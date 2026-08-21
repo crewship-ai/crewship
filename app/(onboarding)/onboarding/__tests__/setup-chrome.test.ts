@@ -164,7 +164,11 @@ describe("pairing the CLI is not a dead end", () => {
     const step3 = gate.slice(gate.indexOf("step === 3"), gate.indexOf("return false"))
     const cli = step3.slice(step3.indexOf('mode === "cli"'))
     expect(cli).toMatch(/pairStatus === "consumed"/)
-    expect(cli, "a paired CLI must not also require keyOK").not.toMatch(/keyOK/)
+    // The property is "an empty token is acceptable", not "the word keyOK is
+    // absent". The first version of this assertion forbade the identifier
+    // outright and then failed the moment the gate legitimately started
+    // using it to reject a *half-typed* token.
+    expect(cli, "a paired CLI must accept an empty token").toMatch(/apiKey\.trim\(\) === ""/)
   })
 
   it("still requires a credential in browser mode", () => {
@@ -173,5 +177,57 @@ describe("pairing the CLI is not a dead end", () => {
     const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
     const step3 = gate.slice(gate.indexOf("step === 3"), gate.indexOf("return false"))
     expect(step3).toMatch(/mode === "browser"\) return keyOK/)
+  })
+})
+
+describe("step 3 asks one question, then its consequence", () => {
+  /** The JSX of step 3, from its guard to the telemetry block. */
+  function stepThree(): string {
+    const from = PAGE.indexOf("{step === 3 && (")
+    const to = PAGE.indexOf("TELEMETRY CONSENT")
+    expect(from, "step 3 guard moved").toBeGreaterThan(-1)
+    expect(to).toBeGreaterThan(from)
+    return PAGE.slice(from, to)
+  }
+
+  it("collapses the credential block behind a disclosure in CLI mode", () => {
+    // The step used to ask two unrelated things at once — how the human
+    // drives Crewship, and which credential the agents use — and ran off
+    // the bottom of the viewport doing it. With a CLI in the picture the
+    // second question has a second answer: `crewship setup` asks in the
+    // terminal.
+    const step3 = stepThree()
+    expect(step3).toMatch(/mode === "cli" && !showCredential/)
+    expect(step3).toMatch(/Or add it now/)
+    expect(step3).toMatch(/setShowCredential\(true\)/)
+  })
+
+  it("keeps the credential open and required in browser mode", () => {
+    // No terminal to fall back to there, so neither the collapse nor the
+    // optional-token gate applies.
+    expect(stepThree()).toMatch(/mode === "browser" \|\| showCredential/)
+    const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
+    expect(gate.slice(0, 900)).toMatch(/mode === "browser"\) return keyOK/)
+  })
+
+  it("puts the toolchain picker inside the credential block", () => {
+    // Which toolchain you pick is part of answering "which credential", not
+    // "how do I drive this" — it means nothing until a key is being pasted.
+    const step3 = stepThree()
+    const disclosure = step3.indexOf('mode === "browser" || showCredential')
+    const toolchain = step3.indexOf("Agent toolchain")
+    expect(disclosure).toBeGreaterThan(-1)
+    expect(toolchain, "toolchain must sit inside the disclosure").toBeGreaterThan(disclosure)
+  })
+
+  it("refuses a half-typed token even though an empty one is fine", () => {
+    // A paired CLI can finish in the terminal, so empty is a valid answer.
+    // A truncated paste is not — it stores a credential that loads but
+    // never works, which is the failure the token hint warns about.
+    const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
+    const cli = gate.slice(gate.indexOf('mode === "cli"'), gate.indexOf("return false"))
+    expect(cli).toMatch(/apiKey\.trim\(\) === ""/)
+    expect(cli).toMatch(/keyOK/)
+    expect(cli).toMatch(/pairStatus === "consumed"/)
   })
 })

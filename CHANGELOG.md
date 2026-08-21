@@ -102,12 +102,38 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   credential afterwards. Browser mode still requires it, because there is no
   terminal there to add it from later.
 
-- **The model picker offers only current Anthropic models — and now includes
-  Claude Opus 5.** It was missing entirely while three superseded Opus
-  versions were selectable. The list is Opus 5, Fable 5, Sonnet 5, Opus 4.8
-  (the documented fallback target for Opus 5's refusal classifiers) and
-  Haiku 4.5. The Haiku entry used the dated `claude-haiku-4-5-20251001`
-  form the model docs warn against; every value is a bare alias now.
+- **Step 3 asks one question, then its consequence.** "How will you work?" was
+  asking two unrelated things on one screen — how the human drives Crewship,
+  and which credential the agents use — and ran off the bottom of the viewport
+  doing it, while the two steps before it fit in a third of it. The server says
+  as much in its own comment: `pairing_mode` "drives how the human works, not
+  the agents".
+
+  With a CLI in the picture the second question has a second answer, so in CLI
+  mode the credential block collapses to one line — "Add the token in the
+  terminal", with "Or add it now" to expand it — and the toolchain picker moves
+  inside, because choosing a toolchain only means something once a key is being
+  pasted. Browser mode has no terminal to fall back to, so there it stays open
+  and required, with no terminal instructions at all. The whole step now fits
+  above the fold.
+
+  An empty token is a valid answer once paired; a half-typed one is not, and is
+  rejected rather than stored as a credential that loads but never works.
+
+- **The Claude Code model picker offers only what has been verified with the
+  adapter, and is pinned to the backend's curated list.** It was a third independent copy of "which models
+  exist", alongside `internal/llm/models_curated.go` (which the backend already
+  serves at `GET /api/v1/models`) and the CLI's own adapter defaults — three
+  lists, three different contents. The Go list is the source of truth now, and
+  a test parses it to enforce that the picker never offers an id it does not
+  carry.
+
+  What the picker offers is deliberately narrower than curated: Claude Code
+  lists Sonnet 5 and nothing else, because that is what has actually been run
+  end to end with the adapter. An earlier version of this list was populated
+  from Anthropic's published catalogue, which offered five models of which one
+  was tested — publishing a model is not the same as having verified it.
+  Widening the list means verifying the adapter first.
 
   Superseded aliases still answer at the API and can be set through the CLI
   or the API — they are just not offered as a starting point. They keep their
