@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter, isLocalModel } from "@/lib/cli-adapters"
+import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelLabel, getModelsForAdapter, isLocalModel } from "@/lib/cli-adapters"
 import { buildOnboardingSetupBody } from "@/lib/onboarding-setup"
 import { getAdapterBrand, ADAPTER_TOKEN_GUIDE, ADAPTER_TOKEN_CMD, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
 import { LANGUAGES } from "@/lib/languages"
@@ -178,6 +178,9 @@ export default function OnboardingPage() {
   // any await. Without this, clicking Retry after an expiry could
   // mint two codes — UI keeps the second one but the first stays
   // valid server-side until its 10-min TTL elapses.
+  // Whether the credential block is expanded. CLI mode collapses it behind
+  // "Or add it now"; browser mode ignores this and always shows it.
+  const [showCredential, setShowCredential] = useState(false)
   const [pairStatus, setPairStatus] = useState<"idle" | "starting" | "pending" | "consumed" | "expired" | "failed">("idle")
   const [pairCopied, setPairCopied] = useState(false)
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null)
@@ -397,7 +400,12 @@ export default function OnboardingPage() {
       // with the message, not the old gate: validateOnboardingCredential
       // returns nil on an empty value, so launching without one is a
       // supported path and the CLI lands the credential afterwards.
-      if (mode === "cli") return pairStatus === "consumed"
+      // A paired CLI can finish in the terminal, so an EMPTY token is fine.
+      // A partially typed one is not — that is a truncated paste, and
+      // launching with it stores a credential that loads but never works.
+      if (mode === "cli") {
+        return pairStatus === "consumed" && (apiKey.trim() === "" || keyOK)
+      }
     }
     return false
   }
@@ -699,7 +707,9 @@ export default function OnboardingPage() {
                         Drive Crewship from your terminal or stay in the browser.{" "}
                         {isLocalModel(model)
                           ? "Your local model runs without an API key — just confirm the setup below."
-                          : "Either way the agents need an API key below to call their model."}
+                          : mode === "cli"
+                            ? "Your agents need a model token; the CLI can hand it over after launch."
+                            : "Your agents need a model token below to call their model."}
                       </p>
                     </div>
 
@@ -866,8 +876,47 @@ export default function OnboardingPage() {
                       )}
                     </AnimatePresence>
 
-                    {/* ADAPTER + API KEY — always visible because agents
-                        need a credential regardless of mode. */}
+                    {/* CREDENTIAL HANDOFF — the collapsed form of the block
+                        below, shown only in CLI mode.
+
+                        This step used to ask two unrelated questions on one
+                        screen: how the human drives Crewship, and which
+                        credential the agents use. The server says as much in
+                        its own comment — pairing_mode "drives how the human
+                        works, not the agents" — and stacking them is why the
+                        step ran off the bottom while the two before it fit in
+                        a third of the viewport.
+
+                        With a CLI in the picture the second question has a
+                        second answer: `crewship setup` asks for the token in
+                        the terminal. So the block collapses to this line and
+                        expands on request. Browser mode has no terminal to
+                        fall back to, so there it stays open and required. */}
+                    {mode === "cli" && !showCredential && (
+                      <div className="rounded-xl border border-dashed border-border bg-card/40 p-3">
+                        <div className="text-sm font-medium">Add the token in the terminal</div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                          Your agents need a model token to call{" "}
+                          {getModelLabel(model) || "their model"}. Run{" "}
+                          <code className="font-mono text-foreground/80">crewship setup</code> after
+                          launching and it will ask for it there — nothing else to do here.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowCredential(true)}
+                          className="mt-2 text-xs font-semibold text-primary hover:underline"
+                        >
+                          Or add it now →
+                        </button>
+                      </div>
+                    )}
+
+                    {/* ADAPTER + API KEY. Which toolchain you pick is part of
+                        answering "which credential", not "how do I drive
+                        this" — it has no meaning until a key is being
+                        pasted, so it lives in here rather than above. */}
+                    {(mode === "browser" || showCredential) && (
+                    <>
                     <div className="space-y-2">
                       <Label>Agent toolchain</Label>
                       <div className="grid grid-cols-2 gap-2">
@@ -992,6 +1041,8 @@ export default function OnboardingPage() {
                           {" — "}then come back and paste the snippet above.
                         </div>
                       </div>
+                    )}
+                    </>
                     )}
 
                     {/* TELEMETRY CONSENT — explicit choice, pre-ticked to

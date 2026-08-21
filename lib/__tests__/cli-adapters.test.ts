@@ -80,14 +80,13 @@ describe("CLI_ADAPTERS registry", () => {
     expect(values).toContain("google/gemini-2.5-pro")
   })
 
-  it("frontier Anthropic models are present in CLAUDE_CODE", () => {
-    // Current generation. The superseded aliases this used to assert were
-    // removed from the picker; they still resolve a label (see
-    // anthropic-models.test.ts and the getModelLabel case below).
+  it("CLAUDE_CODE offers the verified model", () => {
+    // Deliberately one entry. The picker lists what has been exercised end
+    // to end with the adapter, not Anthropic's published catalogue — see
+    // anthropic-models.test.ts, which also pins it against the Go curated
+    // list. Models it drops still resolve a display name.
     const values = CLI_ADAPTERS.CLAUDE_CODE.models.map((m) => m.value)
-    expect(values).toContain("claude-opus-5")
     expect(values).toContain("claude-sonnet-5")
-    expect(values).toContain("claude-haiku-4-5")
   })
 })
 
@@ -136,8 +135,8 @@ describe("getProviderLabel", () => {
 
 describe("getModelLabel", () => {
   it("translates Anthropic API IDs to friendly labels", () => {
-    expect(getModelLabel("claude-opus-5")).toBe("Claude Opus 5")
     expect(getModelLabel("claude-sonnet-5")).toBe("Claude Sonnet 5")
+    expect(getModelLabel("claude-opus-5")).toBe("Claude Opus 5")
     expect(getModelLabel("claude-haiku-4-5")).toBe("Claude Haiku 4.5")
   })
 
