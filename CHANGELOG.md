@@ -100,6 +100,29 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   be `bg-muted/20`, within a hair of the form column, so the split read as one
   page with a hairline down it.
 
+  The pane is lit rather than decorated: an inset highlight on the edge the
+  two panes share, and the ground falling away beneath it. The first attempt
+  reached for a large soft brand-blue radial glow, which is what every AI
+  product has shipped since 2024 and read as unserious next to a form people
+  have to fill in carefully. Depth is what makes a split read as two panes.
+  Stacked below `lg` the highlight moves to the bottom edge, because that is
+  where the seam actually is.
+
+  **The unauthenticated forms are usable with a thumb.** The shared `Input` is
+  `h-9` and `Button`'s default size is `h-9` — 36px, under every touch
+  guideline there is — and sign-in, sign-up, first-run and setup are the
+  screens most likely to be met on a phone. A `.touch-form` scope raises them
+  to 44px, keyed on `pointer: coarse` rather than on viewport width: width
+  missed the iPad, which is over any phone breakpoint you would pick and still
+  a finger. `components/ui` is untouched, because the same controls sit in
+  dense authenticated tables where 44px would wreck the row rhythm.
+
+  Two more phone fixes: the crew empty state reserved a full card's height on
+  a screen where the preview is below the form and off-screen while you type,
+  and it told you to pick a crew "on the left" when stacked there is no left.
+  The adapter step's token label and its help link stacked into a run-on at
+  390px; they sit on separate lines there now.
+
   Two fixes found by walking the wizard on a nuked instance rather than by
   reading it. **The lockup drifted between steps** — the form column was
   centred as a whole, so the logo and stepper slid as the step content changed
