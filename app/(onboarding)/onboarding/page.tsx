@@ -534,7 +534,7 @@ export default function OnboardingPage() {
             y=66 on Adapter, so the logo visibly jumped on every Continue. The
             fixed things stay fixed; only the form below them moves. */}
         <div className="border-b lg:border-b-0 lg:border-r border-border p-6 lg:p-12 flex items-start">
-          <div className="w-full max-w-md mx-auto space-y-7 lg:py-6">
+          <div className="touch-form w-full max-w-md mx-auto space-y-7 lg:py-6">
             <motion.div
               initial={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -912,7 +912,11 @@ export default function OnboardingPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
+                      {/* Stacks on a phone: "Claude Code CLI token" beside
+                          "How to generate a Claude Code CLI token ↗" squeezes
+                          both into two and three wrapped lines at 390px and
+                          they read as one run-on. */}
+                      <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                         <Label htmlFor="api_key">{adapterCfg?.label ?? "Adapter"} CLI token</Label>
                         {ADAPTER_TOKEN_GUIDE[adapter] && (
                           <a
@@ -1071,18 +1075,19 @@ export default function OnboardingPage() {
         </div>
 
         {/* RIGHT: live preview.
-            A surface of its own, tinted toward the brand, with the mark as a
-            watermark. `bg-muted/20` was within a hair of the left column's
-            background, so the split read as one page with a hairline down it
-            rather than as two panes. Top-aligned for the same reason the left
-            column is: the preview grows downward as you fill things in, and
-            centring made the workspace card drift while it did. */}
-        <div className="relative overflow-hidden p-6 lg:p-12 flex items-start bg-[radial-gradient(120%_90%_at_78%_8%,rgba(30,123,254,0.16),transparent_60%),linear-gradient(180deg,#0f1320_0%,#0c0e16_100%)]">
-          <CrewshipLogo
-            tight
-            aria-hidden="true"
-            className="pointer-events-none absolute -right-[6%] top-[44%] w-[62%] text-white opacity-[0.045]"
-          />
+            A surface of its own, lit rather than decorated. `bg-muted/20` was
+            within a hair of the left column's background, so the split read as
+            one page with a hairline down it rather than as two panes.
+
+            No mark here on purpose: it already sits in the lockup a few
+            centimetres to the left, and a second copy at watermark opacity
+            earns nothing except somewhere else for the eye to go. The cards
+            are the only figure on this surface.
+
+            Top-aligned for the same reason the left column is: the preview
+            grows downward as you fill things in, and centring made the
+            workspace card drift while it did. */}
+        <div className="onboarding-pane relative overflow-hidden p-6 lg:p-12 flex items-start">
           <OnboardingPreview
             workspaceName={workspaceName}
             crewSlug={crewSlug}

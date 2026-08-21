@@ -62,7 +62,30 @@ describe("the setup wizard's chrome holds still", () => {
     // split read as one page with a hairline down it instead of two panes.
     const right = rightColumn()
     expect(right).not.toMatch(/bg-muted\/20/)
-    expect(right).toMatch(/radial-gradient/)
+    expect(right).toMatch(/onboarding-pane/)
+  })
+
+  it("lights the surface with depth rather than with a coloured glow", () => {
+    // The reach here is a big soft brand-blue radial, and it was the wrong
+    // one: it is what every AI product has shipped since 2024, and next to a
+    // form people have to read carefully it looks unserious. What makes a
+    // split read as two panes is depth — an inset highlight and a falloff.
+    const css = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8")
+    const rule = css.slice(css.indexOf(".onboarding-pane {"))
+    const body = rule.slice(0, rule.indexOf("}"))
+    expect(body).toMatch(/inset 0 1px 0/)
+    expect(body).not.toMatch(/radial-gradient/)
+    // No brand blue anywhere in the pane's own surface.
+    expect(body).not.toMatch(/30[,\s]+123[,\s]+254|#1[eE]7[bB][fF][eE]/)
+  })
+
+  it("moves the edge light to the seam when the panes stack", () => {
+    // Under lg the pane sits above the form, so a highlight on its top edge
+    // would run along the top of the viewport, describing a seam that is not
+    // there. The shared edge is the bottom one.
+    const css = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8")
+    const stacked = css.slice(css.indexOf("@media (max-width: 1023px)"))
+    expect(stacked.slice(0, 400)).toMatch(/inset 0 -1px 0/)
   })
 })
 
@@ -81,10 +104,51 @@ describe("the preview's empty state is a promise, not a gap", () => {
     // reads as a failed render — and the layout jumped when the real crew
     // card arrived. The floor is the header plus four agent rows.
     const empty = PREVIEW.slice(PREVIEW.indexOf('key="empty"'))
-    expect(empty).toMatch(/min-h-\[24\d px?\]|min-h-\[248px\]/)
+    expect(empty).toMatch(/sm:min-h-\[248px\]/)
+    // ...but only from sm up. Stacked on a phone the preview is below the
+    // form and off-screen while you type, so a card's worth of reserved
+    // height there is dead scroll for a landing nobody watches.
+    expect(empty).toMatch(/min-h-\[120px\]/)
   })
 
-  it("says what will land there rather than pointing at a control", () => {
+  it("does not tell a phone user to look left", () => {
+    // Stacked, there is no left — the picker is above the preview, not
+    // beside it. Direction words in shared copy break in one layout or the
+    // other, so this one has none.
     expect(PREVIEW).toMatch(/Your crew lands here/)
+    // Comments stripped first: the note explaining this rule quotes the very
+    // words it forbids, which is the third time that has bitten this file.
+    const empty = PREVIEW.slice(PREVIEW.indexOf('key="empty"'), PREVIEW.indexOf('key="empty"') + 1400)
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+      .replace(/\/\/.*$/gm, "")
+    expect(empty).not.toMatch(/on the left|on the right/)
+  })
+})
+
+describe("the unauthenticated forms are usable with a thumb", () => {
+  const CSS = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8")
+  const SHELL = readFileSync(
+    join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
+    "utf8"
+  )
+
+  it("raises the shared 36px controls to 44px where the pointer is a finger", () => {
+    const rule = CSS.slice(CSS.indexOf(".touch-form input"))
+    expect(rule.slice(0, 400)).toMatch(/min-height:\s*44px/)
+  })
+
+  it("keys that on the pointer, not on the viewport width", () => {
+    // Width was the first attempt and it missed the iPad: 820px is over any
+    // phone breakpoint you would pick, and it is still a finger. A mouse in
+    // a narrow window, meanwhile, does not need 44px.
+    const at = CSS.indexOf(".touch-form input")
+    const guard = CSS.lastIndexOf("@media", at)
+    expect(CSS.slice(guard, at)).toMatch(/pointer:\s*coarse/)
+    expect(CSS.slice(guard, at)).not.toMatch(/max-width/)
+  })
+
+  it("applies it to both the auth shell and the setup wizard", () => {
+    expect(SHELL).toMatch(/touch-form/)
+    expect(PAGE).toMatch(/touch-form/)
   })
 })

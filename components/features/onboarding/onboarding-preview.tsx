@@ -272,9 +272,16 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             // on step one, which reads as a rendering failure rather than as
             // an empty state, and the layout jumped when the real card
             // arrived. An empty state should be a promise at the right scale.
-            className="flex min-h-[248px] items-center justify-center rounded-[20px] border border-dashed border-border bg-card/40 p-6 text-center text-sm text-muted-foreground"
+            //
+            // Only from `sm` up, though: stacked on a phone the preview is
+            // below the form and off-screen while you type, so reserving a
+            // card's worth of height there is pure dead scroll for a landing
+            // nobody watches.
+            className="flex min-h-[120px] items-center justify-center rounded-[20px] border border-dashed border-border bg-card/40 p-6 text-center text-sm text-muted-foreground sm:min-h-[248px]"
           >
-            Your crew lands here — pick one on the left
+            {/* Not "on the left" — stacked on a phone there is no left, and
+                the picker is above this, not beside it. */}
+            Your crew lands here once you pick one
           </motion.div>
         )}
       </AnimatePresence>
