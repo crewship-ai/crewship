@@ -72,9 +72,13 @@ export function AuthSplitShell({
           <p className="font-mono text-[11px] uppercase tracking-[0.09em] text-white/70">
             {eyebrow}
           </p>
-          <h2 className="mt-3 text-balance text-2xl font-extrabold leading-[1.05] tracking-[-0.033em] lg:text-[clamp(28px,2.9vw,40px)]">
+          {/* A <p>, not a heading. The panel is order-first in the DOM, so an
+              h2 here would be the first heading a screen reader meets and
+              would sit above the form's own h1 in the outline. This copy is
+              branding, not a document section. */}
+          <p className="mt-3 text-balance text-2xl font-extrabold leading-[1.05] tracking-[-0.033em] lg:text-[clamp(28px,2.9vw,40px)]">
             {headline}
-          </h2>
+          </p>
           <p className="mt-3 max-w-[36ch] text-sm leading-relaxed text-white/80">
             {blurb}
           </p>

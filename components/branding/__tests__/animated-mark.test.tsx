@@ -143,9 +143,46 @@ describe("AnimatedMark", () => {
     })
 
     render(<AnimatedMark />)
-    // One fill per sail, plus the bloom.
+    // One `fill` per sail. The bloom and the sweep are `fillRect`.
     expect(ctx.fill.mock.calls.length).toBe(MARK_SAILS.length)
     expect(ctx.fillRect).toHaveBeenCalled()
+
+    getContext.mockRestore()
+  })
+
+  it("plays the entrance however late the first frame's timestamp is", () => {
+    // requestAnimationFrame reports time since the document origin, so on a
+    // hydrated page the first frame already reads hundreds of ms. The
+    // entrance trigger starts at 0, so a clock fed the raw timestamp
+    // computes the fade-in as already finished and the sails snap in at full
+    // opacity. Feeding a late first timestamp here is what catches that.
+    const ctx = fakeContext()
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(ctx as unknown as CanvasRenderingContext2D)
+    vi.stubGlobal("DOMMatrix", FakeMatrix)
+    vi.stubGlobal("Path2D", FakePath)
+
+    const stamps = [9_000, 9_450]
+    let next = 0
+    rafSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      if (next < stamps.length) cb(stamps[next++])
+      return 1 as never
+    })
+
+    render(<AnimatedMark />)
+
+    const perFrame = MARK_SAILS.length
+    expect(ctx.alphaAtFill.length).toBe(stamps.length * perFrame)
+    const first = ctx.alphaAtFill.slice(0, perFrame)
+    const second = ctx.alphaAtFill.slice(perFrame)
+
+    // Frame one is the start of the entrance, not the end of it.
+    for (const a of first) expect(a).toBeLessThan(1)
+    // 450 ms later, every sail is further along than it was.
+    second.forEach((a, i) => expect(a).toBeGreaterThan(first[i]))
+    // Later sails trail earlier ones — the 90 ms stagger.
+    expect(second[0]).toBeGreaterThan(second[perFrame - 1])
 
     getContext.mockRestore()
   })
@@ -172,11 +209,17 @@ class FakeMatrix {
 
 function fakeContext() {
   const gradient = { addColorStop: vi.fn() }
-  return {
+  // Sail opacity is the entrance made observable: the component sets
+  // globalAlpha immediately before each sail's fill, so recording it there
+  // is how a test can see the fade-in without a real canvas.
+  const alphaAtFill: number[] = []
+  const ctx = {
     setTransform: vi.fn(),
     clearRect: vi.fn(),
     fillRect: vi.fn(),
-    fill: vi.fn(),
+    fill: vi.fn(() => {
+      alphaAtFill.push(ctx.globalAlpha)
+    }),
     save: vi.fn(),
     restore: vi.fn(),
     clip: vi.fn(),
@@ -184,5 +227,7 @@ function fakeContext() {
     createLinearGradient: vi.fn(() => gradient),
     globalAlpha: 1,
     fillStyle: "",
+    alphaAtFill,
   }
+  return ctx
 }

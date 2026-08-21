@@ -65,7 +65,13 @@ export function AnimatedMark({ variant = "swell", replayKey, className }: Props)
   // the tree for no one's benefit.
   const enterAtRef = useRef(0)
   const sweepAtRef = useRef(0)
+  // Milliseconds since the first frame, NOT the raw rAF timestamp. rAF hands
+  // out time since the document origin, which on a hydrated page is already
+  // hundreds of ms — enough for the entrance to compute as complete before
+  // it has drawn once, and for the first light sweep to start mid-stroke.
+  // Both triggers below start at 0, so the clock has to as well.
   const clockRef = useRef(0)
+  const originRef = useRef<number | null>(null)
   const reduced = useReducedMotion()
 
   // Fire the sweep (and, for "assemble", the entrance) on demand. Kept out
@@ -231,7 +237,10 @@ export function AnimatedMark({ variant = "swell", replayKey, className }: Props)
 
     const tick = (ts: number) => {
       if (!running) return
-      clockRef.current = ts
+      // Anchor to the first frame. originRef survives a visibility pause, so
+      // resuming continues the phase rather than restarting it.
+      if (originRef.current === null) originRef.current = ts
+      clockRef.current = ts - originRef.current
       draw()
       frame = requestAnimationFrame(tick)
     }
