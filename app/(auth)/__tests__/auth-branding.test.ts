@@ -23,6 +23,18 @@ function authPages(): { name: string; source: string }[] {
     .map((p) => ({ name: p.name, source: readFileSync(p.file, "utf8") }))
 }
 
+// A page satisfies the property either by rendering the tile itself or by
+// sitting inside AuthSplitShell, which renders it in the lockup. The second
+// route appeared when login moved to the split shell; the shell's own use of
+// the tile is pinned below, so the chain stays checked end to end.
+const SHELL = "AuthSplitShell"
+const TILE = "CrewshipLogoTile"
+// The shell shows the bare mark rather than the tile: nested inside both the
+// tile's padding and the viewBox's, the sails stop being readable at lockup
+// size. Either component satisfies the property — both come from the shared
+// branding module, which is the thing being pinned.
+const SHARED_MARK = /Crewship(Logo|LogoTile)\b/
+
 describe("auth pages wear the product mark", () => {
   const pages = authPages()
 
@@ -32,7 +44,30 @@ describe("auth pages wear the product mark", () => {
 
   it.each(pages.map((p) => p.name))("%s uses the shared logo component", (name) => {
     const page = pages.find((p) => p.name === name)!
-    expect(page.source).toContain("CrewshipLogoTile")
+    expect(
+      page.source.includes(TILE) || page.source.includes(SHELL),
+      `${name} renders neither ${TILE} nor ${SHELL}`
+    ).toBe(true)
+  })
+
+  it("the shared shell is what puts the mark on the pages that delegate to it", () => {
+    const shell = readFileSync(
+      join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
+      "utf8"
+    )
+    expect(shell).toMatch(SHARED_MARK)
+  })
+
+  it("shows the mark cropped to its own bounds when it stands without a tile", () => {
+    // Without `tight` the mark renders inside the tile's padding with no tile
+    // around it, which is what made it read as a few grey pixels at 28px.
+    const shell = readFileSync(
+      join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
+      "utf8"
+    )
+    if (shell.includes("<CrewshipLogo ")) {
+      expect(shell).toMatch(/<CrewshipLogo\s+tight\b/)
+    }
   })
 
   it.each(pages.map((p) => p.name))("%s does not hand-roll a lucide ship", (name) => {
