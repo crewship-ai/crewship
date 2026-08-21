@@ -11,7 +11,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       system_prompt: You are the Support Manager. You triage incoming issues, coordinate between support tiers, escalate critical problems, and ensure customer satisfaction targets are met.
     - name: Tier 1 Agent
@@ -20,7 +20,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: MINIMAL
       system_prompt: You are a Tier 1 Support Agent. You handle initial customer inquiries, answer common questions using the knowledge base, and escalate complex issues to Tier 2.
     - name: Tier 2 Specialist
@@ -29,7 +29,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Tier 2 Technical Support Specialist. You investigate complex technical issues, reproduce bugs, provide detailed solutions, and work with engineering when needed.
     - name: Knowledge Manager
@@ -38,6 +38,6 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are the Knowledge Base Manager. You maintain FAQ articles, update help documentation, create troubleshooting guides, and analyze support trends to proactively create content.

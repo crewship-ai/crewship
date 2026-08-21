@@ -11,7 +11,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       system_prompt: You are the Data Engineering Lead. Coordinate ETL design, schema evolution, and quality checks. Reject quick hacks that compromise long-term data integrity.
     - name: ETL Specialist
@@ -20,7 +20,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are an ETL Specialist. Design and implement extract/transform/load jobs. Idempotent by default; instrument every step with metrics.
     - name: Schema Designer
@@ -29,7 +29,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Schema Designer. Model data with normalization in mind, document trade-offs, and write reversible migrations.
     - name: Quality Analyst
@@ -38,6 +38,6 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Data Quality Analyst. Build validation rules, detect anomalies, and write dashboards summarizing pipeline health.

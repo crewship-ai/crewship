@@ -87,6 +87,30 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **The builtin crew templates ship models that are not being retired.** All
+  twelve template files pinned dated snapshots — `claude-sonnet-4-20250514` on
+  43 agents, `claude-opus-4-20250514` on one, `claude-haiku-4-20250514` on
+  three — and those ids retire on 2026-06-15. Every crew the onboarding wizard
+  can deploy was seeded against a model with an end date, on the first screen a
+  new install ever shows.
+
+  The bump is per tier, not a blanket replace: the threat modeller keeps its
+  Opus, the secrets sweeper and the documentation writers keep their Haiku, and
+  everything else moves to Sonnet. A template's model choice is a cost decision
+  someone made deliberately, and flattening 47 pins onto one model would have
+  quietly repriced twelve crews.
+
+  A test walks the YAML exactly as the seeder does and holds two lines for
+  every agent in every template: no dated suffix, and the id must appear in
+  `llm.CuratedModels("anthropic")`. Bare aliases are the convention here —
+  a dated id pins a snapshot that will be withdrawn, and the alias will not.
+
+- **The onboarding preview no longer names a model of its own.** Five
+  hardcoded `"Claude Sonnet 4.6"` strings sat in the preview component, so the
+  same screen could show the picker's model, the template's model and the
+  preview's model and have all three disagree. It resolves one id through
+  `getModelLabel` now — the same function the rest of the UI labels with.
+
 - **First-run now asks for the password twice.** `/bootstrap` creates the one
   account that owns the workspace, before any session exists, and a typo was
   only discoverable at the next sign-in — by which point the way back in is a
@@ -237,6 +261,45 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   re-exported, so importers are unaffected.
 
 ### Fixed
+
+- **Deploying a crew template links credentials for the agent's own provider.**
+  `autoAssignCredentials` filtered the workspace's credentials with a hardcoded
+  `provider = 'ANTHROPIC'` while the agents it links them to carry whatever
+  provider their template pinned. For an Anthropic crew the two agreed by
+  accident and nothing looked wrong. For any other provider the query matched
+  nothing and every agent in the crew deployed with **zero credentials** — no
+  error, no failed request, just a crew that does not work; and a workspace
+  holding an Anthropic key handed that key to a Google agent, which is worse,
+  because it loads and then fails at call time.
+
+  It reads the agent's own `llm_provider` now and falls back to `ANTHROPIC`
+  only when the column is empty, matching the default the write side applies.
+  A lookup that errors leaves the agent unlinked rather than guessing. The
+  onboarding wizard reaches this path for every builtin template, so it was one
+  adapter choice away on the most common flow in the product, and nothing
+  covered it.
+
+- **The wizard's model choice reaches the crew it deploys.** Picking a model on
+  step 3 did nothing for four of the five crew options: `req.LlmModel` was read
+  only by the branch that builds a blank or single-agent crew, so every builtin
+  template deployed with the model its YAML pinned and the select was
+  decoration. `deployCrewTemplate` takes the override now.
+
+  It applies **only when the chosen provider matches the agent's** — writing a
+  Gemini id onto a `CLAUDE_CODE` agent breaks it outright, which is worse than
+  the template's default. An override with no resolvable provider is ignored
+  for the same reason, and the zero value deploys the template verbatim, which
+  is what every other caller passes.
+
+- **The first-run window is documented as it behaves.** Three source comments
+  and the changelog stated bootstrap closes five minutes after `crewship
+  start`. It does not: it stays open until an admin account exists, and the
+  finite window is opt-in through `CREWSHIP_BOOTSTRAP_WINDOW` for instances
+  reachable from the internet before anyone claims them. One of the comments
+  named a symbol that is not in the tree. Four docs pages also said the closed
+  endpoint answers 403 where the server answers 410 — the code was right in
+  every case and only the prose was wrong, which is the kind of drift that gets
+  believed because it is checked in.
 
 - **A failed `crewship apply` no longer reports success.** Apply is fail-fast,
   so on an error the counters describe a *prefix* of the plan — but they were

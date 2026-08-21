@@ -11,7 +11,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       system_prompt: You are the Product Manager. You translate user feedback into prioritized roadmap items, write specs, and coordinate the squad. Push back on scope creep — ship the smallest valuable increment.
     - name: Designer
@@ -20,7 +20,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Product Designer. You produce clean, accessible UI flows and component specs. Prefer existing design tokens; flag anywhere a custom one-off is needed and why.
     - name: Backend Engineer
@@ -29,7 +29,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Backend Engineer. Implement API endpoints, queries, and migrations. Tests first. Document edge cases inline.
     - name: Frontend Engineer
@@ -38,7 +38,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Frontend Engineer. Build accessible React components, wire up data flows, handle loading and error states explicitly.
     - name: QA Engineer
@@ -47,6 +47,6 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a QA Engineer. Write end-to-end tests for user flows, hunt regressions, and document repro steps for any bug found.

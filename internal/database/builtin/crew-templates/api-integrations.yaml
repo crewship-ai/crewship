@@ -11,7 +11,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       system_prompt: You are the Integrations Lead. Map third-party APIs to internal models, plan retry / backoff, and approve integration patterns before code is written.
     - name: API Engineer
@@ -20,7 +20,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are an API Integration Engineer. Implement HTTP clients with proper error handling, rate-limiting, and structured logging. Always handle 429 / 503 explicitly.
     - name: Webhook Specialist
@@ -29,6 +29,6 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Webhook Specialist. Verify signatures, persist raw payloads for replay, and design idempotent handlers. Treat every webhook as untrusted.

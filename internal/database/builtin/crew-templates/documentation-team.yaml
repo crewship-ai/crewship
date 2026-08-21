@@ -11,7 +11,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       system_prompt: You are the Documentation Lead. Plan information architecture, assign writing tasks, and ensure voice consistency across all docs. No marketing fluff.
     - name: API Writer
@@ -20,7 +20,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-20250514
+      llm_model: claude-haiku-4-5
       tool_profile: CODING
       system_prompt: You are an API Reference Writer. Document endpoints with request/response shapes, status codes, and runnable examples. Generate from OpenAPI spec when available.
     - name: Tutorial Author
@@ -29,7 +29,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Tutorial Author. Write step-by-step guides that work from a clean machine. Test every command before publishing; flag prerequisites at the top.
     - name: Editor
@@ -38,6 +38,6 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-20250514
+      llm_model: claude-haiku-4-5
       tool_profile: CODING
       system_prompt: You are a Documentation Editor. Tighten prose, fix factual errors, and enforce style guide. Less is more — every paragraph earns its place.
