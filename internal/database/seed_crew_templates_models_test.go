@@ -2,6 +2,7 @@ package database
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -71,21 +72,33 @@ func TestBuiltinCrewTemplates_ModelsAreCuratedBareAliases(t *testing.T) {
 		t.Fatal("no template agents to check — loader returned templates with zero agents")
 	}
 
+	// The curated half is Anthropic-specific, so it can only run on agents
+	// that declare that provider. Counted here rather than skipped per
+	// subtest: a t.Skip reports the same "ok" as a pass, so a template set
+	// that drifted entirely off ANTHROPIC would turn the curated assertion
+	// into a no-op while the suite still read green.
+	anthropicChecked := 0
+
 	for _, tc := range cases {
 		t.Run(tc.template+"/"+tc.agent, func(t *testing.T) {
-			t.Parallel()
+			// The bare-alias rule is provider-independent — a dated id
+			// pins a snapshot that gets withdrawn whoever serves it.
 			if dateSuffixedModelID.MatchString(tc.model) {
 				t.Errorf("llm_model %q carries a date suffix; model ids must be bare aliases", tc.model)
 			}
-			// The curated set this test checks against is Anthropic's.
-			// A template on another provider is out of scope here
-			// rather than silently passing an Anthropic lookup.
-			if tc.provider != "ANTHROPIC" && tc.provider != "anthropic" {
-				t.Skipf("llm_provider %q is not ANTHROPIC — not covered by the Anthropic curated set", tc.provider)
+			if !strings.EqualFold(tc.provider, "anthropic") {
+				return
 			}
 			if !known[tc.model] {
 				t.Errorf("llm_model %q is not in llm.CuratedModels(%q); the backend does not know this id", tc.model, "anthropic")
 			}
 		})
+		if strings.EqualFold(tc.provider, "anthropic") {
+			anthropicChecked++
+		}
+	}
+
+	if anthropicChecked == 0 {
+		t.Error("no template agent declares llm_provider ANTHROPIC — the curated-membership half of this test checked nothing")
 	}
 }
