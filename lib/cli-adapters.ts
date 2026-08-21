@@ -52,26 +52,65 @@ export interface CLIAdapterConfig {
   caveat?: string
 }
 
-// ===== ANTHROPIC =====
-// Source: https://platform.claude.com/docs/en/about-claude/models/overview
-// claude-fable-5 is the premium flagship (most capable); claude-opus-4-8 and
-// claude-sonnet-5 are the current Opus/Sonnet tiers. All are bare aliases =
-// canonical for their version. Haiku 4.5 has alias `claude-haiku-4-5` resolving
-// to the dated `claude-haiku-4-5-20251001`. Superseded 4.7/4.6 aliases stay
-// selectable under "legacy"; anything claude-3-* / claude-*-4-2025* is
-// deprecated (retiring 2026-06-15) and removed from the picker.
+// ===== ANTHROPIC (Claude Code adapter) =====
+//
+// SOURCE OF TRUTH: internal/llm/models_curated.go → curatedModels["anthropic"].
+// That is the list the backend already serves at GET /api/v1/models and that
+// `crewship model` reads; this file must never offer an id it does not carry.
+// lib/__tests__/anthropic-models.test.ts parses the Go file and enforces the
+// subset relation, so the two cannot drift apart silently.
+//
+// What is offered here is deliberately NARROWER than the curated set: this
+// is the onboarding picker, which decides what a brand-new workspace starts
+// on, and it lists only what has actually been exercised end to end with
+// Claude Code. Anthropic publishing a model is not the same as Crewship
+// having run agents on it — an earlier version of this list was populated
+// from the model docs, which offered people five models of which one was
+// tested.
+//
+// Sonnet 5 is that one. Widening this list is a deliberate act: verify the
+// adapter against the model first, then add it here AND to the Go curated
+// list if it is missing there.
+//
+// The value is a bare alias, which is canonical and complete as-is — never
+// append a date suffix.
 const ANTHROPIC_MODELS: ModelOption[] = [
-  { value: "claude-fable-5", label: "Claude Fable 5", category: "frontier" },
-  { value: "claude-opus-4-8", label: "Claude Opus 4.8", category: "frontier" },
   { value: "claude-sonnet-5", label: "Claude Sonnet 5", category: "frontier" },
-  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", category: "fast" },
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7", category: "legacy" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", category: "legacy" },
-  { value: "claude-opus-4-6", label: "Claude Opus 4.6", category: "legacy" },
-  { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", category: "legacy" },
-  { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", category: "legacy" },
-  { value: "claude-opus-4-1-20250805", label: "Claude Opus 4.1", category: "legacy" },
 ]
+
+/**
+ * Display names for every Anthropic model that can end up stored on a
+ * workspace — not just the ones this picker offers.
+ *
+ * The picker is deliberately narrow (see ANTHROPIC_MODELS), but a workspace
+ * can be pointed at any curated model through the CLI or the API, and older
+ * workspaces still carry ids from before the picker was trimmed. getModelLabel
+ * resolves by scanning adapters, so an id missing from here renders as its raw
+ * string — or worse, borrows another adapter's label: claude-sonnet-4-6 is
+ * also registered under Cursor, and briefly relabelled live workspaces to
+ * "Claude Sonnet 4.6 (Cursor)".
+ *
+ * Label-only. Nothing here is selectable; add to ANTHROPIC_MODELS for that,
+ * and only after the adapter has been verified against the model.
+ */
+const ANTHROPIC_LABELS: Record<string, string> = {
+  // Curated (internal/llm/models_curated.go) but not offered by the wizard.
+  "claude-fable-5": "Claude Fable 5",
+  "claude-opus-5": "Claude Opus 5",
+  "claude-opus-4-8": "Claude Opus 4.8",
+  "claude-haiku-4-5": "Claude Haiku 4.5",
+  // Superseded, still stored by workspaces created before the trim.
+  "claude-opus-4-7": "Claude Opus 4.7",
+  "claude-opus-4-6": "Claude Opus 4.6",
+  "claude-opus-4-5": "Claude Opus 4.5",
+  "claude-opus-4-5-20251101": "Claude Opus 4.5",
+  "claude-opus-4-1": "Claude Opus 4.1",
+  "claude-opus-4-1-20250805": "Claude Opus 4.1",
+  "claude-sonnet-4-6": "Claude Sonnet 4.6",
+  "claude-sonnet-4-5": "Claude Sonnet 4.5",
+  "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+  "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+}
 
 // ===== OPENAI — Codex CLI subset =====
 // Source: https://developers.openai.com/codex/models
@@ -320,6 +359,13 @@ export function getProviderLabel(provider: string): string {
  */
 export function getModelLabel(value: string): string {
   if (!value) return ""
+  // Anthropic names first. Scanning adapters alone is not enough once a
+  // model leaves ANTHROPIC_MODELS: claude-sonnet-4-6 is also registered
+  // under Cursor, whose label carries a "(Cursor)" suffix, so an existing
+  // Claude Code workspace on that model silently started reading "Claude
+  // Sonnet 4.6 (Cursor)".
+  const known = ANTHROPIC_LABELS[value]
+  if (known) return known
   for (const adapter of Object.values(CLI_ADAPTERS)) {
     const found = adapter.models.find((m) => m.value === value)
     if (found) return found.label

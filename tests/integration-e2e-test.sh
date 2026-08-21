@@ -107,7 +107,7 @@ CREW_ID=$(echo "$CREW_RESP" | jq -r '.id')
 
 AGENT_RESP=$(curl -sf -X POST "$BASE/api/v1/agents?workspace_id=$WS_ID" \
   -H "$AUTH" -H 'Content-Type: application/json' \
-  -d "{\"name\":\"Nela\",\"slug\":\"nela\",\"crew_id\":\"$CREW_ID\",\"role_title\":\"Dev\",\"cli_adapter\":\"CLAUDE_CODE\",\"provider\":\"ANTHROPIC\",\"model\":\"claude-sonnet-4-20250514\"}")
+  -d "{\"name\":\"Nela\",\"slug\":\"nela\",\"crew_id\":\"$CREW_ID\",\"role_title\":\"Dev\",\"cli_adapter\":\"CLAUDE_CODE\",\"provider\":\"ANTHROPIC\",\"model\":\"claude-sonnet-5\"}")
 AGENT_ID=$(echo "$AGENT_RESP" | jq -r '.id')
 [ -n "$AGENT_ID" ] && ok "Agent created ($AGENT_ID)" || fail "Agent creation" "$AGENT_RESP"
 

@@ -97,7 +97,10 @@ export function AuthSplitShell({
           <span className="text-lg font-bold tracking-[-0.015em]">Crewship</span>
         </div>
         <div className="flex min-h-0 flex-1 items-center py-8">
-          <div className="mx-auto w-full max-w-[352px]">{children}</div>
+          {/* touch-form raises the shared h-9 controls to 44px under 640px —
+              see globals.css. These are the screens most likely to be met on
+              a phone. */}
+          <div className="touch-form mx-auto w-full max-w-[352px]">{children}</div>
         </div>
       </div>
     </div>

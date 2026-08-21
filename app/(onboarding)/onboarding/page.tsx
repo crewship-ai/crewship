@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check, ExternalLink, Sparkles, AlertTriangle, ChevronsUpDown } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter, isLocalModel } from "@/lib/cli-adapters"
+import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelLabel, getModelsForAdapter, isLocalModel } from "@/lib/cli-adapters"
 import { buildOnboardingSetupBody } from "@/lib/onboarding-setup"
 import { getAdapterBrand, ADAPTER_TOKEN_GUIDE, ADAPTER_TOKEN_CMD, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
 import { LANGUAGES } from "@/lib/languages"
@@ -178,6 +178,9 @@ export default function OnboardingPage() {
   // any await. Without this, clicking Retry after an expiry could
   // mint two codes — UI keeps the second one but the first stays
   // valid server-side until its 10-min TTL elapses.
+  // Whether the credential block is expanded. CLI mode collapses it behind
+  // "Or add it now"; browser mode ignores this and always shows it.
+  const [showCredential, setShowCredential] = useState(false)
   const [pairStatus, setPairStatus] = useState<"idle" | "starting" | "pending" | "consumed" | "expired" | "failed">("idle")
   const [pairCopied, setPairCopied] = useState(false)
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null)
@@ -387,7 +390,22 @@ export default function OnboardingPage() {
     if (step === 3) {
       const keyOK = apiKey.trim().length >= 8 || isLocalModel(model)
       if (mode === "browser") return keyOK
-      if (mode === "cli") return keyOK && pairStatus === "consumed"
+      // Paired CLI: the token stops being required here.
+      //
+      // It used to be `keyOK && pairStatus === "consumed"`, which dead-ended
+      // the wizard: the green line above says "CLI paired. You can finish
+      // below or jump to `crewship setup` in the terminal", and then Launch
+      // stayed disabled until a token was pasted into the browser — so the
+      // terminal route the message offers was unreachable. The server agrees
+      // with the message, not the old gate: validateOnboardingCredential
+      // returns nil on an empty value, so launching without one is a
+      // supported path and the CLI lands the credential afterwards.
+      // A paired CLI can finish in the terminal, so an EMPTY token is fine.
+      // A partially typed one is not — that is a truncated paste, and
+      // launching with it stores a credential that loads but never works.
+      if (mode === "cli") {
+        return pairStatus === "consumed" && (apiKey.trim() === "" || keyOK)
+      }
     }
     return false
   }
@@ -527,19 +545,27 @@ export default function OnboardingPage() {
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[360px] bg-[radial-gradient(ellipse_60%_50%_at_30%_0%,rgba(30,123,254,0.10),transparent_60%)]" />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 min-h-screen relative">
-        {/* LEFT: form */}
-        <div className="border-b lg:border-b-0 lg:border-r border-border p-6 lg:p-12 flex items-center">
-          <div className="w-full max-w-md mx-auto space-y-7">
+        {/* LEFT: form.
+            Anchored to the top, not centred. Centring the whole column meant
+            the lockup and the stepper slid up and down as the step content
+            changed height — measured at y=101 on Workspace, y=137 on Crew and
+            y=66 on Adapter, so the logo visibly jumped on every Continue. The
+            fixed things stay fixed; only the form below them moves. */}
+        <div className="border-b lg:border-b-0 lg:border-r border-border p-6 lg:p-12 flex items-start">
+          <div className="touch-form w-full max-w-md mx-auto space-y-7 lg:py-6">
             <motion.div
               initial={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, ease }}
               className="flex items-center gap-3"
             >
-              <CrewshipLogoTile size="h-10 w-10" iconSize="h-5 w-5" rounded="rounded-xl" />
+              {/* The bare cropped mark, matching the sign-in lockup. Inside
+                  the tile's padding AND the viewBox's, the sails stopped
+                  being legible at this size. */}
+              <CrewshipLogo tight className="h-9 w-auto text-foreground" />
               <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Crewship</div>
-                <h1 className="text-lg font-semibold tracking-tight">Setup</h1>
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Setup</div>
+                <h1 className="text-lg font-bold tracking-tight">Crewship</h1>
               </div>
             </motion.div>
 
@@ -681,7 +707,9 @@ export default function OnboardingPage() {
                         Drive Crewship from your terminal or stay in the browser.{" "}
                         {isLocalModel(model)
                           ? "Your local model runs without an API key — just confirm the setup below."
-                          : "Either way the agents need an API key below to call their model."}
+                          : mode === "cli"
+                            ? "Your agents need a model token; the CLI can hand it over after launch."
+                            : "Your agents need a model token below to call their model."}
                       </p>
                     </div>
 
@@ -848,8 +876,47 @@ export default function OnboardingPage() {
                       )}
                     </AnimatePresence>
 
-                    {/* ADAPTER + API KEY — always visible because agents
-                        need a credential regardless of mode. */}
+                    {/* CREDENTIAL HANDOFF — the collapsed form of the block
+                        below, shown only in CLI mode.
+
+                        This step used to ask two unrelated questions on one
+                        screen: how the human drives Crewship, and which
+                        credential the agents use. The server says as much in
+                        its own comment — pairing_mode "drives how the human
+                        works, not the agents" — and stacking them is why the
+                        step ran off the bottom while the two before it fit in
+                        a third of the viewport.
+
+                        With a CLI in the picture the second question has a
+                        second answer: `crewship setup` asks for the token in
+                        the terminal. So the block collapses to this line and
+                        expands on request. Browser mode has no terminal to
+                        fall back to, so there it stays open and required. */}
+                    {mode === "cli" && !showCredential && (
+                      <div className="rounded-xl border border-dashed border-border bg-card/40 p-3">
+                        <div className="text-sm font-medium">Add the token in the terminal</div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                          Your agents need a model token to call{" "}
+                          {getModelLabel(model) || "their model"}. Run{" "}
+                          <code className="font-mono text-foreground/80">crewship setup</code> after
+                          launching and it will ask for it there — nothing else to do here.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowCredential(true)}
+                          className="mt-2 text-xs font-semibold text-primary hover:underline"
+                        >
+                          Or add it now →
+                        </button>
+                      </div>
+                    )}
+
+                    {/* ADAPTER + API KEY. Which toolchain you pick is part of
+                        answering "which credential", not "how do I drive
+                        this" — it has no meaning until a key is being
+                        pasted, so it lives in here rather than above. */}
+                    {(mode === "browser" || showCredential) && (
+                    <>
                     <div className="space-y-2">
                       <Label>Agent toolchain</Label>
                       <div className="grid grid-cols-2 gap-2">
@@ -904,7 +971,11 @@ export default function OnboardingPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
+                      {/* Stacks on a phone: "Claude Code CLI token" beside
+                          "How to generate a Claude Code CLI token ↗" squeezes
+                          both into two and three wrapped lines at 390px and
+                          they read as one run-on. */}
+                      <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                         <Label htmlFor="api_key">{adapterCfg?.label ?? "Adapter"} CLI token</Label>
                         {ADAPTER_TOKEN_GUIDE[adapter] && (
                           <a
@@ -970,6 +1041,8 @@ export default function OnboardingPage() {
                           {" — "}then come back and paste the snippet above.
                         </div>
                       </div>
+                    )}
+                    </>
                     )}
 
                     {/* TELEMETRY CONSENT — explicit choice, pre-ticked to
@@ -1062,8 +1135,20 @@ export default function OnboardingPage() {
           </div>
         </div>
 
-        {/* RIGHT: live preview */}
-        <div className="bg-muted/20 p-6 lg:p-12 flex items-center">
+        {/* RIGHT: live preview.
+            A surface of its own, lit rather than decorated. `bg-muted/20` was
+            within a hair of the left column's background, so the split read as
+            one page with a hairline down it rather than as two panes.
+
+            No mark here on purpose: it already sits in the lockup a few
+            centimetres to the left, and a second copy at watermark opacity
+            earns nothing except somewhere else for the eye to go. The cards
+            are the only figure on this surface.
+
+            Top-aligned for the same reason the left column is: the preview
+            grows downward as you fill things in, and centring made the
+            workspace card drift while it did. */}
+        <div className="onboarding-pane relative overflow-hidden p-6 lg:p-12 flex items-start">
           <OnboardingPreview
             workspaceName={workspaceName}
             crewSlug={crewSlug}

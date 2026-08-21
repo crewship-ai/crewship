@@ -213,7 +213,7 @@ func TestCovCT2_DeployCrewTemplate_LoadTemplateDBError(t *testing.T) {
 	h, _, wsID := covCT2Fixture(t)
 	h.db.Close()
 	if _, err := deployCrewTemplate(context.Background(), h.db, newTestLogger(), noopEmitter{},
-		wsID, "anything", "Crew", ""); err == nil ||
+		wsID, "anything", "Crew", "", deployOverrides{}); err == nil ||
 		!strings.Contains(err.Error(), "load template") {
 		t.Fatalf("err = %v, want load template failure", err)
 	}

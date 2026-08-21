@@ -5,25 +5,29 @@ import { useRouter } from "next/navigation"
 import { motion, useReducedMotion } from "motion/react"
 import { Sparkles, ArrowRight } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { AuthSplitShell } from "@/components/branding/auth-split-shell"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/hooks/use-auth"
 import { serverFetch } from "@/lib/server-base"
 
 /**
- * Single-form first-run bootstrap with a time-bounded window.
+ * Single-form first-run bootstrap, open until the first admin exists.
  *
- * Three input fields (name + email + password), one submit, done. No
+ * Four input fields (name + email + password + confirmation), one
+ * submit, done. No
  * setup token, no placeholder credentials, no separate profile-setup
- * step afterwards. Deploy-race protection is a fixed-duration
- * bootstrap window enforced server-side (default 5 minutes): the
- * /api/v1/bootstrap endpoint accepts requests for that long after
- * `crewship start`, then refuses with 410 until the server is
+ * step afterwards. By default there is no timer: the server keeps
+ * /api/v1/bootstrap open until the users table is non-empty — the
+ * empty table is the gate (the GitLab/Grafana first-run pattern) — and
+ * once an admin exists it refuses with 410. Deploy-race protection is
+ * opt-in: setting CREWSHIP_BOOTSTRAP_WINDOW=<duration> (e.g. "5m")
+ * arms a finite window after startup so an internet-reachable instance
+ * nobody bootstrapped doesn't sit open to whichever scanner finds the
+ * URL first; after it elapses the endpoint refuses until the server is
  * restarted. Headless / CI provisioning uses `crewship init` against
- * the same endpoint and is bound by the same window.
+ * the same endpoint and is bound by the same gates.
  *
  * Flow:
  *   /login  → setup-status check finds needs_bootstrap=true → /bootstrap
@@ -43,6 +47,7 @@ export default function BootstrapPage() {
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(true)
@@ -70,6 +75,10 @@ export default function BootstrapPage() {
     }
     if (password.length < 8) {
       setError("Password must be at least 8 characters.")
+      return
+    }
+    if (password !== confirmPassword) {
+      setError("Those passwords don't match.")
       return
     }
     setLoading(true)
@@ -108,33 +117,27 @@ export default function BootstrapPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-background p-4 overflow-hidden">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_70%_50%_at_50%_0%,rgba(30,123,254,0.14),transparent_60%)]" />
-
+    <AuthSplitShell
+      eyebrow="First run"
+      headline="You're the first aboard."
+      blurb="Nothing has been created yet. This account owns the workspace and invites the rest."
+    >
       <motion.div
         initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.55, ease }}
-        className="relative w-full max-w-md"
       >
-        <Card className="border-border/60 bg-card/95 backdrop-blur-sm rounded-[20px] shadow-2xl shadow-primary/10">
-          <CardHeader className="text-center pb-2">
-            <div className="flex justify-center mb-4">
-              <CrewshipLogoTile size="h-14 w-14" iconSize="h-7 w-7" rounded="rounded-2xl" />
-            </div>
-            <div className="flex justify-center mb-3">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/30 px-3 py-1 text-[11px] font-medium text-primary uppercase tracking-[0.12em]">
-                <Sparkles className="h-3 w-3" /> Initial setup
-              </span>
-            </div>
-            <CardTitle className="text-2xl tracking-tight">Create administrator account</CardTitle>
-            <CardDescription className="mt-2 text-balance">
-              This is the first sign-in for this Crewship instance. The account you create will own the
-              workspace and can invite additional members afterwards.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <form onSubmit={handleSubmit} className="space-y-4">
+        <p className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.11em] text-primary">
+          <Sparkles className="h-3 w-3" /> Initial setup
+        </p>
+        <h1 className="mt-3 text-balance text-[clamp(24px,2.2vw,30px)] font-extrabold leading-[1.14] tracking-[-0.028em]">
+          Create the administrator account
+        </h1>
+        <p className="mt-2 max-w-[44ch] text-sm text-muted-foreground">
+          This is the first sign-in for this Crewship instance. The account you create will own the
+          workspace and can invite additional members afterwards.
+        </p>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               {error && (
                 <div
                   className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
@@ -181,6 +184,24 @@ export default function BootstrapPage() {
                   className="h-11"
                 />
               </div>
+              {/* Confirmation, same as /signup. This is the one account on the
+                  instance that owns the workspace, it is created before any
+                  session exists, and a typo here is only discoverable at the
+                  next sign-in — by which point the only way back in is a
+                  password reset the fresh install may not be able to send. */}
+              <div className="space-y-2">
+                <Label htmlFor="confirm_password">Confirm password</Label>
+                <Input
+                  id="confirm_password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repeat it"
+                  required
+                  autoComplete="new-password"
+                  className="h-11"
+                />
+              </div>
               <Button type="submit" className="w-full h-11 text-sm font-semibold" disabled={loading}>
                 {loading ? (
                   <>
@@ -194,10 +215,8 @@ export default function BootstrapPage() {
                   </>
                 )}
               </Button>
-            </form>
-          </CardContent>
-        </Card>
+        </form>
       </motion.div>
-    </div>
+    </AuthSplitShell>
   )
 }

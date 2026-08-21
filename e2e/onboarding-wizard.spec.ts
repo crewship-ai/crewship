@@ -15,8 +15,10 @@ import { test, expect, type Page } from "@playwright/test"
  *     accepts a fake Claude Code CLI token instead of live-calling
  *     api.anthropic.com.
  *
- * Bootstrap is a one-shot (POST /api/v1/bootstrap returns 403 after
- * the first user), so the whole describe block runs serially with the
+ * Bootstrap is a one-shot (POST /api/v1/bootstrap returns 410 once a
+ * user exists — the header said 403, the test at the bottom of this
+ * file has always asserted 410), so the whole describe block runs
+ * serially with the
  * validation tests first — they fail submission so they don't consume
  * the shot.
  */
@@ -75,12 +77,17 @@ test.describe("onboarding wizard — first-run flow", () => {
     expect(page.url()).toContain("/bootstrap")
   })
 
+  // #confirm_password is `required`, so leaving it empty makes the browser
+  // block submit and the handler never runs — no alert, and the assertion
+  // below fails on "element(s) not found" rather than on the wrong text.
+  // Every test that expects to reach a validation message must fill it.
   test("bootstrap form rejects short name", async ({ page }) => {
     await page.goto("/bootstrap")
     await page.waitForSelector("#full_name")
     await page.fill("#full_name", "A")
     await page.fill("#email", `pre-${email}`)
     await page.fill("#password", "long-enough-pw")
+    await page.fill("#confirm_password", "long-enough-pw")
     await page.click("button[type=submit]")
     await expect(formAlert(page)).toContainText(/at least 2 characters/i)
     expect(page.url()).toContain("/bootstrap")
@@ -92,8 +99,27 @@ test.describe("onboarding wizard — first-run flow", () => {
     await page.fill("#full_name", fullName)
     await page.fill("#email", `pre-${email}`)
     await page.fill("#password", "short")
+    await page.fill("#confirm_password", "short")
     await page.click("button[type=submit]")
     await expect(formAlert(page)).toContainText(/at least 8 characters/i)
+    expect(page.url()).toContain("/bootstrap")
+  })
+
+  // The confirmation field is the reason this form has four inputs: /bootstrap
+  // creates the account that owns the workspace before any session exists, so
+  // a typo is only discoverable at the next sign-in. Mismatch must be caught
+  // client-side and must NOT burn the one bootstrap the empty DB allows.
+  test("bootstrap form rejects a password that does not match its confirmation", async ({
+    page,
+  }) => {
+    await page.goto("/bootstrap")
+    await page.waitForSelector("#full_name")
+    await page.fill("#full_name", fullName)
+    await page.fill("#email", `pre-${email}`)
+    await page.fill("#password", "long-enough-pw")
+    await page.fill("#confirm_password", "long-enough-px")
+    await page.click("button[type=submit]")
+    await expect(formAlert(page)).toContainText(/don't match/i)
     expect(page.url()).toContain("/bootstrap")
   })
 
@@ -110,6 +136,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     await page.fill("#full_name", fullName)
     await page.fill("#email", email)
     await page.fill("#password", password)
+    await page.fill("#confirm_password", password)
     await page.click("button[type=submit]")
     await page.waitForURL(/\/onboarding/, { timeout: 20_000 })
 

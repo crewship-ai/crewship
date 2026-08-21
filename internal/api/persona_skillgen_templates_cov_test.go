@@ -629,7 +629,7 @@ func TestCovPSTDeployTemplate_EmptySlug(t *testing.T) {
 	logger := newTestLogger()
 
 	_, err := deployCrewTemplate(context.Background(), db, logger, noopEmitter{},
-		wsID, "any-template", "Some Name", "!!!")
+		wsID, "any-template", "Some Name", "!!!", deployOverrides{})
 	if err == nil {
 		t.Fatal("expected error for empty derived slug, got nil")
 	}

@@ -87,6 +87,137 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **The builtin crew templates ship models that are not being retired.** All
+  twelve template files pinned dated snapshots — `claude-sonnet-4-20250514` on
+  43 agents, `claude-opus-4-20250514` on one, `claude-haiku-4-20250514` on
+  three — and those ids retire on 2026-06-15. Every crew the onboarding wizard
+  can deploy was seeded against a model with an end date, on the first screen a
+  new install ever shows.
+
+  The bump is per tier, not a blanket replace: the threat modeller keeps its
+  Opus, the secrets sweeper and the documentation writers keep their Haiku, and
+  everything else moves to Sonnet. A template's model choice is a cost decision
+  someone made deliberately, and flattening 47 pins onto one model would have
+  quietly repriced twelve crews.
+
+  A test walks the YAML exactly as the seeder does and holds two lines for
+  every agent in every template: no dated suffix, and the id must appear in
+  `llm.CuratedModels("anthropic")`. Bare aliases are the convention here —
+  a dated id pins a snapshot that will be withdrawn, and the alias will not.
+
+- **The onboarding preview no longer names a model of its own.** Five
+  hardcoded `"Claude Sonnet 4.6"` strings sat in the preview component, so the
+  same screen could show the picker's model, the template's model and the
+  preview's model and have all three disagree. It resolves one id through
+  `getModelLabel` now — the same function the rest of the UI labels with.
+
+- **First-run now asks for the password twice.** `/bootstrap` creates the one
+  account that owns the workspace, before any session exists, and a typo was
+  only discoverable at the next sign-in — by which point the way back in is a
+  password reset a fresh install may not be able to send. `/signup` already
+  confirmed; this brings the more consequential form in line.
+
+- **Pairing the CLI is no longer a dead end.** Step 3's green line reads "CLI
+  paired. You can finish below or jump to `crewship setup` in the terminal",
+  and Launch stayed disabled until a token was pasted into the browser — so
+  the terminal route it offers was unreachable. The client gate was stricter
+  than the server: `validateOnboardingCredential` returns nil on an empty
+  value, so launching without one is a supported path and the CLI lands the
+  credential afterwards. Browser mode still requires it, because there is no
+  terminal there to add it from later.
+
+- **Step 3 asks one question, then its consequence.** "How will you work?" was
+  asking two unrelated things on one screen — how the human drives Crewship,
+  and which credential the agents use — and ran off the bottom of the viewport
+  doing it, while the two steps before it fit in a third of it. The server says
+  as much in its own comment: `pairing_mode` "drives how the human works, not
+  the agents".
+
+  With a CLI in the picture the second question has a second answer, so in CLI
+  mode the credential block collapses to one line — "Add the token in the
+  terminal", with "Or add it now" to expand it — and the toolchain picker moves
+  inside, because choosing a toolchain only means something once a key is being
+  pasted. Browser mode has no terminal to fall back to, so there it stays open
+  and required, with no terminal instructions at all. The whole step now fits
+  above the fold.
+
+  An empty token is a valid answer once paired; a half-typed one is not, and is
+  rejected rather than stored as a credential that loads but never works.
+
+- **The Claude Code model picker offers only what has been verified with the
+  adapter, and is pinned to the backend's curated list.** It was a third independent copy of "which models
+  exist", alongside `internal/llm/models_curated.go` (which the backend already
+  serves at `GET /api/v1/models`) and the CLI's own adapter defaults — three
+  lists, three different contents. The Go list is the source of truth now, and
+  a test parses it to enforce that the picker never offers an id it does not
+  carry.
+
+  What the picker offers is deliberately narrower than curated: Claude Code
+  lists Sonnet 5 and nothing else, because that is what has actually been run
+  end to end with the adapter. An earlier version of this list was populated
+  from Anthropic's published catalogue, which offered five models of which one
+  was tested — publishing a model is not the same as having verified it.
+  Widening the list means verifying the adapter first.
+
+  Superseded aliases still answer at the API and can be set through the CLI
+  or the API — they are just not offered as a starting point. They keep their
+  display names through a label-only table: `getModelLabel` resolves by
+  scanning adapters, so without it an existing workspace on
+  `claude-sonnet-4-6` would have silently relabelled to "Claude Sonnet 4.6
+  (Cursor)" — the only other adapter that registers it.
+
+  `crewship setup`'s adapter defaults had drifted to Sonnet 4.6 while the web
+  picker moved on, so the two setup paths for the same adapter handed out
+  different models. They match again — which matters more now that the wizard
+  points paired users at the terminal path.
+
+- **Sign-up and the first-run admin screen join the split shell, and the setup
+  wizard stops moving underneath you.** `/signup` and `/bootstrap` were centred
+  cards next to a split `/login` they link to directly; both now mount
+  `AuthSplitShell` with the animated mark and their own panel copy.
+
+  Onboarding deliberately does **not** get the brand panel. It already has a
+  live preview of the workspace and crew you are building, which is worth more
+  than a logo, so it gets the same visual language applied to what is already
+  there: the cropped mark in the lockup, and the preview on a surface of its
+  own — tinted toward the brand with the mark as a watermark — where it used to
+  be `bg-muted/20`, within a hair of the form column, so the split read as one
+  page with a hairline down it.
+
+  The pane is lit rather than decorated: an inset highlight on the edge the
+  two panes share, and the ground falling away beneath it. The first attempt
+  reached for a large soft brand-blue radial glow, which is what every AI
+  product has shipped since 2024 and read as unserious next to a form people
+  have to fill in carefully. Depth is what makes a split read as two panes.
+  Stacked below `lg` the highlight moves to the bottom edge, because that is
+  where the seam actually is.
+
+  **The unauthenticated forms are usable with a thumb.** The shared `Input` is
+  `h-9` and `Button`'s default size is `h-9` — 36px, under every touch
+  guideline there is — and sign-in, sign-up, first-run and setup are the
+  screens most likely to be met on a phone. A `.touch-form` scope raises them
+  to 44px, keyed on `pointer: coarse` rather than on viewport width: width
+  missed the iPad, which is over any phone breakpoint you would pick and still
+  a finger. `components/ui` is untouched, because the same controls sit in
+  dense authenticated tables where 44px would wreck the row rhythm.
+
+  Two more phone fixes: the crew empty state reserved a full card's height on
+  a screen where the preview is below the form and off-screen while you type,
+  and it told you to pick a crew "on the left" when stacked there is no left.
+  The adapter step's token label and its help link stacked into a run-on at
+  390px; they sit on separate lines there now.
+
+  Two fixes found by walking the wizard on a nuked instance rather than by
+  reading it. **The lockup drifted between steps** — the form column was
+  centred as a whole, so the logo and stepper slid as the step content changed
+  height, measured at y=101 on Workspace, y=137 on Crew and y=66 on Adapter.
+  Both columns are top-anchored now; measured steady at y=71 across all three.
+  And **the preview's empty state was a thin strip**, leaving the pane looking
+  ~85% empty on step one — which reads as a failed render, not an empty state —
+  and making the layout jump when the real crew card arrived. It now reserves
+  that card's height and says what will land there instead of pointing at a
+  control.
+
 - **The sign-in screen is now a split, with the brand mark animated on the
   right.** `/login` was a centred card on a flat gradient. It is now a
   two-pane shell: the form in a readable column on the left, and on the right
@@ -130,6 +261,57 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   re-exported, so importers are unaffected.
 
 ### Fixed
+
+- **Deploying a crew template links credentials for the agent's own provider.**
+  `autoAssignCredentials` filtered the workspace's credentials with a hardcoded
+  `provider = 'ANTHROPIC'` while the agents it links them to carry whatever
+  provider their template pinned. For an Anthropic crew the two agreed by
+  accident and nothing looked wrong. For any other provider the query matched
+  nothing and every agent in the crew deployed with **zero credentials** — no
+  error, no failed request, just a crew that does not work; and a workspace
+  holding an Anthropic key handed that key to a Google agent, which is worse,
+  because it loads and then fails at call time.
+
+  It reads the agent's own `llm_provider` now and falls back to `ANTHROPIC`
+  only when the column is empty, matching the default the write side applies.
+  A lookup that errors leaves the agent unlinked rather than guessing. The
+  onboarding wizard reaches this path for every builtin template, so it was one
+  adapter choice away on the most common flow in the product, and nothing
+  covered it.
+
+- **The wizard's model choice reaches the crew it deploys.** Picking a model on
+  step 3 did nothing for four of the five crew options: `req.LlmModel` was read
+  only by the branch that builds a blank or single-agent crew, so every builtin
+  template deployed with the model its YAML pinned and the select was
+  decoration. `deployCrewTemplate` takes the override now.
+
+  It applies **only when the chosen provider matches the agent's** — writing a
+  Gemini id onto a `CLAUDE_CODE` agent breaks it outright, which is worse than
+  the template's default. An override with no resolvable provider is ignored
+  for the same reason, and the zero value deploys the template verbatim, which
+  is what every other caller passes.
+
+- **The first-run window is documented as it behaves.** Three source comments
+  and the changelog stated bootstrap closes five minutes after `crewship
+  start`. It does not: it stays open until an admin account exists, and the
+  finite window is opt-in through `CREWSHIP_BOOTSTRAP_WINDOW` for instances
+  reachable from the internet before anyone claims them. One of the comments
+  named a symbol that is not in the tree. Four docs pages also said the closed
+  endpoint answers 403 where the server answers 410, as did an assertion in
+  `e2e/onboarding-fresh.mjs` — the code was right in every case and only the
+  prose and one stale check were wrong, which is the kind of drift that gets
+  believed because it is checked in.
+
+- **`e2e/onboarding-fresh.mjs` runs past its 24th check.** A module-scope
+  `const URL` shadowed the global constructor, so `new URL(...)` threw partway
+  through and the eleven checks after it had never executed — in a script that
+  reports its own pass count, which made a truncated run look like a short one.
+  Nothing in CI runs this script, so it went unnoticed; it completes now, 37
+  checks against a fresh database. Two of the newly-reachable checks were
+  themselves stale: the 410 above, and a `console.anthropic.com` link no
+  onboarding component renders any more (the step deep-links into the adapter's
+  own CLI-auth docs, deliberately not to the API-key page, because onboarding
+  rejects raw API keys).
 
 - **A failed `crewship apply` no longer reports success.** Apply is fail-fast,
   so on an error the counters describe a *prefix* of the plan — but they were
