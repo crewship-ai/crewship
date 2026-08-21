@@ -5,9 +5,8 @@ import { useRouter } from "next/navigation"
 import { motion, useReducedMotion } from "motion/react"
 import { Sparkles, ArrowRight } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { AuthSplitShell } from "@/components/branding/auth-split-shell"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/hooks/use-auth"
@@ -108,33 +107,27 @@ export default function BootstrapPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-background p-4 overflow-hidden">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_70%_50%_at_50%_0%,rgba(30,123,254,0.14),transparent_60%)]" />
-
+    <AuthSplitShell
+      eyebrow="First run"
+      headline="You're the first aboard."
+      blurb="Nothing has been created yet. This account owns the workspace and invites the rest."
+    >
       <motion.div
         initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.55, ease }}
-        className="relative w-full max-w-md"
       >
-        <Card className="border-border/60 bg-card/95 backdrop-blur-sm rounded-[20px] shadow-2xl shadow-primary/10">
-          <CardHeader className="text-center pb-2">
-            <div className="flex justify-center mb-4">
-              <CrewshipLogoTile size="h-14 w-14" iconSize="h-7 w-7" rounded="rounded-2xl" />
-            </div>
-            <div className="flex justify-center mb-3">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/30 px-3 py-1 text-[11px] font-medium text-primary uppercase tracking-[0.12em]">
-                <Sparkles className="h-3 w-3" /> Initial setup
-              </span>
-            </div>
-            <CardTitle className="text-2xl tracking-tight">Create administrator account</CardTitle>
-            <CardDescription className="mt-2 text-balance">
-              This is the first sign-in for this Crewship instance. The account you create will own the
-              workspace and can invite additional members afterwards.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <form onSubmit={handleSubmit} className="space-y-4">
+        <p className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.11em] text-primary">
+          <Sparkles className="h-3 w-3" /> Initial setup
+        </p>
+        <h1 className="mt-3 text-balance text-[clamp(24px,2.2vw,30px)] font-extrabold leading-[1.14] tracking-[-0.028em]">
+          Create the administrator account
+        </h1>
+        <p className="mt-2 max-w-[44ch] text-sm text-muted-foreground">
+          This is the first sign-in for this Crewship instance. The account you create will own the
+          workspace and can invite additional members afterwards.
+        </p>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               {error && (
                 <div
                   className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
@@ -194,10 +187,8 @@ export default function BootstrapPage() {
                   </>
                 )}
               </Button>
-            </form>
-          </CardContent>
-        </Card>
+        </form>
       </motion.div>
-    </div>
+    </AuthSplitShell>
   )
 }

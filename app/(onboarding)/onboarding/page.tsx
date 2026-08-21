@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check, ExternalLink, Sparkles, AlertTriangle, ChevronsUpDown } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -527,19 +527,27 @@ export default function OnboardingPage() {
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[360px] bg-[radial-gradient(ellipse_60%_50%_at_30%_0%,rgba(30,123,254,0.10),transparent_60%)]" />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 min-h-screen relative">
-        {/* LEFT: form */}
-        <div className="border-b lg:border-b-0 lg:border-r border-border p-6 lg:p-12 flex items-center">
-          <div className="w-full max-w-md mx-auto space-y-7">
+        {/* LEFT: form.
+            Anchored to the top, not centred. Centring the whole column meant
+            the lockup and the stepper slid up and down as the step content
+            changed height — measured at y=101 on Workspace, y=137 on Crew and
+            y=66 on Adapter, so the logo visibly jumped on every Continue. The
+            fixed things stay fixed; only the form below them moves. */}
+        <div className="border-b lg:border-b-0 lg:border-r border-border p-6 lg:p-12 flex items-start">
+          <div className="w-full max-w-md mx-auto space-y-7 lg:py-6">
             <motion.div
               initial={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, ease }}
               className="flex items-center gap-3"
             >
-              <CrewshipLogoTile size="h-10 w-10" iconSize="h-5 w-5" rounded="rounded-xl" />
+              {/* The bare cropped mark, matching the sign-in lockup. Inside
+                  the tile's padding AND the viewBox's, the sails stopped
+                  being legible at this size. */}
+              <CrewshipLogo tight className="h-9 w-auto text-foreground" />
               <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Crewship</div>
-                <h1 className="text-lg font-semibold tracking-tight">Setup</h1>
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Setup</div>
+                <h1 className="text-lg font-bold tracking-tight">Crewship</h1>
               </div>
             </motion.div>
 
@@ -1062,8 +1070,19 @@ export default function OnboardingPage() {
           </div>
         </div>
 
-        {/* RIGHT: live preview */}
-        <div className="bg-muted/20 p-6 lg:p-12 flex items-center">
+        {/* RIGHT: live preview.
+            A surface of its own, tinted toward the brand, with the mark as a
+            watermark. `bg-muted/20` was within a hair of the left column's
+            background, so the split read as one page with a hairline down it
+            rather than as two panes. Top-aligned for the same reason the left
+            column is: the preview grows downward as you fill things in, and
+            centring made the workspace card drift while it did. */}
+        <div className="relative overflow-hidden p-6 lg:p-12 flex items-start bg-[radial-gradient(120%_90%_at_78%_8%,rgba(30,123,254,0.16),transparent_60%),linear-gradient(180deg,#0f1320_0%,#0c0e16_100%)]">
+          <CrewshipLogo
+            tight
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-[6%] top-[44%] w-[62%] text-white opacity-[0.045]"
+          />
           <OnboardingPreview
             workspaceName={workspaceName}
             crewSlug={crewSlug}
