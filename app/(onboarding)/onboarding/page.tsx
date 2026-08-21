@@ -387,7 +387,17 @@ export default function OnboardingPage() {
     if (step === 3) {
       const keyOK = apiKey.trim().length >= 8 || isLocalModel(model)
       if (mode === "browser") return keyOK
-      if (mode === "cli") return keyOK && pairStatus === "consumed"
+      // Paired CLI: the token stops being required here.
+      //
+      // It used to be `keyOK && pairStatus === "consumed"`, which dead-ended
+      // the wizard: the green line above says "CLI paired. You can finish
+      // below or jump to `crewship setup` in the terminal", and then Launch
+      // stayed disabled until a token was pasted into the browser — so the
+      // terminal route the message offers was unreachable. The server agrees
+      // with the message, not the old gate: validateOnboardingCredential
+      // returns nil on an empty value, so launching without one is a
+      // supported path and the CLI lands the credential afterwards.
+      if (mode === "cli") return pairStatus === "consumed"
     }
     return false
   }

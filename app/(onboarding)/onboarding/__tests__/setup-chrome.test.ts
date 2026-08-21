@@ -152,3 +152,26 @@ describe("the unauthenticated forms are usable with a thumb", () => {
     expect(PAGE).toMatch(/touch-form/)
   })
 })
+
+describe("pairing the CLI is not a dead end", () => {
+  it("stops requiring a browser-pasted token once the CLI is paired", () => {
+    // The green line on step 3 reads "CLI paired. You can finish below or
+    // jump to `crewship setup` in the terminal" — and Launch stayed disabled
+    // until a token was pasted into the browser, so the terminal route it
+    // offers was unreachable. The server agrees with the message, not the
+    // old gate: validateOnboardingCredential returns nil on an empty value.
+    const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
+    const step3 = gate.slice(gate.indexOf("step === 3"), gate.indexOf("return false"))
+    const cli = step3.slice(step3.indexOf('mode === "cli"'))
+    expect(cli).toMatch(/pairStatus === "consumed"/)
+    expect(cli, "a paired CLI must not also require keyOK").not.toMatch(/keyOK/)
+  })
+
+  it("still requires a credential in browser mode", () => {
+    // Browser mode has no CLI to land the credential afterwards, so the
+    // token is the only way the agents get one.
+    const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
+    const step3 = gate.slice(gate.indexOf("step === 3"), gate.indexOf("return false"))
+    expect(step3).toMatch(/mode === "browser"\) return keyOK/)
+  })
+})

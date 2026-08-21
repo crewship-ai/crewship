@@ -87,6 +87,40 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **First-run now asks for the password twice.** `/bootstrap` creates the one
+  account that owns the workspace, before any session exists, and a typo was
+  only discoverable at the next sign-in — by which point the way back in is a
+  password reset a fresh install may not be able to send. `/signup` already
+  confirmed; this brings the more consequential form in line.
+
+- **Pairing the CLI is no longer a dead end.** Step 3's green line reads "CLI
+  paired. You can finish below or jump to `crewship setup` in the terminal",
+  and Launch stayed disabled until a token was pasted into the browser — so
+  the terminal route it offers was unreachable. The client gate was stricter
+  than the server: `validateOnboardingCredential` returns nil on an empty
+  value, so launching without one is a supported path and the CLI lands the
+  credential afterwards. Browser mode still requires it, because there is no
+  terminal there to add it from later.
+
+- **The model picker offers only current Anthropic models — and now includes
+  Claude Opus 5.** It was missing entirely while three superseded Opus
+  versions were selectable. The list is Opus 5, Fable 5, Sonnet 5, Opus 4.8
+  (the documented fallback target for Opus 5's refusal classifiers) and
+  Haiku 4.5. The Haiku entry used the dated `claude-haiku-4-5-20251001`
+  form the model docs warn against; every value is a bare alias now.
+
+  Superseded aliases still answer at the API and can be set through the CLI
+  or the API — they are just not offered as a starting point. They keep their
+  display names through a label-only table: `getModelLabel` resolves by
+  scanning adapters, so without it an existing workspace on
+  `claude-sonnet-4-6` would have silently relabelled to "Claude Sonnet 4.6
+  (Cursor)" — the only other adapter that registers it.
+
+  `crewship setup`'s adapter defaults had drifted to Sonnet 4.6 while the web
+  picker moved on, so the two setup paths for the same adapter handed out
+  different models. They match again — which matters more now that the wizard
+  points paired users at the terminal path.
+
 - **Sign-up and the first-run admin screen join the split shell, and the setup
   wizard stops moving underneath you.** `/signup` and `/bootstrap` were centred
   cards next to a split `/login` they link to directly; both now mount
