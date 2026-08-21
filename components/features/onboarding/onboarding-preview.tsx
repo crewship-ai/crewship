@@ -267,9 +267,14 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35, ease, delay: 0.25 }}
-            className="bg-card/40 border border-dashed border-border rounded-[20px] p-6 text-center text-sm text-muted-foreground"
+            // Sized to the crew card that lands here — a header plus four
+            // agent rows. As a thin strip it left the pane looking ~85% empty
+            // on step one, which reads as a rendering failure rather than as
+            // an empty state, and the layout jumped when the real card
+            // arrived. An empty state should be a promise at the right scale.
+            className="flex min-h-[248px] items-center justify-center rounded-[20px] border border-dashed border-border bg-card/40 p-6 text-center text-sm text-muted-foreground"
           >
-            Pick a crew template ↑
+            Your crew lands here — pick one on the left
           </motion.div>
         )}
       </AnimatePresence>

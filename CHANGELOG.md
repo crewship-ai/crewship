@@ -87,6 +87,30 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Sign-up and the first-run admin screen join the split shell, and the setup
+  wizard stops moving underneath you.** `/signup` and `/bootstrap` were centred
+  cards next to a split `/login` they link to directly; both now mount
+  `AuthSplitShell` with the animated mark and their own panel copy.
+
+  Onboarding deliberately does **not** get the brand panel. It already has a
+  live preview of the workspace and crew you are building, which is worth more
+  than a logo, so it gets the same visual language applied to what is already
+  there: the cropped mark in the lockup, and the preview on a surface of its
+  own — tinted toward the brand with the mark as a watermark — where it used to
+  be `bg-muted/20`, within a hair of the form column, so the split read as one
+  page with a hairline down it.
+
+  Two fixes found by walking the wizard on a nuked instance rather than by
+  reading it. **The lockup drifted between steps** — the form column was
+  centred as a whole, so the logo and stepper slid as the step content changed
+  height, measured at y=101 on Workspace, y=137 on Crew and y=66 on Adapter.
+  Both columns are top-anchored now; measured steady at y=71 across all three.
+  And **the preview's empty state was a thin strip**, leaving the pane looking
+  ~85% empty on step one — which reads as a failed render, not an empty state —
+  and making the layout jump when the real crew card arrived. It now reserves
+  that card's height and says what will land there instead of pointing at a
+  control.
+
 - **The sign-in screen is now a split, with the brand mark animated on the
   right.** `/login` was a centred card on a flat gradient. It is now a
   two-pane shell: the form in a readable column on the left, and on the right
