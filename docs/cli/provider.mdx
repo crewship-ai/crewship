@@ -1,6 +1,6 @@
 ---
 title: "crewship provider"
-description: "Inspect the LLM providers this build can talk to, and send one live completion to prove a backend answers."
+description: "Inspect the LLM providers this build can talk to, see how the agent sidecar routes each one, and send one live completion to prove a backend answers."
 icon: "plug-zap"
 stability: experimental
 tag: Experimental
@@ -15,11 +15,11 @@ dials a provider once to prove the wiring end to end.
 crewship provider <subcommand> [flags]
 ```
 
-Both subcommands are **local**. There is no server route behind
-them: the registry and the model catalog are compiled in, so they work with no
-config file, no token, no workspace and no reachable server. `check` reaches the
-provider directly from the machine you run it on, which means it can test a
-local backend the server itself cannot see.
+Every subcommand is **local**. There is no server route behind
+them: the registry, the model catalog and the sidecar's routing table are all
+compiled in, so they work with no config file, no token, no workspace and no
+reachable server. `check` reaches the provider directly from the machine you run
+it on, which means it can test a local backend the server itself cannot see.
 
 Background on what these tables are:
 [Multi-provider LLM configuration](/guides/multi-provider-llm).
@@ -76,6 +76,93 @@ per row, which is the shape to script against:
 ```bash
 crewship provider list --format json | jq '.providers[] | select(.key_set | not)'
 ```
+
+### route
+
+```bash
+crewship provider route list
+crewship provider route show <provider>
+```
+
+`list` answers the other half of the provider question. `provider list` says
+which providers **this binary** can construct and whether their key is in your
+environment; `route list` says how an **agent's** CLI reaches a provider through
+its sidecar — the path it dials on `127.0.0.1:9119`, where the sidecar forwards
+it, and which header or query parameter the credential is written into on the
+way out.
+
+The two tables are deliberately different sets. A provider here does not have to
+be one crewshipd can call, and vice versa.
+
+**Example:**
+
+```bash
+crewship provider route list
+```
+
+```
+╭───────────────┬────────────────────┬───────────────────────────────────┬───────────────────────────────────────┬────────────┬──────────────────────────╮
+│   PROVIDER    │        PATH        │             UPSTREAM              │                 AUTH                  │ CREDENTIAL │        BILLED AS         │
+├───────────────┼────────────────────┼───────────────────────────────────┼───────────────────────────────────────┼────────────┼──────────────────────────┤
+│ ANTHROPIC     │ /v1                │ api.anthropic.com                 │ header x-api-key (+1 by token prefix) │ optional   │ anthropic                │
+│ OPENAI        │ /openai            │ api.openai.com                    │ header Authorization: Bearer          │ optional   │ openai                   │
+│ GOOGLE        │ /gemini            │ generativelanguage.googleapis.com │ header x-goog-api-key + query key     │ optional   │ google                   │
+│ OPENROUTER    │ /llm/openrouter    │ openrouter.ai/api/v1              │ header Authorization: Bearer          │ required   │ openrouter               │
+│ OPENAI_COMPAT │ /llm/openai-compat │ from credential                   │ header Authorization: Bearer          │ required   │ openai-compat (unpriced) │
+╰───────────────┴────────────────────┴───────────────────────────────────┴───────────────────────────────────────┴────────────┴──────────────────────────╯
+```
+
+| Column | Meaning |
+|---|---|
+| `PROVIDER` | The descriptor id. This is the value stored in a credential's `provider` column, and what `crewship credential create --provider` takes. |
+| `PATH` | The path prefix an agent's CLI is pointed at inside the container. |
+| `UPSTREAM` | The fixed dial target, base path included — or `from credential` when the endpoint is supplied by the credential itself. |
+| `AUTH` | Where the credential is written. A provider that accepts more than one token shape shows the default slot plus how many prefix-selected branches sit ahead of it; `route show` prints them all. |
+| `CREDENTIAL` | `required` refuses the call with a 503 when the sidecar holds no credential. `optional` forwards the agent's own request untouched, which is how an Anthropic OAuth token — which the sidecar never holds — still reaches the upstream. |
+| `BILLED AS` | The provider key cost-ledger rows are written under. `(unpriced)` means nothing prices that key, so calls through the route bill \$0. |
+
+`show` prints one route in full, including every auth branch:
+
+```bash
+crewship provider route show openrouter
+```
+
+```
+Provider:         OPENROUTER
+Name:             OpenRouter
+Agent path:       /llm/openrouter
+Prefix:           stripped before forwarding
+Upstream:         openrouter.ai/api/v1
+Credential:       required
+Auth:             header Authorization: Bearer
+Billed as:        openrouter
+Usage parsed as:  openai
+Key env vars:     OPENROUTER_API_KEY
+```
+
+A provider with more than one token shape lists each branch — `provider route
+show anthropic` prints an `Auth (token sk-ant-oat…)` line above its
+`Auth (default)` one, which is how an OAuth token ends up in `Authorization`
+and an API key in `x-api-key` without either being a special case in the
+router.
+
+Like `list` and unlike `check`, both are **local and read-only**: the descriptor
+table is compiled in, nothing reads the credential vault, and no server is
+contacted. An unknown provider exits `3`:
+
+```bash
+crewship provider route show bedrock
+# unknown provider route "bedrock" (known: ANTHROPIC, OPENAI, GOOGLE, OPENROUTER, OPENAI_COMPAT)
+# exit 3
+```
+
+Bedrock is not in that list and is not supported: it authenticates with SigV4
+request signing, which the sidecar does not do.
+
+To create a credential for one of these providers, see
+[`crewship credential create`](/cli/credential#crewship-credential-create) — and
+for a `from credential` upstream,
+[an OpenAI-compatible endpoint](/cli/credential#an-openai-compatible-endpoint).
 
 ### check
 

@@ -1,0 +1,10 @@
+method POST
+scheme https
+url.host api.anthropic.com
+req.host api.anthropic.com
+path /v1/messages
+rawpath 
+rawquery 
+target /v1/messages
+requesturi ""
+header Authorization: Bearer sk-ant-oat01-FROM-ENV

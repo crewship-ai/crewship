@@ -173,12 +173,28 @@ enum CredentialType {
   SECRET
 }
 
+// CredentialProvider is a TYPE-GENERATION surface, not a constraint. The
+// credentials.provider column is `TEXT NOT NULL DEFAULT 'NONE'` with no CHECK
+// (internal/database/migrate_consts_v01_init.go), and the API stores whatever
+// string it is handed — live workspaces already hold GITHUB, AWS, KUBERNETES,
+// NOTION and STRIPE, none of which appear below. Adding a value here therefore
+// needs no SQL migration, and adding a CHECK constraint to match would break
+// every one of those rows.
+//
+// OPENROUTER and OPENAI_COMPAT are the two providers an operator can reach by
+// pasting a credential alone: the sidecar routes an agent's LLM traffic to them
+// from the descriptor table (internal/llmroute), so the key never enters the
+// agent container. OPENAI_COMPAT's value is a {baseURL, apiKey, headers}
+// object rather than a bare token, because its upstream comes from the
+// credential.
 enum CredentialProvider {
   ANTHROPIC
   OPENAI
   GOOGLE
   CURSOR
   FACTORY
+  OPENROUTER
+  OPENAI_COMPAT
   NONE
 }
 

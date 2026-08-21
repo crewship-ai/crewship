@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -79,6 +81,7 @@ func TestNewProxy_ConfigTransportOverride(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("Authorization", "Bearer sk-ant-oat01-my-oauth-token")
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
@@ -144,6 +147,7 @@ func TestProxyHealthEndpoint(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 
 	proxy.ServeHTTP(w, req)
@@ -160,9 +164,24 @@ func TestProxyHealthEndpoint(t *testing.T) {
 	}
 }
 
+// specFor is the test-side lookup for a provider's descriptor. Every
+// injectCredential(req, provider, token) call in this package became
+// llmroute.ApplyAuth(req, specFor(t, provider), token, nil): the auth table
+// moved out of proxy.go's switch and into the descriptor, so the assertions
+// below now exercise the descriptor row AND the writer in one call — which is
+// what the proxy itself does.
+func specFor(t *testing.T, provider ProviderType) llmroute.Spec {
+	t.Helper()
+	s, ok := llmroute.Lookup(string(provider))
+	if !ok {
+		t.Fatalf("no llmroute spec registered for provider %q; the sidecar routes it, so the descriptor must describe it", provider)
+	}
+	return s
+}
+
 func TestInjectCredentialAnthropic(t *testing.T) {
 	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
-	injectCredential(req, ProviderAnthropic, "sk-ant-test-key")
+	llmroute.ApplyAuth(req, specFor(t, ProviderAnthropic), "sk-ant-test-key", nil)
 
 	if req.Header.Get("x-api-key") != "sk-ant-test-key" {
 		t.Errorf("expected x-api-key header, got %q", req.Header.Get("x-api-key"))
@@ -174,7 +193,7 @@ func TestInjectCredentialAnthropic(t *testing.T) {
 
 func TestInjectCredentialOpenAI(t *testing.T) {
 	req := httptest.NewRequest("POST", "https://api.openai.com/v1/chat/completions", nil)
-	injectCredential(req, ProviderOpenAI, "sk-oai-test-key")
+	llmroute.ApplyAuth(req, specFor(t, ProviderOpenAI), "sk-oai-test-key", nil)
 
 	if req.Header.Get("Authorization") != "Bearer sk-oai-test-key" {
 		t.Errorf("expected Authorization Bearer header, got %q", req.Header.Get("Authorization"))
@@ -183,7 +202,7 @@ func TestInjectCredentialOpenAI(t *testing.T) {
 
 func TestInjectCredentialGoogle(t *testing.T) {
 	req := httptest.NewRequest("POST", "https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent", nil)
-	injectCredential(req, ProviderGoogle, "AIza-test-key")
+	llmroute.ApplyAuth(req, specFor(t, ProviderGoogle), "AIza-test-key", nil)
 
 	if req.URL.Query().Get("key") != "AIza-test-key" {
 		t.Errorf("expected key query param, got %q", req.URL.Query().Get("key"))
@@ -315,7 +334,7 @@ func TestProxyE2EWithCredentialInjection(t *testing.T) {
 func TestInjectCredentialOverwritesExistingOpenAI(t *testing.T) {
 	req := httptest.NewRequest("POST", "https://api.openai.com/v1/chat/completions", nil)
 	req.Header.Set("Authorization", "Bearer sk-agent-fake-key")
-	injectCredential(req, ProviderOpenAI, "sk-real-openai-key")
+	llmroute.ApplyAuth(req, specFor(t, ProviderOpenAI), "sk-real-openai-key", nil)
 	if req.Header.Get("Authorization") != "Bearer sk-real-openai-key" {
 		t.Errorf("expected real key to overwrite agent key, got %q", req.Header.Get("Authorization"))
 	}
@@ -323,9 +342,62 @@ func TestInjectCredentialOverwritesExistingOpenAI(t *testing.T) {
 
 func TestInjectCredentialOverwritesExistingGoogle(t *testing.T) {
 	req := httptest.NewRequest("POST", "https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=agent-fake-key", nil)
-	injectCredential(req, ProviderGoogle, "AIzaSy-real-key")
+	llmroute.ApplyAuth(req, specFor(t, ProviderGoogle), "AIzaSy-real-key", nil)
 	if req.URL.Query().Get("key") != "AIzaSy-real-key" {
 		t.Errorf("expected real key to overwrite agent key, got %q", req.URL.Query().Get("key"))
+	}
+}
+
+// TestHealth_CountPerDescriptor: /health carries one provider_creds entry per
+// registered descriptor, including the ones with no credential (a missing key
+// and a zero are the same fact, and an absent key reads as "this sidecar has
+// never heard of that provider"). Providers WITHOUT a descriptor — CURSOR,
+// FACTORY, which are env-injected and never proxied — must not appear: the map
+// describes what the router can route, not what the store happens to hold.
+func TestHealth_CountPerDescriptor(t *testing.T) {
+	cs := NewCredStore()
+	cs.Load([]Credential{
+		{ID: "a1", Provider: ProviderAnthropic, Token: "sk-ant-1"},
+		{ID: "r1", Provider: ProviderOpenRouter, Token: "sk-or-v1-1"},
+		{ID: "r2", Provider: ProviderOpenRouter, Token: "sk-or-v1-2"},
+		{ID: "x1", Provider: ProviderCursor, Token: "cur_not_proxied"},
+	})
+	proxy := NewProxy(ProxyConfig{
+		CredStore: cs,
+		Allowlist: NewDomainAllowlist(nil),
+		Logger:    slog.Default(),
+	})
+
+	req := httptest.NewRequest("GET", "http://127.0.0.1:9119/health", nil)
+	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	var got struct {
+		ProviderCreds map[string]int `json:"provider_creds"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal health: %v; body=%s", err, w.Body.String())
+	}
+
+	specs := llmroute.Specs()
+	if len(specs) == 0 {
+		t.Fatal("llmroute.Specs() is empty; this assertion would pass vacuously")
+	}
+	if len(got.ProviderCreds) != len(specs) {
+		t.Errorf("provider_creds has %d entries, want one per descriptor (%d): %v", len(got.ProviderCreds), len(specs), got.ProviderCreds)
+	}
+	for _, s := range specs {
+		if _, ok := got.ProviderCreds[s.ID]; !ok {
+			t.Errorf("provider_creds is missing %s; every descriptor must report, zero included", s.ID)
+		}
+	}
+	if got.ProviderCreds["ANTHROPIC"] != 1 || got.ProviderCreds["OPENROUTER"] != 2 {
+		t.Errorf("counts = %v, want ANTHROPIC:1 OPENROUTER:2", got.ProviderCreds)
+	}
+	if _, ok := got.ProviderCreds[string(ProviderCursor)]; ok {
+		t.Errorf("provider_creds reports CURSOR, which has no descriptor and is never proxied: %v", got.ProviderCreds)
 	}
 }
 
@@ -353,6 +425,7 @@ func TestProxyDirectRequestReverseProxiesV1Path(t *testing.T) {
 	// Simulate ANTHROPIC_BASE_URL=http://127.0.0.1:9119 — direct HTTP request, not proxy
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", "sk-ant-dummy-crewship-sidecar")
 	w := httptest.NewRecorder()
@@ -388,6 +461,7 @@ func TestProxyDirectRequestOAuthPassthrough(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("Authorization", "Bearer sk-ant-oat01-my-oauth-token")
 	w := httptest.NewRecorder()
 

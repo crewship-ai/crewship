@@ -43,6 +43,19 @@ func TestE2ESidecarIntegration(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"key": lastGoogleKey})
 	})
+	// OpenRouter serves under /api/v1 — the UpstreamBasePath the descriptor
+	// joins ahead of the stripped request path. Registering the route at its
+	// REAL path is what makes this leg meaningful: a base-path join that got
+	// dropped would 404 here rather than quietly work.
+	//
+	// Deliberately does NOT touch the shared lastAuthHeader: the assertion below
+	// reads the value back out of the response body, so the shared variable
+	// would buy nothing and add an unsynchronised write from a handler
+	// goroutine to a variable the test goroutine also resets.
+	mux.HandleFunc("/api/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"auth": r.Header.Get("Authorization")})
+	})
 
 	upstreamLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -59,6 +72,8 @@ func TestE2ESidecarIntegration(t *testing.T) {
 	// OpenAI keys: sk-proj-* or sk-{20+ alphanum}
 	realOAIKey := "sk-proj-" + strings.Repeat("Y", 30)
 	realGoogleKey := "AIzaSy" + strings.Repeat("Z", 33)
+	// OpenRouter keys: sk-or-*
+	realORKey := "sk-or-v1-" + strings.Repeat("Q", 30)
 
 	srv := NewServer(ServerConfig{
 		Addr: "127.0.0.1:0",
@@ -67,21 +82,41 @@ func TestE2ESidecarIntegration(t *testing.T) {
 			{ID: "anth-2", Provider: ProviderAnthropic, Token: backupAnthKey, Priority: 2},
 			{ID: "oai-1", Provider: ProviderOpenAI, Token: realOAIKey, Priority: 1},
 			{ID: "google-1", Provider: ProviderGoogle, Token: realGoogleKey, Priority: 1},
+			{ID: "or-1", Provider: ProviderOpenRouter, Token: realORKey, Priority: 1},
 		},
 		NetworkPolicy: &NetworkPolicyConfig{Mode: "restricted"},
 	})
 
-	// Override sidecar's internal transport to redirect LLM domains to our fake upstream
-	srv.proxy.transport = &http.Transport{
+	// Override sidecar's internal transport to redirect LLM domains to our fake
+	// upstream. The scheme downgrade matters for the OpenRouter leg: the
+	// forward-proxy path keeps whatever scheme the agent's absolute URL used
+	// (http here), but the reverse-proxy path always dials https, and the fake
+	// upstream speaks plain HTTP. Downgrading only the redirected hosts keeps
+	// the rest of the transport honest.
+	redirected := []string{"api.anthropic.com", "api.openai.com", "generativelanguage.googleapis.com", "openrouter.ai"}
+	isRedirected := func(host string) bool {
+		for _, domain := range redirected {
+			if strings.HasPrefix(host, domain) {
+				return true
+			}
+		}
+		return false
+	}
+	base := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			for _, domain := range []string{"api.anthropic.com", "api.openai.com", "generativelanguage.googleapis.com"} {
-				if strings.HasPrefix(addr, domain) {
-					return net.Dial(network, upstreamAddr)
-				}
+			if isRedirected(addr) {
+				return net.Dial(network, upstreamAddr)
 			}
 			return net.Dial(network, addr)
 		},
 	}
+	srv.proxy.transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Scheme == "https" && isRedirected(r.URL.Host) {
+			r = r.Clone(r.Context())
+			r.URL.Scheme = "http"
+		}
+		return base.RoundTrip(r)
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -187,6 +222,31 @@ func TestE2ESidecarIntegration(t *testing.T) {
 		}
 	})
 
+	// ---- TEST 4b: OpenRouter, the first descriptor-only provider ----
+	//
+	// It is reached on the sidecar's own listener (/llm/openrouter/...), NOT
+	// through HTTP_PROXY, because the descriptor deliberately claims no host:
+	// mapping openrouter.ai would 503 every existing BYOK crew that dials it
+	// with its own key in the agent env.
+	t.Run("openrouter_injection", func(t *testing.T) {
+		req, _ := http.NewRequest("POST", "http://"+sidecarAddr+"/llm/openrouter/chat/completions",
+			strings.NewReader(`{"model":"anthropic/claude-sonnet-4-6"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer dummy-crewship-sidecar")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var result map[string]string
+		json.NewDecoder(resp.Body).Decode(&result)
+
+		if result["auth"] != "Bearer "+realORKey {
+			t.Errorf("upstream got auth %q, want Bearer <real OpenRouter key>", result["auth"])
+		}
+	})
+
 	// ---- TEST 5: Domain Blocking ----
 	t.Run("domain_blocking", func(t *testing.T) {
 		blocked := []string{"evil.com", "google.com", "github.com", "attacker.io"}
@@ -215,6 +275,7 @@ func TestE2ESidecarIntegration(t *testing.T) {
 		}{
 			{"anthropic", "Found: " + realAnthKey, "sk-ant-"},
 			{"openai", "Token: " + realOAIKey, "sk-proj-"},
+			{"openrouter", "Route: " + realORKey, "sk-or-"},
 			{"google", "Key=" + realGoogleKey, "AIzaSy"},
 			{"ssh_key", "-----BEGIN OPENSSH PRIVATE KEY-----\ndata\n-----END OPENSSH PRIVATE KEY-----", "BEGIN OPENSSH"},
 			{"password", `{"password": "supersecret123"}`, "supersecret123"},

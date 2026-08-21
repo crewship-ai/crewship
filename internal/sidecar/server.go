@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -176,6 +178,73 @@ type Server struct {
 	memoryExec *memoryExecutor
 }
 
+// minScrubbableTokenBytes is the shortest credential value we will register as
+// a literal scrubber pattern. The guard is load-bearing, not defensive: an
+// empty (or near-empty) token compiles to a regex that matches everywhere, so
+// registering one would redact the entire memory-write surface. 16 bytes is
+// comfortably below every real provider key and comfortably above anything a
+// misconfiguration would produce.
+const minScrubbableTokenBytes = 16
+
+// registerCredentialLiterals teaches the memory-write scrubber the exact
+// credential values this sidecar is holding.
+//
+// The built-in patterns are shape-based (sk-ant-…, AIzaSy…, sk-or-…), which
+// works only for providers whose keys have a recognisable shape. A
+// bring-your-own endpoint's token has no shape at all — a self-hosted LiteLLM
+// or vLLM proxy issues whatever string its operator configured — so the only
+// reliable way to keep it out of a memory write is to know the literal. We do
+// know it: it is in the CredStore. QuoteMeta because a token is data, not a
+// pattern.
+//
+// Called once from NewServer, before the HTTP server accepts, so the pattern
+// list is still effectively immutable for the life of the process.
+func registerCredentialLiterals(s *scrubber.Scrubber, creds []Credential, logger *slog.Logger) {
+	if s == nil {
+		return
+	}
+	for _, c := range creds {
+		if len(c.Token) < minScrubbableTokenBytes {
+			continue
+		}
+		if err := s.AddPattern("credential_"+c.ID, regexp.QuoteMeta(c.Token)); err != nil {
+			// QuoteMeta output is always a valid regex, so this is
+			// unreachable — but a silently unregistered credential is a silent
+			// redaction hole, which is exactly the class of thing that must
+			// never be swallowed. The credential value is NOT logged.
+			logger.Error("failed to register credential scrubber pattern", "credential_id", c.ID, "error", err)
+		}
+		// Custom headers are credential material by the same argument the
+		// comment above makes for the token. A self-hosted gateway that
+		// authenticates with `X-Api-Key: 9f2c…` instead of a bearer puts the
+		// whole secret in a header value, and that value matches no built-in
+		// shape either — so registering only the token leaves it unredacted in
+		// a memory write. The sidecar already holds these for exactly the same
+		// reason it holds the token.
+		//
+		// Sorted so the registered pattern set is deterministic across boots:
+		// map iteration order would otherwise vary and make one sidecar's
+		// pattern list differ from another's for identical config.
+		names := make([]string, 0, len(c.Headers))
+		for name := range c.Headers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for i, name := range names {
+			v := c.Headers[name]
+			if len(v) < minScrubbableTokenBytes {
+				continue
+			}
+			id := fmt.Sprintf("credential_%s_hdr_%d", c.ID, i)
+			if err := s.AddPattern(id, regexp.QuoteMeta(v)); err != nil {
+				// Header NAME is safe to log; the value never is.
+				logger.Error("failed to register credential header scrubber pattern",
+					"credential_id", c.ID, "header", name, "error", err)
+			}
+		}
+	}
+}
+
 // memoryExecCloseTimeout bounds how long sidecar shutdown waits for the
 // off-thread reindex queue to drain. A wedged reindex must not block
 // container teardown indefinitely; 5s comfortably covers a normal drain
@@ -253,10 +322,10 @@ func NewServer(cfg ServerConfig) *Server {
 		logger:      cfg.Logger,
 		readyCh:     make(chan struct{}),
 		// Shared scrubber instance reused by every /memory/write
-		// validation pass. The scrubber is read-only at runtime
-		// (its pattern list is fixed by New() — AddPattern is not
-		// called on the sidecar path), so a single instance under
-		// concurrent handlers is safe.
+		// validation pass. Its pattern list is fixed before the HTTP
+		// server starts accepting (New() + the credential literals
+		// registered immediately below) and never mutated after, so a
+		// single instance under concurrent handlers is safe.
 		scrubber: scrubber.New(),
 		// Single-worker, strict-FIFO, no-drop executor for post-write
 		// reindex + journal emit. Started here so it's live before the
@@ -264,6 +333,8 @@ func NewServer(cfg ServerConfig) *Server {
 		memoryExec:        newMemoryExecutor(cfg.Logger),
 		peerMemoryEngines: make(map[string]*memory.Engine),
 	}
+
+	registerCredentialLiterals(s.scrubber, cfg.Credentials, cfg.Logger)
 
 	// Billing-mode + plan come from the orchestrator-set env vars in
 	// exec_env.go. Defaults to "metered" when missing so a sidecar started
@@ -286,9 +357,15 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 
 	proxy := NewProxy(ProxyConfig{
-		CredStore:         credStore,
-		Allowlist:         allowlist,
-		Scrubber:          scrubber.New(),
+		CredStore: credStore,
+		Allowlist: allowlist,
+		// The SAME scrubber the server holds, not a second one. Nothing in
+		// proxy.go reads this field today, but registerCredentialLiterals
+		// registers every CredStore token on s.scrubber — so a fresh instance
+		// here would hand the proxy a scrubber that knows none of them, and the
+		// first code path to start using it would redact nothing while looking
+		// entirely correct.
+		Scrubber:          s.scrubber,
 		Logger:            cfg.Logger,
 		FreeMode:          freeMode,
 		AllowPrivate:      allowPrivateEndpoints,
@@ -770,10 +847,13 @@ func (s *Server) Start(ctx context.Context) error {
 	// Signal that the listener is bound and we're ready to accept connections.
 	close(s.readyCh)
 
+	// One count per provider actually held, from a single store pass. The old
+	// line logged anthropic + openai only, so a Google-only (or, now,
+	// OpenRouter-only) sidecar started looking like it had booted with no
+	// credentials at all.
 	s.logger.Info("sidecar proxy started",
 		"addr", s.httpServer.Addr,
-		"anthropic_creds", s.credStore.Count(ProviderAnthropic),
-		"openai_creds", s.credStore.Count(ProviderOpenAI),
+		"provider_creds", s.credStore.CountsByProvider(),
 	)
 
 	errCh := make(chan error, 1)

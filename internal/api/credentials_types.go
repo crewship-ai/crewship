@@ -20,12 +20,14 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/httpsafe"
+	"github.com/crewship-ai/crewship/internal/llmroute"
 )
 
 // CredentialType is a string alias used to document intent at call
@@ -170,6 +172,21 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 		// The generic "value required" gate in the Create handler is
 		// enough.
 
+	case CredTypeAPIKey:
+		// An API_KEY is an opaque secret for every provider that dials a
+		// fixed vendor host — nothing to shape-check. The exception is a
+		// provider whose route takes its upstream FROM the credential
+		// (OPENAI_COMPAT): there the value is not a bare key but the
+		// endpointValue object carrying the base URL the sidecar will dial,
+		// so it earns the same gate an ENDPOINT_URL gets. Without this a
+		// pasted bare key would store fine and fail at run time as a 502
+		// from a provider with no upstream to reach.
+		if providerNeedsEndpointValue(req.Provider) {
+			if msg := validateEndpointURL(req.Value); msg != "" {
+				return msg
+			}
+		}
+
 	case CredTypeEndpointURL:
 		// The value is an OpenAI-compatible base URL (#955), not a secret.
 		// Gate it to a well-formed absolute http/https URL so a typo lands
@@ -240,6 +257,48 @@ func buildEndpointValue(baseURL, apiKey string, headers map[string]string) (stri
 		return "", err
 	}
 	return string(raw), nil
+}
+
+// providerNeedsEndpointValue reports whether a credential for this provider must
+// carry an endpoint rather than a bare token — i.e. whether the provider has an
+// llmroute spec whose upstream comes from the credential. It is the one place
+// the API layer asks that question, so "which providers are BYO-endpoint" stays
+// a property of the route table and never becomes a second list here.
+func providerNeedsEndpointValue(provider string) bool {
+	return llmroute.ProviderCarriesUpstream(provider)
+}
+
+// providerEndpointFromValue splits a stored credential value into the three
+// pieces the sidecar boot payload carries separately: the bearer token, the
+// upstream base URL, and any custom headers.
+//
+// Almost every provider dials a fixed vendor host, so its value IS the token and
+// there is nothing to split — those return (value, "", nil, nil) and the payload
+// is byte-identical to what it carried before phase 2. A provider whose route
+// takes its upstream from the credential (OPENAI_COMPAT) has no fixed host, so
+// its value must supply one: it is the endpointValue JSON (#961), and the split
+// is what keeps the JSON blob from travelling as the token — pasting the whole
+// object into an Authorization header would leak the base URL and the custom
+// headers to the upstream on every call.
+//
+// The re-validation here is defence in depth, NOT the control. The authoritative
+// SSRF decision is made at dial time inside the sidecar, which is the only place
+// that sees both the post-DNS address and the crew's egress opt-in. What this
+// buys is a value stored malformed (by a path that predates validateEndpointURL,
+// or a hand-edited row) being refused with a named error instead of delivered
+// blank, which would otherwise surface as an unexplained 502 with no audit trail.
+func providerEndpointFromValue(provider, value string) (token, baseURL string, headers map[string]string, err error) {
+	if !providerNeedsEndpointValue(provider) {
+		return value, "", nil, nil
+	}
+	if msg := validateEndpointURL(value); msg != "" {
+		return "", "", nil, errors.New(msg)
+	}
+	baseURL, token, headers, err = parseEndpointValue(value)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return token, baseURL, headers, nil
 }
 
 // validateEndpointURL enforces that an ENDPOINT_URL credential value carries an

@@ -14,6 +14,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/llmroute"
 )
 
 // newCapturingProxy is defined in proxy_openai_test.go.
@@ -27,6 +29,7 @@ func TestGeminiReverseProxy_InjectsKeyStripsPrefixRewritesHost(t *testing.T) {
 		"http://127.0.0.1:9119/gemini/v1beta/models/gemini-2.5-pro:generateContent",
 		strings.NewReader(`{"contents":[]}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	// The genai SDK sends the (dummy) key in x-goog-api-key.
 	req.Header.Set("x-goog-api-key", "dummy-crewship-sidecar")
 	w := httptest.NewRecorder()
@@ -61,6 +64,7 @@ func TestGeminiReverseProxy_StreamPathPreservesQuery(t *testing.T) {
 		"http://127.0.0.1:9119/gemini/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
 		strings.NewReader(`{}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 	if upstream == nil {
@@ -87,6 +91,7 @@ func TestGeminiReverseProxy_NoCredPassesThrough(t *testing.T) {
 		"http://127.0.0.1:9119/gemini/v1beta/models/gemini-2.5-pro:generateContent",
 		strings.NewReader(`{}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("x-goog-api-key", "caller-supplied")
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
@@ -123,6 +128,8 @@ func TestHandleLocal_RoutesGeminiDistinctFromAnthropicAndOpenAI(t *testing.T) {
 				[]Credential{{ID: "c", Provider: tc.provider, Token: tc.token}}, &upstream)
 			req := httptest.NewRequest("POST", "http://127.0.0.1:9119"+tc.path, strings.NewReader(`{}`))
 			req.Host = "127.0.0.1:9119"
+			req.RemoteAddr = "127.0.0.1:54321"
+			req.RemoteAddr = "127.0.0.1:54321"
 			w := httptest.NewRecorder()
 			proxy.ServeHTTP(w, req)
 			if upstream == nil {
@@ -144,15 +151,18 @@ func TestHandleLocal_RoutesGeminiDistinctFromAnthropicAndOpenAI(t *testing.T) {
 	}
 }
 
-// injectCredential for Google must set BOTH auth slots the Gemini API accepts:
-// the x-goog-api-key header (what the genai SDK sends, so the dummy the agent
+// Google's descriptor must carry BOTH auth slots the Gemini API accepts: the
+// x-goog-api-key header (what the genai SDK sends, so the dummy the agent
 // carries gets overwritten) and the ?key= query param (the pre-existing
-// forward-proxy behavior, kept for clients that authenticate that way).
+// forward-proxy behavior, kept for clients that authenticate that way). This
+// is the two-slot case the AuthSlot list exists for — a single-header
+// descriptor would leave the query param holding the dummy, and the only
+// symptom would be a 401 the agent reports as a model error.
 func TestInjectCredentialGoogle_SetsHeaderAndQueryParam(t *testing.T) {
 	req := httptest.NewRequest("POST",
 		"https://generativelanguage.googleapis.com/v1beta/models/g:generateContent", nil)
 	req.Header.Set("x-goog-api-key", "dummy-crewship-sidecar")
-	injectCredential(req, ProviderGoogle, "AIzaSy-real-key")
+	llmroute.ApplyAuth(req, specFor(t, ProviderGoogle), "AIzaSy-real-key", nil)
 	if got := req.Header.Get("x-goog-api-key"); got != "AIzaSy-real-key" {
 		t.Errorf("x-goog-api-key = %q, want the real key (dummy overwritten)", got)
 	}

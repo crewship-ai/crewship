@@ -56,11 +56,11 @@ func NewAuxCredentialLookup(db *sql.DB) keepercfg.AuxCredentialLookup {
 			return "", fmt.Errorf("evaluator credential lookup: empty credential id")
 		}
 
-		var encrypted, credType string
+		var encrypted, credType, credProvider string
 		err := db.QueryRowContext(ctx, `
-			SELECT encrypted_value, type FROM credentials
+			SELECT encrypted_value, type, COALESCE(provider, '') FROM credentials
 			WHERE id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`,
-			credentialID).Scan(&encrypted, &credType)
+			credentialID).Scan(&encrypted, &credType, &credProvider)
 		if err == sql.ErrNoRows {
 			return "", fmt.Errorf("evaluator credential %q is not found, inactive, or revoked", credentialID)
 		}
@@ -80,7 +80,17 @@ func NewAuxCredentialLookup(db *sql.DB) keepercfg.AuxCredentialLookup {
 		if dec == "" || isPendingSentinel(dec) {
 			return "", fmt.Errorf("evaluator credential %q has no usable value yet (pending)", credentialID)
 		}
-		return dec, nil
+		// Split before returning. An API_KEY row can now hold an endpoint
+		// object ({"baseURL":…,"apiKey":…,"headers":{…}}) for a provider that
+		// carries its own endpoint, and this value is handed straight to
+		// llm.NewAnthropic / NewOpenAI as the key — so returning it whole would
+		// send the operator's secret, base URL and headers to api.anthropic.com
+		// in an x-api-key header. A no-op for every other provider.
+		token, _, _, perr := providerEndpointFromValue(credProvider, dec)
+		if perr != nil {
+			return "", fmt.Errorf("evaluator credential %q is unusable: %v", credentialID, perr)
+		}
+		return token, nil
 	}
 }
 

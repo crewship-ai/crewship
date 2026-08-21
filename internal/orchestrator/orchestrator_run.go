@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -432,11 +433,52 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// stream scrubber the run's loaded credential values so split/encoded
 	// secrets are caught across streamed deltas, and flush the buffered tail
 	// once the stream ends.
+	//
+	// HEADER values count as credential values. A bring-your-own endpoint can
+	// authenticate entirely through a custom header — `X-Api-Key: <secret>` —
+	// and those headers are written into OPENCODE_CONFIG_CONTENT, which an agent
+	// can simply print. Registering only PlainValue left an opaque header secret
+	// matching no built-in pattern and surviving Scrub into the chat UI and the
+	// journal. Same omission as the sidecar's registerCredentialLiterals had,
+	// one package away, which is how it was missed here.
 	var secretValues []string
-	for _, c := range req.Credentials {
-		if c.PlainValue != "" {
-			secretValues = append(secretValues, c.PlainValue)
+	addSecret := func(v string) {
+		if strings.TrimSpace(v) != "" {
+			secretValues = append(secretValues, v)
 		}
+	}
+	// A header value is registered only when it is long enough to plausibly BE
+	// a secret. Custom headers are not always secret — the field's own contract
+	// calls them "an org / route selector some gateways require" — and a global
+	// redaction literal is not free: registering "acme-production" turns every
+	// occurrence of that string in agent output, chat and the journal into
+	// REDACTED, which reads as a bug and hides the text an operator is trying
+	// to debug. The scrubber's own floor is 5 characters, calibrated for values
+	// that are secrets by construction; header values need a higher one because
+	// most of them are not.
+	//
+	// The trade-off is named rather than hidden: a genuine header secret shorter
+	// than this is NOT scrubbed. That is the losing case, and it is chosen
+	// because the scrubber is defence in depth here — a routed endpoint's headers
+	// live only in the sidecar and never enter agent output at all, so this path
+	// matters only for an UNROUTED run, where the headers are in the OpenCode
+	// config and already reported as an env exposure.
+	addHeaderSecret := func(v string) {
+		if len(strings.TrimSpace(v)) >= minHeaderSecretLen {
+			addSecret(v)
+		}
+	}
+	for _, c := range req.Credentials {
+		addSecret(c.PlainValue)
+		for _, k := range sortedKeys(c.Headers) {
+			addHeaderSecret(c.Headers[k])
+		}
+	}
+	// The resolved local-model endpoint travels outside req.Credentials. Its
+	// APIKey is a token by construction, so it is unconditional.
+	addSecret(req.LocalModelAPIKey)
+	for _, k := range sortedKeys(req.LocalModelHeaders) {
+		addHeaderSecret(req.LocalModelHeaders[k])
 	}
 	// Journal tap: accumulate the agent's reply for the end-of-run
 	// chat.agent_response journal entry. CRITICAL (CodeRabbit): this tap sits
@@ -1054,11 +1096,20 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		case "restricted":
 			// Auto-add API domains for stdio MCP servers so their HTTP
 			// calls can pass through the sidecar proxy.
-			domains := append([]string{}, req.AllowedDomains...)
-			domains = append(domains, mcpStdioDomains(req.MCPServers)...)
-			// #944: allow the operator-configured local-model endpoint —
-			// empty unless this run actually uses an ollama/… model.
-			domains = append(domains, localModelExtraDomains(*req)...)
+			extras := mcpStdioDomains(req.MCPServers)
+			// #944: allow the endpoint this run's model traffic actually
+			// reaches — empty unless the run resolves one. On the routed path
+			// the host is needed for the SIDECAR's allowlist check, not the
+			// agent's: the agent only ever dials 127.0.0.1, which NO_PROXY
+			// covers, but the sidecar dials the real upstream and is fenced by
+			// this list.
+			extras = append(extras, proxiedEndpointDomains(*req)...)
+			// Both of the above are resolved PER AGENT while the sidecar is
+			// shared by the whole crew, so the set is unioned across the
+			// members that have run in this container — otherwise each member's
+			// exec computes a hash the others' sidecar cannot match and
+			// restarts it (see crewDesiredDomains).
+			domains := o.crewDesiredDomains(req.ContainerID, req.AgentID, req.AllowedDomains, extras)
 			desiredDomains = domains
 			networkPolicy = &SidecarNetworkPolicy{
 				Mode:                  "restricted",
@@ -1602,4 +1653,28 @@ func (o *Orchestrator) emitStaleSidecarSignal(ctx context.Context, req AgentRunR
 		},
 		Refs: map[string]any{"agent_id": req.AgentID, "container_id": req.ContainerID},
 	})
+}
+
+// minHeaderSecretLen is the floor for registering a CUSTOM HEADER value as a
+// scrub literal. Every credential shape the scrubber already knows by pattern is
+// well above it (sk-… 20+, AIza… 39, ghp_… 36+, glpat-… 26+), while the route
+// and org selectors headers usually carry — "acme", "prod", "us-east-1",
+// "team-a" — are well below. Deliberately stricter than the scrubber's own
+// 5-character floor, which exists for values that are secrets by construction.
+const minHeaderSecretLen = 16
+
+// sortedKeys returns a map's keys in a deterministic order. Go randomises map
+// iteration, and the scrubber's registration order decides which pattern name a
+// redaction is reported under — so without this, two runs with identical
+// credentials could attribute the same redaction to different headers.
+func sortedKeys(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
