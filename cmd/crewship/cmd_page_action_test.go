@@ -437,14 +437,18 @@ func TestPageActionsCLI_QuietPrintsOneActionIDPerLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("page actions --format quiet: %v\n%s", err, out)
 	}
-	got := strings.Fields(strings.TrimSpace(out))
+	// Split on newlines, NOT strings.Fields: Fields treats a space like a line
+	// break, so it would accept "restart-api collapse" on a single line — which
+	// is the one output shape `quiet` promises never to produce, since the
+	// reader downstream consumes a line at a time.
+	got := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
 	want := []string{pageActionCLIID, "collapse"}
 	if len(got) != len(want) {
-		t.Fatalf("quiet printed %d lines, want %d (one id each):\n%s", len(got), len(want), out)
+		t.Fatalf("quiet printed %d lines, want %d (one id each):\n%q", len(got), len(want), out)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Errorf("line %d is %q, want the action id %q:\n%s", i, got[i], want[i], out)
+			t.Errorf("line %d is %q, want the action id %q:\n%q", i, got[i], want[i], out)
 		}
 	}
 }
