@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/sidecar"
@@ -36,6 +39,8 @@ type sidecarInput struct {
 func main() {
 	addr := flag.String("addr", sidecar.DefaultAddr, "listen address")
 	showVersion := flag.Bool("version", false, "print version info and exit")
+	healthCheck := flag.Bool("health-check", false,
+		"probe a already-running sidecar's /health endpoint and exit 0 (healthy) or 1")
 	flag.Parse()
 
 	// --version is used by the Crewship container runtime as a sanity check
@@ -46,6 +51,29 @@ func main() {
 	if *showVersion {
 		fmt.Printf("crewship-sidecar version %s (%s/%s, %s)\n",
 			version, runtime.GOOS, runtime.GOARCH, runtime.Version())
+		os.Exit(0)
+	}
+
+	// --health-check exists so that verifying the sidecar came up does not
+	// depend on anything being installed in the agent's base image.
+	//
+	// The launch script used to probe with `wget`, falling back to `curl`.
+	// debian:bookworm-slim — which is Crewship's own compiled-in default
+	// runtime image (internal/config/config.go) and what the docs and the
+	// devcontainer e2e both use — ships NEITHER. Both branches failed on
+	// "command not found", the script took its else branch, and a perfectly
+	// healthy sidecar was reported as "sidecar health check failed". Out of
+	// the box, on the default image, no agent could answer a message.
+	//
+	// This binary is bind-mounted into the container by the runtime, so it
+	// is present by construction — the one thing a probe can rely on. It is
+	// also already the BYOI ABI canary via --version, so using it here keeps
+	// that guarantee in one place.
+	if *healthCheck {
+		if err := probeHealth(*addr); err != nil {
+			fmt.Fprintf(os.Stderr, "sidecar health check failed: %v\n", err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
@@ -138,7 +166,8 @@ func main() {
 	// Wait for the listener to be bound before signaling readiness.
 	// This prevents the race where SIDECAR_READY is sent before Start() binds the port.
 	// The write is non-fatal: stdout may already be closed if Docker exec stream ended
-	// before the goroutine runs. Health check via wget/curl is the primary mechanism.
+	// before the goroutine runs. The primary readiness mechanism is the
+	// --health-check probe run by sidecarLaunchScript, not this line.
 	go func() {
 		<-srv.Ready()
 		if _, err := os.Stdout.WriteString("SIDECAR_READY\n"); err != nil {
@@ -168,4 +197,46 @@ func readStdin() ([]byte, error) {
 		}
 	}
 	return buf, nil
+}
+
+// probeHealth GETs http://<addr>/health and reports whether the sidecar is
+// serving. Used by --health-check.
+//
+// Deliberately dependency-free: net/http from the standard library, compiled
+// into the same static binary the runtime already bind-mounts. That is the
+// whole point — the previous probe shelled out to wget/curl, which the
+// default runtime image does not contain, so it could not tell "the sidecar
+// is down" apart from "I have no way to ask".
+//
+// The address is normalised rather than trusted: --addr is a listen address
+// ("127.0.0.1:9119", or ":9119" when the caller binds all interfaces), and a
+// bare ":9119" is not a dialable host. An empty host means localhost here.
+func probeHealth(addr string) error {
+	host := strings.TrimSpace(addr)
+	if host == "" {
+		host = sidecar.DefaultAddr
+	}
+	if strings.HasPrefix(host, ":") {
+		host = "127.0.0.1" + host
+	}
+
+	// Short and fixed. The caller (sidecarLaunchScript) has already slept for
+	// the sidecar to bind, and this runs on the critical path of a user's
+	// first message — a long timeout here turns a dead sidecar into a stalled
+	// chat rather than an error.
+	client := &http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, "http://"+host+"/health", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	return nil
 }
