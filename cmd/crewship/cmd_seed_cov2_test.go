@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
@@ -68,10 +69,28 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
 	// Page seeding: the spec POST, then one payload PUT per panel. Both are
 	// wildcarded because the panel path carries the page slug and the panel id.
-	s.OnPost("/api/v1/pages", clitest.JSONResponse(201, map[string]string{"slug": "prehled-provozu"}))
-	for _, panel := range []string{"sluzby", "fronta", "odezva", "nasazeni", "rozbor"} {
-		s.OnPut("/api/v1/pages/prehled-provozu/panels/"+panel+"/data",
-			clitest.JSONResponse(200, map[string]any{"accepted": true}))
+	s.OnPost("/api/v1/pages", clitest.JSONResponse(201, map[string]string{"slug": "operations"}))
+	// Panels are read from the catalogue rather than listed here. The list used
+	// to be spelled out, and a renamed panel then left this test pushing at
+	// stubs nobody answered — which it could not notice, because it asserts on
+	// the summary line and a failed push is reported and stepped over.
+	for _, page := range seeddata.Pages {
+		for _, panel := range page.Panels {
+			if panel.Demo == nil {
+				continue
+			}
+			s.OnPut("/api/v1/pages/"+page.Slug+"/panels/"+panel.ID+"/data",
+				clitest.JSONResponse(200, map[string]any{"accepted": true}))
+		}
+	}
+	// …and then one run per routine-produced panel's producer. Stubbed from
+	// the catalogue rather than by name: an unstubbed path here would 404,
+	// seedPageProducerRoutines would report it and carry on, and this test —
+	// which asserts on the summary line — would keep passing while the phase
+	// it is meant to cover failed every time.
+	for _, slug := range pageProducerRoutineSlugs(seeddata.Pages) {
+		s.OnPost("/api/v1/workspaces/"+covSeedWSID+"/pipelines/"+slug+"/run",
+			clitest.JSONResponse(202, map[string]string{"run_id": "run_seeded"}))
 	}
 
 	covSetupRunSeed(t, s)
@@ -89,6 +108,14 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	}
 	if !strings.Contains(out, "Seed complete:") {
 		t.Errorf("missing summary:\n%s", out)
+	}
+	// The page producer routines were actually fired — the only path by which
+	// a routine-produced panel ever holds data.
+	for _, slug := range pageProducerRoutineSlugs(seeddata.Pages) {
+		path := "/api/v1/workspaces/" + covSeedWSID + "/pipelines/" + slug + "/run"
+		if n := len(s.CallsFor("POST", path)); n != 1 {
+			t.Errorf("routine %s: %d run POSTs, want exactly 1", slug, n)
+		}
 	}
 	// Nuke ran (issue listing consulted) and was gated by --yes.
 	if n := len(s.CallsFor("GET", "/api/v1/issues")); n == 0 {

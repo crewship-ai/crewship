@@ -28,6 +28,9 @@
  */
 
 import * as React from "react"
+import { AnimatePresence, motion } from "motion/react"
+
+import { listRow } from "@/lib/motion"
 import { AlertTriangle, CircleCheck, Clock, Gauge } from "lucide-react"
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
@@ -296,13 +299,24 @@ export function PagesOverview({
                 />
               ) : (
                 <div className="flex flex-col">
-                  {attention.map((p) => (
-                    <button
-                      key={p.id || p.slug}
-                      type="button"
-                      onClick={() => onSelect(p.slug)}
-                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
-                    >
+                  {/* A page that starts failing APPEARS in this list, and a page
+                      somebody fixed leaves it. Both are events worth seeing
+                      happen rather than finding already happened, which is what
+                      AnimatePresence buys — the exit is the whole point, and a
+                      plain conditional cannot draw one. `listRow.layout` makes
+                      the rows below close the gap rather than jump into it. */}
+                  <AnimatePresence initial={false}>
+                    {attention.map((p) => (
+                      <motion.button
+                        key={p.id || p.slug}
+                        {...listRow}
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, height: 0 }}
+                        type="button"
+                        onClick={() => onSelect(p.slug)}
+                        className="group flex items-center gap-2.5 overflow-hidden rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                      >
                       <span
                         aria-hidden
                         className={cn(
@@ -325,13 +339,14 @@ export function PagesOverview({
                             .join(" · ")}
                         </span>
                       </span>
-                      {p.ownerLabel && (
-                        <span className="type-page-meta shrink-0 text-muted-foreground-soft">
-                          {p.ownerLabel}
-                        </span>
-                      )}
-                    </button>
-                  ))}
+                        {p.ownerLabel && (
+                          <span className="type-page-meta shrink-0 text-muted-foreground-soft">
+                            {p.ownerLabel}
+                          </span>
+                        )}
+                      </motion.button>
+                    ))}
+                  </AnimatePresence>
                 </div>
               )}
             </DashboardCard>
@@ -355,12 +370,17 @@ export function PagesOverview({
               />
             ) : (
               <div className="flex flex-col">
+                {/* Same treatment as the attention list, and for the same
+                    reason: this list reorders as pages are pushed to, so a row
+                    that moves should be seen moving rather than found somewhere
+                    else on the next poll. */}
                 {recent.map((p) => {
                   const meta = p.state ? PAGE_STATE_META[p.state] : null
                   const Icon = meta?.icon ?? CONCEPT_ICON.pages
                   return (
-                    <button
+                    <motion.button
                       key={p.id || p.slug}
+                      {...listRow}
                       type="button"
                       onClick={() => onSelect(p.slug)}
                       className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
@@ -382,7 +402,7 @@ export function PagesOverview({
                       <span className="type-page-stamp shrink-0 text-right tabular-nums text-muted-foreground-soft">
                         {formatInstant(p.lastProducedAt!, clock)}
                       </span>
-                    </button>
+                    </motion.button>
                   )
                 })}
               </div>

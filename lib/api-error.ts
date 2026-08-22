@@ -49,6 +49,26 @@ export function apiErrorMessage(body: unknown, fallback: string): string {
  * it consumes the body.
  */
 export async function readApiError(res: Response, fallback: string): Promise<string> {
+  return (await readApiErrorDetail(res, fallback)).message
+}
+
+/**
+ * The refusal's sentence AND the body it came in.
+ *
+ * Some refusals carry more than prose. `POST /api/v1/pages/import` answers a
+ * 422 with an `unresolved` array naming every reference it could not bind, and
+ * a caller that can only see the sentence has to ask the person to re-read a
+ * paragraph instead of showing them the list they need to act on. The body was
+ * always parsed here and then dropped on the floor; this returns it.
+ *
+ * `readApiError` stays the one-line form because that is what almost every
+ * call site wants, and widening it would make every one of them handle a
+ * value they have no use for.
+ */
+export async function readApiErrorDetail(
+  res: Response,
+  fallback: string,
+): Promise<{ message: string; body: unknown }> {
   const body = await res.json().catch(() => null)
-  return apiErrorMessage(body, fallback)
+  return { message: apiErrorMessage(body, fallback), body }
 }

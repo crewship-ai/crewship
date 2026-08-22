@@ -23,6 +23,9 @@
  */
 
 import * as React from "react"
+import { AnimatePresence, motion } from "motion/react"
+
+import { listRow } from "@/lib/motion"
 
 import {
   SidebarActiveChip,
@@ -116,7 +119,9 @@ export function PagesRail({
   const ownerLabel = (ref: string) => owners.find((o) => o.ref === ref)?.label ?? ref
 
   return (
-    <div className="flex h-full flex-col">
+    // Tagged so a test can hold the node across a selection: the rail must not
+    // be torn down and rebuilt when a different page is opened.
+    <div data-slot="pages-rail" className="flex h-full flex-col">
       <SidebarToolbar>
         <div data-pages-search className="min-w-0 flex-1">
           <SidebarSearch
@@ -223,12 +228,25 @@ export function PagesRail({
       <div className="flex min-h-0 flex-1 flex-col">
         <SidebarSection label="Pages" count={displayed.length} />
         <div className="min-h-0 flex-1 overflow-y-auto pb-1">
-          {displayed.map((page) => {
-            const meta = page.state ? PAGE_STATE_META[page.state] : null
-            const Icon = meta?.icon ?? CONCEPT_ICON.pages
-            return (
+          {/* The rail is a FILTERED list: picking a facet above removes rows,
+              clearing it brings them back. Those are the two moments worth
+              drawing, so each row owns its own entry and exit rather than the
+              whole list being swapped out — and `listRow.layout` closes the gap
+              a removed row leaves instead of snapping the rest upward. */}
+          <AnimatePresence initial={false}>
+            {displayed.map((page) => {
+              const meta = page.state ? PAGE_STATE_META[page.state] : null
+              const Icon = meta?.icon ?? CONCEPT_ICON.pages
+              return (
+                <motion.div
+                  key={page.id || page.slug}
+                  {...listRow}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
               <SidebarRow
-                key={page.id || page.slug}
                 selected={selectedSlug === page.slug}
                 onSelect={() => onSelectPage(page.slug)}
               >
@@ -248,8 +266,10 @@ export function PagesRail({
                   </span>
                 )}
               </SidebarRow>
-            )
-          })}
+                </motion.div>
+              )
+            })}
+          </AnimatePresence>
           {displayed.length === 0 && (
             <div className="type-nav-sub px-3 py-6 text-center text-muted-foreground-soft">
               {pages.length === 0 ? (

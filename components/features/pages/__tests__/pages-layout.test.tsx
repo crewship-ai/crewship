@@ -105,11 +105,46 @@ describe("PagesLayout", () => {
     expect(text).not.toContain("stale")
   })
 
-  it("puts the rail beside the main pane and routes a pick to /pages/<slug>", async () => {
+  // Picking a page rewrites the address bar WITHOUT navigating, and the
+  // difference is the whole reason this is not `router.push`.
+  //
+  // Routing to /pages/<slug> made Next unmount the shell and rebuild it, so the
+  // rail — which has nothing to do with which page is open — blinked out and
+  // came back on every click, losing its scroll position and its filters with
+  // it. The URL still has to change, because /pages/[slug] is a real route that
+  // a refresh, a bookmark and a shared link all arrive through; it just must
+  // not be a navigation.
+  it("rewrites the URL on a pick without navigating", async () => {
+    const pushState = vi.spyOn(window.history, "pushState")
+    try {
+      renderLayout([FLEET, CLOSE])
+      await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
+      fireEvent.click(screen.getByText("Flotila .201"))
+
+      expect(pushState).toHaveBeenCalledWith(null, "", "/pages/fleet-201")
+      // The router is the thing that would have remounted everything.
+      expect(push).not.toHaveBeenCalled()
+    } finally {
+      pushState.mockRestore()
+    }
+  })
+
+  // The failure this guards is the one a reader reports as "the sidebar
+  // flickers": if the rail is torn down and rebuilt on selection, its DOM node
+  // identity changes. Holding the node across the click is the strongest
+  // assertion available here that nothing above it remounted.
+  it("keeps the rail mounted across a selection", async () => {
     renderLayout([FLEET, CLOSE])
     await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
+
+    const railBefore = document.querySelector('[data-slot="pages-rail"]')
+    expect(railBefore).toBeTruthy()
+
     fireEvent.click(screen.getByText("Flotila .201"))
-    expect(push).toHaveBeenCalledWith("/pages/fleet-201")
+    await waitFor(() => {
+      const railAfter = document.querySelector('[data-slot="pages-rail"]')
+      expect(railAfter).toBe(railBefore)
+    })
   })
 
   it("renders the overview with no slug, and the page's grid with one", async () => {

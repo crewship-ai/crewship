@@ -34,7 +34,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -393,25 +392,33 @@ never its numbers.`,
 			return fmt.Errorf("decode response: %w", err)
 		}
 		if len(out.Versions) == 0 {
-			fmt.Printf("No versions retained for %s.\n", args[0])
+			if f.Format != "quiet" {
+				fmt.Printf("No versions retained for %s.\n", args[0])
+			}
 			return nil
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SEQ\tWHEN\tAUTHOR\tPANELS\tNAME")
+		rows := make([][]string, 0, len(out.Versions))
 		for _, v := range out.Versions {
-			seq := fmt.Sprintf("%d", v.Seq)
-			if v.Current {
-				seq += " *"
+			// ShortID picks which rendering of the key belongs in the row: the
+			// bare seq under `quiet`, because that is what `page rollback --to`
+			// takes, and the starred one in the human table, where the marker is
+			// the only thing saying which version you are looking at now.
+			seq := f.ShortID(fmt.Sprintf("%d", v.Seq), fmt.Sprintf("%d *", v.Seq))
+			if !v.Current {
+				seq = fmt.Sprintf("%d", v.Seq)
 			}
 			author := v.AuthorLabel
 			if strings.TrimSpace(author) == "" {
 				author = v.Author
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n",
-				seq, pageDash(v.CreatedAt), pageDash(author), v.PanelCount, pageDash(v.Name))
+			rows = append(rows, []string{
+				seq, pageDash(v.CreatedAt), pageDash(author),
+				fmt.Sprintf("%d", v.PanelCount), pageDash(v.Name),
+			})
 		}
-		if err := w.Flush(); err != nil {
-			return err
+		f.Table([]string{"SEQ", "WHEN", "AUTHOR", "PANELS", "NAME"}, rows)
+		if f.Format == "quiet" {
+			return nil
 		}
 		fmt.Printf("\n* current. The last %d versions are retained; roll back with: crewship page rollback %s --to <seq>\n",
 			out.Retained, args[0])
@@ -441,10 +448,20 @@ itself be rolled back.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		to, _ := cmd.Flags().GetInt64("to")
-		if to <= 0 {
+		// `Changed` rather than `to == 0`: zero is the flag's own zero value, so
+		// the two cases are indistinguishable by value alone and both used to
+		// answer "--to is required". Somebody who typed `--to 0` was told they
+		// had typed nothing, which sends them looking for a shell quoting
+		// problem instead of at the number they picked.
+		if !cmd.Flags().Changed("to") {
 			return cli.WithExitCode(errors.New(
 				"--to <seq> is required: rollback names the version to restore — see crewship page versions "+args[0]),
 				cli.ExitValidation)
+		}
+		if to <= 0 {
+			return cli.WithExitCode(fmt.Errorf(
+				"--to %d is not a version: versions are numbered from 1 — see crewship page versions %s",
+				to, args[0]), cli.ExitValidation)
 		}
 		if err := confirmAction(cmd, fmt.Sprintf(
 			"Restore page %q to version %d? Panels it brings back or redefines will show no data until their producer pushes again.",

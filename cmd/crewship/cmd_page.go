@@ -37,7 +37,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/pages"
@@ -95,6 +94,61 @@ type pagePanelJSON struct {
 	Reason     string              `json:"reason"`
 	Data       json.RawMessage     `json:"data"`
 	Provenance *pageProvenanceJSON `json:"provenance"`
+
+	// The authored half. The server sends these only to a caller who may edit
+	// the spec (attachAuthoredHalf), and until they were read here the human
+	// output could not show them at all: someone auditing their own page saw
+	// state and data and had no way to learn that the panel carries a wake
+	// gate, an on_failure crew, a refresh trigger or buttons. `--format json`
+	// was unaffected, so agents were fine and only people were misled.
+	Icon      string          `json:"icon"`
+	Tab       string          `json:"tab"`
+	Public    bool            `json:"public"`
+	Refresh   string          `json:"refresh"`
+	Wake      json.RawMessage `json:"wake"`
+	OnFailure json.RawMessage `json:"on_failure"`
+	Actions   json.RawMessage `json:"actions"`
+}
+
+// authoredSummary renders the sensor and action half as one line per feature,
+// or "" when the panel declares none of it.
+//
+// A summary rather than the YAML: the point is that a reader auditing a page
+// learns the gate EXISTS. What it says is `page export`'s job, and printing a
+// nested block per panel would bury the data the panel is actually showing.
+func (p pagePanelJSON) authoredSummary() []string {
+	var out []string
+	if p.Tab != "" {
+		out = append(out, "tab:      "+p.Tab)
+	}
+	if p.Public {
+		out = append(out, "public:   yes — this panel is served on the page's public links")
+	}
+	if n := jsonArrayLen(p.Wake); n > 0 {
+		out = append(out, fmt.Sprintf("wake:     %d gate(s) — see `crewship automation list`", n))
+	}
+	if len(bytes.TrimSpace(p.OnFailure)) > 0 && string(bytes.TrimSpace(p.OnFailure)) != "null" {
+		out = append(out, "on_fail:  declared — an SLA lapse opens an issue")
+	}
+	if p.Refresh != "" {
+		out = append(out, "refresh:  "+p.Refresh)
+	}
+	if n := jsonArrayLen(p.Actions); n > 0 {
+		out = append(out, fmt.Sprintf("actions:  %d — dispatch with `crewship page action`", n))
+	}
+	return out
+}
+
+// jsonArrayLen counts a raw JSON array without caring what is in it.
+func jsonArrayLen(raw json.RawMessage) int {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return 0
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return 0
+	}
+	return len(items)
 }
 
 type pageJSON struct {
@@ -160,6 +214,17 @@ type pageWriteJSON struct {
 	Name        string               `json:"name"`
 	Description string               `json:"description,omitempty"`
 	Panels      []pageWritePanelJSON `json:"panels"`
+	// Owner hands the page to a crew instead of to whoever ran the command.
+	//
+	// It is NOT part of the page document, and that is the decision rather than
+	// an oversight: the document is the spec, and a spec that carried ownership
+	// would re-assert it on every `page update` — turning a re-apply into a
+	// silent transfer. Ownership is decided once, at creation, and moving it
+	// afterwards is a transfer with its own rules (§7.1 rule 1b). So this rides
+	// on the create REQUEST, is set from --owner, and `update` never sends it.
+	//
+	// Omitted means the server's default: the creator owns the page.
+	Owner string `json:"owner,omitempty"`
 }
 
 type pageWritePanelJSON struct {
@@ -243,19 +308,29 @@ var pageListCmd = &cobra.Command{
 				rows = wrapped.Rows
 			}
 		}
+		// The empty-state prose is for a human. Under `quiet` the contract is
+		// one id per line and nothing else, so a sentence here would be piped
+		// into the next command as if it were a slug.
 		if len(rows) == 0 {
-			fmt.Println("No pages yet.")
-			fmt.Println("Author one: crewship page create --file <page.yaml>")
+			if f.Format != "quiet" {
+				fmt.Println("No pages yet.")
+				fmt.Println("Author one: crewship page create --file <page.yaml>")
+			}
 			return nil
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SLUG\tNAME\tPANELS\tSTATE\tOWNER\tLAST DATA")
+		// f.Table rather than a tabwriter: `quiet` is a repo-wide contract —
+		// print rows[i][0], one per line, so the next command can consume it —
+		// and a hand-rolled table silently ignores it, printing the full human
+		// table with headers into whatever was meant to read ids.
+		out := make([][]string, 0, len(rows))
 		for _, row := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n",
-				row.Slug, row.Name, row.panelCount(),
-				pageDash(row.State), pageDash(row.Owner), pageDash(row.LastProducedAt))
+			out = append(out, []string{
+				row.Slug, row.Name, fmt.Sprintf("%d", row.panelCount()),
+				pageDash(row.State), pageDash(row.Owner), pageDash(row.LastProducedAt),
+			})
 		}
-		return w.Flush()
+		f.Table([]string{"SLUG", "NAME", "PANELS", "STATE", "OWNER", "LAST DATA"}, out)
+		return nil
 	},
 }
 
@@ -341,6 +416,9 @@ func printPageHuman(page pageJSON) {
 		if sla := p.slaLabel(); sla != "" {
 			fmt.Printf("  sla:      %s\n", sla)
 		}
+		for _, line := range p.authoredSummary() {
+			fmt.Printf("  %s\n", line)
+		}
 		if prov := p.Provenance; prov != nil {
 			// The footer §4 rule 5 requires: producer, run id, timestamp —
 			// every one of them written by the server.
@@ -379,11 +457,17 @@ var pageCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		owner, err := pageOwnerFromFlag(cmd)
+		if err != nil {
+			return err
+		}
 		client, err := pageClient()
 		if err != nil {
 			return err
 		}
-		resp, err := client.Post("/api/v1/pages", pageWriteFrom(doc))
+		body := pageWriteFrom(doc)
+		body.Owner = owner
+		resp, err := client.Post("/api/v1/pages", body)
 		if err != nil {
 			return err
 		}
@@ -425,6 +509,33 @@ var pageUpdateCmd = &cobra.Command{
 		}
 		return pagePrintWriteResult(resp, "updated")
 	},
+}
+
+// pageOwnerFromFlag reads --owner and refuses anything that is not a crew.
+//
+// Why a crew is the only value worth typing: page ownership decides who may
+// push to a `script`- or `webhook`-produced panel by hand (mayProduce,
+// internal/api/pages_authz.go), and isPageOwner counts every MEMBER of an
+// owning crew. So `--owner crew/ops` is what turns "the person who ran the
+// command may hand-write these panels" into "the ops crew may" — which is the
+// difference between a personal page and a team's board.
+//
+// `user/<self>` is refused rather than accepted as a no-op: it is already the
+// default, and admitting it would invite `user/<somebody-else>`, which the
+// server refuses anyway because handing a page to another person is a transfer
+// and not a creation.
+func pageOwnerFromFlag(cmd *cobra.Command) (string, error) {
+	raw := strings.TrimSpace(cmd.Flags().Lookup("owner").Value.String())
+	if raw == "" {
+		return "", nil
+	}
+	kind, ref, ok := strings.Cut(raw, "/")
+	if !ok || kind != "crew" || strings.TrimSpace(ref) == "" {
+		return "", cli.WithExitCode(fmt.Errorf(
+			"--owner %q must be crew/<slug>: a page is owned by its creator unless it is handed to a crew, "+
+				"and every member of that crew may then hand-write its script-produced panels", raw), cli.ExitValidation)
+	}
+	return raw, nil
 }
 
 // pageDocumentFromFlag reads and validates the authored document.
@@ -532,6 +643,13 @@ var pageDeleteCmd = &cobra.Command{
 		defer resp.Body.Close()
 		if err := pageCheckError(resp); err != nil {
 			return err
+		}
+		// A 204 carries no body, so there is nothing to pass through — but a
+		// command that answers only in prose is one an agent cannot check.
+		// Every other page command honours --format; this synthesises the
+		// receipt the server had no body to send.
+		if f := newFormatter(); f.Format != "table" && f.Format != "" {
+			return f.Machine(map[string]any{"slug": args[0], "deleted": true})
 		}
 		fmt.Printf("Page %s deleted.\n", args[0])
 		return nil
@@ -679,6 +797,39 @@ func pageCheckError(resp *http.Response) error {
 		// renders it the way it renders every other error.
 		resp.Body = io.NopCloser(bytes.NewReader(raw))
 	}
+	// 429 gets the same treatment and for the same reason. writePushLimited
+	// (internal/api/pages_data.go) deliberately sends more than a bare status:
+	// the SCOPE, because "this panel is too fast" and "this workspace is too
+	// fast" ask the producer for different fixes, and the seconds to wait. Its
+	// own comment says "a bare 429 leaves it to guess which one it is" — and a
+	// bare 429 is exactly what a producer got here, because CheckError reads
+	// `error` and nothing else. A push loop that cannot read the interval backs
+	// off by guessing, which is how a rate-limited loop becomes a tighter one.
+	if resp.StatusCode == http.StatusTooManyRequests {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		var lim struct {
+			Error      string `json:"error"`
+			Reason     string `json:"reason"`
+			Scope      string `json:"scope"`
+			RetryAfter int    `json:"retry_after_secs"`
+		}
+		if json.Unmarshal(raw, &lim) == nil && strings.TrimSpace(lim.Reason) != "" {
+			msg := lim.Reason
+			// The scope is half the answer and it was decoded and then dropped.
+			// "this panel is too fast" and "this workspace is too fast" ask the
+			// producer for different fixes, and a reason that names neither
+			// leaves the caller doing what a bare 429 would have left them
+			// doing.
+			if scope := strings.TrimSpace(lim.Scope); scope != "" {
+				msg = fmt.Sprintf("%s (%s limit)", msg, scope)
+			}
+			if lim.RetryAfter > 0 {
+				msg = fmt.Sprintf("%s — retry in %ds", msg, lim.RetryAfter)
+			}
+			return cli.WithExitCode(errors.New(msg), cli.ExitRateLimited)
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(raw))
+	}
 	return cli.CheckError(resp)
 }
 
@@ -715,6 +866,9 @@ func pageDash(s string) string {
 
 func init() {
 	pageCreateCmd.Flags().String("file", "", "Page document to author from (YAML or JSON; - for stdin)")
+	// Create only. `update` re-applies a spec, and ownership is not part of the
+	// spec — see pageWriteJSON.Owner.
+	pageCreateCmd.Flags().String("owner", "", "Hand the page to a crew (crew/<slug>); default is the creator")
 	pageUpdateCmd.Flags().String("file", "", "Page document to replace the spec with (YAML or JSON; - for stdin)")
 	pageDeleteCmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
 	pageSetCmd.Flags().String("data", "-", `Payload: "-" for stdin, "@path" for a file, or a literal JSON document`)

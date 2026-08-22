@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 const covPipelineSavePath = "/api/v1/workspaces/" + covWorkspaceIDCli10 + "/pipelines/save"
@@ -149,5 +151,49 @@ func TestSeedRoutines_SeedsBothBatches(t *testing.T) {
 	wantCalls := len(seeddata.Routines) + len(seeddata.EvalScenarios)
 	if got := len(s.CallsFor("POST", covPipelineSavePath)); got != wantCalls {
 		t.Errorf("save calls = %d, want %d", got, wantCalls)
+	}
+}
+
+// Every seeded routine's DSL must survive the validator the save endpoint runs.
+//
+// The seeder POSTs each definition and reports whatever comes back, so a
+// definition the validator refuses costs one line on stderr during a seed that
+// otherwise looks like it worked — and the routine is simply absent from the
+// workspace afterwards. Nothing in the build compiled these trees: they are
+// map[string]interface{} literals, so a misspelled step kind, a `needs` naming
+// a step that does not exist, or a guarantee the steps cannot keep are all
+// invisible until a 400 nobody is reading for.
+//
+// Validate rather than Parse: Parse only unmarshals, and every rule worth
+// having here — the agentless token-zero gate, step-graph integrity, egress
+// declarations — lives in Validate.
+func TestSeedRoutines_EveryDefinitionPassesTheDSLValidator(t *testing.T) {
+	t.Parallel()
+
+	agents := map[string]struct{}{}
+	for _, a := range seeddata.Agents {
+		agents[a.Slug] = struct{}{}
+	}
+	// A routine may call another by slug; the set it is validated against is
+	// the catalogue itself, which is what the workspace holds after a seed.
+	slugs := map[string]struct{}{}
+	for _, r := range seeddata.Routines {
+		slugs[r.Slug] = struct{}{}
+	}
+
+	for _, r := range seeddata.Routines {
+		raw, err := json.Marshal(r.Definition)
+		if err != nil {
+			t.Errorf("%s: definition is not JSON-encodable: %v", r.Slug, err)
+			continue
+		}
+		dsl, err := pipeline.Parse(raw)
+		if err != nil {
+			t.Errorf("%s: parse: %v", r.Slug, err)
+			continue
+		}
+		if err := pipeline.Validate(dsl, agents, slugs); err != nil {
+			t.Errorf("%s: the save endpoint would refuse this definition: %v", r.Slug, err)
+		}
 	}
 }

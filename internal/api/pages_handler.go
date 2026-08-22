@@ -164,10 +164,13 @@ type pagePanelWire struct {
 	// Wake and OnFailure are the sensor half of the panel (§5, §4 rule 4) and
 	// ride on the WRITE half of this struct, like Actions: a human authors
 	// them, the server stores them in spec_json, and spec_json is what the
-	// gate compiler and the freshness sweeper read. They are not echoed on the
-	// read path — `crewship page export` serves the stored spec, which is
-	// where the authored form belongs, and a panel document that carried
-	// half the spec back would invite a client to treat it as the whole of it.
+	// gate compiler and the freshness sweeper read.
+	//
+	// They come BACK only under `authored`, through attachAuthoredHalf, for
+	// the reason spelled out on Refresh below: a client that read a document
+	// without them and saved it back would delete the gates. An earlier note
+	// here said they were never echoed on the read path; that stopped being
+	// true when attachAuthoredHalf started copying them.
 	Wake      []pages.PanelWake     `json:"wake,omitempty"`
 	OnFailure *pages.PanelOnFailure `json:"on_failure,omitempty"`
 
@@ -1327,6 +1330,15 @@ func (h *PageHandler) attachAuthoredHalf(ctx context.Context, pageID, panelID st
 		}
 		return
 	}
+	// Public is echoed for exactly the reason Refresh is, and it was the one
+	// field of the authored half that was not. panelWire builds from
+	// panelRecord, which has no Public column to read, so the flag lived only
+	// on the WRITE path: a caller that read a page and saved the same document
+	// back — `page export | apply`, or `page get -f json` edited by hand, or
+	// the editor — unpublished every public panel on it, silently, every time.
+	// The published link kept resolving and rendered an empty page, and the
+	// next `page publish` then refused it for having no public panels.
+	wire.Public = spec.Public
 	wire.Actions = spec.Actions
 	wire.Wake = spec.Wake
 	wire.OnFailure = spec.OnFailure

@@ -13,7 +13,7 @@ list of **panels**. Each panel declares:
 
 - a **schema** — one of a closed set of five (below),
 - an **owner** — a crew, which is the panel's permission anchor,
-- a **producer** — the routine, script, or agent allowed to write its data,
+- a **producer** — the routine, script, agent or webhook allowed to write its data,
 - a **freshness contract** — how often data is expected, and what happens when it stops.
 
 A page holds no query, no datasource, no connection string, and no
@@ -21,7 +21,8 @@ credentials. It cannot reach a database. It renders the last payload a
 producer pushed, plus the metadata Crewship attached to that push. Everything
 a page might show — a Postgres row count, a queue depth, a calendar, an
 uptime check — is reachable because the producer already runs next to that
-data, inside a crew container, with credentials the page itself never sees.
+data: on the host that holds the credentials, as a routine step, or as an agent
+inside a crew container. The page itself never sees any of them.
 Adding a data source to Pages is a scripting job, not a connector-engineering
 one.
 
@@ -68,7 +69,7 @@ user-supplied string.
 | `series.v1` | `{unit, labels[], series[{name, values[]}]}` | bar / line chart; one unit per panel |
 | `status.v1` | `{items[{name, state: ok\|warning\|critical, label}]}` | status grid; state carries glyph and text, never colour alone |
 | `table.v1` | `{columns[{key,label,align?}], rows[]}` | table; rows are **keyed objects** matching `columns`, not positional arrays |
-| `narrative.v1` | `{blocks[{kind: paragraph\|list, text}], verdict?, actions?[]}` | prose plus the page's declared action buttons |
+| `narrative.v1` | `{blocks[{kind: paragraph\|list, text}], verdict?}` | prose and an optional verdict; it may **not** declare actions in this release |
 
 ### Panel icons
 
@@ -284,30 +285,52 @@ but never case-folded: the bar draws the word you wrote.
 
 A producer is whatever runs closest to the thing being measured. Crewship does
 not care what language it is written in or where it lives; it cares that the
-push arrives with an identity it can check. There are four doors, and which one
-you use is decided by where your code already runs — not by what you are
-allowed to do.
+push arrives with an identity it can check. There are four doors — and **the
+door you come through decides which `producer:` declarations you can satisfy**,
+because each door carries a different identity. Pick the door from where your
+code runs, then declare the producer that door can prove.
 
-| Your producer is | It pushes through | Identity comes from |
-|---|---|---|
-| a script on a host you control | `crewship page set <page>/<panel>` | a CLI token |
-| a step in a routine | the `page.write` verb | the run the dispatcher injected |
-| an agent inside a crew container | `PUT /pages/{page}/{panel}` on the sidecar | the agent's own token, held by the sidecar |
-| a third-party system | a panel webhook | the webhook token, bound to one panel |
+| Your producer is | It pushes through | Identity comes from | The panel must declare |
+|---|---|---|---|
+| a script on a host you control | `crewship page set <page>/<panel>` | a CLI token | `producer: script/<name>`, and the pusher is the page's owner or a workspace admin |
+| a step in a routine | the `page.write` verb | the run the dispatcher injected | `producer: routine/<slug>` — the routine that is running |
+| an agent inside a crew container | `PUT /pages/{page}/{panel}` on the sidecar | the agent's own token, held by the sidecar | `producer: agent/<slug>` — the agent that pushes |
+| a third-party system | a panel webhook | the webhook token, bound to one panel | whatever the human who minted the token could push themselves |
+
+In every row a `produce` grant a human issued is the alternative to the
+declaration — that is what the grant is for.
 
 The four doors are one write. They share the schema validation, the 64 KiB
 payload cap, the push-rate floor, and the same refusal sentences — the entry
-point is the only thing that differs.
+point and the identity it carries are the only things that differ.
+
+**`script` is the odd one, and the difference is worth understanding.** The
+other three name a principal the server can check: a run, an agent, a token.
+`script/watch-services.sh` names nothing — it is a label saying "a script
+writes this", and the real principal is whichever human's CLI token invoked it.
+So the server admits it on the CLI door, where a human is present, and gates it
+on ownership of the page instead. That is also what makes a `script` panel the
+one kind a person can correct by hand while a producer keeps writing it.
+
+**A routine's push is governed twice.** The producer check is the first gate;
+the author crew's autonomy level is the second. `page.write` maps to the
+`page_write` policy action, and under `strict` autonomy it is held for operator
+approval — which on an unattended run (a schedule, an automation, a wake gate)
+**is a refusal**, so the panel is not written. `guided`, `trusted` and `full`
+all write and journal. See [Governance](/guides/routines#governance--agent-proposes-human-approves-the-risky-ones).
+A panel that never fills on a strict crew is this, not a broken producer.
 
 ### From inside a crew container
 
-An agent does not get a CLI token. It pushes to its sidecar on localhost, and
-the sidecar attaches the identity:
+An agent does not get a CLI token, and **there is no `crewship` binary inside
+the sandbox image** — it ships `curl`, `jq`, `git` and little else, so
+`crewship page set` is not a command an agent can run. It pushes to its sidecar
+on localhost instead, and the sidecar attaches the identity:
 
 ```bash
-curl -s -X PUT http://localhost:9119/pages/sit/latence \
+curl -s -X PUT http://localhost:9119/pages/sit/rozbor \
   -H "Content-Type: application/json" \
-  -d '{"value": 42, "unit": "ms", "delta_good": "down"}' \
+  -d '{"blocks":[{"kind":"paragraph","text":"Latence se vrátila pod 50 ms."}]}' \
   -K /dev/fd/3 3<<AUTH
 header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
 AUTH
@@ -330,10 +353,79 @@ why the door exists at all: handing a container a CLI token would work, and
 would put the one credential the sidecar is there to hold inside the process it
 is holding it against.
 
-Whether the agent may write *this* panel is a separate question, answered the
-same way for every door — the panel's declared `producer:` must name it, or a
-human must have issued it a `produce` grant. See
-[Producer authority](#producer-authority-is-separate-from-viewer-authority).
+**The panel has to be declared for this door.** The sidecar stamps an
+`agent_id` and deliberately no run id, so the panel this push lands on must
+declare the agent that is pushing:
+
+```yaml
+    - id: rozbor
+      schema: narrative.v1
+      owner: crew/devops
+      producer: agent/devops-lead     # not script/…, not routine/…
+      sla: 1h
+```
+
+A panel declaring `producer: script/watch.sh` **cannot be written from a
+container**, even though the script is sitting right there in it. On this door
+the server asks two questions and only two: is the acting agent the panel's
+declared producer, or did a human issue it a `produce` grant covering the
+panel? A `script` producer answers neither — it names no principal — so the
+push is refused, and the refusal says so:
+
+```
+panel latence is produced by script/ping-go; this routine is not that
+producer and holds no produce grant covering the panel
+```
+
+So if you want a container-resident script to fill a panel, you have two honest
+options and no third: declare the panel `producer: agent/<slug>` and push as
+that agent, or leave the declaration alone and have a human issue that agent a
+grant — `crewship page grant <page> --agent <slug> --level produce --panels <id>`.
+
+### Filling such a panel by hand, to see it work
+
+The seed cannot do it, and that is not a gap to be closed. The sidecar is not a
+service that waits: it is started when an agent RUN is dispatched, and
+`$CREWSHIP_AGENT_TOKEN` is minted on the same path and injected into that
+agent's process — not into the container. So a `docker exec` from outside lands
+in a shell with no token, and the only way to get one there would be to read
+another process's command line. A seed that needed a model to cooperate, a
+container to boot and a token to be scavenged is not a seed.
+
+What works is asking the agent, which is the designed path and the same thing a
+wake gate asks for:
+
+```bash
+crewship crew start ops
+crewship run riley "Push this payload onto the Crewship page panel
+  from-a-container/report through your sidecar, then reply with the response
+  body: {\"items\":[{\"name\":\"riley\",\"state\":\"ok\"}]}"
+```
+
+Ask for the outcome rather than dictating the command. An agent told to run a
+`curl` with `-H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"` will refuse it —
+correctly, because that puts the token in the process table — and then do the
+same push the safe way from its own guidelines.
+
+### What a container producer gets, and what it does not
+
+This is the part people get wrong, so it is a table rather than a sentence.
+
+| You have | You do not have |
+|---|---|
+| `curl` and `jq` in the image | the `crewship` CLI — it is not installed, so `crewship page set` is out |
+| `$CREWSHIP_AGENT_TOKEN` and a sidecar on `127.0.0.1:9119` | any credential that reaches the public API |
+| one push per invocation, whenever the agent runs | `cron` — nothing inside the container schedules anything |
+| whatever the agent writes during its own run | a channel that provisions a producer *script file* into the container; Pages provides none |
+
+The consequence: **a container is not where you put a polling producer.** If a
+panel should refresh on a cycle, its producer is a routine on a schedule, or a
+script on a host you control with a real cron and a CLI token. The container
+door is for the agent that has just concluded something and wants it on the
+board — which is exactly what a wake gate asks it to do.
+
+See [Producer authority](#producer-authority-is-separate-from-viewer-authority)
+for the full rule.
 
 ## What a Page is not
 
@@ -447,8 +539,9 @@ authored. It becomes one once it has existed for longer than its own SLA and
 still has nothing: a producer that was never wired up is exactly the silent
 failure this section exists to catch.
 
-**Every panel footer carries provenance** — producer, run id, timestamp — and
-it is server-attached, never producer-claimed.
+**Every panel footer carries provenance** — the producer, the timestamp, and the
+run id *when a routine pushed it* (a CLI, sidecar or webhook push has no run
+behind it) — and it is server-attached, never producer-claimed.
 
 ## Wake gates — the panel as a sensor
 
@@ -832,6 +925,47 @@ owning user leaves the workspace, the page transfers to a crew rather than
 being deleted or orphaned, and a workspace ADMIN/OWNER is notified so a role
 that does not leave can reassign it.
 
+**Two things are called `owner` and they answer different questions.** A
+*panel's* `owner:` is written in the page document and is the ACL for **seeing**
+that panel — not a member of that crew, and you get a sealed placeholder. The
+*page's* owner is not in the document at all; it is a create-time argument
+(`crewship page create --owner crew/ops`) and it decides who may **edit the
+spec** and who may **hand-write a `script`- or `webhook`-produced panel** when
+the producer got a number wrong. A crew-owned page counts every member of that
+crew for the second question, which is what turns a personal page into a team's
+board.
+
+Neither owner grants the other's authority. Owning the page does not open a
+panel belonging to a crew you are not in, and owning a panel's crew does not let
+you edit the page's spec.
+
+Ownership is decided once. There is no transfer command: it moves only when the
+owning user is erased from the workspace, and then only to a crew. A re-applied
+spec never moves it either — `page update` replaces panels, not ownership.
+
+### Re-applying a spec
+
+`crewship page update` — and a re-run of `crewship seed` — re-applies a spec
+onto the page that is already there rather than replacing the page:
+
+- **A panel that survives keeps its payload ring**, its history and its
+  freshness clock. Panels are reconciled by id.
+- **A panel the new spec dropped is deleted**, and its payloads go with it.
+- **Grants, webhook tokens and version history are untouched.** They belong to
+  the page, not to the spec.
+- **Every save appends a version** (the last 50 are kept) and rewrites the
+  page's `wake:` and `refresh:` automation rows.
+
+The sharp edge: `update --file` **replaces** the spec, it does not merge into
+it. A panel field left out of the file is deleted — including `tab:`, `icon:`,
+`public:`, `actions:`, `wake:`, `on_failure:` and `refresh:`.
+
+Keep the document you authored, because nothing gives it back to you verbatim:
+`page get --format json` returns the read shape (`sla_seconds`, plus the state
+and data the server attached) which `update` refuses, and `page export` returns
+a bundle in a third format that drops the gates and the publication flag on
+purpose. Rebuilding a lost spec from `page get` means converting it by hand.
+
 ### Managing grants
 
 ```bash
@@ -1019,21 +1153,204 @@ already strip provenance for a smaller version of the same reason.
   browser.
 </Note>
 
+## Making one of your own
+
+A page does not have to belong to a routine, and most do not. This is the whole
+flow, and every step of it is verified against a running server.
+
+**1. Decide who owns the page.** The default is you. Hand it to a crew and every
+member of that crew can edit the spec and hand-write its `script`-produced
+panels — which is what you want for anything a team looks after.
+
+**2. Decide who may SEE each panel.** That is the panel's own `owner:`, and it
+is always a crew. A reader outside that crew gets a sealed placeholder rather
+than an omission, so the page has the same shape for everyone.
+
+**3. Decide who may WRITE each panel.** That is `producer:`, and this is the
+choice people get stuck on. Four kinds, and only two of them have to exist
+before you can save the page:
+
+| `producer:` | Must already exist? | Who ends up writing it |
+|---|---|---|
+| `script/<any name>` | **no** — there is no table of scripts | you, or anything with a CLI token: a cron, a laptop, a CI step |
+| `webhook/<any name>` | **no** | whatever you hand the token to |
+| `routine/<slug>` | **yes**, the routine must be there | that routine, when it runs |
+| `agent/<slug>` | **yes**, the agent must be there | that agent, from inside its crew container |
+
+So a page you want to fill yourself is a `script/` page. The name is a label —
+`script/whatever.sh` is fine even before the script exists — and it is the only
+kind whose panel the page's owner may also write by hand.
+
+```yaml
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Moje stránka
+  slug: moje
+spec:
+  panels:
+    - id: moje-vec
+      schema: status.v1
+      title: Moje věc
+      owner: crew/ops              # who may SEE it
+      producer: script/cokoliv.sh  # who may WRITE it — no such file needed yet
+      sla: 1h
+      span: 6
+```
+
+```bash
+crewship page create --file moje.page.yaml --owner crew/ops
+echo '{"items":[{"name":"disk","state":"ok","label":"volno"}]}' \
+  | crewship page set moje/moje-vec --data -
+```
+
+That is a working page with data on it, bound to no routine and no run.
+
+### Letting other people in
+
+Reach is closed by default: someone outside the owning crews gets a **404**, not
+a 403 — the endpoint is not an existence oracle, and the page is absent from
+their `page list` entirely.
+
+```bash
+crewship page grant moje --user someone@example.com --level read
+crewship page grant moje --crew quality --level read
+crewship page grant moje --agent devops-bot --level produce --panels moje-vec
+```
+
+Three verbs, three kinds of subject (`--user`, `--crew`, `--agent`):
+
+| Level | Means |
+|---|---|
+| `read` | may reach the page and see the panels their crew membership already admits |
+| `produce` | may push payloads into **named** panels (`--panels`), and nothing else |
+| `write` | may edit the spec — add, remove and rearrange panels |
+
+Two properties worth knowing before you rely on them, because both surprise
+people:
+
+- **`read` is not a skeleton key.** A grantee who is in none of the owning crews
+  reaches the page and sees a grid of sealed placeholders. Panel visibility is
+  crew membership and a grant does not widen it.
+- **`produce` does not let you SEE what you write.** Every level opens the
+  page — `read` is the floor the other two are built on, not a separate grant
+  you also have to issue — but opening it is not the same as unsealing a panel.
+  A subject can be the writer of a panel whose contents it may not look at, and
+  that is deliberate: it lets a producer feed a board it has no business
+  reading.
+
+Only a human issues a grant, and only the page's owner or a workspace admin. An
+agent holding `write` can rebuild the page freely and can never widen who
+reaches it — otherwise "grant my agent access" would be a privilege-escalation
+primitive.
+
+The same three verbs are in the page's settings panel in the app, with each
+grant showing who issued it and whether it is still live.
+
 ## Seeing one without building one
 
-`crewship seed` creates a page called **Přehled provozu** with five panels — one
-per schema — and pushes a payload into each, so a fresh workspace opens on a
-page that shows something rather than on five panels reading "never produced".
+`crewship seed` creates a page called **Operations**: five panels, one per
+schema, each on its own tab, and a payload pushed into every one — so a fresh
+workspace opens on a page that shows something rather than on five panels
+reading "never produced".
+
+One panel per tab is unusual and deliberate. Tabs exist because a page past
+about six panels becomes a scroll, so a real page groups several panels under
+one tab; this one is a *catalogue* of the five payload shapes, and what a reader
+learning the format wants is to look at exactly one shape at a time.
 
 Its panels are owned by different seeded crews on purpose. Log in as a member of
 only one of them and the rest arrive as sealed placeholders, which is the
 per-panel permission model doing its job rather than a rendering fault.
 
+**The `services` panel is also where the seed shows the other half of the
+feature.** It declares a `wake:` gate (`any(state == "critical")`, held for five
+minutes), an `on_failure:` route that opens an issue on ops when the producer
+stops, an action that runs the seeded `feed-watch-probe` routine, and
+`public: true`. So `crewship page publish operations` works against a fresh
+seed with nothing to edit first, and the gate is a real compiled automation you
+can see with `crewship automation list` — not a line of YAML that has never been
+exercised.
+
 The definition is `cmd/crewship/seeddata/builtin/pages.yaml`, and it is a
 readable example of the authoring format: five schemas, a sparse series axis, an
-em-dash cell, a `delta_good`, and the icons. Every payload in it is validated
-against its panel's schema at build time, so a demo that would refuse to load
-fails the test suite instead.
+em-dash cell, a `delta_good`, tabs, and the icons. Every payload in it is
+validated against its panel's schema at build time, and every page is re-parsed
+as though a human had authored it, so a demo that would refuse to load fails the
+test suite instead.
+
+### Three writers, one panel
+
+The seeded page is handed to **crew/ops** rather than kept by the account that
+ran the seed, and its panels all declare a `script` producer. Those two choices
+together are what let three different writers fill the same panel without a
+single grant being issued:
+
+- **the seeder**, once, at seed time;
+- **a script**, whenever you run it — `examples/pages/operations.sh` measures
+  whatever host it runs on with `free`, `uptime`, `df` and one HTTP probe, and
+  pushes all five panels through `crewship page set`;
+- **any member of ops**, by hand, at any time.
+
+That last one is the part worth understanding. Page ownership decides who may
+push to a `script`- or `webhook`-produced panel, and ownership of a *crew*-owned
+page counts every member of that crew. So a number a producer got wrong can be
+corrected by whoever is looking at it, without stopping the producer and without
+anyone issuing a permission.
+
+```bash
+./examples/pages/operations.sh              # one pass
+./examples/pages/operations.sh --loop 60    # keep it fresh
+```
+
+Hand it to a crew when you author your own page:
+
+```bash
+crewship page create --file page.yaml --owner crew/ops
+```
+
+Without `--owner` the page belongs to whoever ran the command, which is right
+for a personal page and wrong for a team's board. Ownership is a create-time
+decision — `page update` re-applies a spec and never moves it, because a
+re-apply that silently transferred a page would be a permission change nobody
+asked for.
+
+<Note>
+  A hand-written payload is still attributed to the panel's *declared* producer
+  in the footer, because `producer:` is a name rather than a principal. If you
+  need to tell the two apart, the journal records who actually pushed.
+</Note>
+
+### The second seeded page shows the loop, not the snapshot
+
+Operations is filled and then it ages: nothing re-pushes it unless you run
+the script, so it goes stale exactly as a real page whose producer stopped
+would.
+
+The seed also creates **Watch**, and its two panels declare
+`producer: routine/page-watch`. That one word changes who may write them: a
+routine producer is not the page owner, and [producer
+authority](#producer-authority-is-separate-from-viewer-authority) admits only
+the declared producer, so the seeder *cannot* fill these panels the way it fills
+the others — a demo payload authored for them would come back a 403. They are
+filled by running their producer, which the seeder does once at the end of
+seeding.
+
+So the four seeded pages together show **every door a producer can push
+through** — a script on a host (Operations), an agent inside a crew container
+(From a container), a third-party system holding a token (From outside), and a
+routine through the dispatcher (Watch) — and Operations carries the sensor,
+action and publish halves on top of that. Re-running it is the shortest way to watch a panel
+refresh:
+
+```bash
+crewship routine run page-watch --inputs '{"note":"anything"}'
+```
+
+The seed creates no schedules, by design, so nothing re-runs it on its own —
+which is why those panels carry a six-hour SLA rather than the sixty seconds a
+monitored service would want. A one-minute SLA on a page nobody refreshes says
+"broken" when what happened is "nobody wired a schedule".
 
 `crewship seed --nuke` removes pages before crews, because a panel's owning crew
 carries `ON DELETE RESTRICT` — a workspace still holding pages cannot have its

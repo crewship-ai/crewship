@@ -13,7 +13,7 @@
  * on: a measured `0` draws a bar, and only a gap draws an em dash.
  */
 import { describe, it, expect } from "vitest"
-import { render, within } from "@testing-library/react"
+import { fireEvent, render, within } from "@testing-library/react"
 
 import { PanelRenderer } from "../registry"
 import {
@@ -674,5 +674,81 @@ describe("the panel component is exported and renders standalone", () => {
   it("renders without going through the registry", () => {
     const { container } = render(<SeriesPanel {...seriesFixtures.fresh} now={FIXTURE_NOW} />)
     expect(container.querySelector('svg[data-slot="series-chart"]')).toBeTruthy()
+  })
+})
+
+/**
+ * The legend is a control, not a caption.
+ *
+ * A chart of several series is unreadable the moment one of them dwarfs the
+ * rest, and the only fix a reader has is to take that one out of the picture.
+ * The payload is untouched by any of this: hiding is view state, exactly as a
+ * `toggle` action is for whole panels, and a reload brings everything back.
+ */
+describe("SeriesPanel — choosing which series to draw", () => {
+  const renderFresh = () =>
+    render(<PanelRenderer {...seriesFixtures.fresh} now={FIXTURE_NOW} />)
+
+  // Scoped to the legend on purpose: the bars and the direct point labels
+  // carry `data-series-name` as well, and they come first in the DOM.
+  const legendFor = (container: HTMLElement, name: string) =>
+    container.querySelector<HTMLButtonElement>(
+      `[data-slot="series-legend-item"][data-series-name="${name}"]`,
+    )!
+
+  it("draws every declared series before anything is hidden", () => {
+    const { container } = renderFresh()
+    expect(legendFor(container, "api").getAttribute("aria-pressed")).toBe("true")
+    expect(legendFor(container, "worker").getAttribute("aria-pressed")).toBe("true")
+  })
+
+  it("hides a series when its legend entry is pressed, and brings it back", () => {
+    const { container } = renderFresh()
+    const api = legendFor(container, "api")
+
+    fireEvent.click(api)
+    expect(legendFor(container, "api").getAttribute("aria-pressed")).toBe("false")
+    expect(legendFor(container, "api").getAttribute("data-series-hidden")).toBe("true")
+    // The bars go with it — the chart is drawn from the visible set.
+    expect(
+      container.querySelectorAll('[data-slot="series-bar"][data-series-name="api"]').length,
+    ).toBe(0)
+
+    fireEvent.click(legendFor(container, "api"))
+    expect(legendFor(container, "api").getAttribute("aria-pressed")).toBe("true")
+  })
+
+  // The name stays in the legend precisely BECAUSE it is hidden: a switched-off
+  // series that vanished from the legend could never be switched back on.
+  it("keeps a hidden series in the legend", () => {
+    const { container } = renderFresh()
+    fireEvent.click(legendFor(container, "api"))
+    expect(legendFor(container, "api")).toBeTruthy()
+    expect(legendFor(container, "api").textContent).toContain("api")
+  })
+
+  // An empty chart under a legend of switched-off names is recoverable but
+  // reads as a broken panel for as long as it lasts.
+  it("refuses to hide the last visible series, and says why", () => {
+    const { container } = renderFresh()
+    fireEvent.click(legendFor(container, "api"))
+
+    const worker = legendFor(container, "worker")
+    expect(worker.disabled).toBe(true)
+    expect(worker.getAttribute("title")).toContain("last visible series")
+
+    fireEvent.click(worker)
+    expect(legendFor(container, "worker").getAttribute("aria-pressed")).toBe("true")
+  })
+
+  // §3's rule read literally: colour is not the ordinal. `assignSeriesColors`
+  // builds its map from the DECLARED set, so taking a series out of the picture
+  // must not renumber the palette under the ones that remain.
+  it("does not recolour the remaining series", () => {
+    const { container } = renderFresh()
+    const workerColour = legendFor(container, "worker").getAttribute("data-series-color")
+
+    fireEvent.click(legendFor(container, "api"))
+    expect(legendFor(container, "worker").getAttribute("data-series-color")).toBe(workerColour)
   })
 })

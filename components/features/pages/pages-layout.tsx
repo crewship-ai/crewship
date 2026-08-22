@@ -25,8 +25,10 @@
  */
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
-import { FilePlus2, Pencil, SlidersHorizontal } from "lucide-react"
+import { AnimatePresence, motion } from "motion/react"
+
+import { duration } from "@/lib/motion"
+import { FilePlus2, Pencil, SlidersHorizontal, Upload} from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
@@ -47,6 +49,7 @@ import { PagesRail } from "@/components/features/pages/pages-rail"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
 import { PageEditor, sealedPanelCount, type PageEditorMode } from "@/components/features/pages/page-editor"
+import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
 import { PageSettings } from "@/components/features/pages/page-settings"
 
 export interface PagesLayoutProps {
@@ -58,8 +61,43 @@ export interface PagesLayoutProps {
 }
 
 export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
-  const router = useRouter()
   const isMobile = useIsMobile()
+
+  // WHICH PAGE IS OPEN IS STATE, NOT A ROUTE — and that is the difference
+  // between this surface feeling like /routines and feeling like a website.
+  //
+  // `slug` still arrives as a prop, because /pages/[slug] is a real route and
+  // has to keep working: a deep link, a refresh, a bookmark and a shared URL
+  // all enter that way. What changed is what a CLICK does. Routing to
+  // /pages/<slug> made Next unmount this whole subtree and build it again, so
+  // the rail — which has nothing to do with which page is open — blinked out
+  // and came back on every selection, taking its scroll position and its
+  // filter state with it.
+  //
+  // So a click sets state and rewrites the address bar with history.pushState,
+  // which App Router supports without a navigation. Nothing unmounts, the URL
+  // stays honest, Back still works, and the route below still serves anyone
+  // arriving cold.
+  const [selectedSlug, setSelectedSlug] = React.useState<string | null>(slug ?? null)
+
+  // The prop wins whenever the route genuinely changes under us — arriving at
+  // /pages/x from somewhere else entirely, or a full reload.
+  React.useEffect(() => {
+    setSelectedSlug(slug ?? null)
+  }, [slug])
+
+  // Back and Forward move through the entries pushed below. The pathname is
+  // the only authority here: reading state we pushed ourselves would drift the
+  // moment somebody navigated with the keyboard.
+  React.useEffect(() => {
+    const onPop = () => {
+      const path = window.location.pathname
+      const match = /^\/pages\/([^/]+)/.exec(path)
+      setSelectedSlug(match ? decodeURIComponent(match[1]) : null)
+    }
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
+  }, [])
   const [collapsed, setCollapsed] = React.useState(false)
   // On a phone the rail is 280px of a 390px screen — it does not sit BESIDE
   // the content, it replaces it. Collapse it when the viewport narrows and let
@@ -68,11 +106,12 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     if (isMobile) setCollapsed(true)
   }, [isMobile])
 
+  const [importing, setImporting] = React.useState(false)
   const [search, setSearch] = React.useState("")
   const [filters, setFilters] = React.useState<PageFilters>(EMPTY_PAGE_FILTERS)
 
   const { pages, loading, error } = usePages(workspaceId)
-  const detail = usePage(workspaceId, slug ?? null)
+  const detail = usePage(workspaceId, selectedSlug)
 
   const summary = React.useMemo(() => summarisePages(pages, now), [pages, now])
   const filtered = React.useMemo(
@@ -85,10 +124,16 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
       // Picking a page on a phone means "show me that", and the overlay
       // covering it would be the opposite.
       if (isMobile) setCollapsed(true)
-      router.push(`/pages/${encodeURIComponent(next)}`)
+      setSelectedSlug(next)
+      window.history.pushState(null, "", `/pages/${encodeURIComponent(next)}`)
     },
-    [isMobile, router],
+    [isMobile],
   )
+
+  const closePage = React.useCallback(() => {
+    setSelectedSlug(null)
+    window.history.pushState(null, "", "/pages")
+  }, [])
 
   const description = (
     <>
@@ -114,7 +159,11 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // document, because the document has no way to say "and one more I am not
   // allowed to describe" — saving it would delete that panel (§11b.14).
   const sealed = sealedPanelCount(detail.raw)
-  const canEdit = Boolean(slug) && detail.page != null && sealed === 0
+  // Every one of these reads the SELECTION, not the route prop. They read the
+  // prop until selection became state, and the result was that opening a page
+  // in place left the Edit and Settings controls hidden: the URL had changed,
+  // the prop had not, and the two had silently stopped agreeing.
+  const canEdit = Boolean(selectedSlug) && detail.page != null && sealed === 0
 
   // ── Settings (§7.1b, §10b.1) ─────────────────────────────────────────────
   // Who reaches this page, and what this page is. It sits beside Edit rather
@@ -126,7 +175,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   // A slug change means a different page; a settings sheet left open over it
   // would be showing another page's ACL.
-  React.useEffect(() => setSettingsOpen(false), [slug])
+  React.useEffect(() => setSettingsOpen(false), [selectedSlug])
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
@@ -137,7 +186,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         ariaLabel="Pages"
         actions={
           <>
-            {slug && (
+            {selectedSlug && (
               <SubBarSecondary
                 icon={SlidersHorizontal}
                 onClick={() => setSettingsOpen(true)}
@@ -147,7 +196,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Settings
               </SubBarSecondary>
             )}
-            {slug && (
+            {selectedSlug && (
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => setEditor("edit")}
@@ -161,6 +210,12 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Edit
               </SubBarSecondary>
             )}
+            {/* Import sits beside New page because they are the same intent —
+                "a page that is not here yet" — and it was the one authoring
+                door that existed only as a CLI command. */}
+            <SubBarSecondary icon={Upload} onClick={() => setImporting(true)}>
+              Import
+            </SubBarSecondary>
             <SubBarPrimary icon={FilePlus2} onClick={() => setEditor("create")}>
               New page
             </SubBarPrimary>
@@ -195,7 +250,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onSearchChange={setSearch}
               filters={filters}
               onFiltersChange={setFilters}
-              selectedSlug={slug ?? null}
+              selectedSlug={selectedSlug}
               onSelectPage={openPage}
               onCreatePage={() => setEditor("create")}
               onToggleCollapse={() => setCollapsed(true)}
@@ -204,40 +259,80 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         </aside>
 
         <div className="relative flex-1 overflow-hidden bg-background">
-          {slug ? (
-            <PageView
-              page={detail.page}
-              slug={slug}
-              loading={detail.loading}
-              error={detail.error}
-              notFound={detail.notFound}
-              onBack={() => router.push("/pages")}
-              now={now}
-              // Straight from the subscription `usePage` registered — the
-              // header indicator is lit only while this page's channel is on a
-              // live socket, never on a timer of its own (epic #1935).
-              live={detail.live}
-            />
-          ) : (
-            <PagesOverview
-              pages={filtered}
-              allPages={pages}
-              loading={loading}
-              error={error}
-              onSelect={openPage}
-              onFilterState={(state: PanelState) =>
-                setFilters((f) => ({ ...f, states: togglePageFilter(f.states, state) }))
-              }
-              now={now}
-            />
-          )}
+          {/* The same swap /routines does, with the same numbers: the outgoing
+              view leaves to the left, the incoming one arrives from the right,
+              and `mode="wait"` keeps them from overlapping. Only THIS column is
+              inside it — the rail beside it is not, so it never participates in
+              the transition and never blinks. */}
+          <AnimatePresence mode="wait">
+            {selectedSlug ? (
+              <motion.div
+                key={`page-${selectedSlug}`}
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -12 }}
+                transition={{ duration: duration.short, ease: "easeOut" }}
+                className="absolute inset-0 flex flex-col overflow-hidden"
+              >
+                <PageView
+                  page={detail.page}
+                  slug={selectedSlug}
+                  loading={detail.loading}
+                  error={detail.error}
+                  notFound={detail.notFound}
+                  onBack={closePage}
+                  now={now}
+                  // Straight from the subscription `usePage` registered — the
+                  // header indicator is lit only while this page's channel is
+                  // on a live socket, never on a timer of its own (epic #1935).
+                  live={detail.live}
+                />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="pages-overview"
+                initial={{ opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 12 }}
+                transition={{ duration: duration.short, ease: "easeOut" }}
+                className="absolute inset-0 overflow-auto"
+              >
+                <PagesOverview
+                  pages={filtered}
+                  allPages={pages}
+                  loading={loading}
+                  error={error}
+                  onSelect={openPage}
+                  onFilterState={(state: PanelState) =>
+                    setFilters((f) => ({ ...f, states: togglePageFilter(f.states, state) }))
+                  }
+                  now={now}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
-      {settingsOpen && slug && (
+      {/* Bound to the SELECTION, not to the route. Left on `slug` it would have
+          opened the settings of whichever page the URL happened to carry when
+          the shell mounted, which after the first in-place selection is not the
+          page on screen. */}
+      {importing && (
+        <PageImportDialog
+          workspaceId={workspaceId}
+          onClose={() => setImporting(false)}
+          onImported={(installed) => {
+            setImporting(false)
+            openPage(installed)
+          }}
+        />
+      )}
+
+      {settingsOpen && selectedSlug && (
         <PageSettings
           workspaceId={workspaceId}
-          slug={slug}
+          slug={selectedSlug}
           page={detail.raw}
           onClose={() => setSettingsOpen(false)}
         />
@@ -254,7 +349,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           // already looking at, and the invalidation the mutation performed
           // has already refetched it.
           onSaved={(saved) => {
-            if (editor === "create" && saved && saved !== slug) openPage(saved)
+            if (editor === "create" && saved && saved !== selectedSlug) openPage(saved)
           }}
         />
       )}

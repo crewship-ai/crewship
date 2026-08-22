@@ -64,6 +64,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
+	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/spf13/cobra"
 )
 
@@ -865,4 +866,214 @@ func mustJSONBytes(t *testing.T, v any) []byte {
 		t.Fatalf("marshal fixture: %v", err)
 	}
 	return b
+}
+
+// --owner is what turns a personal page into a team's board, so its parsing is
+// worth pinning: page ownership decides who may hand-write a script-produced
+// panel, and isPageOwner counts every member of an owning crew.
+func TestPageCLI_CreateOwnerFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		flag    string
+		want    string
+		wantErr string
+	}{
+		{
+			name: "omitted leaves the server's default — the creator owns it",
+			flag: "",
+			want: "",
+		},
+		{
+			name: "a crew is handed the page",
+			flag: "crew/ops",
+			want: "crew/ops",
+		},
+		{
+			name: "whitespace is not a value",
+			flag: "   ",
+			want: "",
+		},
+		{
+			// Already the default, and admitting it would invite
+			// user/<somebody-else>, which is a transfer and not a creation.
+			name:    "a user is refused rather than treated as a no-op",
+			flag:    "user/me",
+			wantErr: "must be crew/<slug>",
+		},
+		{
+			name:    "a bare slug names no kind",
+			flag:    "ops",
+			wantErr: "must be crew/<slug>",
+		},
+		{
+			name:    "a crew with no slug names no crew",
+			flag:    "crew/",
+			wantErr: "must be crew/<slug>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			cmd.Flags().String("owner", "", "")
+			if tt.flag != "" {
+				if err := cmd.Flags().Set("owner", tt.flag); err != nil {
+					t.Fatalf("set flag: %v", err)
+				}
+			}
+			got, err := pageOwnerFromFlag(cmd)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("got (%q, %v), want an error containing %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The owner rides on the create REQUEST and never on the spec: `page update`
+// re-applies a document, and a document that carried ownership would make every
+// re-apply a silent transfer.
+func TestPageCLI_OwnerIsNotPartOfTheDocument(t *testing.T) {
+	doc, err := pages.ParseDocument([]byte(`apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Provoz
+  slug: provoz
+spec:
+  panels:
+    - id: sluzby
+      schema: status.v1
+      owner: crew/ops
+      producer: script/operations.sh
+      sla: 5m
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	body := pageWriteFrom(doc)
+	if body.Owner != "" {
+		t.Errorf("pageWriteFrom carried an owner (%q) — ownership comes from --owner, not the spec", body.Owner)
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// Asserted on the TOP-LEVEL key, not on the bytes. The panel below carries
+	// `"owner":"crew/ops"` of its own, so a substring check passes whatever the
+	// page-level field says — including the value this test exists to forbid.
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("create body is not a JSON object: %v", err)
+	}
+	if _, present := wire["owner"]; present {
+		t.Errorf("create body carries a page-level owner without --owner: %s", wire["owner"])
+	}
+	// The panel's own owner is a different field and must survive.
+	if body.Panels[0].Owner != "crew/ops" {
+		t.Errorf("panel owner lost: %q", body.Panels[0].Owner)
+	}
+}
+
+// `-f quiet` is a repo-wide contract: one id per line, so the next command in
+// the pipe can consume it. Every page list used to hand-roll its table with a
+// tabwriter, which ignores the format entirely — so `quiet` printed the full
+// human table, headers and all, into whatever was meant to read ids.
+//
+// The list commands are covered here as a group rather than one test each,
+// because the defect was not in any one of them: it was that a new list
+// command starts from a tabwriter unless something says otherwise.
+func TestPageCLI_QuietPrintsOnlyTheKeyColumn(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		body    any
+		args    []string
+		want    []string
+		notWant []string
+	}{
+		{
+			name: "page list emits slugs",
+			path: "/api/v1/pages",
+			body: []map[string]any{
+				{"slug": "provoz", "name": "Provoz", "panel_count": 5, "state": "fresh", "owner": "crew/ops"},
+				{"slug": "watch", "name": "Watch", "panel_count": 2, "state": "stale", "owner": "crew/ops"},
+			},
+			args:    []string{"page", "list", "-f", "quiet"},
+			want:    []string{"provoz", "watch"},
+			notWant: []string{"SLUG", "Provoz", "fresh", "crew/ops"},
+		},
+		{
+			name: "page links emits link ids",
+			path: "/api/v1/pages/provoz/public",
+			body: map[string]any{"tokens": []map[string]any{
+				{"id": "cmsq1f0000", "expires_at": "2026-09-01T00:00:00Z"},
+			}},
+			args:    []string{"page", "links", "provoz", "-f", "quiet"},
+			want:    []string{"cmsq1f0000"},
+			notWant: []string{"ID", "STATUS", "EXPIRES"},
+		},
+		{
+			name: "page webhook list emits webhook ids",
+			path: "/api/v1/pages/provoz/webhooks",
+			body: map[string]any{"webhooks": []map[string]any{
+				{"id": "pgwh_abc", "panel": "sluzby", "fire_count": 3},
+			}},
+			args:    []string{"page", "webhook", "list", "provoz", "-f", "quiet"},
+			want:    []string{"pgwh_abc"},
+			notWant: []string{"ID", "PANEL", "FIRES", "sluzby"},
+		},
+		{
+			name: "page grants emits the subject key",
+			path: "/api/v1/pages/provoz/grants",
+			body: map[string]any{"grants": []map[string]any{
+				{"subject_type": "crew", "subject": "ops", "level": "produce", "granted_by": "demo@x"},
+			}},
+			args:    []string{"page", "grants", "provoz", "-f", "quiet"},
+			want:    []string{"crew/ops"},
+			notWant: []string{"SUBJECT", "LEVEL", "produce", "demo@x"},
+		},
+		{
+			// The starred marker is a human affordance for "you are here"; the
+			// bare seq is what `page rollback --to` takes.
+			name: "page versions emits a bare seq, never the current-marker",
+			path: "/api/v1/pages/provoz/versions",
+			body: map[string]any{"retained": 50, "versions": []map[string]any{
+				{"seq": 7, "current": true, "panel_count": 5, "created_at": "2026-08-21T00:00:00Z"},
+				{"seq": 6, "panel_count": 4, "created_at": "2026-08-20T00:00:00Z"},
+			}},
+			args:    []string{"page", "versions", "provoz", "-f", "quiet"},
+			want:    []string{"7", "6"},
+			notWant: []string{"*", "SEQ", "current", "rollback"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := pageStub(t)
+			stub.OnGet(tt.path, clitest.JSONResponse(http.StatusOK, tt.body))
+
+			out, err := runPageCLI(t, "", tt.args...)
+			if err != nil {
+				t.Fatalf("%s: %v\n%s", strings.Join(tt.args, " "), err, out)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("quiet output is missing %q:\n%s", w, out)
+				}
+			}
+			for _, n := range tt.notWant {
+				if strings.Contains(out, n) {
+					t.Errorf("quiet output carries %q, which a pipe would read as a key:\n%s", n, out)
+				}
+			}
+		})
+	}
 }

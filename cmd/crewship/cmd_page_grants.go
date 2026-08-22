@@ -38,9 +38,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -252,19 +250,22 @@ it simply authorises nothing, and the reason says why.`,
 			return fmt.Errorf("decode response: %w", err)
 		}
 		if len(doc.Grants) == 0 {
-			fmt.Printf("Page %s has no grants — it is reachable by its owner, workspace admins, and the crews that own its panels.\n", args[0])
-			fmt.Println("Widen it: crewship page grant " + args[0] + " --crew <slug> --level read")
+			if f.Format != "quiet" {
+				fmt.Printf("Page %s has no grants — it is reachable by its owner, workspace admins, and the crews that own its panels.\n", args[0])
+				fmt.Println("Widen it: crewship page grant " + args[0] + " --crew <slug> --level read")
+			}
 			return nil
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SUBJECT\tLEVEL\tPANELS\tGRANTED BY\tGRANTED AT\tSTATUS")
+		rows := make([][]string, 0, len(doc.Grants))
 		for _, g := range doc.Grants {
-			fmt.Fprintf(w, "%s/%s\t%s\t%s\t%s\t%s\t%s\n",
-				g.SubjectType, pageDash(g.Subject), pageDash(g.Level),
+			rows = append(rows, []string{
+				g.SubjectType + "/" + pageDash(g.Subject), pageDash(g.Level),
 				pageDash(strings.Join(g.Panels, ",")), pageDash(g.GrantedBy),
-				pageDash(g.GrantedAt), pageGrantStatus(g))
+				pageDash(g.GrantedAt), pageGrantStatus(g),
+			})
 		}
-		return w.Flush()
+		f.Table([]string{"SUBJECT", "LEVEL", "PANELS", "GRANTED BY", "GRANTED AT", "STATUS"}, rows)
+		return nil
 	},
 }
 

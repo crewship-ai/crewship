@@ -270,7 +270,7 @@ export const pageAccessKeys = {
 
 // ── Reads ──────────────────────────────────────────────────────────────────
 
-function pageQueryString(workspaceId: string): string {
+export function pageQueryString(workspaceId: string): string {
   return `?workspace_id=${encodeURIComponent(workspaceId)}`
 }
 
@@ -287,7 +287,7 @@ async function readJSON(url: string, signal: AbortSignal | undefined, what: stri
 
 /** A read whose failure keeps the one distinction the surface acts on: a 403
  *  is not a broken request, it is the answer. */
-interface GatedRead {
+export interface GatedRead {
   loading: boolean
   /** The server's sentence for a 403 — the caller may not read this. */
   refusal: string | null
@@ -295,7 +295,7 @@ interface GatedRead {
   error: string | null
 }
 
-function gateOf(status: unknown, isPending: boolean, enabled: boolean): GatedRead {
+export function gateOf(status: unknown, isPending: boolean, enabled: boolean): GatedRead {
   const err = status as Error | null
   const forbidden = err instanceof PagesRequestError && err.status === 403
   return {
@@ -391,7 +391,7 @@ export interface PageRollbackVariables {
   to: number
 }
 
-interface WriteCallbacks<TVariables> {
+export interface WriteCallbacks<TVariables> {
   onOk?: (variables: TVariables) => void
   onRefused?: (message: string) => void
 }

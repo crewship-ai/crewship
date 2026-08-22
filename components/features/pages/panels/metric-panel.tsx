@@ -1,16 +1,21 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import { Gauge } from "lucide-react"
+import * as React from "react";
+import { Gauge } from "lucide-react";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 import {
   formatTweenFrame,
   panelMotion,
   useTweenedValues,
   type TweenFrame,
-} from "@/components/features/pages/panel-motion"
-import { EM_DASH, defaultEmptyHint, panelGate, provenanceProducedAt } from "./freshness"
+} from "@/components/features/pages/panel-motion";
+import {
+  EM_DASH,
+  defaultEmptyHint,
+  panelGate,
+  provenanceProducedAt,
+} from "./freshness";
 import {
   FailedValue,
   NeverProducedValue,
@@ -18,8 +23,8 @@ import {
   PanelFrame,
   PanelValue,
   resolveNow,
-} from "./panel-frame"
-import type { MetricPayload, PanelProps } from "./types"
+} from "./panel-frame";
+import type { MetricPayload, PanelProps } from "./types";
 
 /**
  * `metric.v1` — one number, delta, optional target and sparkline (§3).
@@ -48,30 +53,43 @@ import type { MetricPayload, PanelProps } from "./types"
  *  · **The sparkline's `aria-label`.** It names the last measured value, not
  *    the frame on screen. A reader who cannot see the tween is never told one.
  */
-export function MetricPanel({ panel, data, now, publicView = false, className }: PanelProps) {
-  const clock = resolveNow(now)
-  const gate = panelGate(data)
-  const payload = (data.payload ?? {}) as MetricPayload
-  const motion = panelMotion(panel, data)
+export function MetricPanel({
+  panel,
+  data,
+  now,
+  publicView = false,
+  className,
+}: PanelProps) {
+  const clock = resolveNow(now);
+  const gate = panelGate(data);
+  const payload = (data.payload ?? {}) as MetricPayload;
+  const motion = panelMotion(panel, data);
 
   // `null`/absent alone is "no basis to compute". An empty string is a value
   // the producer measured: `IsNoData()` in internal/pages/payload.go treats
   // JSON null and nothing else as no data, and the em dash is the one glyph
   // both sides have to agree on (§9b.4).
-  const hasValue = payload.value !== null && payload.value !== undefined
+  const hasValue = payload.value !== null && payload.value !== undefined;
   const numeric =
-    typeof payload.value === "number" && Number.isFinite(payload.value) ? payload.value : null
-  const spark = sparkPoints(payload.sparkline)
+    typeof payload.value === "number" && Number.isFinite(payload.value)
+      ? payload.value
+      : null;
+  const spark = sparkPoints(payload.sparkline);
 
   // Only what was MEASURED goes into the tween. A value that is absent, or is
   // a string rather than a number, is simply not a key — so there is no route
   // by which it could be interpolated towards or away from.
-  const tweenTarget = new Map<string, number>()
-  if (numeric !== null) tweenTarget.set(METRIC_VALUE_KEY, numeric)
-  spark.forEach((v, i) => tweenTarget.set(`${SPARK_KEY_PREFIX}${i}`, v))
-  const frames = useTweenedValues(tweenTarget, motion.tween)
+  const tweenTarget = new Map<string, number>();
+  if (numeric !== null) tweenTarget.set(METRIC_VALUE_KEY, numeric);
+  // Keyed on the ORIGINAL index, and only for points that carry a number. A
+  // gap has nothing to tween towards, and giving it a key would interpolate a
+  // value into a slot the producer said it could not measure.
+  spark.forEach((v, i) => {
+    if (v !== null) tweenTarget.set(`${SPARK_KEY_PREFIX}${i}`, v);
+  });
+  const frames = useTweenedValues(tweenTarget, motion.tween);
 
-  let body: React.ReactNode
+  let body: React.ReactNode;
   if (gate.kind === "failed") {
     body = (
       <FailedValue
@@ -80,19 +98,23 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
         producedAt={provenanceProducedAt(data.provenance)}
         now={clock}
       />
-    )
+    );
   } else if (gate.kind === "never") {
-    body = <NeverProducedValue hint={data.emptyHint?.trim() || defaultEmptyHint(panel)} />
+    body = (
+      <NeverProducedValue
+        hint={data.emptyHint?.trim() || defaultEmptyHint(panel)}
+      />
+    );
   } else {
     // Mid-flight, this frame is a number nobody measured — which is exactly
     // why it is thrown away rather than rounded into place. `settled` means the
     // tween is over (or never started), and then the text is the payload's own
     // `String(...)`, byte for byte, with no formatter between them.
-    const frame = frames.get(METRIC_VALUE_KEY)
-    const tweening = frame !== undefined && !frame.settled && numeric !== null
+    const frame = frames.get(METRIC_VALUE_KEY);
+    const tweening = frame !== undefined && !frame.settled && numeric !== null;
     const shownValue = tweening
       ? formatTweenFrame(frame.from, numeric, frame.value)
-      : String(payload.value)
+      : String(payload.value);
     body = (
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -111,9 +133,14 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
                 {shownValue}
               </span>
               {payload.unit ? (
-                <span className="type-page-value text-muted-foreground">{payload.unit}</span>
+                <span className="type-page-value text-muted-foreground">
+                  {payload.unit}
+                </span>
               ) : null}
-              <MetricDelta delta={payload.delta} deltaGood={payload.delta_good} />
+              <MetricDelta
+                delta={payload.delta}
+                deltaGood={payload.delta_good}
+              />
             </PanelValue>
           ) : (
             <PanelValue
@@ -126,7 +153,10 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
             </PanelValue>
           )}
           {gate.dimmed ? (
-            <PanelAge producedAt={provenanceProducedAt(data.provenance)} now={clock} />
+            <PanelAge
+              producedAt={provenanceProducedAt(data.provenance)}
+              now={clock}
+            />
           ) : null}
         </div>
         <TargetMeter
@@ -137,7 +167,7 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
         />
         <Sparkline points={spark} frames={frames} dimmed={gate.dimmed} />
       </div>
-    )
+    );
   }
 
   return (
@@ -151,7 +181,7 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
     >
       {body}
     </PanelFrame>
-  )
+  );
 }
 
 /**
@@ -166,12 +196,17 @@ function MetricDelta({
   delta,
   deltaGood,
 }: {
-  delta?: number | null
-  deltaGood?: "up" | "down" | null
+  delta?: number | null;
+  deltaGood?: "up" | "down" | null;
 }) {
-  if (typeof delta !== "number" || !Number.isFinite(delta) || delta === 0) return null
-  const up = delta > 0
-  const good = deltaGood ? (up ? deltaGood === "up" : deltaGood === "down") : null
+  if (typeof delta !== "number" || !Number.isFinite(delta) || delta === 0)
+    return null;
+  const up = delta > 0;
+  const good = deltaGood
+    ? up
+      ? deltaGood === "up"
+      : deltaGood === "down"
+    : null;
   return (
     <span
       data-slot="panel-delta"
@@ -185,7 +220,7 @@ function MetricDelta({
       <span aria-hidden="true">{up ? "▲" : "▼"}</span>
       {` ${up ? "+" : "−"}${Math.abs(delta)}`}
     </span>
-  )
+  );
 }
 
 /**
@@ -214,18 +249,23 @@ function TargetMeter({
   deltaGood,
   dimmed,
 }: {
-  value: number | null
-  target?: number | null
-  deltaGood?: "up" | "down" | null
-  dimmed: boolean
+  value: number | null;
+  target?: number | null;
+  deltaGood?: "up" | "down" | null;
+  dimmed: boolean;
 }) {
-  if (value === null || typeof target !== "number" || !Number.isFinite(target) || target <= 0) {
-    return null
+  if (
+    value === null ||
+    typeof target !== "number" ||
+    !Number.isFinite(target) ||
+    target <= 0
+  ) {
+    return null;
   }
-  const pct = Math.max(0, Math.min(100, (value / target) * 100))
-  const reached = value >= target
+  const pct = Math.max(0, Math.min(100, (value / target) * 100));
+  const reached = value >= target;
   // `null` is "reached, but the payload never said whether that is good news".
-  const good = reached && deltaGood ? deltaGood === "up" : null
+  const good = reached && deltaGood ? deltaGood === "up" : null;
   return (
     <div
       data-slot="panel-target"
@@ -272,16 +312,16 @@ function TargetMeter({
         {reached ? `${target} target · reached` : `of ${target} target`}
       </span>
     </div>
-  )
+  );
 }
 
-const SPARK_W = 100
-const SPARK_H = 28
-const SPARK_PAD = 2
+const SPARK_W = 100;
+const SPARK_H = 28;
+const SPARK_PAD = 2;
 
 /** Tween keys. Namespaced so the value can never collide with a point. */
-const METRIC_VALUE_KEY = "value"
-const SPARK_KEY_PREFIX = "spark:"
+const METRIC_VALUE_KEY = "value";
+const SPARK_KEY_PREFIX = "spark:";
 
 /**
  * The points this panel will actually draw. Shared between the component and
@@ -289,10 +329,12 @@ const SPARK_KEY_PREFIX = "spark:"
  * a filter applied in one place and not the other would morph point 3 towards
  * a number that belongs to point 4.
  */
-function sparkPoints(values?: number[] | null): number[] {
+function sparkPoints(values?: (number | null)[] | null): (number | null)[] {
   return Array.isArray(values)
-    ? values.filter((v): v is number => typeof v === "number" && Number.isFinite(v))
-    : []
+    ? values.map((v) =>
+        typeof v === "number" && Number.isFinite(v) ? v : null,
+      )
+    : [];
 }
 
 /**
@@ -317,27 +359,58 @@ function Sparkline({
   frames,
   dimmed,
 }: {
-  points: number[]
-  frames: ReadonlyMap<string, TweenFrame>
-  dimmed: boolean
+  points: (number | null)[];
+  frames: ReadonlyMap<string, TweenFrame>;
+  dimmed: boolean;
 }) {
-  if (points.length === 0) return null
+  if (points.length === 0) return null;
 
-  const drawn = points.map((v, i) => frames.get(`${SPARK_KEY_PREFIX}${i}`)?.value ?? v)
-  const min = Math.min(...drawn)
-  const max = Math.max(...drawn)
-  const span = max - min
+  // A `null` stays a null all the way to the geometry. The schema calls it "a
+  // gap the producer knows about, so the line breaks instead of interpolating
+  // across missing data", and this used to filter them out instead — which did
+  // two wrong things at once: it drew a straight line THROUGH the gap, and it
+  // shifted every later point leftwards, so a window with one missing sample
+  // silently compressed its own time axis.
+  const drawn = points.map((v, i) =>
+    v === null ? null : (frames.get(`${SPARK_KEY_PREFIX}${i}`)?.value ?? v),
+  );
+  const measured = drawn.filter((v): v is number => v !== null);
+  if (measured.length === 0) return null;
+
+  const min = Math.min(...measured);
+  const max = Math.max(...measured);
+  const span = max - min;
+  // Positions come from the ORIGINAL index and the ORIGINAL length, so a gap
+  // holds its place on the axis rather than closing it.
   const x = (i: number) =>
     drawn.length === 1
       ? SPARK_W / 2
-      : SPARK_PAD + (i * (SPARK_W - 2 * SPARK_PAD)) / (drawn.length - 1)
+      : SPARK_PAD + (i * (SPARK_W - 2 * SPARK_PAD)) / (drawn.length - 1);
   const y = (v: number) =>
     span === 0
       ? SPARK_H / 2
-      : SPARK_H - SPARK_PAD - ((v - min) / span) * (SPARK_H - 2 * SPARK_PAD)
+      : SPARK_H - SPARK_PAD - ((v - min) / span) * (SPARK_H - 2 * SPARK_PAD);
 
-  const path = drawn.map((v, i) => `${x(i).toFixed(2)},${y(v).toFixed(2)}`).join(" ")
-  const last = points[points.length - 1]
+  // One polyline per contiguous run of measured points. A run of one is drawn
+  // too — as a dot rather than a line, because a lone sample between two gaps
+  // is still something the producer measured and dropping it would be the same
+  // erasure this fix is about.
+  const runs: { i: number; v: number }[][] = [];
+  let run: { i: number; v: number }[] = [];
+  drawn.forEach((v, i) => {
+    if (v === null) {
+      if (run.length > 0) runs.push(run);
+      run = [];
+      return;
+    }
+    run.push({ i, v });
+  });
+  if (run.length > 0) runs.push(run);
+
+  const lastMeasured = [...points]
+    .reverse()
+    .find((v): v is number => v !== null);
+  const gaps = points.length - measured.length;
 
   return (
     <svg
@@ -345,22 +418,51 @@ function Sparkline({
       viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
       preserveAspectRatio="none"
       role="img"
-      aria-label={`Trend over the last ${points.length} values, ending at ${last}`}
+      // The gaps are named rather than left to be inferred from a shape a
+      // screen reader cannot see.
+      aria-label={
+        `Trend over the last ${points.length} values, ending at ${lastMeasured ?? EM_DASH}` +
+        (gaps > 0 ? `, with ${gaps} not measured` : "")
+      }
       focusable="false"
       className={cn("h-7 w-full text-primary", dimmed && "opacity-60")}
     >
-      <polyline
-        points={path}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
-      />
-      {drawn.length === 1 ? (
-        <circle cx={x(0)} cy={y(drawn[0])} r={1.5} fill="currentColor" />
-      ) : null}
+      {/* Only a run of two or more is a LINE. A one-point polyline draws
+          nothing at all — it is DOM that says a segment exists where none
+          does, and the dot below is what actually represents that reading. */}
+      {runs
+        .filter((r) => r.length > 1)
+        .map((r) => (
+          <polyline
+            key={r[0].i}
+            data-slot="sparkline-run"
+            points={r
+              .map((pt) => `${x(pt.i).toFixed(2)},${y(pt.v).toFixed(2)}`)
+              .join(" ")}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      {/* A run of one has no line to draw, so it is drawn as a dot. That covers
+          the single-sample panel it always covered, and now also a lone
+          measurement stranded between two gaps — which is a real reading and
+          would otherwise vanish. */}
+      {runs
+        .filter((r) => r.length === 1)
+        .map((r) => (
+          <circle
+            key={r[0].i}
+            data-slot="sparkline-point"
+            cx={x(r[0].i)}
+            cy={y(r[0].v)}
+            r={1.5}
+            fill="currentColor"
+          />
+        ))}
     </svg>
-  )
+  );
 }

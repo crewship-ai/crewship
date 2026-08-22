@@ -15,9 +15,13 @@
 # it, and a `produced_at` in the payload would be refused: the freshness clock
 # is the server's (§4 rule 2).
 #
-# Auth: a CLI token in CREWSHIP_TOKEN. A producer inside a crew container will
-# eventually reach the sidecar instead, so the agent process never holds a
-# credential at all — that path is issue #1946 and is not built yet.
+# Auth: a CLI token in CREWSHIP_TOKEN. A producer inside a crew container
+# reaches the sidecar instead (PUT localhost:9119/pages/{page}/{panel}), so the
+# agent process never holds a credential at all — that door shipped with #1969.
+# It is not a drop-in swap for this script, though: the sidecar attaches AGENT
+# identity, so a panel written that way has to declare `producer: agent/<slug>`
+# rather than `script/…`. See docs/guides/pages.mdx, "From inside a crew
+# container".
 #
 #   CREWSHIP_SERVER=http://localhost:8083 \
 #   CREWSHIP_TOKEN=... CREWSHIP_WORKSPACE=... \

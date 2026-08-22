@@ -31,9 +31,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/google/uuid"
@@ -133,6 +131,13 @@ handler built into the web client.`,
 			return fmt.Errorf("decode response: %w", err)
 		}
 		if len(doc.Actions) == 0 {
+			// Under `quiet` the caller is a pipe expecting one action id per
+			// line, and "declares no actions." is a line — it would be read as
+			// an id. Empty means emit nothing; the exit code already says the
+			// call succeeded.
+			if f.Format == "quiet" {
+				return nil
+			}
 			fmt.Printf("Panel %s/%s declares no actions.\n", slug, panel)
 			fmt.Println("Actions are declared in the page document, never at click time — see docs/cli/page.")
 			return nil
@@ -143,17 +148,24 @@ handler built into the web client.`,
 }
 
 func printPageActions(slug, panel string, actions []pageActionJSON) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tKIND\tLABEL\tRUNS\tCONFIRM\tINPUTS")
+	f := newFormatter()
+	rows := make([][]string, 0, len(actions))
 	for _, a := range actions {
 		confirm := "—"
 		if a.Confirm != nil {
 			confirm = "yes"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			a.ID, pageDash(a.Kind), pageDash(a.Label), pageActionTargetLabel(a), confirm, pageActionInputLabel(a))
+		rows = append(rows, []string{
+			a.ID, pageDash(a.Kind), pageDash(a.Label),
+			pageActionTargetLabel(a), confirm, pageActionInputLabel(a),
+		})
 	}
-	_ = w.Flush()
+	// Column 0 is the action id, which is the argument `page action` takes —
+	// so `page actions x/y -f quiet` feeds the next command directly.
+	f.Table([]string{"ID", "KIND", "LABEL", "RUNS", "CONFIRM", "INPUTS"}, rows)
+	if f.Format == "quiet" {
+		return
+	}
 	fmt.Println()
 	fmt.Printf("Dispatch one:  crewship page action %s/%s <id> [--input k=v]\n", slug, panel)
 }

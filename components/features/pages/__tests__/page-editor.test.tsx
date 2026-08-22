@@ -500,6 +500,19 @@ describe("the starter document", () => {
     expect(body.panels[0].sla_seconds).toBe(300)
     expect(body.panels[0].producer).toContain("CHANGEME")
   })
+
+  // The template used to say `routine/CHANGEME`, and a routine producer is
+  // checked against the routines that exist: pressing "Create page" on the
+  // untouched default answered `no such routine exists here`. A starter
+  // document whose only outcome is a 400 does not teach that the producer
+  // matters, it teaches that the editor is broken — and it makes the first
+  // page somebody authors impossible rather than empty.
+  it("names a producer kind the server will accept from a first-time author", () => {
+    const parsed = parsePageBuffer(newPageTemplate("crew/lookout"))
+    const body = (parsed as { ok: true; body: PageWriteBody }).body
+    expect(body.panels[0].producer.startsWith("script/")).toBe(true)
+    expect(body.panels[0].producer.startsWith("routine/")).toBe(false)
+  })
 })
 
 describe("the inline linter is additive", () => {

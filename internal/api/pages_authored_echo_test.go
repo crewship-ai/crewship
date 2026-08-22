@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -66,5 +68,65 @@ func TestPagesGet_AuthoredHalfIsWithheldFromAReader(t *testing.T) {
 		if strings.Contains(string(raw), forbidden) {
 			t.Errorf("a reader who cannot edit the spec received %s", forbidden)
 		}
+	}
+}
+
+// `public` is part of the authored half, and leaving it off the read path made
+// the read/write round trip destructive.
+//
+// panelWire builds from panelRecord, which has no `public` to read, so the flag
+// only ever travelled one way: into spec_json. Anything that read a page and
+// saved the same document back — `crewship page export | crewship apply`, a
+// hand-edited `page get -f json`, the editor's own PATCH — dropped it, and
+// every public panel on the page quietly became private. The published link
+// kept resolving and rendered a page with nothing on it, and the next
+// `page publish` refused the page for having no public panels, which points the
+// operator at the wrong thing entirely.
+//
+// The round trip is the assertion, not the field: reading the value back is
+// only interesting because saving it again has to leave the page as it was.
+func TestPagesGet_PublicSurvivesAReadWriteRoundTrip(t *testing.T) {
+	h, _, _, wsID, userID := newPagesFixture(t)
+	pagesCreateFrom(t, h, wsID, userID,
+		`{"slug":"verejna","name":"Veřejná","panels":[`+
+			`{"id":"verejny","schema":"status.v1","owner":"crew/lookout","producer":"script/w.sh","sla_seconds":3600,"span":6,"public":true},`+
+			`{"id":"interni","schema":"status.v1","owner":"crew/lookout","producer":"script/q.sh","sla_seconds":3600,"span":6}]}`)
+
+	doc := pagesGet(t, h, wsID, userID, "OWNER", "verejna")
+	if authored, _ := doc["authored"].(bool); !authored {
+		t.Fatalf("fixture is not reading as an editor, so this test cannot see the authored half: %v", doc["authored"])
+	}
+
+	if got := pagesPanel(t, doc, "verejny")["public"]; got != true {
+		t.Errorf("panel verejny came back with public=%v, want true — the flag is authored and must be echoed to an editor", got)
+	}
+	// The absent case stays absent rather than arriving as `false`: an
+	// `omitempty` bool that materialises as an explicit false teaches a client
+	// to write one back, which is the same quiet rewrite one level down.
+	if _, present := pagesPanel(t, doc, "interni")["public"]; present {
+		t.Errorf("panel interni carries a public key it never declared")
+	}
+
+	// Now the part that actually broke: save the document straight back.
+	panels, ok := doc["panels"].([]any)
+	if !ok {
+		t.Fatalf("panels are not a list: %T", doc["panels"])
+	}
+	body, err := json.Marshal(map[string]any{"name": doc["name"], "panels": panels})
+	if err != nil {
+		t.Fatalf("marshal round trip: %v", err)
+	}
+	req := pagesRequest(t, "PATCH", "/api/v1/pages/verejna", wsID, userID, "OWNER", string(body))
+	req.SetPathValue("slug", "verejna")
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("re-apply the document we were just served: %d %s", rr.Code, rr.Body.String())
+	}
+
+	after := pagesGet(t, h, wsID, userID, "OWNER", "verejna")
+	if got := pagesPanel(t, after, "verejny")["public"]; got != true {
+		t.Errorf("re-applying the served document unpublished the panel (public=%v) — "+
+			"a read followed by a write must leave the page as it was", got)
 	}
 }

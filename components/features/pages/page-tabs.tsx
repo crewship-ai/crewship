@@ -52,6 +52,9 @@
  */
 
 import * as React from "react"
+import { motion } from "motion/react"
+
+import { duration, ease } from "@/lib/motion"
 import { useSearchParams } from "next/navigation"
 
 import { ToolbarStrip, type ToolbarTab } from "@/components/layout/toolbar-strip"
@@ -290,7 +293,32 @@ export function PageTabGroup({ tab, active, idScope, children }: PageTabGroupPro
       >
         {tab.name}
       </h2>
-      {children}
+      {/* The switch is animated, the MOUNTING is not — and that distinction is
+          the whole design of this component. Every group stays in the DOM so
+          print can reveal them all and so a panel's change baseline is not
+          reset by a click, which rules out the `AnimatePresence mode="wait"`
+          the rest of the app uses for a detail swap: it would unmount the group
+          being left and take both properties with it.
+          
+          So the group animates on BECOMING active instead. `key={String(active)}`
+          restarts the entry each time it flips, and only the visible group runs
+          one — a hidden section is `display: none` and paints nothing. The
+          distance is small and vertical, matching the house `arrival`, and it
+          is ink and transform only: nothing here reflows the grid, so a reader
+          mid-sentence is not moved.
+          
+          Reduced motion is handled by `motion` itself through
+          `useReducedMotion`, which the house helper reads from the same media
+          query — an animation this component declares is suppressed there, and
+          the settled DOM is identical either way. */}
+      <motion.div
+        key={String(active)}
+        initial={active ? { opacity: 0, y: 6 } : false}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: duration.short, ease: ease.out }}
+      >
+        {children}
+      </motion.div>
     </section>
   )
 }

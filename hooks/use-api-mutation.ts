@@ -4,7 +4,7 @@ import { useCallback, useRef } from "react"
 import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query"
 
 import { apiFetch, type ApiFetchInit } from "@/lib/api-fetch"
-import { readApiError } from "@/lib/api-error"
+import { readApiError, readApiErrorDetail } from "@/lib/api-error"
 
 /**
  * The one shared executor behind every write button in the app (PRD
@@ -87,10 +87,20 @@ import { readApiError } from "@/lib/api-error"
  *  transport failure only" made checkable. */
 export class ApiMutationError extends Error {
   readonly status: number
-  constructor(message: string, status: number) {
+  /**
+   * The parsed refusal body, when there was one.
+   *
+   * Optional and untyped on purpose: almost every caller wants the message and
+   * nothing else, and the handful that need more — the page import's 422 lists
+   * every reference it could not bind — know the shape of their own endpoint's
+   * refusal and can narrow it themselves.
+   */
+  readonly body: unknown
+  constructor(message: string, status: number, body?: unknown) {
     super(message)
     this.name = "ApiMutationError"
     this.status = status
+    this.body = body
   }
 }
 
@@ -272,8 +282,11 @@ export function useApiMutation<TVariables = void, TData = unknown>(
       if (!res.ok) {
         // Rule 2: the server's own words, falling back to "(HTTP
         // <status>)" — never a made-up client-side guess at why.
-        const message = await readApiError(res, `Request failed (HTTP ${res.status})`)
-        throw new ApiMutationError(message, res.status)
+        const { message, body } = await readApiErrorDetail(
+          res,
+          `Request failed (HTTP ${res.status})`,
+        )
+        throw new ApiMutationError(message, res.status, body)
       }
       const parse = optionsRef.current.parse ?? defaultParse<TData>
       const data = await parse(res)

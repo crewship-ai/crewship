@@ -39,9 +39,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -231,18 +229,21 @@ it" is the question an incident asks, and a deleted row cannot answer it.`,
 			return fmt.Errorf("decode response: %w", err)
 		}
 		if len(out.Webhooks) == 0 {
-			fmt.Printf("Page %s has no webhooks.\n", args[0])
-			fmt.Printf("Mint one with: crewship page webhook create %s --panel <panel>\n", args[0])
+			if f.Format != "quiet" {
+				fmt.Printf("Page %s has no webhooks.\n", args[0])
+				fmt.Printf("Mint one with: crewship page webhook create %s --panel <panel>\n", args[0])
+			}
 			return nil
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tPANEL\tSTATUS\tNAME\tLAST FIRED\tFIRES\tISSUED BY")
+		rows := make([][]string, 0, len(out.Webhooks))
 		for _, wh := range out.Webhooks {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+			rows = append(rows, []string{
 				wh.ID, pageDash(wh.Panel), pageWebhookStatus(wh), pageDash(wh.Name),
-				pagePublicWhen(wh.LastFiredAt), wh.FireCount, pageDash(wh.CreatedBy))
+				pagePublicWhen(wh.LastFiredAt), fmt.Sprintf("%d", wh.FireCount), pageDash(wh.CreatedBy),
+			})
 		}
-		return w.Flush()
+		f.Table([]string{"ID", "PANEL", "STATUS", "NAME", "LAST FIRED", "FIRES", "ISSUED BY"}, rows)
+		return nil
 	},
 }
 
