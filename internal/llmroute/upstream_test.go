@@ -54,21 +54,19 @@ func TestResolveUpstream_FromCredential(t *testing.T) {
 
 	t.Run("accepts", func(t *testing.T) {
 		cases := []struct {
-			base                       string
-			wantScheme, wantHost, want string
+			base                                  string
+			wantScheme, wantHost, want, wantQuery string
 		}{
-			{"https://llm.internal.example/v1", "https", "llm.internal.example", "/v1"},
-			{"https://llm.internal.example/v1/", "https", "llm.internal.example", "/v1"},
-			{"https://llm.internal.example", "https", "llm.internal.example", ""},
-			{"https://llm.internal.example/", "https", "llm.internal.example", ""},
+			{"https://llm.internal.example/v1", "https", "llm.internal.example", "/v1", ""},
+			{"https://llm.internal.example/v1/", "https", "llm.internal.example", "/v1", ""},
+			{"https://llm.internal.example", "https", "llm.internal.example", "", ""},
+			{"https://llm.internal.example/", "https", "llm.internal.example", "", ""},
 			// A self-hosted runtime on a private network is plain http by
 			// default; whether the crew may REACH it is the sidecar
 			// allowlist's and the SSRF dialer's decision, not this one.
-			{"http://ollama.lan:11434/v1", "http", "ollama.lan:11434", "/v1"},
-			{"HTTPS://LLM.Internal.Example/v1", "https", "llm.internal.example", "/v1"},
-			// Query and fragment are dropped rather than concatenated onto
-			// every agent request.
-			{"https://llm.internal.example/v1?tenant=a#x", "https", "llm.internal.example", "/v1"},
+			{"http://ollama.lan:11434/v1", "http", "ollama.lan:11434", "/v1", ""},
+			{"HTTPS://LLM.Internal.Example/v1", "https", "llm.internal.example", "/v1", ""},
+			{"https://llm.internal.example/v1?tenant=a#x", "https", "llm.internal.example", "/v1", "tenant=a"},
 		}
 		for _, tc := range cases {
 			t.Run(tc.base, func(t *testing.T) {
@@ -76,7 +74,7 @@ func TestResolveUpstream_FromCredential(t *testing.T) {
 				if err != nil {
 					t.Fatalf("ResolveUpstream(%q): %v", tc.base, err)
 				}
-				if u.Scheme != tc.wantScheme || u.Host != tc.wantHost || u.BasePath != tc.want {
+				if u.Scheme != tc.wantScheme || u.Host != tc.wantHost || u.BasePath != tc.want || u.BaseQuery != tc.wantQuery {
 					t.Errorf("= %+v, want %s://%s%s", u, tc.wantScheme, tc.wantHost, tc.want)
 				}
 			})
@@ -114,6 +112,19 @@ func TestResolveUpstream_FromCredential(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestOutboundQuery(t *testing.T) {
+	tests := []struct{ base, request, want string }{
+		{"", "stream=true", "stream=true"},
+		{"api-version=2026-01-01", "", "api-version=2026-01-01"},
+		{"api-version=2026-01-01", "stream=true", "api-version=2026-01-01&stream=true"},
+	}
+	for _, tc := range tests {
+		if got := OutboundQuery(tc.base, tc.request); got != tc.want {
+			t.Errorf("OutboundQuery(%q,%q) = %q, want %q", tc.base, tc.request, got, tc.want)
+		}
+	}
 }
 
 // TestOutboundPath covers the two halves of the path rewrite: the routing

@@ -68,18 +68,19 @@ type LLMCallObserver func(usage LLMUsage, quota QuotaInfo, mode, plan string)
 // Proxy is an HTTP forward proxy that intercepts agent outbound requests,
 // injects LLM API credentials, and blocks non-allowed domains.
 type Proxy struct {
-	credStore    *CredStore
-	allowlist    *DomainAllowlist
-	scrubber     *scrubber.Scrubber
-	logger       *slog.Logger
-	transport    http.RoundTripper
-	freeMode     bool
-	allowPrivate bool // #961: permit RFC1918/loopback dial targets (crew opt-in); link-local/metadata always blocked
-	onEgress     EgressObserver
-	onLLMCall    LLMCallObserver
-	billingMode  string // "metered" | "flat_rate" | "" — set from env at startup
-	subPlan      string // human label for flat-rate (e.g. "Anthropic Max 20×")
-	buildHash    string // #1008: content hash of the running sidecar binary, advertised on /health
+	credStore          *CredStore
+	allowlist          *DomainAllowlist
+	scrubber           *scrubber.Scrubber
+	logger             *slog.Logger
+	transport          http.RoundTripper
+	freeMode           bool
+	allowPrivate       bool // #961: permit RFC1918/loopback dial targets (crew opt-in); link-local/metadata always blocked
+	onEgress           EgressObserver
+	onLLMCall          LLMCallObserver
+	resolveLLMIdentity func(*http.Request) (agentID, configFingerprint string, present, ok bool)
+	billingMode        string // "metered" | "flat_rate" | "" — set from env at startup
+	subPlan            string // human label for flat-rate (e.g. "Anthropic Max 20×")
+	buildHash          string // #1008: content hash of the running sidecar binary, advertised on /health
 	// policyDomainsHash (#1160) is a hash of ONLY the per-crew policy
 	// domains (restricted mode's cfg.NetworkPolicy.AllowedDomains), NEVER
 	// the DefaultAllowedDomains merged into `allowlist` — see the doc
@@ -95,6 +96,10 @@ type Proxy struct {
 	// configured (a crew-less/standalone sidecar) — the server never
 	// false-classifies an empty fingerprint as orphaned.
 	tokenFP string
+	// configFingerprint is the keyed identity of the exact credential set. It
+	// lets the orchestrator detect rotation/addition/removal
+	// without exposing a plain hash of credential material.
+	configFingerprint string
 
 	// dnsCache, dnsResolve, and dialer back the shared resolve-then-pin SSRF
 	// dialer (#961, cache added #1081). ONE instance lives on the Proxy and is
@@ -129,6 +134,10 @@ type ProxyConfig struct {
 	// OnLLMCall is invoked after a successful LLM-provider call, with the
 	// parsed usage and quota signal. Optional. See LLMCallObserver.
 	OnLLMCall LLMCallObserver
+	// ResolveLLMIdentity authenticates the per-agent token embedded in the
+	// disposable provider key before that key is overwritten. The returned
+	// fingerprint must match this sidecar's keyed credential-set fingerprint.
+	ResolveLLMIdentity func(*http.Request) (agentID, configFingerprint string, present, ok bool)
 	// BillingMode and SubscriptionPlan come from the agent container's
 	// CREWSHIP_BILLING_MODE / CREWSHIP_SUBSCRIPTION_PLAN env vars (set by
 	// orchestrator/exec_env.go based on credential type). Pass-through
@@ -148,6 +157,9 @@ type ProxyConfig struct {
 	// as token_fp so the server can detect a container orphaned by a master
 	// rotation. Empty = no IPC token configured (never flagged as orphaned).
 	TokenFP string
+	// ConfigFingerprint is an HMAC produced by crewshipd and echoed on health.
+	// The sidecar never computes it and therefore never needs the HMAC key.
+	ConfigFingerprint string
 	// Transport overrides the outbound RoundTripper the proxy hands every
 	// forwarded request to (handleHTTP, handleReverseProxy). nil (the
 	// default) builds the real resolve-then-pin SSRF-guarded *http.Transport
@@ -163,22 +175,24 @@ type ProxyConfig struct {
 // NewProxy creates a forward proxy with credential injection.
 func NewProxy(cfg ProxyConfig) *Proxy {
 	p := &Proxy{
-		credStore:         cfg.CredStore,
-		allowlist:         cfg.Allowlist,
-		scrubber:          cfg.Scrubber,
-		logger:            cfg.Logger,
-		freeMode:          cfg.FreeMode,
-		allowPrivate:      cfg.AllowPrivate,
-		onEgress:          cfg.OnEgress,
-		onLLMCall:         cfg.OnLLMCall,
-		billingMode:       cfg.BillingMode,
-		subPlan:           cfg.SubscriptionPlan,
-		buildHash:         cfg.BuildHash,
-		policyDomainsHash: cfg.PolicyDomainsHash,
-		tokenFP:           cfg.TokenFP,
-		dnsCache:          newDNSPositiveCache(ssrfDNSCacheTTL),
-		dnsResolve:        net.DefaultResolver.LookupIPAddr,
-		dialer:            &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second},
+		credStore:          cfg.CredStore,
+		allowlist:          cfg.Allowlist,
+		scrubber:           cfg.Scrubber,
+		logger:             cfg.Logger,
+		freeMode:           cfg.FreeMode,
+		allowPrivate:       cfg.AllowPrivate,
+		onEgress:           cfg.OnEgress,
+		onLLMCall:          cfg.OnLLMCall,
+		resolveLLMIdentity: cfg.ResolveLLMIdentity,
+		billingMode:        cfg.BillingMode,
+		subPlan:            cfg.SubscriptionPlan,
+		buildHash:          cfg.BuildHash,
+		policyDomainsHash:  cfg.PolicyDomainsHash,
+		tokenFP:            cfg.TokenFP,
+		configFingerprint:  cfg.ConfigFingerprint,
+		dnsCache:           newDNSPositiveCache(ssrfDNSCacheTTL),
+		dnsResolve:         net.DefaultResolver.LookupIPAddr,
+		dialer:             &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second},
 	}
 	if cfg.Transport != nil {
 		p.transport = cfg.Transport
@@ -408,7 +422,13 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// credential-era provider is reached by path prefix, not by host.
 	spec, isLLM := llmroute.MatchHost(strings.ToLower(stripPort(host)))
 	provider := ""
+	actorID := ""
 	if isLLM {
+		var allowed bool
+		actorID, allowed = p.authorizeLLMRoute(w, r)
+		if !allowed {
+			return
+		}
 		provider = spec.ID
 		cred := p.credStore.Select(ProviderType(spec.ID))
 		if cred == nil {
@@ -476,7 +496,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	p.copyAndObserveLLM(w, resp, spec.BodyCodec, spec.LedgerProvider)
+	p.copyAndObserveLLM(w, resp, spec.BodyCodec, spec.LedgerProvider, actorID)
 }
 
 // handleConnect handles HTTPS CONNECT tunnel requests.
@@ -584,15 +604,16 @@ func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
 // restart-skip and the stale-sidecar / orphan-token checks all read it, and two
 // tests assert on raw substrings). provider_creds is appended last.
 type healthPayload struct {
-	Status         string         `json:"status"`
-	AnthropicCreds int            `json:"anthropic_creds"`
-	OpenAICreds    int            `json:"openai_creds"`
-	GoogleCreds    int            `json:"google_creds"`
-	NetworkMode    string         `json:"network_mode"`
-	SidecarHash    string         `json:"sidecar_hash"`
-	DomainsHash    string         `json:"domains_hash"`
-	TokenFP        string         `json:"token_fp"`
-	ProviderCreds  map[string]int `json:"provider_creds"`
+	Status            string         `json:"status"`
+	AnthropicCreds    int            `json:"anthropic_creds"`
+	OpenAICreds       int            `json:"openai_creds"`
+	GoogleCreds       int            `json:"google_creds"`
+	NetworkMode       string         `json:"network_mode"`
+	SidecarHash       string         `json:"sidecar_hash"`
+	DomainsHash       string         `json:"domains_hash"`
+	TokenFP           string         `json:"token_fp"`
+	ProviderCreds     map[string]int `json:"provider_creds"`
+	ConfigFingerprint string         `json:"config_fingerprint,omitempty"`
 }
 
 // writeHealth emits the /health payload. Credential counts come from ONE
@@ -625,15 +646,16 @@ func (p *Proxy) writeHealth(w http.ResponseWriter) {
 	}
 
 	body, err := json.Marshal(healthPayload{
-		Status:         "ok",
-		AnthropicCreds: legacy["anthropic_creds"],
-		OpenAICreds:    legacy["openai_creds"],
-		GoogleCreds:    legacy["google_creds"],
-		NetworkMode:    networkMode,
-		SidecarHash:    p.buildHash,
-		DomainsHash:    p.policyDomainsHash,
-		TokenFP:        p.tokenFP,
-		ProviderCreds:  perProvider,
+		Status:            "ok",
+		AnthropicCreds:    legacy["anthropic_creds"],
+		OpenAICreds:       legacy["openai_creds"],
+		GoogleCreds:       legacy["google_creds"],
+		NetworkMode:       networkMode,
+		SidecarHash:       p.buildHash,
+		DomainsHash:       p.policyDomainsHash,
+		TokenFP:           p.tokenFP,
+		ProviderCreds:     perProvider,
+		ConfigFingerprint: p.configFingerprint,
 	})
 	if err != nil {
 		// Unreachable: every field is a string/int/map[string]int. Fail loudly
@@ -665,6 +687,10 @@ func (p *Proxy) writeHealth(w http.ResponseWriter) {
 // then-pin SSRF guard and the #1139 shared DNS cache apply identically to
 // every provider — no provider gets a weaker egress path than Anthropic.
 func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s llmroute.Spec) {
+	actorID, allowed := p.authorizeLLMRoute(w, r)
+	if !allowed {
+		return
+	}
 	cred := p.credStore.Select(ProviderType(s.ID))
 	if cred == nil && s.RequireCredential {
 		p.logger.Error("no credential available for reverse proxy", "provider", s.ID, "path", r.URL.Path)
@@ -729,6 +755,7 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	outReq.URL.Host = up.Host
 	outReq.Host = up.Host
 	outReq.URL.Path = llmroute.OutboundPath(s, up, outReq.URL.Path)
+	outReq.URL.RawQuery = llmroute.OutboundQuery(up.BaseQuery, outReq.URL.RawQuery)
 	if s.StripPrefix || up.BasePath != "" {
 		// RawPath is an optional escaped hint; clearing it makes URL.String()
 		// re-derive the request-target from the (now-rewritten) Path so the
@@ -763,17 +790,52 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	p.copyAndObserveLLM(w, resp, s.BodyCodec, s.LedgerProvider)
+	p.copyAndObserveLLM(w, resp, s.BodyCodec, s.LedgerProvider, actorID)
+}
+
+// authorizeLLMRoute authenticates the disposable provider key before the
+// CredStore overwrites it. Once a sidecar advertises a keyed configuration,
+// absence is not a legacy fallback: every process in a shared crew container
+// can reach loopback, so accepting a token-less request would let one agent
+// deliberately consume another agent's currently-loaded provider credential.
+func (p *Proxy) authorizeLLMRoute(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if p.resolveLLMIdentity == nil {
+		if p.configFingerprint != "" {
+			http.Error(w, "sidecar route identity unavailable", http.StatusServiceUnavailable)
+			return "", false
+		}
+		return "", true
+	}
+
+	actorID, routeFingerprint, present, ok := p.resolveLLMIdentity(r)
+	if !present {
+		if p.configFingerprint != "" {
+			http.Error(w, "missing agent route token", http.StatusForbidden)
+			return "", false
+		}
+		return "", true
+	}
+	if !ok {
+		http.Error(w, "invalid agent route token", http.StatusForbidden)
+		return "", false
+	}
+	if p.configFingerprint != "" && routeFingerprint != p.configFingerprint {
+		// A concurrent run can outlive the sidecar instance it started. Once
+		// another agent restarts the shared sidecar with a different credential
+		// set, fail closed instead of silently sending this agent's prompt to the
+		// other agent's endpoint/key (#2052).
+		http.Error(w, "sidecar credential configuration changed; retry the run", http.StatusServiceUnavailable)
+		return "", false
+	}
+	return actorID, true
 }
 
 // copyAndObserveLLM streams the upstream response body to the client and,
-// when the upstream is a known LLM provider returning a non-streaming JSON
-// body, also parses usage / quota and fires the OnLLMCall observer.
+// when the upstream is a known LLM provider returning JSON or SSE, also parses
+// usage / quota and fires the OnLLMCall observer.
 //
-// Streaming responses (text/event-stream) and non-LLM hosts skip the buffer
-// path and pass through unmodified — buffering an SSE stream would defeat
-// its low-latency UX, and we don't want to pay the buffer cost on generic
-// HTTPS traffic that has nothing to do with billing.
+// SSE is tee'd while it streams, so the client receives each byte immediately;
+// parsing happens only after EOF. Non-LLM hosts skip the buffer path entirely.
 //
 // Body buffering is bounded by maxRequestBodyBytes (10 MB) — the same cap
 // that protects the request path, applied here to the response so a
@@ -784,7 +846,7 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 // `ledgerProvider` is the lowercase paymaster rate-card key
 // (Spec.LedgerProvider) stamped onto the usage row. OpenRouter is why they
 // are separate — OpenAI-shaped bodies, its own rate card.
-func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, codec, ledgerProvider string) {
+func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, codec, ledgerProvider, actorID string) {
 	// Bail out fast for non-LLM traffic or when nobody's listening for usage.
 	if ledgerProvider == "" || p.onLLMCall == nil {
 		_, _ = io.Copy(w, resp.Body)
@@ -793,13 +855,20 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 
 	contentType := resp.Header.Get("Content-Type")
 	if !isJSONResponse(contentType) {
-		// Streaming (SSE) or unknown shape — pass through, only fire quota
-		// signal from headers so EnforceQuota still gets the most-restrictive
-		// reading even when we can't see the body.
-		_, _ = io.Copy(w, resp.Body)
+		var usage LLMUsage
+		if strings.HasPrefix(strings.ToLower(contentType), "text/event-stream") {
+			buf := &boundedBuffer{cap: maxRequestBodyBytes}
+			_, _ = io.Copy(w, io.TeeReader(resp.Body, buf))
+			usage = parseLLMUsageSSE(codec, buf.String())
+		} else {
+			_, _ = io.Copy(w, resp.Body)
+		}
+		usage.AgentID = actorID
+		usage.Provider = ledgerProvider
 		quota := parseQuotaInfo(resp.Header, resp.StatusCode)
-		if quota.RemainingPct > 0 || quota.HadStatus429 {
-			p.onLLMCall(LLMUsage{Provider: ledgerProvider}, quota, p.billingMode, p.subPlan)
+		if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CachedInputTokens != 0 ||
+			usage.CacheCreationTokens != 0 || quota.Window != "" || quota.HadStatus429 {
+			p.onLLMCall(usage, quota, p.billingMode, p.subPlan)
 		}
 		return
 	}
@@ -809,9 +878,8 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	// io.MultiWriter with a bytes.Buffer would buffer fully before flushing,
 	// which surfaces as latency to the agent — io.TeeReader is the right
 	// shape: read once, write twice.
-	limited := http.MaxBytesReader(w, resp.Body, maxRequestBodyBytes)
 	buf := &boundedBuffer{cap: maxRequestBodyBytes}
-	tee := io.TeeReader(limited, buf)
+	tee := io.TeeReader(resp.Body, buf)
 	if _, err := io.Copy(w, tee); err != nil {
 		// Client disconnected or upstream cut off mid-stream. We still try
 		// to parse whatever we've got — partial JSON returns zero usage,
@@ -820,6 +888,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	}
 
 	usage := parseLLMUsage(codec, buf.String())
+	usage.AgentID = actorID
 	usage.Provider = ledgerProvider
 	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 	p.onLLMCall(usage, quota, p.billingMode, p.subPlan)

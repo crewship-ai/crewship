@@ -45,3 +45,21 @@ func TestRegisterCredentialLiterals_RedactsHeaderValuesToo(t *testing.T) {
 		t.Errorf("header value survived scrubbing: %q — a header-authenticated endpoint's secret is credential material", got)
 	}
 }
+
+// A custom-header credential does not have to carry a bearer token. The token
+// length guard must therefore govern only the token pattern, not skip the
+// independent header patterns that follow it.
+func TestRegisterCredentialLiterals_RedactsHeaderOnlyCredential(t *testing.T) {
+	const headerValue = "header-only-secret-4d7e2f9a1c3b5e8f"
+
+	sc := scrubber.New()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	registerCredentialLiterals(sc, []Credential{{
+		ID:      "cred-header-only",
+		Headers: map[string]string{"X-Api-Key": headerValue},
+	}}, logger)
+
+	if got := sc.Scrub("header=" + headerValue); strings.Contains(got, headerValue) {
+		t.Fatalf("header-only secret survived scrubbing: %q", got)
+	}
+}

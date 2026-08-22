@@ -590,7 +590,7 @@ func TestCovCopyAndObserveLLM_NoObserverPassthrough(t *testing.T) {
 
 	resp := jsonUpstreamResponse(http.StatusOK, "application/json", `{"ok":true}`, nil)
 	w := httptest.NewRecorder()
-	proxy.copyAndObserveLLM(w, resp, "anthropic", "anthropic")
+	proxy.copyAndObserveLLM(w, resp, "anthropic", "anthropic", "")
 	if w.Body.String() != `{"ok":true}` {
 		t.Errorf("body = %q", w.Body.String())
 	}
@@ -618,7 +618,7 @@ func TestCovCopyAndObserveLLM_SSEQuotaSignal(t *testing.T) {
 		"anthropic-ratelimit-requests-limit":     "100",
 	})
 	w := httptest.NewRecorder()
-	proxy.copyAndObserveLLM(w, resp, "anthropic", "anthropic")
+	proxy.copyAndObserveLLM(w, resp, "anthropic", "anthropic", "")
 	if w.Body.String() != "data: {}\n\n" {
 		t.Errorf("SSE body = %q", w.Body.String())
 	}
@@ -635,12 +635,30 @@ func TestCovCopyAndObserveLLM_SSEQuotaSignal(t *testing.T) {
 
 	// SSE response WITHOUT quota headers and no 429 → observer must NOT fire.
 	resp2 := jsonUpstreamResponse(http.StatusOK, "text/event-stream", "data: {}\n\n", nil)
-	proxy.copyAndObserveLLM(httptest.NewRecorder(), resp2, "anthropic", "anthropic")
+	proxy.copyAndObserveLLM(httptest.NewRecorder(), resp2, "anthropic", "anthropic", "")
 	mu.Lock()
 	if fired != 1 {
 		t.Errorf("observer fired on quota-less SSE response")
 	}
 	mu.Unlock()
+}
+
+func TestCovCopyAndObserveLLM_SSEUsageAndActor(t *testing.T) {
+	var got LLMUsage
+	proxy := NewProxy(ProxyConfig{
+		CredStore: NewCredStore(), Allowlist: NewDomainAllowlist(nil), Logger: covLogger(),
+		OnLLMCall: func(u LLMUsage, _ QuotaInfo, _, _ string) { got = u },
+	})
+	body := `data: {"type":"response.completed","response":{"model":"gpt-5.5","usage":{"input_tokens":12,"output_tokens":3}}}` + "\n\n"
+	resp := jsonUpstreamResponse(http.StatusOK, "text/event-stream", body, nil)
+	w := httptest.NewRecorder()
+	proxy.copyAndObserveLLM(w, resp, "openai", "openai", "agent-7")
+	if w.Body.String() != body {
+		t.Fatalf("SSE pass-through changed: %q", w.Body.String())
+	}
+	if got.AgentID != "agent-7" || got.Provider != "openai" || got.InputTokens != 12 || got.OutputTokens != 3 {
+		t.Fatalf("observed usage = %+v", got)
+	}
 }
 
 // --- boundedBuffer ---

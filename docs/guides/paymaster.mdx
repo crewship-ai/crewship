@@ -135,7 +135,7 @@ Three values, written to every row:
 
 - **`precise`** — provider returned a usage block we trust verbatim (e.g. Anthropic non-streaming).
 - **`estimate`** — we computed it from `pricing.go` rates against parsed token counts.
-- **`unknown`** — flat-rate row, or we couldn't parse the response body (streaming with no body buffer, opaque proxy).
+- **`unknown`** — flat-rate row, or we couldn't parse the response body (for example an opaque proxy response or a stream with no terminal usage event).
 
 The dashboard surfaces these as badges next to \$ figures. Aggregate KPIs deliberately do **not** mix confidences — when a rollup spans multiple bands, the lowest band wins so the operator sees the floor of certainty, not the average.
 
@@ -369,12 +369,12 @@ What the sidecar can and cannot see:
 | Traffic shape | Token counts | Quota signals |
 |---|---|---|
 | Non-streaming JSON (Anthropic / OpenAI / Google) | **yes** — per-provider body parser | **yes** |
-| Streaming (`text/event-stream`) | **no** — body is opaque without a parallel SSE parser | **yes** — headers are always present |
+| Streaming (`text/event-stream`) | **yes, when the stream emits usage** — the bounded SSE parser understands Anthropic, OpenAI Responses/Chat, and Google event shapes | **yes** — headers are always present |
 | Pinned-cert TLS CONNECT (Claude Code Max OAuth tunnel) | **no** — body is end-to-end encrypted | **no** |
 
 For pinned-cert tunnels the sidecar emits a "credential was used" attribution row (`billing_mode=flat_rate`, no tokens, `cost_confidence=unknown`) so the Subscriptions panel still shows usage. We deliberately do not MITM with a custom CA — CLIs with pinned certs would reject it, and the honest answer is that the body is private.
 
-Body buffering uses `io.TeeReader` with a **10 MB cap** so streaming UX is preserved while a pathological upstream cannot OOM the sidecar. Reads beyond the cap pass through to the agent unmodified but are not parsed.
+Body observation uses `io.TeeReader` with a **10 MB cap** so streaming UX is preserved while a pathological upstream cannot OOM the sidecar. Both JSON and SSE responses continue to pass through after the cap; only bytes beyond it are omitted from usage parsing.
 
 Look for the `llm.call` journal entry: if it exists, the call was metered. If you see `exec.command` with `claude` and no `llm.call`, the OAuth tunnel was used and the row will land as flat-rate.
 

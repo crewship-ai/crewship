@@ -3,8 +3,11 @@ package sidecar
 import (
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
 // #1059: actingAgentID's legacy (token-less) fallback returned ("", true) when
@@ -33,5 +36,57 @@ func TestActingAgentID_FailsClosedWithoutIdentity(t *testing.T) {
 	s3 := &Server{logger: silent, ipc: &IPCConfig{AgentID: "boot-agent"}}
 	if id, ok := s3.actingAgentID(req); !ok || id != "boot-agent" {
 		t.Errorf("legacy fallback: got (%q,%v), want (\"boot-agent\",true)", id, ok)
+	}
+}
+
+func TestLLMRouteIdentity_AllProviderAuthShapes(t *testing.T) {
+	const routeKey = "crew-bound-route-key"
+	token := internaltoken.DeriveLLMRouteToken(routeKey, "agent-a")
+	const fingerprint = "abcdef123456"
+	s := &Server{
+		routeAuth: &RouteAuth{Key: routeKey},
+	}
+	tests := []struct {
+		name  string
+		apply func(*http.Request)
+	}{
+		{"openai bearer", func(r *http.Request) {
+			r.Header.Set("Authorization", "Bearer sk-dummy."+token+internaltoken.RouteFingerprintDelimiter+fingerprint)
+		}},
+		{"anthropic header", func(r *http.Request) {
+			r.Header.Set("x-api-key", "sk-ant-dummy."+token+internaltoken.RouteFingerprintDelimiter+fingerprint)
+		}},
+		{"google header", func(r *http.Request) {
+			r.Header.Set("x-goog-api-key", "dummy."+token+internaltoken.RouteFingerprintDelimiter+fingerprint)
+		}},
+		{"google query", func(r *http.Request) {
+			q := r.URL.Query()
+			q.Set("key", "dummy."+token+internaltoken.RouteFingerprintDelimiter+fingerprint)
+			r.URL.RawQuery = q.Encode()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "http://127.0.0.1/llm", nil)
+			tc.apply(req)
+			id, fp, present, ok := s.llmRouteIdentity(req)
+			if !present || !ok || id != "agent-a" || fp != fingerprint {
+				t.Fatalf("identity = (%q,%q,%v,%v), want (agent-a,%s,true,true)", id, fp, present, ok, fingerprint)
+			}
+		})
+	}
+}
+
+func TestLLMRouteIdentity_DoesNotRequireIPC(t *testing.T) {
+	const routeKey = "crew-bound-route-key"
+	token := internaltoken.DeriveLLMRouteToken(routeKey, "solo")
+	const fingerprint = "abcdef123456"
+	s := &Server{routeAuth: &RouteAuth{Key: routeKey}}
+	req := httptest.NewRequest("POST", "http://127.0.0.1/llm", nil)
+	req.Header.Set("Authorization", "Bearer dummy."+token+internaltoken.RouteFingerprintDelimiter+fingerprint)
+
+	id, fp, present, ok := s.llmRouteIdentity(req)
+	if !present || !ok || id != "solo" || fp != fingerprint {
+		t.Fatalf("identity = (%q,%q,%v,%v), want (solo,%s,true,true)", id, fp, present, ok, fingerprint)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llmroute"
@@ -559,6 +560,44 @@ const sidecarProxyOrigin = "http://127.0.0.1:9119"
 // reason as the dummy ANTHROPIC_API_KEY / GEMINI_API_KEY above.
 const routedProviderDummyKey = "dummy-crewship-sidecar"
 
+// bindLLMRouteToken embeds the already-agent-visible, HMAC-authenticated
+// CREWSHIP_AGENT_TOKEN into each provider's dummy API key. The sidecar replaces
+// the dummy before forwarding, but first uses the embedded token to attribute
+// cost and to reject a stale concurrent run whose shared sidecar has since
+// restarted for another agent's credential set.
+//
+// With an empty token callers leave the legacy byte shape untouched. This is
+// important for deployments that explicitly run without internal auth and for
+// the byte-identity fixtures which pin pre-existing provider behaviour.
+func bindLLMRouteToken(env []string, token, configFingerprint string) []string {
+	if token == "" || configFingerprint == "" {
+		return env
+	}
+	routeIdentity := token + internaltoken.RouteFingerprintDelimiter + configFingerprint
+	replacements := map[string]string{
+		"ANTHROPIC_API_KEY": "sk-ant-dummy-crewship-sidecar",
+		"OPENAI_API_KEY":    "sk-dummy-crewship-sidecar",
+		"GOOGLE_API_KEY":    "dummy-crewship-sidecar",
+		"GEMINI_API_KEY":    "dummy-crewship-sidecar",
+	}
+	for i, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if dummy, found := replacements[name]; found && value == dummy {
+			env[i] = name + "=" + dummy + "." + routeIdentity
+			continue
+		}
+		if name == "OPENCODE_CONFIG_CONTENT" {
+			old := `"apiKey":"` + routedProviderDummyKey + `"`
+			newValue := `"apiKey":"` + routedProviderDummyKey + "." + routeIdentity + `"`
+			env[i] = name + "=" + strings.ReplaceAll(value, old, newValue)
+		}
+	}
+	return env
+}
+
 // localEndpointModel reports whether this run targets the operator's resolved
 // OpenAI-compatible endpoint, returning the model id with the ollama/ prefix
 // stripped. It is the #944 activation condition on its own — separate from
@@ -671,10 +710,10 @@ func credentialRoutesTo(cred Credential, s llmroute.Spec) bool {
 // unless the credential the sidecar would need is demonstrably on its way there.
 // An unrouted run is byte-identical to its pre-phase-2 self.
 func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider, bool) {
-	// Only OpenCode has a config surface that can be pointed at the sidecar per
-	// provider. Codex and Gemini are routed by their own *_BASE_URL vars above;
-	// Cursor and Factory have no override at all (#1030 residual).
-	if !viaSidecar || req.CLIAdapter != "OPENCODE" {
+	// OpenCode and Codex both expose a per-provider base-URL surface. Gemini is
+	// routed only by its global GOOGLE_GEMINI_BASE_URL above; Cursor and Factory
+	// have no endpoint override at all (#1030 residual).
+	if !viaSidecar || (req.CLIAdapter != "OPENCODE" && req.CLIAdapter != "CODEX_CLI") {
 		return routedProvider{}, false
 	}
 
@@ -738,7 +777,14 @@ func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider
 	// A provider with a reserved /llm/… route of its own, selected the way
 	// OpenCode selects providers: by the model string's prefix.
 	prefix, model, found := strings.Cut(req.LLMModel, "/")
-	if !found || prefix == "" || model == "" {
+	if !found {
+		// API clients may send provider and model as separate fields. OpenCode's
+		// command builder qualifies that pair later, but routing is decided before
+		// command construction; consume the same pair here so a pasted credential
+		// does not depend on the UI having duplicated the provider into LLMModel.
+		prefix, model = strings.TrimSpace(req.LLMProvider), strings.TrimSpace(req.LLMModel)
+	}
+	if prefix == "" || model == "" {
 		return routedProvider{}, false
 	}
 	s, ok := llmroute.Lookup(strings.ToUpper(prefix))

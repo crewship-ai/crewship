@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -989,7 +990,13 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 	}
 
 	var env []string
+	req.sidecarActive = sidecarEnabled
 	if sidecarEnabled {
+		agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger)
+		internalAPIToken := sidecarIPCToken(ipcToken, req.WorkspaceID, req.CrewID, o.logger)
+		routeKey := internaltoken.DeriveLLMRouteKey(ipcToken, req.WorkspaceID, req.CrewID)
+		llmRouteToken := internaltoken.DeriveLLMRouteToken(routeKey, req.AgentID)
+		configFingerprint := sidecarConfigFingerprint(ipcToken, req.Credentials)
 		env = BuildEnvVarsSidecar(*req, keeperEnabled)
 		// #812: hand THIS agent its own per-agent bearer token. The agent
 		// presents it (Authorization: Bearer $CREWSHIP_AGENT_TOKEN) on sidecar
@@ -998,8 +1005,11 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// the token instead of a spoofable `from`/slug. Fail-closed empty when
 		// internal auth is unconfigured; the sidecar then falls back to the
 		// #796 membership-validated behaviour.
-		if agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger); agentTok != "" {
+		if agentTok != "" {
 			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
+		}
+		if llmRouteToken != "" {
+			env = bindLLMRouteToken(env, llmRouteToken, configFingerprint)
 		}
 		// Surface the credential-isolation gap: any plaintext credential that
 		// lands in the agent env (readable by the agent process). Actionable
@@ -1055,7 +1065,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
-				Token:       sidecarIPCToken(ipcToken, req.WorkspaceID, req.CrewID, o.logger),
+				Token:       internalAPIToken,
 				AgentID:     req.AgentID,
 				AgentSlug:   req.AgentSlug,
 				CrewID:      req.CrewID,
@@ -1067,6 +1077,10 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				// missing from the sidecar's token→identity roster.
 				AgentToken: agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger),
 			}
+		}
+		var routeAuth *SidecarRouteAuth
+		if routeKey != "" {
+			routeAuth = &SidecarRouteAuth{Key: routeKey}
 		}
 		// Convert crew members to sidecar format for target validation.
 		// #812: mint each member's per-agent token so the sidecar's roster can
@@ -1144,7 +1158,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				// operator-watchable channel (#1160), not just stdout.
 				o.emitStaleSidecarSignal(ctx, *req, health.SidecarHash)
 			}
-			if !sidecarNeedsRestart(health, desiredMode, desiredDomains) {
+			if !sidecarNeedsRestart(health, desiredMode, desiredDomains, configFingerprint) {
 				// #1160: restricted mode used to restart UNCONDITIONALLY here
 				// ("the domain allowlist may differ between agents, so we
 				// always restart to pick up the latest set") — with multiple
@@ -1166,7 +1180,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 						memoryPrepPaths(memoryCfg, nil), o.logger)
 				}
 			} else {
-				o.logger.Warn("sidecar network policy changed, restarting",
+				o.logger.Warn("sidecar runtime configuration changed, restarting",
 					"running_mode", health.NetworkMode, "desired_mode", desiredMode)
 				// Kill the existing sidecar and WAIT for it to actually exit
 				// before startSidecar launches a replacement (#1160): pkill
@@ -1207,7 +1221,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 			}
 		}
 		if needStart {
-			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, networkPolicy, req.MCPServers, o.logger); err != nil {
+			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, routeAuth, sidecarMembers, networkPolicy, req.MCPServers, configFingerprint, o.logger); err != nil {
 				o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
 				o.failRun(ctx, *req, runID, "error")
 				return nil, fmt.Errorf("start sidecar: %w", err)

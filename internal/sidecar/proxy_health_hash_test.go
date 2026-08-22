@@ -81,6 +81,18 @@ func TestHealthTokenFPEmptyWhenUnset(t *testing.T) {
 	}
 }
 
+func TestHealthReportsConfigFingerprintOnlyWhenConfigured(t *testing.T) {
+	proxy := newTestProxy(nil, []string{"localhost"})
+	proxy.configFingerprint = "a1b2c3d4e5f6"
+	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+	if body := w.Body.String(); !strings.Contains(body, `"config_fingerprint":"a1b2c3d4e5f6"`) {
+		t.Fatalf("health body missing config fingerprint: %q", body)
+	}
+}
+
 // TestSelfExeHashStable confirms selfExeHash returns a stable, non-empty digest
 // (it hashes the running executable once and memoizes).
 func TestSelfExeHashStable(t *testing.T) {

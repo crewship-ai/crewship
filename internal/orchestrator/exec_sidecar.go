@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -704,6 +705,10 @@ type sidecarHealth struct {
 	// non-empty mismatch means this container was orphaned by a master rotation
 	// and now holds a permanently-rejected token.
 	TokenFP string `json:"token_fp"`
+	// ConfigFingerprint identifies the exact credential set the running
+	// sidecar received. It is keyed, not a plain secret hash, so the
+	// loopback health endpoint cannot become an offline credential oracle.
+	ConfigFingerprint string `json:"config_fingerprint"`
 }
 
 // sidecarHashReporter is the optional capability a ContainerProvider implements
@@ -829,8 +834,11 @@ func DomainsHash(domains []string) string {
 // pre-#1160 sidecar that doesn't report domains_hash) can't prove the
 // allowlist is unchanged, so it fails toward the old, safe-but-noisier
 // behaviour rather than risk skipping a genuinely-needed restart.
-func sidecarNeedsRestart(health *sidecarHealth, desiredMode string, desiredDomains []string) bool {
+func sidecarNeedsRestart(health *sidecarHealth, desiredMode string, desiredDomains []string, desiredConfigFingerprint string) bool {
 	if health.NetworkMode != desiredMode {
+		return true
+	}
+	if desiredConfigFingerprint != "" && health.ConfigFingerprint != desiredConfigFingerprint {
 		return true
 	}
 	if desiredMode != "restricted" {
@@ -873,6 +881,14 @@ type SidecarIPCConfig struct {
 	AgentToken string `json:"agent_token,omitempty"`
 }
 
+// SidecarRouteAuth lets the sidecar validate any agent's derived LLM route
+// token without receiving the process-wide master or a complete crew roster.
+// Key is independently scoped to this workspace/crew and cannot authorize
+// internal API calls.
+type SidecarRouteAuth struct {
+	Key string `json:"key"`
+}
+
 // SidecarCrewMember describes a crew member accessible to lead agents for assignment.
 type SidecarCrewMember struct {
 	ID        string `json:"id"`
@@ -902,9 +918,11 @@ func startSidecar(
 	creds []Credential,
 	memoryCfg *SidecarMemoryConfig,
 	ipcCfg *SidecarIPCConfig,
+	routeAuth *SidecarRouteAuth,
 	crewMembers []SidecarCrewMember,
 	networkPolicy *SidecarNetworkPolicy,
 	mcpServers []MCPServerConfig,
+	configFingerprint string,
 	logger *slog.Logger,
 ) error {
 	sc := buildSidecarCreds(creds, logger)
@@ -922,12 +940,14 @@ func startSidecar(
 		Credential  *MCPCredential    `json:"credential,omitempty"`
 	}
 	type sidecarInput struct {
-		Credentials   []sidecarCred         `json:"credentials"`
-		Memory        *SidecarMemoryConfig  `json:"memory,omitempty"`
-		IPC           *SidecarIPCConfig     `json:"ipc,omitempty"`
-		CrewMembers   []SidecarCrewMember   `json:"crew_members,omitempty"`
-		NetworkPolicy *SidecarNetworkPolicy `json:"network_policy,omitempty"`
-		MCPServers    []sidecarMCPServer    `json:"mcp_servers,omitempty"`
+		Credentials       []sidecarCred         `json:"credentials"`
+		Memory            *SidecarMemoryConfig  `json:"memory,omitempty"`
+		IPC               *SidecarIPCConfig     `json:"ipc,omitempty"`
+		RouteAuth         *SidecarRouteAuth     `json:"route_auth,omitempty"`
+		CrewMembers       []SidecarCrewMember   `json:"crew_members,omitempty"`
+		NetworkPolicy     *SidecarNetworkPolicy `json:"network_policy,omitempty"`
+		MCPServers        []sidecarMCPServer    `json:"mcp_servers,omitempty"`
+		ConfigFingerprint string                `json:"config_fingerprint,omitempty"`
 	}
 
 	// Only pass HTTP servers to sidecar — stdio servers are handled
@@ -946,12 +966,14 @@ func startSidecar(
 	}
 
 	input := sidecarInput{
-		Credentials:   sc,
-		Memory:        memoryCfg,
-		IPC:           ipcCfg,
-		CrewMembers:   crewMembers,
-		NetworkPolicy: networkPolicy,
-		MCPServers:    mcpInput,
+		Credentials:       sc,
+		Memory:            memoryCfg,
+		IPC:               ipcCfg,
+		RouteAuth:         routeAuth,
+		CrewMembers:       crewMembers,
+		NetworkPolicy:     networkPolicy,
+		MCPServers:        mcpInput,
+		ConfigFingerprint: configFingerprint,
 	}
 
 	credsJSON, err := json.Marshal(input)
@@ -1050,6 +1072,44 @@ type sidecarCred struct {
 	// sidecar sees exactly the bytes it saw before these fields existed.
 	BaseURL string            `json:"base_url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// sidecarConfigFingerprint returns a secret-safe identity for the exact
+// credential configuration a run needs. The master internal token is the
+// HMAC key and never enters the container; /health exposes only the result, so
+// even a low-entropy custom-header value cannot be guessed offline. Agent
+// identity is deliberately separate: a route token is self-verifying under the
+// crew-bound route key, so agents with the same credentials can reuse safely.
+//
+// Empty key returns no fingerprint. Internal auth is required in production;
+// a test/dev deployment that explicitly omits it must not publish an unkeyed
+// digest of credentials merely to gain a restart optimisation. Such a legacy
+// deployment retains its pre-existing reuse behaviour; production config
+// always supplies the key.
+func sidecarConfigFingerprint(key string, creds []Credential) string {
+	if key == "" {
+		return ""
+	}
+	sc := buildSidecarCreds(creds, nil)
+	sort.SliceStable(sc, func(i, j int) bool {
+		if sc[i].ID != sc[j].ID {
+			return sc[i].ID < sc[j].ID
+		}
+		if sc[i].Provider != sc[j].Provider {
+			return sc[i].Provider < sc[j].Provider
+		}
+		return sc[i].Priority < sc[j].Priority
+	})
+	payload, err := json.Marshal(struct {
+		Credentials []sidecarCred `json:"credentials"`
+	}{Credentials: sc})
+	if err != nil {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte("crewship-sidecar-config-v1\x00"))
+	mac.Write(payload)
+	return hex.EncodeToString(mac.Sum(nil))[:24]
 }
 
 // buildSidecarCreds maps the delivered credentials onto the sidecar boot

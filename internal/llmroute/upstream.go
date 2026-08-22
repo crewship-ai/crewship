@@ -21,6 +21,10 @@ type Upstream struct {
 	// BasePath is joined ahead of the outbound path, without a trailing
 	// slash. Empty for a provider whose upstream serves at the root.
 	BasePath string
+	// BaseQuery is the credential endpoint's query string, without '?'. Some
+	// OpenAI-compatible gateways require fixed selectors such as api-version.
+	// It is joined with, not substituted for, the agent request query.
+	BaseQuery string
 }
 
 // ResolveUpstream returns the dial target for a spec.
@@ -69,14 +73,27 @@ func ResolveUpstream(s Spec, credBaseURL string) (Upstream, error) {
 		return Upstream{}, fmt.Errorf("llmroute: %s: base URL must not carry userinfo", s.ID)
 	}
 
-	// The credential's path is the endpoint's base path ("…/v1"); its query
-	// and fragment are not ours to forward and are dropped here rather than
-	// silently concatenated onto every agent request.
+	// The credential's path and query are part of the endpoint contract. A URL
+	// fragment is client-side only and is never sent in an HTTP request.
 	return Upstream{
-		Scheme:   strings.ToLower(u.Scheme),
-		Host:     strings.ToLower(u.Host),
-		BasePath: strings.TrimSuffix(u.Path, "/"),
+		Scheme:    strings.ToLower(u.Scheme),
+		Host:      strings.ToLower(u.Host),
+		BasePath:  strings.TrimSuffix(u.Path, "/"),
+		BaseQuery: u.RawQuery,
 	}, nil
+}
+
+// OutboundQuery preserves both a credential endpoint's fixed query and the
+// request-specific query. Raw concatenation is intentional: decoding and
+// re-encoding would change signed/opaque values and parameter order.
+func OutboundQuery(baseQuery, requestQuery string) string {
+	if baseQuery == "" {
+		return requestQuery
+	}
+	if requestQuery == "" {
+		return baseQuery
+	}
+	return baseQuery + "&" + requestQuery
 }
 
 // OutboundPath computes the upstream path for a request that arrived on the

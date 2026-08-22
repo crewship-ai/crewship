@@ -36,6 +36,27 @@ func (codexAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
 
 func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 	cmd := []string{"codex", "exec", "--json"}
+	model := req.LLMModel
+
+	// Codex supports custom OpenAI Responses providers through its native
+	// model-provider config. Point credential-backed OpenRouter and generic
+	// OpenAI-compatible runs at the same loopback route OpenCode uses; the
+	// sidecar replaces the disposable OPENAI_API_KEY before forwarding. Config
+	// overrides are invocation-scoped, so they compose with the generated
+	// ~/.codex/config.toml that owns MCP servers and cannot leave stale provider
+	// state behind for the next agent sharing this container.
+	if routed, ok := resolveRoutedProvider(req, req.sidecarActive); ok {
+		const providerID = "crewship"
+		baseURL := sidecarProxyOrigin + routed.Spec.PathPrefix
+		cmd = append(cmd,
+			"--config", fmt.Sprintf("model_provider=%q", providerID),
+			"--config", fmt.Sprintf("model_providers.%s.name=%q", providerID, routed.Label),
+			"--config", fmt.Sprintf("model_providers.%s.base_url=%q", providerID, baseURL),
+			"--config", fmt.Sprintf("model_providers.%s.env_key=%q", providerID, "OPENAI_API_KEY"),
+			"--config", fmt.Sprintf("model_providers.%s.wire_api=%q", providerID, "responses"),
+		)
+		model = routed.ModelID
+	}
 
 	// Sandbox policy: MINIMAL profile is read-only, all other profiles get
 	// workspace-write so the agent can edit code. danger-full-access is
@@ -48,8 +69,8 @@ func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 	}
 	cmd = append(cmd, "--sandbox", sandbox)
 
-	if req.LLMModel != "" {
-		cmd = append(cmd, "--model", req.LLMModel)
+	if model != "" {
+		cmd = append(cmd, "--model", model)
 	}
 
 	// Codex exec has NO --system-prompt flag and AGENTS.md is only read on

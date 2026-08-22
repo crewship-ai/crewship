@@ -60,6 +60,45 @@ func TestParseLLMUsageOpenAI(t *testing.T) {
 	}
 }
 
+func TestParseLLMUsageSSEProviderShapes(t *testing.T) {
+	tests := []struct {
+		name, codec, body, model       string
+		input, output, cached, created int64
+	}{
+		{
+			name: "openai responses completed", codec: "openai", model: "gpt-5.5",
+			body: "event: response.completed\n" +
+				`data: {"type":"response.completed","response":{"model":"gpt-5.5","usage":{"input_tokens":120,"output_tokens":30,"input_tokens_details":{"cached_tokens":20}}}}` + "\n\n",
+			input: 100, output: 30, cached: 20,
+		},
+		{
+			name: "openai chat final usage", codec: "openai", model: "gpt-chat",
+			body:  `data: {"model":"gpt-chat","choices":[],"usage":{"prompt_tokens":70,"completion_tokens":12,"prompt_tokens_details":{"cached_tokens":10}}}` + "\n\ndata: [DONE]\n\n",
+			input: 60, output: 12, cached: 10,
+		},
+		{
+			name: "anthropic split events", codec: "anthropic", model: "claude-test",
+			body: `data: {"type":"message_start","message":{"model":"claude-test","usage":{"input_tokens":40,"cache_creation_input_tokens":5,"cache_read_input_tokens":7}}}` + "\n\n" +
+				`data: {"type":"message_delta","usage":{"output_tokens":22}}` + "\n\n",
+			input: 40, output: 22, cached: 7, created: 5,
+		},
+		{
+			name: "google streamed response", codec: "google", model: "gemini-test",
+			body:  `data: {"modelVersion":"gemini-test","usageMetadata":{"promptTokenCount":90,"candidatesTokenCount":20,"cachedContentTokenCount":30}}` + "\n\n",
+			input: 60, output: 20, cached: 30,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseLLMUsageSSE(tc.codec, tc.body)
+			if got.Model != tc.model || got.InputTokens != tc.input || got.OutputTokens != tc.output ||
+				got.CachedInputTokens != tc.cached || got.CacheCreationTokens != tc.created {
+				t.Fatalf("usage = %+v", got)
+			}
+		})
+	}
+}
+
 // TestParseLLMUsageGoogle exercises the Gemini usageMetadata shape, which
 // uses different field names from both Anthropic and OpenAI.
 func TestParseLLMUsageGoogle(t *testing.T) {

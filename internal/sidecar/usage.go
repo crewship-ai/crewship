@@ -14,6 +14,10 @@ import (
 // the v1 rate card — Opus 4.7 was 3× over because cached input was billed at
 // fresh-input rates). Zero on any field means "not reported by upstream".
 type LLMUsage struct {
+	// AgentID is resolved from the per-agent token embedded in the disposable
+	// proxy key. It is sidecar-local attribution metadata, never parsed from or
+	// sent to an upstream provider.
+	AgentID string
 	// Provider is the LOWERCASE paymaster rate-card key
 	// (llmroute.Spec.LedgerProvider), e.g. "anthropic" / "openrouter" — not
 	// the uppercase CredStore ProviderType and not the body codec. It is set
@@ -68,12 +72,9 @@ type QuotaInfo struct {
 // tokens — Anthropic posted $0 ledger rows and OpenAI/Gemini posted none at
 // all. Keeping the two names apart is what stops that recurring.
 //
-// Only non-streaming JSON responses are supported — streaming
-// (text/event-stream) returns zero usage because the stream's `usage` block
-// isn't visible until the body is closed, which happens *after* we'd have
-// already passed the body through to the client. Streaming usage tracking
-// would need a tee-reader + goroutine; deferred until we have a clear
-// product reason to spend the latency budget.
+// This parser handles one JSON object. Streaming responses are tee'd without
+// delaying the client and their data events are passed through
+// parseLLMUsageSSE after EOF.
 //
 // Returns an empty LLMUsage on any parse failure — we never fail the proxy
 // over a usage parse error because the agent's call already succeeded
@@ -205,6 +206,72 @@ func parseLLMUsage(codec, body string) LLMUsage {
 	}
 
 	return out
+}
+
+// parseLLMUsageSSE extracts the last/cumulative usage values from Server-Sent
+// Events without delaying delivery: the proxy tees bytes to the client while
+// retaining only a bounded copy, then calls this after EOF. Providers use
+// three common event shapes: a normal response object in data:, OpenAI
+// Responses' {response:{...}}, and Anthropic's {message:{...}} start event.
+func parseLLMUsageSSE(codec, body string) LLMUsage {
+	var out LLMUsage
+	var dataLines []string
+	flush := func() {
+		if len(dataLines) == 0 {
+			return
+		}
+		data := strings.Join(dataLines, "\n")
+		dataLines = dataLines[:0]
+		if data == "[DONE]" {
+			return
+		}
+		candidates := []string{data}
+		var envelope struct {
+			Response json.RawMessage `json:"response"`
+			Message  json.RawMessage `json:"message"`
+		}
+		if json.Unmarshal([]byte(data), &envelope) == nil {
+			if len(envelope.Response) > 0 {
+				candidates = append(candidates, string(envelope.Response))
+			}
+			if len(envelope.Message) > 0 {
+				candidates = append(candidates, string(envelope.Message))
+			}
+		}
+		for _, candidate := range candidates {
+			mergeLLMUsageMax(&out, parseLLMUsage(codec, candidate))
+		}
+	}
+
+	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		if line == "" {
+			flush()
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	flush()
+	return out
+}
+
+func mergeLLMUsageMax(dst *LLMUsage, src LLMUsage) {
+	if src.Model != "" {
+		dst.Model = src.Model
+	}
+	if src.InputTokens > dst.InputTokens {
+		dst.InputTokens = src.InputTokens
+	}
+	if src.OutputTokens > dst.OutputTokens {
+		dst.OutputTokens = src.OutputTokens
+	}
+	if src.CachedInputTokens > dst.CachedInputTokens {
+		dst.CachedInputTokens = src.CachedInputTokens
+	}
+	if src.CacheCreationTokens > dst.CacheCreationTokens {
+		dst.CacheCreationTokens = src.CacheCreationTokens
+	}
 }
 
 // parseQuotaInfo extracts the most-restrictive remaining-quota signal from

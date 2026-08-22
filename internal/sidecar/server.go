@@ -101,15 +101,24 @@ type MCPCredInput struct {
 
 // ServerConfig configures the sidecar server.
 type ServerConfig struct {
-	Addr           string   // listen address (default: 127.0.0.1:9119)
-	AllowedDomains []string // extra allowed domains beyond defaults
-	Credentials    []Credential
-	Memory         *MemoryConfig
-	IPC            *IPCConfig
-	CrewMembers    []CrewMember
-	NetworkPolicy  *NetworkPolicyConfig
-	MCPServers     []MCPServerInput
-	Logger         *slog.Logger
+	Addr              string   // listen address (default: 127.0.0.1:9119)
+	AllowedDomains    []string // extra allowed domains beyond defaults
+	Credentials       []Credential
+	Memory            *MemoryConfig
+	IPC               *IPCConfig
+	RouteAuth         *RouteAuth
+	CrewMembers       []CrewMember
+	NetworkPolicy     *NetworkPolicyConfig
+	MCPServers        []MCPServerInput
+	ConfigFingerprint string
+	Logger            *slog.Logger
+}
+
+// RouteAuth validates self-contained per-agent LLM route tokens. The key is a
+// purpose-limited crew/workspace derivation, never an internal-API token or the
+// process-wide master secret.
+type RouteAuth struct {
+	Key string `json:"key"`
 }
 
 // Server is the crewship sidecar that runs inside agent containers.
@@ -167,6 +176,7 @@ type Server struct {
 	// used in tests; production paths always wire one.
 	scrubber    *scrubber.Scrubber
 	ipc         *IPCConfig
+	routeAuth   *RouteAuth
 	crewMembers []CrewMember
 	mcpGateway  *MCPGateway
 	logger      *slog.Logger
@@ -204,15 +214,14 @@ func registerCredentialLiterals(s *scrubber.Scrubber, creds []Credential, logger
 		return
 	}
 	for _, c := range creds {
-		if len(c.Token) < minScrubbableTokenBytes {
-			continue
-		}
-		if err := s.AddPattern("credential_"+c.ID, regexp.QuoteMeta(c.Token)); err != nil {
-			// QuoteMeta output is always a valid regex, so this is
-			// unreachable — but a silently unregistered credential is a silent
-			// redaction hole, which is exactly the class of thing that must
-			// never be swallowed. The credential value is NOT logged.
-			logger.Error("failed to register credential scrubber pattern", "credential_id", c.ID, "error", err)
+		if len(c.Token) >= minScrubbableTokenBytes {
+			if err := s.AddPattern("credential_"+c.ID, regexp.QuoteMeta(c.Token)); err != nil {
+				// QuoteMeta output is always a valid regex, so this is
+				// unreachable — but a silently unregistered credential is a silent
+				// redaction hole, which is exactly the class of thing that must
+				// never be swallowed. The credential value is NOT logged.
+				logger.Error("failed to register credential scrubber pattern", "credential_id", c.ID, "error", err)
+			}
 		}
 		// Custom headers are credential material by the same argument the
 		// comment above makes for the token. A self-hosted gateway that
@@ -318,6 +327,7 @@ func NewServer(cfg ServerConfig) *Server {
 		credStore:   credStore,
 		allowlist:   allowlist,
 		ipc:         cfg.IPC,
+		routeAuth:   cfg.RouteAuth,
 		crewMembers: cfg.CrewMembers,
 		logger:      cfg.Logger,
 		readyCh:     make(chan struct{}),
@@ -365,17 +375,19 @@ func NewServer(cfg ServerConfig) *Server {
 		// here would hand the proxy a scrubber that knows none of them, and the
 		// first code path to start using it would redact nothing while looking
 		// entirely correct.
-		Scrubber:          s.scrubber,
-		Logger:            cfg.Logger,
-		FreeMode:          freeMode,
-		AllowPrivate:      allowPrivateEndpoints,
-		OnEgress:          s.buildEgressObserver(),
-		OnLLMCall:         s.buildLLMCallObserver(),
-		BillingMode:       billingMode,
-		SubscriptionPlan:  subscriptionPlan,
-		BuildHash:         selfExeHash(),
-		PolicyDomainsHash: policyDomainsHash,
-		TokenFP:           tokenFP,
+		Scrubber:           s.scrubber,
+		Logger:             cfg.Logger,
+		FreeMode:           freeMode,
+		AllowPrivate:       allowPrivateEndpoints,
+		OnEgress:           s.buildEgressObserver(),
+		OnLLMCall:          s.buildLLMCallObserver(),
+		ResolveLLMIdentity: s.llmRouteIdentity,
+		BillingMode:        billingMode,
+		SubscriptionPlan:   subscriptionPlan,
+		BuildHash:          selfExeHash(),
+		PolicyDomainsHash:  policyDomainsHash,
+		TokenFP:            tokenFP,
+		ConfigFingerprint:  cfg.ConfigFingerprint,
 	})
 	s.proxy = proxy
 

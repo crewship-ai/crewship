@@ -274,6 +274,16 @@ func TestResolveRoutedProvider(t *testing.T) {
 		{"unauthenticated endpoint is left alone", localModelReq(), true, ""},
 		{"authenticated endpoint whose credential was withheld does not route", authedLocalReqNoCred(), true, ""},
 		{"openrouter model with a matching credential", opencodeReq("openrouter/x/y", orCred), true, "OPENROUTER"},
+		{"provider and bare model route without a duplicated prefix", func() AgentRunRequest {
+			r := opencodeReq("gpt-5", orCred)
+			r.LLMProvider = "OPENROUTER"
+			return r
+		}(), true, "OPENROUTER"},
+		{"codex has a native custom-provider route", func() AgentRunRequest {
+			r := opencodeReq("openrouter/x/y", orCred)
+			r.CLIAdapter = "CODEX_CLI"
+			return r
+		}(), true, "OPENROUTER"},
 		{"openrouter model without one", opencodeReq("openrouter/x/y"), true, ""},
 		{"a grandfathered provider is not /llm/-routable", opencodeReq("anthropic/claude-sonnet-5", orCred), true, ""},
 		{"unknown prefix", opencodeReq("deepseek/deepseek-v3.2", orCred), true, ""},

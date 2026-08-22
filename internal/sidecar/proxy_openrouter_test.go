@@ -82,6 +82,52 @@ func TestOpenRouterProxy_NilCredIs503NotPassThrough(t *testing.T) {
 	}
 }
 
+func TestOpenRouterProxy_StaleAgentCredentialSetFailsClosed(t *testing.T) {
+	var upstream *http.Request
+	proxy := newCapturingProxy(t,
+		[]Credential{{ID: "or1", Provider: ProviderOpenRouter, Token: "sidecar-secret"}}, &upstream)
+	proxy.resolveLLMIdentity = func(*http.Request) (string, string, bool, bool) {
+		return "agent-a", "old-fingerprint", true, true
+	}
+	proxy.configFingerprint = "new-fingerprint"
+
+	req := httptest.NewRequest("POST", "http://127.0.0.1:9119/llm/openrouter/chat/completions", strings.NewReader(`{}`))
+	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", w.Code)
+	}
+	if upstream != nil {
+		t.Fatal("stale agent request reached the other agent's upstream")
+	}
+}
+
+func TestOpenRouterProxy_MissingAgentRouteTokenFailsClosed(t *testing.T) {
+	var upstream *http.Request
+	proxy := newCapturingProxy(t,
+		[]Credential{{ID: "or1", Provider: ProviderOpenRouter, Token: "sidecar-secret"}}, &upstream)
+	proxy.resolveLLMIdentity = func(*http.Request) (string, string, bool, bool) {
+		return "", "", false, false
+	}
+	proxy.configFingerprint = "current-fingerprint"
+
+	req := httptest.NewRequest("POST", "http://127.0.0.1:9119/llm/openrouter/chat/completions", strings.NewReader(`{}`))
+	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if upstream != nil {
+		t.Fatal("anonymous request consumed the sidecar-held credential")
+	}
+}
+
 // The §1.4 asymmetry, named and pinned rather than left as an accident.
 //
 // openrouter.ai IS in DefaultAllowedDomains, so an OpenCode BYOK crew can dial

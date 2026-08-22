@@ -150,10 +150,14 @@ func (s *Server) postCostRecord(ctx context.Context, usage LLMUsage, quota Quota
 		// nowhere to attribute the row, so skip rather than write garbage.
 		return
 	}
+	agentID := usage.AgentID
+	if agentID == "" {
+		agentID = s.ipc.AgentID
+	}
 	body, err := json.Marshal(sidecarCostRecord{
 		WorkspaceID:         s.ipc.WorkspaceID,
 		CrewID:              s.ipc.CrewID,
-		AgentID:             s.ipc.AgentID,
+		AgentID:             agentID,
 		Provider:            usage.Provider,
 		Model:               usage.Model,
 		InputTokens:         usage.InputTokens,

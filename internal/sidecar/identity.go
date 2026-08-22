@@ -4,6 +4,8 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
 // bearerToken extracts the token from an "Authorization: Bearer <token>"
@@ -42,7 +44,14 @@ func (s *Server) actingIdentity(r *http.Request) (agentID, slug string, present,
 	if tok == "" {
 		return "", "", false, false
 	}
-	// The boot agent — the one this sidecar's IPC config was minted for.
+	return s.identityForToken(tok)
+}
+
+func (s *Server) identityForToken(tok string) (agentID, slug string, present, ok bool) {
+	if tok == "" {
+		return "", "", false, false
+	}
+	// The boot agent's control-plane token lives on IPCConfig.
 	if s.ipc != nil && s.ipc.AgentToken != "" &&
 		subtle.ConstantTimeCompare([]byte(tok), []byte(s.ipc.AgentToken)) == 1 {
 		return s.ipc.AgentID, s.ipc.AgentSlug, true, true
@@ -56,6 +65,38 @@ func (s *Server) actingIdentity(r *http.Request) (agentID, slug string, present,
 		}
 	}
 	return "", "", true, false
+}
+
+// llmRouteIdentity extracts the per-agent token embedded in the disposable
+// provider key. The real provider credential is injected only after this
+// lookup, so these slots contain no upstream secret at this point. Supporting
+// every auth shape is necessary: Anthropic uses x-api-key, OpenAI/OpenRouter
+// use Authorization, and Gemini may use either its header or ?key=.
+func (s *Server) llmRouteIdentity(r *http.Request) (agentID, configFingerprint string, present, ok bool) {
+	values := []string{
+		bearerToken(r),
+		r.Header.Get("x-api-key"),
+		r.Header.Get("x-goog-api-key"),
+		r.URL.Query().Get("key"),
+	}
+	marker := internaltoken.LLMRoutePrefix + "."
+	for _, value := range values {
+		idx := strings.Index(value, marker)
+		if idx < 0 {
+			continue
+		}
+		routeIdentity := value[idx:]
+		token, fp, hasFP := strings.Cut(routeIdentity, internaltoken.RouteFingerprintDelimiter)
+		if !hasFP || fp == "" {
+			return "", "", true, false
+		}
+		if s.routeAuth == nil {
+			return "", fp, true, false
+		}
+		id, matched := internaltoken.ValidateLLMRouteToken(s.routeAuth.Key, token)
+		return id, fp, true, matched
+	}
+	return "", "", false, false
 }
 
 // tokensProvisioned reports whether this sidecar was booted with any per-agent
