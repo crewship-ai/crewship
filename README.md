@@ -54,6 +54,53 @@ wire, and out of the agent process.
 
 ---
 
+## The idea behind it
+
+This is how I think AI should plug into a company or a project: **the tools are
+rented, the work is owned.**
+
+**Everything it produces is yours.** Memory, files, conversations, the audit
+trail — on your disk, in your backups. Not with a model vendor, not in a cloud.
+
+**Memory outlives the model.** An agent learns your codebase and your decisions.
+Normally that dies the day you switch assistants. Here it does not — move the
+agent to another provider and it keeps what it knew. The model is compute you
+rent. The memory is the asset.
+
+**A real machine, not a chat box.** Each crew gets its own Linux container and
+installs what the work needs, then reaches the systems work lives in: internal
+servers, documentation, a remote host, a file share.
+
+**Built like a company.** Roles from OWNER to VIEWER enforced on every route, a
+Lead who delegates, approvals on risky actions, budgets, and an append-only
+record of every call — so a fleet of agents can be run the way a team is run.
+
+**Agents report where people look.** [Pages](docs/guides/pages.mdx) are dashboards
+an agent or routine pushes data into. The page holds no query and no credentials;
+the producer already runs next to the data.
+
+**Not just for engineers.** A company should not have to build its own chatbot.
+Anyone in the org can have an agent of their own — with their skills, doing their
+routine work — and reach it in the same chat and inbox everyone else uses. That
+part is early, and it is the direction the rest is built toward.
+
+**The bet:** local models get good enough that routine work stops needing the
+strongest one. Most of what an agent does in a day is not hard — it is repetitive,
+and a model running on your own hardware will handle it. Then the frontier model
+becomes something you reach for deliberately rather than a dependency you route
+everything through, and the part that matters is what surrounds it: the memory,
+the environment, the permissions, the record. That is what this is built for, and
+built so the model underneath can change without any of it moving.
+
+A real container per crew is demanding, so today that means one host; Kubernetes
+and multi-host scheduling are where it goes next.
+
+**Status:** big concept, one person, **pre-1.0**.
+[What's ready vs. WIP](#whats-ready-vs-wip) says which pieces are finished
+instead of leaving you to find out.
+
+---
+
 ## Quickstart
 
 ```bash
@@ -98,8 +145,16 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 - ✅ **Pick your engine** — drive a crew with a **local model via Ollama**,
   **OpenCode**, or **Claude Code**. No API key required if you run local.
   [→ CLI adapters](docs/guides/cli-adapters.mdx)
+- 🟡 **Provider registry + model catalogue** — an embedded catalogue of models
+  and their prices, two configurable wire codecs, and `crewship model price` to
+  see what a call will cost before you make it.
+  [→ multi-provider](docs/guides/multi-provider-llm.mdx) · [model discovery](docs/guides/model-discovery.mdx)
 - ✅ **Skills** — author or import a `SKILL.md` playbook and attach it to one
-  agent or a whole crew. [→ skills](docs/guides/skills.mdx)
+  agent or a whole crew; an agent can also turn a workflow it just performed
+  into one. [→ skills](docs/guides/skills.mdx)
+  · [agent-authored](docs/guides/skills-agent-authored.mdx)
+- 🟡 **Hooks** — shell, HTTP or subagent callbacks on lifecycle events, able to
+  block the action that fired them. [→ hooks](docs/guides/hooks.mdx)
 - ✅ **Manifests** — declare your whole org (workspace, crews, agents, skills,
   integrations, issues, projects) as files and `crewship apply` it. GitOps for
   your agent fleet. [→ manifests](docs/guides/manifests.mdx)
@@ -114,16 +169,34 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   clone. [→ API: missions](docs/api-reference/missions.mdx)
 - ✅ **Per-agent chat** — every agent has its own conversation, resumable across
   sessions. [→ chat sessions](docs/guides/chat-sessions.mdx)
+- 🟡 **Ask forms** — when an agent needs answers before it can start, it offers a
+  short questionnaire instead of a paragraph of questions; what you fill in is
+  sent as an ordinary message. [→ ask forms](docs/guides/ask-forms.mdx)
 - ✅ **Issue tracker + triage** — humans file issues; **triage rules** auto-route
   each one to the right crew, agent, and project. Full backlog with **projects,
-  milestones, recurring issues, and saved views**. [→ API: issues](docs/api-reference/issues.mdx)
-  · [triage](docs/api-reference/triage.mdx)
-- 🟡 **Routines** — scheduled, AI-authored workflows: step DAGs, cron +
+  milestones, recurring issues, and saved views**. **@mention an agent** in a
+  comment to wake it onto the issue, attach files it can read, and link the
+  GitHub PR or GitLab MR that closes it. [→ API: issues](docs/api-reference/issues.mdx)
+  · [triage](docs/api-reference/triage.mdx) · [mentions](docs/guides/issue-mentions.mdx)
+  · [git links](docs/guides/git-links.mdx)
+- ✅ **Routines** — scheduled, AI-authored workflows: step DAGs, cron +
   HMAC-signed webhooks, human-in-the-loop waitpoints, immutable version history.
-  [→ routines](docs/guides/routines.mdx)
+  Run one from a **slash command** in chat or `crewship shell`, and give it its
+  inputs through a **form built from what it declares** rather than a wall of
+  flags. [→ routines](docs/guides/routines.mdx)
+  · [cookbook](docs/guides/routines-cookbook.mdx)
+- 🟡 **Automations** — run a routine whenever a journal event happens, with no
+  glue code in between. [→ automations](docs/guides/automations.mdx)
 - ✅ **Inbox + notifications** — messages, mentions, and events land in a
   per-user inbox with configurable notification channels. [→ inbox](docs/guides/inbox.mdx)
   · [notifications](docs/guides/notifications.mdx)
+- 🟡 **Watch a run from a shell** — newline-delimited JSON over plain HTTP,
+  resumable, no SDK. [→ watching runs](docs/guides/watching-agent-runs.mdx)
+- ✅ **Files in and out** — upload to an agent, download what it produced, and a
+  shared crew space both sides can write.
+  [→ files and output](docs/guides/files-and-output.mdx)
+- 🟡 **Autonomy dial** — how much a crew may decide on its own, and whether an
+  agent learns from what it did. [→ autonomy](docs/guides/autonomy-and-self-learning.mdx)
 
 **3 · Control plane & governance**
 
@@ -131,8 +204,10 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   enforced on every route. [→ auth](docs/guides/auth.mdx)
 - ✅ **Approvals** — risky tool calls pause for human sign-off; the agent waits.
   *(Harbormaster)* [→ harbormaster](docs/guides/harbormaster.mdx)
-- ✅ **Keeper** — optional rule-based gate + watchdog on what agents pull and do,
-  with snitch-to-admin alerts. [→ keeper](docs/guides/keeper.mdx)
+- ✅ **Keeper** — optional rule-based gate + watchdog on what agents pull and do:
+  it sits between an agent and the vault and can refuse a secret the job does not
+  justify asking for, with snitch-to-admin alerts. Off by default.
+  [→ keeper](docs/guides/keeper.mdx)
 - ✅ **Cost ledger** — every LLM call priced with token counts; per-workspace
   budgets enforced. *(Paymaster)* [→ paymaster](docs/guides/paymaster.mdx)
 - ✅ **Input guard** — argument- and prompt-injection guardrails on LLM inputs.
@@ -144,6 +219,11 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   *(Quartermaster)* [→ API: eval](docs/api-reference/eval.mdx)
 - ✅ **Checkpoints & fork** — snapshot a mission's state, advisory-restore it, or
   fork a fresh mission from any point. *(Cartographer)* [→ API: checkpoints](docs/api-reference/checkpoints.mdx)
+- ✅ **Admin console** — instance security posture, plus rate limits and memory
+  configuration tunable at runtime.
+  [→ API: admin](docs/api-reference/admin.mdx) · [admin CLI](docs/guides/admin-cli.mdx)
+- 🟡 **OpenTelemetry** — GenAI spans with W3C trace context propagated into the
+  journal, so a run is one trace end to end. [→ tracing](docs/guides/tracing.mdx)
 
 **4 · Your data, your keys**
 
@@ -153,7 +233,14 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 - ✅ **Outbound scrubber** — credential patterns redacted from agent output
   before it leaves the container.
 - ✅ **Agent memory** — file-first memory that recalls across sessions, plus
-  crew-shared facts with cross-crew isolation. [→ agent memory](docs/guides/agent-memory.mdx)
+  crew-shared facts with cross-crew isolation. Vector recall over the journal and
+  keyword search across past chats sit on top of it.
+  [→ agent memory](docs/guides/agent-memory.mdx) · [episodic](docs/guides/episodic-memory.mdx)
+  · [conversation search](docs/guides/conversation-search.mdx)
+- 🟡 **Memory portability** — memory is plain markdown, so it can leave: export a
+  readable bundle you can diff and keep in git, or import memory produced by
+  another harness. The point of the whole design — nothing here is a format only
+  Crewship can read. [→ memory portability](docs/guides/memory-portability.mdx)
 - ✅ **Encrypted backups** — Age-encrypted bundles capture a whole workspace or
   crew — code, data, conversations, journal, memory — so nothing agents create
   disappears. [→ backup](docs/guides/backup.mdx)
@@ -164,7 +251,13 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 
 - ✅ **Web UI** — activity feed, per-crew dashboards, approvals queue,
   integrations page, and a bottom command dock. [→ activity](docs/guides/activity.mdx)
+- 🟡 **Pages** — dashboards an agent or routine pushes data into, permissioned
+  per panel and honest about when a number goes stale. The page holds no query
+  and no credentials. [→ pages](docs/guides/pages.mdx)
 - ✅ **Full CLI** — every workflow, scriptable and headless. [→ CLI overview](docs/cli/overview.mdx)
+- ✅ **Browsable API docs** — the running instance serves its own OpenAPI spec at
+  `/openapi.json`, browsable without a third-party renderer.
+  [→ API overview](docs/api-reference/overview.mdx) · [`crewship system openapi`](docs/cli/system.mdx)
 - ✅ **Single binary** — the Next.js UI is embedded in the Go server. No Node.js
   at runtime, no separate services to deploy.
 
@@ -203,8 +296,9 @@ maintainer in production-shaped workloads; 🟡 and 🚧 are still being shaped.
   yet the integration tests and tuning to call production-ready.
 - **SQLite for now.** Runs on `modernc.org/sqlite` (single binary, WAL, no extra
   services). PostgreSQL is on the roadmap.
-- **Single host.** One instance manages many crews on its own host; multi-host
-  clustering is future work.
+- **Single host.** One instance manages many crews on its own host. A full
+  container per crew is heavy, so scheduling across machines — Kubernetes and
+  friends — is future work rather than a flag you can flip.
 - **APIs may break across minor bumps.** Patch bumps inside a minor are
   backwards-compatible. Pin a tag for production.
 - **Telemetry is opt-in on stable builds.** Prerelease/dev builds send anonymous
