@@ -185,8 +185,13 @@ func TestSeedPages_EveryRoutineProducedPanelIsWrittenByItsRoutine(t *testing.T) 
 			}
 		}
 	}
+	// Fatal rather than Skip. A skip reports the same "ok" as a pass, so a
+	// catalogue that lost its routine-produced panels would take this whole
+	// check with it and say nothing — and demonstrating that door is the reason
+	// those panels are in the seed at all.
 	if len(want) == 0 {
-		t.Skip("no routine-produced panels in the catalogue")
+		t.Fatal("no routine-produced panel in the catalogue — the seed is meant to demonstrate " +
+			"that door, and without one this check silently covers nothing")
 	}
 
 	written := map[target]bool{}
@@ -365,8 +370,12 @@ func TestSeedPageProducerRoutines_FiresEachRoutineAndSurvivesAFailure(t *testing
 	// Every routine the catalogue names, so the stub answers whatever the
 	// real seed data asks for and the test does not have to restate it.
 	slugs := pageProducerRoutineSlugs(seeddata.Pages)
+	// Fatal for the same reason as above: no routine producer means the seeder
+	// fires nothing, and a green tick over an untested phase is worse than a
+	// red one over a missing fixture.
 	if len(slugs) == 0 {
-		t.Skip("no routine-produced panels in the catalogue")
+		t.Fatal("no routine-produced panel in the catalogue, so seedPageProducerRoutines has " +
+			"nothing to fire and this test would assert nothing")
 	}
 	for i, slug := range slugs {
 		path := "/api/v1/workspaces/" + ws + "/pipelines/" + slug + "/run"
