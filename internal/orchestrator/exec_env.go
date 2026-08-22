@@ -9,9 +9,11 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
+	"github.com/crewship-ai/crewship/internal/llmroute"
 )
 
 // baseAgentEnv returns the agent-identity env entries shared by every exec
@@ -67,7 +69,10 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 		}
 	}
 
-	if e, ok := localModelConfigEnv(req); ok {
+	// viaSidecar=false: there is no sidecar on this path, so nothing can be
+	// proxy-routed and the generated block keeps pointing straight at the
+	// endpoint, auth material and all.
+	if e, ok := localModelConfigEnv(req, false); ok {
 		env = append(env, e)
 	}
 
@@ -424,15 +429,29 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	// cursor-agent configuration surface has no endpoint / base-URL override
 	// (cursor.com/docs/cli/reference/configuration), so there is no way to
 	// point it at the sidecar; its key stays on the env path until upstream
-	// ships an override. OpenCode is BYOK-by-design and Factory has no
-	// override either.
+	// ships an override. OpenCode is BYOK-by-design across 75+ providers and
+	// Factory has no override either.
+	//
+	// The one exception is a provider this run is actually PROXY-ROUTED to:
+	// OpenCode reads its endpoint from the generated OPENCODE_CONFIG_CONTENT
+	// block, so when that block points at the sidecar the CLI never needs the
+	// real key and it is left out of /proc/<pid>/environ. The set is deliberately
+	// per-run rather than per-adapter — an OpenCode crew whose model is NOT
+	// routed still needs its key here, so apiKeyEnvVarsForAdapter keeps every
+	// entry it has today and the filter below is what narrows it.
 	allowed := apiKeyEnvVarsForAdapter(req.CLIAdapter)
 	if len(allowed) > 0 {
+		routed, isRouted := resolveRoutedProvider(req, true)
 		for _, cred := range req.Credentials {
 			if cred.PlainValue == "" {
 				continue
 			}
 			if _, ok := allowed[cred.EnvVarName]; !ok {
+				continue
+			}
+			if isRouted && credentialRoutesTo(cred, routed.Spec) {
+				// The sidecar CredStore holds this one; the config block sends
+				// the CLI to 127.0.0.1 and the proxy injects it mid-flight.
 				continue
 			}
 			env = overrideEnv(env, cred.EnvVarName, cred.PlainValue)
@@ -491,7 +510,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		env = appendCredentialFields(env, cred, valueReachedEnv)
 	}
 
-	if e, ok := localModelConfigEnv(req); ok {
+	if e, ok := localModelConfigEnv(req, true); ok {
 		env = append(env, e)
 	}
 
@@ -518,13 +537,34 @@ func effectiveLocalModelBaseURL(fromCredential, fromEnv string) (string, bool) {
 // keep both in sync.
 const localModelPrefix = "ollama/"
 
-// localModelConfigEnv builds the OPENCODE_CONFIG_CONTENT entry for the
-// local-model path (#944): an OPENCODE agent selecting an "ollama/…" model on
-// a server with cfg.LocalModels.BaseURL configured gets a generated provider
-// block pointing OpenCode's openai-compatible driver at that endpoint. The
-// JSON is always marshalled from a fixed struct — no user-controlled JSON
-// reaches the env, so a hostile model name can't smuggle extra config keys.
-func localModelConfigEnv(req AgentRunRequest) (string, bool) {
+// localModelDisplayName is the generated provider block's human label. Unchanged
+// on the routed path: it is the same operator endpoint either way, only reached
+// through the sidecar instead of directly.
+const localModelDisplayName = "Ollama (local)"
+
+// openAICompatProviderID is llmroute.Spec.ID for the generic OpenAI-compatible
+// endpoint — the descriptor the operator's own ENDPOINT_URL credential is
+// delivered under. A constant rather than an import of internal/sidecar: this
+// package must not depend on the sidecar to name a provider.
+const openAICompatProviderID = "OPENAI_COMPAT"
+
+// sidecarProxyOrigin is the loopback origin a proxy-routed provider block points
+// at — the sidecar's own port, the one NO_PROXY in SidecarProxyEnv keeps direct.
+const sidecarProxyOrigin = "http://127.0.0.1:9119"
+
+// routedProviderDummyKey is what a routed provider block puts in options.apiKey.
+// The @ai-sdk/openai-compatible driver refuses to send a request without one, so
+// the slot cannot simply be left empty; the sidecar overwrites the header it
+// produces with the real credential from the CredStore. Same shape and same
+// reason as the dummy ANTHROPIC_API_KEY / GEMINI_API_KEY above.
+const routedProviderDummyKey = "dummy-crewship-sidecar"
+
+// localEndpointModel reports whether this run targets the operator's resolved
+// OpenAI-compatible endpoint, returning the model id with the ollama/ prefix
+// stripped. It is the #944 activation condition on its own — separate from
+// whether the traffic is proxy-routed, which localEndpointModel deliberately
+// says nothing about.
+func localEndpointModel(req AgentRunRequest) (string, bool) {
 	if req.CLIAdapter != "OPENCODE" || req.LocalModelBaseURL == "" {
 		return "", false
 	}
@@ -532,6 +572,295 @@ func localModelConfigEnv(req AgentRunRequest) (string, bool) {
 	if modelID == req.LLMModel || modelID == "" {
 		return "", false // not an ollama/… model
 	}
+	return modelID, true
+}
+
+// routedProvider is the OpenCode provider block for a run whose LLM traffic goes
+// through the sidecar reverse proxy instead of straight out of the container.
+type routedProvider struct {
+	Spec llmroute.Spec
+	// ProviderID is the OpenCode config key, which is also the prefix of the
+	// model string OpenCode routes on. Always from a closed set — either the
+	// ollama/ literal or a descriptor ID lowercased — never free text.
+	ProviderID string
+	// ModelID is the model as OpenCode must see it under that key: the run's
+	// LLMModel with the provider prefix removed.
+	ModelID string
+	Label   string
+	// UpstreamHost is the host the SIDECAR will dial for this run, and it is
+	// only non-empty for a spec whose upstream comes from the credential.
+	//
+	// It exists because two places used to answer "where does this run talk to"
+	// independently and could disagree: the router picked the provider, while
+	// proxiedEndpointDomains built the egress allowlist from
+	// req.LocalModelBaseURL. When an assigned OPENAI_COMPAT credential won over
+	// the synthetic endpoint, the sidecar dialled the credential's host and the
+	// allowlist named the other one — a 403 on every call, for a crew whose
+	// credentials were all valid. Carrying it on the routing decision means the
+	// allowlist is derived from the same answer the proxy acts on.
+	UpstreamHost string
+}
+
+// proxyRoutable reports whether a descriptor owns one of the reserved /llm/…
+// sidecar routes. The three grandfathered providers (/v1, /openai, /gemini) are
+// mounted for the CLIs that were built around them and are not on this path:
+// OpenCode reaches Anthropic/OpenAI/Google over an HTTPS CONNECT tunnel, which
+// the proxy cannot inject into.
+func proxyRoutable(s llmroute.Spec) bool {
+	return strings.HasPrefix(s.PathPrefix, "/llm/")
+}
+
+// credentialRoutesTo reports whether a delivered credential is the one the
+// sidecar's CredStore will hold for spec s.
+//
+// It mirrors credTypeToProvider (exec_sidecar.go), which consults a credential's
+// agent-facing env-var name BEFORE its provider column. So the provider column
+// has to name the spec, and the env-var name must not be claimed by a different
+// provider — a credential carrying somebody else's variable lands in the
+// CredStore under THAT provider and would never answer for this one. Being
+// conservative here is the safe direction: a "no" leaves the run on the path it
+// takes today, while a wrong "yes" withholds the key from the env AND finds no
+// credential at the proxy, which is a 503 where there used to be a working run.
+func credentialRoutesTo(cred Credential, s llmroute.Spec) bool {
+	byColumn, ok := llmroute.LookupProvider(cred.Provider)
+	if !ok || byColumn.ID != s.ID {
+		return false
+	}
+	// "Carries auth material", not "carries a token". A bring-your-own endpoint
+	// can authenticate entirely through a custom header, and such a credential
+	// has an EMPTY PlainValue by construction — the whole secret is in Headers.
+	// Requiring a token here was the last of the gates that kept those endpoints
+	// unrouted, and therefore kept their secret in the agent's own config where
+	// the agent can read it.
+	//
+	// Headers count ONLY for a spec whose upstream comes from the credential.
+	// Every other provider authenticates through a slot this package fills from
+	// the token, so a token-less credential there would route to a real vendor
+	// host and arrive unauthenticated. Nothing populates Headers for those specs
+	// today — the field is written by the endpoint split alone — but the check
+	// costs one condition and removes the question.
+	if cred.PlainValue == "" && !(s.UpstreamFromCredential && len(cred.Headers) > 0) {
+		return false
+	}
+	if cred.EnvVarName == "" {
+		return true
+	}
+	// A spec that declares NO KeyEnvVars is reached through the provider column
+	// alone — that is what OPENAI_COMPAT's registry comment says, because a
+	// bring-your-own endpoint has no conventional variable name an agent CLI
+	// reads it from. Falling through to the loop below made that promise
+	// unkeepable: a credential row always carries an env_var_name, the loop over
+	// an empty slice never matches, and every such credential was refused. The
+	// provider column had already identified it by then.
+	if len(s.KeyEnvVars) == 0 {
+		return true
+	}
+	for _, name := range s.KeyEnvVars {
+		if name == cred.EnvVarName {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveRoutedProvider picks the descriptor this run's model traffic is proxied
+// through, or ok=false when it is not proxied at all. viaSidecar is false on the
+// no-sidecar exec path, where there is no proxy to route to.
+//
+// Routing is opt-in per run and never speculative: each branch below refuses
+// unless the credential the sidecar would need is demonstrably on its way there.
+// An unrouted run is byte-identical to its pre-phase-2 self.
+func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider, bool) {
+	// Only OpenCode has a config surface that can be pointed at the sidecar per
+	// provider. Codex and Gemini are routed by their own *_BASE_URL vars above;
+	// Cursor and Factory have no override at all (#1030 residual).
+	if !viaSidecar || req.CLIAdapter != "OPENCODE" {
+		return routedProvider{}, false
+	}
+
+	// The operator's own OpenAI-compatible endpoint (#961). Routed only when it
+	// carries auth material: a bare Ollama box has no secret to isolate, and
+	// routing it anyway would put a RequireCredential 503 in front of a path
+	// that works today. When there IS auth material the API tier delivers the
+	// same resolved endpoint to the CredStore as an OPENAI_COMPAT credential
+	// (internal/api/agent_config.go), which is what fills the slot the dummy
+	// key below occupies.
+	if modelID, ok := localEndpointModel(req); ok {
+		// Auth material of EITHER kind. This used to demand a bearer token
+		// specifically, because llmroute.ApplyAuth dropped custom headers on an
+		// empty token and routing a headers-only endpoint would have sent the
+		// request unauthenticated. ApplyAuth writes them independently now, so
+		// the endpoint whose only secret lives in a header is isolated in the
+		// sidecar rather than left in the agent's own config for the agent to
+		// read. A bare endpoint with no auth at all still stays unrouted: there
+		// is nothing to isolate, and OPENAI_COMPAT is RequireCredential.
+		if req.LocalModelAPIKey == "" && len(req.LocalModelHeaders) == 0 {
+			return routedProvider{}, false
+		}
+		s, ok := llmroute.Lookup(openAICompatProviderID)
+		if !ok {
+			return routedProvider{}, false
+		}
+		// Auth material alone is NOT enough to route. The API tier withholds
+		// the CredStore delivery in cases where the endpoint key still travels
+		// on the env path — a privileged crew without
+		// allow_privileged_credentials is the live one (#1032 fails closed on
+		// loading anything into a CredStore whose memory the agent can read).
+		// Routing on the key's presence alone would point OpenCode at a
+		// RequireCredential provider the proxy has nothing for, turning a
+		// working run into a 503. Ask for the credential itself.
+		cred, ok := credentialFor(req, s)
+		if !ok {
+			return routedProvider{}, false
+		}
+		rp := routedProvider{
+			Spec:       s,
+			ProviderID: strings.TrimSuffix(localModelPrefix, "/"),
+			ModelID:    modelID,
+			Label:      localModelDisplayName,
+		}
+		// The upstream is the CREDENTIAL's, not req.LocalModelBaseURL's, and on
+		// this branch the two can disagree: when a crew has both a resolved
+		// local endpoint and an assigned OPENAI_COMPAT credential,
+		// appendProxiedEndpointCredential logs the collision and delivers the
+		// ASSIGNED one. Leaving UpstreamHost empty here sent
+		// proxiedEndpointDomains back to the synthetic URL, so a restricted
+		// crew allowlisted one host while the sidecar dialled another — a 403
+		// on every model call with every credential valid. Same failure the
+		// field was added to prevent on the model-prefix branch below; it just
+		// had two callers and one of them was never wired.
+		if strings.TrimSpace(cred.BaseURL) != "" {
+			rp.UpstreamHost = cred.BaseURL
+		}
+		return rp, true
+	}
+
+	// A provider with a reserved /llm/… route of its own, selected the way
+	// OpenCode selects providers: by the model string's prefix.
+	prefix, model, found := strings.Cut(req.LLMModel, "/")
+	if !found || prefix == "" || model == "" {
+		return routedProvider{}, false
+	}
+	s, ok := llmroute.Lookup(strings.ToUpper(prefix))
+	if !ok || !proxyRoutable(s) {
+		return routedProvider{}, false
+	}
+	cred, ok := credentialFor(req, s)
+	if !ok {
+		return routedProvider{}, false
+	}
+	// A spec that takes its upstream from the credential is routable here too,
+	// but ONLY once that credential actually supplies one. This branch used to
+	// refuse every UpstreamFromCredential spec outright, which made the whole
+	// operator-facing OPENAI_COMPAT surface inert: the credential stored,
+	// validated and delivered fine, nothing ever dialled /llm/openai-compat,
+	// and the documentation described a call that could not happen. Refusing
+	// when BaseURL is empty is still right — the proxy would have nowhere to
+	// send the request and would 503 a run that has no other way to work.
+	if s.UpstreamFromCredential && strings.TrimSpace(cred.BaseURL) == "" {
+		return routedProvider{}, false
+	}
+	rp := routedProvider{Spec: s, ProviderID: prefix, ModelID: model, Label: s.DisplayName}
+	if s.UpstreamFromCredential {
+		rp.UpstreamHost = cred.BaseURL
+	}
+	return rp, true
+}
+
+// credentialFor returns the delivered credential the sidecar's CredStore will
+// hold for spec s — i.e. whether the proxy can actually answer for it, and with
+// what. It is the guard that keeps routing from ever being speculative.
+//
+// Both branches of resolveRoutedProvider need the credential itself and not
+// merely its existence: a spec that takes its upstream from the credential can
+// only be routed to the host THAT credential names, and the boolean-only
+// wrapper this replaced is exactly how one branch came to route without ever
+// learning where it was routing to.
+//
+// It mirrors the sidecar's CredStore.Select as far as a host-side caller can:
+// Select picks the LOWEST Priority and round-robins within that tier, so
+// returning the first slice match could name a credential the proxy will never
+// choose. Ties keep slice order, which is Select's own pass-2 order.
+func credentialFor(req AgentRunRequest, s llmroute.Spec) (Credential, bool) {
+	now := time.Now()
+	var best Credential
+	found := false
+	for _, cred := range req.Credentials {
+		if !credentialRoutesTo(cred, s) || credentialLeaseLapsed(cred, now) {
+			continue
+		}
+		if !found || cred.Priority < best.Priority {
+			best, found = cred, true
+		}
+	}
+	return best, found
+}
+
+// credentialLeaseLapsed mirrors the sidecar CredStore's own lease gate
+// (internal/sidecar/credstore.go). The API tier applies the lease filter at
+// delivery-query time, so a credential whose grant expires between that query
+// and the exec is still sitting in req.Credentials — the sidecar will refuse it
+// and this side must not count on it. Selecting a lapsed credential here routes
+// the run to a provider the proxy then has nothing for (503), and for a spec
+// whose upstream comes from the credential it also names an UpstreamHost the
+// sidecar will never dial.
+//
+// An unparseable deadline reads as LAPSED, not as standing: the server always
+// writes a fixed-width RFC3339 UTC value, so anything else is corruption, and
+// the safe reading of "I cannot tell when this expires" for a security control
+// is "it already did". Same convention as leaseEpochSentinel on the other side.
+func credentialLeaseLapsed(cred Credential, now time.Time) bool {
+	if cred.LeaseExpiresAt == "" {
+		return false
+	}
+	deadline, err := time.Parse(time.RFC3339, cred.LeaseExpiresAt)
+	if err != nil {
+		return true
+	}
+	return !now.Before(deadline)
+}
+
+// credentialsFor returns EVERY credential this run carries that routes to s.
+//
+// One answer is not enough for the egress allowlist. CredStore.Select
+// round-robins within the top priority tier, so a crew holding two
+// OPENAI_COMPAT credentials with different base URLs has the sidecar dialling a
+// different host on alternating calls. Allowlisting only the one credentialFor
+// happened to return would 403 every other request, with both credentials valid
+// — the same failure as naming the wrong host, arriving intermittently, which is
+// harder to diagnose than never working at all.
+func credentialsFor(req AgentRunRequest, s llmroute.Spec) []Credential {
+	now := time.Now()
+	var out []Credential
+	for _, cred := range req.Credentials {
+		if credentialRoutesTo(cred, s) && !credentialLeaseLapsed(cred, now) {
+			out = append(out, cred)
+		}
+	}
+	return out
+}
+
+// localModelConfigEnv builds the OPENCODE_CONFIG_CONTENT entry (#944): an
+// OPENCODE agent selecting an "ollama/…" model on a server with a resolved
+// endpoint, or a model whose prefix names a descriptor with a reserved sidecar
+// route, gets a generated provider block pointing OpenCode's openai-compatible
+// driver at it. The JSON is always marshalled from a fixed struct — no
+// user-controlled JSON reaches the env, so a hostile model name can't smuggle
+// extra config keys.
+//
+// viaSidecar decides whether the block may point at the proxy. On the routed
+// branch the endpoint becomes 127.0.0.1:9119 and NO credential material goes in:
+// options.apiKey holds a dummy and options.headers is omitted entirely, so the
+// real values live only in the sidecar heap. On the unrouted branch the block is
+// exactly what it has always been, auth material included, because there is
+// nothing between the driver and the endpoint to inject on its behalf.
+func localModelConfigEnv(req AgentRunRequest, viaSidecar bool) (string, bool) {
+	routed, isRouted := resolveRoutedProvider(req, viaSidecar)
+	modelID, localActive := localEndpointModel(req)
+	if !isRouted && !localActive {
+		return "", false
+	}
+
 	type providerCfg struct {
 		NPM     string `json:"npm"`
 		Name    string `json:"name"`
@@ -544,27 +873,39 @@ func localModelConfigEnv(req AgentRunRequest) (string, bool) {
 			Name string `json:"name"`
 		} `json:"models"`
 	}
-	p := providerCfg{
-		NPM:  "@ai-sdk/openai-compatible",
-		Name: "Ollama (local)",
+	p := providerCfg{NPM: "@ai-sdk/openai-compatible"}
+	providerID := strings.TrimSuffix(localModelPrefix, "/")
+
+	if isRouted {
+		providerID = routed.ProviderID
+		modelID = routed.ModelID
+		p.Name = routed.Label
+		// #974 S2 closed: the driver dials the sidecar, which owns the real
+		// credential. Headers are omitted rather than forwarded — a custom
+		// header on an authenticated endpoint is credential material too, and
+		// the proxy re-adds it from the CredStore entry.
+		p.Options.BaseURL = sidecarProxyOrigin + routed.Spec.PathPrefix
+		p.Options.APIKey = routedProviderDummyKey
+	} else {
+		p.Name = localModelDisplayName
+		p.Options.BaseURL = req.LocalModelBaseURL
+		// #961: optional auth for an authenticated endpoint. apiKey → the
+		// @ai-sdk/openai-compatible driver auto-adds `Authorization: Bearer`;
+		// headers is the escape hatch for Basic/custom-header/non-bearer
+		// schemes. OPENCODE_CONFIG_CONTENT is itself an agent env var, so on
+		// this branch they DO land in the agent environment — reported by
+		// AgentEnvCredentialExposures and redacted from logs by the scrubber's
+		// (case-insensitive) apiKey pattern.
+		p.Options.APIKey = req.LocalModelAPIKey
+		if len(req.LocalModelHeaders) > 0 {
+			p.Options.Headers = req.LocalModelHeaders
+		}
 	}
-	p.Options.BaseURL = req.LocalModelBaseURL
-	// #961: optional auth for an authenticated endpoint. apiKey → the
-	// @ai-sdk/openai-compatible driver auto-adds `Authorization: Bearer`;
-	// headers is the escape hatch for Basic/custom-header/non-bearer schemes.
-	// NOTE (#974 S2): OPENCODE_CONFIG_CONTENT is itself an agent env var, so
-	// apiKey/headers DO land in the agent environment — the openai-compatible
-	// driver dials the endpoint directly, so the sidecar proxy can't isolate
-	// them. They are reported by AgentEnvCredentialExposures and redacted from
-	// logs by the scrubber's (case-insensitive) apiKey pattern.
-	p.Options.APIKey = req.LocalModelAPIKey
-	if len(req.LocalModelHeaders) > 0 {
-		p.Options.Headers = req.LocalModelHeaders
-	}
+
 	p.Models = map[string]struct {
 		Name string `json:"name"`
 	}{modelID: {Name: modelID}}
-	cfg := map[string]any{"provider": map[string]providerCfg{"ollama": p}}
+	cfg := map[string]any{"provider": map[string]providerCfg{providerID: p}}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		// Statically-shaped struct — marshal cannot realistically fail; treat
@@ -605,38 +946,81 @@ func effectiveAllowPrivateEndpoints(crewFlag bool) bool {
 	return crewFlag && instanceAllowsPrivateEndpoints()
 }
 
-// localModelExtraDomains returns the local endpoint's host when the
-// local-model path is active, so restricted network mode auto-allowlists the
-// traffic the operator explicitly enabled (same pattern as mcpStdioDomains).
-// Empty in every other case — the exception never widens egress for crews
-// that don't use a local model.
-func localModelExtraDomains(req AgentRunRequest) []string {
-	if _, ok := localModelConfigEnv(req); !ok {
+// proxiedEndpointDomains returns the operator endpoint's host when this run
+// uses it, so restricted network mode auto-allowlists the traffic the operator
+// explicitly enabled (same pattern as mcpStdioDomains). Empty in every other
+// case — the exception never widens egress for crews that don't use one.
+//
+// The host is needed whether or not the run is proxy-routed, but for different
+// reasons, and the gate is deliberately the endpoint's activation condition
+// rather than the routing decision. Unrouted, the agent dials the endpoint
+// itself and meets the crew allowlist on the way out. Routed, the agent only
+// ever dials 127.0.0.1 (which NO_PROXY keeps direct) and it is the SIDECAR that
+// dials the endpoint — and the sidecar checks the same crew allowlist before it
+// does, so a routed run that dropped the host here would egress-block itself.
+//
+// Providers with a fixed upstream (OpenRouter et al.) contribute nothing: the
+// sidecar's allowlist check is scoped to credential-supplied upstreams, and
+// their hosts are already in egressallow's defaults.
+func proxiedEndpointDomains(req AgentRunRequest) []string {
+	// Ask the router where this run actually goes, rather than assuming
+	// req.LocalModelBaseURL. When an assigned OPENAI_COMPAT credential wins
+	// over the synthetic endpoint, the sidecar dials the CREDENTIAL's host —
+	// and an allowlist built from the other URL produced a 403 on every call
+	// for a crew whose credentials were all valid. One question, one answer.
+	// EVERY base URL the sidecar might dial, not one. CredStore.Select
+	// round-robins within the top priority tier, so a crew holding two
+	// endpoint credentials alternates hosts between calls; allowlisting one of
+	// them 403s every other request with both credentials valid.
+	var bases []string
+	if rp, routed := resolveRoutedProvider(req, true); routed && rp.UpstreamHost != "" {
+		for _, cred := range credentialsFor(req, rp.Spec) {
+			if b := strings.TrimSpace(cred.BaseURL); b != "" {
+				bases = append(bases, b)
+			}
+		}
+		if len(bases) == 0 {
+			bases = []string{rp.UpstreamHost}
+		}
+	} else if _, ok := localEndpointModel(req); ok {
+		bases = []string{req.LocalModelBaseURL}
+	} else {
 		return nil
 	}
-	u, err := url.Parse(req.LocalModelBaseURL)
-	if err != nil || u.Hostname() == "" {
-		return nil
-	}
-	host := u.Hostname()
-	// SSRF fence (#961): if the endpoint host is a literal IP, gate it here
-	// before it ever reaches the sidecar allowlist. Hard-blocked ranges
-	// (link-local/metadata/reserved) are refused unconditionally; RFC1918/
-	// loopback are refused unless the crew opted into private-endpoint egress.
-	// A non-literal hostname (e.g. host.docker.internal, which may resolve only
-	// inside the container's network) is passed through — the sidecar does the
-	// authoritative resolve-then-pin check at dial time, where it can actually
-	// resolve the name. This keeps the host-side check synchronous and correct
-	// for names crewshipd itself can't resolve.
-	if ip := net.ParseIP(host); ip != nil {
-		if httpsafe.IsBlockedIPForEndpoint(ip, req.AllowPrivateEndpoints) {
-			// Refuse silently here — not added to the allowlist, so the
-			// deny-by-default sidecar blocks it and emits the loud
-			// network.egress journal entry the operator sees.
-			return nil
+
+	var hosts []string
+	seen := map[string]bool{}
+	for _, base := range bases {
+		u, err := url.Parse(base)
+		if err != nil || u.Hostname() == "" {
+			continue
+		}
+		host := u.Hostname()
+		// SSRF fence (#961): if the endpoint host is a literal IP, gate it here
+		// before it ever reaches the sidecar allowlist. Hard-blocked ranges
+		// (link-local/metadata/reserved) are refused unconditionally; RFC1918/
+		// loopback are refused unless the crew opted into private-endpoint egress.
+		// A non-literal hostname (e.g. host.docker.internal, which may resolve only
+		// inside the container's network) is passed through — the sidecar does the
+		// authoritative resolve-then-pin check at dial time, where it can actually
+		// resolve the name. This keeps the host-side check synchronous and correct
+		// for names crewshipd itself can't resolve.
+		//
+		// Per host, not per call: one blocked address must not drop a sibling
+		// that is perfectly reachable, or a single bad credential takes the
+		// whole crew offline. It is simply not allowlisted, and the
+		// deny-by-default sidecar emits the loud network.egress entry for it.
+		if ip := net.ParseIP(host); ip != nil {
+			if httpsafe.IsBlockedIPForEndpoint(ip, req.AllowPrivateEndpoints) {
+				continue
+			}
+		}
+		if !seen[host] {
+			seen[host] = true
+			hosts = append(hosts, host)
 		}
 	}
-	return []string{host}
+	return hosts
 }
 
 // CredentialEnvExposure describes a credential whose plaintext value is placed
@@ -703,11 +1087,12 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 
 	// BYO API keys: CONNECT-tunneled adapters reach their upstream over an HTTPS
 	// CONNECT tunnel and get the real key written into the env, because the sidecar
-	// reverse-proxy only injects for the proxy-injected endpoint (the proxy-injected
+	// reverse-proxy only injects for providers it has a route for (the proxy-injected
 	// adapter returns an empty set and stays isolated). Mirror BuildEnvVarsSidecar's
-	// allowed-override loop exactly — one exposure per matching credential, keyed by
-	// its own EnvVarName.
+	// allowed-override loop exactly — including its routed-provider skip — so one
+	// exposure is reported per credential that actually lands in the env.
 	if allowed := apiKeyEnvVarsForAdapter(req.CLIAdapter); len(allowed) > 0 {
+		routed, isRouted := resolveRoutedProvider(req, true)
 		for _, cred := range req.Credentials {
 			if cred.PlainValue == "" {
 				continue
@@ -715,10 +1100,13 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 			if _, ok := allowed[cred.EnvVarName]; !ok {
 				continue
 			}
+			if isRouted && credentialRoutesTo(cred, routed.Spec) {
+				continue // isolated: the sidecar holds it, the env does not
+			}
 			out = append(out, CredentialEnvExposure{
 				EnvVarName: cred.EnvVarName,
 				Type:       "API_KEY",
-				Reason:     "adapter " + req.CLIAdapter + " reaches its upstream over an HTTPS CONNECT tunnel, so the real API key is written to env (the sidecar reverse-proxy injects only for api.anthropic.com, api.openai.com and generativelanguage.googleapis.com)",
+				Reason:     "adapter " + req.CLIAdapter + " reaches this provider over an HTTPS CONNECT tunnel, so the real API key is written to env; only providers the sidecar has a reverse-proxy route for can be isolated",
 			})
 			markExposed(cred.ID)
 		}
@@ -738,23 +1126,30 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 	}
 
 	// Local-model endpoint auth (#961/#974 S2): the apiKey/headers are embedded
-	// in OPENCODE_CONFIG_CONTENT (an agent env var). The openai-compatible
-	// driver dials the endpoint directly, so the sidecar reverse-proxy cannot
-	// inject them — they are exposed to the agent process, like a CONNECT-
-	// tunneled API key. Not actionable via config (it is the endpoint's auth).
+	// in OPENCODE_CONFIG_CONTENT (an agent env var) whenever the generated block
+	// still points straight at the endpoint. Not actionable via config (it is
+	// the endpoint's own auth).
 	//
-	// Gate on localModelConfigEnv's active condition (OPENCODE adapter + base
-	// URL + ollama model), not just the presence of auth material: the auth is
+	// Gate on the endpoint's active condition (OPENCODE adapter + base URL +
+	// ollama model), not just the presence of auth material: the auth is
 	// resolved for every agent in a workspace that has an authed ENDPOINT_URL
 	// credential, but OPENCODE_CONFIG_CONTENT is only actually placed in the
 	// env for the OpenCode/ollama path. Otherwise we'd report a phantom
 	// exposure for a Claude/mismatched-adapter run.
-	if _, active := localModelConfigEnv(req); active && (req.LocalModelAPIKey != "" || len(req.LocalModelHeaders) > 0) {
-		out = append(out, CredentialEnvExposure{
-			EnvVarName: "OPENCODE_CONFIG_CONTENT",
-			Type:       "ENDPOINT_URL",
-			Reason:     "the local-model endpoint auth token/headers are embedded in the OpenCode config env var; the openai-compatible driver dials the endpoint directly, so the sidecar proxy cannot isolate them",
-		})
+	//
+	// !isEndpointRouted is the phase-2 half: when the block points at the
+	// sidecar instead, the token and the headers are replaced by a dummy and an
+	// omission, and there is nothing here to report. This branch stays because
+	// the routing is conditional — a run that does not qualify still carries the
+	// key, and an operator must be told which of the two they got.
+	if _, active := localEndpointModel(req); active && (req.LocalModelAPIKey != "" || len(req.LocalModelHeaders) > 0) {
+		if _, isEndpointRouted := resolveRoutedProvider(req, true); !isEndpointRouted {
+			out = append(out, CredentialEnvExposure{
+				EnvVarName: "OPENCODE_CONFIG_CONTENT",
+				Type:       "ENDPOINT_URL",
+				Reason:     "the local-model endpoint auth token/headers are embedded in the OpenCode config env var; this run is not proxy-routed, so the openai-compatible driver dials the endpoint directly and the sidecar cannot isolate them",
+			})
+		}
 	}
 
 	// Keeper-gated credentials (SECRET today): isolated behind the Keeper

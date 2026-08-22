@@ -102,6 +102,55 @@ func TestValidateCredentialPayload(t *testing.T) {
 			name: "API_KEY (legacy) still accepted with no extra fields",
 			req:  createCredentialRequest{Type: "API_KEY", Value: "sk-..."},
 		},
+		// The API_KEY gate is provider-conditional, and these rows pin which
+		// side of it each provider is on. An opaque key must keep sailing
+		// through for every provider that dials a fixed vendor host — otherwise
+		// phase 2 has broken every credential in every workspace — while a
+		// BYO-endpoint provider's value must carry the URL the sidecar will
+		// dial. The URL rules themselves are exercised in
+		// TestProviderEndpointFromValue; what is under test here is only that
+		// the gate fires for the right providers and for no others.
+		{
+			name: "API_KEY for a fixed-host provider stays opaque",
+			req:  createCredentialRequest{Type: "API_KEY", Provider: "OPENAI", Value: "sk-proj-not-a-url"},
+		},
+		{
+			name: "API_KEY with no provider stays opaque",
+			req:  createCredentialRequest{Type: "API_KEY", Value: "hunter2"},
+		},
+		{
+			name: "API_KEY for OPENROUTER stays opaque (fixed upstream)",
+			req:  createCredentialRequest{Type: "API_KEY", Provider: "OPENROUTER", Value: "sk-or-v1-not-a-url"},
+		},
+		{
+			name: "OPENAI_COMPAT accepts the endpoint object",
+			req: createCredentialRequest{
+				Type: "API_KEY", Provider: "OPENAI_COMPAT",
+				Value: `{"baseURL":"https://llm.internal.example/v1","apiKey":"sk-abc","headers":{"X-Org":"acme"}}`,
+			},
+		},
+		{
+			name: "OPENAI_COMPAT accepts a bare URL (unauthenticated endpoint)",
+			req: createCredentialRequest{
+				Type: "API_KEY", Provider: "OPENAI_COMPAT",
+				Value: "http://192.168.1.222:11434/v1",
+			},
+		},
+		{
+			name: "OPENAI_COMPAT rejects a bare key with no endpoint",
+			req: createCredentialRequest{
+				Type: "API_KEY", Provider: "OPENAI_COMPAT", Value: "sk-just-a-key",
+			},
+			wantErr: "must use http or https",
+		},
+		{
+			name: "OPENAI_COMPAT rejects the cloud-metadata address",
+			req: createCredentialRequest{
+				Type: "API_KEY", Provider: "OPENAI_COMPAT",
+				Value: "http://169.254.169.254/v1",
+			},
+			wantErr: "link-local/metadata/reserved",
+		},
 		{
 			name: "OAUTH2 (legacy) still accepted with no extra fields",
 			req:  createCredentialRequest{Type: "OAUTH2", Value: "pending_oauth"},
@@ -149,6 +198,155 @@ func TestValidateCredentialPayload(t *testing.T) {
 			}
 			if !strings.Contains(got, tt.wantErr) {
 				t.Errorf("validateCredentialPayload() = %q, want substring %q", got, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestProviderEndpointFromValue covers the split that decides what reaches the
+// sidecar. Two properties matter more than the field values themselves:
+//
+//   - a provider that dials a fixed vendor host must come back byte-identical
+//     to its stored value, because that is what today's boot payload carries and
+//     phase 2 changes nothing for the three grandfathered providers;
+//   - the endpoint JSON must NEVER come back as the token. Handing the whole
+//     object to the Authorization header would ship the base URL and every
+//     custom header to the upstream on each call, and would authenticate with
+//     nothing.
+//
+// Hermetic: validateEndpointURL and parseEndpointValue are pure string/URL work
+// with no DNS or dial in them.
+func TestProviderEndpointFromValue(t *testing.T) {
+	t.Parallel()
+
+	const compatJSON = `{"baseURL":"https://llm.internal.example/v1","apiKey":"sk-byo-abc","headers":{"X-Org":"acme"}}`
+
+	tests := []struct {
+		name        string
+		provider    string
+		value       string
+		wantToken   string
+		wantBaseURL string
+		wantHeaders map[string]string
+		wantErr     string // substring; empty means "no error"
+	}{
+		{
+			name:      "fixed-host provider returns the value verbatim as the token",
+			provider:  "OPENROUTER",
+			value:     "sk-or-v1-EXAMPLE-NOT-A-REAL-KEY",
+			wantToken: "sk-or-v1-EXAMPLE-NOT-A-REAL-KEY",
+		},
+		{
+			name:      "provider with no route spec returns the value verbatim",
+			provider:  "NOTION",
+			value:     "secret_abc123",
+			wantToken: "secret_abc123",
+		},
+		{
+			name:      "empty provider returns the value verbatim",
+			provider:  "",
+			value:     "opaque",
+			wantToken: "opaque",
+		},
+		{
+			name:        "BYO endpoint splits token, base URL and headers",
+			provider:    "OPENAI_COMPAT",
+			value:       compatJSON,
+			wantToken:   "sk-byo-abc",
+			wantBaseURL: "https://llm.internal.example/v1",
+			wantHeaders: map[string]string{"X-Org": "acme"},
+		},
+		{
+			name:        "BYO endpoint with no auth material yields a base URL and no token",
+			provider:    "OPENAI_COMPAT",
+			value:       "http://192.168.1.222:11434/v1",
+			wantBaseURL: "http://192.168.1.222:11434/v1",
+		},
+		{
+			name:     "BYO endpoint rejects a bare key — there would be no upstream",
+			provider: "OPENAI_COMPAT",
+			value:    "sk-just-a-key",
+			wantErr:  "must use http or https",
+		},
+		{
+			name:     "BYO endpoint rejects JSON with no baseURL",
+			provider: "OPENAI_COMPAT",
+			value:    `{"apiKey":"sk-abc"}`,
+			wantErr:  "must be a URL",
+		},
+		{
+			name:     "BYO endpoint rejects userinfo in the URL",
+			provider: "OPENAI_COMPAT",
+			value:    "https://user:pass@llm.example.com/v1",
+			wantErr:  "must not embed credentials",
+		},
+		{
+			name:     "BYO endpoint rejects a token over plaintext http to a public host",
+			provider: "OPENAI_COMPAT",
+			value:    `{"baseURL":"http://llm.example.com/v1","apiKey":"sk-abc"}`,
+			wantErr:  "must use https",
+		},
+		{
+			name:     "BYO endpoint rejects a link-local host",
+			provider: "OPENAI_COMPAT",
+			value:    "http://169.254.169.254/v1",
+			wantErr:  "link-local",
+		},
+		{
+			name:     "BYO endpoint rejects an oversized value",
+			provider: "OPENAI_COMPAT",
+			value:    `{"baseURL":"https://llm.example.com/` + strings.Repeat("a", maxEndpointValueLen) + `"}`,
+			wantErr:  "too long",
+		},
+		{
+			name:     "BYO endpoint rejects an empty value",
+			provider: "OPENAI_COMPAT",
+			value:    "",
+			wantErr:  "endpoint URL is required",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			token, baseURL, headers, err := providerEndpointFromValue(tt.provider, tt.value)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("providerEndpointFromValue(%q, …) = (%q, %q, %v, nil), want error containing %q",
+						tt.provider, token, baseURL, headers, tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %q, want substring %q", err, tt.wantErr)
+				}
+				// A refused value must yield nothing at all: a half-populated
+				// return would be delivered as a credential pointing nowhere.
+				if token != "" || baseURL != "" || headers != nil {
+					t.Errorf("rejected value still returned (%q, %q, %v)", token, baseURL, headers)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("providerEndpointFromValue(%q, …) unexpected error: %v", tt.provider, err)
+			}
+			if token != tt.wantToken {
+				t.Errorf("token = %q, want %q", token, tt.wantToken)
+			}
+			if baseURL != tt.wantBaseURL {
+				t.Errorf("baseURL = %q, want %q", baseURL, tt.wantBaseURL)
+			}
+			if len(headers) != len(tt.wantHeaders) {
+				t.Errorf("headers = %v, want %v", headers, tt.wantHeaders)
+			}
+			for k, v := range tt.wantHeaders {
+				if headers[k] != v {
+					t.Errorf("headers[%q] = %q, want %q", k, headers[k], v)
+				}
+			}
+			// The property the whole split exists for.
+			if strings.Contains(token, "baseURL") {
+				t.Errorf("token %q still carries the endpoint JSON — the object must never "+
+					"travel as the bearer token", token)
 			}
 		})
 	}

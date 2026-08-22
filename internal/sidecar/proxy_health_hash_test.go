@@ -17,6 +17,7 @@ func TestHealthReportsSidecarHash(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 
@@ -35,6 +36,7 @@ func TestHealthSidecarHashEmptyWhenUnset(t *testing.T) {
 	proxy := newTestProxy(nil, []string{"localhost"})
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 	if body := w.Body.String(); !strings.Contains(body, `"sidecar_hash":""`) {
@@ -52,6 +54,7 @@ func TestHealthReportsTokenFP(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 
@@ -70,6 +73,7 @@ func TestHealthTokenFPEmptyWhenUnset(t *testing.T) {
 	proxy := newTestProxy(nil, []string{"localhost"})
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 	if body := w.Body.String(); !strings.Contains(body, `"token_fp":""`) {

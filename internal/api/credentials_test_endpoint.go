@@ -48,18 +48,37 @@ type testResult struct {
 // button was hidden for three providers the server could validate. Same drift
 // class as #1083 (provider→env-var), same remedy: decide in Go, tell the client.
 //
-// Keep in lockstep with the switch in probeProvider; TestProbeSupported_GoldenSet
-// fails if they part ways.
+// Keep in lockstep with the switch in probeProvider;
+// TestProbeSupported_ProbelessRegistrationFails fails if they part ways — it
+// drives every id below through probeProviderInner and rejects any that lands
+// in the default branch.
+//
+// OPENAI_COMPAT is deliberately NOT here even though its credential is the one
+// most worth testing. Its endpoint is operator-supplied, so probing it means
+// crewshipd dialling a caller-chosen host: the SSRF shape probeProvider's
+// dialEndpoint flag exists to contain, and containing it needs the whole
+// resolve-then-pin dialer the sidecar has and this path does not. An absent
+// "Test value" button is the honest answer; a green tick from a host we were
+// tricked into dialling is not.
 var probeSupportedProviders = map[string]struct{}{
-	"ANTHROPIC": {},
-	"OPENAI":    {},
-	"GOOGLE":    {},
-	"CURSOR":    {},
-	"FACTORY":   {},
-	"GITHUB":    {},
-	"GITLAB":    {},
-	"VERCEL":    {},
+	"ANTHROPIC":  {},
+	"OPENAI":     {},
+	"GOOGLE":     {},
+	"OPENROUTER": {},
+	"CURSOR":     {},
+	"FACTORY":    {},
+	"GITHUB":     {},
+	"GITLAB":     {},
+	"VERCEL":     {},
 }
+
+// probeNoValidationMsg is the default branch's answer: honest text wrapped in
+// Valid:true (kept for backward compatibility — `supported` is the field a
+// caller should read). Named because it is the exact signal
+// TestProbeSupported_ProbelessRegistrationFails keys off: a provider listed in
+// probeSupportedProviders that still produces this string has been advertised
+// as probeable without a probe, which renders a green tick over a non-check.
+const probeNoValidationMsg = "No validation available for this provider"
 
 // probeSupported reports whether (provider, credType) has a real upstream check.
 // Support is a function of both: an ENDPOINT_URL is probeable whatever the
@@ -162,6 +181,23 @@ func probeProviderInner(ctx context.Context, provider, ctype, value string, dial
 			return testResult{Valid: true, Status: resp.StatusCode}
 		}
 		return testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)}
+
+	case "OPENROUTER":
+		// OpenRouter exposes the key's own metadata (label, usage, limit) at
+		// /api/v1/key — the cheapest endpoint that authenticates: no model
+		// list, no credits spent.
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://openrouter.ai/api/v1/key", nil)
+		if err != nil {
+			return testResult{Error: "Failed to create request"}
+		}
+		req.Header.Set("Authorization", "Bearer "+value)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return testResult{Error: "Connection failed: " + err.Error()}
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+		return openRouterProbeResult(resp.StatusCode)
 
 	case "CURSOR":
 		// Cursor token validation: ping the auth endpoint with the token.
@@ -294,7 +330,31 @@ func probeProviderInner(ctx context.Context, provider, ctype, value string, dial
 			}
 			return probeLocalModelEndpoint(ctx, value)
 		}
-		return testResult{Valid: true, Error: "No validation available for this provider"}
+		return testResult{Valid: true, Error: probeNoValidationMsg}
+	}
+}
+
+// openRouterProbeResult maps an /api/v1/key response status onto the result the
+// UI renders. Split out of the arm above — rather than inlined the way the older
+// arms are — because it is the half worth testing and the only half that can be
+// tested without dialling openrouter.ai: the arms that inline their switch are
+// exercised only against the live vendor, which is to say not at all in CI.
+//
+// 429 is Valid deliberately. A throttled key is a working key, and reporting it
+// as invalid sends the operator off to rotate a credential that was fine — the
+// same distinction the ANTHROPIC arm draws.
+func openRouterProbeResult(status int) testResult {
+	switch status {
+	case http.StatusOK:
+		return testResult{Valid: true, Status: status}
+	case http.StatusUnauthorized:
+		return testResult{Status: status, Error: "Invalid OpenRouter API key"}
+	case http.StatusForbidden:
+		return testResult{Status: status, Error: "Key is disabled or lacks access"}
+	case http.StatusTooManyRequests:
+		return testResult{Valid: true, Status: status, Error: "Rate limited (key is valid but temporarily throttled)"}
+	default:
+		return testResult{Status: status, Error: fmt.Sprintf("Unexpected response: %d", status)}
 	}
 }
 

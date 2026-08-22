@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -187,14 +188,30 @@ func TestSecurityEmptyCredentialToken(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
-	injectCredential(req, ProviderAnthropic, cred.Token)
+	req.Header.Set("x-api-key", "sk-ant-dummy-crewship-sidecar")
+	llmroute.ApplyAuth(req, specFor(t, ProviderAnthropic), cred.Token, nil)
 
-	// Empty token must round-trip as an empty header value (it is the
-	// store's responsibility to reject empty tokens before they reach
-	// injectCredential; the invariant here is that injectCredential never
-	// fabricates or leaks a token when handed "").
-	if val := req.Header.Get("x-api-key"); val != "" {
-		t.Fatalf("expected empty x-api-key header for empty token, got %q", val)
+	// THE MECHANISM CHANGED HERE, deliberately, and this is the one declared
+	// exception to phase 2's byte-identity claim that is visible in an
+	// outbound request.
+	//
+	// injectCredential used to write x-api-key unconditionally, so an empty
+	// token blanked whatever the agent had put there. llmroute.ApplyAuth is a
+	// no-op for "" instead, so the agent's dummy survives to the upstream.
+	// Both shapes 401; neither leaks a secret. The old assertion pinned the
+	// MECHANISM ("the header ends up empty"), which is not the property that
+	// matters and would now fail for a reason nobody cares about.
+	//
+	// The property that matters — and the only one a security test should
+	// state — is that a credential with no token produces no token: the
+	// sidecar must never fabricate one, and must never emit some OTHER
+	// credential's value into the slot.
+	got := req.Header.Get("x-api-key")
+	if got != "" && got != "sk-ant-dummy-crewship-sidecar" {
+		t.Fatalf("x-api-key = %q: an empty token produced a value that was neither absent nor the caller's own", got)
+	}
+	if auth := req.Header.Get("Authorization"); auth != "" {
+		t.Fatalf("Authorization = %q: an empty token must not populate the OAuth slot either", auth)
 	}
 }
 
@@ -520,6 +537,7 @@ func TestSecurityLocalhostUnknownPath(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/admin/secrets", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 

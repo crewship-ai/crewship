@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/egressallow"
+	"github.com/crewship-ai/crewship/internal/llmroute"
 )
 
 // The domain-allowlist primitive moved to the dependency-free leaf package
@@ -34,16 +35,18 @@ func NewDomainAllowlist(domains []string) *DomainAllowlist {
 func stripPort(host string) string { return egressallow.StripPort(host) }
 
 // providerForHost returns the LLM provider type for a given host, or empty string.
+//
+// The host→provider table now lives in the llmroute descriptor, but ONLY the
+// three grandfathered providers populate Spec.Hosts. That asymmetry is
+// deliberate, not an oversight: openrouter.ai is already in
+// DefaultAllowedDomains, so mapping it here would flip every existing OpenCode
+// BYOK crew that dials OpenRouter directly from pass-through to a hard 503 in
+// handleHTTP the moment no OPENROUTER credential is in the store. A new
+// provider is reachable through its reverse-proxy path prefix, never by host.
 func providerForHost(host string) ProviderType {
 	h := strings.ToLower(stripPort(host))
-	switch h {
-	case "api.anthropic.com":
-		return ProviderAnthropic
-	case "api.openai.com":
-		return ProviderOpenAI
-	case "generativelanguage.googleapis.com":
-		return ProviderGoogle
-	default:
-		return ""
+	if s, ok := llmroute.MatchHost(h); ok {
+		return ProviderType(s.ID)
 	}
+	return ""
 }

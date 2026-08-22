@@ -145,10 +145,15 @@ func TestCovBuildHandlerNonLoopbackFallsThroughToProxy(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	// Control plane would answer 503 (no IPC). The proxy's handleLocal
-	// answers 404 for /standup — proof the gate routed to the proxy.
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 from proxy fallthrough, got %d: %s", w.Code, w.Body.String())
+	// Control plane would answer 503 (no IPC). It answers 403 instead: the
+	// proxy now applies the SAME loopback-peer gate buildHandler does, so a
+	// spoofed Host from a non-loopback peer is not "a localhost request" to
+	// either layer — it is ordinary egress to a host called "localhost:9119",
+	// which no allowlist contains. The property under test is unchanged and
+	// slightly stronger: the control plane did not serve this request, and
+	// neither did handleLocal (which would have answered 404 for /standup).
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 (neither control plane nor handleLocal served it), got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -164,6 +169,7 @@ func TestCovNewServerUnknownNetworkModeFailsClosed(t *testing.T) {
 	// Unknown mode must default to restricted → /health reports it.
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	srv.proxy.ServeHTTP(w, req)
 
@@ -191,6 +197,7 @@ func TestCovNewServerRestrictedModeAddsPolicyDomains(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	srv.proxy.ServeHTTP(w, req)
 	if !strings.Contains(w.Body.String(), `"network_mode":"restricted"`) {
@@ -219,6 +226,7 @@ func TestCovNewServerHealthDomainsHash_ExcludesDefaultDomains(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	srv.proxy.ServeHTTP(w, req)
 

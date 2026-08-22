@@ -1,0 +1,12 @@
+method POST
+scheme http
+url.host api.anthropic.com
+req.host api.anthropic.com
+path /v1/messages
+rawpath 
+rawquery 
+target /v1/messages
+requesturi ""
+header Anthropic-Version: 2023-06-01
+header Content-Type: application/json
+header X-Api-Key: sk-ant-api03-REALKEY

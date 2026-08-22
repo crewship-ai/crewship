@@ -260,6 +260,19 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   // ─── AI / inference ─────────────────────────────────────────────
   { key: "ANTHROPIC", label: "Anthropic", hex: "#D97757", Icon: SiAnthropic as IconComponent, category: "AI", keywords: ["anthropic", "claude"], prefixes: ["sk-ant-"], cli: true },
   { key: "OPENAI", label: "OpenAI", hex: "#412991", Icon: SiOpenai as IconComponent, category: "AI", keywords: ["openai", "chatgpt", "gpt", "oai_"], prefixes: ["sk-proj-", "sk-svcacct-"], cli: true },
+  // A self-hosted or third-party OpenAI-compatible endpoint. Its credential is
+  // an endpoint object, not a bare key, so it carries NO prefixes: a BYO
+  // gateway mints tokens in whatever
+  // shape it likes, and claiming a shape here would mis-badge every "sk-"
+  // paste that is really an OpenAI key.
+  //
+  // ORDER IS BEHAVIOUR: it sits after OPENAI on purpose. Its keywords are
+  // chosen so they cannot contain "openai" — a keyword like
+  // "openai-compatible" would be dead on arrival (OPENAI's "openai" matches
+  // first and wins), and one placed ABOVE OPENAI would steal every plain
+  // OpenAI credential. The keyword strings below are runtime detection
+  // literals, not references — they must match what operators actually type.
+  { key: "OPENAI_COMPAT", label: "OpenAI-compatible endpoint", hex: "#64748B", Icon: Server as unknown as IconComponent, category: "AI", keywords: ["litellm", "vllm"] },
   { key: "GOOGLE", label: "Google AI / Gemini", hex: "#4285F4", Icon: SiGooglegemini as IconComponent, category: "AI", keywords: ["google", "gemini", "googleai", "vertex"], prefixes: ["AIza"], cli: true },
   { key: "HUGGINGFACE", label: "Hugging Face", hex: "#FFD21E", Icon: SiHuggingface as IconComponent, category: "AI", keywords: ["huggingface", "hf_"], prefixes: ["hf_"] },
   { key: "PERPLEXITY", label: "Perplexity", hex: "#1FB8CD", Icon: SiPerplexity as IconComponent, category: "AI", keywords: ["perplexity", "pplx"], prefixes: ["pplx-"] },

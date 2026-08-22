@@ -299,3 +299,57 @@ func TestScrubEndpointAuthToken(t *testing.T) {
 		})
 	}
 }
+
+// Phase 2 — a provider becomes a credential, and an operator-supplied
+// OpenAI-compatible gateway mints its own sk-… key. Those keys routinely carry
+// `-` and `_`, which the openai_key fallback's character class used to exclude:
+// the key then matched NOTHING and survived in any log line the bearer_token or
+// "apiKey": patterns did not happen to cover.
+func TestScrubGatewayStyleSKKeys(t *testing.T) {
+	s := New()
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"litellm_underscore", "key=sk-my_proxy_abcdefghij1234567890", "key=[REDACTED:openai_key]"},
+		{"vllm_hyphen", "sk-vllm-team-abcdefghij1234567890", "[REDACTED:openai_key]"},
+		{"mixed_separators", "sk-a_b-c_defghij1234567890XYZ", "[REDACTED:openai_key]"},
+		// The class widened, the length floor did not: a short sk- token is
+		// still not a key, and redacting it would be a false positive on
+		// ordinary prose.
+		{"too_short", "sk-short_one", "sk-short_one"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.Scrub(tt.input); got != tt.want {
+				t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// The widened class overlaps two prefixes that already had patterns of their
+// own. Redaction was never in doubt for those — the marker is: it names the
+// provider an operator then goes and rotates, so sk-ant-… must stay
+// anthropic_key and sk-or-… must stay openrouter_key.
+func TestScrubSKPrefixesKeepTheirOwnMarkers(t *testing.T) {
+	s := New()
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"anthropic", buildKey("sk-ant-api03-", 30), "[REDACTED:anthropic_key]"},
+		{"anthropic_oauth", buildKey("sk-ant-oat01-", 30), "[REDACTED:anthropic_key]"},
+		{"openrouter", "sk-or-v1-abcdefghij1234567890ABCDEFGHIJ", "[REDACTED:openrouter_key]"},
+		{"openai_project", buildKey("sk-proj-", 30), "[REDACTED:openai_key]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.Scrub(tt.input); got != tt.want {
+				t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

@@ -25,7 +25,7 @@ import (
 var Providers = []string{
 	// AI / inference
 	"ANTHROPIC", "OPENAI", "GOOGLE", "HUGGINGFACE", "PERPLEXITY",
-	"REPLICATE", "ELEVENLABS", "OLLAMA",
+	"REPLICATE", "ELEVENLABS", "OLLAMA", "OPENROUTER", "OPENAI_COMPAT",
 	// Cloud / hosting
 	"AWS", "GCP", "AZURE", "CLOUDFLARE", "VERCEL", "NETLIFY",
 	"RAILWAY", "DIGITALOCEAN", "HEROKU", "SUPABASE",
@@ -54,7 +54,12 @@ var Providers = []string{
 // Deliberately absent (the tool reads no single documented variable, so any
 // value here would be invented): DOCKER (the docker CLI reads ~/.docker/config.json,
 // not an env var), TERRAFORM (HCP Terraform's token variable is host-suffixed,
-// TF_TOKEN_<hostname>), ANSIBLE, CUSTOM_CLI, NONE.
+// TF_TOKEN_<hostname>), ANSIBLE, CUSTOM_CLI, NONE, and OPENAI_COMPAT — that
+// last one is not an oversight but the point: an OPENAI_COMPAT credential is a
+// {baseURL, apiKey, headers} object dialled by the sidecar, not a token any
+// agent-side tool reads from its environment, so there is no conventional
+// variable to suggest and suggesting one would invite exactly the env-var
+// delivery the provider exists to avoid.
 var defaultEnvVars = map[string]string{
 	// AI / inference — the SDK/CLI variable, not the proxy header. Crewship
 	// injects API_KEY / AI_CLI_TOKEN credentials through the sidecar proxy,
@@ -66,7 +71,8 @@ var defaultEnvVars = map[string]string{
 	"PERPLEXITY":  "PERPLEXITY_API_KEY",
 	"REPLICATE":   "REPLICATE_API_TOKEN",
 	"ELEVENLABS":  "ELEVENLABS_API_KEY",
-	"OLLAMA":      "OLLAMA_HOST", // an endpoint, not a secret — Ollama has no auth
+	"OLLAMA":      "OLLAMA_HOST",        // an endpoint, not a secret — Ollama has no auth
+	"OPENROUTER":  "OPENROUTER_API_KEY", // the variable OpenCode/the OpenAI SDK read for openrouter/<model>
 
 	// Cloud / hosting
 	"AWS":          "AWS_ACCESS_KEY_ID",
@@ -136,6 +142,36 @@ var requiredFeatures = map[string]string{
 // provider, or "" when the provider has no conventional default.
 func DefaultEnvVar(provider string) string {
 	return defaultEnvVars[provider]
+}
+
+// canonicalByFold indexes Providers by upper-case name, so a provider the
+// operator typed in any casing can be folded back onto its canonical spelling.
+var canonicalByFold = func() map[string]string {
+	m := make(map[string]string, len(Providers))
+	for _, p := range Providers {
+		m[strings.ToUpper(p)] = p
+	}
+	return m
+}()
+
+// Canonical folds a provider string onto its canonical spelling when it names a
+// recognized provider, and returns it UNCHANGED otherwise.
+//
+// The asymmetry is the point. Every consumer that does something with a
+// provider — the endpoint-value gate, the sidecar's CredStore routing, the
+// frontend's brand registry — keys off the canonical uppercase name, so
+// "openai_compat" typed into the dashboard or posted by an API client silently
+// missed all of them: the credential stored fine, validated nothing, and routed
+// nowhere. But the provider column has never been a closed enum, and an
+// operator who stores "MyInternalVault" means that string, not its shouted
+// form. Folding only what we recognize fixes the first case without inventing a
+// restriction that was never there.
+func Canonical(provider string) string {
+	trimmed := strings.TrimSpace(provider)
+	if c, ok := canonicalByFold[strings.ToUpper(trimmed)]; ok {
+		return c
+	}
+	return trimmed
 }
 
 // RequiredFeature returns the devcontainer feature ref that installs the CLI
