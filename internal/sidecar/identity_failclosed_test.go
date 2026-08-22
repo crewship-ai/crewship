@@ -90,3 +90,32 @@ func TestLLMRouteIdentity_DoesNotRequireIPC(t *testing.T) {
 		t.Fatalf("identity = (%q,%q,%v,%v), want (solo,%s,true,true)", id, fp, present, ok, fingerprint)
 	}
 }
+
+func TestLLMRouteIdentity_FailsClosed(t *testing.T) {
+	t.Parallel()
+
+	const routeKey = "crew-bound-route-key"
+	token := internaltoken.DeriveLLMRouteToken(routeKey, "agent-a")
+	const fingerprint = "abcdef123456"
+	tests := []struct {
+		name   string
+		server *Server
+		value  string
+	}{
+		{"no fingerprint", &Server{routeAuth: &RouteAuth{Key: routeKey}}, token},
+		{"empty fingerprint", &Server{routeAuth: &RouteAuth{Key: routeKey}}, token + internaltoken.RouteFingerprintDelimiter},
+		{"no route auth configured", &Server{}, token + internaltoken.RouteFingerprintDelimiter + fingerprint},
+		{"token signed by another key", &Server{routeAuth: &RouteAuth{Key: "other-key"}}, token + internaltoken.RouteFingerprintDelimiter + fingerprint},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest("POST", "http://127.0.0.1/llm", nil)
+			req.Header.Set("Authorization", "Bearer dummy."+tc.value)
+			id, _, present, ok := tc.server.llmRouteIdentity(req)
+			if !present || ok || id != "" {
+				t.Fatalf("identity = (%q,%v,%v), want (empty,true,false)", id, present, ok)
+			}
+		})
+	}
+}

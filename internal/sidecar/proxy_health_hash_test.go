@@ -91,6 +91,15 @@ func TestHealthReportsConfigFingerprintOnlyWhenConfigured(t *testing.T) {
 	if body := w.Body.String(); !strings.Contains(body, `"config_fingerprint":"a1b2c3d4e5f6"`) {
 		t.Fatalf("health body missing config fingerprint: %q", body)
 	}
+
+	bare := newTestProxy(nil, []string{"localhost"})
+	bareReq := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
+	bareReq.RemoteAddr = "127.0.0.1:54321"
+	bw := httptest.NewRecorder()
+	bare.ServeHTTP(bw, bareReq)
+	if body := bw.Body.String(); strings.Contains(body, "config_fingerprint") {
+		t.Fatalf("unconfigured sidecar must omit config_fingerprint: %q", body)
+	}
 }
 
 // TestSelfExeHashStable confirms selfExeHash returns a stable, non-empty digest

@@ -44,6 +44,9 @@ func TestRegisterCredentialLiterals_RedactsHeaderValuesToo(t *testing.T) {
 	if strings.Contains(got, headerValue) {
 		t.Errorf("header value survived scrubbing: %q — a header-authenticated endpoint's secret is credential material", got)
 	}
+	if plain := sc.Scrub("there is no problem here"); !strings.Contains(plain, "no problem") {
+		t.Errorf("short header value was registered as a literal: %q", plain)
+	}
 }
 
 // A custom-header credential does not have to carry a bearer token. The token

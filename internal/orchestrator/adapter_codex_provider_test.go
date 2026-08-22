@@ -60,7 +60,7 @@ func TestCodexAdapter_DoesNotRouteWithoutSidecarOrCredential(t *testing.T) {
 			t.Errorf("speculative Codex route emitted without both sidecar and credential: %v", cmd)
 		}
 		modelAt := slices.Index(cmd, "--model")
-		if modelAt < 0 || cmd[modelAt+1] != base.LLMModel {
+		if modelAt < 0 || modelAt+1 >= len(cmd) || cmd[modelAt+1] != base.LLMModel {
 			t.Errorf("unrouted Codex model changed: %v", cmd)
 		}
 	}

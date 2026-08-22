@@ -3,6 +3,8 @@ package orchestrator
 import "testing"
 
 func TestSidecarConfigFingerprintTracksCredentialMaterial(t *testing.T) {
+	t.Parallel()
+
 	key := "internal-master-for-test"
 	base := []Credential{{
 		ID: "cred-1", Provider: "OPENAI_COMPAT", PlainValue: "secret-one",
@@ -26,12 +28,20 @@ func TestSidecarConfigFingerprintTracksCredentialMaterial(t *testing.T) {
 		t.Fatal("header rotation did not change config fingerprint")
 	}
 
+	endpointMoved := append([]Credential(nil), base...)
+	endpointMoved[0].BaseURL = "https://other-gateway.example/v1"
+	if got == sidecarConfigFingerprint(key, endpointMoved) {
+		t.Fatal("endpoint change did not change config fingerprint")
+	}
+
 	if fp := sidecarConfigFingerprint("", base); fp != "" {
 		t.Fatalf("unkeyed fingerprint = %q, want empty rather than a credential oracle", fp)
 	}
 }
 
 func TestSidecarConfigFingerprintIsOrderIndependent(t *testing.T) {
+	t.Parallel()
+
 	key := "internal-master-for-test"
 	a := Credential{ID: "a", EnvVarName: "OPENAI_API_KEY", PlainValue: "one", Priority: 1}
 	b := Credential{ID: "b", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "two", Priority: 2}
@@ -44,6 +54,8 @@ func TestSidecarConfigFingerprintIsOrderIndependent(t *testing.T) {
 }
 
 func TestSidecarNeedsRestartOnConfigFingerprintDrift(t *testing.T) {
+	t.Parallel()
+
 	health := &sidecarHealth{
 		NetworkMode:       "free",
 		ConfigFingerprint: "running",

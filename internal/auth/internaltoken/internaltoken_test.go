@@ -254,6 +254,32 @@ func TestLLMRouteToken_RoundTripAndTamperResistance(t *testing.T) {
 	}
 }
 
+func TestValidateLLMRouteTokenRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
+
+	const key = "crew-bound-route-key"
+	valid := DeriveLLMRouteToken(key, "agent-a")
+	tests := []struct {
+		name     string
+		routeKey string
+		value    string
+	}{
+		{"empty route key", "", valid},
+		{"missing prefix", key, strings.TrimPrefix(valid, LLMRoutePrefix+".")},
+		{"extra dot in signature", key, valid + ".trailing"},
+		{"empty encoded id", key, LLMRoutePrefix + "..deadbeef"},
+		{"invalid encoded id", key, LLMRoutePrefix + ".!!!.deadbeef"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if id, ok := ValidateLLMRouteToken(tc.routeKey, tc.value); ok || id != "" {
+				t.Fatalf("accepted malformed token: (%q,%v)", id, ok)
+			}
+		})
+	}
+}
+
 func TestDeriveLLMRouteKeyIsScopedAndFailClosed(t *testing.T) {
 	t.Parallel()
 
