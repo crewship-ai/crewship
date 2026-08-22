@@ -194,12 +194,35 @@ describe("step 3 asks one question, then its consequence", () => {
     // The step used to ask two unrelated things at once — how the human
     // drives Crewship, and which credential the agents use — and ran off
     // the bottom of the viewport doing it. With a CLI in the picture the
-    // second question has a second answer: `crewship setup` asks in the
-    // terminal.
+    // second question has a second answer: `crewship login --pair` offers
+    // to land the token in the terminal.
+    //
+    // Asserted as a property — a collapsed block plus a control that opens
+    // it — and not by quoting the button's words. The first version of this
+    // pinned the literal "Or add it now" and failed the moment that copy was
+    // corrected, which taught the wrong lesson: the label is not the contract,
+    // the escape hatch is.
     const step3 = stepThree()
     expect(step3).toMatch(/mode === "cli" && !showCredential/)
-    expect(step3).toMatch(/Or add it now/)
     expect(step3).toMatch(/setShowCredential\(true\)/)
+  })
+
+  it("never tells a launched user to run `crewship setup` to add the token", () => {
+    // That instruction shipped and was false twice over: `crewship setup`
+    // answers 409 "Onboarding already completed" once a crew exists, and a
+    // credential created after Launch is not delivered to the agents that
+    // already exist — autoAssignCredentials links workspace credentials at
+    // DEPLOY time, and the read-time delivery query has no bare
+    // workspace-scope arm. A crew launched without a token could not be
+    // repaired by the route the UI named.
+    //
+    // Comments are stripped first so this cannot trip over the explanation
+    // sitting next to the code it guards.
+    const step3 = stepThree()
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+    expect(step3).not.toMatch(/crewship setup/)
   })
 
   it("keeps the credential open and required in browser mode", () => {

@@ -462,17 +462,28 @@ func loginWithPairing(serverURL, code, adapterHint string) error {
 
 	cli.PrintSuccess(savedTokenMessage(fmt.Sprintf("Paired as %s.", redeem.Email), profile))
 
+	// The agents' model token is a different credential from the CLI token
+	// just persisted, and this is the last moment it can be landed cheaply —
+	// autoAssignCredentials links workspace credentials to agents when the
+	// crew is DEPLOYED, so anything that arrives after Launch reaches nobody.
+	// Best-effort: never fails the pair.
+	offerModelTokenHandoff(serverURL, redeem.CliToken, adapterHint)
+
 	// Next-step guidance — without this the user is left holding a
 	// valid token and no idea what to do. Two paths from here:
 	//   1. Go back to the browser; the wizard's poll loop sees the
 	//      pair consumed and unlocks Launch.
 	//   2. Skip the browser entirely; run `crewship setup` here.
+	//
+	// (2) is only open while onboarding is unfinished: once a crew exists
+	// `setup` answers 409, which is why it is worded as an alternative to
+	// the browser rather than as something to run afterwards.
 	fmt.Println()
 	fmt.Println("Next steps:")
 	fmt.Println("  • Back in the browser the onboarding wizard will unlock automatically.")
-	fmt.Println("  • Or finish from the terminal:")
+	fmt.Println("  • Or, instead of the browser, finish here:")
 	fmt.Printf("      %screwship setup%s\n", cli.Bold, cli.Reset)
-	fmt.Println("    (interactive prompts for crew template, adapter, API key, language)")
+	fmt.Println("    (interactive prompts for crew template, adapter, token, language)")
 	return nil
 }
 

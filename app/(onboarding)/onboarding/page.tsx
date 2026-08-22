@@ -182,6 +182,9 @@ export default function OnboardingPage() {
   // "Or add it now"; browser mode ignores this and always shows it.
   const [showCredential, setShowCredential] = useState(false)
   const [pairStatus, setPairStatus] = useState<"idle" | "starting" | "pending" | "consumed" | "expired" | "failed">("idle")
+  // Whether the workspace holds a model token for the agents yet — a
+  // different credential from the CLI token pairing mints. See the poll below.
+  const [tokenDelivered, setTokenDelivered] = useState(false)
   const [pairCopied, setPairCopied] = useState(false)
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null)
 
@@ -268,6 +271,45 @@ export default function OnboardingPage() {
     }, 2000)
     return () => clearInterval(interval)
   }, [mode, step, pairCode, pairStatus])
+
+  // Model-token poll. Pairing signs the TERMINAL in; it does not give the
+  // agents a key, and those are two different credentials that both get
+  // called "token". `crewship login --pair` offers to land the model token
+  // right after it pairs, so once the pair is consumed this watches for it to
+  // show up and the step can state what is actually true instead of promising
+  // a repair that does not exist.
+  //
+  // The order is the whole reason this matters: autoAssignCredentials links
+  // workspace credentials to agents when the crew is DEPLOYED. A token that
+  // arrives after Launch reaches none of them, and `crewship setup` answers
+  // 409 once onboarding is complete — so "you can add it later" was false.
+  useEffect(() => {
+    if (mode !== "cli" || step !== 3 || pairStatus !== "consumed" || tokenDelivered) return
+    let cancelled = false
+    const check = async () => {
+      try {
+        // eslint-disable-next-line no-restricted-syntax -- onboarding-time credential probe; mirrors the pairing poll above
+        const res = await fetch("/api/v1/credentials")
+        if (!res.ok) return
+        const data = await res.json()
+        const list = Array.isArray(data) ? data : (data?.credentials ?? [])
+        const found = list.some(
+          (c: { provider?: string; status?: string }) =>
+            (c.provider ?? "").toUpperCase() === "ANTHROPIC" &&
+            (!c.status || c.status.toUpperCase() === "ACTIVE"),
+        )
+        if (found && !cancelled) setTokenDelivered(true)
+      } catch {
+        // network blip — the next tick retries
+      }
+    }
+    void check()
+    const interval = setInterval(check, 2500)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [mode, step, pairStatus, tokenDelivered])
 
   // Live countdown for the pair-code expiry. Updates every second
   // while the code is pending so the user can see at a glance how
@@ -823,10 +865,28 @@ export default function OnboardingPage() {
                                   initial={{ opacity: 0, scale: 0.96 }}
                                   animate={{ opacity: 1, scale: 1 }}
                                   transition={{ duration: 0.35, ease }}
-                                  className="flex items-center gap-2 text-xs text-success"
+                                  // items-start + a single <span> for the
+                                  // sentence: with items-center and bare text
+                                  // nodes, flex made each fragment around the
+                                  // inline <code> its own column and the line
+                                  // wrapped into an unreadable three-column
+                                  // jumble at this width.
+                                  className="flex items-start gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2 text-xs text-success"
                                 >
-                                  <Check className="h-3.5 w-3.5" /> CLI paired. You can finish below or jump
-                                  to <code className="font-mono">crewship setup</code> in the terminal.
+                                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                  <span className="leading-relaxed">
+                                    {tokenDelivered ? (
+                                      <>
+                                        <strong className="font-semibold">CLI paired and model token received.</strong>{" "}
+                                        Your crew is ready to launch.
+                                      </>
+                                    ) : (
+                                      <>
+                                        <strong className="font-semibold">CLI paired.</strong> Your terminal is
+                                        signed in — the agents still need their own model token.
+                                      </>
+                                    )}
+                                  </span>
                                 </motion.div>
                               )}
                               {pairStatus === "expired" && (
@@ -893,20 +953,51 @@ export default function OnboardingPage() {
                         expands on request. Browser mode has no terminal to
                         fall back to, so there it stays open and required. */}
                     {mode === "cli" && !showCredential && (
-                      <div className="rounded-xl border border-dashed border-border bg-card/40 p-3">
-                        <div className="text-sm font-medium">Add the token in the terminal</div>
-                        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                          Your agents need a model token to call{" "}
-                          {getModelLabel(model) || "their model"}. Run{" "}
-                          <code className="font-mono text-foreground/80">crewship setup</code> after
-                          launching and it will ask for it there — nothing else to do here.
-                        </p>
+                      <div
+                        // There is no --warning token in the theme (only
+                        // --success and --destructive), so the unresolved
+                        // state borrows destructive at low opacity rather
+                        // than a `border-warning/40` that renders as nothing.
+                        className={
+                          tokenDelivered
+                            ? "rounded-xl border border-success/30 bg-success/5 p-3"
+                            : "rounded-xl border border-destructive/30 bg-destructive/5 p-3"
+                        }
+                      >
+                        {tokenDelivered ? (
+                          <>
+                            <div className="text-sm font-medium">Model token received</div>
+                            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                              Your CLI handed over a token for{" "}
+                              {getModelLabel(model) || "their model"}. Every agent in the crew gets it
+                              when you launch.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-sm font-medium">Your agents have no model token yet</div>
+                            {/* This used to read "run `crewship setup` after launching — nothing
+                                else to do here". Both halves were false: setup answers 409 once a
+                                crew exists, and a credential created afterwards is not delivered to
+                                agents that already exist, because autoAssignCredentials links them
+                                at deploy time. Launching without one produces a crew that cannot
+                                answer and cannot be repaired by any documented route, so the step
+                                says that plainly instead. */}
+                            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                              Pairing signed your terminal in; it did not give the agents a key to
+                              call {getModelLabel(model) || "their model"}. Paste one in the terminal
+                              when <code className="font-mono text-foreground/80">crewship login --pair</code>{" "}
+                              asks, or add it here. Launching without one creates a crew that cannot
+                              reply.
+                            </p>
+                          </>
+                        )}
                         <button
                           type="button"
                           onClick={() => setShowCredential(true)}
                           className="mt-2 text-xs font-semibold text-primary hover:underline"
                         >
-                          Or add it now →
+                          {tokenDelivered ? "Use a different token →" : "Add it here instead →"}
                         </button>
                       </div>
                     )}
