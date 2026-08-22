@@ -251,11 +251,19 @@ func buildWakeAutomation(wsID, pageID, pageSlug string, panel gatePlanPanel, g p
 	if g.For > 0 {
 		held = fmt.Sprintf(" held for %s", g.For)
 	}
+	// The issue this becomes is assigned to a crew's agent, which runs INSIDE a
+	// crew container — where there is no `crewship` binary at all (the sandbox
+	// image ships curl and jq). So the instruction has to name the door that
+	// audience actually has: the sidecar on loopback, which stamps the agent's
+	// own identity onto the push.
 	writes := ""
 	if g.Writes != "" {
-		writes = fmt.Sprintf("\n\nWrite your analysis back onto the page: `crewship page set %s/%s --data -`. "+
-			"The gate declares that panel as where the answer goes; it does NOT grant you produce authority on it, "+
-			"so if the push is refused, that is the ACL and not a bug.", pageSlug, g.Writes)
+		writes = fmt.Sprintf("\n\nWrite your analysis back onto the page with one PUT to your sidecar: "+
+			"`curl -X PUT http://localhost:9119/pages/%s/%s` with the payload as the body, and the token "+
+			"from $CREWSHIP_AGENT_TOKEN. The gate declares that panel as where the answer goes; it does NOT "+
+			"grant you produce authority on it, so if the push is refused, that is the ACL and not a bug — "+
+			"the panel has to declare `producer: agent/<your slug>`, or a human has to grant you `produce` "+
+			"on it.", pageSlug, g.Writes)
 	}
 	return automation.Automation{
 		ID:          wakeAutomationID(pageID, panel.panelID, g.Index),
@@ -280,11 +288,11 @@ func buildWakeAutomation(wsID, pageID, pageSlug string, panel gatePlanPanel, g p
 			Title:    wakeIssueTitle(fmt.Sprintf("%s/%s: %s", pageSlug, panel.panelID, g.When)),
 			Body: fmt.Sprintf(
 				"Panel **%s** on page **%s** satisfied its wake gate: `%s`%s.\n\n"+
-					"Look at the panel — `crewship page get %s` — and decide what to do about it.%s\n\n"+
+					"Look at panel `%s` on that page and decide what to do about it.%s\n\n"+
 					"_Opened by a wake gate on the page spec (docs/prd/pages.md §5). "+
 					"Editing or deleting this automation directly will not stop it: the page spec owns the rule "+
 					"and the next save rewrites it. Remove the gate from the page instead._",
-				panel.panelID, pageSlug, g.When, held, pageSlug, writes),
+				panel.panelID, pageSlug, g.When, held, panel.panelID, writes),
 			DedupeKey: wakeAlertGateKey(g.Index),
 			Context: map[string]string{
 				"page_id":  pageID,

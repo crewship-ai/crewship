@@ -106,8 +106,12 @@ const (
 	// ProducerRoutine — a routine run pushes the payload; its run id becomes
 	// the panel's provenance.
 	ProducerRoutine ProducerKind = "routine"
-	// ProducerScript — a script inside a crew container pushes through the
-	// CLI or the sidecar.
+	// ProducerScript — a script pushes through the CLI, under whichever human's
+	// token invoked it. NOT through the sidecar: that door attaches agent
+	// identity, and mayProduceUnattended (internal/api/pages_internal.go) has no
+	// `script` arm, so a container producer writing a script-declared panel is
+	// refused unless a human issued it a produce grant. A panel meant to be
+	// written from inside a container declares ProducerAgent instead.
 	ProducerScript ProducerKind = "script"
 	// ProducerAgent — an agent holding a `produce` grant on this panel.
 	ProducerAgent ProducerKind = "agent"

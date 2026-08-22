@@ -9,6 +9,20 @@ package main
 //	GET    /api/v1/pages/{slug}/public             page links <slug>
 //	DELETE /api/v1/pages/{slug}/public/{tokenId}   page unpublish <slug> --id <id>
 //
+// The feature has two more endpoints and they deliberately have NO command,
+// for the reason POST /api/v1/page-webhooks/{token} has none (cmd_page_webhook.go):
+//
+//	GET  /api/v1/public/pages/{token}          the anonymous reader's page
+//	POST /api/v1/public/pages/{token}/unlock   the password gate in front of it
+//
+// Both are unauthenticated, and they exist for somebody who does NOT have this
+// binary or an account — the accountant opening a link in a browser. A command
+// here would be the CLI rendering a page at itself while holding credentials
+// the real audience does not have, which would prove nothing about what that
+// audience sees. `page links` already answers the operator's question — is this
+// link live, when does it expire, has anyone opened it — from the owner's side,
+// where the answer is authoritative.
+//
 // Three things this file deliberately does NOT do:
 //
 //  1. It never puts a password in argv. §7.3.3 says the password is never in a
@@ -33,7 +47,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -241,19 +254,24 @@ roughly where.`,
 			return fmt.Errorf("decode response: %w", err)
 		}
 		if len(out.Tokens) == 0 {
-			fmt.Printf("Page %s has no public links.\n", args[0])
-			fmt.Printf("Publish one with: crewship page publish %s\n", args[0])
+			if f.Format != "quiet" {
+				fmt.Printf("Page %s has no public links.\n", args[0])
+				fmt.Printf("Publish one with: crewship page publish %s\n", args[0])
+			}
 			return nil
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSTATUS\tEXPIRES\tPASSWORD\tPROVENANCE\tLAST SEEN\tPUBLISHED BY")
+		// Column 0 is the link id, which is what `quiet` emits — the whole
+		// point being `page links x -f quiet | xargs -I{} page unpublish x --id {}`.
+		rows := make([][]string, 0, len(out.Tokens))
 		for _, t := range out.Tokens {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			rows = append(rows, []string{
 				t.ID, pagePublicStatus(t), pagePublicWhen(t.ExpiresAt),
 				pagePublicYesNo(t.HasPassword), pagePublicOnOff(t.ShowProvenance),
-				pagePublicWhen(t.LastSeenAt), pageDash(t.CreatedBy))
+				pagePublicWhen(t.LastSeenAt), pageDash(t.CreatedBy),
+			})
 		}
-		return w.Flush()
+		f.Table([]string{"ID", "STATUS", "EXPIRES", "PASSWORD", "PROVENANCE", "LAST SEEN", "PUBLISHED BY"}, rows)
+		return nil
 	},
 }
 
