@@ -13,10 +13,26 @@ import (
 // are the same decision: a demo panel and the number it shows are authored
 // together, and splitting them is how one gets renamed without the other.
 type PageDef struct {
-	Slug        string         `yaml:"slug"`
-	Name        string         `yaml:"name"`
-	Description string         `yaml:"description"`
-	Panels      []PagePanelDef `yaml:"panels"`
+	Slug        string `yaml:"slug"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	// Owner hands the page to a crew ("crew/<slug>"). Empty means the seeding
+	// account keeps it.
+	//
+	// This is the page's owner, which is a different question from a panel's
+	// owner: the panel's owner decides who may SEE it, and the page's decides
+	// who may hand-write a script-produced panel and edit the spec. Naming a
+	// crew here is what makes the demo a team's board rather than one account's
+	// — isPageOwner counts every member of the owning crew
+	// (internal/api/pages_authz.go), so anyone in that crew can correct a panel
+	// by hand without a grant and without waiting for the producer.
+	//
+	// It is NOT part of the page document a human authors: ownership is decided
+	// once, at creation, and moving it afterwards is a transfer with its own
+	// rules. It rides on the create request, exactly as `crewship page create
+	// --owner` does.
+	Owner  string         `yaml:"owner,omitempty"`
+	Panels []PagePanelDef `yaml:"panels"`
 }
 
 // PagePanelDef is a panel's spec with its demo payload attached.
@@ -36,7 +52,25 @@ type PagePanelDef struct {
 	Producer string `yaml:"producer"`
 	SLA      string `yaml:"sla"`
 	Span     int    `yaml:"span,omitempty"`
-	Demo     any    `yaml:"demo,omitempty"`
+
+	// The authored half — the sensor, the buttons and the publication flag.
+	//
+	// All three are `any` for the reason `Demo` is: they are judged by the
+	// server, which owns the grammar. A wake predicate is checked against the
+	// panel's own schema, an action's routine has to exist, and `public` is
+	// governed by the publication rules. Typing them here would be a second,
+	// weaker copy of that grammar, and the copy that drifts is always the one
+	// nobody runs.
+	//
+	// They are carried at all because a catalogue that could only declare the
+	// display half would demo half the feature: PRD §0 says the panel is a
+	// sensor, and a seeded page with no gate never shows that.
+	Wake      any  `yaml:"wake,omitempty"`
+	OnFailure any  `yaml:"on_failure,omitempty"`
+	Actions   any  `yaml:"actions,omitempty"`
+	Public    bool `yaml:"public,omitempty"`
+
+	Demo any `yaml:"demo,omitempty"`
 }
 
 // Pages is the demo catalogue, loaded at package init like every other one.

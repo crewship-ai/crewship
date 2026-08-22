@@ -60,6 +60,11 @@ func agentSlugRef(slug string) string { return slug }
 //     transform + code:expr), suitable as a schedule's wake gate
 //   - feed-change-report  — the intended wake-gated target that only
 //     runs (and only spends tokens) when the probe fires
+//   - page-watch          — the routine→page loop: writes both panels
+//     of the `watch` page as their declared producer. The seeder
+//     fires one run of it (seedPageProducerRoutines), which is the
+//     ONLY way those panels ever hold data — an owner may not push to
+//     a routine-produced panel.
 //
 // Design conventions (kept identical across every recipe):
 //   - Each routine runs with empty inputs (sensible defaults set)
@@ -1167,6 +1172,133 @@ var Routines = []RoutineDef{
 					"id":            "dates",
 					"type":          "call_pipeline",
 					"pipeline_slug": "normalize-dates",
+				},
+			},
+		},
+	},
+
+	// ───────────────────────────────────────────────────────────────
+	// 19. page-watch — the routine→page loop the seed ships
+	//
+	// Writes both panels of the `watch` page (builtin/pages.yaml).
+	// Those panels declare `producer: routine/page-watch`, and §7.1
+	// rule 4 says only the declared producer may write a panel — so
+	// THIS routine's slug is load-bearing. Rename it and the panels
+	// stop being writable by anything at all; the parity test in
+	// cmd/crewship/cmd_seed_data_pages_test.go is what catches that.
+	//
+	// WHY IT IS NOT `agentless: true`, despite spending zero tokens.
+	// validateAgentless rejects every `crewship` step outright
+	// (dsl_validate_agentless.go): a verb can reach a handler that
+	// wakes an agent — an @mention in an issue body, an assignment —
+	// and which it does depends on rendered content, so token-zero is
+	// not provable at save time. `page.write` cannot wake anything,
+	// but the rejection is by STEP KIND and buying an exception for
+	// one verb would mean the guarantee is enforced by a list that
+	// has to be kept correct forever. estimated_cost_usd is 0.0
+	// because that is what this actually costs.
+	//
+	// WHY THE PAYLOADS ARE MOSTLY LITERAL. renderCrewshipArgs
+	// (runner_crewship.go) substitutes templates in STRINGS and
+	// leaves every other value verbatim — there is no JSON coercion.
+	// So `{{ … }}` in a `state` or a numeric field would arrive as a
+	// string and be refused by the panel's schema. Strings templated
+	// into string fields are safe, and that is the only place this
+	// routine uses one.
+	// ───────────────────────────────────────────────────────────────
+	{
+		Slug:        "page-watch",
+		Name:        "Page watch",
+		Description: "Write both panels of the Watch page — the routine→page loop, so a seeded workspace has a page filled by its own declared producer rather than by the seeder.",
+		CrewSlug:    "ops",
+		Definition: map[string]interface{}{
+			"dsl_version":        "1.0",
+			"name":               "page-watch",
+			"display_name":       "Page watch",
+			"description":        "Write both panels of the Watch page — the routine→page loop, so a seeded workspace has a page filled by its own declared producer rather than by the seeder.",
+			"estimated_cost_usd": 0.0,
+			"egress_targets":     []string{},
+			"inputs": []map[string]interface{}{
+				{
+					"name":     "note",
+					"type":     "string",
+					"required": false,
+					"default":  "Nobody has complained yet.",
+					"description": "One line the narrative panel repeats back — the knob a demo can turn " +
+						"without editing the DSL. Plain text: narrative.v1 refuses a URL anywhere in its prose.",
+				},
+			},
+			"outputs": []map[string]interface{}{},
+			"steps": []map[string]interface{}{
+				{
+					"id":     "stav",
+					"type":   "crewship",
+					"action": "page.write",
+					"args": map[string]interface{}{
+						"page":  "watch",
+						"panel": "wiring",
+						"data": map[string]interface{}{
+							"items": []map[string]interface{}{
+								{
+									"name":  "page and routine",
+									"state": "ok",
+									"label": "both created by the seed",
+								},
+								{
+									"name":  "producer",
+									"state": "ok",
+									"label": "routine/page-watch — this run wrote it",
+								},
+								{
+									// Honest rather than green: the seed ships zero
+									// scheduled routines by design (see this file's
+									// header), so nothing refreshes this page on its
+									// own. A reader who sees the panel go stale in
+									// six hours has already been told why.
+									"name":  "schedule",
+									"state": "warning",
+									"label": "none — run the routine by hand to refresh this page",
+								},
+							},
+						},
+					},
+				},
+				{
+					"id":     "zapis",
+					"type":   "crewship",
+					"action": "page.write",
+					// Sequenced behind `stav` so a run that fails authority fails
+					// on the FIRST panel. Both panels name the same producer, so
+					// the second push would fail identically — and two copies of
+					// one 403 in the journal reads as two problems.
+					"needs": []string{"stav"},
+					"args": map[string]interface{}{
+						"page":  "watch",
+						"panel": "entry",
+						"data": map[string]interface{}{
+							"verdict": "No human wrote this page",
+							"blocks": []map[string]interface{}{
+								{
+									"kind": "paragraph",
+									"text": "Both panels declare producer routine/page-watch. The page's owner cannot push to them — " +
+										"only the declared producer is admitted — so everything you are reading was written by a run " +
+										"of this routine, through the dispatcher, not by the seed.",
+								},
+								{
+									"kind": "list",
+									"text": "Run it again with: crewship routine run page-watch",
+								},
+								{
+									"kind": "list",
+									"text": "The seed creates no schedule on purpose, so this page does not refresh itself and goes stale after six hours.",
+								},
+								{
+									"kind": "paragraph",
+									"text": "{{ inputs.note }}",
+								},
+							},
+						},
+					},
 				},
 			},
 		},

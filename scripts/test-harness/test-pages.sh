@@ -5,18 +5,20 @@
 # Spec: docs/prd/pages.md §11 (API and CLI surface), §7 (permissions),
 # §4 (the freshness contract), §10 / §10b.3 (caps).
 #
-# ─── THIS SUITE IS RED ON PURPOSE ───────────────────────────────────────────
+# ─── Registration ───────────────────────────────────────────────────────────
 #
-# `crewship page` does not exist yet. The suite detects that in one place and
-# reports a single loud FAIL naming the reason, rather than cascading twenty
-# confusing ones. GREEN is: the guard passes and every assertion below holds.
+# This suite is GREEN and registered: run-all.sh runs it behind WITH_PAGES, and
+# pr-subset.sh runs it on every PR — it is credential-free and fast, with no
+# provider call anywhere below.
 #
-# It is deliberately NOT registered in run-all.sh or pr-subset.sh yet — a
-# permanently red nightly square is noise, and CLAUDE.md's "never merge on red
-# CI" only means anything while red is rare. The agent that lands cmd_page.go
-# registers it: add `[[ "${WITH_PAGES:-1}" == "1" ]] && tests+=(test-pages.sh)`
-# to run-all.sh, and (once it is credential-free and fast, which it is — no
-# provider call anywhere below) to pr-subset.sh's list.
+# The guard at the top still checks that `crewship page` is registered at all,
+# and reports a single loud FAIL naming that reason rather than cascading twenty
+# confusing ones. It dates from when the command did not yet exist; it is worth
+# keeping, because "the subcommand vanished" and "the write path regressed" are
+# different diagnoses and should not look alike.
+#
+# It covers ONE of the four producer doors — the CLI/host one. The routine,
+# sidecar and webhook doors are unit-tested in Go and have no coverage here.
 #
 # ─── Why this exists alongside cmd/crewship/cmd_page_test.go ────────────────
 #
