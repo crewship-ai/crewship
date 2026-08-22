@@ -159,7 +159,11 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // document, because the document has no way to say "and one more I am not
   // allowed to describe" — saving it would delete that panel (§11b.14).
   const sealed = sealedPanelCount(detail.raw)
-  const canEdit = Boolean(slug) && detail.page != null && sealed === 0
+  // Every one of these reads the SELECTION, not the route prop. They read the
+  // prop until selection became state, and the result was that opening a page
+  // in place left the Edit and Settings controls hidden: the URL had changed,
+  // the prop had not, and the two had silently stopped agreeing.
+  const canEdit = Boolean(selectedSlug) && detail.page != null && sealed === 0
 
   // ── Settings (§7.1b, §10b.1) ─────────────────────────────────────────────
   // Who reaches this page, and what this page is. It sits beside Edit rather
@@ -171,7 +175,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   // A slug change means a different page; a settings sheet left open over it
   // would be showing another page's ACL.
-  React.useEffect(() => setSettingsOpen(false), [slug])
+  React.useEffect(() => setSettingsOpen(false), [selectedSlug])
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
@@ -182,7 +186,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         ariaLabel="Pages"
         actions={
           <>
-            {slug && (
+            {selectedSlug && (
               <SubBarSecondary
                 icon={SlidersHorizontal}
                 onClick={() => setSettingsOpen(true)}
@@ -192,7 +196,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Settings
               </SubBarSecondary>
             )}
-            {slug && (
+            {selectedSlug && (
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => setEditor("edit")}
@@ -345,7 +349,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           // already looking at, and the invalidation the mutation performed
           // has already refetched it.
           onSaved={(saved) => {
-            if (editor === "create" && saved && saved !== slug) openPage(saved)
+            if (editor === "create" && saved && saved !== selectedSlug) openPage(saved)
           }}
         />
       )}

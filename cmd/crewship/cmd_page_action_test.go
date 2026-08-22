@@ -397,3 +397,54 @@ func TestPageActionsCLI_EmptyListSaysWhereActionsComeFrom(t *testing.T) {
 		t.Errorf("an empty listing is not an instruction:\n%s", out)
 	}
 }
+
+// The pipe half of the same case. `quiet` exists so a listing can be read line
+// by line by the next command, and under that contract "Panel x/y declares no
+// actions." is not an explanation — it is a line, and the loop reading it will
+// try to dispatch it as an action id. Empty means empty.
+func TestPageActionsCLI_QuietPrintsNothingWhenThereAreNoActions(t *testing.T) {
+	stub := pageStub(t)
+	stub.OnGet(pageActionsRoute, clitest.JSONResponse(http.StatusOK, map[string]any{
+		"page": pageAcceptSlug, "panel": pageActionCLIPanel, "actions": []map[string]any{},
+	}))
+
+	out, err := runPageActionCLI(t, "page", "actions",
+		pageAcceptSlug+"/"+pageActionCLIPanel, "--format", "quiet")
+	if err != nil {
+		t.Fatalf("page actions --format quiet: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("quiet emitted %d bytes for an empty listing; every line here is read as an "+
+			"action id by the command downstream:\n%s", len(out), out)
+	}
+}
+
+// And the non-empty half, so the id column stays the thing that gets piped. If
+// this ever prints the label or the routine instead, the composition in
+// docs/cli/page.mdx dispatches garbage.
+func TestPageActionsCLI_QuietPrintsOneActionIDPerLine(t *testing.T) {
+	stub := pageStub(t)
+	stub.OnGet(pageActionsRoute, clitest.JSONResponse(http.StatusOK, map[string]any{
+		"page": pageAcceptSlug, "panel": pageActionCLIPanel,
+		"actions": []map[string]any{
+			{"id": pageActionCLIID, "kind": "call", "label": "Restart API", "routine": pageActionCLIRoutine},
+			{"id": "collapse", "kind": "toggle", "label": "Collapse", "target": []string{"inventory"}},
+		},
+	}))
+
+	out, err := runPageActionCLI(t, "page", "actions",
+		pageAcceptSlug+"/"+pageActionCLIPanel, "--format", "quiet")
+	if err != nil {
+		t.Fatalf("page actions --format quiet: %v\n%s", err, out)
+	}
+	got := strings.Fields(strings.TrimSpace(out))
+	want := []string{pageActionCLIID, "collapse"}
+	if len(got) != len(want) {
+		t.Fatalf("quiet printed %d lines, want %d (one id each):\n%s", len(got), len(want), out)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d is %q, want the action id %q:\n%s", i, got[i], want[i], out)
+		}
+	}
+}

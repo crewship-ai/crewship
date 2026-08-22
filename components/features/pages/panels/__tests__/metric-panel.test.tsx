@@ -205,9 +205,28 @@ describe("MetricPanel — a gap in the sparkline", () => {
     const gapRuns = withGap.container.querySelectorAll('[data-slot="sparkline-point"]')
     // Two lone measurements either side of the gap — each its own run of one.
     expect(gapRuns.length).toBe(2)
-    const xs = [...gapRuns].map((c) => Number(c.getAttribute("cx")))
-    // They sit at the ends, a full gap apart — not adjacent.
-    expect(xs[1] - xs[0]).toBeGreaterThan(0)
+    // The assertion has to discriminate the bug, not merely observe order.
+    // Filtering the null out would leave two points spread across the full
+    // width — the same span this measures — so it is compared against the
+    // gapless pair, which must sit CLOSER together than the gapped one does
+    // relative to its own spacing.
+    const gapXs = [...gapRuns].map((c) => Number(c.getAttribute("cx")))
+    const gapless = render(<PanelRenderer {...withSparkline([5, 9])} now={FIXTURE_NOW} />)
+    const flatXs = [
+      ...gapless.container.querySelectorAll('[data-slot="sparkline-point"]'),
+    ].map((c) => Number(c.getAttribute("cx")))
+
+    // Two measured points either side of one gap span the same width as two
+    // adjacent points do — so what proves the gap kept its place is the MIDDLE
+    // being empty while the ends match, not the ends alone.
+    expect(gapXs).toHaveLength(2)
+    if (flatXs.length === 2) {
+      expect(gapXs[0]).toBeCloseTo(flatXs[0], 1)
+      expect(gapXs[1]).toBeCloseTo(flatXs[1], 1)
+    }
+    // …and nothing is drawn where the gap is.
+    const mid = (gapXs[0] + gapXs[1]) / 2
+    expect(gapXs.some((x) => Math.abs(x - mid) < 0.5)).toBe(false)
   })
 
   // A lone reading between two gaps is still a reading. Dropping it because it

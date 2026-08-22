@@ -839,7 +839,11 @@ export interface PageSettingsProps {
  * and dismissing it is the user saying they have it. It stays until they do.
  */
 function OneTimeSecret({ url, onDone }: { url: string; onDone: () => void }) {
-  const [copied, setCopied] = React.useState(false)
+  // Three states, not two. A clipboard write can be REFUSED — an insecure
+  // origin, a denied permission — and the old version set "Copied" without
+  // waiting for the promise, so the one moment this value exists on screen
+  // could end with the reader believing they had it and closing the banner.
+  const [copyState, setCopyState] = React.useState<"idle" | "copied" | "failed">("idle")
   return (
     <div className="flex flex-col gap-2 rounded-md border border-primary/40 bg-primary/[0.06] p-3">
       <div className="type-page-meta flex items-center gap-1.5 font-medium text-foreground">
@@ -854,17 +858,29 @@ function OneTimeSecret({ url, onDone }: { url: string; onDone: () => void }) {
           size="sm"
           variant="secondary"
           className="h-7 gap-1.5 px-2.5 text-xs"
-          onClick={() => {
-            void navigator.clipboard?.writeText(url)
-            setCopied(true)
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(url)
+              setCopyState("copied")
+            } catch {
+              // Not a toast: the value is still on screen above and the reader
+              // can select it by hand. What must not happen is this saying it
+              // worked.
+              setCopyState("failed")
+            }
           }}
         >
           <Copy className="h-3 w-3" />
-          {copied ? "Copied" : "Copy"}
+          {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy"}
         </Button>
         <Button size="sm" variant="ghost" className="h-7 px-2.5 text-xs" onClick={onDone}>
           I have it
         </Button>
+        {copyState === "failed" && (
+          <span className="type-page-meta text-muted-foreground">
+            Select the text above and copy it yourself.
+          </span>
+        )}
       </div>
     </div>
   )
@@ -1114,7 +1130,13 @@ function WebhooksCard({
   const [minted, setMinted] = React.useState<string | null>(null)
   const [writeRefusal, setWriteRefusal] = React.useState<string | null>(null)
   const [revokeTarget, setRevokeTarget] = React.useState<WireWebhook | null>(null)
-  const [panel, setPanel] = React.useState(panelIDs[0] ?? "")
+  // Not just an initial value: the page detail arrives after this mounts, so
+  // panelIDs is empty on the first render and the select would stay empty for
+  // good — the Mint button disabled with no way to enable it.
+  const [panel, setPanel] = React.useState("")
+  React.useEffect(() => {
+    setPanel((current) => (current && panelIDs.includes(current) ? current : (panelIDs[0] ?? "")))
+  }, [panelIDs])
   const [name, setName] = React.useState("")
 
   const create = usePageWebhookCreate(workspaceId, slug, {

@@ -91,6 +91,20 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
         )
         return
       }
+      // The format string alone is not the shape. A file that declares the
+      // right format and carries no `page` would render as `bundle.page.name`
+      // on the very next line, which is a crash rather than a refusal — and a
+      // truncated or hand-edited bundle is exactly the file somebody drags in.
+      if (!parsed.page || typeof parsed.page !== "object" || !Array.isArray(parsed.page.panels)) {
+        setBundle(null)
+        setRefusal("That bundle declares the right format but carries no page — it is incomplete.")
+        return
+      }
+      if (parsed.references !== undefined && !Array.isArray(parsed.references)) {
+        setBundle(null)
+        setRefusal("That bundle's `references` is not a list, so its shape cannot be trusted.")
+        return
+      }
       setBundle(parsed)
       setSlug(parsed.page?.slug ?? "")
       setBind({})
@@ -155,15 +169,24 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
             </div>
           )}
 
-          <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border p-3 hover:bg-white/[0.02]">
+          {/* `htmlFor` rather than a wrapping label around a `hidden` input.
+              `display: none` takes the input out of the tab order entirely, so
+              the only way to reach this control was a mouse. Visually hidden
+              but focusable, with the label pointing at it, keeps the styling
+              and gives it back to the keyboard. */}
+          <label
+            htmlFor="page-import-file"
+            className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border p-3 hover:bg-white/[0.02] focus-within:ring-1 focus-within:ring-ring"
+          >
             <Upload className="h-4 w-4 shrink-0 text-muted-foreground-soft" />
             <span className="type-page-meta text-muted-foreground">
               {fileName || "Choose a bundle written by Export"}
             </span>
             <input
+              id="page-import-file"
               type="file"
               accept="application/json,.json"
-              className="hidden"
+              className="sr-only"
               onChange={(e) => {
                 const f = e.target.files?.[0]
                 if (f) void readFile(f)

@@ -28,9 +28,12 @@ Every subcommand honours the global `--format table|json|yaml|ndjson|quiet`.
 Machine output is the server's own document passed through unmodified rather
 than re-encoded, so a field this build has never heard of is not lost on the
 way out. `--format quiet` prints one key per line — the slug, the link id, the
-webhook id, the version seq — so a listing can be piped into the command that
-consumes it. `page export` is the exception in the other direction: it prints
-YAML unless you ask for `--format json`.
+webhook id, the action id, the version seq — so a listing can be piped into the
+command that consumes it. A listing with nothing in it prints **nothing** under
+`quiet`, rather than the sentence the human format would use: an empty pipe is
+empty, and a line saying so would be read as a key. `page export` is the
+exception in the other direction: it prints YAML unless you ask for
+`--format json`.
 
 ## Subcommands
 
@@ -143,6 +146,15 @@ spec:
       owner: crew/lookout
       producer: webhook/sklad
       sla: 1h
+      span: 12
+
+    - id: rozbor
+      schema: narrative.v1
+      title: Co se dělo v noci
+      tab: Provoz
+      owner: crew/lookout
+      producer: agent/riley       # pushed from inside a container, via the sidecar
+      sla: 12h
       span: 12
 ```
 
@@ -351,9 +363,9 @@ producer script always calls the same command wherever it runs.
   and never enters the agent process:
 
   ```bash
-  curl -s -X PUT http://localhost:9119/pages/fleet-201/sluzby \
+  curl -s -X PUT http://localhost:9119/pages/fleet-201/rozbor \
     -H "Content-Type: application/json" \
-    -d '{"items":[{"name":"api","state":"ok"}]}' \
+    -d '{"blocks":[{"kind":"paragraph","text":"Dva restarty ve 03:12, oba se zvedly."}],"verdict":"Noc bez zásahu."}' \
     -K /dev/fd/3 3<<AUTH
   header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
   AUTH
@@ -361,6 +373,12 @@ producer script always calls the same command wherever it runs.
 
   The `fd-3` form is deliberate: a bearer token passed as `-H` is visible in
   the container's process table.
+
+  Note the panel: `rozbor`, not `sluzby`. `rozbor` declares `producer:
+  agent/riley`, and the curl above runs inside riley's container. `sluzby`
+  declares `producer: script/watch-services.sh`, and this door would refuse it
+  — which is the rule stated immediately below, so an example that pushed there
+  would be teaching the opposite of the paragraph it sits in.
 
   **Declare such a panel `producer: agent/<slug>`, not `producer: script/…`.**
   A `script` producer means "a human's CLI token pushes this", and the
@@ -464,6 +482,18 @@ Only `call` actions reach the server. A `link` navigates to an internal entity
 no URL field anywhere in the schema and there will not be one. A `toggle` is
 client-side panel state. A `custom` action resolves to a handler compiled into
 the web client.
+
+`--format quiet` prints one action id per line — column 0 is the argument
+[`page action`](#crewship-page-action) takes, so the two compose:
+
+```bash
+crewship page actions fleet-201/sluzby -f quiet |
+  while read -r id; do crewship page action fleet-201/sluzby "$id"; done
+```
+
+A panel that declares no actions prints nothing at all under `quiet` and exits
+`0`. Do not read the empty output as a failure — a panel with no actions and a
+panel you may not see are told apart by the exit code, not by the text.
 
 ---
 

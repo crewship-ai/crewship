@@ -329,7 +329,7 @@ pages:
   # ── The webhook door ─────────────────────────────────────────────────────
   #
   # The door for a producer that cannot run the binary: a cron on somebody
-  # else's box, a CI step, a Trigger.dev job, a PLC gateway. Nothing about it
+  # else's box, a CI step, a hosted job runner, a PLC gateway. Nothing about it
   # needs a routine, an agent or a container.
   #
   # These panels DO carry demo payloads, because §7.1 rule 4 admits an owner
@@ -354,7 +354,10 @@ pages:
         span: 12
         demo:
           items:
-            - name: build #412
+            # Quoted: an unquoted `#` after a space starts a YAML comment, so
+            # this arrived as plain "build" and the demo lost the one detail
+            # that made it read like a real build.
+            - name: "build #412"
               state: ok
               label: passed in 2 m 14 s
             - name: tests

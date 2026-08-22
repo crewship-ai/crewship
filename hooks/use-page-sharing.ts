@@ -32,6 +32,7 @@
 import { useQuery } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { PagesRequestError } from "@/hooks/use-pages"
 import {
   type UseApiMutationResult,
   useApiMutation,
@@ -95,9 +96,25 @@ export interface WireWebhooks {
 
 // ── reads ─────────────────────────────────────────────────────────────────
 
+/**
+ * A read that raises the refusal `gateOf` knows how to read.
+ *
+ * This threw a plain Error carrying the status as its message, which meant the
+ * 403 arm of `gateOf` never matched: a caller who may not read this page's
+ * links was shown "403" in the error slot instead of the server's sentence in
+ * the refusal slot. The distinction is the whole reason GatedRead exists — a
+ * refusal is the answer, not a broken request.
+ */
 async function fetchJSON<T>(url: string, signal?: AbortSignal): Promise<T> {
   const res = await apiFetch(url, { signal })
-  if (!res.ok) throw new Error(String(res.status))
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    const detail =
+      body && typeof body === "object" && typeof (body as { error?: string }).error === "string"
+        ? (body as { error: string }).error
+        : null
+    throw new PagesRequestError(res.status, detail ?? `Request failed (${res.status})`)
+  }
   return (await res.json()) as T
 }
 

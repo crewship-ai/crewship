@@ -815,6 +815,14 @@ func pageCheckError(resp *http.Response) error {
 		}
 		if json.Unmarshal(raw, &lim) == nil && strings.TrimSpace(lim.Reason) != "" {
 			msg := lim.Reason
+			// The scope is half the answer and it was decoded and then dropped.
+			// "this panel is too fast" and "this workspace is too fast" ask the
+			// producer for different fixes, and a reason that names neither
+			// leaves the caller doing what a bare 429 would have left them
+			// doing.
+			if scope := strings.TrimSpace(lim.Scope); scope != "" {
+				msg = fmt.Sprintf("%s (%s limit)", msg, scope)
+			}
 			if lim.RetryAfter > 0 {
 				msg = fmt.Sprintf("%s — retry in %ds", msg, lim.RetryAfter)
 			}

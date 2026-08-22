@@ -966,8 +966,15 @@ spec:
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if strings.Contains(string(raw), `"owner":"`) && !strings.Contains(string(raw), `"owner":"crew/ops"`) {
-		t.Errorf("unexpected page-level owner on the wire: %s", raw)
+	// Asserted on the TOP-LEVEL key, not on the bytes. The panel below carries
+	// `"owner":"crew/ops"` of its own, so a substring check passes whatever the
+	// page-level field says — including the value this test exists to forbid.
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("create body is not a JSON object: %v", err)
+	}
+	if _, present := wire["owner"]; present {
+		t.Errorf("create body carries a page-level owner without --owner: %s", wire["owner"])
 	}
 	// The panel's own owner is a different field and must survive.
 	if body.Panels[0].Owner != "crew/ops" {

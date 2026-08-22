@@ -185,7 +185,9 @@ export interface MetricPayload {
    */
   delta_good?: "up" | "down" | null
   target?: number | null
-  sparkline?: number[] | null
+  /** `null` marks a gap the producer knows about — the line breaks there
+   *  rather than interpolating across it (schemas/panel.metric.v1.json). */
+  sparkline?: (number | null)[] | null
 }
 
 export const STATUS_ITEM_STATES = ["ok", "warning", "critical"] as const

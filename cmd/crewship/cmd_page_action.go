@@ -131,6 +131,13 @@ handler built into the web client.`,
 			return fmt.Errorf("decode response: %w", err)
 		}
 		if len(doc.Actions) == 0 {
+			// Under `quiet` the caller is a pipe expecting one action id per
+			// line, and "declares no actions." is a line — it would be read as
+			// an id. Empty means emit nothing; the exit code already says the
+			// call succeeded.
+			if f.Format == "quiet" {
+				return nil
+			}
 			fmt.Printf("Panel %s/%s declares no actions.\n", slug, panel)
 			fmt.Println("Actions are declared in the page document, never at click time — see docs/cli/page.")
 			return nil
