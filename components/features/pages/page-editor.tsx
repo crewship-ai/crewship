@@ -226,12 +226,39 @@ export function formatSlaSeconds(seconds: number): string {
 export const PAGE_DOCUMENT_API_VERSION = "crewship/v1"
 export const PAGE_DOCUMENT_KIND = "Page"
 
-/** The starter document. Every field the authoring gate requires is present
- *  and obviously a placeholder, because a template that validates would teach
- *  the reader that owner and producer are decoration. */
+/** The starter document. Every field the authoring gate requires is present,
+ *  and the ones the author has to decide are named in the comments, because a
+ *  template that hid them would teach the reader that owner and producer are
+ *  decoration.
+ *
+ *  The producer is `script/`, and that is the load-bearing choice rather than
+ *  an arbitrary one. It used to be `routine/CHANGEME`, which could never be
+ *  submitted: a routine producer must resolve to a routine that EXISTS, so
+ *  pressing "Create page" on the untouched template answered
+ *  `no such routine exists here` — a first run that fails on the default, and
+ *  an error that teaches the template is broken rather than that the producer
+ *  matters.
+ *
+ *  `script/` has no such lookup (there is no table of scripts, by design), and
+ *  it is the one producer kind whose panel the page's own author may then
+ *  write by hand. So the first page somebody makes is one they can immediately
+ *  put a number on — with `crewship page set`, or from a script on their own
+ *  machine — which is the whole of what a page is for. Until they do, the
+ *  panel reads "never produced", which is the product's own words for "nobody
+ *  wired this up" and is a better teacher than a 400. */
 export function newPageTemplate(ownerRef?: string | null): string {
   const owner = ownerRef && ownerRef.startsWith("crew/") ? ownerRef : "crew/CHANGEME"
   return [
+    "# A page renders the last payload a producer pushed. It holds no query, no",
+    "# datasource and no credentials, so there are only three things to decide:",
+    "#",
+    "#   owner:     which crew may SEE a panel      (visibility)",
+    "#   producer:  who may WRITE it                (authority)",
+    "#   sla:       how long silence is allowed     (honesty)",
+    "#",
+    "# Everything below marked CHANGEME is yours to replace. Delete any comment",
+    "# once you have decided — they are here to be read, not kept.",
+    "",
     `apiVersion: ${PAGE_DOCUMENT_API_VERSION}`,
     `kind: ${PAGE_DOCUMENT_KIND}`,
     "metadata:",
@@ -241,12 +268,68 @@ export function newPageTemplate(ownerRef?: string | null): string {
     "spec:",
     "  panels:",
     "    - id: status",
+    "",
+    "      # WHAT SHAPE OF DATA. One of five, and the panel renders accordingly:",
+    "      #   status.v1     a grid of named things, each ok | warning | critical",
+    "      #   metric.v1     one number, with an optional delta and sparkline",
+    "      #   series.v1     a chart; one unit for the whole panel",
+    "      #   table.v1      declared columns and keyed rows",
+    "      #   narrative.v1  typed prose blocks written by an agent or a script",
     "      schema: status.v1",
+    "",
     "      title: Is it running?",
+    "",
+    "      # WHO MAY SEE IT. Always a crew — this is the permission anchor.",
+    "      # A reader outside this crew gets a sealed placeholder, not an error,",
+    "      # so the page has the same shape for everyone looking at it.",
     `      owner: ${owner}`,
-    "      producer: routine/CHANGEME",
+    "",
+    "      # WHO MAY WRITE IT. Four kinds; only two of them must already exist:",
+    "      #   script/<any-name>   nothing has to exist. Anything holding a CLI",
+    "      #                       token pushes it — a cron, your laptop, a CI",
+    "      #                       step — and the page's OWNER may also write it",
+    "      #                       by hand. Start here if you want to fill the",
+    "      #                       page yourself.",
+    "      #   webhook/<any-name>  nothing has to exist. Mint a token with",
+    "      #                       `crewship page webhook create` and hand it to",
+    "      #                       a system that cannot run the CLI.",
+    "      #   routine/<slug>      the routine MUST exist. It writes the panel",
+    "      #                       when it runs. A human cannot write it by hand.",
+    "      #   agent/<slug>        the agent MUST exist. It pushes from inside",
+    "      #                       its crew container, through the sidecar.",
+    "      producer: script/CHANGEME.sh",
+    "",
+    "      # HOW LONG SILENCE IS ALLOWED. Past this the panel reads `stale` and",
+    "      # says so. There is no value meaning `never mind`: a panel that cannot",
+    "      # go stale is a panel that can show yesterday's number as today's.",
     "      sla: 5m",
+    "",
+    "      # Width on a 12-column grid. 12 is full width.",
     "      span: 12",
+    "",
+    "      # Optional, and worth knowing they exist:",
+    "      #   icon: memory          a glyph, from a closed set of thirteen",
+    "      #   tab: Overview         put this panel on a named tab; one word per",
+    "      #                         panel, no `tabs:` block, first use sets the",
+    "      #                         order. No tab anywhere means no tab bar.",
+    "      #   public: true          include this one panel in a published link",
+    "",
+    "    # Add as many panels as the page needs, up to 24.",
+    "",
+    "# WHO ELSE REACHES THIS PAGE is not part of this document — it is decided",
+    "# after the page exists, in Settings or with `crewship page grant`:",
+    "#",
+    "#   read     may reach the page, and sees the panels their crew already",
+    "#            admits. It does NOT unseal a panel: visibility stays crew",
+    "#            membership, and a grant never widens it.",
+    "#   produce  may push payloads into NAMED panels and nothing else. It does",
+    "#            NOT imply read — a subject can write a panel whose contents it",
+    "#            may not look at.",
+    "#   write    may edit this document: add, remove and rearrange panels.",
+    "#",
+    "# Each can go to a user, a crew or an agent. Only a human may issue one,",
+    "# and only the page's owner or a workspace admin — an agent holding `write`",
+    "# can rebuild the page but can never widen who reaches it.",
     "",
   ].join("\n")
 }

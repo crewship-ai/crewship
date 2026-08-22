@@ -52,6 +52,9 @@
 import * as React from "react"
 import {
   AlertTriangle,
+  Copy,
+  Download,
+  Globe,
   History,
   Info,
   KeyRound,
@@ -59,6 +62,7 @@ import {
   Plus,
   Trash2,
   Undo2,
+  Webhook,
   X,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -76,6 +80,18 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  fetchPageBundle,
+  usePageDelete,
+  usePagePublicLinks,
+  usePagePublish,
+  usePageUnpublish,
+  usePageWebhookCreate,
+  usePageWebhookRevoke,
+  usePageWebhooks,
+  type WirePublicLink,
+  type WireWebhook,
+} from "@/hooks/use-page-sharing"
 import { SectionCard } from "@/components/ui/section-card"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -184,17 +200,31 @@ function when(iso: string | null | undefined): string {
 
 // ── Access ─────────────────────────────────────────────────────────────────
 
-/** What the revoke dialog is asking about. Held as a whole grant so the
- *  sentence can name the level as well as the subject. */
-type RevokeTarget = PageGrant
+/**
+ * What the revoke dialog is asking about: one row, or every level a subject
+ * holds on this page.
+ *
+ * The second is the shape an incident wants. An agent that has started writing
+ * panels it should not typically holds `read` and `produce`, sometimes `write`
+ * too, and revoking them one at a time leaves a window between clicks where it
+ * still has some of what you are taking away. The server has always accepted a
+ * DELETE with no `level` for exactly this — the CLI calls it out as the
+ * incident-response shape — and the panel simply never offered it.
+ */
+type RevokeTarget = { kind: "one"; grant: PageGrant } | { kind: "all"; subject: PageGrant; levels: number }
 
 function GrantRow({
   grant,
   onRevoke,
+  onRevokeAll,
+  siblingLevels,
   disabled,
 }: {
   grant: PageGrant
   onRevoke: () => void
+  /** Present only when this subject holds more than one level here. */
+  onRevokeAll?: () => void
+  siblingLevels: number
   disabled: boolean
 }) {
   return (
@@ -233,6 +263,22 @@ function GrantRow({
           <Trash2 className="h-3 w-3" />
           Revoke
         </Button>
+        {/* Offered only where it is a different act from the button beside it.
+            On a subject holding one level, "revoke all" IS "revoke", and two
+            controls that do the same thing make a reader stop and work out
+            which is which. */}
+        {onRevokeAll && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onRevokeAll}
+            disabled={disabled}
+            className="type-page-meta h-6 shrink-0 px-2 text-muted-foreground hover:text-destructive"
+            aria-label={`Revoke all ${siblingLevels} levels from ${grant.subjectType}/${grant.subject}`}
+          >
+            all {siblingLevels}
+          </Button>
+        )}
       </div>
 
       {/* The produce scope. An EMPTY list is not "no panels" — a null
@@ -384,14 +430,29 @@ function AccessCard({
 
         {!refusal && grants.length > 0 && (
           <div data-slot="page-grants">
-            {grants.map((g) => (
-              <GrantRow
-                key={`${g.subjectType}:${g.subjectId}:${g.level}`}
-                grant={g}
-                disabled={busy}
-                onRevoke={() => setRevokeTarget(g)}
-              />
-            ))}
+            {grants.map((g) => {
+              // How many levels this same subject holds. Counted per row rather
+              // than grouped into sections: grouping would reorder a list whose
+              // order is the server's, and the only thing the count decides is
+              // whether one extra control appears.
+              const levels = grants.filter(
+                (o) => o.subjectType === g.subjectType && o.subjectId === g.subjectId,
+              ).length
+              return (
+                <GrantRow
+                  key={`${g.subjectType}:${g.subjectId}:${g.level}`}
+                  grant={g}
+                  disabled={busy}
+                  onRevoke={() => setRevokeTarget({ kind: "one", grant: g })}
+                  siblingLevels={levels}
+                  onRevokeAll={
+                    levels > 1
+                      ? () => setRevokeTarget({ kind: "all", subject: g, levels })
+                      : undefined
+                  }
+                />
+              )
+            })}
           </div>
         )}
 
@@ -501,14 +562,29 @@ function AccessCard({
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-sm">
               <AlertTriangle className="h-4 w-4 text-destructive" />
-              Revoke this grant
+              {revokeTarget?.kind === "all" ? "Revoke every level" : "Revoke this grant"}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-xs">
-              Remove <strong>{revokeTarget?.level}</strong> on <strong>{slug}</strong> from{" "}
-              <strong>
-                {revokeTarget?.subjectType}/{revokeTarget?.subject}
-              </strong>
-              ? The change is journalled with you as the actor, and it takes effect on the next read.
+              {revokeTarget?.kind === "all" ? (
+                <>
+                  Remove all <strong>{revokeTarget.levels}</strong> levels on{" "}
+                  <strong>{slug}</strong> from{" "}
+                  <strong>
+                    {revokeTarget.subject.subjectType}/{revokeTarget.subject.subject}
+                  </strong>
+                  ? One request, so there is no moment where some of them are still in force.
+                </>
+              ) : (
+                <>
+                  Remove <strong>{revokeTarget?.grant.level}</strong> on <strong>{slug}</strong>{" "}
+                  from{" "}
+                  <strong>
+                    {revokeTarget?.grant.subjectType}/{revokeTarget?.grant.subject}
+                  </strong>
+                  ?
+                </>
+              )}{" "}
+              The change is journalled with you as the actor, and it takes effect on the next read.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -518,10 +594,15 @@ function AccessCard({
               disabled={revoke.isPending}
               onClick={() => {
                 if (!revokeTarget) return
+                // Omitting `level` is what makes the server take every one of
+                // them in a single DELETE, which is the whole point of the
+                // second control — three sequential revokes leave a window
+                // where the subject still holds what has not been reached yet.
+                const g = revokeTarget.kind === "all" ? revokeTarget.subject : revokeTarget.grant
                 revoke.mutate({
-                  subjectType: revokeTarget.subjectType,
-                  subject: revokeTarget.subject,
-                  level: revokeTarget.level,
+                  subjectType: g.subjectType,
+                  subject: g.subject,
+                  level: revokeTarget.kind === "all" ? undefined : g.level,
                 })
               }}
             >
@@ -747,6 +828,627 @@ export interface PageSettingsProps {
   onClose: () => void
 }
 
+// ── Sharing outward ────────────────────────────────────────────────────────
+
+/**
+ * A secret the server will never send again.
+ *
+ * Both `publish` and `webhook create` answer with a token exactly once — every
+ * later read omits it, because what is stored is a hash. So this is not a
+ * convenience banner: it is the only moment the value exists on this screen,
+ * and dismissing it is the user saying they have it. It stays until they do.
+ */
+function OneTimeSecret({ url, onDone }: { url: string; onDone: () => void }) {
+  const [copied, setCopied] = React.useState(false)
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-primary/40 bg-primary/[0.06] p-3">
+      <div className="type-page-meta flex items-center gap-1.5 font-medium text-foreground">
+        <AlertTriangle className="h-3.5 w-3.5 text-primary" />
+        Copy this now — it is shown once
+      </div>
+      <code className="type-page-stamp block overflow-x-auto rounded bg-background/60 px-2 py-1.5 leading-relaxed">
+        {url}
+      </code>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          className="h-7 gap-1.5 px-2.5 text-xs"
+          onClick={() => {
+            void navigator.clipboard?.writeText(url)
+            setCopied(true)
+          }}
+        >
+          <Copy className="h-3 w-3" />
+          {copied ? "Copied" : "Copy"}
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 px-2.5 text-xs" onClick={onDone}>
+          I have it
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** One public link, live or withdrawn. */
+function LinkRow({
+  link,
+  onRevoke,
+}: {
+  link: WirePublicLink
+  onRevoke: () => void
+}) {
+  return (
+    <div
+      data-slot="page-public-link"
+      data-live={link.live ? "true" : "false"}
+      className="flex items-start gap-3 border-b border-border/40 py-2.5 last:border-b-0"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="type-page-value flex flex-wrap items-center gap-1.5">
+          <span className="type-page-stamp text-foreground/90">{link.id}</span>
+          {link.has_password && (
+            <Badge variant="outline" className="type-page-label h-4 px-1">
+              password
+            </Badge>
+          )}
+          {link.show_provenance ? (
+            <Badge variant="outline" className="type-page-label h-4 px-1">
+              provenance shown
+            </Badge>
+          ) : null}
+        </div>
+        <div className="type-page-meta text-muted-foreground">
+          {link.live ? `Expires ${when(link.expires_at)}` : `Withdrawn ${when(link.revoked_at)}`}
+          {" · "}
+          {/* A link nobody has opened is a different fact from one that has
+              been read, and it is the fact an audit asks for first. */}
+          {link.last_seen_at ? `last opened ${when(link.last_seen_at)}` : "never opened"}
+          {" · by "}
+          {dashed(link.created_by)}
+        </div>
+        {link.panels.length > 0 && (
+          <div className="type-page-meta text-muted-foreground-soft">
+            Serves {link.panels.join(", ")}
+          </div>
+        )}
+      </div>
+      <div className="shrink-0">
+        {link.live ? (
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onRevoke}>
+            Withdraw
+          </Button>
+        ) : (
+          <span className="type-page-meta text-muted-foreground-soft">revoked</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Public links — the page as seen by somebody with no account.
+ *
+ * This sat only behind `crewship page publish` until now, which put the one
+ * question a reader arrives at this panel with — "who outside can see this?" —
+ * in a place they had no reason to look. It belongs next to Access, because
+ * the two together are the whole answer to who reaches this page.
+ */
+function SharingCard({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+  const { links, loading, refusal, error } = usePagePublicLinks(workspaceId, slug)
+  const [minted, setMinted] = React.useState<string | null>(null)
+  const [writeRefusal, setWriteRefusal] = React.useState<string | null>(null)
+  const [revokeTarget, setRevokeTarget] = React.useState<WirePublicLink | null>(null)
+  const [days, setDays] = React.useState("")
+  const [password, setPassword] = React.useState("")
+  const [showProvenance, setShowProvenance] = React.useState(false)
+
+  const publish = usePagePublish(workspaceId, slug, {
+    onOk: (link) => {
+      setWriteRefusal(null)
+      setDays("")
+      setPassword("")
+      // The URL is in this response and in no other. Holding it in state is
+      // what gives the reader a chance to copy it.
+      setMinted(link.url ?? null)
+      toast.success("Published", { description: "The link is live until it expires or you withdraw it." })
+    },
+    onRefused: setWriteRefusal,
+  })
+  const unpublish = usePageUnpublish(workspaceId, slug, {
+    onOk: () => {
+      setRevokeTarget(null)
+      toast.success("Withdrawn", { description: "The link stops resolving immediately." })
+    },
+    onRefused: (m) => {
+      setRevokeTarget(null)
+      setWriteRefusal(m)
+    },
+  })
+
+  const liveCount = links.reduce((n, l) => (l.live ? n + 1 : n), 0)
+  const answer = loading
+    ? "…"
+    : liveCount === 0
+      ? "not published"
+      : `${liveCount} live link${liveCount === 1 ? "" : "s"}`
+
+  return (
+    <SectionCard
+      title={<CardLabel icon={Globe}>Public links</CardLabel>}
+      actions={<CardAnswer>{answer}</CardAnswer>}
+      className="gap-4 py-4"
+    >
+      <div className="flex flex-col gap-3">
+        {refusal && <Refusal>{refusal}</Refusal>}
+        {error && <Refusal>{error}</Refusal>}
+        {writeRefusal && <Refusal>{writeRefusal}</Refusal>}
+        {minted && <OneTimeSecret url={minted} onDone={() => setMinted(null)} />}
+
+        {loading && !refusal && (
+          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+            <Spinner className="h-3.5 w-3.5" />
+            Reading this page&rsquo;s links…
+          </div>
+        )}
+
+        {!loading && !refusal && !error && links.length === 0 && (
+          <EmptyState
+            size="inline"
+            icon={Globe}
+            title="Not published"
+            description="Only panels that declare `public: true` are ever served on a link, and provenance is stripped unless you ask for it. Nothing here is visible to anyone until you publish."
+          />
+        )}
+
+        {links.length > 0 && (
+          <div className="flex flex-col">
+            {links.map((l) => (
+              <LinkRow key={l.id} link={l} onRevoke={() => setRevokeTarget(l)} />
+            ))}
+          </div>
+        )}
+
+        {!refusal && (
+          <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-background/40 p-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={days}
+                onChange={(e) => setDays(e.target.value)}
+                placeholder="30"
+                inputMode="numeric"
+                aria-label="Days until the link expires"
+                className="h-8 w-20 text-xs"
+              />
+              <span className="type-page-meta text-muted-foreground">days</span>
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="password (optional)"
+                aria-label="Password for the link"
+                className="h-8 min-w-[10rem] flex-1 text-xs"
+              />
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 px-3 text-xs"
+                disabled={publish.isPending}
+                onClick={() => {
+                  setWriteRefusal(null)
+                  const n = Number(days.trim())
+                  publish.mutate({
+                    expiresInDays: days.trim() !== "" && Number.isFinite(n) ? n : undefined,
+                    password: password.trim() || undefined,
+                    showProvenance,
+                  })
+                }}
+              >
+                {publish.isPending ? <Spinner className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                Publish
+              </Button>
+            </div>
+            <label className="type-page-meta flex items-center gap-1.5 text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={showProvenance}
+                onChange={(e) => setShowProvenance(e.target.checked)}
+                className="h-3 w-3"
+              />
+              Show provenance — run ids, crew and agent names. Off by default.
+            </label>
+            <p className="type-page-meta text-muted-foreground-soft">
+              Leave the days empty for the default of 30. Every link expires; the maximum is 365.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <AlertDialog open={revokeTarget != null} onOpenChange={(o) => !o && setRevokeTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Withdraw this link
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              It stops resolving immediately for anyone holding it. The row stays in this list with
+              the time it was withdrawn, because &ldquo;was it used after we pulled it&rdquo; is the
+              question an incident asks.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="h-7 bg-destructive text-xs text-destructive-foreground hover:bg-destructive/90"
+              disabled={unpublish.isPending}
+              onClick={() => revokeTarget && unpublish.mutate({ id: revokeTarget.id })}
+            >
+              {unpublish.isPending && <Spinner className="mr-1.5 h-3 w-3" />}
+              Withdraw
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SectionCard>
+  )
+}
+
+/**
+ * Panel webhooks — the door for a producer that cannot run the binary.
+ *
+ * A token is bound to exactly ONE panel, and that is the property worth
+ * putting on screen: a leaked token writes that panel and nothing else. The
+ * form therefore makes the panel a required choice rather than an optional
+ * scope, which is the same shape the server enforces.
+ */
+function WebhooksCard({
+  workspaceId,
+  slug,
+  panelIDs,
+}: {
+  workspaceId: string
+  slug: string
+  panelIDs: string[]
+}) {
+  const { webhooks, loading, refusal, error } = usePageWebhooks(workspaceId, slug)
+  const [minted, setMinted] = React.useState<string | null>(null)
+  const [writeRefusal, setWriteRefusal] = React.useState<string | null>(null)
+  const [revokeTarget, setRevokeTarget] = React.useState<WireWebhook | null>(null)
+  const [panel, setPanel] = React.useState(panelIDs[0] ?? "")
+  const [name, setName] = React.useState("")
+
+  const create = usePageWebhookCreate(workspaceId, slug, {
+    onOk: (wh) => {
+      setWriteRefusal(null)
+      setName("")
+      setMinted(wh.url ?? null)
+      toast.success("Token minted", { description: `It writes ${wh.panel} and nothing else.` })
+    },
+    onRefused: setWriteRefusal,
+  })
+  const revoke = usePageWebhookRevoke(workspaceId, slug, {
+    onOk: () => {
+      setRevokeTarget(null)
+      toast.success("Token revoked", { description: "The next request with it is refused." })
+    },
+    onRefused: (m) => {
+      setRevokeTarget(null)
+      setWriteRefusal(m)
+    },
+  })
+
+  const liveCount = webhooks.reduce((n, w) => (w.live ? n + 1 : n), 0)
+  const answer = loading ? "…" : liveCount === 0 ? "none" : `${liveCount} live`
+
+  return (
+    <SectionCard
+      title={<CardLabel icon={Webhook}>Webhooks</CardLabel>}
+      actions={<CardAnswer>{answer}</CardAnswer>}
+      className="gap-4 py-4"
+    >
+      <div className="flex flex-col gap-3">
+        {refusal && <Refusal>{refusal}</Refusal>}
+        {error && <Refusal>{error}</Refusal>}
+        {writeRefusal && <Refusal>{writeRefusal}</Refusal>}
+        {minted && <OneTimeSecret url={minted} onDone={() => setMinted(null)} />}
+
+        {loading && !refusal && (
+          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+            <Spinner className="h-3.5 w-3.5" />
+            Reading this page&rsquo;s tokens…
+          </div>
+        )}
+
+        {!loading && !refusal && !error && webhooks.length === 0 && (
+          <EmptyState
+            size="inline"
+            icon={Webhook}
+            title="No webhook tokens"
+            description="Mint one for a system that cannot run the CLI — a cron on somebody else's box, a CI step, a gateway. Each token writes exactly one panel."
+          />
+        )}
+
+        {webhooks.length > 0 && (
+          <div className="flex flex-col">
+            {webhooks.map((w) => (
+              <div
+                key={w.id}
+                data-slot="page-webhook"
+                data-live={w.live ? "true" : "false"}
+                className="flex items-start gap-3 border-b border-border/40 py-2.5 last:border-b-0"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="type-page-value flex flex-wrap items-center gap-1.5">
+                    <span className="font-medium text-foreground/90">{dashed(w.name)}</span>
+                    <Badge variant="outline" className="type-page-label h-4 px-1">
+                      {w.panel}
+                    </Badge>
+                  </div>
+                  <div className="type-page-meta text-muted-foreground">
+                    {w.live ? `Minted ${when(w.created_at)}` : `Revoked ${when(w.revoked_at)}`}
+                    {" · "}
+                    {w.fire_count > 0
+                      ? `fired ${w.fire_count}×, last ${when(w.last_fired_at)}`
+                      : "never fired"}
+                    {" · by "}
+                    {dashed(w.created_by)}
+                  </div>
+                </div>
+                <div className="shrink-0">
+                  {w.live ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setRevokeTarget(w)}
+                    >
+                      Revoke
+                    </Button>
+                  ) : (
+                    <span className="type-page-meta text-muted-foreground-soft">revoked</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!refusal && panelIDs.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-background/40 p-2.5">
+            <select
+              value={panel}
+              onChange={(e) => setPanel(e.target.value)}
+              aria-label="Panel this token may write"
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+            >
+              {panelIDs.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="what holds it (optional)"
+              aria-label="A label for this token"
+              className="h-8 min-w-[10rem] flex-1 text-xs"
+            />
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 px-3 text-xs"
+              disabled={create.isPending || !panel}
+              onClick={() => {
+                setWriteRefusal(null)
+                create.mutate({ panel, name: name.trim() || undefined })
+              }}
+            >
+              {create.isPending ? <Spinner className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+              Mint
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <AlertDialog open={revokeTarget != null} onOpenChange={(o) => !o && setRevokeTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Revoke this token
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              Whatever holds it stops being able to write{" "}
+              <strong>{revokeTarget?.panel}</strong> immediately. The row stays in this list with
+              its fire count, so you can still answer whether it was used after you pulled it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="h-7 bg-destructive text-xs text-destructive-foreground hover:bg-destructive/90"
+              disabled={revoke.isPending}
+              onClick={() => revokeTarget && revoke.mutate({ id: revokeTarget.id })}
+            >
+              {revoke.isPending && <Spinner className="mr-1.5 h-3 w-3" />}
+              Revoke
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SectionCard>
+  )
+}
+
+/**
+ * Deleting the page.
+ *
+ * Its own card at the bottom rather than a button in General, because the two
+ * are not the same kind of thing: everything in General describes the page,
+ * and this ends it. The panel data goes with it — the payload ring is the
+ * page's, not the producer's — and the confirm says so, because a producer
+ * pushing every thirty seconds does not make the history it wrote recoverable.
+ */
+function DangerCard({
+  workspaceId,
+  slug,
+  onDeleted,
+}: {
+  workspaceId: string
+  slug: string
+  onDeleted: () => void
+}) {
+  const [open, setOpen] = React.useState(false)
+  const [typed, setTyped] = React.useState("")
+  const [writeRefusal, setWriteRefusal] = React.useState<string | null>(null)
+
+  const del = usePageDelete(workspaceId, slug, {
+    onOk: () => {
+      setOpen(false)
+      toast.success("Page deleted", { description: `${slug} and its panels are gone.` })
+      onDeleted()
+    },
+    onRefused: (m) => {
+      setOpen(false)
+      setWriteRefusal(m)
+    },
+  })
+
+  return (
+    <SectionCard
+      title={<CardLabel icon={Trash2}>Delete</CardLabel>}
+      className="gap-4 border-destructive/30 py-4"
+    >
+      <div className="flex flex-col gap-3">
+        {writeRefusal && <Refusal>{writeRefusal}</Refusal>}
+        <p className="type-page-meta text-muted-foreground">
+          Deletes the page, its panels and every payload they hold. Grants, public links and webhook
+          tokens go with it. There is no undo — a rollback restores a spec, not a deleted page.
+        </p>
+        <div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 border-destructive/50 px-3 text-xs text-destructive hover:bg-destructive/10"
+            onClick={() => {
+              setTyped("")
+              setOpen(true)
+            }}
+          >
+            <Trash2 className="h-3 w-3" />
+            Delete this page
+          </Button>
+        </div>
+      </div>
+
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Delete {slug}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              Every panel on this page and every payload it holds is deleted with it. Type the slug
+              to confirm — the friction is deliberate, because this is the one action on this panel
+              nothing can undo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder={slug}
+            aria-label="Type the page slug to confirm"
+            className="h-8 text-xs"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="h-7 bg-destructive text-xs text-destructive-foreground hover:bg-destructive/90"
+              disabled={del.isPending || typed.trim() !== slug}
+              onClick={() => del.mutate()}
+            >
+              {del.isPending && <Spinner className="mr-1.5 h-3 w-3" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SectionCard>
+  )
+}
+
+
+/**
+ * Export — the page as a document you can install somewhere else.
+ *
+ * Deliberately a download rather than a preview pane: a bundle is something
+ * you keep, and putting it on screen invites hand-editing a format the server
+ * validates strictly. It is also NOT the page's spec — the bundle drops
+ * `wake:`, `on_failure:`, `actions:`, `refresh:` and `public:`, because a
+ * gate that arrived with an install would create automations nobody in the
+ * receiving workspace approved, and publication is a property of the install
+ * rather than of the document. The card says so, because a person who exports
+ * a monitored page and imports a silent one should learn that here and not
+ * from a panel that never fired.
+ */
+function ExportCard({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+  const [busy, setBusy] = React.useState(false)
+  const [refusal, setRefusal] = React.useState<string | null>(null)
+
+  return (
+    <SectionCard
+      title={<CardLabel icon={Download}>Export</CardLabel>}
+      className="gap-4 py-4"
+    >
+      <div className="flex flex-col gap-3">
+        {refusal && <Refusal>{refusal}</Refusal>}
+        <p className="type-page-meta text-muted-foreground">
+          Downloads this page as a portable bundle — its panels, their owners and producers, and the
+          references another workspace has to bind. Wake gates, on-failure routes, actions and
+          publication do <strong>not</strong> travel: they would arrive as automations and links
+          nobody there approved.
+        </p>
+        <div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 px-3 text-xs"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              setRefusal(null)
+              try {
+                const bundle = await fetchPageBundle(workspaceId, slug)
+                // Held only long enough for the browser to take it. Revoked
+                // straight after, because an object URL keeps the whole blob
+                // alive for the life of the document otherwise.
+                const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+                  type: "application/json",
+                })
+                const href = URL.createObjectURL(blob)
+                const a = document.createElement("a")
+                a.href = href
+                a.download = `${slug}.bundle.json`
+                a.click()
+                URL.revokeObjectURL(href)
+                toast.success("Exported", { description: `${slug}.bundle.json` })
+              } catch (err) {
+                setRefusal(err instanceof Error ? err.message : "Export failed")
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            {busy ? <Spinner className="h-3 w-3" /> : <Download className="h-3 w-3" />}
+            Download bundle
+          </Button>
+        </div>
+      </div>
+    </SectionCard>
+  )
+}
+
 export function PageSettings({ workspaceId, slug, page, onClose }: PageSettingsProps) {
   // Panel ids, for the produce-scope placeholder. A sealed panel still has an
   // id (§11b.14 keeps `panel_id`), and it is still a legitimate scope target.
@@ -800,7 +1502,15 @@ export function PageSettings({ workspaceId, slug, page, onClose }: PageSettingsP
         <div className="flex-1 overflow-auto">
           <div className="flex flex-col gap-4 p-4">
             <AccessCard workspaceId={workspaceId} slug={slug} panelIDs={panelIDs} />
+            {/* Access and Public links sit together on purpose: they are the two
+                halves of one question — who reaches this page — and splitting
+                them across surfaces is what sent people to the CLI to answer
+                the second half. */}
+            <SharingCard workspaceId={workspaceId} slug={slug} />
+            <WebhooksCard workspaceId={workspaceId} slug={slug} panelIDs={panelIDs} />
             <GeneralCard workspaceId={workspaceId} slug={slug} page={page} />
+            <ExportCard workspaceId={workspaceId} slug={slug} />
+            <DangerCard workspaceId={workspaceId} slug={slug} onDeleted={onClose} />
           </div>
         </div>
       </div>

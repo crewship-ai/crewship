@@ -18,6 +18,10 @@ import {
   resolveNow,
 } from "./panel-frame"
 import type { PanelProps, SeriesEntry, SeriesPayload } from "./types"
+import { cn } from "@/lib/utils"
+
+/** Stable identity so the initial state does not re-create a Set each render. */
+const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>()
 
 /**
  * `series.v1` as this panel reads it.
@@ -130,14 +134,40 @@ export function SeriesPanel({ panel, data, now, publicView = false, className }:
     : []
   const unit = typeof payload.unit === "string" ? payload.unit.trim() : ""
   const drawn = mergeOverflow(Array.isArray(payload.series) ? payload.series : [], labels.length)
+  // Built from the DECLARED set, never from the visible one. `assignSeriesColors`
+  // documents this as guarantee 2 — "filtering never recolours" — and hiding a
+  // series is exactly the case it was written for: every swatch and every bar is
+  // a lookup by name, so a series keeps its colour whether or not it is drawn.
   const colors = assignSeriesColors(drawn.map((s) => s.name))
+
+  // WHICH SERIES ARE HIDDEN. View state and nothing else: no request is made,
+  // no payload changes, and a reload brings every series back — the same
+  // contract a `toggle` action has for whole panels.
+  //
+  // Stored as the hidden set rather than the visible one so a series the
+  // producer ADDS in a later push arrives visible. Storing the visible set
+  // would have a new series appear already switched off, which reads as a
+  // rendering fault rather than as a choice nobody made.
+  const [hidden, setHidden] = React.useState<ReadonlySet<string>>(EMPTY_HIDDEN)
+  const visible = drawn.filter((s) => !hidden.has(s.name))
+  // Hiding the last one would leave an empty chart with a legend of switched-off
+  // names — recoverable, but it reads as a broken panel for as long as it lasts.
+  const canHide = visible.length > 1
+  const toggleSeries = React.useCallback((name: string) => {
+    setHidden((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }, [])
 
   // The tween is keyed on (series NAME, label index), never on an ordinal into
   // the payload's array — the same reason colour is. A producer that reorders
   // its series must not make every bar travel to a neighbour's height.
   const motion = panelMotion(panel, data)
   const tweenTarget = new Map<string, number>()
-  for (const s of drawn) {
+  for (const s of visible) {
     s.values.forEach((v, li) => {
       if (v !== null) tweenTarget.set(pointKey(s.name, li), v)
     })
@@ -174,7 +204,7 @@ export function SeriesPanel({ panel, data, now, publicView = false, className }:
           <div data-slot="panel-container" className="@container/panel flex flex-col gap-2">
             <BarChart
               labels={labels}
-              series={drawn}
+              series={visible}
               colors={colors}
               unit={unit}
               frames={frames}
@@ -185,23 +215,63 @@ export function SeriesPanel({ panel, data, now, publicView = false, className }:
               data-slot="series-legend"
               className="flex flex-wrap items-center gap-x-3 gap-y-1 type-page-meta text-muted-foreground"
             >
-              {drawn.map((s) => (
-                <li
-                  key={s.name}
-                  data-slot="series-legend-item"
-                  data-series-name={s.name}
-                  data-series-color={colors.get(s.name)}
-                  className="flex min-w-0 items-center gap-1.5"
-                >
-                  <span
-                    data-slot="series-swatch"
-                    aria-hidden="true"
-                    className="h-2 w-2 shrink-0 rounded-[2px]"
-                    style={{ backgroundColor: `var(${colors.get(s.name)})` }}
-                  />
-                  <span className="truncate">{s.name}</span>
-                </li>
-              ))}
+              {/* The legend lists every DECLARED series, hidden ones included —
+                  a switched-off name that vanished from the legend would leave
+                  no way to switch it back on. `aria-pressed` is what says which
+                  is which to a screen reader; the dimming is the same fact for
+                  an eye. */}
+              {drawn.map((s) => {
+                const off = hidden.has(s.name)
+                const last = !off && !canHide
+                return (
+                  <li key={s.name} className="min-w-0">
+                    <button
+                      type="button"
+                      data-slot="series-legend-item"
+                      data-series-name={s.name}
+                      data-series-color={colors.get(s.name)}
+                      data-series-hidden={off ? "true" : undefined}
+                      aria-pressed={!off}
+                      // Refused rather than hidden: a disabled control that
+                      // says why is kinder than one that silently does nothing,
+                      // and the panel would otherwise draw an empty chart.
+                      disabled={last}
+                      title={
+                        last
+                          ? "The last visible series cannot be hidden"
+                          : off
+                            ? `Show ${s.name}`
+                            : `Hide ${s.name}`
+                      }
+                      onClick={() => toggleSeries(s.name)}
+                      className={cn(
+                        "flex min-w-0 items-center gap-1.5 rounded-sm px-1 -mx-1 py-0.5 transition-opacity",
+                        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                        off ? "opacity-40" : "opacity-100",
+                        last ? "cursor-default" : "cursor-pointer hover:opacity-70",
+                      )}
+                    >
+                      <span
+                        data-slot="series-swatch"
+                        aria-hidden="true"
+                        className={cn(
+                          "h-2 w-2 shrink-0 rounded-[2px]",
+                          // A hidden series keeps its colour and loses its
+                          // fill: the swatch stays identifiable, which is the
+                          // whole reason the palette is assigned by name.
+                          off && "bg-transparent ring-1 ring-inset",
+                        )}
+                        style={
+                          off
+                            ? { color: `var(${colors.get(s.name)})` }
+                            : { backgroundColor: `var(${colors.get(s.name)})` }
+                        }
+                      />
+                      <span className={cn("truncate", off && "line-through")}>{s.name}</span>
+                    </button>
+                  </li>
+                )
+              })}
               {unit ? <li className="ml-auto shrink-0 tabular-nums">{unit}</li> : null}
             </ul>
           </div>
