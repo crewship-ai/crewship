@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelLabel, getModelsForAdapter, isLocalModel } from "@/lib/cli-adapters"
+import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter, isLocalModel } from "@/lib/cli-adapters"
 import { buildOnboardingSetupBody } from "@/lib/onboarding-setup"
 import { getAdapterBrand, ADAPTER_TOKEN_GUIDE, ADAPTER_TOKEN_CMD, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
 import { LANGUAGES } from "@/lib/languages"
@@ -155,10 +155,11 @@ export default function OnboardingPage() {
   const [workspaceName, setWorkspaceName] = useState("")
   const [language, setLanguage] = useState<string>("English")
   const [crewSlug, setCrewSlug] = useState<CrewTemplateSlug | null>(null)
-  // Default to "cli" — Claude Code users (our primary persona) almost
-  // always have a local CLI already; flagging it as the recommended
-  // path matters more than the browser-chat fallback.
-  const [mode, setMode] = useState<HandoffMode>("cli")
+  // Browser, not CLI. The old default was "cli", reasoning that Claude Code
+  // users almost always have a local CLI already — true of people who
+  // already run Crewship, not of the person this screen exists for, who is
+  // installing it for the first time and may have no CLI at all.
+  const [mode, setMode] = useState<HandoffMode>("browser")
   const [adapter, setAdapter] = useState<string>("CLAUDE_CODE")
   const [model, setModel] = useState<string>("")
   const [apiKey, setApiKey] = useState("")
@@ -180,7 +181,8 @@ export default function OnboardingPage() {
   // valid server-side until its 10-min TTL elapses.
   // Whether the credential block is expanded. CLI mode collapses it behind
   // "Or add it now"; browser mode ignores this and always shows it.
-  const [showCredential, setShowCredential] = useState(false)
+  // (showCredential is gone: the credential block is no longer collapsible.
+  // Hiding it was what took the model picker away in CLI mode.)
   const [pairStatus, setPairStatus] = useState<"idle" | "starting" | "pending" | "consumed" | "expired" | "failed">("idle")
   // Whether the workspace holds a model token for the agents yet — a
   // different credential from the CLI token pairing mints. See the poll below.
@@ -417,11 +419,25 @@ export default function OnboardingPage() {
   }, [pairCommand])
 
   /**
-   * Step 3 validation — API key is required in BOTH modes because the
-   * agents in containers always need a provider credential to call
-   * Claude (the CLI token is for the user's terminal, not the agents).
-   * In CLI mode we ALSO require the pair to be consumed so the local
-   * CLI is ready to drive the workspace.
+   * Step 3 validation — the model token is required in BOTH modes, because
+   * it is a fact about the AGENTS, not about how the human drives Crewship.
+   * Agents run in containers and need a provider credential to call their
+   * model. Pairing mints a CLI token for the operator's terminal; the two
+   * are unrelated and only share the word "token".
+   *
+   * This gate has been wrong in both directions. It first required
+   * `keyOK && pairStatus === "consumed"` — correct about the key, but it
+   * blocked Launch with no explanation, which read as a dead end. The fix
+   * for that was to say WHY; instead the key requirement was dropped, and
+   * that produced something worse: a crew of four agents with zero
+   * credentials, unable to answer and unrepairable — `crewship setup`
+   * answers 409 once a crew exists, and a credential created afterwards is
+   * never linked, because autoAssignCredentials runs at deploy time.
+   *
+   * So: the key is required, and pairing is NOT. Pairing is an optional
+   * convenience — a person installing Crewship for the first time does not
+   * have the CLI yet, and must not be sent to a GitHub release page to
+   * finish signing up. They can pair whenever they like, afterwards.
    *
    * Exception (#944): local (ollama/…) models talk to the operator's own
    * endpoint and need no provider credential, so the key becomes optional.
@@ -429,26 +445,7 @@ export default function OnboardingPage() {
   const canContinue = () => {
     if (step === 1) return workspaceName.trim().length >= 2
     if (step === 2) return crewSlug !== null
-    if (step === 3) {
-      const keyOK = apiKey.trim().length >= 8 || isLocalModel(model)
-      if (mode === "browser") return keyOK
-      // Paired CLI: the token stops being required here.
-      //
-      // It used to be `keyOK && pairStatus === "consumed"`, which dead-ended
-      // the wizard: the green line above says "CLI paired. You can finish
-      // below or jump to `crewship setup` in the terminal", and then Launch
-      // stayed disabled until a token was pasted into the browser — so the
-      // terminal route the message offers was unreachable. The server agrees
-      // with the message, not the old gate: validateOnboardingCredential
-      // returns nil on an empty value, so launching without one is a
-      // supported path and the CLI lands the credential afterwards.
-      // A paired CLI can finish in the terminal, so an EMPTY token is fine.
-      // A partially typed one is not — that is a truncated paste, and
-      // launching with it stores a credential that loads but never works.
-      if (mode === "cli") {
-        return pairStatus === "consumed" && (apiKey.trim() === "" || keyOK)
-      }
-    }
+    if (step === 3) return apiKey.trim().length >= 8 || isLocalModel(model)
     return false
   }
 
@@ -744,35 +741,49 @@ export default function OnboardingPage() {
                 {step === 3 && (
                   <div className="space-y-5">
                     <div>
-                      <h2 className="text-2xl font-semibold tracking-tight">How will you work?</h2>
+                      {/* The heading asked "How will you work?" — the human's
+                          question — while the step's actual requirement is
+                          the agents' one. That framing is why the token could
+                          look optional once you had answered about yourself.
+                          It leads with what the crew needs now. */}
+                      <h2 className="text-2xl font-semibold tracking-tight">
+                        Give your agents a model
+                      </h2>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Drive Crewship from your terminal or stay in the browser.{" "}
                         {isLocalModel(model)
-                          ? "Your local model runs without an API key — just confirm the setup below."
-                          : mode === "cli"
-                            ? "Your agents need a model token; the CLI can hand it over after launch."
-                            : "Your agents need a model token below to call their model."}
+                          ? "Your local model runs on your own endpoint, so no token is needed — just confirm the setup below."
+                          : "Agents run in containers and need their own token to call a model. Pairing your CLI signs your terminal in; it does not give them one."}
                       </p>
                     </div>
 
-                    {/* MODE PICKER — CLI first with Recommended badge,
-                        because Claude Code users are our primary
-                        persona and they already have a terminal open. */}
+                    {/* MODE PICKER. Browser first and Recommended, which is a
+                        reversal: CLI led, on the reasoning that Claude Code
+                        users already have a terminal open. That holds for
+                        people who already run Crewship — not for the person
+                        this screen is actually for, who is installing it for
+                        the first time and does not have the CLI yet. Leading
+                        with "Pair my CLI" sent them to a GitHub release page
+                        to download a binary before they could finish signing
+                        up, and the block underneath still says so.
+
+                        Neither card changes what the agents need. The model
+                        and its token are asked for below in both cases; this
+                        choice is only about where the human works. */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <ModeCard
-                        icon={Terminal}
-                        title="Pair my CLI"
-                        description="Claude Code, Gemini, Codex, OpenCode…"
-                        active={mode === "cli"}
-                        recommended
-                        onClick={() => setMode("cli")}
-                      />
                       <ModeCard
                         icon={Globe}
                         title="Chat in browser"
-                        description="No terminal required."
+                        description="Nothing to install."
                         active={mode === "browser"}
+                        recommended
                         onClick={() => setMode("browser")}
+                      />
+                      <ModeCard
+                        icon={Terminal}
+                        title="Also pair my CLI"
+                        description="Optional — signs your terminal in too."
+                        active={mode === "cli"}
+                        onClick={() => setMode("cli")}
                       />
                     </div>
 
@@ -936,78 +947,42 @@ export default function OnboardingPage() {
                       )}
                     </AnimatePresence>
 
-                    {/* CREDENTIAL HANDOFF — the collapsed form of the block
-                        below, shown only in CLI mode.
+                    {/* The credential block below is NOT collapsed in CLI
+                        mode any more, and this is the correction that matters
+                        most on this screen.
 
-                        This step used to ask two unrelated questions on one
-                        screen: how the human drives Crewship, and which
-                        credential the agents use. The server says as much in
-                        its own comment — pairing_mode "drives how the human
-                        works, not the agents" — and stacking them is why the
-                        step ran off the bottom while the two before it fit in
-                        a third of the viewport.
+                        Collapsing it hid the model picker, because the picker
+                        lives inside it — so choosing "Pair my CLI" silently
+                        took away the choice of which model the agents run.
+                        That is backwards: the model and its token are facts
+                        about the AGENTS. How the human drives Crewship is a
+                        separate question, and the server says so in its own
+                        comment — pairing_mode "drives how the human works,
+                        not the agents".
 
-                        With a CLI in the picture the second question has a
-                        second answer: `crewship setup` asks for the token in
-                        the terminal. So the block collapses to this line and
-                        expands on request. Browser mode has no terminal to
-                        fall back to, so there it stays open and required. */}
-                    {mode === "cli" && !showCredential && (
-                      <div
-                        // There is no --warning token in the theme (only
-                        // --success and --destructive), so the unresolved
-                        // state borrows destructive at low opacity rather
-                        // than a `border-warning/40` that renders as nothing.
-                        className={
-                          tokenDelivered
-                            ? "rounded-xl border border-success/30 bg-success/5 p-3"
-                            : "rounded-xl border border-destructive/30 bg-destructive/5 p-3"
-                        }
-                      >
-                        {tokenDelivered ? (
-                          <>
-                            <div className="text-sm font-medium">Model token received</div>
-                            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                              Your CLI handed over a token for{" "}
-                              {getModelLabel(model) || "their model"}. Every agent in the crew gets it
-                              when you launch.
-                            </p>
-                          </>
-                        ) : (
-                          <>
-                            <div className="text-sm font-medium">Your agents have no model token yet</div>
-                            {/* This used to read "run `crewship setup` after launching — nothing
-                                else to do here". Both halves were false: setup answers 409 once a
-                                crew exists, and a credential created afterwards is not delivered to
-                                agents that already exist, because autoAssignCredentials links them
-                                at deploy time. Launching without one produces a crew that cannot
-                                answer and cannot be repaired by any documented route, so the step
-                                says that plainly instead. */}
-                            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                              Pairing signed your terminal in; it did not give the agents a key to
-                              call {getModelLabel(model) || "their model"}. Paste one in the terminal
-                              when <code className="font-mono text-foreground/80">crewship login --pair</code>{" "}
-                              asks, or add it here. Launching without one creates a crew that cannot
-                              reply.
-                            </p>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setShowCredential(true)}
-                          className="mt-2 text-xs font-semibold text-primary hover:underline"
-                        >
-                          {tokenDelivered ? "Use a different token →" : "Add it here instead →"}
-                        </button>
+                        Nothing here is optional-by-mode. A person installing
+                        Crewship for the first time may not have the CLI at
+                        all, and must be able to finish in the browser without
+                        being sent to a release page to download one. */}
+                    {tokenDelivered && (
+                      <div className="flex items-start gap-2 rounded-xl border border-success/30 bg-success/5 p-3">
+                        <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          <span className="font-medium text-foreground">
+                            Your CLI already handed over a token.
+                          </span>{" "}
+                          It is filled in below — change it only if you want the agents on a
+                          different key.
+                        </p>
                       </div>
                     )}
 
-                    {/* ADAPTER + API KEY. Which toolchain you pick is part of
-                        answering "which credential", not "how do I drive
-                        this" — it has no meaning until a key is being
-                        pasted, so it lives in here rather than above. */}
-                    {(mode === "browser" || showCredential) && (
-                    <>
+                    {/* ADAPTER + MODEL + TOKEN. Always rendered, in both
+                        modes: this is the question about the agents, and it
+                        has the same answer however the human drives Crewship.
+                        It used to be gated on `mode === "browser" ||
+                        showCredential`, which is what hid the model picker
+                        behind the CLI choice. */}
                     <div className="space-y-2">
                       <Label>Agent toolchain</Label>
                       <div className="grid grid-cols-2 gap-2">
@@ -1132,8 +1107,6 @@ export default function OnboardingPage() {
                           {" — "}then come back and paste the snippet above.
                         </div>
                       </div>
-                    )}
-                    </>
                     )}
 
                     {/* TELEMETRY CONSENT — explicit choice, pre-ticked to

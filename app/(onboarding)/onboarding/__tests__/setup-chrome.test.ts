@@ -153,30 +153,39 @@ describe("the unauthenticated forms are usable with a thumb", () => {
   })
 })
 
-describe("pairing the CLI is not a dead end", () => {
-  it("stops requiring a browser-pasted token once the CLI is paired", () => {
-    // The green line on step 3 reads "CLI paired. You can finish below or
-    // jump to `crewship setup` in the terminal" — and Launch stayed disabled
-    // until a token was pasted into the browser, so the terminal route it
-    // offers was unreachable. The server agrees with the message, not the
-    // old gate: validateOnboardingCredential returns nil on an empty value.
+describe("the model token is the agents' requirement, not the human's", () => {
+  /** The step-3 arm of canContinue. */
+  function stepThreeGate(): string {
     const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
-    const step3 = gate.slice(gate.indexOf("step === 3"), gate.indexOf("return false"))
-    const cli = step3.slice(step3.indexOf('mode === "cli"'))
-    expect(cli).toMatch(/pairStatus === "consumed"/)
-    // The property is "an empty token is acceptable", not "the word keyOK is
-    // absent". The first version of this assertion forbade the identifier
-    // outright and then failed the moment the gate legitimately started
-    // using it to reject a *half-typed* token.
-    expect(cli, "a paired CLI must accept an empty token").toMatch(/apiKey\.trim\(\) === ""/)
+    return gate.slice(gate.indexOf("step === 3"), gate.indexOf("return false"))
+  }
+
+  it("requires a token in every mode, with only the local-model exception", () => {
+    // This gate has now been wrong in both directions, which is why it is
+    // pinned by property rather than by shape.
+    //
+    // It first required `keyOK && pairStatus === "consumed"` — right about
+    // the token, but it disabled Launch with no explanation and read as a
+    // dead end. The fix for that should have been to say WHY. Instead the
+    // token requirement was dropped, and that produced a crew of four agents
+    // with zero credentials that could not be repaired afterwards:
+    // `crewship setup` answers 409 once a crew exists, and a credential
+    // created later is never linked, because autoAssignCredentials runs at
+    // deploy time.
+    //
+    // Agents run in containers and always need their own credential. The
+    // only exemption is a local model on the operator's own endpoint (#944).
+    const step3 = stepThreeGate()
+    expect(step3).toMatch(/apiKey\.trim\(\)\.length >= 8/)
+    expect(step3).toMatch(/isLocalModel\(model\)/)
   })
 
-  it("still requires a credential in browser mode", () => {
-    // Browser mode has no CLI to land the credential afterwards, so the
-    // token is the only way the agents get one.
-    const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
-    const step3 = gate.slice(gate.indexOf("step === 3"), gate.indexOf("return false"))
-    expect(step3).toMatch(/mode === "browser"\) return keyOK/)
+  it("does not let the handoff mode change whether a token is needed", () => {
+    // Pairing signs the operator's TERMINAL in. It gives the agents nothing,
+    // so it must not appear in this gate at all — in either direction.
+    const step3 = stepThreeGate()
+    expect(step3, "mode must not gate the token").not.toMatch(/mode === "(cli|browser)"/)
+    expect(step3, "pairing must not gate Launch").not.toMatch(/pairStatus/)
   })
 })
 
@@ -190,21 +199,50 @@ describe("step 3 asks one question, then its consequence", () => {
     return PAGE.slice(from, to)
   }
 
-  it("collapses the credential block behind a disclosure in CLI mode", () => {
-    // The step used to ask two unrelated things at once — how the human
-    // drives Crewship, and which credential the agents use — and ran off
-    // the bottom of the viewport doing it. With a CLI in the picture the
-    // second question has a second answer: `crewship login --pair` offers
-    // to land the token in the terminal.
-    //
-    // Asserted as a property — a collapsed block plus a control that opens
-    // it — and not by quoting the button's words. The first version of this
-    // pinned the literal "Or add it now" and failed the moment that copy was
-    // corrected, which taught the wrong lesson: the label is not the contract,
-    // the escape hatch is.
+  /**
+   * step 3 with every comment removed.
+   *
+   * Needed by any assertion phrased as "this string must NOT appear": the
+   * comments next to a correction quote the wording being corrected, so a
+   * raw scan matches the explanation and reports the bug it documents. This
+   * is the third time that has bitten in this file — hence a helper rather
+   * than another inline `.replace` chain.
+   */
+  function stepThreeCode(): string {
+    return stepThree()
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+  }
+
+  it("never hides the model picker behind the handoff choice", () => {
+    // The credential block used to be gated on
+    // `mode === "browser" || showCredential`, and the model picker lives
+    // inside it — so choosing "Pair my CLI" silently removed the choice of
+    // which model the agents run. Backwards: the model is a fact about the
+    // agents, the handoff is about where the human works.
+    const step3 = stepThreeCode()
+    expect(step3, "credential block must not be mode-gated").not.toMatch(
+      /mode === "browser" \|\| showCredential/,
+    )
+    expect(step3, "the collapse state is gone entirely").not.toMatch(/showCredential/)
+    // Both controls present unconditionally.
+    expect(step3).toMatch(/htmlFor="model"/)
+    expect(step3).toMatch(/Agent toolchain/)
+  })
+
+  it("does not make a first-run user install the CLI to finish", () => {
+    // The person this screen exists for is installing Crewship for the first
+    // time and may have no CLI at all. Leading with "Pair my CLI" as the
+    // recommended path sent them to a GitHub release page to download a
+    // binary before they could finish signing up.
+    expect(PAGE).toMatch(/useState<HandoffMode>\("browser"\)/)
     const step3 = stepThree()
-    expect(step3).toMatch(/mode === "cli" && !showCredential/)
-    expect(step3).toMatch(/setShowCredential\(true\)/)
+    const browserCard = step3.indexOf('title="Chat in browser"')
+    const cliCard = step3.indexOf('title="Also pair my CLI"')
+    expect(browserCard).toBeGreaterThan(-1)
+    expect(cliCard).toBeGreaterThan(-1)
+    expect(browserCard, "the no-install path comes first").toBeLessThan(cliCard)
   })
 
   it("never tells a launched user to run `crewship setup` to add the token", () => {
@@ -218,39 +256,21 @@ describe("step 3 asks one question, then its consequence", () => {
     //
     // Comments are stripped first so this cannot trip over the explanation
     // sitting next to the code it guards.
-    const step3 = stepThree()
-      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/\/\/.*$/gm, "")
-    expect(step3).not.toMatch(/crewship setup/)
+    expect(stepThreeCode()).not.toMatch(/crewship setup/)
   })
 
-  it("keeps the credential open and required in browser mode", () => {
-    // No terminal to fall back to there, so neither the collapse nor the
-    // optional-token gate applies.
-    expect(stepThree()).toMatch(/mode === "browser" \|\| showCredential/)
-    const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
-    expect(gate.slice(0, 900)).toMatch(/mode === "browser"\) return keyOK/)
+  it("leads with what the crew needs, not with how the human works", () => {
+    // The heading asked "How will you work?" — the human's question — while
+    // the step's actual requirement belongs to the agents. That framing is
+    // how the token came to look optional once you had answered about
+    // yourself, and it is what let the mode picker swallow the model choice.
+    const step3 = stepThreeCode()
+    expect(step3).not.toMatch(/How will you work\?/)
+    expect(step3).toMatch(/Give your agents a model/)
   })
 
-  it("puts the toolchain picker inside the credential block", () => {
-    // Which toolchain you pick is part of answering "which credential", not
-    // "how do I drive this" — it means nothing until a key is being pasted.
-    const step3 = stepThree()
-    const disclosure = step3.indexOf('mode === "browser" || showCredential')
-    const toolchain = step3.indexOf("Agent toolchain")
-    expect(disclosure).toBeGreaterThan(-1)
-    expect(toolchain, "toolchain must sit inside the disclosure").toBeGreaterThan(disclosure)
-  })
-
-  it("refuses a half-typed token even though an empty one is fine", () => {
-    // A paired CLI can finish in the terminal, so empty is a valid answer.
-    // A truncated paste is not — it stores a credential that loads but
-    // never works, which is the failure the token hint warns about.
-    const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
-    const cli = gate.slice(gate.indexOf('mode === "cli"'), gate.indexOf("return false"))
-    expect(cli).toMatch(/apiKey\.trim\(\) === ""/)
-    expect(cli).toMatch(/keyOK/)
-    expect(cli).toMatch(/pairStatus === "consumed"/)
+  it("says plainly that pairing does not credential the agents", () => {
+    // The single sentence that would have saved this whole round trip.
+    expect(stepThree()).toMatch(/does not give them one/)
   })
 })
