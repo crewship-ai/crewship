@@ -87,7 +87,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "lg · fixed",
-    migrated: { on: "2026-08-23", note: "Pinned at lg. CodeMirror, the YAML/JSON conversion and the /test_run → saveToken → /save chain survived intact." },
+    migrated: { on: "2026-08-23", note: "Pinned at lg. CodeMirror, the YAML/JSON conversion and the /test_run → saveToken → /save chain survived intact; the insides came onto the kit afterwards." },
   },
   {
     page: "Routines",
@@ -135,7 +135,7 @@ export const DOORS: Door[] = [
     cmdEnter: true,
     mobile: false,
     proposed: "lg · fixed",
-    migrated: { on: "2026-08-23", note: "Width pinned at lg, so the template browser lost ~70px of card width. The 680 → 940 jump mid-flow is gone." },
+    migrated: { on: "2026-08-23", note: "Width pinned at lg. Later rebuilt to the four-step shape /design proposed: Runtime folded into Container, egress open by default, MCP gone." },
   },
   {
     page: "Crews",
@@ -171,7 +171,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: true,
     proposed: "md",
-    migrated: { on: "2026-08-23", note: "The one door that already handled a phone. Its full-screen takeover became the shared bottom sheet — less vertical room, thumb-reachable primary." },
+    migrated: { on: "2026-08-23", note: "The one door that already handled a phone. Its full-screen takeover became the shared bottom sheet, and its DetailCards became the kit's sections." },
   },
   {
     page: "Credentials",
@@ -183,7 +183,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "sm",
-    migrated: { on: "2026-08-23", note: "On the shell, but its primary is still inside the scrollport: OAuthForm draws its own actions and is shared with the MCP picker." },
+    migrated: { on: "2026-08-23", note: "OAuthForm is shared with the MCP picker, so it publishes its primary rather than surrendering it — the picker keeps its inline row, this door puts Authorize in the footer." },
   },
   {
     page: "Integrations",

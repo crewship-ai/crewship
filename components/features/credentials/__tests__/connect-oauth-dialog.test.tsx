@@ -11,11 +11,12 @@ import { ConnectOAuthDialog } from "../connect-oauth-dialog"
 // no `p-6`, the shell's own header/close), and the request its primary action
 // has always issued, which the migration must not touch.
 //
-// The body is OAuthForm, lifted across intact. It lives in
-// components/features/mcp/components/oauth-form.tsx and is shared with the
-// MCP server config's credential picker, so it is NOT edited here — which is
-// why the Authorize button is still inside the scrollport rather than in a
-// CreateSurfaceFooter.
+// The body is OAuthForm. It lives in
+// components/features/mcp/components/oauth-form.tsx and is shared with the MCP
+// server config's credential picker, so it still draws its own action row
+// there — but it publishes the primary through `onActionChange`, and this
+// surface renders it in a CreateSurfaceFooter instead. That is the difference
+// between one Authorize outside the scrollport and two in different places.
 
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({
@@ -188,12 +189,66 @@ describe("ConnectOAuthDialog — the request it has always issued", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/Popup blocked/)))
   })
 
-  it("cancels through the form's own Cancel", async () => {
+  it("cancels through the shell's Cancel", async () => {
     const { onOpenChange } = renderDialog()
     await waitFor(() => expect(shell()).not.toBeNull())
 
     fireEvent.click(screen.getByRole("button", { name: "Google" }))
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  // ── The primary belongs to the shell ──────────────────────────────────
+
+  it("puts Authorize in the footer, not in the scrollport", async () => {
+    renderDialog()
+    await waitFor(() => expect(shell()).not.toBeNull())
+
+    const authorize = screen.getByRole("button", { name: /authorize/i })
+    // The scrollport is the body; the footer is its sibling. A primary inside
+    // the body scrolls away from the fields it commits.
+    const body = shell()!.querySelector('[data-slot="dialog-content"] > div')
+    expect(body?.contains(authorize)).not.toBe(true)
+    // And exactly one of it — the form's own row is suppressed when the
+    // caller takes the action.
+    expect(screen.getAllByRole("button", { name: /authorize/i })).toHaveLength(1)
+  })
+
+  it("keeps the primary disabled until there is something to send", async () => {
+    renderDialog()
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/oauth/providers?workspace_id=ws1"),
+    )
+
+    expect(screen.getByRole("button", { name: /authorize/i })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Google" }))
+    fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "cid" } })
+    expect(screen.getByRole("button", { name: /authorize/i })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "csecret" } })
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /authorize/i })).not.toBeDisabled(),
+    )
+  })
+
+  it("⌘↵ authorizes, because the shell owns the primary now", async () => {
+    renderDialog()
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/oauth/providers?workspace_id=ws1"),
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Google" }))
+    fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "cid" } })
+    fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "csecret" } })
+
+    fireEvent.keyDown(shell()!, { key: "Enter", metaKey: true })
+
+    await waitFor(() => {
+      const call = apiFetch.mock.calls.find(
+        (c) => typeof c[0] === "string" && c[0].startsWith("/api/v1/credentials?"),
+      )
+      expect(call).toBeDefined()
+    })
   })
 })

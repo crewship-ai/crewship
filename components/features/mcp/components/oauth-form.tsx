@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useCallback, useState, useEffect, useRef } from "react"
 import { ExternalLink } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
@@ -31,12 +31,33 @@ const OAUTH_PROVIDER_SHORTCUTS: { key: string; label: string }[] = [
 // Props
 // ---------------------------------------------------------------------------
 
+/** What the form's primary action is, right now. */
+export interface OAuthFormAction {
+  authorize: () => void
+  disabled: boolean
+  busy: boolean
+  label: string
+}
+
 export interface OAuthFormProps {
   envKey: string
   workspaceId: string
   onAddCredential: (cred: Credential) => void
   onSelectCredential: (credName: string) => void
   onCancel: () => void
+  /**
+   * Hand the primary action to the caller instead of drawing it.
+   *
+   * The MCP credential picker renders this form inline, where an action row
+   * at the bottom of the form is right. `ConnectOAuthDialog` renders it in a
+   * CreateSurface, where the primary belongs in the footer — outside the
+   * scrollport, next to Cancel, reachable by ⌘↵ — and a second Authorize
+   * button halfway up the body is the thing the shell exists to stop.
+   *
+   * Supplying this suppresses the in-form row. Called on mount and whenever
+   * the action's state changes; the callback itself must be stable.
+   */
+  onActionChange?: (action: OAuthFormAction) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +70,7 @@ export function OAuthForm({
   onAddCredential,
   onSelectCredential,
   onCancel,
+  onActionChange,
 }: OAuthFormProps) {
   const [providers, setProviders] = useState<Record<string, OAuthProvider>>({})
   const [providersFetched, setProvidersFetched] = useState(false)
@@ -114,6 +136,31 @@ export function OAuthForm({
     setTokenUrl("")
     setScopes("")
   }
+
+  // ── The primary, published rather than drawn ───────────────────────────
+  //
+  // `handleAuthorize` is redeclared every render, so it cannot go in the
+  // effect's deps without looping. The ref holds the current one and the
+  // callback stays stable; the effect then depends only on the four things a
+  // caller's footer actually renders from.
+  const canAuthorize =
+    !authorizing &&
+    clientId.trim() !== "" &&
+    clientSecret.trim() !== "" &&
+    !(selectedProvider === "custom" && (!authUrl.trim() || !tokenUrl.trim()))
+  const primaryLabel = polling ? "Waiting for authorization..." : "Authorize"
+
+  const authorizeRef = useRef<() => void>(() => {})
+  const authorize = useCallback(() => authorizeRef.current(), [])
+
+  useEffect(() => {
+    onActionChange?.({
+      authorize,
+      disabled: !canAuthorize,
+      busy: authorizing || polling,
+      label: primaryLabel,
+    })
+  }, [onActionChange, authorize, canAuthorize, authorizing, polling, primaryLabel])
 
   async function handleAuthorize() {
     if (!clientId.trim() || !clientSecret.trim() || !authUrl.trim() || !tokenUrl.trim()) {
@@ -331,6 +378,10 @@ export function OAuthForm({
   // Render
   // ---------------------------------------------------------------------------
 
+  // Kept current so the stable `authorize` callback above always runs the
+  // handler this render closed over.
+  authorizeRef.current = handleAuthorize
+
   return (
     <div className="p-3 space-y-3">
       <div className="text-xs font-medium">Connect with OAuth</div>
@@ -430,32 +481,34 @@ export function OAuthForm({
             )}
           </div>
 
-          <div className="flex items-center gap-2 pt-1">
-            <Button
-              type="button"
-              size="sm"
-              className="h-7 text-xs gap-1.5 flex-1"
-              disabled={authorizing || !clientId.trim() || !clientSecret.trim() || (selectedProvider === "custom" && (!authUrl.trim() || !tokenUrl.trim()))}
-              onClick={handleAuthorize}
-            >
-              {polling ? (
-                <Spinner className="h-3 w-3" />
-              ) : (
-                <ExternalLink className="h-3 w-3" />
-              )}
-              {polling ? "Waiting for authorization..." : "Authorize"}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={onCancel}
-              disabled={authorizing}
-            >
-              Cancel
-            </Button>
-          </div>
+          {!onActionChange && (
+            <div className="flex items-center gap-2 pt-1">
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 text-xs gap-1.5 flex-1"
+                disabled={!canAuthorize}
+                onClick={handleAuthorize}
+              >
+                {polling ? (
+                  <Spinner className="h-3 w-3" />
+                ) : (
+                  <ExternalLink className="h-3 w-3" />
+                )}
+                {primaryLabel}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={onCancel}
+                disabled={authorizing}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
 
           {/* Manual code fallback */}
           {(showCodeInput || polling) && (

@@ -8,24 +8,21 @@
 // popup, and polls until the tokens land — all inside OAuthForm; this
 // component only supplies the page-level chrome and refresh wiring.
 //
-// The chrome is now CreateSurface at size `sm` (480px). It used to be a
-// bare `sm:max-w-md` DialogContent carrying the shared dialog DEFAULTS —
-// 448px, `p-6`, an 18px DialogTitle — which is why the audit on /design
-// counted it as reading like a different design system rather than merely a
-// different width.
+// The chrome is CreateSurface at size `sm` (480px). It used to be a bare
+// `sm:max-w-md` DialogContent carrying the shared dialog DEFAULTS — 448px,
+// `p-6`, an 18px DialogTitle — which is why the audit on /design counted it as
+// reading like a different design system rather than merely a different width.
 //
-// Two parts of the shell are deliberately NOT taken up here, and both have
-// the same cause: OAuthForm owns the primary action, and OAuthForm lives in
-// components/features/mcp/components/oauth-form.tsx, shared verbatim with the
-// MCP credential picker.
+// The primary is the shell's now. It used to stay inside the body, because
+// OAuthForm drew it and OAuthForm is shared verbatim with the MCP credential
+// picker; the form publishes its action through `onActionChange` instead, so
+// the picker keeps its inline row and this surface puts Authorize in the
+// footer — outside the scrollport, next to Cancel, and reachable by ⌘↵.
 //
-//   · No CreateSurfaceFooter. "Authorize"/"Cancel" stay inside the body where
-//     the form draws them, so the primary is inside the scrollport. Hoisting
-//     it means giving OAuthForm a way to expose its handler, which changes a
-//     component the MCP surface also renders.
-//   · No CreateSurfaceRefusal, and so no ⌘↵. Every failure in the flow is
-//     reported by a `toast.error` inside OAuthForm; there is no error state
-//     this component can read, and ⌘↵ has no handler to call.
+// Still NOT taken up: CreateSurfaceRefusal. Every failure in the flow is
+// reported by a `toast.error` inside OAuthForm, so there is no error state
+// this component can read. Wiring a band that can never fill is worse than
+// none — it says the surface reports its refusals here, and then it does not.
 //
 // `dirty` IS wired, because it can be observed from the outside: React's
 // synthetic change event bubbles through the React tree, so the wrapper below
@@ -35,13 +32,15 @@
 // choice is the kind of false alarm that teaches people to click through.
 
 import * as React from "react"
+import { ExternalLink } from "lucide-react"
 
 import {
   CreateSurface,
   CreateSurfaceBody,
+  CreateSurfaceFooter,
   CreateSurfaceHeader,
 } from "@/components/layout/create-surface"
-import { OAuthForm } from "@/components/features/mcp/components/oauth-form"
+import { OAuthForm, type OAuthFormAction } from "@/components/features/mcp/components/oauth-form"
 
 interface ConnectOAuthDialogProps {
   workspaceId: string
@@ -55,6 +54,11 @@ interface ConnectOAuthDialogProps {
 
 export function ConnectOAuthDialog({ workspaceId, open, onOpenChange, onSuccess }: ConnectOAuthDialogProps) {
   const [dirty, setDirty] = React.useState(false)
+  const [action, setAction] = React.useState<OAuthFormAction | null>(null)
+
+  // Stable, so the form's publishing effect depends only on the action's own
+  // state rather than re-firing every render.
+  const handleActionChange = React.useCallback((next: OAuthFormAction) => setAction(next), [])
 
   return (
     <CreateSurface
@@ -63,6 +67,9 @@ export function ConnectOAuthDialog({ workspaceId, open, onOpenChange, onSuccess 
       size="sm"
       dirty={dirty}
       discardLabel="this connection"
+      onSubmit={() => {
+        if (action && !action.disabled) action.authorize()
+      }}
     >
       <CreateSurfaceHeader
         concept="credentials"
@@ -90,9 +97,21 @@ export function ConnectOAuthDialog({ workspaceId, open, onOpenChange, onSuccess 
               onOpenChange(false)
             }}
             onCancel={() => onOpenChange(false)}
+            onActionChange={handleActionChange}
           />
         </div>
       </CreateSurfaceBody>
+
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={action?.label ?? "Authorize"}
+        primaryIcon={ExternalLink}
+        // Disabled until the form says otherwise: before it has published an
+        // action there are no credentials typed, so there is nothing to send.
+        primaryDisabled={action?.disabled ?? true}
+        busy={action?.busy ?? false}
+        onPrimary={() => action?.authorize()}
+      />
     </CreateSurface>
   )
 }
