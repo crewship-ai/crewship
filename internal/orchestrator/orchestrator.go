@@ -333,7 +333,12 @@ type Orchestrator struct {
 	// CREWSHIP_LOCAL_MODEL_BASE_URL env fallback at most once per process so
 	// it doesn't spam the log on every run.
 	localModelEnvFallbackWarned sync.Once
-	statsRegister               StatsRegisterFunc
+	// credentialIsolationFailOpenWarned fires once per process when a run
+	// carries routed provider credentials but no internal token, so
+	// sidecarConfigFingerprint returns "" and authorizeLLMRoute's per-agent
+	// isolation degrades to the legacy fail-open path (#2047/#2051).
+	credentialIsolationFailOpenWarned sync.Once
+	statsRegister                     StatsRegisterFunc
 	// crewTTL and containerBusy are the reaper's two injected inputs; see the
 	// type docs. Both nil-safe: with neither wired the reaper falls back to
 	// the TTL each run registered, which is the pre-#1662 behaviour.
@@ -1319,6 +1324,21 @@ func (o *Orchestrator) warnLocalModelEnvFallbackOnce() {
 	o.localModelEnvFallbackWarned.Do(func() {
 		o.logger.Warn("local-model endpoint sourced from deprecated CREWSHIP_LOCAL_MODEL_BASE_URL env; " +
 			"migrate to an ENDPOINT_URL credential (crewship credential create --type ENDPOINT_URL --provider OLLAMA --value <url>)")
+	})
+}
+
+// warnCredentialIsolationFailOpenOnce logs a one-time warning when a run
+// routes provider credentials through the shared sidecar without an internal
+// token configured. sidecarConfigFingerprint then returns "" and
+// authorizeLLMRoute cannot bind requests to a specific credential set, so a
+// concurrent agent sharing the same crew container could reach whichever
+// credential the sidecar currently has loaded. Configure server-side internal
+// auth to restore per-agent isolation.
+func (o *Orchestrator) warnCredentialIsolationFailOpenOnce() {
+	o.credentialIsolationFailOpenWarned.Do(func() {
+		o.logger.Warn("routed provider credentials configured without an internal token; " +
+			"sidecar credential isolation degrades to fail-open — a concurrent agent in the same crew container " +
+			"can reach another agent's currently-loaded provider credential until internal auth is configured")
 	})
 }
 

@@ -997,6 +997,9 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		routeKey := internaltoken.DeriveLLMRouteKey(ipcToken, req.WorkspaceID, req.CrewID)
 		llmRouteToken := internaltoken.DeriveLLMRouteToken(routeKey, req.AgentID)
 		configFingerprint := sidecarConfigFingerprint(ipcToken, req.Credentials)
+		if configFingerprint == "" && len(req.Credentials) > 0 {
+			o.warnCredentialIsolationFailOpenOnce()
+		}
 		env = BuildEnvVarsSidecar(*req, keeperEnabled)
 		// #812: hand THIS agent its own per-agent bearer token. The agent
 		// presents it (Authorization: Bearer $CREWSHIP_AGENT_TOKEN) on sidecar
