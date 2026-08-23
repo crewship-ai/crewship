@@ -110,6 +110,72 @@ describe("AssistantTurn dispatch", () => {
     cleanup()
   })
 
+  // The result footer's model badge. It used to read Object.keys(model_usage)[0],
+  // and because Go's encoding/json emits map keys sorted, the CLI's small
+  // housekeeping model ("claude-haiku-4-5-…") always arrived ahead of the model
+  // the agent actually reasons with ("claude-opus-5"). An operator asking
+  // "which model is this agent on?" got the wrong answer, reliably.
+  describe("result footer model badge", () => {
+    // Key order here is the order the server really sends: sorted, so haiku first.
+    const bothModels = {
+      "claude-haiku-4-5-20251001": { inputTokens: 40, outputTokens: 12 },
+      "claude-opus-5": { inputTokens: 9000, outputTokens: 2400 },
+    }
+
+    it("prefers the server-stamped scalar model over the model_usage map", () => {
+      render(
+        <AssistantTurn
+          turn={turn([
+            part({
+              type: "result",
+              metadata: { model: "claude-opus-5", model_usage: bothModels, num_turns: 1 },
+            }),
+          ])}
+          onCopy={onCopy}
+          onFileClick={onFileClick}
+        />,
+      )
+      expect(screen.getAllByText(/claude-opus-5/).length).toBeGreaterThan(0)
+      expect(screen.queryAllByText(/claude-haiku/)).toHaveLength(0)
+    })
+
+    it("falls back to the highest-token model, not the alphabetically first", () => {
+      // No scalar `model` — an older server or a replayed transcript. The
+      // housekeeping model must still not win just because it sorts first.
+      render(
+        <AssistantTurn
+          turn={turn([part({ type: "result", metadata: { model_usage: bothModels, num_turns: 1 } })])}
+          onCopy={onCopy}
+          onFileClick={onFileClick}
+        />,
+      )
+      expect(screen.getAllByText(/claude-opus-5/).length).toBeGreaterThan(0)
+      expect(screen.queryAllByText(/claude-haiku/)).toHaveLength(0)
+    })
+
+    it("still reports a genuinely cheap agent's own model", () => {
+      // Guard against 'fixing' this with a name blacklist: an agent really
+      // configured on the cheap model must report it, not fall through to
+      // nothing.
+      render(
+        <AssistantTurn
+          turn={turn([
+            part({
+              type: "result",
+              metadata: {
+                model_usage: { "claude-haiku-4-5-20251001": { inputTokens: 5000, outputTokens: 900 } },
+                num_turns: 1,
+              },
+            }),
+          ])}
+          onCopy={onCopy}
+          onFileClick={onFileClick}
+        />,
+      )
+      expect(screen.getAllByText(/claude-haiku-4-5/).length).toBeGreaterThan(0)
+    })
+  })
+
   it("renders status part via StatusIndicator", () => {
     render(<AssistantTurn turn={turn([part({ type: "status", content: "Thinking..." })])} onCopy={onCopy} onFileClick={onFileClick} />)
     expect(screen.getByTestId("status-indicator").textContent).toBe("Thinking...")

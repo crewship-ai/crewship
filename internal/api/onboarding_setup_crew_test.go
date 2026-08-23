@@ -16,6 +16,310 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
+// ---- ensureOnboardingSetupCrew: autonomy level ----
+
+func TestEnsureOnboardingSetupCrew_NewCrewGetsCurrentAutonomyLevel(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	info, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID)
+	if err != nil {
+		t.Fatalf("ensureOnboardingSetupCrew: %v", err)
+	}
+	var autonomy string
+	if err := db.QueryRow("SELECT autonomy_level FROM crews WHERE id = ?", info.CrewID).Scan(&autonomy); err != nil {
+		t.Fatalf("read autonomy_level: %v", err)
+	}
+	if autonomy != setupCrewAutonomyLevel {
+		t.Errorf("autonomy_level = %q, want %q", autonomy, setupCrewAutonomyLevel)
+	}
+}
+
+// TestEnsureOnboardingSetupCrew_HealsStaleStrictAutonomy pins the narrow,
+// one-time heal: a setup crew left over from before this constant was
+// raised (still 'strict', the old default) picks up the current value on
+// the next call — the whole point of the guard, since a workspace created
+// under an older build must not carry a stale autonomy level forever.
+func TestEnsureOnboardingSetupCrew_HealsStaleStrictAutonomy(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	if _, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID); err != nil {
+		t.Fatalf("ensureOnboardingSetupCrew (create): %v", err)
+	}
+	if _, err := db.Exec("UPDATE crews SET autonomy_level = 'strict' WHERE workspace_id = ? AND slug = ?",
+		wsID, setupCrewSlug); err != nil {
+		t.Fatalf("force stale autonomy_level: %v", err)
+	}
+
+	info, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID)
+	if err != nil {
+		t.Fatalf("ensureOnboardingSetupCrew (heal): %v", err)
+	}
+	var autonomy string
+	if err := db.QueryRow("SELECT autonomy_level FROM crews WHERE id = ?", info.CrewID).Scan(&autonomy); err != nil {
+		t.Fatalf("read autonomy_level: %v", err)
+	}
+	if autonomy != setupCrewAutonomyLevel {
+		t.Errorf("autonomy_level = %q after heal, want %q", autonomy, setupCrewAutonomyLevel)
+	}
+}
+
+// TestEnsureOnboardingSetupCrew_PreservesOperatorChosenAutonomy is the other
+// half of the same guard: a crew an operator has explicitly moved to some
+// OTHER level (guided here — deliberately not 'strict', so the heal's WHERE
+// clause cannot match it) must never be silently overwritten back to the
+// constant on a later call. Self-healing a stale default must not double as
+// "always sync to the constant".
+func TestEnsureOnboardingSetupCrew_PreservesOperatorChosenAutonomy(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	if _, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID); err != nil {
+		t.Fatalf("ensureOnboardingSetupCrew (create): %v", err)
+	}
+	if _, err := db.Exec("UPDATE crews SET autonomy_level = 'guided' WHERE workspace_id = ? AND slug = ?",
+		wsID, setupCrewSlug); err != nil {
+		t.Fatalf("simulate operator override: %v", err)
+	}
+
+	info, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID)
+	if err != nil {
+		t.Fatalf("ensureOnboardingSetupCrew (second call): %v", err)
+	}
+	var autonomy string
+	if err := db.QueryRow("SELECT autonomy_level FROM crews WHERE id = ?", info.CrewID).Scan(&autonomy); err != nil {
+		t.Fatalf("read autonomy_level: %v", err)
+	}
+	if autonomy != "guided" {
+		t.Errorf("autonomy_level = %q, want operator's own 'guided' preserved", autonomy)
+	}
+}
+
+// TestSetupAgentModelOutranksCreatedCrewDefault pins the split between the
+// two model constants, which is the whole reason they are separate names.
+//
+// The Guide reasons on the stronger model because its output is a spec a
+// human cannot easily check; a created crew's agents stay on the cheaper
+// default because re-tiering every agent every crew ever creates is a
+// pricing decision, not a side effect of making onboarding smarter. Collapse
+// the two constants back together in either direction and this fails.
+func TestSetupAgentModelOutranksCreatedCrewDefault(t *testing.T) {
+	if setupAgentModel == crewAgentDefaultModel {
+		t.Fatalf("setupAgentModel and crewAgentDefaultModel are both %q — "+
+			"the Guide's model and a created crew's default are separate decisions; "+
+			"see their doc comments before collapsing them", setupAgentModel)
+	}
+
+	// The Guide itself, end to end through the real row it writes.
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	info, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID)
+	if err != nil {
+		t.Fatalf("ensureOnboardingSetupCrew: %v", err)
+	}
+	var guideModel string
+	if err := db.QueryRow("SELECT llm_model FROM agents WHERE id = ?", info.AgentID).Scan(&guideModel); err != nil {
+		t.Fatalf("read guide llm_model: %v", err)
+	}
+	if guideModel != setupAgentModel {
+		t.Errorf("guide llm_model = %q, want %q", guideModel, setupAgentModel)
+	}
+
+	// A crew created FROM the Guide's own proposal path must not inherit it.
+	// providerRuntimeDefaults is what planCustomAgents reads when a proposal
+	// carries no explicit llm_model, so this is the real branch, not a proxy.
+	if _, model := providerRuntimeDefaults("ANTHROPIC"); model != crewAgentDefaultModel {
+		t.Errorf("providerRuntimeDefaults(ANTHROPIC) model = %q, want %q "+
+			"(a created crew's agents must not inherit the Guide's tier)", model, crewAgentDefaultModel)
+	}
+}
+
+// TestSetupPrompt_MarkerDoesNotProposeTheGuidesOwnModel is the regression
+// guard for a real cost bug: the proposal marker interpolated {{SETUP_MODEL}}
+// — the GUIDE's model — as the llm_model for the crew being proposed. Raising
+// the Guide to opus therefore put every crew it created on opus too, including
+// agents whose whole job is polling a URL on a schedule, forever.
+//
+// The marker must offer the crew default instead, and the prompt must tell the
+// Guide to choose a cheaper tier when the work allows it.
+func TestSetupPrompt_MarkerDoesNotProposeTheGuidesOwnModel(t *testing.T) {
+	prompt := renderSetupAgentPrompt(setupAgentSystemPromptTemplate, "ANTHROPIC", setupAgentModel)
+
+	markerLine := ""
+	for _, line := range strings.Split(prompt, "\n") {
+		if strings.Contains(line, "crewship:onboarding-proposal") && strings.Contains(line, "llm_model") {
+			markerLine = line
+			break
+		}
+	}
+	if markerLine == "" {
+		t.Fatal("could not find the proposal marker template in the rendered prompt")
+	}
+	if !strings.Contains(markerLine, `"llm_model":"`+crewAgentDefaultModel+`"`) {
+		t.Errorf("marker does not offer the crew default model %q:\n%s", crewAgentDefaultModel, markerLine)
+	}
+	if strings.Contains(markerLine, setupAgentModel) {
+		t.Errorf("marker still hands the crew the GUIDE's own model %q — that is the cost regression:\n%s",
+			setupAgentModel, markerLine)
+	}
+	// The menu must actually reach the model, cheapest tier included, or the
+	// "pick something cheaper" instruction has nothing to point at.
+	for _, want := range []string{"claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("rendered prompt is missing model tier %q", want)
+		}
+	}
+	if strings.Contains(prompt, "{{CREW_MODEL") {
+		t.Error("an unexpanded {{CREW_MODEL…}} placeholder reached the prompt")
+	}
+}
+
+// TestSetupPrompt_ForbidsToolCallsWhileProposing pins the instruction added
+// after a real session showed the Guide spending three tool calls
+// (discover_capabilities, list_routines, then validate_manifest twice) before
+// proposing a two-agent crew in a brand-new workspace — where there are no
+// routines to list and no manifest to validate. The user saw "Worked · 3
+// steps" and an expensive pause in place of an answer, and reasonably asked
+// what it was doing.
+func TestSetupPrompt_ForbidsToolCallsWhileProposing(t *testing.T) {
+	prompt := renderSetupAgentPrompt(setupAgentSystemPromptTemplate, "ANTHROPIC", setupAgentModel)
+	if !strings.Contains(prompt, "CALL NO TOOLS WHILE PROPOSING A CREW") {
+		t.Error("prompt no longer forbids tool calls during the crew proposal")
+	}
+	// The rule has to name the tools it is about, or the model has to infer
+	// which of its ~20 advertised tools the sentence covers.
+	for _, tool := range []string{"discover_capabilities", "list_routines", "validate_manifest"} {
+		idx := strings.Index(prompt, "CALL NO TOOLS WHILE PROPOSING A CREW")
+		if !strings.Contains(prompt[idx:idx+900], tool) {
+			t.Errorf("the no-tools rule does not name %q, so it reads as advice rather than a list", tool)
+		}
+	}
+}
+
+// TestSetupPrompt_MarkerModelMatchesProvider guards a bug the suite caught:
+// {{CREW_MODEL}} was interpolated as the bare ANTHROPIC default, so an
+// OpenAI/Google workspace was handed a marker telling the Guide to propose a
+// CLAUDE model. Every field would have been individually valid and the
+// combination unrunnable — the exact failure resolveSetupAgentRuntime's
+// docstring describes.
+func TestSetupPrompt_MarkerModelMatchesProvider(t *testing.T) {
+	for _, tc := range []struct{ provider, wantModel string }{
+		{"ANTHROPIC", crewAgentDefaultModel},
+		{"OPENAI", "gpt-5.5"},
+		{"GOOGLE", "gemini-2.5-pro"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			_, setupModel := providerRuntimeDefaults(tc.provider)
+			prompt := renderSetupAgentPrompt(setupAgentSystemPromptTemplate, tc.provider, setupModel)
+			var marker string
+			for _, line := range strings.Split(prompt, "\n") {
+				if strings.Contains(line, "crewship:onboarding-proposal") && strings.Contains(line, "llm_model") {
+					marker = line
+					break
+				}
+			}
+			if marker == "" {
+				t.Fatal("no marker template in the rendered prompt")
+			}
+			if !strings.Contains(marker, `"llm_model":"`+tc.wantModel+`"`) {
+				t.Errorf("%s marker does not offer %q:\n%s", tc.provider, tc.wantModel, marker)
+			}
+		})
+	}
+}
+
+// TestRuntimeToolsAreAClosedEnum is the safety property behind letting the
+// Guide ask for container tools at all. Authoring devcontainer_config would
+// have been arbitrary root code execution — postCreateCommand is run as raw
+// shell during the image build and feature refs have no registry allowlist —
+// so the Guide's authority is deliberately reduced to picking names from the
+// in-binary runtime catalogue, with the server pinning every version.
+func TestRuntimeToolsAreAClosedEnum(t *testing.T) {
+	t.Run("known name resolves with a server-pinned version", func(t *testing.T) {
+		tool, version, ok := resolveProposalTool("Python")
+		if !ok || tool != "python" || version == "" {
+			t.Fatalf("resolveProposalTool(Python) = (%q, %q, %v)", tool, version, ok)
+		}
+	})
+	t.Run("unknown name is refused", func(t *testing.T) {
+		if _, _, ok := resolveProposalTool("totally-made-up"); ok {
+			t.Error("an uncatalogued tool resolved")
+		}
+	})
+	t.Run("composes a mise config and drops what it cannot resolve", func(t *testing.T) {
+		cfg, resolved, dropped := composeProposalMiseConfig([]string{"python", "not-a-tool", "jq"})
+		if !strings.Contains(cfg, `"python"`) {
+			t.Errorf("composed config missing python: %s", cfg)
+		}
+		if len(resolved) == 0 {
+			t.Error("nothing resolved")
+		}
+		if len(dropped) == 0 {
+			t.Error("an uncatalogued name was not reported as dropped")
+		}
+		if strings.Contains(cfg, "not-a-tool") {
+			t.Errorf("an uncatalogued name reached the config: %s", cfg)
+		}
+	})
+	t.Run("no tools means no config, so no image build is forced", func(t *testing.T) {
+		// crewNeedsProvision treats ANY non-empty mise_config as "build an
+		// image first", so an empty-but-present value would commit every
+		// proposal crew to a cold build for zero tools.
+		if cfg, _, _ := composeProposalMiseConfig(nil); cfg != "" {
+			t.Errorf("expected empty config, got %q", cfg)
+		}
+		if cfg, _, _ := composeProposalMiseConfig([]string{"nope", "also-nope"}); cfg != "" {
+			t.Errorf("all-unresolvable list should compose nothing, got %q", cfg)
+		}
+	})
+	t.Run("caps the number of tools", func(t *testing.T) {
+		many := []string{"python", "node", "go", "rust", "ruby", "java", "php"}
+		cfg, resolved, dropped := composeProposalMiseConfig(many)
+		if len(resolved) > onboardingProposalMaxTools {
+			t.Errorf("resolved %d tools, cap is %d: %s", len(resolved), onboardingProposalMaxTools, cfg)
+		}
+		if len(dropped) == 0 {
+			t.Error("over-cap entries were not reported as dropped")
+		}
+	})
+}
+
+func TestValidateCrewModel(t *testing.T) {
+	cases := []struct {
+		name        string
+		provider    string
+		model       string
+		want        string
+		wantSwapped bool
+	}{
+		{"known cheap tier passes", "ANTHROPIC", "claude-haiku-4-5", "claude-haiku-4-5", false},
+		{"known default passes", "ANTHROPIC", "claude-sonnet-5", "claude-sonnet-5", false},
+		{"known top tier passes", "ANTHROPIC", "claude-opus-5", "claude-opus-5", false},
+		{"case-insensitive", "ANTHROPIC", "Claude-Sonnet-5", "claude-sonnet-5", false},
+		{"empty means no override", "ANTHROPIC", "", "", false},
+		{"hallucinated id falls back", "ANTHROPIC", "claude-omega-9", crewAgentDefaultModel, true},
+		{"date-suffixed alias falls back", "ANTHROPIC", "claude-sonnet-5-20260101", crewAgentDefaultModel, true},
+		// Ollama ships no curated catalogue — its models live on the daemon, so
+		// passing through is the honest answer and substituting a Claude id
+		// would be strictly worse.
+		{"uncatalogued provider passes through", "OLLAMA", "llama3.2", "llama3.2", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, swapped := validateCrewModel(tc.provider, tc.model)
+			if got != tc.want || swapped != tc.wantSwapped {
+				t.Errorf("validateCrewModel(%q, %q) = (%q, %v), want (%q, %v)",
+					tc.provider, tc.model, got, swapped, tc.want, tc.wantSwapped)
+			}
+		})
+	}
+}
+
 // ---- ensureOnboardingSetupCrew: slug, network mode, kind ----
 
 func TestEnsureOnboardingSetupCrew_FixedSlugRestrictedNetworkAndKind(t *testing.T) {
@@ -223,7 +527,7 @@ func TestEnsureOnboardingSetupCrew_SystemPromptCarriesLanguageBlock(t *testing.T
 
 func TestBuildSetupAgentSystemPrompt_ListsBuiltinTemplates(t *testing.T) {
 	db := setupTestDB(t)
-	prompt, err := buildSetupAgentSystemPrompt(context.Background(), db, testLogger(), "ANTHROPIC", setupAgentDefaultModel)
+	prompt, err := buildSetupAgentSystemPrompt(context.Background(), db, testLogger(), "ANTHROPIC", setupAgentModel)
 	if err != nil {
 		t.Fatalf("buildSetupAgentSystemPrompt: %v", err)
 	}
@@ -547,8 +851,8 @@ func TestEnsureOnboardingSetupCrew_RefreshesExistingAgentPrompt(t *testing.T) {
 		FROM agents WHERE id = ?`, info.AgentID).Scan(&adapter, &provider, &model, &prompt); err != nil {
 		t.Fatalf("read refreshed setup agent: %v", err)
 	}
-	if adapter != "CLAUDE_CODE" || provider != "ANTHROPIC" || model != setupAgentDefaultModel {
-		t.Errorf("refreshed runtime = %s/%s/%s, want CLAUDE_CODE/ANTHROPIC/%s", adapter, provider, model, setupAgentDefaultModel)
+	if adapter != "CLAUDE_CODE" || provider != "ANTHROPIC" || model != setupAgentModel {
+		t.Errorf("refreshed runtime = %s/%s/%s, want CLAUDE_CODE/ANTHROPIC/%s", adapter, provider, model, setupAgentModel)
 	}
 	if !strings.Contains(prompt, "Crewship Guide") || !strings.Contains(prompt, "crewship:onboarding-proposal") {
 		t.Error("existing setup agent did not receive the current authored prompt")
@@ -579,5 +883,36 @@ func TestWorkspaceHasCredential_RejectsUnusableRows(t *testing.T) {
 	}
 	if h.workspaceHasCredential(context.Background(), wsID) {
 		t.Fatal("revoked model credential opened the setup chat")
+	}
+}
+
+// The Guide's ordering rule, pinned in the prompt because the server-side
+// refusal (internal_delegated_crew.go) is a backstop, not the mechanism. A
+// backstop that fires on every attempt means every onboarding burns a
+// round-trip on an error the prompt should have prevented.
+func TestSetupAgentPrompt_TellsTheGuideItOwnsNothing(t *testing.T) {
+	prompt := renderSetupAgentPrompt(setupAgentSystemPromptTemplate, "ANTHROPIC", setupAgentModel)
+
+	// The consequence, not just the rule. A model that knows ownership picks
+	// the egress allowlist and the container has a reason to get it right on
+	// a routine the prompt never anticipated.
+	for _, want := range []string{
+		"YOU OWN NOTHING",
+		"allowlist",
+		`"crew" argument`,
+		"discover_capabilities",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt is missing %q — the Guide will not know to name the target crew", want)
+		}
+	}
+
+	// Ordering: propose, wait for Create, then build. Stated as a numbered
+	// sequence rather than left implicit, because "logically first" is
+	// exactly the kind of instruction a model satisfies in its own order.
+	own := strings.Index(prompt, "YOU OWN NOTHING")
+	contract := strings.Index(prompt, "REAL TOOL CONTRACT")
+	if own < 0 || contract < 0 || own > contract {
+		t.Errorf("the ownership rule must come before the tool contract (own=%d contract=%d)", own, contract)
 	}
 }

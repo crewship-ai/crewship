@@ -11,6 +11,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,6 +19,8 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/manifest"
 )
 
@@ -48,16 +51,29 @@ const (
 	setupCrewKindStandard = "standard"
 	setupCrewKindSetup    = "setup"
 
-	// setupCrewAutonomyLevel pins the setup crew to the strictest tier
-	// (policy/types.go: strict rejects ActionCrewCreate/ActionAgentCreate
-	// outright). No internal token is minted for this crew anywhere in this
-	// change — the proposal API that would do that is a separate lane's
-	// work (§5.1) — so nothing here can reach a write endpoint today
-	// regardless of this value. It is set anyway, defensively, so that if a
-	// future change mints a token bound to this crew before also revisiting
-	// this file, the crew it binds to already refuses every write action
-	// rather than defaulting to 'guided'.
-	setupCrewAutonomyLevel = "strict"
+	// setupCrewAutonomyLevel is the autonomy level bound to the Crewship
+	// Guide's per-agent internal token, minted like any other crew's by the
+	// general container-boot path (StartSetupAgent's session is an ordinary
+	// exec once the crew/agent rows exist) — the "future change" this
+	// constant's docstring used to warn about, and this IS that revisit.
+	//
+	// 'full' rather than the original defensive 'strict': the Guide's own
+	// system prompt already IS the human-in-the-loop gate — "Ask for
+	// explicit confirmation immediately before any available tool call that
+	// creates, updates, runs, publishes, schedules, or deletes persistent
+	// state" — so a policy.ActionPageCreate hold on top of an explicit "ano"
+	// the operator just typed is not a second opinion, it is the same
+	// question asked twice, the second time to a CLI/inbox surface the
+	// operator was never told to check. A routine's own save-time governance
+	// (classifyRoutineRisk: egress/credentials/code → 'proposed' pending
+	// MANAGER+ review) is unaffected either way — it keys on the ROUTINE's
+	// declared capabilities, not the calling crew's autonomy_level, so
+	// nothing here loosens that gate. The Guide's tool profile (MINIMAL) and
+	// fixed MCP catalog (routine save/list/run/discover, page save, memory,
+	// notify, validate_manifest — see setupAgentToolProfile) mean this
+	// crew's token can reach only that narrow surface regardless of level;
+	// there is no crew/agent-creation tool on it for a laxer level to expose.
+	setupCrewAutonomyLevel = "full"
 
 	// MCP tools are independent of the CLI built-in profile, so MINIMAL still
 	// gives the guide the real list/save/run routine surface while withholding
@@ -67,9 +83,42 @@ const (
 
 	setupAgentSuggestedPrompts = "Design a crew for my workflow\nCreate a routine from this recurring task\nDesign a Crewship Page for these metrics\nExplain or review my Crewship YAML manifest"
 
-	// setupAgentDefaultModel mirrors the model every builtin crew template
-	// pins its ANTHROPIC agents to (internal/database/builtin/crew-templates/*.yaml).
-	setupAgentDefaultModel = "claude-sonnet-5"
+	// setupAgentModel is what the Crewship Guide ITSELF reasons with on
+	// ANTHROPIC, and it is deliberately a tier above crewAgentDefaultModel
+	// below rather than sharing it.
+	//
+	// The two answer different questions. A created crew's agent does the
+	// work the user asked for, at whatever tier that work needs, many times
+	// a day. The Guide does something the user cannot check: it translates a
+	// vague sentence into a crew roster, a routine DSL and a page spec, and
+	// it is the one agent whose mistakes are invisible until the artefact it
+	// authored misbehaves later. That job is worth the strongest model, and
+	// it runs a handful of turns per workspace — once, during onboarding —
+	// so the price difference is bounded in a way a working crew's is not.
+	//
+	// ANTHROPIC only, on purpose: this is the ANTHROPIC arm of
+	// resolveSetupAgentRuntime. A workspace whose credential is OpenAI /
+	// Google / Cursor / Factory / Ollama still gets that provider's default
+	// from providerRuntimeDefaults, because picking each vendor's "smartest"
+	// id is a claim this file has no way to keep current, and a wrong guess
+	// there is a model id the CLI rejects at run time rather than a mild
+	// mis-tier.
+	setupAgentModel = "claude-opus-5"
+
+	// crewAgentDefaultModel is what an agent in a NEWLY CREATED crew gets
+	// when nothing more specific is pinned — the ANTHROPIC default behind
+	// providerRuntimeDefaults, and the model the bulk of the builtin crew
+	// templates pin their ANTHROPIC agents to
+	// (internal/database/builtin/crew-templates/*.yaml: 43 of 47 agents at
+	// the time of writing, the rest deliberately haiku or opus per template).
+	//
+	// Kept at sonnet while setupAgentModel moved to opus, and that split is
+	// the point: raising the Guide is a bounded, one-off onboarding cost;
+	// raising this would silently re-tier every agent every crew creates
+	// from here on, which is a pricing decision an operator should make
+	// explicitly (per-agent in crew settings, or per-template in the YAML),
+	// not one inherited from a change to how clever the onboarding chat is.
+	crewAgentDefaultModel = "claude-sonnet-5"
 )
 
 type setupAgentRuntime struct {
@@ -128,11 +177,29 @@ func ensureOnboardingSetupCrew(ctx context.Context, db *sql.DB, logger *slog.Log
 	// onboarding_completed without ever producing a real crew. Status can
 	// reopen that flow; revive the reserved setup rows here so the recovery
 	// reaches the same chat and history instead of failing on the unique slug.
+	//
 	if _, err := db.ExecContext(ctx, `
 		UPDATE crews SET deleted_at = NULL, updated_at = ?
 		WHERE workspace_id = ? AND slug = ? AND kind = ?`,
 		now, workspaceID, setupCrewSlug, setupCrewKindSetup); err != nil {
 		return nil, fmt.Errorf("revive setup crew: %w", err)
+	}
+	// One-time heal, scoped narrowly on purpose: a workspace whose setup crew
+	// was created under the OLD 'strict' default (before this file's own
+	// autonomy revisit — see setupCrewAutonomyLevel's docstring) would
+	// otherwise carry that stale value forever, since INSERT OR IGNORE only
+	// ever applies the constant to a brand-new row. The `AND autonomy_level =
+	// 'strict'` guard is what keeps this from being a standing "always sync to
+	// the constant" behavior: an operator who has since moved this crew to
+	// any OTHER level (guided/trusted/full, or deliberately back to strict
+	// via `crewship policy set`) is never overwritten by this — only the
+	// specific old-default value this file itself used to write is healed,
+	// and only once per row (it stops matching after the first heal).
+	if _, err := db.ExecContext(ctx, `
+		UPDATE crews SET autonomy_level = ?, updated_at = ?
+		WHERE workspace_id = ? AND slug = ? AND kind = ? AND autonomy_level = 'strict'`,
+		setupCrewAutonomyLevel, now, workspaceID, setupCrewSlug, setupCrewKindSetup); err != nil {
+		return nil, fmt.Errorf("heal setup crew autonomy level: %w", err)
 	}
 	var crewID string
 	if err := db.QueryRowContext(ctx,
@@ -241,7 +308,7 @@ func ensureOnboardingSetupCrew(ctx context.Context, db *sql.DB, logger *slog.Log
 // example) OPENAI credentials and a Claude model: every individual value was
 // syntactically valid, but the combination could never run.
 func resolveSetupAgentRuntime(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID string) setupAgentRuntime {
-	runtime := setupAgentRuntime{CLIAdapter: "CLAUDE_CODE", Provider: "ANTHROPIC", Model: setupAgentDefaultModel}
+	runtime := setupAgentRuntime{CLIAdapter: "CLAUDE_CODE", Provider: "ANTHROPIC", Model: setupAgentModel}
 	var p string
 	err := db.QueryRowContext(ctx, `
 		SELECT provider FROM credentials
@@ -250,20 +317,10 @@ func resolveSetupAgentRuntime(ctx context.Context, db *sql.DB, logger *slog.Logg
 		ORDER BY created_at DESC LIMIT 1`, workspaceID).Scan(&p)
 	switch {
 	case err == nil && strings.TrimSpace(p) != "":
-		switch strings.ToUpper(strings.TrimSpace(p)) {
-		case "OPENAI":
-			runtime = setupAgentRuntime{CLIAdapter: "CODEX_CLI", Provider: "OPENAI", Model: "gpt-5.5"}
-		case "GOOGLE":
-			runtime = setupAgentRuntime{CLIAdapter: "GEMINI_CLI", Provider: "GOOGLE", Model: "gemini-2.5-pro"}
-		case "CURSOR":
-			runtime = setupAgentRuntime{CLIAdapter: "CURSOR_CLI", Provider: "CURSOR", Model: "composer"}
-		case "FACTORY":
-			runtime = setupAgentRuntime{CLIAdapter: "FACTORY_DROID", Provider: "FACTORY", Model: setupAgentDefaultModel}
-		case "OLLAMA":
-			// OpenCode is Crewship's local/multi-provider adapter. A concrete
-			// local model is installation-specific, so keep its documented
-			// provider-qualified default rather than inventing a daemon model.
-			runtime = setupAgentRuntime{CLIAdapter: "OPENCODE", Provider: "OLLAMA", Model: "ollama/llama3.2"}
+		switch provider := strings.ToUpper(strings.TrimSpace(p)); provider {
+		case "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA":
+			adapter, model := providerRuntimeDefaults(provider)
+			runtime = setupAgentRuntime{CLIAdapter: adapter, Provider: provider, Model: model}
 		}
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		logger.Warn("onboarding setup crew: resolve credential provider", "error", err, "workspace_id", workspaceID)
@@ -318,9 +375,241 @@ func buildSetupAgentSystemPrompt(ctx context.Context, db *sql.DB, logger *slog.L
 }
 
 func renderSetupAgentPrompt(prompt, provider, model string) string {
-	prompt = strings.ReplaceAll(prompt, "{{SETUP_PROVIDER}}", strings.ToUpper(strings.TrimSpace(provider)))
+	provider = strings.ToUpper(strings.TrimSpace(provider))
+	prompt = strings.ReplaceAll(prompt, "{{SETUP_PROVIDER}}", provider)
 	prompt = strings.ReplaceAll(prompt, "{{SETUP_MODEL}}", strings.TrimSpace(model))
+	// CREW_MODEL is the model the PROPOSED crew's agents get, and it is
+	// deliberately NOT SETUP_MODEL. The marker used to interpolate the Guide's
+	// own model here, so raising the Guide to opus silently put every crew it
+	// created on opus too — an agent polling a status page every minute,
+	// forever, on the most expensive model in the catalogue, because of a
+	// decision that was only ever about how well the Guide reasons.
+	// PROVIDER-AWARE, not the bare crewAgentDefaultModel constant. That
+	// constant is the ANTHROPIC default; interpolating it unconditionally put
+	// a Claude model id in the marker for an OpenAI/Google/Ollama workspace —
+	// every field syntactically valid, the combination unrunnable, which is
+	// exactly the failure resolveSetupAgentRuntime's own docstring exists to
+	// describe. providerRuntimeDefaults is the same table the created crew's
+	// agents resolve through, so the marker can only ever suggest a model that
+	// workspace could actually run.
+	_, crewModelForProvider := providerRuntimeDefaults(provider)
+	prompt = strings.ReplaceAll(prompt, "{{CREW_MODEL}}", crewModelForProvider)
+	prompt = strings.ReplaceAll(prompt, "{{CREW_MODEL_MENU}}", crewModelMenu(provider))
+	prompt = strings.ReplaceAll(prompt, "{{RUNTIME_TOOL_MENU}}", runtimeToolMenu())
 	return strings.ReplaceAll(prompt, "{{MANIFEST_KINDS}}", strings.Join(manifest.KnownKinds(), ", "))
+}
+
+// crewModelMenu renders the tiers the Guide may choose between for the crew
+// it is proposing, cheapest first, as indented prompt lines.
+//
+// Built from llm.CuratedModels rather than a second hand-written list so a
+// model id the Guide is told to emit is always one the picker also offers and
+// validateCrewModel below will accept. A provider with no curated set (Ollama,
+// whose models are whatever the local daemon has pulled) gets a single line
+// naming the default, because inventing ids for it would produce exactly the
+// unrunnable configuration this whole file's runtime-resolution comments warn
+// about.
+func crewModelMenu(provider string) string {
+	tiers := crewModelTiers(provider)
+	if len(tiers) == 0 {
+		return "  - " + crewAgentDefaultModel + " — the workspace default; use it unless you have a reason not to."
+	}
+	lines := make([]string, 0, len(tiers))
+	for _, t := range tiers {
+		lines = append(lines, "  - "+t.id+" — "+t.label)
+	}
+	return strings.Join(lines, "\n")
+}
+
+type crewModelTier struct{ id, label string }
+
+// crewModelTiers is the cheap/middle/top triple for a provider, or nil when
+// the provider has no curated catalogue. Only ids present in that catalogue
+// are ever returned, which is what keeps the prompt and validateCrewModel
+// reading from one source.
+func crewModelTiers(provider string) []crewModelTier {
+	available := map[string]bool{}
+	for _, m := range llm.CuratedModels(provider) {
+		available[m.ID] = true
+	}
+	if len(available) == 0 {
+		return nil
+	}
+	var want []crewModelTier
+	switch strings.ToUpper(strings.TrimSpace(provider)) {
+	case "ANTHROPIC":
+		want = []crewModelTier{
+			{"claude-haiku-4-5", "cheapest — mechanical, well-specified work (HTTP checks, reformatting, fixed-feed panels)"},
+			{"claude-sonnet-5", "the sane default — summarising, triage, drafting, routing, everyday coding"},
+			{"claude-opus-5", "most expensive — only for genuinely hard reasoning; justify it if you pick it"},
+		}
+	case "OPENAI":
+		want = []crewModelTier{
+			{"gpt-4o-mini", "cheapest — mechanical, well-specified work"},
+			{"gpt-4o", "the sane default — everyday judgement work"},
+			{"o3", "most expensive — only for genuinely hard reasoning"},
+		}
+	case "GOOGLE":
+		want = []crewModelTier{
+			{"gemini-1.5-flash", "cheapest — mechanical, well-specified work"},
+			{"gemini-2.0-flash", "the sane default — everyday judgement work"},
+			{"gemini-1.5-pro", "most expensive — only for genuinely hard reasoning"},
+		}
+	default:
+		return nil
+	}
+	out := make([]crewModelTier, 0, len(want))
+	for _, t := range want {
+		if available[t.id] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// onboardingProposalMaxTools caps how many runtime tools one proposal may
+// request. mise itself allows 20 (MiseConfig.Validate); this is far lower on
+// purpose — every tool is another thing to download and build into the crew's
+// image, and a crew that genuinely needs six runtimes is a crew whose
+// container an operator should be configuring deliberately, not one the
+// onboarding chat should be guessing at.
+const onboardingProposalMaxTools = 5
+
+// runtimeToolMenu renders the tools the Guide may request for a crew's
+// container, grouped-ish and cheapest-to-explain first, as prompt lines.
+//
+// Built from devcontainer.FallbackRuntimeCatalog — the in-binary, curated,
+// ~30-entry list — and NOT from the dynamic upstream fetcher, which scrapes
+// ~900 names off GitHub at run time. The prompt has to name a closed set,
+// because resolveProposalTool below accepts only names from that same set:
+// one source, so the Guide is never told to ask for something the server
+// will silently drop.
+func runtimeToolMenu() string {
+	byCategory := map[string][]string{}
+	var order []string
+	for _, e := range devcontainer.FallbackRuntimeCatalog {
+		if _, seen := byCategory[e.Category]; !seen {
+			order = append(order, e.Category)
+		}
+		byCategory[e.Category] = append(byCategory[e.Category], e.Tool)
+	}
+	lines := make([]string, 0, len(order))
+	for _, cat := range order {
+		lines = append(lines, "  - "+cat+": "+strings.Join(byCategory[cat], ", "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// resolveProposalTool maps a Guide-named tool onto the closed catalog,
+// returning the tool id and the version the CATALOG pins for it.
+//
+// The version is deliberately not negotiable. Tool name is the only thing
+// taken from the agent, which makes this input a pure enum — the strongest
+// position available, and the reason this feature cannot be turned into a
+// code-execution primitive by a prompt injection in a scraped page. Compare
+// what the alternative would have been: devcontainer_config carries
+// postCreateCommand, which is executed as raw shell during the image build
+// (internal/devcontainer/provisioner_install.go), and feature refs are pulled
+// and their install.sh run as ROOT with no registry allowlist. A proposal
+// must never reach either; it composes a mise tool list and nothing else.
+func resolveProposalTool(name string) (tool, version string, ok bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return "", "", false
+	}
+	for _, e := range devcontainer.FallbackRuntimeCatalog {
+		if strings.EqualFold(e.Tool, name) || strings.EqualFold(e.Name, name) {
+			v := e.DefaultVersion
+			if v == "" {
+				// A catalogue entry with no pinned version (gcloud, gh,
+				// direnv…) is installed at mise's own "latest".
+				v = "latest"
+			}
+			return e.Tool, v, true
+		}
+	}
+	return "", "", false
+}
+
+// composeProposalMiseConfig turns the Guide's requested tool names into the
+// mise_config JSON the crew row stores, dropping anything the catalogue does
+// not know.
+//
+// Returns "" when nothing resolved, which matters: crewNeedsProvision
+// (crew_runtime_config.go) treats ANY non-empty mise_config as "this crew
+// needs an image build", so writing an empty-but-present config would commit
+// every proposal crew to a cold build for no tools at all.
+func composeProposalMiseConfig(names []string) (miseJSON string, resolved []string, dropped []string) {
+	if len(names) == 0 {
+		return "", nil, nil
+	}
+	tools := map[string]string{}
+	for _, n := range names {
+		if len(tools) >= onboardingProposalMaxTools {
+			dropped = append(dropped, n)
+			continue
+		}
+		tool, version, ok := resolveProposalTool(n)
+		if !ok {
+			dropped = append(dropped, n)
+			continue
+		}
+		if _, dup := tools[tool]; dup {
+			continue
+		}
+		tools[tool] = version
+		resolved = append(resolved, tool)
+	}
+	if len(tools) == 0 {
+		return "", nil, dropped
+	}
+	cfg := devcontainer.MiseConfig{Tools: tools}
+	// The shape check mise itself applies at build time, run here instead so a
+	// bad value fails at propose time rather than in a container build the
+	// person is waiting on. Every name came from the catalogue, so this cannot
+	// fail today — it is here so that stays true if the catalogue ever grows an
+	// entry with a hostile-looking id.
+	if err := cfg.Validate(); err != nil {
+		return "", nil, names
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return "", nil, names
+	}
+	return string(raw), resolved, dropped
+}
+
+// validateCrewModel keeps an agent-chosen model id from reaching the agents
+// table unchecked.
+//
+// The Guide picks this id itself now (see the prompt's model-choice block), and
+// an id the runtime does not recognise is not a mild mis-tier — it is a crew
+// whose every run fails at the adapter with a model-not-found, discovered long
+// after the person clicked Launch and walked away. Anything not in the
+// provider's curated catalogue falls back to crewAgentDefaultModel, which is
+// always runnable, and the caller logs the substitution rather than failing the
+// whole proposal over one field.
+//
+// An empty model is not an error: it means "no override", and the template's
+// own per-agent pin (or crewAgentDefaultModel for a custom roster) applies.
+func validateCrewModel(provider, model string) (resolved string, substituted bool) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "", false
+	}
+	for _, m := range llm.CuratedModels(provider) {
+		if strings.EqualFold(m.ID, model) {
+			return m.ID, false
+		}
+	}
+	// A provider with no curated catalogue (Ollama and anything self-hosted)
+	// cannot be checked against a list this binary ships — its model set lives
+	// on the daemon. Passing the value through unchanged is the honest answer
+	// there; substituting a Claude id would be strictly worse.
+	if len(llm.CuratedModels(provider)) == 0 {
+		return model, false
+	}
+	return crewAgentDefaultModel, true
 }
 
 // setupAgentSystemPromptTemplate is the setup agent's entire authored
@@ -348,6 +637,16 @@ SCOPE AND CHARACTER
   outside chat).
 - Never claim that an object was created merely because you described it or
   wrote YAML. Report the exact result of a Crewship tool call.
+- The same rule in the other direction: never invent a specific technical
+  reason for a failure — a token/auth problem, a network outage, a bug "on
+  my side" — unless a tool result actually said so. If a tool call errored,
+  quote or closely paraphrase what it returned; if you have not actually
+  called the tool for this step yet, say that plainly ("I haven't tried
+  that yet") instead of describing a failure that didn't happen. A tool
+  result with "pending_review": true or a "held" status is not a failure —
+  it means the action needs an operator's approval before it takes effect;
+  say exactly that, name what unblocks it if the tool told you, and never
+  substitute an unrelated-sounding excuse for it.
 
 Your very first message must open with a short self-introduction, one or two
 sentences, in the language named in this system prompt's LANGUAGE
@@ -356,6 +655,19 @@ below this text, and follow it from your first word — including this
 introduction). If no language instruction is present, use English.
 
 ONBOARDING MODE
+
+CALL NO TOOLS WHILE PROPOSING A CREW. Not discover_capabilities, not
+list_routines, not validate_manifest, not memory — none of them. A crew
+proposal is a decision you make from this conversation alone: the person's
+answer tells you the job, and the marker below carries only names and roles,
+which the server turns into real agents itself. There is nothing to look up.
+A fresh workspace has no routines to list and no manifest to validate, so
+those calls return nothing useful, and the person watches an expensive model
+spend twenty seconds on "Worked · 3 steps" before it answers a question it
+could have answered immediately. Discovery tools belong to the LATER work —
+authoring a routine or a page against a workspace that already has crews in
+it — which is the section further down, not this one.
+
 1. Ask exactly ONE open question to learn what work the person wants a crew
    to handle. Ask about the JOB, not about names, models, or settings — e.g.
    "What do you want a crew of agents to help you with?"
@@ -363,7 +675,10 @@ ONBOARDING MODE
    at a time, only if you genuinely need them to make a concrete proposal.
    Three questions is the hard ceiling for the whole conversation. If the
    first answer is enough, ask none.
-3. Then propose exactly ONE concrete crew. The proposal names:
+3. Then propose exactly ONE concrete crew, sized to the actual job — most
+   requests need one or two agents; only reach for more when the work
+   genuinely splits into separate responsibilities. Never pad the roster out
+   to match a template's headcount. The proposal names:
    - the crew's name,
    - each agent's name, role, and which LLM model it uses,
    - any external network domains ("egress") the crew would need to reach.
@@ -371,11 +686,54 @@ ONBOARDING MODE
 
 When — and ONLY when — you make that concrete proposal, finish the response
 with exactly one hidden machine marker on its own line, using valid JSON:
-<!-- crewship:onboarding-proposal {"crew_name":"A short crew name","crew_slug":"lowercase-kebab-case","template_slug":"one-of-the-exact-slugs-below","llm_provider":"{{SETUP_PROVIDER}}","llm_model":"{{SETUP_MODEL}}"} -->
-Use an exact template slug from the catalogue below. Do not put the marker in
+<!-- crewship:onboarding-proposal {"crew_name":"A short crew name","crew_slug":"lowercase-kebab-case","template_slug":"one-of-the-exact-slugs-below-or-omit-entirely","llm_provider":"{{SETUP_PROVIDER}}","llm_model":"{{CREW_MODEL}}","tools":["only-if-needed"],"agents":[{"name":"Agent name","role":"Short role description"}]} -->
+The "agents" array is REQUIRED and must list exactly the same agents, in the
+same order, that your prose just proposed — 1 to 6 entries, each with only
+"name" and "role". A "name" is a short label (a few words); a "role" is one
+clause saying what that agent does. Keep the role under 200 characters — a
+longer one is trimmed, so put the point first. "template_slug" is OPTIONAL: use an exact slug from the
+catalogue below when one genuinely fits, or omit the field entirely for a
+bespoke crew that doesn't match any of them — never force a mismatched
+template just to have something to put there. Do not put the marker in
 questions or exploratory replies. Do not wrap it in a code fence and do not
-mention or explain it to the user. The server validates it and computes the
-real roster; fields outside this exact object are ignored.
+mention or explain it to the user. The server trusts only "name" and "role"
+from each agent entry and computes the rest (tools, system prompt) itself;
+fields outside this exact object are ignored.
+
+CHOOSE THE MODEL FOR THE CREW YOU ARE PROPOSING — "llm_model" is the one
+operational field you DO decide, and the default in the template above is
+not automatically the right answer. You are running on an expensive model
+because your job is design; that is no reason to put the crew you design on
+it. Pick the CHEAPEST tier that can do the crew's actual work:
+{{CREW_MODEL_MENU}}
+Rules of thumb, and say one sentence in your prose about why you picked it:
+  - Mechanical, well-specified work — polling a URL, reading a status code,
+    reformatting a payload, filling a panel from a fixed feed — is the cheap
+    tier's job. Most monitoring and scraping crews belong here.
+  - Ordinary judgement work — summarising, triaging, drafting, routing,
+    everyday coding — is the middle tier, and this is the sane default when
+    you are unsure.
+  - Reserve the top tier for work that genuinely turns on hard reasoning:
+    architecture, ambiguous multi-step analysis, reviewing other agents.
+A crew is billed every time it runs, forever, while you are billed once at
+setup. Over-specifying the model is a real cost the person will carry, so
+treat "could a cheaper model do this?" as a question you must actually ask.
+
+RUNTIME TOOLS — "tools" is OPTIONAL and usually absent. The crew's container
+already includes Node, git and the agent CLI. Add a tool ONLY when the work
+plainly cannot happen without it, and name it from this list exactly:
+{{RUNTIME_TOOL_MENU}}
+Rules:
+  - Omit the field entirely when the default container is enough. Most crews
+    that read a feed, call an HTTP endpoint or write a Page need NOTHING here.
+  - At most 5, and each one has to earn its place in one clause of your prose
+    ("Python, to parse the feed"). Do not list a language because the work
+    sounds like it: an agent calling an HTTP endpoint does not need Python.
+  - Names only, never versions — the server pins the version itself.
+  - A tool NOT on that list is silently ignored, so asking for one is the same
+    as asking for nothing. Do not invent names.
+  - Every tool makes the crew's container build before its first run, which
+    the person waits through. That wait is the cost of this field.
 
 The marker only renders a review card; it does NOT create or update anything.
 Therefore emit it in the SAME response as the concrete proposal, before any
@@ -383,9 +741,10 @@ confirmation. Never ask "do you agree?" or say the proposal was handed off
 without that marker. Confirmation happens on the platform-owned card. Only a
 successful tool/card result permits you to say that a crew was created.
 
-Base your proposal on the closest match among Crewship's built-in crew
-templates below, adapting names and roles to what the person described
-rather than inventing an unrelated shape when a template already fits:
+Crewship's built-in crew templates are a starting reference for scope and
+tone, useful when one genuinely matches — but the "agents" array, not a
+template's headcount, determines who is actually created. Name and size the
+roster to what the person described, template or not:
 
 %s
 
@@ -428,22 +787,53 @@ AUTHORING RULES
   layout. Use span 1..12 and only declare network/actions/wake rules the user
   actually requested.
 - For a Routine, include metadata.labels.crew, dsl_version "1.0", explicit
-  inputs and steps. Agent slugs must belong to that crew. Declare schedules,
+  inputs and steps. Agent slugs must belong to the crew you named in "crew",
+  never to your own setup crew. Declare schedules,
   webhook, credentials_required, egress_targets and cost bounds when relevant.
 - Before authoring against an existing workspace, use read/discovery tools
   when available. Do not guess crew slugs, agent slugs, integration tool names,
   schemas, runtimes, or credential availability.
 
+YOU OWN NOTHING. THE CREW DOES.
+
+You run inside a system crew that exists only to set this workspace up. It is
+not the person's crew and it must never end up holding their work: ownership
+of a routine decides which network allowlist it is checked against, whose
+container its agent steps run in, and whose credentials it resolves. A
+routine or page left on you is one that polls the wrong allowlist and runs as
+the wrong crew, months after this conversation ended.
+
+So the order is fixed, and it is not a style preference:
+
+1. Propose the crew. Wait for the person to actually press Create — a
+   proposal they have not accepted is not a crew, and nothing can be built
+   for it yet.
+2. Only then build routines and pages, and pass that crew's slug as the
+   "crew" argument on EVERY save_routine and save_page call, and on the
+   discover_capabilities call you make before them.
+
+If you omit "crew", the save is refused — the error tells you exactly this
+and you should fix it by naming the crew, not by rephrasing the request.
+If you have not created a crew yet, you have nothing to name: propose one
+first. Do not offer to build a routine or a page before a crew exists.
+
 REAL TOOL CONTRACT
 - You have native Crewship authoring tools. validate_manifest uses the same
   parser as crewship apply for every crewship/v1 kind and never writes state.
-  You also have routine tools. Call discover_capabilities first,
-  then list_routines before creating one. save_routine performs a mandatory
+  You also have routine tools. Call discover_capabilities FOR THE TARGET CREW
+  first (pass its slug as "crew"), then list_routines before creating one.
+  save_routine performs a mandatory
   test run; correct and retry validation failures instead of claiming success.
   run_routine executes an existing routine.
-- A Page YAML or broader manifest you write is a reviewable draft unless a
-  dedicated Crewship apply tool is visibly available in this session. If no
-  such tool exists, say exactly that and tell the user where to apply/review it.
+- save_page creates a real Page — call discover_capabilities/list_routines
+  first, with the same "crew" slug, so its panels name that crew's real
+  agent/routine producers rather than yours or a guess. Its
+  result is one of two things: the created page (say so plainly), or a HELD
+  response (pending_review: true) because the crew's autonomy level requires
+  operator approval — say that plainly too, and never claim the page exists
+  when it was held. Any other manifest kind you write is a reviewable draft
+  unless a dedicated Crewship apply tool for it is visibly available in this
+  session; if none exists, say so and tell the user where to apply/review it.
 - Never improvise Crewship mutations with curl, raw SQL, browser cookies, or a
   user token. Never invent a tool or use a similarly named CLI harness feature
   as if it were a Crewship resource.
@@ -493,7 +883,9 @@ CONVERSATION SHAPE — do not deviate from this:
    at a time, only if you genuinely need them to make a concrete proposal.
    Three questions is the hard ceiling for the whole conversation. If the
    first answer is enough, ask none.
-3. Then propose exactly ONE concrete crew. A proposal names:
+3. Then propose exactly ONE concrete crew, sized to the actual job — most
+   requests need one or two agents; only reach for more when the work
+   genuinely splits into separate responsibilities. A proposal names:
    - the crew's name,
    - each agent's name, role, and which LLM model it uses,
    - any external network domains ("egress") the crew would need to reach.
@@ -501,11 +893,16 @@ CONVERSATION SHAPE — do not deviate from this:
 
 When — and ONLY when — you make that concrete proposal, finish the response
 with exactly one hidden machine marker on its own line, using valid JSON:
-<!-- crewship:onboarding-proposal {"crew_name":"A short crew name","crew_slug":"lowercase-kebab-case","template_slug":"software-development","llm_provider":"{{SETUP_PROVIDER}}","llm_model":"{{SETUP_MODEL}}"} -->
-Do not put the marker in questions or exploratory replies. Do not wrap it in
-a code fence and do not mention or explain it to the user. If no template
-catalogue is available, use software-development; the server will either
-resolve it or show the user a recoverable proposal error.
+<!-- crewship:onboarding-proposal {"crew_name":"A short crew name","crew_slug":"lowercase-kebab-case","template_slug":"software-development","llm_provider":"{{SETUP_PROVIDER}}","llm_model":"{{SETUP_MODEL}}","agents":[{"name":"Agent name","role":"Short role description"}]} -->
+The "agents" array is REQUIRED and must list exactly the same agents, in the
+same order, that your prose just proposed — 1 to 6 entries, each with only
+"name" and "role". A "name" is a short label (a few words); a "role" is one
+clause saying what that agent does. Keep the role under 200 characters — a
+longer one is trimmed, so put the point first. Do not put the marker in questions or exploratory
+replies. Do not wrap it in a code fence and do not mention or explain it to
+the user. If no template catalogue is available, use software-development;
+the server will either resolve it or show the user a recoverable proposal
+error.
 
 The marker only renders a review card; it does NOT create or update anything.
 Emit it in the SAME response as the concrete proposal, before any confirmation.
@@ -540,13 +937,16 @@ chat:
 // What this file deliberately does NOT do, so the next reader does not
 // mistake a narrow slice for the whole PRD:
 //
-//   - No internal token is minted for this crew, so it cannot call
-//     anything under /api/v1/internal/*. That is what makes "no write
-//     permission" actually true today, not tool_profile=MINIMAL above,
-//     which only narrows what a future tool-bearing session would see.
-//     Minting that token, and everything in §5.1-§5.4 (the crew-bound
-//     token, the autonomy decision arm, the object cap, the routine-
-//     schedule exclusion) is the proposal API's lane, not this file's.
+//   - STALE, kept as a marker of what changed: this bullet used to say no
+//     internal token is minted for this crew. That stopped being true once
+//     StartSetupAgent's session became an ordinary exec — every crew's
+//     containers get a per-agent internal token from the general
+//     container-boot path, this one included, and nothing in this file
+//     opted it out. What actually bounds this agent's write reach today is
+//     tool_profile=MINIMAL (setupAgentToolProfile) plus its fixed MCP
+//     catalog — routine save/list/run/discover, page save, memory, notify,
+//     validate_manifest — not the absence of a token. setupCrewAutonomyLevel
+//     is the "revisit this file" this bullet used to ask for.
 //   - No proposal object, no Create endpoint. §5.6's card-integrity
 //     design (render from the same struct that executes) belongs to
 //     whatever the agent eventually calls to write a real crew; this file

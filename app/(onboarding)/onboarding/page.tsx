@@ -32,6 +32,7 @@ import {
   type HandoffMode,
 } from "@/components/features/onboarding/onboarding-preview"
 import { OnboardingSetupChat } from "@/components/features/onboarding/onboarding-setup-chat"
+import { OnboardingCreatedPanel } from "@/components/features/onboarding/onboarding-created-panel"
 import { OnboardingProposalSummary } from "@/components/features/onboarding/onboarding-proposal-summary"
 import {
   createWorkspaceModelCredential,
@@ -201,8 +202,27 @@ export default function OnboardingPage() {
   // that point, same as picking a template, just not through crewSlug (which
   // only names a *builtin* template). Carries only what the card already
   // showed the user, never anything re-derived after the click.
-  const [appliedProposal, setAppliedProposal] = useState<{ id: string; crewName: string } | null>(null)
+  // A LIST, not a slot. The Guide can propose a second crew in the same
+  // conversation — people really do ask for "and another one that watches X"
+  // — and each Create applies its own proposal, so more than one crew is
+  // genuinely created. This used to be a single `appliedProposal`, so crew #2
+  // overwrote crew #1 the moment its suggestion arrived: both crews existed
+  // in the database, but the panel only ever named the newest, and the person
+  // reasonably concluded the product could not create more than one.
+  const [createdCrews, setCreatedCrews] = useState<
+    Array<{ id: string; proposal: OnboardingProposal; result: ApplyProposalResult }>
+  >([])
+  // The proposal currently on the card and NOT yet created. Still a single
+  // slot, and correctly so: the Guide revises one proposal at a time, and a
+  // revision should replace its predecessor rather than stack up.
   const [preparedProposal, setPreparedProposal] = useState<OnboardingProposal | null>(null)
+  // Set when Launch has succeeded. The wizard used to redirect straight into
+  // the first agent's chat, so the last thing a person saw of their own setup
+  // was a text box — nothing ever told them what had actually been built, and
+  // with more than one crew there is no single chat that represents the work.
+  // Holding here and showing the receipt is the difference between "something
+  // happened" and "here is what you now have".
+  const [launchSummary, setLaunchSummary] = useState<{ agentSlug: string | null } | null>(null)
   // Browser, not CLI. The old default was "cli", reasoning that Claude Code
   // users almost always have a local CLI already — true of people who
   // already run Crewship, not of the person this screen exists for, who is
@@ -251,7 +271,15 @@ export default function OnboardingPage() {
   // different credential from the CLI token pairing mints. See the poll below.
   const [tokenDelivered, setTokenDelivered] = useState(false)
   const [pairCopied, setPairCopied] = useState(false)
+  // Whether a container runtime is INSTALLED (advisory, step 1 copy).
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null)
+  // Whether THIS SERVER is actually driving one. The distinction decides
+  // whether step 3 can work at all: step 3 opens a chat with an agent that
+  // runs in a container, and a host with Docker installed but a crewshipd
+  // started with --no-docker reports available=true and can start nothing.
+  // null = the probe has not answered yet.
+  const [runtimeInUse, setRuntimeInUse] = useState<boolean | null>(null)
+  const [runtimeChecking, setRuntimeChecking] = useState(false)
 
   // Status and resume are one fail-closed bootstrap. The old gate translated
   // every 401/500/network failure into {completed:false}; a stale login thus
@@ -324,13 +352,27 @@ export default function OnboardingPage() {
     void bootstrapOnboarding()
   }, [bootstrapOnboarding])
 
-  useEffect(() => {
-     
-    serverFetch("/api/v1/system/runtime")
-      .then((r) => (r.ok ? r.json() : { available: false }))
-      .then((d) => setRuntimeReady(Boolean(d.available)))
-      .catch(() => setRuntimeReady(false))
+  // Extracted so the step-2 gate can offer a re-check: the probe used to run
+  // once on mount, which left anyone who started Docker mid-wizard stuck
+  // behind a hard block until they reloaded the page.
+  const checkRuntime = useCallback(async () => {
+    setRuntimeChecking(true)
+    try {
+      const r = await serverFetch("/api/v1/system/runtime")
+      const d = r.ok ? await r.json() : { available: false, in_use: false }
+      setRuntimeReady(Boolean(d.available))
+      setRuntimeInUse(Boolean(d.in_use))
+    } catch {
+      setRuntimeReady(false)
+      setRuntimeInUse(false)
+    } finally {
+      setRuntimeChecking(false)
+    }
   }, [])
+
+  useEffect(() => {
+    void checkRuntime()
+  }, [checkRuntime])
 
   // Seed the telemetry consent checkbox from the server's current state:
   // prerelease/dev builds boot with crash reporting defaulted on, stable
@@ -561,9 +603,18 @@ export default function OnboardingPage() {
       // Fail at the choice, with an explanation, rather than much later as
       // an exit-127 chat that looks like the app ignored them.
       const adapterReady = CLI_ADAPTERS[adapter]?.status === "production"
-      return adapterReady && (savedCredentialSelected || apiKey.trim().length >= 8 || isLocalModel(model))
+      // Step 3 opens a chat with an agent that runs inside a container. With
+      // no runtime driving that, the wizard used to let the user through and
+      // then answer their first message with two stacked errors naming an
+      // internal component — after they had already committed to the step.
+      // Same rule as the adapter check above: fail at the choice, with an
+      // explanation, not later as something that looks like the app ignoring
+      // them. `null` (probe still in flight) blocks too, and the panel says
+      // "Checking…" so it never reads as a silent refusal.
+      const runtimeOk = runtimeInUse === true
+      return runtimeOk && adapterReady && (savedCredentialSelected || apiKey.trim().length >= 8 || isLocalModel(model))
     }
-    if (step === 3) return crewMode === "template" ? crewSlug !== null : appliedProposal !== null
+    if (step === 3) return crewMode === "template" ? crewSlug !== null : createdCrews.length > 0
     return false
   }
 
@@ -704,8 +755,18 @@ export default function OnboardingPage() {
    * after the click.
    */
   const handleProposalApplied = useCallback((result: ApplyProposalResult, proposal: OnboardingProposal) => {
-    setAppliedProposal({ id: proposal.id, crewName: result.crewName ?? proposal.crewName })
-    setPreparedProposal({ ...proposal, crewName: result.crewName ?? proposal.crewName })
+    const named = { ...proposal, crewName: result.crewName ?? proposal.crewName }
+    setCreatedCrews((prev) =>
+      // Idempotent on proposal id: Apply itself replays rather than creating a
+      // second crew, so a double-click must not add a second row here either.
+      prev.some((c) => c.id === proposal.id)
+        ? prev
+        : [...prev, { id: proposal.id, proposal: named, result }],
+    )
+    // The card for this proposal is done; clear the pending slot so the panel
+    // shows it under "created" instead of leaving it queued for a Create that
+    // already happened.
+    setPreparedProposal(null)
   }, [])
 
   async function handleLaunch() {
@@ -732,7 +793,12 @@ export default function OnboardingPage() {
         workspaceName,
         language,
         crewSlug,
-        appliedProposalId: appliedProposal?.id,
+        // One id, though several crews may exist: the server uses it only
+        // to resolve which crew the post-launch redirect lands on (see
+        // setupFromAppliedProposal — it deploys nothing, every crew was
+        // already created by its own Create click). The most recent is the
+        // one the person was last looking at.
+        appliedProposalId: createdCrews.at(-1)?.id,
         adapter,
         adapterLabel: adapterCfg?.label,
         provider: adapterCfg?.provider,
@@ -825,11 +891,7 @@ export default function OnboardingPage() {
       // If the slug could not be resolved we send them to the dashboard,
       // which carries the welcome checklist and a working "Browse agents":
       // a generic page that works beats a specific one that doesn't.
-      if (firstAgentSlug) {
-        router.push(`/chat/${encodeURIComponent(firstAgentSlug)}`)
-      } else {
-        router.push("/")
-      }
+      setLaunchSummary({ agentSlug: firstAgentSlug || null })
     } catch (e) {
       // Real network failure (no response). Differentiate from the
       // "server returned 5xx" case above so users can tell whether
@@ -905,8 +967,12 @@ export default function OnboardingPage() {
             changed height — measured at y=101 on Workspace, y=137 on Crew and
             y=66 on Adapter, so the logo visibly jumped on every Continue. The
             fixed things stay fixed; only the form below them moves. */}
-        <div className="flex items-start border-b border-border p-6 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-12">
-          <div className="touch-form w-full max-w-md mx-auto space-y-7 lg:py-6">
+        {/* pb-0, and the nav row below carries the bottom inset instead. The
+            nav is `sticky bottom-0`, so any padding left on THIS box would be
+            a transparent strip under the pinned bar with crew cards sliding
+            through it. */}
+        <div className="flex items-start border-b border-border p-6 pb-0 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-12 lg:pb-0">
+          <div className="touch-form w-full max-w-md mx-auto space-y-7 lg:pt-6">
             <motion.div
               initial={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -934,7 +1000,7 @@ export default function OnboardingPage() {
                 transition={{ duration: 0.4, ease }}
                 className="space-y-5"
               >
-                {step === 1 && (
+                {!launchSummary && step === 1 && (
                   <div className="space-y-4">
                     <div>
                       <h2 className="text-2xl font-semibold tracking-tight">What&apos;s your workspace called?</h2>
@@ -998,36 +1064,62 @@ export default function OnboardingPage() {
                     )}
                     {runtimeReady === false && (
                       <div className="rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-warn">
-                        Docker isn&apos;t reachable. You can still finish setup now and start a runtime later from
-                        Settings.
+                        Docker isn&apos;t reachable. Your agents run in containers, so you&apos;ll need it running
+                        before the last step — start it now and we&apos;ll pick it up.
                       </div>
                     )}
                   </div>
                 )}
 
-                {step === 3 && crewMode === "chat" && (
+                {!launchSummary && step === 3 && crewMode === "chat" && (
                   <div className="space-y-4">
                     <div>
                       <h2 className="text-2xl font-semibold tracking-tight">
-                        {preparedProposal ? preparedProposal.crewName : "Tell Crewship Guide what you need"}
+                        {createdCrews.length > 0
+                          ? createdCrews.length === 1
+                            ? createdCrews[0].proposal.crewName
+                            : `${createdCrews.length} crews ready`
+                          : preparedProposal
+                            ? preparedProposal.crewName
+                            : "Tell Crewship Guide what you need"}
                       </h2>
                       <p className="text-sm text-muted-foreground mt-1">
-                        {appliedProposal
-                          ? "Your crew is created. Review the roster, then launch it."
+                        {createdCrews.length > 0
+                          ? preparedProposal
+                            ? "Created so far — and one more waiting for you to press Create in the chat."
+                            : "Created. Ask for another crew in the chat, or launch what you have."
                           : preparedProposal
                             ? "Review the crew below. Create it from the proposal card in the chat when it looks right."
-                          : "Chat with it on the right — it asks a couple of questions, then proposes a crew. Nothing is created until you click Create."}
+                            : "Chat with it on the right — it asks a couple of questions, then proposes a crew. Nothing is created until you click Create."}
                       </p>
                     </div>
+                    {/* Every crew that really exists, then the one still
+                        awaiting Create. `created` is per-proposal — it used to
+                        be `appliedProposal !== null`, i.e. "has ANY crew been
+                        created", so a freshly proposed second crew rendered
+                        with a green "Created" badge while nothing had been
+                        written for it yet. The panel was lying at exactly the
+                        moment the user was deciding whether to click. */}
+                    {createdCrews.map((c) => (
+                      <OnboardingProposalSummary key={c.id} proposal={c.proposal} created />
+                    ))}
                     {preparedProposal && (
-                      <OnboardingProposalSummary proposal={preparedProposal} created={appliedProposal !== null} />
+                      <OnboardingProposalSummary proposal={preparedProposal} created={false} />
                     )}
+                    {/* Everything the Guide has ACTUALLY created, read back
+                        from the workspace rather than from the transcript.
+                        Routines and pages are made by the agent calling its
+                        own tools inside a container, so the wizard never
+                        hears about them — without this the person is told in
+                        prose that a routine exists and shown a panel that
+                        says nothing. */}
+                    <OnboardingCreatedPanel workspaceId={onboardingWorkspaceId} />
                     {/* Escape hatch (PRD §4.3): a user who already knows what
                         they want must still be able to skip straight to a
                         template. Hidden once a proposal is actually applied —
                         switching away at that point would abandon a crew that
                         already exists, not merely a choice. */}
-                    {!appliedProposal && (
+                    {createdCrews.length === 0 && (
                       <button
                         type="button"
                         onClick={() => setCrewMode("template")}
@@ -1039,7 +1131,7 @@ export default function OnboardingPage() {
                   </div>
                 )}
 
-                {step === 3 && crewMode === "template" && (
+                {!launchSummary && step === 3 && crewMode === "template" && (
                   <div className="space-y-4">
                     <div>
                       <h2 className="text-2xl font-semibold tracking-tight">Pick your first crew</h2>
@@ -1125,7 +1217,7 @@ export default function OnboardingPage() {
                   </div>
                 )}
 
-                {step === 2 && (
+                {!launchSummary && step === 2 && (
                   <div className="space-y-5">
                     <div>
                       {/* The heading asked "How will you work?" — the human's
@@ -1415,6 +1507,44 @@ export default function OnboardingPage() {
                           {CLI_ADAPTERS[adapter]?.label} is still experimental and its CLI is not guaranteed to be present in the onboarding image. Choose Claude Code to finish setup; you can add experimental adapters from the dashboard afterwards.
                         </div>
                       )}
+                      {/* The container-runtime precondition. Mirrors the
+                          experimental-adapter alert above deliberately: same
+                          shape, same rule — fail at the choice with an
+                          explanation, rather than two steps later as an error
+                          naming an internal component. */}
+                      {runtimeInUse !== true && (
+                        <div
+                          role="alert"
+                          data-testid="onboarding-runtime-blocker"
+                          className="space-y-2 rounded-lg border border-warn/30 bg-warn/5 p-2.5 text-[11px] leading-relaxed text-muted-foreground"
+                        >
+                          {runtimeInUse === null || runtimeChecking ? (
+                            <span>Checking for a container runtime…</span>
+                          ) : (
+                            <>
+                              <div>
+                                {/* Two different failures, and the fix differs, so
+                                    they must not share a sentence. Docker absent:
+                                    install/start it. Docker present but this server
+                                    not driving it: crewshipd was started without a
+                                    runtime and restarting it is the fix, which
+                                    "start Docker" would never lead anyone to. */}
+                                {runtimeReady
+                                  ? "Docker is running, but this Crewship server isn't using it — it was started without a container runtime. Restart the server so it picks Docker up."
+                                  : "Your agents run in Docker containers, and no container runtime is reachable. Install or start Docker, then re-check."}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void checkRuntime()}
+                                disabled={runtimeChecking}
+                                className="font-medium text-primary underline-offset-2 hover:underline disabled:opacity-60"
+                              >
+                                Re-check
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="model">Model</Label>
@@ -1547,7 +1677,17 @@ export default function OnboardingPage() {
               </motion.div>
             )}
 
-            <div className="flex items-center justify-between pt-1">
+            {!launchSummary && (
+            /* Pinned to the foot of the column. Step 3 has no ceiling on its
+               height — one card per crew the Guide creates, plus a row per
+               crew/routine/page in "Built so far" — and Launch used to be
+               pushed below the fold by the second crew, with nothing on
+               screen hinting that the button finishing setup was down there.
+               `sticky` rather than `fixed`: under lg the panes stack, and a
+               fixed bar would stay welded to the viewport while the user
+               scrolled on into the preview pane, offering controls for a
+               screen they had already left. */
+            <div className="sticky bottom-0 z-10 flex items-center justify-between border-t border-border bg-background pb-6 pt-3 lg:pb-8">
               <Button
                 type="button"
                 variant="ghost"
@@ -1593,6 +1733,69 @@ export default function OnboardingPage() {
                 )}
               </div>
             </div>
+            )}
+
+            {launchSummary && (
+              /* pb-6 because the column no longer pads its own bottom — the
+                 nav row owns that inset, and the nav row is gone on this
+                 screen. Without it the receipt's last button sits flush
+                 against the edge of the pane. */
+              <div className="space-y-5 pb-6 lg:pb-8">
+                <div>
+                  <h2 className="text-2xl font-semibold tracking-tight">
+                    {createdCrews.length === 1 ? "Your crew is ready" : `Your ${createdCrews.length} crews are ready`}
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Here is what Crewship just built for you.
+                  </p>
+                </div>
+
+                <ul className="space-y-3">
+                  {createdCrews.map((c) => (
+                    <li key={c.id} className="rounded-xl border border-border bg-card/60 p-3">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="font-medium">{c.proposal.crewName}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {c.proposal.agents.length}{" "}
+                          {c.proposal.agents.length === 1 ? "agent" : "agents"}
+                        </span>
+                      </div>
+                      <ul className="mt-2 space-y-1">
+                        {c.proposal.agents.map((a) => (
+                          <li key={a.name} className="flex items-baseline justify-between gap-3 text-xs">
+                            <span className="text-muted-foreground">
+                              <span className="text-foreground">{a.name}</span>
+                              {a.role ? ` — ${a.role}` : ""}
+                            </span>
+                            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{a.model}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <Button
+                    onClick={() =>
+                      router.push(
+                        launchSummary.agentSlug
+                          ? `/chat/${encodeURIComponent(launchSummary.agentSlug)}`
+                          : "/",
+                      )
+                    }
+                  >
+                    {launchSummary.agentSlug ? "Start chatting" : "Go to dashboard"}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                  {launchSummary.agentSlug && (
+                    <Button variant="ghost" onClick={() => router.push("/")}>
+                      Go to dashboard
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1620,6 +1823,7 @@ export default function OnboardingPage() {
               onUnavailable={handleSetupAgentUnavailable}
               onProposalApplied={handleProposalApplied}
               onProposalPrepared={setPreparedProposal}
+              language={language}
             />
           ) : (
             <OnboardingPreview

@@ -90,6 +90,57 @@ describe("the setup wizard's chrome holds still", () => {
   })
 })
 
+// Step 3 grew unbounded: every crew the Guide creates adds a card to the left
+// column, and "Built so far" adds a row per crew, routine and page under
+// those. On a 800px-tall window the second created crew already pushed Launch
+// off the bottom, and the only way to reach the button that finishes setup was
+// to scroll the page — with nothing on screen suggesting there was anything
+// below to scroll to. A person who cannot see Launch cannot finish onboarding.
+describe("the wizard's controls stay reachable however tall the step grows", () => {
+  /** The nav row holding Back / Skip setup / Launch. */
+  function navRow(): string {
+    const at = PAGE.indexOf("{!launchSummary && (")
+    expect(at, "the nav row's guard moved").toBeGreaterThan(-1)
+    const match = PAGE.slice(at).match(/<div className="([^"]+)"/)
+    expect(match, "no container div follows the nav guard").not.toBeNull()
+    return match![1]
+  }
+
+  it("pins Back / Skip / Launch to the bottom of the column", () => {
+    // sticky, not fixed: the wizard stacks under lg, where the form column is
+    // followed by the preview pane. `fixed` would leave the bar welded to the
+    // viewport while the user scrolled through the preview, describing
+    // controls that no longer apply to what is on screen. Sticky releases the
+    // moment its own column scrolls past, which is the correct scope.
+    const nav = navRow()
+    expect(nav).toMatch(/\bsticky\b/)
+    expect(nav).toMatch(/\bbottom-0\b/)
+    expect(nav).not.toMatch(/\bfixed\b/)
+  })
+
+  it("gives that bar an opaque surface so content cannot show through it", () => {
+    // A translucent bar over a scrolling list of crew cards renders the
+    // Launch label on top of moving text and neither can be read.
+    expect(navRow()).toMatch(/bg-background/)
+  })
+
+  it("carries its own bottom padding instead of leaving a gap under itself", () => {
+    // The column's own bottom padding used to sit BELOW the nav row. Once the
+    // row is sticky that padding becomes a transparent letterbox at the foot
+    // of the scrollport, and the crew cards slide visibly through it under
+    // the pinned bar.
+    const left = leftColumn()
+    expect(left, "the column must not pad below the sticky bar").toMatch(/pb-0/)
+    expect(navRow(), "the bar owns the bottom inset now").toMatch(/pb-\d/)
+  })
+
+  it("scrolls the step content rather than the whole desktop page", () => {
+    // The two columns are independent full-height panes on lg; scrolling the
+    // document there would move the preview too.
+    expect(leftColumn()).toMatch(/lg:overflow-y-auto/)
+  })
+})
+
 describe("the setup lockup wears the mark the sign-in screen wears", () => {
   it("uses the bare cropped mark, not the tile", () => {
     // Nested inside both the tile's padding and the viewBox's, the sails
@@ -197,6 +248,46 @@ describe("the model token is the agents' requirement, not the human's", () => {
   })
 })
 
+// Step 3 opens a chat with an agent that runs inside a container. Before this
+// gate the wizard let a user through with no runtime and then answered their
+// first message with two stacked errors naming an internal component — after
+// they had already committed to the step, and two steps after step 1 told
+// them it was fine to carry on without Docker.
+describe("the crew step is not offered without a runtime to run it in", () => {
+  it("gates Continue on the server actually driving a runtime, not merely on Docker existing", () => {
+    // `available` means a runtime is installed and answering a ping; `in_use`
+    // means THIS server is driving one. A host running Docker under a
+    // crewshipd started with --no-docker reports available=true and can start
+    // no container at all, so gating on `available` would pass and the chat
+    // would still fail. dev.sh falls back to exactly that mode.
+    expect(PAGE).toContain("runtimeInUse")
+    const gate = PAGE.slice(PAGE.indexOf("const canContinue"), PAGE.indexOf("if (step === 3)"))
+    expect(gate, "step-2 gate does not consult runtimeInUse").toContain("runtimeInUse")
+    expect(gate, "gating on `available` would pass under --no-docker").not.toMatch(/runtimeReady\s*(===|&&)/)
+  })
+
+  it("blocks while the probe is still in flight rather than defaulting open", () => {
+    // `null` is "we do not know yet". Treating unknown as permission would
+    // reopen the hole on every slow probe.
+    const gate = PAGE.slice(PAGE.indexOf("const canContinue"), PAGE.indexOf("if (step === 3)"))
+    expect(gate).toContain("runtimeInUse === true")
+  })
+
+  it("offers a re-check instead of demanding a page reload", () => {
+    // The probe used to run once on mount, so a user who started Docker
+    // mid-wizard stayed blocked until they reloaded.
+    expect(PAGE).toContain("onboarding-runtime-blocker")
+    expect(PAGE).toContain("Re-check")
+    expect(PAGE).toContain("checkRuntime")
+  })
+
+  it("step 1 no longer promises setup can be finished without a runtime", () => {
+    // It used to say "You can still finish setup now and start a runtime
+    // later from Settings" — which the step-2 gate now contradicts outright.
+    expect(PAGE).not.toContain("You can still finish setup now and start a runtime later")
+  })
+})
+
 describe("onboarding resume never invents a fresh account", () => {
   it("uses the refresh-aware API gate and restores durable workspace state", () => {
     expect(PAGE).toMatch(/apiFetch\("\/api\/v1\/onboarding\/status"\)/)
@@ -219,7 +310,7 @@ describe("step 2 asks one question, then its consequence", () => {
    *  credential in place before it opens — see page.tsx's own doc comment
    *  and persistAdapterCredential). */
   function stepTwo(): string {
-    const from = PAGE.indexOf("{step === 2 && (")
+    const from = PAGE.indexOf("step === 2 && (")
     const to = PAGE.indexOf("TELEMETRY CONSENT")
     expect(from, "step 2 guard moved").toBeGreaterThan(-1)
     expect(to).toBeGreaterThan(from)

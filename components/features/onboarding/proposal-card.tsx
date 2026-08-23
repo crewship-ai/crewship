@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Check, Globe, Pencil, RefreshCcw, ShieldOff, Sparkles } from "lucide-react"
+import { Check, Globe, ShieldOff, Sparkles, Wrench } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { getModelLabel } from "@/lib/cli-adapters"
@@ -14,12 +14,15 @@ interface ProposalCardProps {
    *  anywhere else — PRD §5.6/§4.2 ("Nothing is written before Create") and
    *  the Vitest test that pins it, __tests__/proposal-card.test.tsx. */
   onCreate: () => void
-  onEdit: () => void
-  onAskDifferent: () => void
-  /** True while the Create click's request is in flight. Disables all three
-   *  buttons — Edit and Ask-for-something-else would otherwise let a user
-   *  fire a second, contradictory request into the same conversation while
-   *  the first proposal is still being applied. */
+  /** True while the Create click's request is in flight, which disables the
+   *  button so a double-click cannot fire a second apply for the same
+   *  proposal. Create is the only control on this card: an "Edit" and an
+   *  "Ask for something else" button used to sit beside it, but neither
+   *  wrote anything — one prefilled the composer with "Let's change: " and
+   *  the other sent the fixed sentence "Let's try a different crew." Both
+   *  were slower than simply typing the next message, which is what people
+   *  did instead, so the card now carries exactly the one control that has
+   *  an effect. */
   creating?: boolean
   /** Set once the proposal has been applied — swaps the buttons for a
    *  confirmation and makes the card inert. */
@@ -44,8 +47,6 @@ interface ProposalCardProps {
 export function ProposalCard({
   proposal,
   onCreate,
-  onEdit,
-  onAskDifferent,
   creating = false,
   created = false,
   error = null,
@@ -99,6 +100,32 @@ export function ProposalCard({
           <div className="text-xs text-muted-foreground italic">No agents in this proposal yet.</div>
         )}
       </div>
+
+      {/* Runtime tools, for the same reason egress is on the card: they change
+          what the crew's container IS, and a build the person waits through is
+          not something to discover afterwards. Rendered from the SERVER's
+          resolved list, never the Guide's request, so the card cannot promise
+          a tool that will not be installed. Absent entirely when the default
+          container is enough, which is the common case. */}
+      {(proposal.tools ?? []).length > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs">
+          <Wrench className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <div className="mb-1 text-muted-foreground">Extra tools in the container:</div>
+            <div className="flex flex-wrap gap-1">
+              {(proposal.tools ?? []).map((tool) => (
+                <span
+                  key={tool}
+                  data-testid="onboarding-proposal-tool"
+                  className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px]"
+                >
+                  {tool}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Egress — PRD §4.2: "Network is on the card." Never implied, never
           folded into a sentence about what the crew "does". */}
@@ -155,14 +182,6 @@ export function ProposalCard({
           >
             {busy ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : <Check className="mr-1.5 h-3.5 w-3.5" />}
             Create
-          </Button>
-          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onEdit}>
-            <Pencil className="mr-1.5 h-3.5 w-3.5" />
-            Edit
-          </Button>
-          <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onAskDifferent}>
-            <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />
-            Ask for something else
           </Button>
         </div>
       )}

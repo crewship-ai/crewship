@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -85,6 +86,22 @@ func opCreate(t *testing.T, h *OnboardingProposalHandler, userID, wsID string, b
 	return rr, out
 }
 
+// opCreateRaw is like opCreate but accepts an arbitrary JSON-able body, so
+// tests can send the "agents" array opCreate's map[string]string can't carry.
+func opCreateRaw(t *testing.T, h *OnboardingProposalHandler, userID, wsID string, body map[string]any) (*httptest.ResponseRecorder, onboardingProposalResponse) {
+	t.Helper()
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/onboarding/proposals", jsonBody(body)), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+	var out onboardingProposalResponse
+	if rr.Code == http.StatusCreated {
+		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode create response: %v; body=%s", err, rr.Body.String())
+		}
+	}
+	return rr, out
+}
+
 // opApply drives Apply for proposalID, optionally with a request body (used
 // by the integrity test to prove the body is ignored). role defaults to
 // OWNER when empty.
@@ -109,11 +126,18 @@ func TestOnboardingProposalCreate_HappyPath_ResolvesTemplateAndOverride(t *testi
 	h, userID, wsID := opFixture(t)
 	opSeedTemplate(t, h.db, wsID, "eng-crew", opTwoAgentRoster())
 
+	// A REAL model id, not a synthetic one. Create validates the requested
+	// model against llm.CuratedModels now (the Guide picks this field itself,
+	// so it is agent-authored input) and substitutes the workspace default for
+	// anything unrecognised — a made-up "claude-override" would be silently
+	// rewritten and this test would be asserting the substitution, not the
+	// override. haiku is real, catalogued, and differs from the template's own
+	// pin, so the override semantics under test are unchanged.
 	rr, proposal := opCreate(t, h, userID, wsID, map[string]string{
 		"crew_name":     "My Crew",
 		"template_slug": "eng-crew",
 		"llm_provider":  "ANTHROPIC",
-		"llm_model":     "claude-override",
+		"llm_model":     "claude-haiku-4-5",
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
@@ -134,8 +158,8 @@ func TestOnboardingProposalCreate_HappyPath_ResolvesTemplateAndOverride(t *testi
 		t.Fatalf("agents = %d, want 2", len(proposal.Payload.Agents))
 	}
 	for _, a := range proposal.Payload.Agents {
-		if a.LLMModel != "claude-override" {
-			t.Errorf("agent %s llm_model = %q, want claude-override (override should apply — provider matches)", a.Name, a.LLMModel)
+		if a.LLMModel != "claude-haiku-4-5" {
+			t.Errorf("agent %s llm_model = %q, want claude-haiku-4-5 (override should apply — provider matches)", a.Name, a.LLMModel)
 		}
 		if a.Slug != "lead-my-crew" && a.Slug != "helper-my-crew" {
 			t.Errorf("unexpected resolved agent slug %q", a.Slug)
@@ -176,7 +200,8 @@ func TestOnboardingProposalCreate_ModelOverrideSkipsMismatchedProvider(t *testin
 		"crew_name":     "Mixed",
 		"template_slug": "mixed-crew",
 		"llm_provider":  "ANTHROPIC",
-		"llm_model":     "claude-override",
+		// Real, catalogued id — see the note in the happy-path test above.
+		"llm_model": "claude-haiku-4-5",
 	})
 	var gotA, gotB string
 	for _, a := range proposal.Payload.Agents {
@@ -187,8 +212,8 @@ func TestOnboardingProposalCreate_ModelOverrideSkipsMismatchedProvider(t *testin
 			gotB = a.LLMModel
 		}
 	}
-	if gotA != "claude-override" {
-		t.Errorf("agent A (ANTHROPIC) llm_model = %q, want claude-override", gotA)
+	if gotA != "claude-haiku-4-5" {
+		t.Errorf("agent A (ANTHROPIC) llm_model = %q, want claude-haiku-4-5", gotA)
 	}
 	if gotB != "openai-default" {
 		t.Errorf("agent B (OPENAI) llm_model = %q, want its own template default (override provider mismatch)", gotB)
@@ -241,6 +266,194 @@ func TestOnboardingProposalCreate_Unauthenticated(t *testing.T) {
 	h.Create(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
+func TestOnboardingProposalCreate_CustomAgentsOverrideTemplateRoster(t *testing.T) {
+	// A four-agent template (like the builtin devops-sre one) must not force
+	// a four-agent crew when the caller names a smaller, custom roster — the
+	// whole point of the "agents" field is letting the card match a task
+	// that only needs one agent.
+	h, userID, wsID := opFixture(t)
+	opSeedTemplate(t, h.db, wsID, "devops-crew", []database.CrewTemplateAgent{
+		{Name: "SRE Lead", Slug: "sre-lead", RoleTitle: "Site Reliability Lead", AgentRole: "LEAD", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-default", ToolProfile: "CODING", SystemPrompt: "Lead SRE work."},
+		{Name: "Platform Engineer", Slug: "platform-engineer", RoleTitle: "Platform Engineer", AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-default", ToolProfile: "CODING", SystemPrompt: "Run platform."},
+		{Name: "Security Analyst", Slug: "security-analyst", RoleTitle: "Security Analyst", AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-default", ToolProfile: "CODING", SystemPrompt: "Watch security."},
+		{Name: "CI/CD Specialist", Slug: "cicd-specialist", RoleTitle: "CI/CD Engineer", AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-default", ToolProfile: "CODING", SystemPrompt: "Run pipelines."},
+	})
+
+	rr, proposal := opCreateRaw(t, h, userID, wsID, map[string]any{
+		"crew_name":     "Web Monitoring Crew",
+		"template_slug": "devops-crew",
+		"llm_provider":  "ANTHROPIC",
+		"llm_model":     "claude-sonnet-5",
+		"agents": []map[string]string{
+			{"name": "Monitoring Engineer", "role": "Watches uptime and pages on failure"},
+		},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if len(proposal.Payload.Agents) != 1 {
+		t.Fatalf("agents = %d, want 1 (the custom roster, not the template's 4)", len(proposal.Payload.Agents))
+	}
+	agent := proposal.Payload.Agents[0]
+	if agent.Name != "Monitoring Engineer" {
+		t.Errorf("agent name = %q, want Monitoring Engineer", agent.Name)
+	}
+	if agent.RoleTitle != "Watches uptime and pages on failure" {
+		t.Errorf("agent role_title = %q, want the caller's role text", agent.RoleTitle)
+	}
+	if agent.AgentRole != "LEAD" {
+		t.Errorf("sole agent's agent_role = %q, want LEAD", agent.AgentRole)
+	}
+	if agent.CLIAdapter != "CLAUDE_CODE" {
+		t.Errorf("cli_adapter = %q, want CLAUDE_CODE (derived from ANTHROPIC)", agent.CLIAdapter)
+	}
+	if agent.LLMProvider != "ANTHROPIC" || agent.LLMModel != "claude-sonnet-5" {
+		t.Errorf("provider/model = %s/%s, want ANTHROPIC/claude-sonnet-5", agent.LLMProvider, agent.LLMModel)
+	}
+	if agent.Slug != "monitoring-engineer-web-monitoring-crew" {
+		t.Errorf("agent slug = %q, want monitoring-engineer-web-monitoring-crew", agent.Slug)
+	}
+	if agent.SystemPrompt == "" {
+		t.Error("expected a server-generated system prompt for the custom agent")
+	}
+	if agent.SystemPrompt == "Lead SRE work." {
+		t.Error("custom agent must not inherit a template agent's system prompt verbatim")
+	}
+	if !strings.Contains(agent.SystemPrompt, "Watches uptime and pages on failure") {
+		t.Errorf("system prompt %q does not reference the agent's own role", agent.SystemPrompt)
+	}
+}
+
+func TestOnboardingProposalCreate_CustomAgentsAssignOneLeadRestAgent(t *testing.T) {
+	h, userID, wsID := opFixture(t)
+	opSeedTemplate(t, h.db, wsID, "eng-crew", opTwoAgentRoster())
+
+	_, proposal := opCreateRaw(t, h, userID, wsID, map[string]any{
+		"crew_name":     "Three Agent Crew",
+		"template_slug": "eng-crew",
+		"agents": []map[string]string{
+			{"name": "First", "role": "Leads"},
+			{"name": "Second", "role": "Helps"},
+			{"name": "Third", "role": "Helps too"},
+		},
+	})
+	if len(proposal.Payload.Agents) != 3 {
+		t.Fatalf("agents = %d, want 3", len(proposal.Payload.Agents))
+	}
+	want := map[string]string{"First": "LEAD", "Second": "AGENT", "Third": "AGENT"}
+	for _, a := range proposal.Payload.Agents {
+		if a.AgentRole != want[a.Name] {
+			t.Errorf("agent %s agent_role = %q, want %q", a.Name, a.AgentRole, want[a.Name])
+		}
+	}
+}
+
+func TestOnboardingProposalCreate_CustomAgentsWithoutAnyTemplate(t *testing.T) {
+	// No template_slug at all — a custom roster must be enough on its own,
+	// not just a name/role override layered on a chosen template.
+	h, userID, wsID := opFixture(t)
+
+	rr, proposal := opCreateRaw(t, h, userID, wsID, map[string]any{
+		"crew_name":    "Bespoke Crew",
+		"llm_provider": "ANTHROPIC",
+		"agents": []map[string]string{
+			{"name": "Solo Agent", "role": "Does the whole job"},
+		},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if proposal.Payload.TemplateSlug != "" {
+		t.Errorf("template_slug = %q, want empty (no template chosen)", proposal.Payload.TemplateSlug)
+	}
+	if len(proposal.Payload.Agents) != 1 || proposal.Payload.Agents[0].Name != "Solo Agent" {
+		t.Fatalf("agents = %+v, want a single Solo Agent", proposal.Payload.Agents)
+	}
+
+	// And it must actually apply: no template row exists for Apply to
+	// (mis)consult, so this also proves Apply doesn't assume one.
+	applyRR := opApply(h, userID, wsID, proposal.ID, "OWNER", nil)
+	if applyRR.Code != http.StatusCreated {
+		t.Fatalf("apply status = %d, body = %s", applyRR.Code, applyRR.Body.String())
+	}
+}
+
+func TestOnboardingProposalCreate_NoTemplateAndNoAgents_Rejected(t *testing.T) {
+	h, userID, wsID := opFixture(t)
+	rr, _ := opCreateRaw(t, h, userID, wsID, map[string]any{"crew_name": "X"})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+// The API half of the byte-vs-rune bug. The bridge and this endpoint each
+// enforce the ceiling, so fixing only one turns a silently-missing card into
+// a red 400 box — the same dead end wearing a different face.
+func TestOnboardingProposalCreate_AcceptsNonASCIIRoles(t *testing.T) {
+	h, userID, wsID := opFixture(t)
+	const role = "Sleduje pravidelná ozvání z uživatelova počítače a hlásí výpadek i obnovení dostupnosti"
+
+	rr, proposal := opCreateRaw(t, h, userID, wsID, map[string]any{
+		"crew_name":    "Hlídka mého PC",
+		"llm_provider": "ANTHROPIC",
+		"agents":       []map[string]string{{"name": "Hlídač dostupnosti", "role": role}},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if len(proposal.Payload.Agents) != 1 {
+		t.Fatalf("agents = %+v", proposal.Payload.Agents)
+	}
+	if proposal.Payload.Agents[0].RoleTitle == "" {
+		t.Error("the role was dropped")
+	}
+}
+
+func TestOnboardingProposalCreate_TruncatesOverlongRoleRatherThanRefusing(t *testing.T) {
+	h, userID, wsID := opFixture(t)
+	rr, proposal := opCreateRaw(t, h, userID, wsID, map[string]any{
+		"crew_name":    "Wordy Crew",
+		"llm_provider": "ANTHROPIC",
+		"agents":       []map[string]string{{"name": "A", "role": strings.Repeat("ř", onboardingProposalAgentRoleMaxLen+50)}},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (trim, not refuse); body = %s", rr.Code, rr.Body.String())
+	}
+	if got := utf8.RuneCountInString(proposal.Payload.Agents[0].RoleTitle); got > onboardingProposalAgentRoleMaxLen {
+		t.Errorf("role kept %d runes, ceiling is %d", got, onboardingProposalAgentRoleMaxLen)
+	}
+}
+
+func TestOnboardingProposalCreate_CustomAgentsRejectsInvalidInput(t *testing.T) {
+	h, userID, wsID := opFixture(t)
+	opSeedTemplate(t, h.db, wsID, "eng-crew", opTwoAgentRoster())
+
+	tooMany := make([]map[string]string, 7)
+	for i := range tooMany {
+		tooMany[i] = map[string]string{"name": "A", "role": "R"}
+	}
+
+	tests := []struct {
+		name   string
+		agents any
+	}{
+		{"too many agents", tooMany},
+		{"empty name", []map[string]string{{"name": "", "role": "R"}}},
+		{"empty role", []map[string]string{{"name": "A", "role": ""}}},
+		{"name too long", []map[string]string{{"name": strings.Repeat("a", 81), "role": "R"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr, _ := opCreateRaw(t, h, userID, wsID, map[string]any{
+				"crew_name": "X", "template_slug": "eng-crew", "agents": tt.agents,
+			})
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+			}
+		})
 	}
 }
 

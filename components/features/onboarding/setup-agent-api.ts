@@ -91,6 +91,10 @@ export interface OnboardingProposal {
    *  network access" for an empty list, so a later phase that adds per-agent
    *  egress is a parsing change here, not a card redesign. */
   egressDomains: string[]
+  /** The runtime tools the server actually resolved and will install. Not the
+   *  Guide's request — the resolved list, so the card cannot overstate what a
+   *  proposal turns into. */
+  tools: string[]
   status: string
 }
 
@@ -133,6 +137,9 @@ function proposalFromWire(json: unknown): OnboardingProposal | null {
     // Phase 1 has no per-proposal egress data on the wire at all — see the
     // field's own doc comment on OnboardingProposal.
     egressDomains: [],
+    tools: Array.isArray(payload.tools)
+      ? payload.tools.filter((t): t is string => typeof t === "string")
+      : [],
     status: typeof row.status === "string" ? row.status : "PENDING",
   }
 }
@@ -151,18 +158,45 @@ function proposalFromWire(json: unknown): OnboardingProposal | null {
  * pre-filled (PRD §5.6: the card must not be able to lie about what a
  * template resolves to).
  */
+export interface ProposalSuggestionAgent {
+  name: string
+  role: string
+}
+
 export interface ProposalSuggestion {
   crewName: string
-  templateSlug: string
+  /** Optional: a bespoke crew that doesn't match any builtin template omits
+   *  this entirely (internal/api/onboarding_proposal.go's Create treats
+   *  template_slug as required only when `agents` is also empty). */
+  templateSlug?: string
   crewSlug?: string
   llmProvider?: string
   llmModel?: string
+  /** The agent identities the setup agent actually named in its prose —
+   *  only name/role are trusted from here; the server derives every
+   *  operational field itself (see the type's own backend counterpart,
+   *  onboardingProposalAgentInput). */
+  agents?: ProposalSuggestionAgent[]
+  /** Runtime tool NAMES the Guide asked for. Names only — the server maps
+   *  each onto a closed catalogue and pins the version itself, so nothing
+   *  here can describe a container build beyond "install this known tool". */
+  tools?: string[]
+}
+
+function proposalSuggestionAgentFromWire(entry: unknown): ProposalSuggestionAgent | null {
+  if (entry == null || typeof entry !== "object") return null
+  const a = entry as Record<string, unknown>
+  if (typeof a.name !== "string" || !a.name) return null
+  if (typeof a.role !== "string" || !a.role) return null
+  return { name: a.name, role: a.role }
 }
 
 /** Read a `ProposalSuggestion` out of a chat event's metadata, or null if
- *  this metadata carries none. Requires at least a crew name and a template
- *  slug — anything else missing is filled in by the server's own defaults
- *  (`resolveLLMProvider` defaults an empty provider to ANTHROPIC). */
+ *  this metadata carries none. Requires a crew name, plus either a template
+ *  slug or at least one named agent — a suggestion with neither has nothing
+ *  for Create to build a roster from. Anything else missing is filled in by
+ *  the server's own defaults (`resolveLLMProvider` defaults an empty
+ *  provider to ANTHROPIC). */
 export function parseProposalSuggestion(
   metadata: Record<string, unknown> | undefined,
 ): ProposalSuggestion | null {
@@ -170,13 +204,21 @@ export function parseProposalSuggestion(
   if (raw == null || typeof raw !== "object") return null
   const s = raw as Record<string, unknown>
   if (typeof s.crew_name !== "string" || !s.crew_name) return null
-  if (typeof s.template_slug !== "string" || !s.template_slug) return null
+  const templateSlug = typeof s.template_slug === "string" && s.template_slug ? s.template_slug : undefined
+  const agents = Array.isArray(s.agents)
+    ? s.agents.map(proposalSuggestionAgentFromWire).filter((a): a is ProposalSuggestionAgent => a !== null)
+    : undefined
+  if (!templateSlug && (!agents || agents.length === 0)) return null
   return {
     crewName: s.crew_name,
-    templateSlug: s.template_slug,
+    templateSlug,
     crewSlug: typeof s.crew_slug === "string" && s.crew_slug ? s.crew_slug : undefined,
     llmProvider: typeof s.llm_provider === "string" && s.llm_provider ? s.llm_provider : undefined,
     llmModel: typeof s.llm_model === "string" && s.llm_model ? s.llm_model : undefined,
+    agents: agents && agents.length > 0 ? agents : undefined,
+    tools: Array.isArray(s.tools)
+      ? s.tools.filter((t): t is string => typeof t === "string" && t.length > 0)
+      : undefined,
   }
 }
 
@@ -221,10 +263,12 @@ export async function createOnboardingProposal(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       crew_name: suggestion.crewName,
-      template_slug: suggestion.templateSlug,
+      ...(suggestion.templateSlug ? { template_slug: suggestion.templateSlug } : {}),
       ...(suggestion.crewSlug ? { crew_slug: suggestion.crewSlug } : {}),
       ...(suggestion.llmProvider ? { llm_provider: suggestion.llmProvider } : {}),
       ...(suggestion.llmModel ? { llm_model: suggestion.llmModel } : {}),
+      ...(suggestion.agents && suggestion.agents.length > 0 ? { agents: suggestion.agents } : {}),
+      ...(suggestion.tools && suggestion.tools.length > 0 ? { tools: suggestion.tools } : {}),
     }),
     },
   )

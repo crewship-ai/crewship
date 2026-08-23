@@ -880,6 +880,30 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	})
 
 	handler := func(event orchestrator.AgentEvent) {
+		// Stamp the RESOLVED model onto the terminal result event.
+		//
+		// The result event carries `model_usage`, a map keyed by every model
+		// the turn touched — which includes the small housekeeping model
+		// Claude Code uses for its own bookkeeping, not just the one the agent
+		// reasons with. It carries no scalar model of its own, so the client
+		// was left picking a key out of that map, and encoding/json emits map
+		// keys in sorted order: "claude-haiku-4-5-…" sorts before
+		// "claude-opus-5", so the footer reliably showed the housekeeping
+		// model and an operator asking "which model is this agent on?" got the
+		// wrong answer from the one place in the UI that claims to say.
+		//
+		// The accumulator already holds the authoritative value from the
+		// system/init event, which always precedes result, and
+		// MergeRunAccumulator already writes that same value to the durable
+		// run row — so this makes the live badge agree with the record instead
+		// of disagreeing with it.
+		if event.Type == "result" {
+			if meta, ok := event.Metadata.(map[string]interface{}); ok {
+				if resolved := acc.ResolvedModel(); resolved != "" {
+					meta["model"] = resolved
+				}
+			}
+		}
 		streamFn(ws.ChatEvent{
 			Type:     event.Type,
 			Content:  event.Content,

@@ -11,6 +11,44 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Everything the onboarding Guide built belonged to the Guide.** A routine
+  or page authored during setup was attributed to `_crewship-setup`, the
+  server-created crew the Crewship Guide itself runs in, because the sidecar
+  injects `author_crew_id` from its own IPC config — the gate that stops
+  Crew B claiming to be Crew A, correct for every crew except the one whose
+  entire job is building for others.
+
+  `author_crew_id` is not a label. `internal/pipeline/egress_gate.go` checks
+  a routine's HTTP steps against the AUTHOR crew's allowlist, so a routine
+  written to poll `seznam.cz` was gated on the Guide's network policy and
+  could only be unblocked by widening the Guide; `internal/pipeline/executor.go`
+  runs agent steps in the author crew's container, so the work ran as the
+  Guide rather than as the crew meant to do it; and the Guide's own
+  `autonomy_level` is `full` (it must be — it creates Pages), so a person's
+  routines took up permanent residence in the most privileged crew in the
+  workspace, outliving onboarding by months. Pages had a fourth version of
+  the same fault: a panel names its producer as `agent/<slug>`, and
+  `discover_capabilities` could only see the Guide's own roster, so pages
+  built at setup pointed their panels at the Guide.
+
+  A `kind='setup'` crew may now name the crew it is authoring FOR
+  (`target_crew_slug` on `/internal/pipelines/save`, `/internal/pipelines/test_run`
+  and `/internal/pages/save`; `crew` on the `save_routine`, `save_page` and
+  `discover_capabilities` MCP tools) and, in exchange, may own nothing at
+  all. Both halves are load-bearing: without the second, naming a crew is
+  an option the model forgets to take and the orphans come back. The
+  exception stays narrow — an ordinary crew naming another crew is still
+  403, the same cross-crew escalation the original gate exists to stop, and
+  the target must be a non-setup crew inside the workspace the caller's
+  token is already bound to. Ownership ordering (crew first, then its work)
+  is now enforced by the slug simply not resolving rather than by the
+  prompt remembering, and the refusal lists the workspace's real crew slugs
+  because a slug is derived server-side and the Guide never sees what its
+  proposed name became. The autonomy gate continues to ask about the ACTOR,
+  not the owner — a brand-new crew defaults to `guided`, and holding a page
+  the Guide is plainly permitted to create would leave setup unable to
+  finish its own job.
+
 - **A crew's first message could be answered by total silence when its
   devcontainer needed a build.** The server deferred the message (streamed a
   `crew_provisioning` build card, returned the `ws.ErrCrewProvisioning`

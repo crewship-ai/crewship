@@ -30,7 +30,7 @@ export function OnboardingProposalSummary({ proposal, created }: OnboardingPropo
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            {created ? "Your first crew" : "Proposed crew"}
+            {created ? "Created crew" : "Proposed crew"}
           </div>
           <div className="truncate text-base font-semibold tracking-tight">{proposal.crewName}</div>
           <div className="text-xs text-muted-foreground">

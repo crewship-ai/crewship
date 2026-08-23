@@ -129,6 +129,21 @@ test.describe("onboarding wizard — first-run flow", () => {
   test("bootstrap → wizard (3 steps) → launch → DB rows present", async ({ page, request }) => {
     test.setTimeout(90_000)
 
+    // Step 2 now refuses to advance unless THIS server is driving a container
+    // runtime — step 3 opens a chat with an agent that runs in one, and
+    // letting the user through without it produced two stacked errors on their
+    // first message instead. Stub the probe so this spec keeps measuring the
+    // WIZARD rather than whether the box running it happens to have Docker
+    // wired: dev slots routinely run `crewship start --no-docker`, where the
+    // real endpoint honestly answers in_use=false.
+    await page.route("**/api/v1/system/runtime", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ available: true, in_use: true }),
+      }),
+    )
+
     // Bootstrap form
     await page.goto("/bootstrap")
     await page.waitForSelector("#full_name")

@@ -274,6 +274,48 @@ describe("parseProposalSuggestion — reads the agent's suggestion, not a finish
       llmModel: "claude-sonnet-5",
     })
   })
+
+  it("accepts a suggestion with agents but no template slug (a bespoke crew)", () => {
+    expect(
+      parseProposalSuggestion({
+        onboarding_proposal_suggestion: {
+          crew_name: "Web Monitoring Crew",
+          agents: [{ name: "Monitoring Engineer", role: "Watches uptime" }],
+        },
+      }),
+    ).toEqual({
+      crewName: "Web Monitoring Crew",
+      templateSlug: undefined,
+      crewSlug: undefined,
+      llmProvider: undefined,
+      llmModel: undefined,
+      agents: [{ name: "Monitoring Engineer", role: "Watches uptime" }],
+    })
+  })
+
+  it("requires a crew name even when agents are present", () => {
+    expect(
+      parseProposalSuggestion({
+        onboarding_proposal_suggestion: { agents: [{ name: "A", role: "R" }] },
+      }),
+    ).toBeNull()
+  })
+
+  it("drops malformed agent entries but keeps the well-formed ones", () => {
+    expect(
+      parseProposalSuggestion({
+        onboarding_proposal_suggestion: {
+          crew_name: "X",
+          template_slug: "software-development",
+          agents: [{ name: "Good", role: "Fine" }, { name: "" }, "nope", { role: "no name" }],
+        },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        agents: [{ name: "Good", role: "Fine" }],
+      }),
+    )
+  })
 })
 
 describe("createOnboardingProposal — the non-sensitive half (a preview, not a crew)", () => {
@@ -292,6 +334,25 @@ describe("createOnboardingProposal — the non-sensitive half (a preview, not a 
           crew_name: "Seznam Listing Scraper",
           template_slug: "software-development",
           llm_model: "claude-sonnet-5",
+        }),
+      }),
+    )
+  })
+
+  it("POSTs a custom agents roster, and template_slug is omitted when the suggestion had none", async () => {
+    mockedApiFetch.mockResolvedValueOnce(jsonResponse(201, WIRE_PROPOSAL))
+    await createOnboardingProposal({
+      crewName: "Web Monitoring Crew",
+      templateSlug: undefined,
+      agents: [{ name: "Monitoring Engineer", role: "Watches uptime" }],
+    }, "ws_1")
+    expect(mockedApiFetch).toHaveBeenCalledWith(
+      "/api/v1/onboarding/proposals?workspace_id=ws_1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          crew_name: "Web Monitoring Crew",
+          agents: [{ name: "Monitoring Engineer", role: "Watches uptime" }],
         }),
       }),
     )

@@ -52,11 +52,30 @@ async function getWsToken(): Promise<string | null> {
  *  row with its own `suggested_prompts`, so there is nothing to read one
  *  from). Reuses the same `FollowUps` chip rail the main chat renders —
  *  only the prompt strings are onboarding-specific. */
-const FOLLOW_UP_PROMPTS = [
-  "Tell me more about what it would do",
-  "Give me an example task it could run",
-  "Let's try a different crew",
-]
+// Follow-up chips, in the language the person picked on step 1.
+//
+// These are sent verbatim as the user's own next message, so an English chip
+// in a Czech conversation does not merely look wrong — it puts words in the
+// user's mouth in a language they did not choose, and the Guide then has to
+// decide which language to answer in. Only the languages the wizard's own
+// picker offers need an entry; anything else falls back to English, which is
+// the same default the system prompt uses when no LANGUAGE block is present.
+const FOLLOW_UP_PROMPTS_BY_LANGUAGE: Record<string, string[]> = {
+  English: [
+    "Tell me more about what it would do",
+    "Give me an example task it could run",
+    "Let's try a different crew",
+  ],
+  Czech: [
+    "Řekni mi víc o tom, co by dělala",
+    "Dej mi příklad úkolu, který by zvládla",
+    "Zkusme jinou crew",
+  ],
+}
+
+function followUpPrompts(language?: string): string[] {
+  return FOLLOW_UP_PROMPTS_BY_LANGUAGE[language ?? "English"] ?? FOLLOW_UP_PROMPTS_BY_LANGUAGE.English
+}
 
 interface OnboardingSetupChatProps {
   /** Fires once, the moment starting the setup agent's session turns out not
@@ -76,6 +95,11 @@ interface OnboardingSetupChatProps {
   /** Mirrors the current server-materialised proposal into the left pane.
    *  This is display-only; Create remains exclusively inside ProposalCard. */
   onProposalPrepared?: (proposal: OnboardingProposal | null) => void
+  /** The language chosen on step 1, used for the follow-up chips. The chips
+   *  are sent as the USER's message, so they have to be in the user's own
+   *  language. The agent's own replies are handled separately, by the
+   *  LANGUAGE block the server injects into its system prompt. */
+  language?: string
 }
 
 /**
@@ -100,6 +124,7 @@ export function OnboardingSetupChat({
   onUnavailable,
   onProposalApplied,
   onProposalPrepared,
+  language,
 }: OnboardingSetupChatProps) {
   const [session, setSession] = useState<SetupAgentSession | null>(null)
   const [starting, setStarting] = useState(true)
@@ -163,6 +188,7 @@ export function OnboardingSetupChat({
         workspaceId={session.workspaceId}
         onProposalApplied={onProposalApplied}
         onProposalPrepared={onProposalPrepared}
+        language={language}
       />
     </RealtimeProvider>
   )
@@ -211,12 +237,14 @@ function ConnectedSetupChat({
   workspaceId,
   onProposalApplied,
   onProposalPrepared,
+  language,
 }: {
   agentId: string
   sessionId: string
   workspaceId: string
   onProposalApplied: (result: ApplyProposalResult, proposal: OnboardingProposal) => void
   onProposalPrepared?: (proposal: OnboardingProposal | null) => void
+  language?: string
 }) {
   const session = useSession()
   const currentUserId = session.data?.user?.id
@@ -311,11 +339,23 @@ function ConnectedSetupChat({
   const [proposal, setProposal] = useState<OnboardingProposal | null>(null)
   const [proposalLoading, setProposalLoading] = useState(false)
   const [proposalPrepError, setProposalPrepError] = useState<string | null>(null)
-  // Which suggestion has already been turned into a proposal, so a re-render
-  // (or the same suggestion appearing on a replayed/duplicated event) does
-  // not re-materialise it. Keyed on the suggestion's own content: a REVISED
-  // suggestion (the user asked for something else) naturally gets a new key.
-  const processedSuggestionKeyRef = useRef<string | null>(null)
+  // Which TURN's marker has already been materialised.
+  //
+  // Keyed on the turn, not on the suggestion's content, and that is the whole
+  // point. Content-keying (either as one slot or as a set of every key ever
+  // seen) breaks the case the Guide hits constantly: the user says "give me
+  // the approval card then", the Guide re-emits the SAME crew, the key
+  // matches something already processed, no proposal is materialised — and
+  // since the card only renders for a live `proposal`, no card appears at
+  // all. The user is stuck asking for a card the code has decided it already
+  // handled.
+  //
+  // A re-emit arrives on a NEW assistant turn, so a turn id distinguishes
+  // "the Guide offered this again" from "React re-rendered" — which is the
+  // only thing the guard was ever for. Nothing is created without a Create
+  // click, and Apply is idempotent per proposal id server-side, so an extra
+  // PENDING row is the entire cost of being wrong here.
+  const processedSuggestionTurnRef = useRef<string | null>(null)
 
   // What the user most recently sent — the only record of it, since a
   // message deferred by provisioning is never persisted before the server
@@ -323,7 +363,6 @@ function ConnectedSetupChat({
   // still lives here.
   const lastSentTextRef = useRef<string>("")
   // Pre-fills the composer for the proposal card's "Edit" affordance.
-  const [prefillInput, setPrefillInput] = useState<string | undefined>(undefined)
 
   // Derived, not stateful: the server resumes a deferred message on this
   // same chat channel (see PendingResume's doc comment), so "is a resume
@@ -371,18 +410,24 @@ function ConnectedSetupChat({
   // (createOnboardingProposal → apiFetch), same as picking a template.
   useEffect(() => {
     let suggestion: ReturnType<typeof parseProposalSuggestion> = null
+    let suggestionTurnId: string | null = null
     outer: for (let i = turns.length - 1; i >= 0; i--) {
       suggestion = parseProposalSuggestion(turns[i].metadata)
-      if (suggestion) break
+      if (suggestion) {
+        suggestionTurnId = turns[i].id
+        break
+      }
       for (const part of turns[i].parts) {
         suggestion = parseProposalSuggestion(part.metadata)
-        if (suggestion) break outer
+        if (suggestion) {
+          suggestionTurnId = turns[i].id
+          break outer
+        }
       }
     }
-    if (!suggestion) return
-    const key = JSON.stringify(suggestion)
-    if (processedSuggestionKeyRef.current === key) return
-    processedSuggestionKeyRef.current = key
+    if (!suggestion || !suggestionTurnId) return
+    if (processedSuggestionTurnRef.current === suggestionTurnId) return
+    processedSuggestionTurnRef.current = suggestionTurnId
     setProposal(null)
     onProposalPrepared?.(null)
     setProposalPrepError(null)
@@ -454,20 +499,6 @@ function ConnectedSetupChat({
     })()
   }, [proposal, workspaceId, onProposalApplied])
 
-  // Neither of these writes anything — they only shape the NEXT message a
-  // human sends. "Edit" pre-fills the composer so the user can say exactly
-  // what to change; "ask for something else" sends an ordinary chat message
-  // like any other, which is why it goes through sendMessageTracked rather
-  // than any proposal-specific path.
-  const handleEdit = useCallback(() => {
-    setPrefillInput("Let's change: ")
-  }, [])
-
-  const handleAskDifferent = useCallback(() => {
-    if (isStreaming) return
-    sendMessageTracked("Let's try a different crew.")
-  }, [isStreaming, sendMessageTracked])
-
   return (
     <div className="flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-[20px] border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
@@ -496,8 +527,8 @@ function ConnectedSetupChat({
           </div>
         )}
         {historyReady && turns.length === 0 && (
-          <div className="text-xs text-muted-foreground italic py-6 text-center">
-            Say what you need help with — e.g. &quot;I need to scrape listings from Seznam.&quot;
+          <div className="py-6 text-center text-xs text-muted-foreground">
+            What work should this crew take off your hands?
           </div>
         )}
         {historyWarning && (
@@ -570,21 +601,24 @@ function ConnectedSetupChat({
             {proposalPrepError}
           </div>
         )}
-        {proposal && (
+        {/* Only while the proposal is still a QUESTION. Once Create has
+            succeeded the card has nothing left to ask, and the crew it made is
+            already listed in the panel beside the chat — leaving a second,
+            identical copy pinned under the transcript just repeated the same
+            roster twice on one screen. */}
+        {proposal && appliedId !== proposal.id && (
           <ProposalCard
             proposal={proposal}
             onCreate={handleCreate}
-            onEdit={handleEdit}
-            onAskDifferent={handleAskDifferent}
             creating={applying}
-            created={appliedId === proposal.id}
+            created={false}
             error={applyError}
           />
         )}
       </div>
 
       <FollowUps
-        prompts={FOLLOW_UP_PROMPTS}
+        prompts={followUpPrompts(language)}
         onPick={sendMessageTracked}
         show={historyReady && connectionStatus === "connected" && !isStreaming && turns.length > 0 && !proposal && !pendingResume}
       />
@@ -599,7 +633,6 @@ function ConnectedSetupChat({
         stopGeneration={stopGeneration}
         ensureSession={ensureSession}
         sendMessage={sendMessageTracked}
-        initialInput={prefillInput}
       />
     </div>
   )

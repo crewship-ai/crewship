@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -46,6 +47,85 @@ const (
 )
 
 var errOnboardingProposalAlreadyApplied = errors.New("onboarding proposal already applied")
+
+const (
+	// onboardingProposalCustomAgentsMax mirrors chatbridge's
+	// onboardingProposalMaxAgents — the same ceiling enforced again here
+	// because Create is reachable directly by an authenticated human, not
+	// only via the setup agent's marker.
+	onboardingProposalCustomAgentsMax = 6
+	// RUNES, mirroring internal/chatbridge. Counted in bytes here too until a
+	// Czech conversation proved what that costs: the same sentence that is 80
+	// characters in English is ~120 bytes with diacritics, so the ceiling
+	// silently moved for every non-ASCII language. These two constants and
+	// the bridge's must change together — the bridge accepting a marker the
+	// API then 400s is a red error box instead of a card.
+	onboardingProposalAgentNameMaxLen = 80
+	onboardingProposalAgentRoleMaxLen = 200
+)
+
+// onboardingProposalAgentInput is one caller-named agent identity for a
+// custom-sized proposal roster. Only Name and Role are ever accepted from a
+// caller — planOnboardingProposal derives every operational field itself
+// (model, adapter, tool profile, system prompt), so nothing agent-authored
+// reaches a created agent's actual configuration.
+type onboardingProposalAgentInput struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+// providerRuntimeDefaults returns the CLI adapter and model Crewship runs a
+// given llm_provider with absent any more specific pin. This is the single
+// source for that table — resolveSetupAgentRuntime (onboarding_setup_crew.go)
+// and planOnboardingProposal's custom-roster path both call it, so "what
+// does OPENAI default to" can't drift between the setup agent and a
+// proposal built from a custom roster.
+//
+// ONE DELIBERATE EXCEPTION, and it is not drift: on ANTHROPIC the Guide does
+// NOT come through here. resolveSetupAgentRuntime seeds its ANTHROPIC arm
+// with setupAgentModel (opus) directly, while the default branch below hands
+// a created crew's agents crewAgentDefaultModel (sonnet). Both constants live
+// next to each other in onboarding_setup_crew.go with the reasoning for the
+// split; the shared-table guarantee above still holds for every OTHER
+// provider, where both callers really do read the same row.
+func providerRuntimeDefaults(provider string) (cliAdapter, model string) {
+	switch strings.ToUpper(strings.TrimSpace(provider)) {
+	case "OPENAI":
+		return "CODEX_CLI", "gpt-5.5"
+	case "GOOGLE":
+		return "GEMINI_CLI", "gemini-2.5-pro"
+	case "CURSOR":
+		return "CURSOR_CLI", "composer"
+	case "FACTORY":
+		return "FACTORY_DROID", crewAgentDefaultModel
+	case "OLLAMA":
+		// OpenCode is Crewship's local/multi-provider adapter. A concrete
+		// local model is installation-specific, so keep its documented
+		// provider-qualified default rather than inventing a daemon model.
+		return "OPENCODE", "ollama/llama3.2"
+	default:
+		return "CLAUDE_CODE", crewAgentDefaultModel
+	}
+}
+
+// buildCustomProposalAgentSystemPrompt is the ONLY text a custom-roster
+// agent's system_prompt_legacy ever gets. It is built purely from
+// roleTitle/crewName — both already length-capped, already-validated,
+// server-visible strings — never from free-form agent-authored prose. That
+// keeps the "no agent-authored prompts" guarantee this whole file documents
+// (see the package comment above) intact even for a roster the setup agent
+// named itself: naming an agent is trusted, authoring its operating
+// instructions is not.
+func buildCustomProposalAgentSystemPrompt(roleTitle, crewName string) string {
+	roleTitle = strings.TrimSpace(roleTitle)
+	crewName = strings.TrimSpace(crewName)
+	if roleTitle == "" {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Act as this crew's %s. Focus on the responsibilities of that role within %s's objective, and defer to the crew's other agents for work outside it.",
+		roleTitle, crewName)
+}
 
 // onboardingProposalAgent is one agent in a proposal's resolved roster —
 // exactly the fields the created `agents` row will carry, computed at
@@ -79,6 +159,15 @@ type onboardingProposalPayload struct {
 	LLMProvider  string                    `json:"llm_provider,omitempty"`
 	LLMModel     string                    `json:"llm_model,omitempty"`
 	Agents       []onboardingProposalAgent `json:"agents"`
+	// MiseConfig is composed by the SERVER from resolved catalogue entries —
+	// never a string the agent authored. Empty when the crew needs no extra
+	// runtime, which matters: crewNeedsProvision treats any non-empty value as
+	// "this crew must build an image before it can run".
+	MiseConfig string `json:"mise_config,omitempty"`
+	// Tools is the resolved list, for the card. The card must be able to show
+	// exactly what will be installed (§5.6 — it must not be able to lie about
+	// what a proposal resolves to).
+	Tools []string `json:"tools,omitempty"`
 }
 
 // onboardingProposalResponse is the wire shape for Create and Get.
@@ -113,7 +202,7 @@ type onboardingProposalApplyResponse struct {
 // the same template row and the same override. Deliberately duplicated
 // rather than factored into crew_templates.go: this file owns the proposal
 // surface end to end and must not require touching the deploy path it calls.
-func planOnboardingProposal(ctx context.Context, db *sql.DB, wsID, templateSlug, crewName, crewSlugInput string, overrides deployOverrides) (*onboardingProposalPayload, error) {
+func planOnboardingProposal(ctx context.Context, db *sql.DB, wsID, templateSlug, crewName, crewSlugInput string, overrides deployOverrides, customAgents []onboardingProposalAgentInput, toolNames []string) (*onboardingProposalPayload, error) {
 	crewSlug := crewSlugInput
 	if crewSlug == "" {
 		crewSlug = slugify(crewName)
@@ -124,22 +213,60 @@ func planOnboardingProposal(ctx context.Context, db *sql.DB, wsID, templateSlug,
 		return nil, fmt.Errorf("%w: crew_slug must contain only lowercase letters, numbers, and hyphens", errCrewSlugConflict)
 	}
 
-	var agentsJSON string
+	// The template is optional once a custom roster is given (it only
+	// contributes icon/color/provenance then), but still required as the
+	// agent source when no custom roster is given at all.
 	var icon, color *string
-	err := db.QueryRowContext(ctx, `
-		SELECT agents_json, icon, color FROM crew_templates`+crewTemplateBySlugScope, templateSlug, wsID).Scan(&agentsJSON, &icon, &color)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errTemplateNotFound
+	if templateSlug != "" {
+		var agentsJSON string
+		err := db.QueryRowContext(ctx, `
+			SELECT agents_json, icon, color FROM crew_templates`+crewTemplateBySlugScope, templateSlug, wsID).Scan(&agentsJSON, &icon, &color)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, errTemplateNotFound
+			}
+			return nil, fmt.Errorf("load template: %w", err)
 		}
-		return nil, fmt.Errorf("load template: %w", err)
+		if len(customAgents) == 0 {
+			var agents []database.CrewTemplateAgent
+			if err := json.Unmarshal([]byte(agentsJSON), &agents); err != nil {
+				return nil, fmt.Errorf("parse template agents: %w", err)
+			}
+			miseJSON, resolvedTools, _ := composeProposalMiseConfig(toolNames)
+			return &onboardingProposalPayload{
+				CrewName:     crewName,
+				CrewSlug:     crewSlug,
+				CrewIcon:     icon,
+				CrewColor:    color,
+				TemplateSlug: templateSlug,
+				LLMProvider:  overrides.Provider,
+				LLMModel:     overrides.LLMModel,
+				Agents:       planTemplateAgents(agents, crewSlug, overrides),
+				MiseConfig:   miseJSON,
+				Tools:        resolvedTools,
+			}, nil
+		}
 	}
 
-	var agents []database.CrewTemplateAgent
-	if err := json.Unmarshal([]byte(agentsJSON), &agents); err != nil {
-		return nil, fmt.Errorf("parse template agents: %w", err)
-	}
+	miseJSON, resolvedTools, _ := composeProposalMiseConfig(toolNames)
+	return &onboardingProposalPayload{
+		CrewName:     crewName,
+		CrewSlug:     crewSlug,
+		CrewIcon:     icon,
+		CrewColor:    color,
+		TemplateSlug: templateSlug,
+		LLMProvider:  overrides.Provider,
+		LLMModel:     overrides.LLMModel,
+		Agents:       planCustomAgents(customAgents, crewName, crewSlug, overrides),
+		MiseConfig:   miseJSON,
+		Tools:        resolvedTools,
+	}, nil
+}
 
+// planTemplateAgents mirrors deployCrewTemplate's own per-agent derivation
+// (crew_templates.go) so what Create stores and what Apply later executes
+// are guaranteed to agree, given the same template row and override.
+func planTemplateAgents(agents []database.CrewTemplateAgent, crewSlug string, overrides deployOverrides) []onboardingProposalAgent {
 	planned := make([]onboardingProposalAgent, 0, len(agents))
 	for _, a := range agents {
 		planned = append(planned, onboardingProposalAgent{
@@ -154,17 +281,50 @@ func planOnboardingProposal(ctx context.Context, db *sql.DB, wsID, templateSlug,
 			SystemPrompt: a.SystemPrompt,
 		})
 	}
+	return planned
+}
 
-	return &onboardingProposalPayload{
-		CrewName:     crewName,
-		CrewSlug:     crewSlug,
-		CrewIcon:     icon,
-		CrewColor:    color,
-		TemplateSlug: templateSlug,
-		LLMProvider:  overrides.Provider,
-		LLMModel:     overrides.LLMModel,
-		Agents:       planned,
-	}, nil
+// planCustomAgents builds a roster from caller-named agent identities
+// instead of a template. The first agent leads; the rest are plain members
+// (matching the LEAD/AGENT vocabulary builtin templates already use). Every
+// field beyond name/role is derived here, never taken from the caller.
+func planCustomAgents(customAgents []onboardingProposalAgentInput, crewName, crewSlug string, overrides deployOverrides) []onboardingProposalAgent {
+	cliAdapter, defaultModel := providerRuntimeDefaults(overrides.Provider)
+	model := strings.TrimSpace(overrides.LLMModel)
+	if model == "" {
+		model = defaultModel
+	}
+	usedSlugs := make(map[string]int, len(customAgents))
+	planned := make([]onboardingProposalAgent, 0, len(customAgents))
+	for i, ca := range customAgents {
+		agentRole := "AGENT"
+		if i == 0 {
+			agentRole = "LEAD"
+		}
+		base := slugify(ca.Name)
+		if base == "" {
+			base = fmt.Sprintf("agent-%d", i+1)
+		}
+		slug := base + "-" + crewSlug
+		if n := usedSlugs[slug]; n > 0 {
+			usedSlugs[slug] = n + 1
+			slug = fmt.Sprintf("%s-%d", slug, n+1)
+		} else {
+			usedSlugs[slug] = 1
+		}
+		planned = append(planned, onboardingProposalAgent{
+			Name:         ca.Name,
+			Slug:         slug,
+			RoleTitle:    ca.Role,
+			AgentRole:    agentRole,
+			CLIAdapter:   cliAdapter,
+			LLMProvider:  overrides.Provider,
+			LLMModel:     model,
+			ToolProfile:  "CODING",
+			SystemPrompt: buildCustomProposalAgentSystemPrompt(ca.Role, crewName),
+		})
+	}
+	return planned
 }
 
 // OnboardingProposalHandler serves the onboarding proposal store: Create,
@@ -192,11 +352,13 @@ func (h *OnboardingProposalHandler) SetJournal(j journal.Emitter) {
 }
 
 type onboardingProposalCreateRequest struct {
-	CrewName     string `json:"crew_name"`
-	CrewSlug     string `json:"crew_slug"`
-	TemplateSlug string `json:"template_slug"`
-	LLMProvider  string `json:"llm_provider"`
-	LLMModel     string `json:"llm_model"`
+	CrewName     string                         `json:"crew_name"`
+	CrewSlug     string                         `json:"crew_slug"`
+	TemplateSlug string                         `json:"template_slug"`
+	LLMProvider  string                         `json:"llm_provider"`
+	LLMModel     string                         `json:"llm_model"`
+	Agents       []onboardingProposalAgentInput `json:"agents,omitempty"`
+	Tools        []string                       `json:"tools,omitempty"`
 }
 
 // Create handles POST /api/v1/onboarding/proposals. Resolves the named
@@ -223,9 +385,30 @@ func (h *OnboardingProposalHandler) Create(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, r, http.StatusBadRequest, "crew_name is required")
 		return
 	}
-	if req.TemplateSlug == "" {
-		writeProblem(w, r, http.StatusBadRequest, "template_slug is required")
+	if req.TemplateSlug == "" && len(req.Agents) == 0 {
+		writeProblem(w, r, http.StatusBadRequest, "template_slug is required unless a custom agents roster is given")
 		return
+	}
+	if len(req.Agents) > onboardingProposalCustomAgentsMax {
+		writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("agents must contain at most %d entries", onboardingProposalCustomAgentsMax))
+		return
+	}
+	for i := range req.Agents {
+		req.Agents[i].Name = strings.TrimSpace(req.Agents[i].Name)
+		req.Agents[i].Role = strings.TrimSpace(req.Agents[i].Role)
+		if req.Agents[i].Name == "" || req.Agents[i].Role == "" ||
+			utf8.RuneCountInString(req.Agents[i].Name) > onboardingProposalAgentNameMaxLen {
+			writeProblem(w, r, http.StatusBadRequest,
+				fmt.Sprintf("each agent needs a non-empty name of at most %d characters and a non-empty role",
+					onboardingProposalAgentNameMaxLen))
+			return
+		}
+		// Trimmed, not refused — same reasoning as the bridge: a clipped
+		// sentence is a cosmetic loss, a refused proposal is a crew the person
+		// cannot create.
+		if r := []rune(req.Agents[i].Role); len(r) > onboardingProposalAgentRoleMaxLen {
+			req.Agents[i].Role = strings.TrimSpace(string(r[:onboardingProposalAgentRoleMaxLen]))
+		}
 	}
 
 	llm, ok := resolveLLMProvider(req.LLMProvider)
@@ -233,7 +416,19 @@ func (h *OnboardingProposalHandler) Create(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, r, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA")
 		return
 	}
-	overrides := deployOverrides{LLMModel: strings.TrimSpace(req.LLMModel), Provider: llm.provider}
+	// The Guide chooses this id itself (the prompt's model-choice block), so it
+	// is agent-authored input reaching a column the runtime dispatches on —
+	// checked here rather than trusted, for the same reason every other
+	// agent-authored field on this path is. An unknown id degrades to the
+	// workspace default instead of failing the proposal: the person is midway
+	// through onboarding, and a runnable crew on the default tier is a better
+	// outcome than a red error over a field they never saw.
+	crewModel, substituted := validateCrewModel(llm.provider, req.LLMModel)
+	if substituted {
+		h.logger.Warn("onboarding proposal: unrecognised model from setup agent, using workspace default",
+			"requested", strings.TrimSpace(req.LLMModel), "provider", llm.provider, "resolved", crewModel)
+	}
+	overrides := deployOverrides{LLMModel: crewModel, Provider: llm.provider}
 
 	// Builtin templates may not be seeded yet if this is the very first
 	// wizard call in a fresh workspace — same lazy-seed CrewTemplateHandler
@@ -242,7 +437,7 @@ func (h *OnboardingProposalHandler) Create(w http.ResponseWriter, r *http.Reques
 		h.logger.Warn("onboarding proposal create: seed builtin templates", "error", err)
 	}
 
-	payload, err := planOnboardingProposal(r.Context(), h.db, wsID, req.TemplateSlug, req.CrewName, req.CrewSlug, overrides)
+	payload, err := planOnboardingProposal(r.Context(), h.db, wsID, req.TemplateSlug, req.CrewName, req.CrewSlug, overrides, req.Agents, req.Tools)
 	if err != nil {
 		switch {
 		case errors.Is(err, errTemplateNotFound):
@@ -370,10 +565,10 @@ func (h *OnboardingProposalHandler) deployStoredOnboardingProposal(ctx context.C
 	crewID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO crews (id, workspace_id, name, slug, icon, color, network_mode, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO crews (id, workspace_id, name, slug, icon, color, network_mode, mise_config, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)`,
 		crewID, wsID, payload.CrewName, payload.CrewSlug, payload.CrewIcon, payload.CrewColor,
-		database.DefaultCrewNetworkMode, now, now); err != nil {
+		database.DefaultCrewNetworkMode, payload.MiseConfig, now, now); err != nil {
 		return nil, payload, "", fmt.Errorf("create proposal crew: %w", err)
 	}
 

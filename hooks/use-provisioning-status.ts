@@ -202,10 +202,29 @@ const STEP_LABELS: Record<string, string> = {
   "provision.failed": "Failed",
 }
 
-export function useProvisioningStatus(workspaceId: string | null): ProvisioningStatus {
+/**
+ * @param extraCrewIds crews to track that `GET /api/v1/crews` will never
+ *   return. Exactly one thing needs this today and it is not an edge case:
+ *   the onboarding setup crew is `kind = 'setup'` and that list deliberately
+ *   excludes it ("a conversation partner, not a crew the user made",
+ *   internal/api/crews_query.go). Its build is therefore invisible here, so
+ *   the provisioning card could never find its row and sat on an
+ *   indefinite "Building _crewship-setup…" spinner forever — not a race, a
+ *   permanent state, with the real progress data one unreachable row away.
+ *   Relaxing the list filter would put the Guide's own machinery in "your
+ *   crews" everywhere; seeding by explicit id keeps that exclusion intact and
+ *   costs one extra fetch only for the caller that asks.
+ */
+export function useProvisioningStatus(
+  workspaceId: string | null,
+  extraCrewIds: string[] = [],
+): ProvisioningStatus {
   const [summary, setSummary] = useState<ProvisioningSummary>(EMPTY)
   const cancelRef = useRef(false)
   const { subscribe } = useRealtime()
+  // Joined, so refresh's identity does not churn on every render from a fresh
+  // array literal — which would restart the poll loop continuously.
+  const extraKey = extraCrewIds.join(",")
 
   const refresh = useCallback(async () => {
     if (!workspaceId) {
@@ -215,8 +234,31 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
     try {
       const listRes = await apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       if (!listRes.ok) return
-      const crews: CrewListEntry[] = await listRes.json()
-      if (!Array.isArray(crews)) return
+      const listed: CrewListEntry[] = await listRes.json()
+      if (!Array.isArray(listed)) return
+
+      // Seed any explicitly requested crew the list cannot return.
+      const seeded: CrewListEntry[] = []
+      for (const id of extraKey ? extraKey.split(",") : []) {
+        if (!id || listed.some((c) => c.id === id)) continue
+        try {
+          const r = await apiFetch(`/api/v1/crews/${id}?workspace_id=${workspaceId}`)
+          if (!r.ok) continue
+          const c = await r.json()
+          if (c && typeof c.id === "string") {
+            seeded.push({
+              id: c.id,
+              slug: typeof c.slug === "string" ? c.slug : "",
+              name: typeof c.name === "string" ? c.name : "",
+              devcontainer_config: c.devcontainer_config ?? null,
+            } as CrewListEntry)
+          }
+        } catch {
+          // A crew we cannot read is one we simply do not track — never a
+          // reason to blank the whole badge.
+        }
+      }
+      const crews = seeded.length > 0 ? [...listed, ...seeded] : listed
 
       // Fan out provision status per crew. Use Promise.allSettled so a
       // single 5xx for one crew doesn't blank the whole badge.
@@ -267,7 +309,7 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
       // granular progress or the "just built" summary we built from WS frames.
       setSummary((prev) => rollup(mergeDetail(prev.detail, serverDetail)))
     } catch { /* toolbar must never crash */ }
-  }, [workspaceId])
+  }, [workspaceId, extraKey])
 
   useEffect(() => {
     cancelRef.current = false
