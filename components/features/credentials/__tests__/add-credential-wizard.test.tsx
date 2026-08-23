@@ -436,7 +436,9 @@ describe("saving", () => {
     const { onSuccess } = renderWizard()
     pickShape(/^token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
-    const tagInput = screen.getByLabelText(/tags \(optional\)/i)
+    // "(optional)" moved out of the label and into the kit's hint line
+    // under the control, where every other optional field says it.
+    const tagInput = screen.getByLabelText(/^tags$/i)
     fireEvent.change(tagInput, { target: { value: "Prod" } })
     fireEvent.keyDown(tagInput, { key: "Enter" })
     fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "THING" } })

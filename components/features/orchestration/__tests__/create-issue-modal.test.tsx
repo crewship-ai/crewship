@@ -541,12 +541,16 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
     render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
 
     fireEvent.click(screen.getByText("Assignee"))
-    await screen.findByText("Morgan")
 
-    const img = commandRow("Morgan").querySelector("img")
-    expect(img).not.toBeNull()
+    // One retried assertion, not "find the name, then go looking for its row".
+    // The second form resolves a node and queries from it a tick later, which
+    // under a loaded suite reads a row React has already replaced.
     // crews-explorer.tsx / agent-canvas.tsx both pass `avatar_seed || name`.
-    expect(img!.getAttribute("src")).toBe(getAgentAvatarUrl("Morgan", null))
+    await waitFor(() => {
+      const img = commandRow("Morgan").querySelector("img")
+      expect(img).not.toBeNull()
+      expect(img!.getAttribute("src")).toBe(getAgentAvatarUrl("Morgan", null))
+    })
   })
 
   // ── 3. The project picker shows a generic glyph ─────────────────────────
@@ -555,12 +559,13 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
     render(<CreateIssueModal {...defaultProps} projects={iconProjects} />)
 
     fireEvent.click(screen.getByText("Project"))
-    await screen.findByText("Launch Prep")
 
-    const row = commandRow("Launch Prep")
-    expect(row.querySelector(`svg.${iconToken("rocket")}`)).not.toBeNull()
-    // CrewIcon tints a raw hex inline; the class-based palette cannot express one.
-    expect(row.querySelector('[style*="#EC4899"]')).not.toBeNull()
+    await waitFor(() => {
+      const row = commandRow("Launch Prep")
+      expect(row.querySelector(`svg.${iconToken("rocket")}`)).not.toBeNull()
+      // CrewIcon tints a raw hex inline; the class palette cannot express one.
+      expect(row.querySelector('[style*="#EC4899"]')).not.toBeNull()
+    })
   })
 
   // ── 4. The routine picker shows a generic glyph ─────────────────────────
@@ -569,10 +574,11 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
     render(<CreateIssueModal {...defaultProps} routines={mockRoutines} />)
 
     fireEvent.click(screen.getByText("Routine"))
-    await screen.findByText("Nightly sweep")
 
-    const row = commandRow("Nightly sweep")
-    const expected = iconToken(resolveRoutineIcon(mockRoutines[0]))
-    expect(row.querySelector(`svg.${expected}`)).not.toBeNull()
+    await waitFor(() => {
+      const row = commandRow("Nightly sweep")
+      const expected = iconToken(resolveRoutineIcon(mockRoutines[0]))
+      expect(row.querySelector(`svg.${expected}`)).not.toBeNull()
+    })
   })
 })

@@ -50,8 +50,8 @@
 
 import * as React from "react"
 import {
-  Check, ChevronLeft, ChevronsUpDown, FileText, KeyRound,
-  Plus, ShieldCheck, Terminal, User, X,
+  Braces, Check, ChevronLeft, ChevronsUpDown, FileText, KeyRound,
+  Palette, Plus, ShieldCheck, Tag, Terminal, User, Users, X,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -59,12 +59,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { DetailCard, FieldLabel } from "@/components/ui/detail"
 import {
   CreateSurfaceBody,
+  CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceRefusal,
   CreateSurfaceSecondaryAction,
+  CreateSurfaceSection,
   CreateSurfaceSteps,
 } from "@/components/layout/create-surface"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -159,6 +160,19 @@ const STEPS: { id: Step; label: string }[] = [
 ]
 
 const STEP_ORDER: Step[] = STEPS.map((s) => s.id)
+
+/**
+ * The line a DetailCard used to render in its footer.
+ *
+ * `CreateSurfaceSection` has no footer slot and its `hint` is hidden below the
+ * `sm` breakpoint, which is right for "— optional" and wrong for a sentence
+ * that stops a mistake. These stay visible everywhere.
+ */
+function CardNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="type-meta leading-relaxed text-muted-foreground-soft">{children}</p>
+  )
+}
 
 export function AddCredentialWizard({
   workspaceId, onSuccess, onCancel, knownTags, onDirtyChange, primaryRef,
@@ -428,12 +442,11 @@ export function AddCredentialWizard({
       <CreateSurfaceBody data-testid="wizard-body" className="space-y-3">
         {step === "type" && (
           <>
-            <div>
-              <FieldLabel>What shape is it?</FieldLabel>
-              <p className="type-meta mt-1 leading-relaxed text-muted-foreground">
+            <CreateSurfaceSection title="What shape is it?" icon={KeyRound} accent="amber">
+              <p className="type-meta leading-relaxed text-muted-foreground">
                 The shape decides which boxes you fill next. Every brand fits one of these.
               </p>
-            </div>
+            </CreateSurfaceSection>
             {/* Two-up on a phone: six tiles in one column is four thumb-swipes
                 to reach Certificate, and three-up leaves 110px of tile for a
                 label plus a blurb. */}
@@ -484,11 +497,7 @@ export function AddCredentialWizard({
                 It is offered here, next to the shape, and it gates nothing —
                 the icon is what the rail and the list draw, not a category the
                 flow makes you choose. */}
-            <DetailCard
-              title="Brand icon"
-              subtitle="optional"
-              footer="Pasting the secret on the next step usually recognises the brand on its own. Setting it here just wins the tie."
-            >
+            <CreateSurfaceSection title="Brand icon" hint="optional" icon={Palette} accent="purple">
               <div className="flex flex-wrap items-center gap-3">
                 <BrandPicker
                   value={provider}
@@ -498,13 +507,17 @@ export function AddCredentialWizard({
                   The face this credential wears everywhere it is listed.
                 </span>
               </div>
-            </DetailCard>
+              <CardNote>
+                Pasting the secret on the next step usually recognises the brand on its own. Setting it
+                here just wins the tie.
+              </CardNote>
+            </CreateSurfaceSection>
           </>
         )}
 
         {step === "values" && (
           <>
-            <DetailCard title="The secret" subtitle={itemType.label.toLowerCase()} icon={ItemIcon}>
+            <CreateSurfaceSection title="The secret" hint={itemType.label.toLowerCase()} icon={ItemIcon} accent="amber">
               <div className="space-y-3">
                 <SecretField
                   id="cred-primary"
@@ -586,12 +599,9 @@ export function AddCredentialWizard({
                   </div>
                 )}
               </div>
-            </DetailCard>
+            </CreateSurfaceSection>
 
-            <DetailCard
-              title="Identity"
-              footer="The name is a human label for the account. It does not have to be the variable name — that is the slot, on the next step."
-            >
+            <CreateSurfaceSection title="Identity" icon={Tag} accent="blue">
               <div className="space-y-3">
                 <div className="space-y-1.5">
                   {/* Wraps: "NAME (WHICH ACCOUNT)" is ~170px of wide-tracked
@@ -618,10 +628,7 @@ export function AddCredentialWizard({
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="cred-account-label" className="type-section text-muted-foreground">
-                    Account label (optional)
-                  </Label>
+                <CreateSurfaceField label="Account label" hint="optional" htmlFor="cred-account-label">
                   <Input
                     id="cred-account-label"
                     placeholder="acme-bot"
@@ -629,13 +636,12 @@ export function AddCredentialWizard({
                     onChange={(e) => setAccountLabel(e.target.value)}
                     className={FIELD}
                   />
-                </div>
+                </CreateSurfaceField>
 
                 {/* Tags stay on the create path: they drive the rail's Tag facet,
                     and a credential that can only be tagged after the fact tends
                     never to be. */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="cred-tags" className="type-section text-muted-foreground">Tags (optional)</Label>
+                <CreateSurfaceField label="Tags" hint="optional" htmlFor="cred-tags">
                   <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1.5 sm:min-h-9">
                     {tags.map((t) => (
                       <Badge key={t} variant="outline" className="gap-1 type-meta font-mono">
@@ -671,28 +677,27 @@ export function AddCredentialWizard({
                       </datalist>
                     )}
                   </div>
-                </div>
+                </CreateSurfaceField>
               </div>
-            </DetailCard>
+              <CardNote>
+                The name is a human label for the account. It does not have to be the variable name —
+                that is the slot, on the next step.
+              </CardNote>
+            </CreateSurfaceSection>
 
-            <DetailCard
-              title="Extra fields"
-              subtitle="optional"
-              footer="Anything else that travels with this credential — a tenant id, an endpoint. Each part is stored separately and can be secret or plain."
-            >
+            <CreateSurfaceSection title="Extra fields" hint="optional" icon={Plus} accent="slate">
               <CustomFields fields={custom} onChange={setCustom} />
-            </DetailCard>
+              <CardNote>
+                Anything else that travels with this credential — a tenant id, an endpoint. Each part is
+                stored separately and can be secret or plain.
+              </CardNote>
+            </CreateSurfaceSection>
           </>
         )}
 
         {step === "scope" && (
           <>
-            <DetailCard
-              title="Who gets it"
-              footer={scope === "CREW"
-                ? "Every agent in the selected crews receives it — including agents created later."
-                : "Every agent in the workspace receives it — including agents created later."}
-            >
+            <CreateSurfaceSection title="Who gets it" icon={Users} accent="teal">
               <div className="space-y-3">
                 {/* Grouped rather than labelled: the card header already says
                     "Who gets it", and a second sr-only <label> pointing at
@@ -710,8 +715,7 @@ export function AddCredentialWizard({
                 </div>
 
                 {scope === "CREW" && (
-                  <div className="space-y-1.5">
-                    <Label className="type-section text-muted-foreground">Crews</Label>
+                  <CreateSurfaceField label="Crews">
                     <Popover open={crewPopoverOpen} onOpenChange={setCrewPopoverOpen}>
                       <PopoverTrigger asChild>
                         <Button variant="outline" role="combobox" className="h-10 w-full justify-between font-normal text-sm sm:h-9">
@@ -745,15 +749,24 @@ export function AddCredentialWizard({
                         </Command>
                       </PopoverContent>
                     </Popover>
-                  </div>
+                  </CreateSurfaceField>
                 )}
               </div>
-            </DetailCard>
+              <CardNote>
+                {scope === "CREW"
+                  ? "Every agent in the selected crews receives it — including agents created later."
+                  : "Every agent in the workspace receives it — including agents created later."}
+              </CardNote>
+            </CreateSurfaceSection>
 
             {/* Keeper tier. On this step rather than a fourth one: "who gets it" and
                 "how hard is it to get" are the same decision, and splitting them
                 would put the tier behind another click nobody takes. */}
-            <DetailCard title="Keeper tier" tone={securityLevel >= 4 ? "warn" : "default"}>
+            <CreateSurfaceSection
+              title="Keeper tier"
+              icon={ShieldCheck}
+              accent={securityLevel >= 4 ? "amber" : "green"}
+            >
               <div className="space-y-2.5">
                 <div
                   role="group"
@@ -784,21 +797,15 @@ export function AddCredentialWizard({
                   {CREDENTIAL_TIERS.find((t) => t.level === securityLevel)?.consequence}
                 </p>
               </div>
-            </DetailCard>
+            </CreateSurfaceSection>
 
-            <DetailCard
-              title="Env var slot"
-              footer={canBind
-                ? (suggestedSlot && !slotTouched
-                  ? "Suggested from the detected brand. Overwrite it freely — this is a hint, not a rule."
-                  : "Leave it empty to deliver the credential under its own name.")
-                : undefined}
-            >
+            <CreateSurfaceSection title="Env var slot" icon={Braces} accent="gold">
               {canBind ? (
-                <div className="space-y-1.5">
-                  <Label htmlFor="cred-slot" className="type-section text-muted-foreground">
-                    Slot — the variable the container sees
-                  </Label>
+                <CreateSurfaceField
+                  label="Slot"
+                  hint="the variable the container sees"
+                  htmlFor="cred-slot"
+                >
                   <Input
                     id="cred-slot"
                     placeholder="GH_TOKEN"
@@ -806,7 +813,7 @@ export function AddCredentialWizard({
                     onChange={(e) => { setSlotTouched(true); setSlot(e.target.value) }}
                     className={cn(FIELD, "font-mono")}
                   />
-                </div>
+                </CreateSurfaceField>
               ) : (
                 <p className="type-meta leading-relaxed text-muted-foreground">
                   Choosing the variable name (the slot) is a workspace-admin action, so this credential
@@ -830,7 +837,14 @@ export function AddCredentialWizard({
                   )}
                 </div>
               ) : null}
-            </DetailCard>
+              {canBind && (
+                <CardNote>
+                  {suggestedSlot && !slotTouched
+                    ? "Suggested from the detected brand. Overwrite it freely — this is a hint, not a rule."
+                    : "Leave it empty to deliver the credential under its own name."}
+                </CardNote>
+              )}
+            </CreateSurfaceSection>
           </>
         )}
       </CreateSurfaceBody>
