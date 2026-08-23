@@ -386,6 +386,35 @@ function getBrandColor(tool: string): string | null {
 }
 
 
+/**
+ * The brand hiding in an image reference.
+ *
+ * `debian:bookworm-slim` is a Debian image and
+ * `mcr.microsoft.com/devcontainers/javascript-node:22-bookworm` is a Node one,
+ * but neither yields its brand by taking the last segment: the first gives
+ * "bookworm-slim" and the second "javascript-node". Try the repository name,
+ * then each hyphen-separated word inside it, then the TAG — devcontainers
+ * publishes `.../base:ubuntu-24.04`, where the only thing naming the distro is
+ * the tag — then the remaining path segments. First hit wins. Returns "" when
+ * none does, which is the honest answer for ghcr.io/acme/thing.
+ */
+function imageBrandKey(image: string): string {
+  const withoutDigest = image.split("@")[0]
+  const [path, tag = ""] = [withoutDigest.split(":")[0], withoutDigest.split(":")[1]]
+  const segments = path.split("/").filter(Boolean)
+  const last = segments[segments.length - 1] ?? ""
+  const candidates = [
+    last,
+    ...last.split("-"),
+    ...tag.split(/[-.]/),
+    ...segments.slice(0, -1).reverse(),
+  ]
+  for (const c of candidates) {
+    if (c && (BRAND_ICONS[c.toLowerCase()] || BRAND_COLORS[c.toLowerCase()])) return c.toLowerCase()
+  }
+  return ""
+}
+
 function featureRefToTool(ref: string): string {
   // ghcr.io/devcontainers/features/python:1 -> "python"
   const withoutTag = ref.split(":")[0]
@@ -401,5 +430,6 @@ export {
   BRAND_COLORS,
   getBrandIcon,
   getBrandColor,
+  imageBrandKey,
   featureRefToTool,
 }

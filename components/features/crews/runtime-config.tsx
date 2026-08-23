@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  AlertCircle, Boxes, Check, Cloud, Copy, FileJson, HardDrive, Info as InfoIcon,
-  Package, Pencil, Search, ShieldCheck, Wrench, X,
+  AlertCircle, Boxes, Check, Copy, FileJson, HardDrive, Info as InfoIcon,
+  Package, Pencil, Search, Wrench, X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,6 +31,7 @@ import {
   featureRefToTool,
   getBrandColor,
   getBrandIcon,
+  imageBrandKey,
 } from "./runtime-config-brands"
 import {
   BASE_IMAGES,
@@ -1319,6 +1320,59 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
     </div>
   )
 
+  /**
+   * What is actually in the box — as marks, not as JSON.
+   *
+   * The Preview panel answered "what will the generated devcontainer.json
+   * look like", which is a question an operator debugging a build asks and
+   * nobody creating a crew does. The question people DO ask at this point is
+   * simpler: what is going to be in there? So this is the image, the features
+   * and the pinned runtimes as the brands they are, updating as they are
+   * picked. The JSON is still one tab away on the crew's settings, where the
+   * person asking the other question is.
+   */
+  const insideSummary = (
+    <CreateSurfaceSection title="What's inside" icon={Boxes} accent="green" hint="the container this crew gets">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="flex h-8 items-center gap-2 rounded-md border border-hairline bg-foreground/[0.03] pl-1.5 pr-2.5 text-xs">
+          <ToolMark tool={imageBrandKey(effectiveImage)} size="sm" />
+          <span className="font-mono text-[11px] text-foreground/85">{effectiveImage}</span>
+        </span>
+
+        {Object.keys(selectedFeatures).map((ref) => {
+          const tool = featureRefToTool(ref)
+          return (
+            <span
+              key={ref}
+              className="flex h-8 items-center gap-1.5 rounded-md border border-hairline bg-foreground/[0.03] pl-1.5 pr-2.5 text-xs text-foreground/85"
+            >
+              <ToolMark tool={tool} size="sm" />
+              {tool}
+            </span>
+          )
+        })}
+
+        {Object.entries(miseTools).map(([tool, version]) => (
+          <span
+            key={tool}
+            className="flex h-8 items-center gap-1.5 rounded-md border border-hairline bg-foreground/[0.03] pl-1.5 pr-2.5 text-xs text-foreground/85"
+          >
+            <ToolMark tool={tool} size="sm" />
+            {tool}
+            <span className="font-mono text-[11px] text-muted-foreground">{version}</span>
+          </span>
+        ))}
+      </div>
+
+      {selectedFeatureCount === 0 && selectedRuntimeCount === 0 && (
+        <p className="text-[11px] text-muted-foreground">
+          The image as it ships — nothing added. That is a fine place to start; anything below can be
+          added later without rebuilding the crew.
+        </p>
+      )}
+    </CreateSurfaceSection>
+  )
+
   if (layout === "sections") {
     return (
       <div className="flex flex-col gap-4">
@@ -1352,18 +1406,27 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           {runtimesPaneSections}
         </CreateSurfaceDisclosure>
 
-        <CreateSurfaceDisclosure
-          icon={ShieldCheck}
-          accent={security.privileged ? "red" : "slate"}
-          label="Security"
-          summary={security.privileged ? "privileged — full host access" : "standard sandbox"}
-        >
-          {securityPane}
-        </CreateSurfaceDisclosure>
+        {/* Security and the generated files are NOT here, and that is the
+            point.
+         *
+         * Privileged mode, Linux capabilities, extra mounts, container env
+         * and the start hook are operator escape hatches for a crew that
+         * exists and turned out to need one — /dev/fuse for a build, a bind
+         * for a cache. Nobody knows any of that while filling in the form
+         * that creates the crew, and putting it here asked every person
+         * making their first crew to have an opinion about SYS_PTRACE.
+         *
+         * Nothing is lost: the crew's Settings tab renders this same
+         * component with all four panels and saves by PATCH
+         * (crew-canvas-tabs/settings-tab.tsx). The note below says so, so
+         * that someone who came looking for it is not left guessing. */}
+        {insideSummary}
 
-        <CreateSurfaceDisclosure icon={FileJson} accent="slate" label="Generated files">
-          {previewPane}
-        </CreateSurfaceDisclosure>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          Privileged mode, Linux capabilities, extra mounts, container environment and the start
+          hook live in the crew&apos;s settings once it exists — they are answers to problems a
+          running crew has, not questions to answer now.
+        </p>
       </div>
     )
   }

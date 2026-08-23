@@ -159,21 +159,76 @@ describe("RuntimeConfig — sections layout", () => {
     expect(screen.queryByRole("tab", { name: /Features/ })).toBeNull()
   })
 
-  it("keeps runtimes, security and the generated files reachable", async () => {
+  it("keeps language runtimes reachable, folded", async () => {
     renderSections()
     await screen.findByText("Base image")
-    // Folded, not dropped: removing settings the create path has today would
-    // be a capability change wearing a redesign's clothes.
+    // Which toolchains a crew works in is a create-time question — the answer
+    // is known while the form is being filled in.
     expect(screen.getByRole("button", { name: /Language runtimes/ })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Security/ })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Generated files/ })).toBeInTheDocument()
   })
 
   it("says what is inside a fold without opening it", async () => {
     renderSections()
     await screen.findByText("Base image")
     expect(screen.getByRole("button", { name: /Language runtimes/ })).toHaveTextContent(/none pinned/i)
-    expect(screen.getByRole("button", { name: /Security/ })).toHaveTextContent(/standard sandbox/i)
+  })
+
+  // Privileged mode, capabilities, mounts, env and the start hook are answers
+  // to problems a RUNNING crew turned out to have. Nobody knows whether they
+  // need /dev/fuse while filling in the form that creates the crew, and asking
+  // put SYS_PTRACE in front of everyone making their first one.
+  it("does not ask a create form about privileged mode or capabilities", async () => {
+    renderSections()
+    await screen.findByText("Base image")
+    expect(screen.queryByRole("button", { name: /^Security/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /Generated files/ })).toBeNull()
+    expect(screen.queryByText(/NET_BIND_SERVICE/)).toBeNull()
+  })
+
+  // "What will the generated devcontainer.json look like" is a question an
+  // operator debugging a build asks. The question at create time is simpler:
+  // what is going to be in there? So the summary is marks, not JSON.
+  it("shows what the container will contain, as brands", async () => {
+    renderSections()
+    await screen.findByText("What's inside")
+    // The base image is always in there, so it is always named.
+    expect(screen.getAllByText(/debian:bookworm-slim/).length).toBeGreaterThan(0)
+  })
+
+  // "debian:bookworm-slim" gives "bookworm-slim" if you take the last piece,
+  // and "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm" gives
+  // "javascript-node" — neither is a brand key, so both drew a grey box.
+  it("finds the brand inside an image reference", async () => {
+    const { imageBrandKey } = await import("@/components/features/crews/runtime-config-brands")
+    expect(imageBrandKey("debian:bookworm-slim")).toBe("debian")
+    expect(imageBrandKey("mcr.microsoft.com/devcontainers/javascript-node:22-bookworm")).toBe("node")
+    expect(imageBrandKey("mcr.microsoft.com/devcontainers/base:ubuntu-24.04")).toBe("ubuntu")
+    // No brand is the honest answer for somebody's own registry.
+    expect(imageBrandKey("ghcr.io/acme/thing:v1")).toBe("")
+  })
+
+  it("says plainly when nothing has been added", async () => {
+    renderSections()
+    await screen.findByText("What's inside")
+    expect(screen.getByText(/The image as it ships — nothing added/i)).toBeInTheDocument()
+  })
+
+  it("says where those settings went, rather than removing them silently", async () => {
+    renderSections()
+    await screen.findByText("Base image")
+    expect(screen.getByText(/live in the crew's settings once it exists/i)).toBeInTheDocument()
+  })
+
+  // The Settings tab is where they live, and it must still have all of them.
+  it("still offers the full set under the tabs layout", async () => {
+    render(
+      <RuntimeConfig
+        value={{ runtimeImage: "", devcontainerConfig: "", miseConfig: "" }}
+        onChange={() => {}}
+      />,
+    )
+    expect(await screen.findByRole("tab", { name: /Security/ })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /Preview/ })).toBeInTheDocument()
   })
 
   it("still draws the tab strip in the default layout", async () => {
@@ -317,6 +372,16 @@ describe("RuntimeConfig — tooling under sections", () => {
     const rows = await screen.findAllByRole("button", { name: /Anaconda|Oddity/ })
     // Anaconda resolves to a brand mark; Oddity does not.
     expect(rows[0].textContent).toMatch(/Anaconda/)
+  })
+
+  it("lists a picked feature in the What's inside summary", async () => {
+    renderSections()
+    await screen.findByText("Preinstalled tooling")
+    fireEvent.click(await screen.findByRole("button", { name: /Anaconda/ }))
+
+    // The summary is what the box will contain, so picking something has to
+    // change it — otherwise it is a decoration rather than a preview.
+    await waitFor(() => expect(screen.queryByText(/The image as it ships/i)).toBeNull())
   })
 
   it("flags a feature nobody official published, and says nothing when official", async () => {
