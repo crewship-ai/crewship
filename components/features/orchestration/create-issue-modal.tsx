@@ -9,6 +9,10 @@ import {
   Check,
   Tag,
   FolderKanban,
+  Calendar,
+  Hash,
+  Milestone as MilestoneIcon,
+  ListTree,
 } from "lucide-react"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import {
@@ -47,10 +51,21 @@ import type { AssigneeOption } from "@/components/features/issues/assignee-picke
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
-import type { IssueLabel, IssuePriority, Project } from "@/lib/types/mission"
+import type { IssueLabel, IssuePriority, Milestone, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 
 const PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
+
+/** Fibonacci-ish points — the same set issue-card-editors.tsx's EstimatePicker
+ *  uses, so an issue estimated here reads the same way once it is on a board. */
+const ESTIMATES = [1, 2, 3, 5, 8, 13, 21]
+
+/** The subset of GET /api/v1/issues this modal reads for the parent picker. */
+interface IssueRow {
+  id: string
+  identifier: string | null
+  title: string
+}
 
 /**
  * An assignee row plus the three fields a face is drawn from.
@@ -81,14 +96,15 @@ interface AgentRow {
 }
 
 /**
- * Where the agent list is between "not asked yet" and "here it is".
+ * Where a fetched list is between "not asked yet" and "here it is".
  *
  * An empty `<CommandGroup>` renders identically whether the crew has nobody in
  * it, the request 500'd, or the request is still in flight — which is the
- * actual defect behind "the Assignee picker offers nobody". Three states, three
- * sentences.
+ * actual defect behind "the Assignee picker offers nobody". Three states,
+ * three sentences. Shared by the assignee, milestone and parent-issue
+ * pickers below — three fetches, one shape.
  */
-type AgentLoad = "idle" | "loading" | "ready" | "error"
+type PickerLoad = "idle" | "loading" | "ready" | "error"
 
 interface CreateIssueModalProps {
   open: boolean
@@ -124,9 +140,22 @@ export function CreateIssueModal({
   const [selectedLabels, setSelectedLabels] = useState<string[]>([])
   const [routineId, setRoutineId] = useState<string | null>(null)
   const [agents, setAgents] = useState<AgentAssigneeOption[]>([])
-  const [agentLoad, setAgentLoad] = useState<AgentLoad>("idle")
+  const [agentLoad, setAgentLoad] = useState<PickerLoad>("idle")
   /** Bumped by the error state's Try again, purely to re-run the fetch effect. */
   const [agentReload, setAgentReload] = useState(0)
+  // due_date, estimate, parent_issue_id and milestone_id: the API accepts all
+  // four (internal/api/issue_handler_create.go:38-42) and nothing on this
+  // modal ever offered them.
+  const [dueDate, setDueDate] = useState("")
+  const [estimate, setEstimate] = useState<number | null>(null)
+  const [parentIssueId, setParentIssueId] = useState<string | null>(null)
+  const [parentCandidates, setParentCandidates] = useState<IssueRow[]>([])
+  const [parentLoad, setParentLoad] = useState<PickerLoad>("idle")
+  const [parentReload, setParentReload] = useState(0)
+  const [milestoneId, setMilestoneId] = useState<string | null>(null)
+  const [milestones, setMilestones] = useState<Milestone[]>([])
+  const [milestoneLoad, setMilestoneLoad] = useState<PickerLoad>("idle")
+  const [milestoneReload, setMilestoneReload] = useState(0)
   const [createMore, setCreateMore] = useState(false)
   const [saving, setSaving] = useState(false)
   // What the server said when it said no. The toast stays — this is the copy
@@ -140,6 +169,10 @@ export function CreateIssueModal({
   const [projectOpen, setProjectOpen] = useState(false)
   const [labelsOpen, setLabelsOpen] = useState(false)
   const [routineOpen, setRoutineOpen] = useState(false)
+  const [dueDateOpen, setDueDateOpen] = useState(false)
+  const [estimateOpen, setEstimateOpen] = useState(false)
+  const [milestoneOpen, setMilestoneOpen] = useState(false)
+  const [parentOpen, setParentOpen] = useState(false)
 
   const titleRef = useRef<HTMLInputElement>(null)
 
@@ -214,6 +247,69 @@ export function CreateIssueModal({
     return () => { cancelled = true }
   }, [crewId, workspaceId, agentReload])
 
+  // Fetch parent-issue candidates when crew changes. Same shape as the
+  // agents fetch above: GET /api/v1/issues has no picker anywhere in the app
+  // today (parent_issue_id is edited nowhere else either), so this is a new
+  // fetch rather than a reused one — but it is the same crew-scoped,
+  // three-state pattern as Assignee, not a new one invented for this field.
+  useEffect(() => {
+    setParentIssueId(null)
+    if (!crewId) { setParentCandidates([]); setParentLoad("idle"); return }
+    let cancelled = false
+    setParentCandidates([])
+    setParentLoad("loading")
+    async function fetchParents() {
+      try {
+        const res = await apiFetch(
+          `/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&crew_id=${encodeURIComponent(crewId)}&limit=50`,
+        )
+        if (cancelled) return
+        if (!res.ok) { setParentLoad("error"); return }
+        const data = await res.json()
+        if (cancelled) return
+        const list: IssueRow[] = Array.isArray(data) ? data : data.issues ?? []
+        setParentCandidates(list.map((i) => ({ id: i.id, identifier: i.identifier, title: i.title })))
+        setParentLoad("ready")
+      } catch {
+        if (!cancelled) setParentLoad("error")
+      }
+    }
+    fetchParents()
+    return () => { cancelled = true }
+  }, [crewId, workspaceId, parentReload])
+
+  // Fetch milestones when project changes. Milestones belong to a project
+  // (GET /api/v1/projects/{projectId}/milestones), so the picker has nothing
+  // to offer until one is picked — mirrored from issue-detail-surface.tsx's
+  // "Milestones belong to the project, so they reset with it" effect, with
+  // the same three-state load as the pickers above instead of that effect's
+  // silent `.catch(() => {})`.
+  useEffect(() => {
+    setMilestoneId(null)
+    if (!projectId) { setMilestones([]); setMilestoneLoad("idle"); return }
+    const pid = projectId
+    let cancelled = false
+    setMilestones([])
+    setMilestoneLoad("loading")
+    async function fetchMilestones() {
+      try {
+        const res = await apiFetch(
+          `/api/v1/projects/${encodeURIComponent(pid)}/milestones?workspace_id=${encodeURIComponent(workspaceId)}`,
+        )
+        if (cancelled) return
+        if (!res.ok) { setMilestoneLoad("error"); return }
+        const data = await res.json()
+        if (cancelled) return
+        setMilestones(Array.isArray(data) ? data : data.milestones ?? [])
+        setMilestoneLoad("ready")
+      } catch {
+        if (!cancelled) setMilestoneLoad("error")
+      }
+    }
+    fetchMilestones()
+    return () => { cancelled = true }
+  }, [projectId, workspaceId, milestoneReload])
+
   function reset() {
     setTitle("")
     setDescription("")
@@ -223,6 +319,10 @@ export function CreateIssueModal({
     setProjectId(null)
     setSelectedLabels([])
     setRoutineId(null)
+    setDueDate("")
+    setEstimate(null)
+    setParentIssueId(null)
+    setMilestoneId(null)
     setRefusal(null)
   }
 
@@ -234,6 +334,10 @@ export function CreateIssueModal({
     priority !== "none" ||
     assigneeId !== null ||
     projectId !== null ||
+    dueDate !== "" ||
+    estimate !== null ||
+    parentIssueId !== null ||
+    milestoneId !== null ||
     routineId !== null ||
     selectedLabels.length > 0
 
@@ -243,6 +347,8 @@ export function CreateIssueModal({
   const selectedRoutine = routines.find((r) => r.id === routineId)
   const selectedAgent = assigneeId ? agents.find((a) => a.id === assigneeId) ?? null : null
   const assigneeName = selectedAgent?.name ?? null
+  const selectedMilestone = milestoneId ? milestones.find((m) => m.id === milestoneId) ?? null : null
+  const selectedParent = parentIssueId ? parentCandidates.find((i) => i.id === parentIssueId) ?? null : null
 
   const handleSubmit = useCallback(async () => {
     if (!crewId) { toast.error("Please select a crew"); return }
@@ -265,6 +371,14 @@ export function CreateIssueModal({
             assignee_id: assigneeId ?? undefined,
             project_id: projectId ?? undefined,
             routine_id: routineId ?? undefined,
+            // Where a value is optional, absent must stay absent on the wire —
+            // `?? undefined` rather than "" / null, so readJSON's *string /
+            // *int pointers on issue_handler_create.go:38-42 land nil, not a
+            // zero value the server would try to validate or store.
+            due_date: dueDate || undefined,
+            estimate: estimate ?? undefined,
+            parent_issue_id: parentIssueId ?? undefined,
+            milestone_id: milestoneId ?? undefined,
           }),
         },
       )
@@ -292,7 +406,7 @@ export function CreateIssueModal({
     } finally {
       setSaving(false)
     }
-  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, workspaceId, onCreated, createMore, onOpenChange])
+  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange])
 
   function toggleLabel(labelId: string) {
     setSelectedLabels((prev) =>
@@ -339,6 +453,16 @@ export function CreateIssueModal({
                         key={crew.id}
                         onSelect={() => { setCrewId(crew.id); setCrewOpen(false) }}
                       >
+                        {/* Same treatment as the Project and Routine pickers below
+                            (`icon || "folder"` fallback, CrewIcon's hex-vs-palette
+                            split via crewColorHex()) — this popover was the one
+                            picker in the file still drawing a bare name. */}
+                        <CrewIcon
+                          icon={crew.icon || "folder"}
+                          color={crew.color}
+                          size="sm"
+                          className="mr-2 !h-5 !w-5 !rounded-md"
+                        />
                         <span className="text-xs">{crew.name}</span>
                         {crewId === crew.id && <Check className="ml-auto h-3.5 w-3.5" />}
                       </CommandItem>
@@ -559,6 +683,78 @@ export function CreateIssueModal({
           </PopoverContent>
         </Popover>
 
+        {/* Milestone — belongs to the project, so it resets when the project
+            does (see the fetch effect above). Always rendered, same as the
+            sidebar's MilestonePicker (issue-card-editors.tsx), rather than
+            hidden until a project is picked — the "set a project first" state
+            below is what tells you why the list is empty. */}
+        <Popover open={milestoneOpen} onOpenChange={setMilestoneOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill
+              icon={MilestoneIcon}
+              accent="purple"
+              set={milestoneId !== null}
+            >
+              <span>{selectedMilestone?.name ?? "Milestone"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[220px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search milestone..." className="h-8 text-xs" />
+              <CommandList>
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem onSelect={() => { setMilestoneId(null); setMilestoneOpen(false) }}>
+                    <span className="text-xs text-muted-foreground">No milestone</span>
+                    {!milestoneId && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </CommandItem>
+                </CommandGroup>
+                {!projectId && (
+                  <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                    Set a project first — milestones belong to a project.
+                  </p>
+                )}
+                {projectId && milestoneLoad === "loading" && (
+                  <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading milestones…</p>
+                )}
+                {projectId && milestoneLoad === "error" && (
+                  <div role="status" className="flex flex-col items-start gap-1 px-3 py-2">
+                    <span className="text-[11px] leading-relaxed text-destructive">
+                      Milestones could not be loaded.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMilestoneReload((n) => n + 1)}
+                      className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+                {projectId && milestoneLoad === "ready" && milestones.length === 0 && (
+                  <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                    No milestones in {selectedProject?.name ?? "this project"}.
+                  </p>
+                )}
+                {milestones.length > 0 && (
+                  <CommandGroup heading="Milestones">
+                    {milestones.map((m) => (
+                      <CommandItem
+                        key={m.id}
+                        onSelect={() => { setMilestoneId(m.id); setMilestoneOpen(false) }}
+                      >
+                        <MilestoneIcon className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="text-xs">{m.name}</span>
+                        {milestoneId === m.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
         {/* Routine — bind a saved routine to handle this issue */}
         <Popover open={routineOpen} onOpenChange={setRoutineOpen}>
           <PopoverTrigger asChild>
@@ -612,6 +808,129 @@ export function CreateIssueModal({
                     </CommandItem>
                   ))}
                 </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
+        {/* Due date */}
+        <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={Calendar} accent="amber" set={dueDate !== ""}>
+              <span>{dueDate || "Due date"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-3" align="start">
+            <p className="text-xs text-muted-foreground mb-2">Due date</p>
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => { setDueDate(e.target.value); setDueDateOpen(false) }}
+              className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
+            />
+            {dueDate && (
+              <button
+                onClick={() => { setDueDate(""); setDueDateOpen(false) }}
+                className="block mt-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            )}
+          </PopoverContent>
+        </Popover>
+
+        {/* Estimate — the same Fibonacci-ish point set as the sidebar's
+            EstimatePicker (issue-card-editors.tsx), so an issue estimated
+            here reads the same once it lands on a board. */}
+        <Popover open={estimateOpen} onOpenChange={setEstimateOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={Hash} accent="teal" set={estimate !== null}>
+              <span>{estimate != null ? `${estimate} pts` : "Estimate"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[140px] p-1" align="start">
+            {ESTIMATES.map((pts) => (
+              <button
+                key={pts}
+                onClick={() => { setEstimate(pts); setEstimateOpen(false) }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
+                  estimate === pts ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
+                )}
+              >
+                <span>{pts} points</span>
+                {estimate === pts && <Check className="ml-auto h-3 w-3" />}
+              </button>
+            ))}
+            {estimate != null && (
+              <button
+                onClick={() => { setEstimate(null); setEstimateOpen(false) }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-white/[0.08] transition-colors"
+              >
+                Clear estimate
+              </button>
+            )}
+          </PopoverContent>
+        </Popover>
+
+        {/* Parent issue — crew-scoped, same fetch shape as Assignee. No
+            picker for parent_issue_id exists anywhere else in the app (see
+            the fetch effect above), so this is new rather than reused. */}
+        <Popover open={parentOpen} onOpenChange={setParentOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={ListTree} accent="slate" set={parentIssueId !== null}>
+              <span>{selectedParent ? (selectedParent.identifier ?? selectedParent.title) : "Parent issue"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[260px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search issues..." className="h-8 text-xs" />
+              <CommandList>
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem onSelect={() => { setParentIssueId(null); setParentOpen(false) }}>
+                    <span className="text-xs text-muted-foreground">No parent</span>
+                    {!parentIssueId && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </CommandItem>
+                </CommandGroup>
+                {parentLoad === "loading" && (
+                  <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading issues…</p>
+                )}
+                {parentLoad === "error" && (
+                  <div role="status" className="flex flex-col items-start gap-1 px-3 py-2">
+                    <span className="text-[11px] leading-relaxed text-destructive">
+                      Issues could not be loaded.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setParentReload((n) => n + 1)}
+                      className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+                {parentLoad === "ready" && parentCandidates.length === 0 && (
+                  <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                    No other issues in {selectedCrew?.name ?? "this crew"} to link as a parent.
+                  </p>
+                )}
+                {parentCandidates.length > 0 && (
+                  <CommandGroup heading="Issues">
+                    {parentCandidates.map((i) => (
+                      <CommandItem
+                        key={i.id}
+                        onSelect={() => { setParentIssueId(i.id); setParentOpen(false) }}
+                      >
+                        <span className="mr-2 shrink-0 text-[10px] tabular-nums text-muted-foreground-soft">
+                          {i.identifier ?? "—"}
+                        </span>
+                        <span className="truncate text-xs">{i.title}</span>
+                        {parentIssueId === i.id && <Check className="ml-auto h-3.5 w-3.5 shrink-0" />}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
               </CommandList>
             </Command>
           </PopoverContent>

@@ -167,9 +167,16 @@ describe("CreateIssueModal", () => {
   it("calls onCreated and closes after successful submit", async () => {
     const onCreated = vi.fn()
     const onOpenChange = vi.fn()
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+    // A method-aware mock rather than a positional mockResolvedValueOnce
+    // chain: New issue now fires TWO crew-scoped GETs on mount (agents,
+    // parent-issue candidates), not one, and a chain keyed to call order
+    // breaks again the next time a fetch is added. Every GET gets an empty
+    // list; the POST is what this test actually cares about.
+    global.fetch = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
 
     render(
       <CreateIssueModal {...defaultProps} onCreated={onCreated} onOpenChange={onOpenChange} />
@@ -186,12 +193,13 @@ describe("CreateIssueModal", () => {
 
   it("shows error toast on API failure", async () => {
     const { toast } = await import("sonner")
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
-      .mockResolvedValueOnce({
-        ok: false,
-        json: () => Promise.resolve({ detail: "Server error" }),
-      })
+    // Method-aware for the same reason as above: the GETs that fire on
+    // mount must not eat the mock slot the POST assertion depends on.
+    global.fetch = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve({ ok: false, json: () => Promise.resolve({ detail: "Server error" }) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
 
     render(<CreateIssueModal {...defaultProps} />)
 
@@ -337,12 +345,12 @@ describe("CreateIssueModal", () => {
 
   it("surfaces a server refusal in the band, not only in a toast", async () => {
     const { toast } = await import("sonner")
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
-      .mockResolvedValueOnce({
-        ok: false,
-        json: () => Promise.resolve({ detail: "Title is already taken" }),
-      })
+    // Method-aware for the same reason as the two tests above.
+    global.fetch = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve({ ok: false, json: () => Promise.resolve({ detail: "Title is already taken" }) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
 
     render(<CreateIssueModal {...defaultProps} />)
 
@@ -579,6 +587,116 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
       const row = commandRow("Nightly sweep")
       const expected = iconToken(resolveRoutineIcon(mockRoutines[0]))
       expect(row.querySelector(`svg.${expected}`)).not.toBeNull()
+    })
+  })
+})
+
+// ── The four fields POST /issues accepts and the modal never offered ──────
+//
+// `internal/api/issue_handler_create.go:32-51` declares due_date, estimate,
+// parent_issue_id and milestone_id on the very endpoint this modal calls. The
+// modal offered none of them, which is the standing rule — what the API can do
+// the frontend must do — broken on the door the audit page calls the reference.
+//
+// These assert the WIRE, not the widgets: a picker that shows a value and does
+// not send it is the failure worth catching, and an optional field that sends
+// `""` or `null` instead of being absent is the other one.
+describe("CreateIssueModal — the fields the API takes", () => {
+  /** Answers every GET with an empty list; hands the POST back for inspection. */
+  function stubWire() {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
+    global.fetch = fetchMock as unknown as typeof fetch
+    return fetchMock
+  }
+
+  function postBody(fetchMock: ReturnType<typeof vi.fn>) {
+    const call = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === "POST",
+    )
+    return call ? JSON.parse((call[1] as RequestInit).body as string) : null
+  }
+
+  it("offers all four as pills", () => {
+    stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+    for (const label of ["Due date", "Estimate", "Parent issue", "Milestone"]) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+  })
+
+  it("leaves every one of them out of the body when untouched", async () => {
+    const fetchMock = stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Bare" } })
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => expect(postBody(fetchMock)).not.toBeNull())
+    const body = postBody(fetchMock)
+    // Absent, not null and not "". The Go side takes *string / *int, so an
+    // empty string would be stored as an empty due date rather than none.
+    for (const key of ["due_date", "estimate", "parent_issue_id", "milestone_id"]) {
+      expect(body).not.toHaveProperty(key)
+    }
+  })
+
+  it("sends the estimate as a number, under the name the handler reads", async () => {
+    const fetchMock = stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Pointed" } })
+    fireEvent.click(screen.getByText("Estimate"))
+    fireEvent.click(await screen.findByText("5 points"))
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => expect(postBody(fetchMock)?.estimate).toBe(5))
+    // A string would be accepted by JSON and rejected by `Estimate *int`.
+    expect(typeof postBody(fetchMock).estimate).toBe("number")
+  })
+
+  it("clearing an estimate removes it from the body rather than sending zero", async () => {
+    const fetchMock = stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Cleared" } })
+    fireEvent.click(screen.getByText("Estimate"))
+    fireEvent.click(await screen.findByText("5 points"))
+    fireEvent.click(screen.getByText("5 pts"))
+    fireEvent.click(await screen.findByText(/clear estimate/i))
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => expect(postBody(fetchMock)).not.toBeNull())
+    // 0 is a legitimate estimate; "cleared" must not become it.
+    expect(postBody(fetchMock)).not.toHaveProperty("estimate")
+  })
+
+  it("scopes the milestone picker to the project, and says so before one is picked", async () => {
+    stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.click(screen.getByText("Milestone"))
+    // Milestones hang off a project (GET /api/v1/projects/{id}/milestones), so
+    // with no project there is nothing to list and the picker has to say which
+    // choice unlocks it rather than showing an empty menu.
+    expect(await screen.findByText(/set a project first/i)).toBeInTheDocument()
+  })
+})
+
+// The crew control in the header was the last picker in this file drawing bare
+// names while Project, Routine and Assignee beside it all draw their icon.
+describe("CreateIssueModal — the crew control", () => {
+  it("wears the crew's icon, like every other picker in this surface", async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.click(await screen.findByText("ENG"))
+    await waitFor(() => {
+      const row = commandRow("Design")
+      expect(row.querySelector("svg")).not.toBeNull()
     })
   })
 })

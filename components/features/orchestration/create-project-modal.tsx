@@ -2,18 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
+  AlertTriangle,
   Check,
   User,
   UserX,
   Calendar,
   FolderKanban,
-  Search,
 } from "lucide-react"
 import {
   CreateSurface,
   CreateSurfaceBody,
   CreateSurfaceFooter,
   CreateSurfaceHeader,
+  CreateSurfaceNotice,
+  CreateSurfacePicker,
   CreateSurfacePill,
   CreateSurfacePills,
   CreateSurfaceRefusal,
@@ -32,7 +34,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { Input } from "@/components/ui/input"
 import dynamic from "next/dynamic"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { CrewIcon } from "@/components/ui/crew-icon"
@@ -106,6 +107,16 @@ type LeadOption = AssigneeOption & {
   crew_avatar_style?: string | null
 }
 
+/**
+ * Where the agent list is between "not asked yet" and "here it is".
+ *
+ * Mirrors `AgentLoad` in create-issue-modal.tsx: an empty list renders
+ * identically whether the workspace has nobody, the request 500'd, or the
+ * request is still in flight, which is the same defect that picker's fix
+ * addressed. Applying the same shape here rather than inventing a second one.
+ */
+type AgentLoad = "idle" | "loading" | "ready" | "error"
+
 export function CreateProjectModal({
   open,
   onOpenChange,
@@ -125,14 +136,18 @@ export function CreateProjectModal({
   const [startDate, setStartDate] = useState("")
   const [targetDate, setTargetDate] = useState("")
   const [agents, setAgents] = useState<LeadOption[]>([])
+  const [agentLoad, setAgentLoad] = useState<AgentLoad>("idle")
+  /** Bumped by the error state's Try again, purely to re-run the fetch effect. */
+  const [agentReload, setAgentReload] = useState(0)
   const [saving, setSaving] = useState(false)
   // What the server said when it said no. Shown in the shell's refusal band,
   // which sits outside the scrollport — the toast below it is kept because it
   // is the notification the rest of the app uses, but the toast is what fades.
   const [refusal, setRefusal] = useState<string | null>(null)
 
-  // Popover states
-  const [iconOpen, setIconOpen] = useState(false)
+  // Icon picker is a panel inside the surface (CreateSurfacePicker), not a
+  // second floating overlay — see the header/body/footer swap below.
+  const [panel, setPanel] = useState<null | "icon">(null)
   const [iconQuery, setIconQuery] = useState("")
   const [iconCategory, setIconCategory] = useState<string | null>(null)
   const [statusOpen, setStatusOpen] = useState(false)
@@ -157,40 +172,51 @@ export function CreateProjectModal({
     }
   }, [open])
 
-  // Fetch all agents for lead picker
+  // Fetch all agents for lead picker.
+  //
+  // The failure paths used to be `if (!res.ok || cancelled) return` and a bare
+  // `catch {}`, which left `agents` at `[]` — identical to what a workspace
+  // with no agents renders. Same defect the assignee picker in
+  // create-issue-modal.tsx had, fixed there with a three-state load; this is
+  // that same shape rather than a second one.
   useEffect(() => {
     if (!open || !workspaceId) return
     let cancelled = false
+    setAgents([])
+    setAgentLoad("loading")
     async function fetchAgents() {
       try {
         const res = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (!res.ok || cancelled) return
+        if (cancelled) return
+        if (!res.ok) { setAgentLoad("error"); return }
         const data = await res.json()
+        if (cancelled) return
         const list = Array.isArray(data) ? data : data.agents ?? []
-        if (!cancelled) {
-          // The avatar fields were dropped in this map, which is why the lead
-          // picker drew a row of identical grey bots while the same agents
-          // wear faces on the board behind it. GET /api/v1/agents returns all
-          // four; the seed falls back to the name, which is the only reason
-          // an avatar appears anywhere (every agent here has a NULL seed).
-          setAgents(
-            list.map((a: RawAgent) => ({
-              id: a.id,
-              name: a.name,
-              type: "agent" as const,
-              slug: a.slug,
-              avatar_seed: a.avatar_seed,
-              avatar_style: a.avatar_style,
-              avatar_url: a.avatar_url,
-              crew_avatar_style: a.crew?.avatar_style ?? null,
-            })),
-          )
-        }
-      } catch { /* ignore */ }
+        // The avatar fields were dropped in this map, which is why the lead
+        // picker drew a row of identical grey bots while the same agents
+        // wear faces on the board behind it. GET /api/v1/agents returns all
+        // four; the seed falls back to the name, which is the only reason
+        // an avatar appears anywhere (every agent here has a NULL seed).
+        setAgents(
+          list.map((a: RawAgent) => ({
+            id: a.id,
+            name: a.name,
+            type: "agent" as const,
+            slug: a.slug,
+            avatar_seed: a.avatar_seed,
+            avatar_style: a.avatar_style,
+            avatar_url: a.avatar_url,
+            crew_avatar_style: a.crew?.avatar_style ?? null,
+          })),
+        )
+        setAgentLoad("ready")
+      } catch {
+        if (!cancelled) setAgentLoad("error")
+      }
     }
     fetchAgents()
     return () => { cancelled = true }
-  }, [open, workspaceId])
+  }, [open, workspaceId, agentReload])
 
   function reset() {
     setName("")
@@ -293,117 +319,61 @@ export function CreateProjectModal({
         // workspace-scoped and has no crew, so the literal froze into a string
         // that reads as truncated text. Every other door names its page here.
         context="Projects"
-        title="New project"
+        title={panel === "icon" ? "Icon — new project" : "New project"}
+        description={
+          panel === "icon" ? "Pick a colour, then an icon. Browse by category, or search." : undefined
+        }
+        onBack={panel ? () => setPanel(null) : undefined}
         onClose={() => onOpenChange(false)}
       />
 
       <CreateSurfaceBody className="flex flex-col gap-4">
+        {/* Icon panel — CreateSurfacePicker, a PANEL INSIDE the surface rather
+            than a nested Popover. A create dialog is already one overlay; a
+            popover full of its own grid on top of it was a second, and on a
+            phone that is a sheet stacked on a sheet where the back gesture
+            dismisses the wrong one. */}
+        {panel === "icon" && (
+          <CreateSurfacePicker
+            preview={<CrewIcon icon={icon} color={color} size="xl" />}
+            previewHint={`${getCrewIconDef(icon).label} · ${color}`}
+            palette={{
+              value: color,
+              onChange: setColor,
+              options: GRADIENT_PALETTES.map((p) => ({ id: p.id, dot: p.dot })),
+            }}
+            categories={{
+              value: iconCategory,
+              options: CREW_ICON_CATEGORIES,
+              onChange: (c) => { setIconCategory(c); setIconQuery("") },
+            }}
+            search={{
+              value: iconQuery,
+              onChange: (v) => { setIconQuery(v); setIconCategory(null) },
+              placeholder: "Search icons…",
+            }}
+            options={iconResults.map((iconName) => {
+              const def = getCrewIconDef(iconName)
+              return { id: iconName, label: def.label, render: <def.icon className="h-4 w-4 text-foreground/70" /> }
+            })}
+            value={icon}
+            onChange={setIcon}
+            columns={8}
+          />
+        )}
+
+        {!panel && (
+          <>
         {/* Icon + Name row */}
         <div className="flex items-start gap-3">
-          {/* Icon button — uses crew icon system */}
-          <Popover open={iconOpen} onOpenChange={(v) => { setIconOpen(v); if (!v) { setIconQuery(""); setIconCategory(null) } }}>
-            <PopoverTrigger asChild>
-              <button type="button" aria-label="Change project icon" className="shrink-0 relative group cursor-pointer">
-                <CrewIcon icon={icon} color={color} size="lg" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[340px] sm:w-[400px] p-0 rounded-2xl" align="start" sideOffset={8}>
-              {/* Color picker row */}
-              <div className="px-4 pt-4 pb-3 border-b">
-                <div className="flex items-center justify-between mb-3">
-                  {GRADIENT_PALETTES.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setColor(p.id)}
-                      className="transition-all hover:scale-105 shrink-0"
-                    >
-                      <CrewIcon
-                        icon={icon}
-                        color={p.id}
-                        size="sm"
-                        className={cn(
-                          "transition-all",
-                          color === p.id ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-110" : "opacity-50 hover:opacity-100",
-                        )}
-                      />
-                    </button>
-                  ))}
-                </div>
-                <p className="text-micro text-muted-foreground">Pick a color, then choose an icon below</p>
-              </div>
-
-              {/* Search */}
-              <div className="px-4 pt-3 pb-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    value={iconQuery}
-                    onChange={(e) => { setIconQuery(e.target.value); setIconCategory(null) }}
-                    placeholder="Search icons..."
-                    className="pl-9 h-8 text-xs"
-                  />
-                </div>
-              </div>
-
-              {/* Category chips */}
-              <div className="px-4 pb-2">
-                <div className="flex flex-wrap gap-1">
-                  {CREW_ICON_CATEGORIES.map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => {
-                        if (iconCategory === cat) { setIconCategory(null); setIconQuery("") }
-                        else { setIconCategory(cat); setIconQuery("") }
-                      }}
-                      className={cn(
-                        "px-2 py-0.5 text-micro rounded-full capitalize transition-colors",
-                        iconCategory === cat
-                          ? "bg-primary text-primary-foreground font-medium"
-                          : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
-                      )}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Icon grid */}
-              <div className="px-4 pb-4">
-                <div className="grid grid-cols-8 gap-1 max-h-[240px] overflow-y-auto rounded-lg border bg-muted/20 p-2">
-                  {iconResults.map((iconName) => {
-                    const def = getCrewIconDef(iconName)
-                    const IconComp = def.icon
-                    const isSelected = icon === iconName
-                    return (
-                      <button
-                        key={iconName}
-                        type="button"
-                        title={def.label}
-                        onClick={() => { setIcon(iconName); setIconOpen(false) }}
-                        className={cn(
-                          "aspect-square rounded-lg flex items-center justify-center transition-all",
-                          isSelected
-                            ? "bg-primary text-primary-foreground shadow-sm scale-110"
-                            : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                        )}
-                      >
-                        <IconComp className="h-4 w-4" />
-                      </button>
-                    )
-                  })}
-                  {iconResults.length === 0 && (
-                    <p className="col-span-8 text-center text-xs text-muted-foreground py-8">No icons found</p>
-                  )}
-                </div>
-                <p className="text-micro text-muted-foreground mt-2 text-center">
-                  {iconResults.length} icons {iconCategory ? `in ${iconCategory}` : "available"}
-                </p>
-              </div>
-            </PopoverContent>
-          </Popover>
+          <button
+            type="button"
+            aria-label="Change project icon"
+            onClick={() => setPanel("icon")}
+            className="shrink-0 rounded-xl transition-opacity hover:opacity-80"
+          >
+            <CrewIcon icon={icon} color={color} size="lg" />
+          </button>
 
           {/* Name */}
           <div className="flex-1 min-w-0">
@@ -434,16 +404,29 @@ export function CreateProjectModal({
           />
         </div>
 
-        {/* No milestones section: POST /api/v1/projects/{projectId}/milestones
-            404s unless the project already exists, so nothing here can create
-            one. Milestones are added after the project is created. */}
+        {/* Milestones cannot be created here: POST
+            /api/v1/projects/{projectId}/milestones 404s until the project
+            already exists (milestone_handler.go's projectExists check), and
+            there is no post-create screen that can add one either. This used
+            to be a code comment only — the user was told nothing. Said
+            out loud instead, matching the read-only reference at
+            components/features/design/surfaces/issues.tsx:341-353. */}
+        <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
+          Milestones cannot be created here — the endpoint refuses until the project exists — and there is
+          no screen anywhere in the web UI that can create one. The CLI can:{" "}
+          <code className="font-mono">crewship milestone create</code>.
+        </CreateSurfaceNotice>
+          </>
+        )}
       </CreateSurfaceBody>
 
       {/* Metadata pills. Same five controls in the same order as before; they
           moved out of the scrollport into the shell's pill row, which is the
           slot for exactly this and keeps them on one scrolling line on a
-          phone instead of wrapping onto three. */}
-      <CreateSurfacePills>
+          phone instead of wrapping onto three. Hidden on the icon panel —
+          the pills describe the project, not the icon, and there is no room
+          for both above a 44px footer. */}
+      {!panel && <CreateSurfacePills>
         {/* Status */}
         <Popover open={statusOpen} onOpenChange={setStatusOpen}>
           <PopoverTrigger asChild>
@@ -530,6 +513,32 @@ export function CreateProjectModal({
                     {!leadId && <Check className="ml-auto h-3.5 w-3.5" />}
                   </CommandItem>
                 </CommandGroup>
+                {/* Three ways to have no agents to list, and they are not the
+                    same thing — see the fetch effect above. Plain nodes rather
+                    than CommandItems: not selectable, and cmdk must not filter
+                    them away when the search box has text in it. */}
+                {agentLoad === "loading" && (
+                  <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading agents…</p>
+                )}
+                {agentLoad === "error" && (
+                  <div role="status" className="flex flex-col items-start gap-1 px-3 py-2">
+                    <span className="text-[11px] leading-relaxed text-destructive">
+                      Agents could not be loaded.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAgentReload((n) => n + 1)}
+                      className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+                {agentLoad === "ready" && agents.length === 0 && (
+                  <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                    No agents in this workspace to lead the project.
+                  </p>
+                )}
                 {agents.length > 0 && (
                   <CommandGroup heading="Agents">
                     {agents.map((agent) => (
@@ -611,16 +620,17 @@ export function CreateProjectModal({
         {/* No labels pill: labels are an issue concept. There is no
             project_labels table and no labels field on the create
             request, so a picker here would discard the selection. */}
-      </CreateSurfacePills>
+      </CreateSurfacePills>}
 
-      <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
+      {!panel && <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />}
 
       <CreateSurfaceFooter
-        onCancel={() => onOpenChange(false)}
-        primaryLabel="Create project"
-        onPrimary={handleSubmit}
-        primaryDisabled={!name.trim()}
-        busy={saving}
+        onCancel={panel ? () => setPanel(null) : () => onOpenChange(false)}
+        cancelLabel={panel ? "Back" : "Cancel"}
+        primaryLabel={panel ? "Use this icon" : "Create project"}
+        onPrimary={panel ? () => setPanel(null) : handleSubmit}
+        primaryDisabled={panel ? false : !name.trim()}
+        busy={panel ? false : saving}
       />
     </CreateSurface>
   )

@@ -359,3 +359,70 @@ describe("CreateProjectModal", () => {
     expect(iconButtons.length).toBeGreaterThan(0)
   })
 })
+
+// ── The three things this surface used to do quietly ──────────────────────
+describe("CreateProjectModal — what it no longer hides", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+  })
+
+  // The lead fetch was `if (!res.ok || cancelled) return` with a bare
+  // `catch {}`, so a 500 rendered exactly like a workspace with no agents in
+  // it. Same defect the assignee picker had, same three-state shape.
+  it("says the lead list failed rather than showing it as empty", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+    ) as unknown as typeof fetch
+
+    render(<CreateProjectModal {...defaultProps} />)
+    fireEvent.click(screen.getByText("Lead"))
+
+    await waitFor(() =>
+      expect(screen.getByText(/could not be loaded/i)).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/no agents/i)).toBeNull()
+  })
+
+  it("offers a way back from that failure", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+    ) as unknown as typeof fetch
+
+    render(<CreateProjectModal {...defaultProps} />)
+    fireEvent.click(screen.getByText("Lead"))
+    await waitFor(() => screen.getByText(/could not be loaded/i))
+
+    const retried = vi.fn(() =>
+      Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: "a1", name: "Morgan" }]) }),
+    )
+    global.fetch = retried as unknown as typeof fetch
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }))
+
+    // Asserts the re-request, not the repainted list: whether the popover has
+    // repainted a tick later is Radix's business and moves with machine load.
+    await waitFor(() => expect(retried).toHaveBeenCalled())
+  })
+
+  // The reason milestones are not offered here lived only in a code comment:
+  // POST /api/v1/projects/{id}/milestones 404s until the project exists.
+  it("explains the missing milestones instead of leaving a hole", () => {
+    render(<CreateProjectModal {...defaultProps} />)
+    expect(
+      screen.getByText(/milestones cannot be created here/i),
+    ).toBeInTheDocument()
+  })
+
+  // The icon picker was a hand-rolled Popover — a second floating layer over a
+  // surface that already is one.
+  it("picks an icon in the body, not in another overlay", async () => {
+    render(<CreateProjectModal {...defaultProps} />)
+    fireEvent.click(screen.getByRole("button", { name: /change project icon/i }))
+
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(/search icons/i)).toBeInTheDocument(),
+    )
+    // One dialog on screen: this surface. The picker is inside it.
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+  })
+})
