@@ -479,4 +479,63 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       expect(screen.getByRole("button", { name: /^Continue$/ })).toBeInTheDocument()
     })
   })
+
+  // ── The icon picker is a panel, like New project's ────────────────────
+  //
+  // It was an inline block on the Identity step: the form, a notice, a
+  // preview, a colour row, a search box and a grid of 345 icons on one
+  // screen. New project had already solved this — the surface swaps, the
+  // header says where you are, and the footer commits.
+  describe("<CreateCrewDialog> — the icon panel", () => {
+    it("swaps the surface, with the categories New project has", async () => {
+      setupFetch([])
+      renderDialog()
+
+      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+
+      await waitFor(() => expect(screen.getByText("Icon — new crew")).toBeInTheDocument())
+      expect(screen.getByPlaceholderText(/search icons/i)).toBeInTheDocument()
+      // Browsing 345 icons by category is the thing the inline version never
+      // had, and the reason it was unusable.
+      // CATEGORY_MAP keys are lowercase; the capital is CSS.
+      expect(screen.getByRole("button", { name: "engineering" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Use this icon/ })).toBeInTheDocument()
+      // Still one dialog.
+      expect(screen.queryAllByRole("dialog")).toHaveLength(1)
+    })
+
+    it("hides the step strip while the panel is up", async () => {
+      setupFetch([])
+      renderDialog()
+      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+
+      await screen.findByText("Icon — new crew")
+      expect(screen.queryByRole("button", { name: /Step 2: Lineup/ })).toBeNull()
+    })
+
+    it("applies the pick and returns to the step", async () => {
+      setupFetch([])
+      renderDialog()
+      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+      await screen.findByText("Icon — new crew")
+
+      fireEvent.click(screen.getByRole("radio", { name: "Rocket" }))
+      fireEvent.click(screen.getByRole("button", { name: /Use this icon/ }))
+
+      await waitFor(() => expect(screen.getByPlaceholderText("Engineering")).toBeInTheDocument())
+      expect(screen.getByText(/Rocket ·/)).toBeInTheDocument()
+    })
+
+    it("searches the set instead of making you scroll it", async () => {
+      setupFetch([])
+      renderDialog()
+      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+      await screen.findByText("Icon — new crew")
+
+      const before = screen.getAllByRole("radio").length
+      fireEvent.change(screen.getByPlaceholderText(/search icons/i), { target: { value: "rocket" } })
+      expect(screen.getAllByRole("radio").length).toBeLessThan(before)
+      expect(screen.getByRole("radio", { name: "Rocket" })).toBeInTheDocument()
+    })
+  })
 })

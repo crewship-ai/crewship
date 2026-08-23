@@ -219,17 +219,18 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await page.getByPlaceholder("Engineering", { exact: true }).fill(name)
     await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
     await page.getByPlaceholder(/What does this crew do/).fill("End-to-end smoke crew")
-    // Open the icon picker and close it again. It used to be a second Radix
-    // Dialog titled "Icon — <crew>" stacked on this one; it is the kit's
-    // in-body picker now, so the thing to assert is its search box appearing
-    // inside this surface, and the tile toggling it back shut.
-    const iconTile = page.getByLabel("Pick icon and color")
-    await iconTile.click()
+    // Open the icon panel and come back. It used to be a second Radix Dialog
+    // stacked on this one, then an inline block on this step; it is a PANEL
+    // now — the surface swaps, the header says where you are, and the footer
+    // commits — which is what New project already did.
+    await page.getByLabel("Pick icon and color").click()
+    await expect(page.getByText("Icon — new crew")).toBeVisible({ timeout: TIMEOUT })
     await expect(page.getByPlaceholder(/search icons/i)).toBeVisible({ timeout: TIMEOUT })
     // Still exactly one dialog — that was the whole point of the change.
     await expect(page.getByRole("dialog")).toHaveCount(1)
-    await iconTile.click()
+    await page.getByRole("button", { name: /Use this icon/ }).click()
     await expect(page.getByPlaceholder(/search icons/i)).not.toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByPlaceholder("Engineering", { exact: true })).toBeVisible()
 
     await page.getByRole("button", { name: /Continue/ }).click()
 

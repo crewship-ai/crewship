@@ -8,13 +8,19 @@ function harness(initial: Partial<WizardState> = {}) {
   const setState = vi.fn((patch: Partial<WizardState>) => {
     state = { ...state, ...patch }
   })
-  const renderResult = render(<StepIdentity state={state} setState={setState} />)
+  const onPickIcon = vi.fn()
+  const renderResult = render(
+    <StepIdentity state={state} setState={setState} onPickIcon={onPickIcon} />,
+  )
   return {
     ...renderResult,
     setState,
+    onPickIcon,
     rerenderWith: (patch: Partial<WizardState>) => {
       state = { ...state, ...patch }
-      renderResult.rerender(<StepIdentity state={state} setState={setState} />)
+      renderResult.rerender(
+        <StepIdentity state={state} setState={setState} onPickIcon={onPickIcon} />,
+      )
     },
     getState: () => state,
   }
@@ -95,17 +101,9 @@ describe("<StepIdentity>", () => {
 
   it("renders the icon-tile button using current state", () => {
     harness({ icon: "rocket", color: "violet" })
-    // Caption beneath the tile shows "icon · color"
-    expect(screen.getByText(/rocket · violet/)).toBeInTheDocument()
-  })
-
-  it("clicking the icon tile opens the picker", () => {
-    harness()
-    const tile = screen.getByLabelText("Pick icon and color")
-    fireEvent.click(tile)
-    // In the body now, not a portalled dialog with its own "Icon — <crew>"
-    // title: the picker's search box is the thing that proves it is open.
-    expect(screen.getByPlaceholderText(/search icons/i)).toBeInTheDocument()
+    // The caption names the icon the way the catalogue does — "rocket" is the
+    // key, "Rocket" is what a person reads.
+    expect(screen.getByText(/Rocket · violet/)).toBeInTheDocument()
   })
 
   it("Slug field shows current slug in the TIP example", () => {
@@ -114,53 +112,31 @@ describe("<StepIdentity>", () => {
   })
 })
 
-// ── The icon picker is not a second dialog ────────────────────────────────
+// ── The icon picker is a panel, not part of this step ───────────────────
 //
-// It used to mount CrewIconPickerDialog — a full Radix <Dialog> — from inside
-// the wizard's own Dialog, so opening it put two overlays, two headers and two
-// Cancel buttons on screen. That is the shape the whole create-surface
-// migration exists to remove, and it survived it.
-describe("<StepIdentity> icon picker", () => {
-  it("opens in the body rather than stacking another dialog", () => {
-    const setState = vi.fn()
-    render(<StepIdentity state={{ ...INITIAL_STATE }} setState={setState} />)
-
+// It started as CrewIconPickerDialog — a full Radix <Dialog> opened from
+// inside the wizard's own — then became an inline block on this step, which
+// put the form, a notice, a preview, a colour row, a search box and a grid of
+// 345 icons on one screen. New project had already solved this: the surface
+// SWAPS to the picker, with its own header, back arrow and "Use this icon".
+// This step asks for the panel and draws none of it.
+describe("<StepIdentity> — the icon control", () => {
+  it("asks the wizard for the panel rather than opening one here", () => {
+    const { onPickIcon } = harness()
     fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+    expect(onPickIcon).toHaveBeenCalledTimes(1)
+  })
 
-    // The kit's picker, in this surface's own body.
-    expect(screen.getByPlaceholderText(/search icons/i)).toBeInTheDocument()
-    // And no second dialog anywhere.
+  it("draws no picker of its own", () => {
+    harness()
+    fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+    expect(screen.queryByPlaceholderText(/search icons/i)).toBeNull()
     expect(screen.queryAllByRole("dialog")).toHaveLength(0)
   })
 
-  it("closes again from the same control it opened from", () => {
-    render(<StepIdentity state={{ ...INITIAL_STATE }} setState={vi.fn()} />)
-    const tile = screen.getByRole("button", { name: /pick icon and color/i })
-
-    fireEvent.click(tile)
-    expect(tile).toHaveAttribute("aria-expanded", "true")
-    fireEvent.click(tile)
-    expect(tile).toHaveAttribute("aria-expanded", "false")
-    expect(screen.queryByPlaceholderText(/search icons/i)).toBeNull()
-  })
-
-  it("patches the icon and the colour separately, as the wizard state expects", () => {
-    const setState = vi.fn()
-    render(<StepIdentity state={{ ...INITIAL_STATE }} setState={setState} />)
-    fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
-
-    fireEvent.click(screen.getByRole("radio", { name: "Rocket" }))
-    expect(setState).toHaveBeenCalledWith({ icon: "rocket" })
-  })
-
-  it("searches the icon set instead of making you scroll it", () => {
-    render(<StepIdentity state={{ ...INITIAL_STATE }} setState={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
-
-    const before = screen.getAllByRole("radio").length
-    fireEvent.change(screen.getByPlaceholderText(/search icons/i), { target: { value: "rocket" } })
-    const after = screen.getAllByRole("radio").length
-    expect(after).toBeLessThan(before)
-    expect(screen.getByRole("radio", { name: "Rocket" })).toBeInTheDocument()
+  it("offers the caption as a second way in, for the same panel", () => {
+    const { onPickIcon } = harness({ icon: "rocket", color: "violet" })
+    fireEvent.click(screen.getByText(/Rocket · violet/))
+    expect(onPickIcon).toHaveBeenCalled()
   })
 })

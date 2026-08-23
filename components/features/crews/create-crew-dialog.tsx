@@ -10,6 +10,7 @@ import {
   CreateSurfaceBody,
   CreateSurfaceFooter,
   CreateSurfaceHeader,
+  CreateSurfacePicker,
   CreateSurfaceRefusal,
   CreateSurfaceSecondaryAction,
   CreateSurfaceSteps,
@@ -19,6 +20,9 @@ import { StepIdentity } from "./create-crew/step-identity"
 import { StepLineup } from "./create-crew/step-lineup"
 import { StepContainer } from "./create-crew/step-container"
 import { BaseImagePanel, effectiveBaseImage, patchImage } from "./create-crew/base-image"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { CREW_ICON_CATEGORIES, GRADIENT_PALETTES, getCrewIconDef, searchCrewIcons } from "@/lib/entities"
+import { asCrewColor } from "./create-crew/types"
 import { StepReview } from "./create-crew/step-review"
 import { submitCrew } from "./create-crew/submit"
 import { INITIAL_STATE, type WizardState, type WizardStep } from "./create-crew/types"
@@ -168,7 +172,13 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   // to its primary, hence the query: the primary is its last button.
   // The base-image picker, as a panel this surface swaps to rather than a
   // second dialog over it.
-  const [panel, setPanel] = useState<null | "image">(null)
+  const [panel, setPanel] = useState<null | "image" | "icon">(null)
+  const [iconQuery, setIconQuery] = useState("")
+  const [iconCategory, setIconCategory] = useState<string | null>(null)
+  const iconResults = useMemo(
+    () => searchCrewIcons(iconCategory ?? iconQuery),
+    [iconQuery, iconCategory],
+  )
 
   const footerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -200,11 +210,19 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
       <CreateSurfaceHeader
         concept="crews"
         context="Crews"
-        title={panel === "image" ? "Base image — new crew" : "New crew"}
+        title={
+          panel === "image"
+            ? "Base image — new crew"
+            : panel === "icon"
+              ? "Icon — new crew"
+              : "New crew"
+        }
         description={
           panel === "image"
             ? "What the container starts from. Node 22 is the recommendation for most agent work; the rest are there for a crew that needs a toolchain preinstalled."
-            : STEP_DESCRIPTION[step]
+            : panel === "icon"
+              ? "Pick a colour, then an icon. Browse by category, or search."
+              : STEP_DESCRIPTION[step]
         }
         onBack={panel ? () => setPanel(null) : step > 1 ? back : undefined}
         onClose={() => onOpenChange(false)}
@@ -237,7 +255,37 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
             onChange={(image) => setState(patchImage(state, image))}
           />
         )}
-        {!panel && step === 1 && <StepIdentity state={state} setState={setState} />}
+        {panel === "icon" && (
+          <CreateSurfacePicker
+            preview={<CrewIcon icon={state.icon} color={state.color} size="xl" />}
+            previewHint={`${getCrewIconDef(state.icon).label} · ${state.color}`}
+            palette={{
+              value: state.color,
+              onChange: (id) => setState({ color: asCrewColor(id) }),
+              options: GRADIENT_PALETTES.map((g) => ({ id: g.id, dot: g.dot })),
+            }}
+            categories={{
+              value: iconCategory,
+              options: CREW_ICON_CATEGORIES,
+              onChange: (c) => { setIconCategory(c); setIconQuery("") },
+            }}
+            search={{
+              value: iconQuery,
+              onChange: (v) => { setIconQuery(v); setIconCategory(null) },
+              placeholder: "Search icons…",
+            }}
+            options={iconResults.map((name) => {
+              const def = getCrewIconDef(name)
+              return { id: name, label: def.label, render: <def.icon className="h-4 w-4 text-foreground/70" /> }
+            })}
+            value={state.icon}
+            onChange={(icon) => setState({ icon })}
+            columns={8}
+          />
+        )}
+        {!panel && step === 1 && (
+          <StepIdentity state={state} setState={setState} onPickIcon={() => setPanel("icon")} />
+        )}
         {!panel && step === 2 && <StepLineup state={state} setState={setState} workspaceId={workspaceId} />}
         {!panel && step === 3 && (
           <StepContainer state={state} setState={setState} onPickImage={() => setPanel("image")} />
@@ -285,7 +333,13 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
             ) : undefined
           }
           primaryLabel={
-            panel ? "Use this image" : step === 4 ? (busy ? "Creating…" : "Create crew") : "Continue"
+            panel === "image"
+              ? "Use this image"
+              : panel === "icon"
+                ? "Use this icon"
+                : step === 4
+                  ? (busy ? "Creating…" : "Create crew")
+                  : "Continue"
           }
           primaryIcon={!panel && step === 4 ? Check : undefined}
           onPrimary={panel ? () => setPanel(null) : advance}
