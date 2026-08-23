@@ -1,11 +1,18 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { StepLineup } from "../step-lineup"
 import { INITIAL_STATE, type WizardState } from "../types"
 import type { CrewTemplate } from "../api"
 
 // =============================================================================
-// Test fixtures — small but representative template list
+// New crew → Lineup, as a grid of tiles.
+//
+// The step used to be a two-pane browser: a Browse/Empty mode tab strip, four
+// source tabs, a row of category chips and a 320px preview pane. These tests
+// cover what survived that — the request, the pick, the identity a template
+// lends the crew — and the two things the shape change is FOR: every template
+// visible as a tile, and "start empty" as one of the options rather than a
+// different mode of the screen.
 // =============================================================================
 
 const TPL_BUILTIN_ENG: CrewTemplate = {
@@ -50,7 +57,6 @@ function harness(initial: Partial<WizardState> = {}, templates: CrewTemplate[] =
     state = { ...state, ...patch }
   })
 
-  // Mock /api/v1/crew-templates fetch
   const fetchMock = vi.fn(async (url: string | URL) => {
     const u = typeof url === "string" ? url : url.toString()
     if (u.includes("/crew-templates")) {
@@ -64,6 +70,7 @@ function harness(initial: Partial<WizardState> = {}, templates: CrewTemplate[] =
   return {
     ...r,
     setState,
+    getState: () => state,
     rerenderWith: (patch: Partial<WizardState>) => {
       state = { ...state, ...patch }
       r.rerender(<StepLineup state={state} setState={setState} workspaceId="ws_probe" />)
@@ -71,63 +78,15 @@ function harness(initial: Partial<WizardState> = {}, templates: CrewTemplate[] =
   }
 }
 
-beforeEach(() => { /* fresh fetch stub per test */ })
+const tile = (name: RegExp) => screen.getByRole("button", { name })
+
 afterEach(() => { vi.unstubAllGlobals() })
 
-describe("<StepLineup> — mode tabs", () => {
-  it("renders the two mode tabs (Browse + Empty) — no AI Suggest", () => {
-    harness()
-    expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Empty crew/ })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /AI Suggest/ })).toBeNull()
-  })
-
-  it("clicking the Empty tab sets mode to 'empty' and hides browser", async () => {
-    const { setState, rerenderWith } = harness({ mode: "browse" }, [TPL_BUILTIN_ENG])
-    await waitFor(() => {
-      expect(screen.queryByText(/Loading templates/)).toBeNull()
-    })
-
-    fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
-    expect(setState).toHaveBeenCalledWith({ mode: "empty" })
-
-    rerenderWith({ mode: "empty" })
-    expect(screen.getByText(/Crew will be created with no agents/)).toBeInTheDocument()
-  })
-})
-
-describe("<StepLineup> — empty mode", () => {
-  it("shows the empty-state explanation", () => {
-    harness({ mode: "empty" })
-    // "Empty crew" appears twice — once in the mode tab, once as the heading.
-    expect(screen.getAllByText("Empty crew").length).toBeGreaterThanOrEqual(2)
-    // Body paragraph is split across <code> elements; matcher fires on every
-    // parent, so allow multiple matches.
-    const matches = screen.getAllByText((_, node) =>
-      !!node?.textContent?.startsWith("Crew will be created with no agents"),
-    )
-    expect(matches.length).toBeGreaterThanOrEqual(1)
-  })
-})
-
-describe("<StepLineup> — browse mode (template fetch)", () => {
-  it("shows loading state while fetching", () => {
-    harness({ mode: "browse" }, [])
-    expect(screen.getByText(/Loading templates/)).toBeInTheDocument()
-  })
-
-  it("renders templates after fetch resolves", async () => {
-    harness({ mode: "browse" }, [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH])
-
-    await waitFor(() => {
-      expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
-    })
-  })
-
+describe("<StepLineup> — the request", () => {
   it("hits /api/v1/crew-templates", async () => {
-    harness({ mode: "browse" }, [TPL_BUILTIN_ENG])
+    harness({}, [TPL_BUILTIN_ENG])
     await waitFor(() => {
-      expect((globalThis.fetch as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      expect(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
         expect.stringContaining("/api/v1/crew-templates"),
         expect.objectContaining({ credentials: "include" }),
       )
@@ -136,12 +95,11 @@ describe("<StepLineup> — browse mode (template fetch)", () => {
 
   // The route is wsCtx-wrapped (router_crews.go) and RequireWorkspace replies
   // 400 "workspace_id is required" when the request carries none in query,
-  // path or header. The old assertion above only proved the path prefix, so a
-  // request the server refuses outright still passed it — and did, all the way
-  // onto dev2, where step 2 read "Failed to load: HTTP 400" with the wizard's
-  // whole template catalogue empty.
+  // path or header. Asserting the path prefix alone let a request the server
+  // refuses outright pass — and it did, all the way onto dev2, where this
+  // step read "Failed to load: HTTP 400" with an empty catalogue.
   it("sends workspace_id — the route refuses the request without it", async () => {
-    harness({ mode: "browse" }, [TPL_BUILTIN_ENG])
+    harness({}, [TPL_BUILTIN_ENG])
     await waitFor(() => {
       const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
       const url = String(calls.find((c) => String(c[0]).includes("/crew-templates"))?.[0] ?? "")
@@ -149,163 +107,139 @@ describe("<StepLineup> — browse mode (template fetch)", () => {
     })
   })
 
-  it("auto-picks the first template so preview renders without manual click", async () => {
-    const { setState } = harness({ mode: "browse", pickedTemplateSlug: null }, [TPL_BUILTIN_ENG])
+  it("says the catalogue failed, and still offers the empty crew", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) } as Response)))
+    let state: WizardState = { ...INITIAL_STATE }
+    render(<StepLineup state={state} setState={(p) => { state = { ...state, ...p } }} workspaceId="ws_probe" />)
 
-    await waitFor(() => {
-      expect(setState).toHaveBeenCalledWith(
-        expect.objectContaining({
-          pickedTemplateSlug: "software-development",
-          pickedTemplateMeta: expect.objectContaining({
-            name: "Software Development",
-            agentCount: 2,
-          }),
-        }),
-      )
-    })
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/did not load/i))
+    // A failed catalogue must not be a dead end: this is the one option that
+    // needs no server data at all.
+    expect(tile(/^Empty crew/)).toBeInTheDocument()
+  })
+})
+
+describe("<StepLineup> — the tiles", () => {
+  it("shows every template as a tile, with its agent count", async () => {
+    harness({}, [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH])
+
+    const eng = await screen.findByRole("button", { name: /^Software Development/ })
+    expect(eng).toHaveTextContent("Tech Lead + Backend + Frontend + QA")
+    expect(eng).toHaveTextContent("2 agents")
+    expect(screen.getByRole("button", { name: /^Research & Analysis/ })).toBeInTheDocument()
   })
 
-  it("re-syncs pickedTemplateSlug when the current selection gets filtered out", async () => {
-    // Start on Software Development; switch source/category so it's filtered
-    // out — picked falls back to filtered[0]. The effect must update state
-    // to match, otherwise submit deploys the hidden (no-longer-visible)
-    // template (CodeRabbit finding).
-    const { setState } = harness(
-      { mode: "browse", pickedTemplateSlug: "software-development" },
-      [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH],
-    )
-    await waitFor(() => {
-      expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
-    })
-
-    // Filter to "research" category — Software Development disappears, only
-    // Research & Analysis remains. picked becomes Research, state must follow.
-    const buttons = screen.getAllByRole("button")
-    const researchChip = buttons.find((b) => /^research\s+\d/.test(b.textContent ?? ""))
-    expect(researchChip).toBeDefined()
-    setState.mockClear()
-    fireEvent.click(researchChip!)
-
-    await waitFor(() => {
-      const calls = setState.mock.calls.map((c) => c[0])
-      expect(calls.some((c) => c.pickedTemplateSlug === "research-analysis")).toBe(true)
-    })
+  it("marks a workspace template as such, so it is not read as built-in", async () => {
+    harness({}, [TPL_WORKSPACE])
+    const custom = await screen.findByRole("button", { name: /^My Custom Template/ })
+    expect(custom).toHaveTextContent(/workspace/i)
   })
 
-  it("clicking a template patches pickedTemplateSlug + meta", async () => {
-    const { setState } = harness(
-      { mode: "browse", pickedTemplateSlug: "software-development" },
-      [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH],
+  it("picks nothing until asked — the step is a choice, not a default", async () => {
+    const { setState } = harness({}, [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH])
+    await screen.findByRole("button", { name: /^Software Development/ })
+
+    // The old browser auto-selected filtered[0], so the wizard advanced with a
+    // template nobody had looked at.
+    expect(setState).not.toHaveBeenCalledWith(
+      expect.objectContaining({ pickedTemplateSlug: expect.any(String) }),
     )
+  })
 
-    await waitFor(() => {
-      expect(screen.getAllByText("Research & Analysis")).not.toHaveLength(0)
-    })
-
-    setState.mockClear()
-    fireEvent.click(screen.getAllByText("Research & Analysis")[0])
+  it("clicking a tile records the slug and the lineup meta", async () => {
+    const { setState } = harness({}, [TPL_BUILTIN_ENG])
+    fireEvent.click(await screen.findByRole("button", { name: /^Software Development/ }))
 
     expect(setState).toHaveBeenCalledWith(
       expect.objectContaining({
-        pickedTemplateSlug: "research-analysis",
-        pickedTemplateMeta: expect.objectContaining({ name: "Research & Analysis", agentCount: 2 }),
+        mode: "browse",
+        pickedTemplateSlug: "software-development",
+        pickedTemplateMeta: expect.objectContaining({ name: "Software Development", agentCount: 2 }),
       }),
     )
   })
 
-  it("preview pane renders the lineup of the selected template (LEAD first)", async () => {
-    harness(
-      { mode: "browse", pickedTemplateSlug: "software-development" },
-      [TPL_BUILTIN_ENG],
-    )
+  it("marks the picked tile as pressed", async () => {
+    const { rerenderWith } = harness({}, [TPL_BUILTIN_ENG])
+    await screen.findByRole("button", { name: /^Software Development/ })
 
-    await waitFor(() => {
-      expect(screen.getAllByText("Tech Lead")).not.toHaveLength(0)
-    })
-    // LEAD pill is rendered for Tech Lead
-    expect(screen.getByText("LEAD")).toBeInTheDocument()
+    rerenderWith({ pickedTemplateSlug: "software-development" })
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Software Development/ })).toHaveAttribute("aria-pressed", "true"),
+    )
   })
 })
 
-describe("<StepLineup> — search + filter", () => {
-  it("search filters templates by name (case-insensitive)", async () => {
-    harness({ mode: "browse" }, [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH])
-    await waitFor(() => {
-      expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
-    })
+describe("<StepLineup> — the identity a template lends", () => {
+  it("adopts the template's name, slug and face while identity is untouched", async () => {
+    const { setState } = harness({ name: "", slug: "" }, [TPL_BUILTIN_ENG])
+    fireEvent.click(await screen.findByRole("button", { name: /^Software Development/ }))
 
-    const searchInput = document.querySelector('input[placeholder*="Search templates"]') as HTMLInputElement
-    fireEvent.change(searchInput, { target: { value: "research" } })
-
-    expect(screen.getAllByText("Research & Analysis")).not.toHaveLength(0)
-    expect(screen.queryByText("Software Development")).toBeNull()
-  })
-
-  it("source-tab Marketplace is disabled and shows 'soon'", async () => {
-    harness({ mode: "browse" }, [TPL_BUILTIN_ENG])
-    await waitFor(() => {
-      expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
-    })
-    const marketplaceTab = screen.getByRole("button", { name: /Marketplace/ })
-    expect(marketplaceTab).toBeDisabled()
-    expect(screen.getByText("soon")).toBeInTheDocument()
-  })
-
-  it("Built-in tab shows only is_builtin=true templates", async () => {
-    harness({ mode: "browse" }, [TPL_BUILTIN_ENG, TPL_WORKSPACE])
-    await waitFor(() => {
-      expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
-    })
-
-    // Built-in is the default tab; My Custom Template should NOT be visible.
-    expect(screen.queryByText("My Custom Template")).toBeNull()
-  })
-
-  it("Workspace tab shows only non-builtin templates", async () => {
-    harness({ mode: "browse" }, [TPL_BUILTIN_ENG, TPL_WORKSPACE])
-    await waitFor(() => {
-      expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
-    })
-
-    fireEvent.click(screen.getByRole("button", { name: /Workspace/ }))
-    expect(screen.queryByText("Software Development")).toBeNull()
-    expect(screen.getAllByText("My Custom Template")).not.toHaveLength(0)
-  })
-
-  it("category chips filter by category", async () => {
-    harness({ mode: "browse" }, [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH])
-    await waitFor(() => {
-      expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
-    })
-
-    // Category chips include name + count, e.g. "research 1". Use accessible
-    // name + count to disambiguate from the result rows that also say "research".
-    const buttons = screen.getAllByRole("button")
-    const researchChip = buttons.find((b) =>
-      /^research\s+\d/.test(b.textContent ?? "") || b.textContent === "research 1",
+    expect(setState).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Software Development", slug: "software-development", icon: "code" }),
     )
-    expect(researchChip).toBeDefined()
-    fireEvent.click(researchChip!)
+  })
 
-    expect(screen.queryByText("Software Development")).toBeNull()
-    expect(screen.getAllByText("Research & Analysis")).not.toHaveLength(0)
+  it("leaves a name somebody typed alone", async () => {
+    const { setState } = harness({ name: "Platform", slug: "platform" }, [TPL_BUILTIN_ENG])
+    fireEvent.click(await screen.findByRole("button", { name: /^Software Development/ }))
+
+    const patch = setState.mock.calls.at(-1)![0]
+    expect(patch).not.toHaveProperty("name")
+    expect(patch).not.toHaveProperty("slug")
   })
 })
 
-describe("<StepLineup> — fetch failure", () => {
-  it("shows fail-to-load fallback when fetch errors", async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: false,
-      status: 500,
-      json: async () => ({}),
-    } as Response))
-    vi.stubGlobal("fetch", fetchMock)
+describe("<StepLineup> — empty crew", () => {
+  it("is a tile beside the templates, not a separate mode of the screen", async () => {
+    harness({}, [TPL_BUILTIN_ENG])
+    const empty = await screen.findByRole("button", { name: /^Empty crew/ })
+    expect(empty).toHaveTextContent(/hire into it/i)
+    // The tab strip it replaces.
+    expect(screen.queryByRole("button", { name: /Browse templates/ })).toBeNull()
+  })
 
-    let state: WizardState = { ...INITIAL_STATE, mode: "browse" }
-    render(<StepLineup state={state} setState={(p) => { state = { ...state, ...p } }} workspaceId="ws_probe" />)
+  it("clears any template pick when chosen", async () => {
+    const { setState } = harness({ pickedTemplateSlug: "software-development" }, [TPL_BUILTIN_ENG])
+    fireEvent.click(await screen.findByRole("button", { name: /^Empty crew/ }))
 
-    await waitFor(() => {
-      expect(screen.getByText(/Failed to load/)).toBeInTheDocument()
+    expect(setState).toHaveBeenCalledWith({
+      mode: "empty",
+      pickedTemplateSlug: null,
+      pickedTemplateMeta: null,
     })
+  })
+})
+
+describe("<StepLineup> — search", () => {
+  it("filters by name, description or category", async () => {
+    harness({}, [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH])
+    await screen.findByRole("button", { name: /^Software Development/ })
+
+    fireEvent.change(screen.getByLabelText(/search crew templates/i), { target: { value: "research" } })
+
+    expect(screen.getByRole("button", { name: /^Research & Analysis/ })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^Software Development/ })).toBeNull()
+    // The empty option is not a search result and must not be filtered away.
+    expect(screen.getByRole("button", { name: /^Empty crew/ })).toBeInTheDocument()
+  })
+
+  it("drops a pick the search has hidden, rather than deploying it unseen", async () => {
+    const { setState } = harness({ pickedTemplateSlug: "software-development" }, [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH])
+    await screen.findByRole("button", { name: /^Software Development/ })
+
+    fireEvent.change(screen.getByLabelText(/search crew templates/i), { target: { value: "research" } })
+
+    await waitFor(() =>
+      expect(setState).toHaveBeenCalledWith({ pickedTemplateSlug: null, pickedTemplateMeta: null }),
+    )
+  })
+
+  it("says so when nothing matches", async () => {
+    harness({}, [TPL_BUILTIN_ENG])
+    await screen.findByRole("button", { name: /^Software Development/ })
+
+    fireEvent.change(screen.getByLabelText(/search crew templates/i), { target: { value: "zzz" } })
+    expect(screen.getByText(/Nothing matches/)).toBeInTheDocument()
   })
 })

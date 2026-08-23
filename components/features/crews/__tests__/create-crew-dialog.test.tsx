@@ -214,6 +214,9 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
     })
+    // The step no longer auto-selects filtered[0], so the wizard cannot
+    // advance past a lineup nobody chose.
+    fireEvent.click(screen.getByRole("button", { name: /^Software Development/ }))
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Continue/ })).not.toBeDisabled()
     })
@@ -262,7 +265,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /^Software Development/ })).toBeInTheDocument()
     })
     expect(screen.getAllByText(/step 2 of 4/i).length).toBeGreaterThanOrEqual(1)
 
@@ -324,6 +327,9 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
     })
+    // The step no longer auto-selects filtered[0], so the wizard cannot
+    // advance past a lineup nobody chose.
+    fireEvent.click(screen.getByRole("button", { name: /^Software Development/ }))
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Continue/ })).not.toBeDisabled()
     })
@@ -359,14 +365,17 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 1 → 2
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /^Software Development/ })).toBeInTheDocument()
     })
+    // The step no longer auto-selects filtered[0], so the wizard cannot
+    // advance past a lineup nobody chose.
+    fireEvent.click(screen.getByRole("button", { name: /^Software Development/ }))
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Continue/ })).not.toBeDisabled()
     })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 2 → 3
     await waitFor(() => {
-      expect(screen.getByText("Image and tooling")).toBeInTheDocument()
+      expect(screen.getByText("Base image")).toBeInTheDocument()
     })
 
     // On Container, Skip-to-defaults is visible and jumps straight to Review.
@@ -392,7 +401,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /^Software Development/ })).toBeInTheDocument()
     })
     // Step 2 — no skip button
     expect(screen.queryByRole("button", { name: /Skip to defaults/ })).toBeNull()

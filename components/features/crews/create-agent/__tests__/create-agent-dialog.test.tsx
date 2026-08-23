@@ -274,4 +274,55 @@ describe("CreateAgentDialog", () => {
       )
     })
   })
+
+  // -- The crew field is a picker, not a native list ----------------------
+  //
+  // It was a <select> of every crew in the workspace: one alphabetical
+  // column of names, no icon, no colour, no search. A dev box accumulates
+  // dozens of crews and they are told apart everywhere else in the product
+  // by exactly the two things this control dropped.
+  describe("the Crew picker", () => {
+    it("is a searchable combobox rather than a <select>", async () => {
+      renderDialog()
+      await waitFor(() =>
+        expect(screen.getByRole("combobox", { name: "Crew" })).toBeInTheDocument(),
+      )
+      expect(document.querySelector("select#agent-crew")).toBeNull()
+    })
+
+    it("separates crews that have agents from empty ones", async () => {
+      renderDialog({
+        defaultCrewSlug: null,
+        crews: [
+          { id: "c1", slug: "engineering", name: "Engineering", agentCount: 3 },
+          { id: "c2", slug: "e2e-empty", name: "E2E Empty", agentCount: 0 },
+        ],
+      })
+      fireEvent.click(await screen.findByRole("combobox", { name: "Crew" }))
+
+      // Without the split, an operator's real crews sit interleaved with a
+      // hundred throwaway ones in alphabetical order.
+      expect(await screen.findByText("With agents")).toBeInTheDocument()
+      expect(screen.getByText("Empty")).toBeInTheDocument()
+    })
+
+    it("stays one flat list when no caller supplied counts", async () => {
+      renderDialog({ defaultCrewSlug: null })
+      fireEvent.click(await screen.findByRole("combobox", { name: "Crew" }))
+
+      await waitFor(() => expect(screen.getByPlaceholderText(/search crews/i)).toBeInTheDocument())
+      // A heading that always says the same thing is noise.
+      expect(screen.queryByText("With agents")).toBeNull()
+    })
+
+    it("selects a crew by slug, which is what the draft keys on", async () => {
+      renderDialog({ defaultCrewSlug: null })
+      fireEvent.click(await screen.findByRole("combobox", { name: "Crew" }))
+      fireEvent.click(await screen.findByText("Research"))
+
+      await waitFor(() =>
+        expect(screen.getByRole("combobox", { name: "Crew" }).textContent).toContain("Research"),
+      )
+    })
+  })
 })

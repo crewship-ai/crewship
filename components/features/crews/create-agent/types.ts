@@ -61,6 +61,13 @@ export interface CrewLite {
   id: string
   slug: string
   name: string
+  /** The crew's own face, so the picker can show it. Optional because
+   *  callers that only have {id, slug, name} still work — the picker falls
+   *  back to a generic glyph. */
+  icon?: string | null
+  color?: string | null
+  /** Drives the picker's "with agents" / "empty" grouping. */
+  agentCount?: number
 }
 
 /** Creates the initial draft with sensible defaults. */

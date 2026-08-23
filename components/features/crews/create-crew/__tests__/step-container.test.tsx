@@ -61,9 +61,18 @@ function openSize() {
 }
 
 describe("<StepContainer> — what the step is made of", () => {
-  it("puts image, network and size on one step", () => {
+  it("puts image, network and size on one step", async () => {
     renderStep()
-    expect(screen.getByText("Image and tooling")).toBeInTheDocument()
+    // The image and tooling sections are RuntimeConfig's own now — it draws
+    // them under layout="sections" instead of this step wrapping the whole
+    // component in one section with a tab strip inside it. RuntimeConfig is
+    // stubbed here, so the stub standing in for those sections is the
+    // assertion; runtime-config's own tests cover what it renders.
+    //
+    // Awaited, because RuntimeConfig is a `dynamic()` import: the step used to
+    // draw the section title itself and so had something synchronous to
+    // assert on, and now it does not.
+    expect(await screen.findByTestId("runtime-config-stub")).toBeInTheDocument()
     expect(screen.getByText("Network")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /^Size/ })).toBeInTheDocument()
   })

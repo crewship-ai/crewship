@@ -114,7 +114,7 @@ describe("<CreateCrewDialog> — CreateSurface shell", () => {
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /^Software Development/ })).toBeInTheDocument()
     })
 
     // Step 2 used to jump to 940px.

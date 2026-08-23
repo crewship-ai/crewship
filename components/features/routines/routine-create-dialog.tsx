@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Sparkles,
   GitFork,
+  Braces,
   Wrench,
   Search,
   Check,
@@ -659,27 +660,33 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       {/* ── ENTRY — three cards ───────────────────────────────────────── */}
       {mode === "entry" && (
         <CreateSurfaceBody className="flex flex-col gap-2.5">
+          {/* Three routes, three colours.
+           *  Two of these were accent="slate", which made the picker read as
+           *  one recommended option and two afterthoughts. The meta says in a
+           *  word what each route trades — the sparkle glyph that used to
+           *  mark the first one said "special" without saying why. */}
           <CreateSurfaceTile
             icon={Sparkles}
-            accent="blue"
+            accent="gold"
             title="Describe it"
             description="Tell a Lead agent your goal in plain words. It drafts the routine with you in chat, asks a couple of questions, and shows a readable preview before anything is saved."
-            meta={<Sparkles className="h-3 w-3 text-primary" aria-label="recommended" />}
+            meta="fastest"
             className="border-primary/40 bg-primary/[0.06] hover:border-primary/60 hover:bg-primary/10"
             onClick={() => setMode("describe")}
           />
           <CreateSurfaceTile
             icon={GitFork}
-            accent="slate"
+            accent="purple"
             title="Fork an existing routine"
             description="Start from one of your workspace's own routines and tweak it. No curated catalog — the library grows from what you and your agents actually build."
             onClick={() => setMode("fork")}
           />
           <CreateSurfaceTile
-            icon={Wrench}
-            accent="slate"
+            icon={Braces}
+            accent="teal"
             title="Write it yourself"
             description="Author the DSL in the editor — YAML or JSON, with schema completion and the step graph beside it. Test-run and save without leaving the dialog."
+            meta="full control"
             onClick={() => setMode("advanced")}
           />
         </CreateSurfaceBody>

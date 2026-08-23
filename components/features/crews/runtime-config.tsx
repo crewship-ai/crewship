@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  AlertCircle, Check, Cloud, Copy, Info as InfoIcon, Package, Pencil, Search, X,
+  AlertCircle, Boxes, Check, Cloud, Copy, FileJson, HardDrive, Info as InfoIcon,
+  Package, Pencil, Search, ShieldCheck, Wrench, X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,6 +16,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  CreateSurfaceDisclosure,
+  CreateSurfaceSection,
+} from "@/components/layout/create-surface"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -63,6 +68,18 @@ interface RuntimeConfigProps {
    * assuming it has the room it used to.
    */
   browserHeight?: string
+  /**
+   * Tab strip, or sections and disclosures.
+   *
+   * `tabs` is the crew Settings editor, where this component is one config
+   * panel among several and four tabs read as four aspects of one thing.
+   * `sections` is New crew's Container step: /design puts base image and
+   * preinstalled tooling on the page as sections and folds the rest away, so
+   * the step leads with the two decisions most crews make and the other three
+   * are one click deep instead of behind a tab strip a create surface has
+   * nowhere else.
+   */
+  layout?: "tabs" | "sections"
 }
 
 interface CatalogFeature {
@@ -128,7 +145,7 @@ function ImageDescription({ children }: { children: ReactNode }) {
 }
 
 
-export function RuntimeConfig({ value, onChange, canEditPrivileged = false, browserHeight = "420px" }: RuntimeConfigProps) {
+export function RuntimeConfig({ value, onChange, canEditPrivileged = false, browserHeight = "420px", layout = "tabs" }: RuntimeConfigProps) {
   // Parse initial state from value
   const initialDC = useMemo(() => parseDevcontainerConfig(value.devcontainerConfig), [value.devcontainerConfig])
   const initialFull = useMemo(() => parseDevcontainerFull(value.devcontainerConfig), [value.devcontainerConfig])
@@ -477,6 +494,533 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
 
   // ---- Visual mode ---------------------------------------------------------
 
+  // ---- Panes -------------------------------------------------------------
+  //
+  // Each of the four tabs' bodies, named. They are rendered either as a tab
+  // strip (the crew's Settings tab, where this is a config editor among other
+  // config editors) or as sections and disclosures (New crew's Container
+  // step, where /design asks for base image and tooling to lead and the rest
+  // to fold away). Same controls either way — the two layouts differ in
+  // chrome only, which is the whole point of the split.
+
+  const baseImagePane = (
+    <div className="space-y-2">
+      {/* Under `sections` the surrounding CreateSurfaceSection is already
+          titled "Base image", and two headings one line apart read as two
+          things. Under `tabs` this label is the only thing naming the block,
+          because the Features tab holds both it and the feature list. */}
+      {layout === "tabs" && (
+        <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Base Image</Label>
+      )}
+              {isCustomImage ? (
+                <div className="flex gap-2">
+                  <Input
+                    value={customImage}
+                    onChange={(e) => setCustomImage(e.target.value)}
+                    placeholder="e.g., myregistry/myimage:tag"
+                    className="flex-1 h-8 text-xs"
+                  />
+                  <Button variant="ghost" size="sm" onClick={() => setIsCustomImage(false)}>
+                    Preset
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={imageSearch}
+                      onChange={(e) => setImageSearch(e.target.value)}
+                      placeholder="Search base images..."
+                      aria-label="Search base images"
+                      className="h-7 pl-8 text-xs"
+                    />
+                  </div>
+
+                  <div
+                    role="radiogroup"
+                    aria-label="Base image"
+                    className="rounded-md border border-border/40 bg-card/30 max-h-[220px] overflow-y-auto divide-y divide-border/40"
+                  >
+                    {filteredBaseImages.map((img) => {
+                      const Icon = img.icon
+                      const isSelected = baseImage === img.value
+                      // colorKey is set explicitly on each entry above
+                      // (e.g. "node", "debian", "ubuntu") because img.value
+                      // is a full registry path. Falls back to muted
+                      // foreground when no key is set (Universal/Boxes).
+                      const brandColor = img.colorKey ? getBrandColor(img.colorKey) : null
+                      return (
+                        // The row is a div holding two siblings, not one
+                        // button holding another. `ImageDescription` is a
+                        // tooltip trigger — itself a <button> — and nesting it
+                        // inside the radio is invalid HTML: React logged a
+                        // hydration error for every row on every render, and
+                        // what the inner control does for a keyboard or screen
+                        // reader user is undefined.
+                        <div
+                          key={img.value}
+                          className={cn(
+                            "flex w-full items-center gap-2.5 pr-3 transition-colors",
+                            isSelected ? "bg-accent/40" : "hover:bg-accent/30"
+                          )}
+                        >
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={isSelected}
+                            onClick={() => setBaseImage(img.value)}
+                            className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-1.5 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                          >
+                            <Icon
+                              className="w-4 h-4 shrink-0"
+                              style={brandColor ? { color: brandColor } : undefined}
+                            />
+                            <span className="min-w-0 flex-1 flex items-center gap-1.5">
+                              <span className="font-medium truncate">{img.label}</span>
+                              {img.recommended && (
+                                <span className="shrink-0 text-[9px] px-1 py-0 rounded bg-primary/20 text-primary-hover">
+                                  RECOMMENDED
+                                </span>
+                              )}
+                            </span>
+                            {isSelected && <Check className="w-3.5 h-3.5 shrink-0 text-success" />}
+                          </button>
+                          <ImageDescription>{img.description}</ImageDescription>
+                        </div>
+                      )
+                    })}
+                    {filteredBaseImages.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-6">
+                        No images found{imageSearch ? ` for "${imageSearch}"` : ""}.
+                      </p>
+                    )}
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => setIsCustomImage(true)}>
+                    Use custom image
+                  </Button>
+                </>
+              )}
+            </div>
+  )
+
+  const toolingPane = (
+    <div className="space-y-3">
+        {/* Selected summary */}
+        {selectedFeatureCount > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/30 text-xs">
+            <Check className="w-3 h-3 text-success" />
+            <span className="font-medium">{selectedFeatureCount} selected</span>
+            <button
+              onClick={clearAllFeatures}
+              className="ml-auto text-muted-foreground hover:text-foreground text-[11px]"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search features..."
+            aria-label="Search features"
+            className="h-7 pl-8 text-xs"
+          />
+        </div>
+
+        {/* Category pills */}
+        <div className="flex flex-wrap gap-1 text-[11px]">
+          {CATEGORY_FILTERS.map((cat) => {
+            const count = featureCategoryCounts[cat] ?? 0
+            if (cat !== "all" && count === 0) return null
+            const active = featureCategoryFilter === cat
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setFeatureCategoryFilter(cat)}
+                className={cn(
+                  "px-2 py-0.5 rounded-full border transition-colors",
+                  active
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border/40 text-muted-foreground hover:bg-accent/50"
+                )}
+              >
+                {cat === "all" ? "All" : CATEGORY_LABELS[cat] || cat}
+                {count > 0 && <span className="ml-1 opacity-60">{count}</span>}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* List */}
+        {catalogLoading ? (
+          <div className="space-y-1">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-7 rounded-md" />
+            ))}
+          </div>
+        ) : (
+          <ScrollArea style={{ height: browserHeight }} className="rounded-md border border-border/40 bg-card/30">
+            <div className="divide-y divide-border/40">
+              {filteredCatalog.map((feature) => {
+                const isSelected = feature.ref in selectedFeatures
+                const toolName = featureRefToTool(feature.ref)
+                const BrandIcon = getBrandIcon(toolName) || getBrandIcon(feature.icon || "")
+                const brandColor = getBrandColor(toolName) || getBrandColor(feature.icon || "")
+                const isCloud = feature.category === "cloud"
+                return (
+                  <div
+                    key={feature.ref}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-1.5 text-xs hover:bg-accent/30 transition-colors",
+                      isSelected && "bg-accent/20"
+                    )}
+                  >
+                    <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
+                      {BrandIcon ? (
+                        <BrandIcon
+                          className="w-4 h-4"
+                          style={brandColor ? { color: brandColor } : undefined}
+                        />
+                      ) : isCloud ? (
+                        <Cloud className="w-4 h-4" />
+                      ) : (
+                        <Package className="w-4 h-4" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      <span className="font-medium text-foreground truncate">{feature.name}</span>
+                      <span className="text-muted-foreground text-[10px] font-mono shrink-0">
+                        {toolName}
+                      </span>
+                      {feature.description && (
+                        <span className="text-muted-foreground truncate hidden md:inline">
+                          {feature.description}
+                        </span>
+                      )}
+                    </div>
+
+                    {feature.publisher && (
+                      <span
+                        className={cn(
+                          "shrink-0 text-[10px] font-mono",
+                          feature.tier === "official"
+                            ? "text-muted-foreground-soft"
+                            : feature.tier === "community"
+                              ? "text-info/70"
+                              : "text-warn/80"
+                        )}
+                        title={`Published by ${feature.publisher} (${feature.tier})`}
+                      >
+                        {feature.publisher} · {feature.tier}
+                      </span>
+                    )}
+
+                    {feature.size_hint && (
+                      <span className="shrink-0 text-[10px] text-muted-foreground-soft font-mono">
+                        {feature.size_hint}
+                      </span>
+                    )}
+
+                    <Switch
+                      checked={isSelected}
+                      onCheckedChange={() => toggleFeature(feature.ref)}
+                      aria-label={feature.name}
+                      className="scale-75"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </ScrollArea>
+        )}
+
+        {!catalogLoading && catalogError && (
+          <div className="flex flex-col items-center gap-2 py-6">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+            <p className="text-xs text-destructive">Failed to load feature catalog.</p>
+            <Button size="sm" variant="outline" onClick={fetchCatalog}>
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {!catalogLoading && !catalogError && filteredCatalog.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-6">
+            No features found{searchQuery ? ` for "${searchQuery}"` : ""}.
+          </p>
+        )}
+    </div>
+  )
+
+  const runtimesPane = (
+    <div className="space-y-3">
+        <p className="text-[11px] text-muted-foreground">
+          Select language runtimes and CLI tools to install in the crew container. Versions are managed
+          per-crew and installed on container start.
+        </p>
+
+        {/* Selected summary */}
+        {selectedRuntimeCount > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/30 text-xs">
+            <Check className="w-3 h-3 text-success" />
+            <span className="font-medium">{selectedRuntimeCount} selected</span>
+            <button
+              onClick={clearAllRuntimes}
+              className="ml-auto text-muted-foreground hover:text-foreground text-[11px]"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={runtimeSearchQuery}
+            onChange={(e) => setRuntimeSearchQuery(e.target.value)}
+            placeholder="Search runtimes (node, python, terraform, kubectl...)"
+            aria-label="Search language runtimes"
+            className="h-7 pl-8 text-xs"
+          />
+        </div>
+
+        {/* Category pills */}
+        <div className="flex flex-wrap gap-1 text-[11px]">
+          {CATEGORY_FILTERS.map((cat) => {
+            const count = runtimeCategoryCounts[cat] ?? 0
+            if (cat !== "all" && count === 0) return null
+            const active = runtimeCategoryFilter === cat
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setRuntimeCategoryFilter(cat)}
+                className={cn(
+                  "px-2 py-0.5 rounded-full border transition-colors",
+                  active
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border/40 text-muted-foreground hover:bg-accent/50"
+                )}
+              >
+                {cat === "all" ? "All" : CATEGORY_LABELS[cat] || cat}
+                {count > 0 && <span className="ml-1 opacity-60">{count}</span>}
+              </button>
+            )
+          })}
+        </div>
+
+        {runtimeCatalogLoading ? (
+          <div className="space-y-1">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-7 rounded-md" />
+            ))}
+          </div>
+        ) : (
+          <ScrollArea style={{ height: browserHeight }} className="rounded-md border border-border/40 bg-card/30">
+            <div className="divide-y divide-border/40">
+              {filteredRuntimes.map((entry) => {
+                const isEnabled = entry.tool in miseTools
+                const selectedVersion =
+                  miseTools[entry.tool] ||
+                  entry.default_version ||
+                  (entry.versions?.[0] ?? "latest")
+                const BrandIcon = getBrandIcon(entry.tool) || getBrandIcon(entry.icon || "")
+                const brandColor = getBrandColor(entry.tool) || getBrandColor(entry.icon || "")
+                const hasVersions = Array.isArray(entry.versions) && entry.versions.length > 0
+                const defaultVersion = entry.default_version || (hasVersions ? entry.versions![0] : "latest")
+                const isCloud = entry.category === "cloud"
+                return (
+                  <div
+                    key={entry.tool}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-1.5 text-xs hover:bg-accent/30 transition-colors",
+                      isEnabled && "bg-accent/20"
+                    )}
+                  >
+                    <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
+                      {BrandIcon ? (
+                        <BrandIcon
+                          className="w-4 h-4"
+                          style={brandColor ? { color: brandColor } : undefined}
+                        />
+                      ) : isCloud ? (
+                        <Cloud className="w-4 h-4" />
+                      ) : (
+                        <Package className="w-4 h-4" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      <span className="font-medium text-foreground truncate">{entry.name}</span>
+                      <span className="text-muted-foreground text-[10px] font-mono shrink-0">
+                        {entry.tool}
+                      </span>
+                      {entry.description && (
+                        <span className="text-muted-foreground truncate hidden md:inline">
+                          {entry.description}
+                        </span>
+                      )}
+                    </div>
+
+                    {isEnabled && (
+                      <div className="shrink-0">
+                        {hasVersions ? (
+                          <Select
+                            value={selectedVersion}
+                            onValueChange={(v) => updateRuntimeVersion(entry.tool, v)}
+                          >
+                            <SelectTrigger className="h-6 w-24 text-[11px] px-2">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {!entry.versions!.includes(selectedVersion) && (
+                                <SelectItem value={selectedVersion} className="text-[11px]">
+                                  {selectedVersion}
+                                </SelectItem>
+                              )}
+                              {entry.versions!.map((v) => (
+                                <SelectItem key={v} value={v} className="text-[11px]">{v}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            value={selectedVersion}
+                            onChange={(e) => updateRuntimeVersion(entry.tool, e.target.value)}
+                            placeholder="latest"
+                            className="h-6 w-24 text-[11px] font-mono"
+                            aria-label={`${entry.name} version`}
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    <Switch
+                      checked={isEnabled}
+                      onCheckedChange={() => toggleRuntimeTool(entry.tool, defaultVersion)}
+                      aria-label={entry.name}
+                      className="scale-75"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </ScrollArea>
+        )}
+
+        {!runtimeCatalogLoading && runtimeCatalogError && (
+          <div className="flex flex-col items-center gap-2 py-6">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+            <p className="text-xs text-destructive">Failed to load language runtimes catalog.</p>
+            <Button size="sm" variant="outline" onClick={fetchRuntimeCatalog}>
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {!runtimeCatalogLoading && !runtimeCatalogError && filteredRuntimes.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-6">
+            No runtimes found{runtimeSearchQuery ? ` for "${runtimeSearchQuery}"` : ""}.
+          </p>
+        )}
+    </div>
+  )
+
+  const securityPane = (
+        <RuntimeSecurityConfig
+          value={security}
+          onChange={setSecurity}
+          canEditPrivileged={canEditPrivileged}
+        />
+  )
+
+  const previewPane = (
+    <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-medium">Generated devcontainer.json</Label>
+          <div className="flex gap-1.5">
+            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleCopy} aria-label="Copy to clipboard">
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-success" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={enterRawEdit} aria-label="Edit raw configuration">
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+        <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+          {devcontainerJSON}
+        </pre>
+
+        {miseJSON && (
+          <>
+            <Label className="text-xs font-medium">Language Runtimes Config</Label>
+            <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+              {miseJSON}
+            </pre>
+          </>
+        )}
+    </div>
+  )
+
+  if (layout === "sections") {
+    return (
+      <div className="flex flex-col gap-4">
+        <CreateSurfaceSection title="Base image" icon={HardDrive} accent="teal">
+          {baseImagePane}
+        </CreateSurfaceSection>
+
+        <CreateSurfaceSection
+          title="Preinstalled tooling"
+          icon={Wrench}
+          accent="amber"
+          hint="devcontainer features"
+        >
+          {toolingPane}
+        </CreateSurfaceSection>
+
+        {/* Folded, not dropped. /design's specimen for this step shows base
+            image and tooling only — but language runtimes and the privileged
+            flags ARE settable here today, and quietly removing them from the
+            create path would be a capability change wearing a redesign's
+            clothes. They fold away instead, with the summary saying whether
+            there is anything inside. */}
+        <CreateSurfaceDisclosure
+          icon={Boxes}
+          accent="blue"
+          label="Language runtimes"
+          summary={selectedRuntimeCount > 0 ? `${selectedRuntimeCount} pinned` : "none pinned"}
+        >
+          {runtimesPane}
+        </CreateSurfaceDisclosure>
+
+        <CreateSurfaceDisclosure
+          icon={ShieldCheck}
+          accent={security.privileged ? "red" : "slate"}
+          label="Security"
+          summary={security.privileged ? "privileged — full host access" : "standard sandbox"}
+        >
+          {securityPane}
+        </CreateSurfaceDisclosure>
+
+        <CreateSurfaceDisclosure icon={FileJson} accent="slate" label="Generated files">
+          {previewPane}
+        </CreateSurfaceDisclosure>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
       <Tabs defaultValue="features" className="w-full">
@@ -496,455 +1040,21 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           <TabsTrigger value="preview">Preview</TabsTrigger>
         </TabsList>
 
-        {/* ---- Features tab ---- */}
         <TabsContent value="features" className="space-y-3 pt-3">
-          {/* Base Image */}
-          <div className="space-y-2">
-            <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Base Image</Label>
-            {isCustomImage ? (
-              <div className="flex gap-2">
-                <Input
-                  value={customImage}
-                  onChange={(e) => setCustomImage(e.target.value)}
-                  placeholder="e.g., myregistry/myimage:tag"
-                  className="flex-1 h-8 text-xs"
-                />
-                <Button variant="ghost" size="sm" onClick={() => setIsCustomImage(false)}>
-                  Preset
-                </Button>
-              </div>
-            ) : (
-              <>
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={imageSearch}
-                    onChange={(e) => setImageSearch(e.target.value)}
-                    placeholder="Search base images..."
-                    aria-label="Search base images"
-                    className="h-7 pl-8 text-xs"
-                  />
-                </div>
-
-                <div
-                  role="radiogroup"
-                  aria-label="Base image"
-                  className="rounded-md border border-border/40 bg-card/30 max-h-[220px] overflow-y-auto divide-y divide-border/40"
-                >
-                  {filteredBaseImages.map((img) => {
-                    const Icon = img.icon
-                    const isSelected = baseImage === img.value
-                    // colorKey is set explicitly on each entry above
-                    // (e.g. "node", "debian", "ubuntu") because img.value
-                    // is a full registry path. Falls back to muted
-                    // foreground when no key is set (Universal/Boxes).
-                    const brandColor = img.colorKey ? getBrandColor(img.colorKey) : null
-                    return (
-                      <button
-                        key={img.value}
-                        type="button"
-                        role="radio"
-                        aria-checked={isSelected}
-                        onClick={() => setBaseImage(img.value)}
-                        className={cn(
-                          "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors",
-                          isSelected ? "bg-accent/40" : "hover:bg-accent/30"
-                        )}
-                      >
-                        <Icon
-                          className="w-4 h-4 shrink-0"
-                          style={brandColor ? { color: brandColor } : undefined}
-                        />
-                        <span className="min-w-0 flex-1 flex items-center gap-1.5">
-                          <span className="font-medium truncate">{img.label}</span>
-                          {img.recommended && (
-                            <span className="shrink-0 text-[9px] px-1 py-0 rounded bg-primary/20 text-primary-hover">
-                              RECOMMENDED
-                            </span>
-                          )}
-                        </span>
-                        <ImageDescription>{img.description}</ImageDescription>
-                        {isSelected && <Check className="w-3.5 h-3.5 shrink-0 text-success" />}
-                      </button>
-                    )
-                  })}
-                  {filteredBaseImages.length === 0 && (
-                    <p className="text-xs text-muted-foreground text-center py-6">
-                      No images found{imageSearch ? ` for "${imageSearch}"` : ""}.
-                    </p>
-                  )}
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setIsCustomImage(true)}>
-                  Use custom image
-                </Button>
-              </>
-            )}
-          </div>
-
-          {/* Selected summary */}
-          {selectedFeatureCount > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/30 text-xs">
-              <Check className="w-3 h-3 text-success" />
-              <span className="font-medium">{selectedFeatureCount} selected</span>
-              <button
-                onClick={clearAllFeatures}
-                className="ml-auto text-muted-foreground hover:text-foreground text-[11px]"
-              >
-                Clear
-              </button>
-            </div>
-          )}
-
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search features..."
-              aria-label="Search features"
-              className="h-7 pl-8 text-xs"
-            />
-          </div>
-
-          {/* Category pills */}
-          <div className="flex flex-wrap gap-1 text-[11px]">
-            {CATEGORY_FILTERS.map((cat) => {
-              const count = featureCategoryCounts[cat] ?? 0
-              if (cat !== "all" && count === 0) return null
-              const active = featureCategoryFilter === cat
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setFeatureCategoryFilter(cat)}
-                  className={cn(
-                    "px-2 py-0.5 rounded-full border transition-colors",
-                    active
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "border-border/40 text-muted-foreground hover:bg-accent/50"
-                  )}
-                >
-                  {cat === "all" ? "All" : CATEGORY_LABELS[cat] || cat}
-                  {count > 0 && <span className="ml-1 opacity-60">{count}</span>}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* List */}
-          {catalogLoading ? (
-            <div className="space-y-1">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <Skeleton key={i} className="h-7 rounded-md" />
-              ))}
-            </div>
-          ) : (
-            <ScrollArea style={{ height: browserHeight }} className="rounded-md border border-border/40 bg-card/30">
-              <div className="divide-y divide-border/40">
-                {filteredCatalog.map((feature) => {
-                  const isSelected = feature.ref in selectedFeatures
-                  const toolName = featureRefToTool(feature.ref)
-                  const BrandIcon = getBrandIcon(toolName) || getBrandIcon(feature.icon || "")
-                  const brandColor = getBrandColor(toolName) || getBrandColor(feature.icon || "")
-                  const isCloud = feature.category === "cloud"
-                  return (
-                    <div
-                      key={feature.ref}
-                      className={cn(
-                        "flex items-center gap-3 px-3 py-1.5 text-xs hover:bg-accent/30 transition-colors",
-                        isSelected && "bg-accent/20"
-                      )}
-                    >
-                      <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
-                        {BrandIcon ? (
-                          <BrandIcon
-                            className="w-4 h-4"
-                            style={brandColor ? { color: brandColor } : undefined}
-                          />
-                        ) : isCloud ? (
-                          <Cloud className="w-4 h-4" />
-                        ) : (
-                          <Package className="w-4 h-4" />
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0 flex items-center gap-2">
-                        <span className="font-medium text-foreground truncate">{feature.name}</span>
-                        <span className="text-muted-foreground text-[10px] font-mono shrink-0">
-                          {toolName}
-                        </span>
-                        {feature.description && (
-                          <span className="text-muted-foreground truncate hidden md:inline">
-                            {feature.description}
-                          </span>
-                        )}
-                      </div>
-
-                      {feature.publisher && (
-                        <span
-                          className={cn(
-                            "shrink-0 text-[10px] font-mono",
-                            feature.tier === "official"
-                              ? "text-muted-foreground-soft"
-                              : feature.tier === "community"
-                                ? "text-info/70"
-                                : "text-warn/80"
-                          )}
-                          title={`Published by ${feature.publisher} (${feature.tier})`}
-                        >
-                          {feature.publisher} · {feature.tier}
-                        </span>
-                      )}
-
-                      {feature.size_hint && (
-                        <span className="shrink-0 text-[10px] text-muted-foreground-soft font-mono">
-                          {feature.size_hint}
-                        </span>
-                      )}
-
-                      <Switch
-                        checked={isSelected}
-                        onCheckedChange={() => toggleFeature(feature.ref)}
-                        aria-label={feature.name}
-                        className="scale-75"
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            </ScrollArea>
-          )}
-
-          {!catalogLoading && catalogError && (
-            <div className="flex flex-col items-center gap-2 py-6">
-              <AlertCircle className="h-5 w-5 text-destructive" />
-              <p className="text-xs text-destructive">Failed to load feature catalog.</p>
-              <Button size="sm" variant="outline" onClick={fetchCatalog}>
-                Retry
-              </Button>
-            </div>
-          )}
-
-          {!catalogLoading && !catalogError && filteredCatalog.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-6">
-              No features found{searchQuery ? ` for "${searchQuery}"` : ""}.
-            </p>
-          )}
+          {baseImagePane}
+          {toolingPane}
         </TabsContent>
 
-        {/* ---- Language Runtimes tab ---- */}
         <TabsContent value="runtimes" className="space-y-3 pt-3">
-          <p className="text-[11px] text-muted-foreground">
-            Select language runtimes and CLI tools to install in the crew container. Versions are managed
-            per-crew and installed on container start.
-          </p>
-
-          {/* Selected summary */}
-          {selectedRuntimeCount > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/30 text-xs">
-              <Check className="w-3 h-3 text-success" />
-              <span className="font-medium">{selectedRuntimeCount} selected</span>
-              <button
-                onClick={clearAllRuntimes}
-                className="ml-auto text-muted-foreground hover:text-foreground text-[11px]"
-              >
-                Clear
-              </button>
-            </div>
-          )}
-
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={runtimeSearchQuery}
-              onChange={(e) => setRuntimeSearchQuery(e.target.value)}
-              placeholder="Search runtimes (node, python, terraform, kubectl...)"
-              aria-label="Search language runtimes"
-              className="h-7 pl-8 text-xs"
-            />
-          </div>
-
-          {/* Category pills */}
-          <div className="flex flex-wrap gap-1 text-[11px]">
-            {CATEGORY_FILTERS.map((cat) => {
-              const count = runtimeCategoryCounts[cat] ?? 0
-              if (cat !== "all" && count === 0) return null
-              const active = runtimeCategoryFilter === cat
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setRuntimeCategoryFilter(cat)}
-                  className={cn(
-                    "px-2 py-0.5 rounded-full border transition-colors",
-                    active
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "border-border/40 text-muted-foreground hover:bg-accent/50"
-                  )}
-                >
-                  {cat === "all" ? "All" : CATEGORY_LABELS[cat] || cat}
-                  {count > 0 && <span className="ml-1 opacity-60">{count}</span>}
-                </button>
-              )
-            })}
-          </div>
-
-          {runtimeCatalogLoading ? (
-            <div className="space-y-1">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <Skeleton key={i} className="h-7 rounded-md" />
-              ))}
-            </div>
-          ) : (
-            <ScrollArea style={{ height: browserHeight }} className="rounded-md border border-border/40 bg-card/30">
-              <div className="divide-y divide-border/40">
-                {filteredRuntimes.map((entry) => {
-                  const isEnabled = entry.tool in miseTools
-                  const selectedVersion =
-                    miseTools[entry.tool] ||
-                    entry.default_version ||
-                    (entry.versions?.[0] ?? "latest")
-                  const BrandIcon = getBrandIcon(entry.tool) || getBrandIcon(entry.icon || "")
-                  const brandColor = getBrandColor(entry.tool) || getBrandColor(entry.icon || "")
-                  const hasVersions = Array.isArray(entry.versions) && entry.versions.length > 0
-                  const defaultVersion = entry.default_version || (hasVersions ? entry.versions![0] : "latest")
-                  const isCloud = entry.category === "cloud"
-                  return (
-                    <div
-                      key={entry.tool}
-                      className={cn(
-                        "flex items-center gap-3 px-3 py-1.5 text-xs hover:bg-accent/30 transition-colors",
-                        isEnabled && "bg-accent/20"
-                      )}
-                    >
-                      <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
-                        {BrandIcon ? (
-                          <BrandIcon
-                            className="w-4 h-4"
-                            style={brandColor ? { color: brandColor } : undefined}
-                          />
-                        ) : isCloud ? (
-                          <Cloud className="w-4 h-4" />
-                        ) : (
-                          <Package className="w-4 h-4" />
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0 flex items-center gap-2">
-                        <span className="font-medium text-foreground truncate">{entry.name}</span>
-                        <span className="text-muted-foreground text-[10px] font-mono shrink-0">
-                          {entry.tool}
-                        </span>
-                        {entry.description && (
-                          <span className="text-muted-foreground truncate hidden md:inline">
-                            {entry.description}
-                          </span>
-                        )}
-                      </div>
-
-                      {isEnabled && (
-                        <div className="shrink-0">
-                          {hasVersions ? (
-                            <Select
-                              value={selectedVersion}
-                              onValueChange={(v) => updateRuntimeVersion(entry.tool, v)}
-                            >
-                              <SelectTrigger className="h-6 w-24 text-[11px] px-2">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {!entry.versions!.includes(selectedVersion) && (
-                                  <SelectItem value={selectedVersion} className="text-[11px]">
-                                    {selectedVersion}
-                                  </SelectItem>
-                                )}
-                                {entry.versions!.map((v) => (
-                                  <SelectItem key={v} value={v} className="text-[11px]">{v}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <Input
-                              value={selectedVersion}
-                              onChange={(e) => updateRuntimeVersion(entry.tool, e.target.value)}
-                              placeholder="latest"
-                              className="h-6 w-24 text-[11px] font-mono"
-                              aria-label={`${entry.name} version`}
-                            />
-                          )}
-                        </div>
-                      )}
-
-                      <Switch
-                        checked={isEnabled}
-                        onCheckedChange={() => toggleRuntimeTool(entry.tool, defaultVersion)}
-                        aria-label={entry.name}
-                        className="scale-75"
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            </ScrollArea>
-          )}
-
-          {!runtimeCatalogLoading && runtimeCatalogError && (
-            <div className="flex flex-col items-center gap-2 py-6">
-              <AlertCircle className="h-5 w-5 text-destructive" />
-              <p className="text-xs text-destructive">Failed to load language runtimes catalog.</p>
-              <Button size="sm" variant="outline" onClick={fetchRuntimeCatalog}>
-                Retry
-              </Button>
-            </div>
-          )}
-
-          {!runtimeCatalogLoading && !runtimeCatalogError && filteredRuntimes.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-6">
-              No runtimes found{runtimeSearchQuery ? ` for "${runtimeSearchQuery}"` : ""}.
-            </p>
-          )}
+          {runtimesPane}
         </TabsContent>
 
-        {/* ---- Security tab ---- */}
         <TabsContent value="security" className="pt-3">
-          <RuntimeSecurityConfig
-            value={security}
-            onChange={setSecurity}
-            canEditPrivileged={canEditPrivileged}
-          />
+          {securityPane}
         </TabsContent>
 
-        {/* ---- Preview tab ---- */}
         <TabsContent value="preview" className="space-y-4 pt-3">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs font-medium">Generated devcontainer.json</Label>
-            <div className="flex gap-1.5">
-              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleCopy} aria-label="Copy to clipboard">
-                {copied ? (
-                  <Check className="h-3.5 w-3.5 text-success" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-              </Button>
-              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={enterRawEdit} aria-label="Edit raw configuration">
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
-          <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-            {devcontainerJSON}
-          </pre>
-
-          {miseJSON && (
-            <>
-              <Label className="text-xs font-medium">Language Runtimes Config</Label>
-              <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-                {miseJSON}
-              </pre>
-            </>
-          )}
+          {previewPane}
         </TabsContent>
       </Tabs>
     </div>

@@ -35,6 +35,7 @@ import {
   CreateSurfaceToggleRow,
 } from "@/components/layout/create-surface"
 import { cn } from "@/lib/utils"
+import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { apiFetch } from "@/lib/api-fetch"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
@@ -408,23 +409,23 @@ export function CreateAgentDialog({
             </div>
 
             <CreateSurfaceGrid>
+              {/* A picker, not a <select>. The native list was every crew in
+                  the workspace as one alphabetical column of names — no icon,
+                  no colour, no search — which on a box with a few dozen crews
+                  is a wall of near-identical strings. The icon and colour are
+                  what the roster, the sidebar and every issue already use to
+                  tell crews apart. */}
               {requiresCrew ? (
                 <CreateSurfaceField label="Crew" htmlFor="agent-crew" required>
-                  <select
+                  <CrewPicker
                     id="agent-crew"
+                    by="slug"
+                    crews={crews}
                     value={draft.crewSlug}
-                    onChange={(e) => setDraft({ ...draft, crewSlug: e.target.value })}
-                    className={INPUT_CLASS}
-                  >
-                    <option value="" disabled>
-                      Pick crew…
-                    </option>
-                    {crews.map((c) => (
-                      <option key={c.id} value={c.slug}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(crewSlug) => setDraft({ ...draft, crewSlug })}
+                    placeholder="Pick crew…"
+                    ariaLabel="Crew"
+                  />
                 </CreateSurfaceField>
               ) : (
                 <CreateSurfaceField label="Crew" htmlFor="agent-crew" hint="N/A for Coordinator">

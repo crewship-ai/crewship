@@ -72,31 +72,34 @@ export function StepContainer({ state, setState }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      <CreateSurfaceSection
-        title="Image and tooling"
-        icon={HardDrive}
-        accent="teal"
-        hint="Optional. The defaults run debian:bookworm-slim with nothing added."
-      >
-        <RuntimeConfig
-          value={{
-            runtimeImage: state.runtimeImage,
-            devcontainerConfig: state.devcontainerConfig,
-            miseConfig: state.miseConfig,
-          }}
-          onChange={(v) => setState({
-            runtimeImage: v.runtimeImage,
-            devcontainerConfig: v.devcontainerConfig,
-            miseConfig: v.miseConfig,
-          })}
-          canEditPrivileged={canEditPrivileged}
-          // Network and Size sit under this on the same step. At the
-          // component's own 420px both landed roughly two screens down, which
-          // is the "where did it go" the old two-step wizard had for other
-          // reasons.
-          browserHeight="240px"
-        />
-      </CreateSurfaceSection>
+      {/* Sections, not a tab strip.
+       *
+       * This used to wrap RuntimeConfig whole inside one "Image and tooling"
+       * section, so the step showed a create surface with a four-tab strip
+       * inside it — a navigation model no other door has, and the reason
+       * Container kept reading as a different product from the rest of the
+       * wizard. `layout="sections"` renders the same controls as the two
+       * sections /design leads with, plus three disclosures for what it does
+       * not show. Nothing is removed; see the note on the prop. */}
+      <RuntimeConfig
+        value={{
+          runtimeImage: state.runtimeImage,
+          devcontainerConfig: state.devcontainerConfig,
+          miseConfig: state.miseConfig,
+        }}
+        onChange={(v) => setState({
+          runtimeImage: v.runtimeImage,
+          devcontainerConfig: v.devcontainerConfig,
+          miseConfig: v.miseConfig,
+        })}
+        canEditPrivileged={canEditPrivileged}
+        layout="sections"
+        // Network and Size sit under this on the same step. At the
+        // component's own 420px both landed roughly two screens down, which
+        // is the "where did it go" the old two-step wizard had for other
+        // reasons.
+        browserHeight="240px"
+      />
 
       <NetworkSection state={state} setState={setState} />
       <SizeDisclosure state={state} setState={setState} />

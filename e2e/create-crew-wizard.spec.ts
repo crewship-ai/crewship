@@ -84,7 +84,7 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
 
     // Step 3 — Container
     await expect(page.getByText(/step 3 of 4/i).first()).toBeVisible()
-    await expect(page.getByText("Image and tooling")).toBeVisible()
+    await expect(page.getByText("Base image")).toBeVisible()
     await expect(page.getByRole("button", { name: /Skip to defaults/ })).toBeVisible()
     await page.getByRole("button", { name: /Skip to defaults/ }).click()
 
@@ -137,9 +137,9 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await page.getByRole("button", { name: /Empty crew/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Image and tooling is the first thing on the step, mounted rather than
+    // Base image is the first thing on the step, mounted rather than
     // hidden behind a disclosure — and the base-image picker with it.
-    await expect(page.getByText("Image and tooling").first()).toBeVisible()
+    await expect(page.getByText("Base image").first()).toBeVisible()
     await expect(page.getByText(/^Base Image$/i).first()).toBeVisible({ timeout: TIMEOUT })
 
     // Egress is open, and the allowlist is one switch away rather than the

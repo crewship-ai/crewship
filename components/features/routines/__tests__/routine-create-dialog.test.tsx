@@ -72,3 +72,34 @@ describe("<RoutineCreateDialog>", () => {
     expect(screen.queryByText(/step by step/i)).not.toBeInTheDocument()
   })
 })
+
+// ── The entry tiles are three routes, not one route and two greys ────────
+//
+// Two of the three carried accent="slate" and no meta, so the picker read as
+// "the blue one, and some other options". /design gives each route its own
+// colour and says in a word what you trade: fastest, or full control.
+describe("New routine — the three entry tiles", () => {
+  function tile(name: RegExp) {
+    return screen.getByRole("button", { name }) as HTMLButtonElement
+  }
+
+  it("gives each route a colour of its own", () => {
+    render(<RoutineCreateDialog {...PROPS} />)
+    const glyphTint = (name: RegExp) =>
+      tile(name).querySelector("span")?.className ?? ""
+
+    const describe_ = glyphTint(/^Describe it/)
+    const fork = glyphTint(/^Fork an existing routine/)
+    const write = glyphTint(/^Write it yourself/)
+
+    expect(describe_).not.toBe(fork)
+    expect(fork).not.toBe(write)
+    expect(write).not.toBe(describe_)
+  })
+
+  it("says what each route trades rather than marking one with a sparkle", () => {
+    render(<RoutineCreateDialog {...PROPS} />)
+    expect(tile(/^Describe it/).textContent).toMatch(/fastest/i)
+    expect(tile(/^Write it yourself/).textContent).toMatch(/full control/i)
+  })
+})

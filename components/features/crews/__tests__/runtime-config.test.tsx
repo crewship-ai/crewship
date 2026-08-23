@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, within, fireEvent, waitFor } from "@testing-library/react"
 import { RuntimeConfig, type RuntimeConfigValue } from "@/components/features/crews/runtime-config"
 import { BASE_IMAGES } from "@/components/features/crews/runtime-config-data"
 
@@ -129,5 +129,97 @@ describe("<RuntimeConfig> base image search", () => {
     expect(screen.getAllByRole("button", { name: /image details/i })).toHaveLength(BASE_IMAGES.length)
     const longDescription = BASE_IMAGES.find((b) => b.description.length > 40)!.description
     expect(screen.queryByText(longDescription)).not.toBeInTheDocument()
+  })
+})
+
+// ── layout="sections" — the wizard's Container step ──────────────────────
+//
+// New crew wrapped this component whole inside one section, so its four-tab
+// strip appeared inside a create surface: a navigation model no other door
+// has, and the reason Container kept reading as a different product from the
+// rest of the wizard. The sections layout renders the same controls with the
+// chrome /design specifies — base image and tooling on the page, the rest
+// folded — and the point of these tests is that folding is all it is.
+describe("RuntimeConfig — sections layout", () => {
+  function renderSections() {
+    return render(
+      <RuntimeConfig
+        value={{ runtimeImage: "", devcontainerConfig: "", miseConfig: "" }}
+        onChange={() => {}}
+        layout="sections"
+      />,
+    )
+  }
+
+  it("leads with base image and tooling instead of a tab strip", async () => {
+    renderSections()
+    expect(await screen.findByText("Base image")).toBeInTheDocument()
+    expect(screen.getByText("Preinstalled tooling")).toBeInTheDocument()
+    // The tab strip it replaces.
+    expect(screen.queryByRole("tab", { name: /Features/ })).toBeNull()
+  })
+
+  it("keeps runtimes, security and the generated files reachable", async () => {
+    renderSections()
+    await screen.findByText("Base image")
+    // Folded, not dropped: removing settings the create path has today would
+    // be a capability change wearing a redesign's clothes.
+    expect(screen.getByRole("button", { name: /Language runtimes/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Security/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Generated files/ })).toBeInTheDocument()
+  })
+
+  it("says what is inside a fold without opening it", async () => {
+    renderSections()
+    await screen.findByText("Base image")
+    expect(screen.getByRole("button", { name: /Language runtimes/ })).toHaveTextContent(/none pinned/i)
+    expect(screen.getByRole("button", { name: /Security/ })).toHaveTextContent(/standard sandbox/i)
+  })
+
+  it("still draws the tab strip in the default layout", async () => {
+    render(
+      <RuntimeConfig
+        value={{ runtimeImage: "", devcontainerConfig: "", miseConfig: "" }}
+        onChange={() => {}}
+      />,
+    )
+    expect(await screen.findByRole("tab", { name: /Features/ })).toBeInTheDocument()
+    expect(screen.queryByText("Preinstalled tooling")).toBeNull()
+  })
+})
+
+// ── A row is not a button inside a button ────────────────────────────────
+//
+// Each base-image row was a <button role="radio"> that CONTAINED the "i"
+// tooltip trigger, which is also a <button>. Nested interactive content is
+// invalid HTML: React logs a hydration error for it on every render of this
+// list, the dev overlay covers the page, and what a screen reader or a
+// keyboard user gets from the inner control is undefined.
+describe("RuntimeConfig — the base image rows", () => {
+  it("does not nest the details trigger inside the radio", async () => {
+    render(
+      <RuntimeConfig
+        value={{ runtimeImage: "", devcontainerConfig: "", miseConfig: "" }}
+        onChange={() => {}}
+      />,
+    )
+    await screen.findByRole("radiogroup", { name: /base image/i })
+
+    const nested = Array.from(document.querySelectorAll("button")).filter(
+      (b) => b.querySelector("button") !== null,
+    )
+    expect(nested).toEqual([])
+  })
+
+  it("keeps both controls reachable", async () => {
+    render(
+      <RuntimeConfig
+        value={{ runtimeImage: "", devcontainerConfig: "", miseConfig: "" }}
+        onChange={() => {}}
+      />,
+    )
+    const group = await screen.findByRole("radiogroup", { name: /base image/i })
+    expect(within(group).getAllByRole("radio").length).toBeGreaterThan(1)
+    expect(within(group).getAllByRole("button", { name: /image details/i }).length).toBeGreaterThan(1)
   })
 })
