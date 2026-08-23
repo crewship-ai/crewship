@@ -303,24 +303,51 @@ export function CreateSurface({
 
     {/* An AlertDialog, not a second CreateSurface: this is a decision with two
         answers and no form, which is what AlertDialog is for. Keeping the
-        distinction is half of why there were three modal shells. */}
+        distinction is half of why there were three modal shells.
+
+        It wears the surface's chrome all the same. Left on the primitive's
+        defaults it was a bg-background card with p-6, a 512px width and a
+        blue confirm — a different dialog language arriving on top of the one
+        the user is looking at, at the moment they are deciding whether to
+        lose work. Same card, same hairline header and footer, same paddings,
+        and the destructive answer is red because it destroys something. */}
     <AlertDialog open={confirmingDiscard} onOpenChange={setConfirmingDiscard}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Discard {discardLabel ?? "this"}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            You have unsaved input. Closing throws it away — there is no draft.
-          </AlertDialogDescription>
+      {/* The width override carries the primitive's own `data-[size=default]`
+          variant. Without it the two rules tie on specificity and source order
+          decides, which left the card at max-w-lg. */}
+      <AlertDialogContent className="gap-0 overflow-hidden border-hairline bg-card p-0 data-[size=default]:sm:max-w-[420px]">
+        <AlertDialogHeader className="shrink-0 space-y-0 border-b border-hairline px-4 py-2.5 text-left sm:px-5 sm:py-3">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-destructive/15 text-destructive">
+              <TriangleAlert className="h-3.5 w-3.5" />
+            </span>
+            <AlertDialogTitle className="min-w-0 truncate text-sm font-semibold text-foreground">
+              Discard {discardLabel ?? "this"}?
+            </AlertDialogTitle>
+          </div>
         </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => { pendingRef.current = null }}>Keep editing</AlertDialogCancel>
+        <AlertDialogDescription className="px-4 py-3.5 text-xs leading-relaxed text-muted-foreground sm:px-5 sm:py-4">
+          You have unsaved input. Closing throws it away — there is no draft.
+        </AlertDialogDescription>
+        <AlertDialogFooter className="shrink-0 gap-2 border-t border-hairline px-4 py-2.5 sm:space-x-0 sm:px-5 sm:py-3">
+          <AlertDialogCancel
+            variant="ghost"
+            size="sm"
+            onClick={() => { pendingRef.current = null }}
+            className="mt-0 text-xs text-muted-foreground hover:text-foreground max-sm:h-12 max-sm:text-sm"
+          >
+            Keep editing
+          </AlertDialogCancel>
           <AlertDialogAction
+            variant="destructive"
+            size="sm"
             onClick={() => {
               setConfirmingDiscard(false)
               const run = pendingRef.current
               pendingRef.current = null
               run?.()
             }}
+            className="text-xs max-sm:h-12 max-sm:text-sm"
           >
             Discard
           </AlertDialogAction>

@@ -267,6 +267,35 @@ describe("the discard guard", () => {
     fireEvent.click(screen.getByRole("button", { name: /^discard$/i }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+
+  // Reported from a screenshot: the guard arrived in the primitive's own
+  // clothes — bg-background, p-6, a 512px card and a blue confirm — on top of
+  // the surface it belongs to, at the moment the user is deciding whether to
+  // lose work. It is the same card as the surface now.
+  it("wears the surface's chrome, not the primitive's defaults", () => {
+    render(<Dirty dirty onOpenChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+
+    const alert = screen.getByRole("alertdialog")
+    expect(alert.className).toContain("bg-card")
+    expect(alert.className).toContain("border-hairline")
+    // The width override has to carry the primitive's own data-size variant,
+    // or the two rules tie and source order leaves the card at max-w-lg.
+    expect(alert.className).toContain("data-[size=default]:sm:max-w-[420px]")
+    // Its own padding is zero: the header and footer bring the surface's.
+    expect(alert.className).toContain("p-0")
+  })
+
+  it("makes the destructive answer look destructive", () => {
+    render(<Dirty dirty onOpenChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+
+    const discard = screen.getByRole("button", { name: /^discard$/i })
+    expect(discard.className).toMatch(/destructive/)
+    // And the way back out is not competing with it for attention.
+    const keep = screen.getByRole("button", { name: /keep editing/i })
+    expect(keep.className).not.toMatch(/bg-primary/)
+  })
 })
 
 describe("CreateSurfaceRefusal", () => {

@@ -1049,17 +1049,26 @@ export function PageEditor({
           </div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <FileEditor
-            key={`page-editor-${editorKey}`}
-            code={text}
-            language="yaml"
-            onSave={handleEditorSave}
-            onDirtyChange={setDirty}
-            saveRef={saveRef}
-            onDocChange={handleDocChange}
-            extraExtensions={extraExtensions}
-          />
+        {/* `relative` + `absolute inset-0`, not `flex-1` alone.
+            CodeMirror's theme sets `height: 100%` on `.cm-editor`, and a
+            percentage against a flex item whose height comes from flex
+            distribution resolved to auto here — so the editor grew to fit the
+            whole buffer (measured: 1502px inside a 620px body) and
+            `.cm-scroller` had nothing to scroll. Absolute inset-0 gives it a
+            definite box, so the scroller is the buffer's scroller again. */}
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div className="absolute inset-0">
+            <FileEditor
+              key={`page-editor-${editorKey}`}
+              code={text}
+              language="yaml"
+              onSave={handleEditorSave}
+              onDirtyChange={setDirty}
+              saveRef={saveRef}
+              onDocChange={handleDocChange}
+              extraExtensions={extraExtensions}
+            />
+          </div>
         </div>
       </CreateSurfaceBody>
 

@@ -24,6 +24,64 @@ import { TextStyle } from "@tiptap/extension-text-style"
 import { Color } from "@tiptap/extension-color"
 import TextAlign from "@tiptap/extension-text-align"
 import { cn } from "@/lib/utils"
+
+/**
+ * What the selection bubble measures to before it has ever been rendered.
+ *
+ * Only used for the first clamp of a given editor instance; every clamp after
+ * that reads the node's real width. Measured at 190px in the browser.
+ */
+const BUBBLE_MENU_W = 190
+/** Breathing room between a floating menu and the container's edge. */
+const EDGE_PAD = 8
+/** How tall the bubble is, plus the gap it keeps from the text. */
+const BUBBLE_MENU_H = 44
+
+interface Rect {
+  top: number
+  left: number
+  right: number
+  bottom: number
+}
+
+/**
+ * Where the selection bubble goes, in container coordinates.
+ *
+ * Extracted from the selection handler because both of its rules are
+ * arithmetic that was wrong in a way no render test would catch:
+ *
+ *  · The bubble is `translateX(-50%)` around the returned `left`, so a
+ *    selection at the start of a line put half of it at a negative x. Inside
+ *    a dialog — which clips — half the toolbar was simply gone. Seen on
+ *    New project, reported from a screenshot.
+ *  · Placing it above the selection unconditionally puts it on top of the
+ *    editor's own toolbar when the selection is on the first line. It flips
+ *    below when there is no room.
+ */
+export function placeBubbleMenu({
+  selection,
+  selectionEnd,
+  container,
+  menuWidth,
+}: {
+  selection: Rect
+  selectionEnd: Rect
+  container: { top: number; left: number; width: number }
+  menuWidth: number
+}): { top: number; left: number } {
+  const midX = (selection.left + selectionEnd.right) / 2 - container.left
+  const above = selection.top - container.top - BUBBLE_MENU_H
+  const top = above < EDGE_PAD ? selectionEnd.bottom - container.top + EDGE_PAD : above
+
+  const half = menuWidth / 2
+  // max() so a container narrower than the menu still yields a sane point
+  // rather than an upper bound below the lower one.
+  const maxX = Math.max(half + EDGE_PAD, container.width - half - EDGE_PAD)
+  return {
+    top: Math.max(EDGE_PAD, top),
+    left: Math.min(Math.max(midX, half + EDGE_PAD), maxX),
+  }
+}
 import {
   AlignCenter,
   AlignLeft,
@@ -247,11 +305,14 @@ export function TiptapEditor({
           const endCoords = e.view.coordsAtPos(to)
           const containerEl = containerRef.current
           if (containerEl) {
-            const containerRect = containerEl.getBoundingClientRect()
-            const midX =
-              (coords.left + endCoords.right) / 2 - containerRect.left
-            const topY = coords.top - containerRect.top - 44
-            setBubbleMenuPos({ top: topY, left: midX })
+            setBubbleMenuPos(
+              placeBubbleMenu({
+                selection: coords,
+                selectionEnd: endCoords,
+                container: containerEl.getBoundingClientRect(),
+                menuWidth: bubbleMenuRef.current?.offsetWidth || BUBBLE_MENU_W,
+              }),
+            )
             setBubbleMenuVisible(true)
           }
         } catch {
