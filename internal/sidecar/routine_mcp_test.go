@@ -70,7 +70,7 @@ func TestRoutinesMCP_ToolsList_ValidSchema(t *testing.T) {
 			t.Errorf("tool %q inputSchema.type = %v, want object", tl.Name, schema["type"])
 		}
 	}
-	want := []string{"save_routine", "list_routines", "run_routine", "discover_capabilities", "validate_manifest"}
+	want := []string{"save_routine", "list_routines", "run_routine", "save_page", "discover_capabilities", "validate_manifest"}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
@@ -343,6 +343,135 @@ func TestRoutinesMCP_SaveRoutine_MissingDefinition_IsError(t *testing.T) {
 	}
 }
 
+// TestRoutinesMCP_SavePage_HappyPath verifies save_page forwards to the
+// internal page-save route with identity injected from IPC — mirroring
+// TestRoutinesMCP_SaveRoutine_HappyPath's forged-field assertion: the agent
+// cannot claim a different crew_id than the one it is actually bound to.
+func TestRoutinesMCP_SavePage_HappyPath(t *testing.T) {
+	var saveBody map[string]any
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/internal/pages/save") {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&saveBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"slug":"ops-status","owner":"crew/eng"}`))
+	}))
+	defer mock.Close()
+
+	s := newRoutineMCPTestServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "t", WorkspaceID: "ws-real",
+		CrewID: "crew-real", AgentID: "agent-real", ChatID: "chat-real",
+	})
+	// Agent forges crew_id — must be ignored by the shared savePage (it is
+	// not even in pagesSaveRequest, so there is nothing to forge here, but
+	// the assertion below still proves the injected value is IPC's own).
+	body := `{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{
+		"name":"save_page",
+		"arguments":{
+			"name":"Ops Status",
+			"description":"status board",
+			"panels":[{"id":"p1","schema":"status.v1","owner":"crew/eng","producer":"agent/lead","sla_seconds":30,"span":4}]
+		}}}`
+	req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Result.IsError {
+		t.Errorf("isError=true on happy path; content=%v", resp.Result.Content)
+	}
+	if len(resp.Result.Content) == 0 || !strings.Contains(resp.Result.Content[0].Text, "ops-status") {
+		t.Errorf("content should carry saved page JSON, got %+v", resp.Result.Content)
+	}
+	if saveBody["workspace_id"] != "ws-real" {
+		t.Errorf("save workspace_id = %v, want ws-real", saveBody["workspace_id"])
+	}
+	if saveBody["crew_id"] != "crew-real" {
+		t.Errorf("save crew_id = %v, want crew-real (from IPC, agent cannot set it)", saveBody["crew_id"])
+	}
+	if saveBody["agent_id"] != "agent-real" {
+		t.Errorf("save agent_id = %v, want agent-real (the acting agent)", saveBody["agent_id"])
+	}
+}
+
+// TestRoutinesMCP_SavePage_HeldByPolicy_ReturnsIsError verifies a held
+// (403, pending_review) response from the internal save route surfaces as a
+// recoverable MCP tool error, so the model tells the user the page needs
+// operator approval instead of claiming it was created.
+func TestRoutinesMCP_SavePage_HeldByPolicy_ReturnsIsError(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"Page creation held by policy","pending_review":true}`))
+	}))
+	defer mock.Close()
+
+	s := newRoutineMCPTestServer(t, &IPCConfig{BaseURL: mock.URL, Token: "t", WorkspaceID: "ws", CrewID: "c", AgentID: "a"})
+	body := `{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{
+		"name":"save_page",
+		"arguments":{"name":"Ops Status","panels":[{"id":"p1","schema":"status.v1"}]}}}`
+	req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+
+	var resp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Result.IsError {
+		t.Fatalf("expected isError=true when held by policy, got %s", w.Body.String())
+	}
+	if len(resp.Result.Content) == 0 || !strings.Contains(resp.Result.Content[0].Text, "pending_review") {
+		t.Errorf("content should carry the held response verbatim, got %+v", resp.Result.Content)
+	}
+}
+
+// TestRoutinesMCP_SavePage_MissingPanels_IsError verifies the local
+// validation gate (name+panels required) surfaces through the tool without
+// ever reaching IPC.
+func TestRoutinesMCP_SavePage_MissingPanels_IsError(t *testing.T) {
+	s := newRoutineMCPTestServer(t, &IPCConfig{BaseURL: "http://must-not-be-called", Token: "t", WorkspaceID: "ws"})
+	body := `{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{
+		"name":"save_page","arguments":{"name":"only a name"}}}`
+	req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+
+	var resp struct {
+		Result struct {
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.Result.IsError {
+		t.Fatalf("expected isError=true when panels missing, got %s", w.Body.String())
+	}
+}
+
 // TestRoutinesMCP_ListRoutines_ForwardsToWorkspace verifies list_routines
 // hits the INTERNAL pipelines endpoint and returns the list payload.
 //
@@ -523,5 +652,151 @@ func TestRoutinesMCP_UnknownMethod_MethodNotFound(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.Error == nil || resp.Error.Code != -32601 {
 		t.Fatalf("want -32601 method not found, got %s", w.Body.String())
+	}
+}
+
+// TestRoutinesMCP_SaveRoutine_ForwardsTargetCrewOnBothLegs pins the one
+// identity field an agent IS allowed to supply, and the reason it has to
+// ride on the test_run leg as well as the save leg.
+//
+// The save_token the internal test_run mints is signed over the AUTHORING
+// crew, and InternalSave re-derives that HMAC over the crew the routine
+// actually lands on. Sending target_crew_slug only on the save would dry-run
+// as the Guide, mint a token bound to the Guide, and then fail verification
+// at the crew the routine is FOR — a signature error, in a flow whose real
+// failure was ownership. Both legs or neither.
+func TestRoutinesMCP_SaveRoutine_ForwardsTargetCrewOnBothLegs(t *testing.T) {
+	var testRunTarget, saveTarget any
+	var saveCrewID any
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/test_run"):
+			testRunTarget = got["target_crew_slug"]
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"DRY_RUN_OK","save_token":"tok"}`))
+		case strings.HasSuffix(r.URL.Path, "/internal/pipelines/save"):
+			saveTarget = got["target_crew_slug"]
+			saveCrewID = got["author_crew_id"]
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"slug":"uptime","saved":true}`))
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer mock.Close()
+
+	s := newRoutineMCPTestServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "t", WorkspaceID: "ws-real",
+		CrewID: "crew-guide", AgentID: "agent-guide", ChatID: "chat-1",
+	})
+	body := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{
+		"name":"save_routine",
+		"arguments":{
+			"name":"Uptime",
+			"definition":{"steps":[]},
+			"crew":"hlidac-dostupnosti"
+		}}}`
+	req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if testRunTarget != "hlidac-dostupnosti" {
+		t.Errorf("test_run target_crew_slug = %v, want hlidac-dostupnosti", testRunTarget)
+	}
+	if saveTarget != "hlidac-dostupnosti" {
+		t.Errorf("save target_crew_slug = %v, want hlidac-dostupnosti", saveTarget)
+	}
+	// The caller's own identity still comes from IPC and is unaffected — the
+	// API decides whether the delegation is allowed, and it needs to know who
+	// is asking.
+	if saveCrewID != "crew-guide" {
+		t.Errorf("author_crew_id = %v, want crew-guide (the caller, from IPC)", saveCrewID)
+	}
+}
+
+// The same field on save_page, plus the read tool that has to agree with it:
+// a page's producer refs name the TARGET crew's agents, so asking
+// discover_capabilities about the caller would hand the model the wrong
+// roster and every ref it wrote would fail to resolve.
+func TestRoutinesMCP_SavePageAndDiscover_CarryTheTargetCrew(t *testing.T) {
+	var pageTarget any
+	var capsQuery string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/internal/pages/save"):
+			var got map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&got)
+			pageTarget = got["target_crew_slug"]
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"slug":"dostupnost"}`))
+		case strings.Contains(r.URL.Path, "/capabilities"):
+			capsQuery = r.URL.RawQuery
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"agents":[]}`))
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer mock.Close()
+
+	s := newRoutineMCPTestServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "t", WorkspaceID: "ws-real",
+		CrewID: "crew-guide", AgentID: "agent-guide",
+	})
+
+	call := func(payload string) {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(payload))
+		req.Host = "127.0.0.1:9119"
+		w := httptest.NewRecorder()
+		s.handleRoutinesMCP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+		}
+	}
+
+	call(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{
+		"name":"save_page",
+		"arguments":{"name":"Dostupnost","panels":[{"id":"p1"}],"crew":"hlidac-dostupnosti"}}}`)
+	if pageTarget != "hlidac-dostupnosti" {
+		t.Errorf("save_page target_crew_slug = %v, want hlidac-dostupnosti", pageTarget)
+	}
+
+	call(`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{
+		"name":"discover_capabilities","arguments":{"crew":"hlidac-dostupnosti"}}}`)
+	if !strings.Contains(capsQuery, "target_crew_slug=hlidac-dostupnosti") {
+		t.Errorf("capabilities query = %q, want it to carry target_crew_slug", capsQuery)
+	}
+}
+
+// Omitting `crew` must stay exactly as it was: an ordinary crew authoring for
+// itself is the overwhelmingly common case, and an empty target_crew_slug
+// must not read as a delegation attempt on the API side.
+func TestRoutinesMCP_DiscoverWithoutCrew_AsksAboutItself(t *testing.T) {
+	var capsQuery string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capsQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"agents":[]}`))
+	}))
+	defer mock.Close()
+
+	s := newRoutineMCPTestServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "t", WorkspaceID: "ws-real", CrewID: "crew-own",
+	})
+	req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(
+		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"discover_capabilities"}}`))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+
+	if strings.Contains(capsQuery, "target_crew_slug") {
+		t.Errorf("query = %q, must not carry an empty target_crew_slug", capsQuery)
 	}
 }

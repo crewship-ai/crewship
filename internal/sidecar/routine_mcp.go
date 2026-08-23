@@ -41,6 +41,10 @@ var routineMCPSaveSchema = json.RawMessage(`{
 			"type": "object",
 			"description": "Example inputs supplied to the mandatory test_run. Pick values that exercise the routine end-to-end so the gate passes.",
 			"additionalProperties": true
+		},
+		"crew": {
+			"type": "string",
+			"description": "Slug of the crew this routine is FOR. Onboarding only: the setup guide builds routines that belong to the crew the person just created, and must name it here. That crew must already exist. Ordinary crews leave this unset — a routine belongs to the crew that writes it."
 		}
 	},
 	"required": ["name", "definition"],
@@ -83,7 +87,41 @@ var routineMCPListSchema = json.RawMessage(`{
 // own crew, derived from IPC, never the caller.
 var routineMCPDiscoverSchema = json.RawMessage(`{
 	"type": "object",
-	"properties": {},
+	"properties": {
+		"crew": {
+			"type": "string",
+			"description": "Slug of the crew to describe. Onboarding only: pass the crew you are authoring FOR, so the agent slugs you get back are the ones your routine or page must name. Omit to describe your own crew."
+		}
+	},
+	"additionalProperties": false
+}`)
+
+// pagesMCPSaveSchema is the JSON Schema for save_page. Panels stays a bare
+// array of objects rather than a fully-specified schema: the server is the
+// real validator (documentFrom/resolveReferences), and duplicating its
+// rules here would only give this schema a second copy to drift from.
+var pagesMCPSaveSchema = json.RawMessage(`{
+	"type": "object",
+	"properties": {
+		"name": {
+			"type": "string",
+			"description": "Human-readable page name. The url slug is derived from this server-side."
+		},
+		"description": {
+			"type": "string",
+			"description": "One-line summary of what the page shows."
+		},
+		"panels": {
+			"type": "array",
+			"description": "The page's panels. Each needs id, schema (one of status.v1, metric.v1, series.v1, table.v1, narrative.v1, embed.v1), owner (\"crew/<slug>\"), producer (\"<kind>/<ref>\", e.g. \"agent/<slug>\" or \"routine/<slug>\"), sla_seconds, and span (1-12). Call discover_capabilities first to see this crew's real agent/routine slugs before naming a producer.",
+			"items": {"type": "object"}
+		},
+		"crew": {
+			"type": "string",
+			"description": "Slug of the crew this page is FOR. Onboarding only: the setup guide builds pages that belong to the crew the person just created, and must name it here — its panels' owner and producer refs must name that crew and ITS agents, which discover_capabilities will list if you pass the same slug. Ordinary crews leave this unset."
+		}
+	},
+	"required": ["name", "panels"],
 	"additionalProperties": false
 }`)
 
@@ -114,6 +152,9 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"`sample_inputs` for the mandatory test_run. The routine is test-run inline before " +
 			"saving: on success the saved routine is returned; on a DSL or validation error the " +
 			"exact failure is returned so you can fix the definition and call save_routine again. " +
+			"A routine belongs to the crew that runs it: if you are building for a DIFFERENT crew " +
+			"(the onboarding guide always is), pass its slug as `crew` — the routine's network " +
+			"policy, credentials and container all follow that ownership. " +
 			"Do NOT shell out to curl — call this tool directly.",
 		InputSchema: routineMCPSaveSchema,
 	},
@@ -131,6 +172,18 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"run result/status is returned so you can report the outcome. Do NOT shell out to curl — " +
 			"call this tool directly.",
 		InputSchema: routineMCPRunSchema,
+	},
+	{
+		Name: "save_page",
+		Description: "Create a Crewship page (a typed operational dashboard: status/metric/series/table/narrative/embed " +
+			"panels). Supply the page name, a short description, and the `panels` array. If this crew's autonomy level " +
+			"allows it the page is created immediately and its document is returned; otherwise the request is HELD for " +
+			"operator approval (no page is created) and you must tell the user that plainly rather than claiming the " +
+			"page exists. On a validation error the exact failure is returned so you can fix the panels and call " +
+			"save_page again. If you are building for a DIFFERENT crew (the onboarding guide always is), pass its " +
+			"slug as `crew`, and give discover_capabilities the same slug so the producer refs you write name that " +
+			"crew's real agents. Do NOT shell out to curl — call this tool directly.",
+		InputSchema: pagesMCPSaveSchema,
 	},
 	{
 		Name: "discover_capabilities",
@@ -159,10 +212,11 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 // authoring tools instead of the memory tools. Methods:
 //
 //   - initialize  → handshake; returns protocolVersion + serverInfo
-//   - tools/list  → returns save_routine + list_routines + run_routine descriptors
-//   - tools/call  → dispatches save_routine / list_routines / run_routine to the
-//     shared savePipeline / listPipelines / runPipeline helpers (author +
-//     invoker identity injected from IPC)
+//   - tools/list  → returns save_routine + list_routines + run_routine + save_page
+//     (+ discover_capabilities + validate_manifest) descriptors
+//   - tools/call  → dispatches save_routine / list_routines / run_routine /
+//     save_page to the shared savePipeline / listPipelines / runPipeline /
+//     savePage helpers (author + invoker identity injected from IPC)
 //
 // Unknown methods return JSON-RPC -32601 (method not found).
 func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
@@ -284,10 +338,30 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		status, bodyBytes = s.savePipeline(r.Context(), save, actingAgentID)
+	case "save_page":
+		var save pagesSaveRequest
+		if len(params.Arguments) > 0 {
+			if err := json.Unmarshal(params.Arguments, &save); err != nil {
+				s.writeRoutinesMCPToolResult(w, req, http.StatusBadRequest,
+					mustJSON(map[string]string{"error": "invalid arguments: " + err.Error()}))
+				return
+			}
+		}
+		status, bodyBytes = s.savePage(r.Context(), save, actingAgentID)
 	case "list_routines":
 		status, bodyBytes = s.listPipelines(r.Context(), "")
 	case "discover_capabilities":
-		status, bodyBytes = s.crewCapabilities(r.Context())
+		var disco struct {
+			Crew string `json:"crew"`
+		}
+		if len(params.Arguments) > 0 {
+			if err := json.Unmarshal(params.Arguments, &disco); err != nil {
+				s.writeRoutinesMCPToolResult(w, req, http.StatusBadRequest,
+					mustJSON(map[string]string{"error": "invalid arguments: " + err.Error()}))
+				return
+			}
+		}
+		status, bodyBytes = s.crewCapabilities(r.Context(), disco.Crew)
 	case "run_routine":
 		var run routineRunRequest
 		if len(params.Arguments) > 0 {
