@@ -1,23 +1,23 @@
 {
   "summary": {
-    "api_operations": 584,
-    "api_exact_docs": 584,
+    "api_operations": 588,
+    "api_exact_docs": 588,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 793,
-    "cli_exact_docs": 793,
-    "cli_root_docs_present": 793,
+    "cli_operations": 800,
+    "cli_exact_docs": 800,
+    "cli_root_docs_present": 800,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 435,
-    "api_with_concrete_response_schemas": 569,
+    "api_with_test_signals": 439,
+    "api_with_concrete_response_schemas": 573,
     "api_generic_response_schemas": 0,
-    "api_with_request_bodies": 248,
-    "api_with_concrete_json_requests": 244,
+    "api_with_request_bodies": 251,
+    "api_with_concrete_json_requests": 247,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 778,
-    "cli_with_flags": 378,
-    "cli_with_all_flags_documented": 378,
+    "cli_with_test_signals": 785,
+    "cli_with_flags": 379,
+    "cli_with_all_flags_documented": 379,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 102,
@@ -7700,9 +7700,9 @@
         "cmd/crewship/cmd_credential_cov_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
         "cmd/crewship/cmd_credential_mutate_cov_test.go",
+        "internal/api/anthropic_probe_test.go",
         "internal/api/credentials_test.go",
         "internal/api/credentials_test_endpoint_cov_test.go",
-        "internal/api/openapi_conformance_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -7727,9 +7727,9 @@
             "cmd/crewship/cmd_credential_cov_test.go",
             "cmd/crewship/cmd_credential_mutate_cov2_test.go",
             "cmd/crewship/cmd_credential_mutate_cov_test.go",
+            "internal/api/anthropic_probe_test.go",
             "internal/api/credentials_test.go",
             "internal/api/credentials_test_endpoint_cov_test.go",
-            "internal/api/openapi_conformance_test.go",
             "…"
           ]
         }
@@ -8518,9 +8518,9 @@
         "internal/api/core_handlers_test.go",
         "internal/api/crew_templates_cov2_test.go",
         "internal/api/crew_templates_cov_test.go",
+        "internal/api/crew_templates_credential_provider_test.go",
         "internal/api/crew_templates_foreign_builtin_test.go",
         "internal/api/crew_templates_shadow_test.go",
-        "internal/api/persona_skillgen_templates_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -8545,9 +8545,9 @@
             "internal/api/core_handlers_test.go",
             "internal/api/crew_templates_cov2_test.go",
             "internal/api/crew_templates_cov_test.go",
+            "internal/api/crew_templates_credential_provider_test.go",
             "internal/api/crew_templates_foreign_builtin_test.go",
             "internal/api/crew_templates_shadow_test.go",
-            "internal/api/persona_skillgen_templates_cov_test.go",
             "…"
           ]
         }
@@ -17318,9 +17318,13 @@
         "docs/api-reference/overview.mdx",
         "docs/guides/auth.mdx"
       ],
+      "resource_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
+        "internal/api/onboarding_applied_proposal_test.go",
         "internal/api/onboarding_hire_config_cov_test.go"
       ],
       "concrete_response_schema": true,
@@ -17341,7 +17345,124 @@
           "source_file": "cmd/crewship/cmd_system.go",
           "test_signals": [
             "cmd/crewship/cmd_system_cov_test.go",
+            "internal/api/onboarding_applied_proposal_test.go",
             "internal/api/onboarding_hire_config_cov_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/onboarding/proposals",
+      "operation_id": "post_api_v1_onboarding_proposals",
+      "tag": "onboarding",
+      "source_file": "cmd/crewship/cmd_onboarding.go",
+      "exact_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_onboarding_test.go",
+        "internal/api/onboarding_applied_proposal_test.go",
+        "internal/api/onboarding_proposal_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/crewship/cmd_onboarding.go",
+          "test_signals": [
+            "cmd/crewship/cmd_onboarding_test.go",
+            "internal/api/onboarding_applied_proposal_test.go",
+            "internal/api/onboarding_proposal_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/onboarding/proposals/{id}",
+      "operation_id": "get_api_v1_onboarding_proposals_id",
+      "tag": "onboarding",
+      "exact_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/onboarding_applied_proposal_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "test_signals": [
+            "internal/api/onboarding_applied_proposal_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/onboarding/proposals/{id}/apply",
+      "operation_id": "post_api_v1_onboarding_proposals_id_apply",
+      "tag": "onboarding",
+      "source_file": "internal/api/onboarding_proposal_routes.go",
+      "exact_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/onboarding_applied_proposal_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/onboarding_proposal_routes.go",
+          "test_signals": [
+            "internal/api/onboarding_applied_proposal_test.go"
           ]
         }
       }
@@ -17353,17 +17474,24 @@
       "tag": "onboarding",
       "source_file": "cmd/crewship/cmd_setup.go",
       "exact_docs": [
+        "docs/api-reference/onboarding.mdx",
         "docs/api-reference/overview.mdx",
         "docs/cli/setup.mdx",
         "docs/cli/system.mdx",
         "docs/guides/auth.mdx"
       ],
+      "resource_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_onboarding_test.go",
         "cmd/crewship/cmd_setup_cov_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
+        "internal/api/onboarding_applied_proposal_test.go",
         "internal/api/onboarding_cov2_test.go",
-        "internal/api/onboarding_hire_config_cov_test.go"
+        "internal/api/onboarding_hire_config_cov_test.go",
+        "internal/api/onboarding_setup_agent_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -17382,10 +17510,53 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_setup.go",
           "test_signals": [
+            "cmd/crewship/cmd_onboarding_test.go",
             "cmd/crewship/cmd_setup_cov_test.go",
             "cmd/crewship/cmd_system_cov_test.go",
+            "internal/api/onboarding_applied_proposal_test.go",
             "internal/api/onboarding_cov2_test.go",
-            "internal/api/onboarding_hire_config_cov_test.go"
+            "internal/api/onboarding_hire_config_cov_test.go",
+            "internal/api/onboarding_setup_agent_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/onboarding/setup-agent/start",
+      "operation_id": "post_api_v1_onboarding_setup-agent_start",
+      "tag": "onboarding",
+      "source_file": "cmd/crewship/cmd_onboarding.go",
+      "exact_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_onboarding_test.go",
+        "internal/api/onboarding_setup_agent_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/crewship/cmd_onboarding.go",
+          "test_signals": [
+            "cmd/crewship/cmd_onboarding_test.go",
+            "internal/api/onboarding_setup_agent_test.go"
           ]
         }
       }
@@ -17400,6 +17571,9 @@
         "docs/api-reference/overview.mdx",
         "docs/cli/system.mdx",
         "docs/guides/auth.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/onboarding.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -20408,7 +20582,8 @@
       "exact_docs": [
         "docs/api-reference/admin.mdx",
         "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
-        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md",
+        "docs/prd/conversational-onboarding.md"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -29645,6 +29820,7 @@
         "docs/cli/credential.mdx",
         "docs/cli/crew.mdx",
         "docs/cli/mcp.mdx",
+        "docs/cli/onboarding.mdx",
         "docs/cli/open.mdx",
         "docs/cli/overview.mdx",
         "docs/cli/recipe.mdx",
@@ -38886,6 +39062,150 @@
       ]
     },
     {
+      "path": "onboarding",
+      "use": "onboarding",
+      "short": "Onboarding proposal store — propose a crew, apply it under your own session",
+      "root": "onboarding",
+      "exact_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_onboarding_test.go",
+        "cmd/crewship/cmd_system_test.go"
+      ]
+    },
+    {
+      "path": "onboarding proposal",
+      "use": "proposal",
+      "short": "Create, inspect, and apply onboarding proposals",
+      "root": "onboarding",
+      "exact_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_onboarding_test.go"
+      ]
+    },
+    {
+      "path": "onboarding proposal apply",
+      "use": "apply \u003cproposal-id\u003e",
+      "short": "Apply a proposal — the only write in this surface",
+      "root": "onboarding",
+      "exact_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_onboarding_test.go"
+      ]
+    },
+    {
+      "path": "onboarding proposal create",
+      "use": "create",
+      "short": "Propose a crew from a template — writes nothing until `apply`",
+      "root": "onboarding",
+      "exact_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/acceptance_credential_openrouter_test.go",
+        "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_audit_test.go",
+        "cmd/crewship/cmd_chat_create_test.go",
+        "cmd/crewship/cmd_checkpoint_cov_test.go",
+        "cmd/crewship/cmd_checkpoint_test.go",
+        "cmd/crewship/cmd_credential_endpoint_headeronly_test.go",
+        "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "…"
+      ],
+      "flags": [
+        "agent",
+        "crew-name",
+        "crew-slug",
+        "llm-model",
+        "llm-provider",
+        "template-slug"
+      ],
+      "documented_flags": [
+        "agent",
+        "crew-name",
+        "crew-slug",
+        "llm-model",
+        "llm-provider",
+        "template-slug"
+      ]
+    },
+    {
+      "path": "onboarding proposal get",
+      "use": "get \u003cproposal-id\u003e",
+      "short": "Show a stored onboarding proposal",
+      "root": "onboarding",
+      "exact_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_onboarding_test.go"
+      ]
+    },
+    {
+      "path": "onboarding setup-agent",
+      "use": "setup-agent",
+      "short": "The in-wizard chat agent that helps stand up your crew",
+      "root": "onboarding",
+      "exact_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_onboarding_test.go"
+      ]
+    },
+    {
+      "path": "onboarding setup-agent start",
+      "use": "start",
+      "short": "Start (or resume) the onboarding setup agent's chat session",
+      "root": "onboarding",
+      "exact_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/onboarding.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_crew_provision_referenced_test.go",
+        "cmd/crewship/cmd_crew_start_test.go",
+        "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_workflow_cov_test.go",
+        "cmd/crewship/cmd_mission_run_cov_test.go",
+        "cmd/crewship/cmd_onboarding_test.go",
+        "cmd/crewship/cmd_root_headless_test.go",
+        "cmd/crewship/cmd_start_cov_test.go"
+      ]
+    },
+    {
       "path": "open",
       "use": "open \u003cresource\u003e [id]",
       "short": "Open the web UI page for a resource (inbox, activity, chat, etc.)",
@@ -44603,6 +44923,7 @@
       "exact_docs": [
         "docs/cli/init.mdx",
         "docs/cli/login.mdx",
+        "docs/cli/onboarding.mdx",
         "docs/cli/overview.mdx",
         "docs/cli/seed.mdx",
         "docs/cli/setup.mdx"
@@ -47168,7 +47489,9 @@
     {
       "name": "CREWSHIP_BOOTSTRAP_WINDOW",
       "docs": [
+        "docs/changelog/overview.mdx",
         "docs/configuration/environment.mdx",
+        "docs/prd/conversational-onboarding.md",
         "docs/quickstart.mdx"
       ],
       "status": "documented"
@@ -47756,7 +48079,8 @@
       "docs": [
         "docs/configuration/devcontainers.mdx",
         "docs/configuration/environment.mdx",
-        "docs/guides/devcontainers.mdx"
+        "docs/guides/devcontainers.mdx",
+        "docs/prd/conversational-onboarding.md"
       ],
       "status": "documented"
     },
@@ -48025,6 +48349,7 @@
         "docs/prd/agent-identity-signing.md",
         "docs/prd/agent-memory-on-wake.md",
         "docs/prd/chat-as-a-primary-surface.md",
+        "docs/prd/conversational-onboarding.md",
         "docs/prd/model-scoped-credentials.md",
         "docs/prd/pages.md",
         "docs/production-checklist.mdx",
@@ -48364,6 +48689,7 @@
         "docs/guides/routines.mdx",
         "docs/manifest/README.md",
         "docs/manifest/page.md",
+        "docs/prd/crewship-guide.md",
         "docs/prd/memory-retrieval-layer.md",
         "docs/prd/pages.md",
         "docs/security/audit.mdx"
@@ -48474,6 +48800,7 @@
         "docs/prd/CHAT-SURFACE-CODE-AUDIT-2026-08-13.md",
         "docs/prd/agent-identity-signing.md",
         "docs/prd/chat-as-a-primary-surface.md",
+        "docs/prd/crewship-guide.md",
         "docs/security/container-isolation.mdx"
       ],
       "status": "documented"
@@ -48644,11 +48971,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4402,
-    "api_path_references": 2158,
-    "environment_references": 431,
+    "command_references": 4413,
+    "api_path_references": 2166,
+    "environment_references": 432,
     "manifest_kind_references": 230,
-    "flag_references": 2084,
+    "flag_references": 2087,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,
