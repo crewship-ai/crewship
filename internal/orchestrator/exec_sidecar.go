@@ -1112,6 +1112,23 @@ func sidecarConfigFingerprint(key string, creds []Credential) string {
 	return hex.EncodeToString(mac.Sum(nil))[:24]
 }
 
+// credentialIsolationFailedOpen reports whether this run hands the sidecar a
+// routed provider credential that it cannot bind to a configuration identity.
+//
+// sidecarConfigFingerprint returns "" when no internal token is configured, and
+// an empty fingerprint is what makes Proxy.authorizeLLMRoute skip the route-token
+// check entirely — every agent sharing the crew container can then reach whichever
+// credential the CredStore currently holds. That is a real exposure, but only if
+// something is actually loaded: buildSidecarCreds drops everything
+// credTypeToProvider does not route (GitHub PATs, OAuth tokens, an agent's own
+// SECRET), so gating on len(creds) would raise the isolation alarm for runs with
+// nothing to isolate — and an alarm that names a non-existent gap is one operators
+// learn to skip past. The fingerprint test short-circuits, so the filter only runs
+// on the already-degraded path.
+func credentialIsolationFailedOpen(configFingerprint string, creds []Credential) bool {
+	return configFingerprint == "" && len(buildSidecarCreds(creds, nil)) > 0
+}
+
 // buildSidecarCreds maps the delivered credentials onto the sidecar boot
 // payload, dropping every credential the CredStore has no provider for.
 //

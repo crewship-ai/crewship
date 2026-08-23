@@ -997,7 +997,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		routeKey := internaltoken.DeriveLLMRouteKey(ipcToken, req.WorkspaceID, req.CrewID)
 		llmRouteToken := internaltoken.DeriveLLMRouteToken(routeKey, req.AgentID)
 		configFingerprint := sidecarConfigFingerprint(ipcToken, req.Credentials)
-		if configFingerprint == "" && len(req.Credentials) > 0 {
+		if credentialIsolationFailedOpen(configFingerprint, req.Credentials) {
 			o.warnCredentialIsolationFailOpenOnce()
 		}
 		env = BuildEnvVarsSidecar(*req, keeperEnabled)
