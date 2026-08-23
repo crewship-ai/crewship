@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Pencil } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { CrewIconPickerDialog } from "../crew-icon-picker-dialog"
+import { CreateSurfacePicker } from "@/components/layout/create-surface"
+import { CREW_ICONS, GRADIENT_PALETTES } from "@/lib/entities"
 import { asCrewColor, type WizardState } from "./types"
 
 interface Props {
@@ -13,6 +14,16 @@ interface Props {
 
 export function StepIdentity({ state, setState }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [iconSearch, setIconSearch] = useState("")
+
+  const iconOptions = useMemo(() => {
+    const q = iconSearch.trim().toLowerCase()
+    return CREW_ICONS.filter((i) => (q ? i.label.toLowerCase().includes(q) : true)).map((i) => ({
+      id: i.name,
+      label: i.label,
+      render: <i.icon className="h-4 w-4 text-foreground/70" />,
+    }))
+  }, [iconSearch])
 
   const onNameChange = (val: string) => {
     if (state.slugTouched) {
@@ -33,8 +44,9 @@ export function StepIdentity({ state, setState }: Props) {
           </label>
           <button
             type="button"
-            onClick={() => setPickerOpen(true)}
-            className="group relative outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-2xl"
+            onClick={() => setPickerOpen((o) => !o)}
+            aria-expanded={pickerOpen}
+            className="group relative rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-primary"
             aria-label="Pick icon and color"
           >
             <CrewIcon
@@ -49,7 +61,8 @@ export function StepIdentity({ state, setState }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => setPickerOpen(true)}
+            onClick={() => setPickerOpen((o) => !o)}
+            aria-expanded={pickerOpen}
             // Padding, not size: it is a caption that happens to be clickable,
             // and 17px of text is a 17px target. The icon above opens the same
             // picker and is large; this still has to be hittable.
@@ -113,16 +126,33 @@ export function StepIdentity({ state, setState }: Props) {
         </div>
       </div>
 
-      <CrewIconPickerDialog
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        crewName={state.name || "new crew"}
-        icon={state.icon}
-        color={state.color}
-        onSave={({ icon, color }) => {
-          setState({ icon, color: asCrewColor(color) })
-        }}
-      />
+      {/* In the body, not a second Dialog on top of the first.
+       *
+       * This used to mount CrewIconPickerDialog, which is a full Radix
+       * `<Dialog>` — so opening it put two overlays, two headers and two
+       * Cancel buttons on screen at once, which is the exact shape this
+       * migration exists to remove. That component is NOT changed: the crew
+       * detail page (crew-canvas.tsx) renders it standalone, where a dialog
+       * IS the right answer.
+       *
+       * A plain conditional rather than CreateSurfaceDisclosure: the
+       * disclosure owns its open state internally, so the icon tile above —
+       * which is the affordance people actually click — could not drive it. */}
+      {pickerOpen && (
+        <CreateSurfacePicker
+          preview={<CrewIcon icon={state.icon} color={state.color} size="xl" />}
+          previewHint="The face this crew wears in the roster, the sidebar, and every issue it owns."
+          palette={{
+            value: state.color,
+            onChange: (id) => setState({ color: asCrewColor(id) }),
+            options: GRADIENT_PALETTES.map((g) => ({ id: g.id, dot: g.dot })),
+          }}
+          search={{ value: iconSearch, onChange: setIconSearch, placeholder: "Search icons…" }}
+          options={iconOptions}
+          value={state.icon}
+          onChange={(icon) => setState({ icon })}
+        />
+      )}
     </>
   )
 }
