@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  AlertCircle, Check, Cloud, Copy, Package, Pencil, Search, X,
+  AlertCircle, Check, Cloud, Copy, Info as InfoIcon, Package, Pencil, Search, X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,6 +15,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { useCatalog } from "@/hooks/use-catalog"
@@ -32,6 +33,7 @@ import {
   CATEGORY_LABELS,
   buildDevcontainerJSON,
   buildMiseJSON,
+  isCustomBaseImage,
   parseDevcontainerConfig,
   parseDevcontainerFull,
   parseMiseConfig,
@@ -97,6 +99,34 @@ function extractRuntimes(json: unknown): RuntimeEntry[] {
   return Array.isArray(runtimes) ? (runtimes as RuntimeEntry[]) : []
 }
 
+// A hoverable "i" for a base image's description, so the catalogue row stays
+// one line instead of wrapping — the shape the owner asked for once the
+// catalogue itself was in front of them to react to.
+function ImageDescription({ children }: { children: ReactNode }) {
+  // Self-contained TooltipProvider rather than relying on one further up the
+  // tree: the app layout supplies one, but this component is also mounted
+  // directly in unit tests that don't, and nesting a Provider is harmless.
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label="Image details"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <InfoIcon className="h-3 w-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[280px] text-left text-[11px] leading-relaxed">
+          {children}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 
 export function RuntimeConfig({ value, onChange, canEditPrivileged = false, browserHeight = "420px" }: RuntimeConfigProps) {
   // Parse initial state from value
@@ -136,9 +166,8 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
   const [customImage, setCustomImage] = useState(
     BASE_IMAGES.some((b) => b.value === initialDC.image) ? "" : initialDC.image
   )
-  const [isCustomImage, setIsCustomImage] = useState(
-    !BASE_IMAGES.some((b) => b.value === initialDC.image) && initialDC.image !== "debian:bookworm-slim"
-  )
+  const [isCustomImage, setIsCustomImage] = useState(isCustomBaseImage(initialDC.image))
+  const [imageSearch, setImageSearch] = useState("")
 
   // Selected runtime tools (tool name -> version)
   const [miseTools, setMiseTools] = useState<Record<string, string>>(initialMise)
@@ -164,7 +193,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
     const mc = parseMiseConfig(value.miseConfig)
     setSelectedFeatures(dc.features)
     setBaseImage(dc.image)
-    const isCustom = !BASE_IMAGES.some((b) => b.value === dc.image)
+    const isCustom = isCustomBaseImage(dc.image)
     setIsCustomImage(isCustom)
     if (isCustom) setCustomImage(dc.image)
     setMiseTools(mc)
@@ -257,6 +286,21 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
     })
   }, [runtimeCatalog, runtimeSearchQuery, runtimeCategoryFilter])
 
+  // Filter base-image catalogue. BASE_IMAGES is a short static list (no
+  // backend catalog endpoint exists for base images — /api/v1/features and
+  // /api/v1/runtimes have one each, images do not), so this filters in
+  // memory rather than hitting the network like the two catalogs above.
+  const filteredBaseImages = useMemo(() => {
+    const q = imageSearch.trim().toLowerCase()
+    if (!q) return BASE_IMAGES
+    return BASE_IMAGES.filter(
+      (img) =>
+        img.label.toLowerCase().includes(q) ||
+        img.description.toLowerCase().includes(q) ||
+        img.value.toLowerCase().includes(q)
+    )
+  }, [imageSearch])
+
   // Counts per category for filter pills
   const featureCategoryCounts = useMemo(() => {
     const c: Record<string, number> = { all: catalog.length }
@@ -338,7 +382,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           postStartCommand: full.postStartCommand,
         })
         setPassthrough(full.passthrough)
-        if (!BASE_IMAGES.some((b) => b.value === full.image)) {
+        if (isCustomBaseImage(full.image)) {
           setIsCustomImage(true)
           setCustomImage(full.image)
         } else {
@@ -471,8 +515,23 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                  {BASE_IMAGES.map((img) => {
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={imageSearch}
+                    onChange={(e) => setImageSearch(e.target.value)}
+                    placeholder="Search base images..."
+                    aria-label="Search base images"
+                    className="h-7 pl-8 text-xs"
+                  />
+                </div>
+
+                <div
+                  role="radiogroup"
+                  aria-label="Base image"
+                  className="rounded-md border border-border/40 bg-card/30 max-h-[220px] overflow-y-auto divide-y divide-border/40"
+                >
+                  {filteredBaseImages.map((img) => {
                     const Icon = img.icon
                     const isSelected = baseImage === img.value
                     // colorKey is set explicitly on each entry above
@@ -488,30 +547,32 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
                         aria-checked={isSelected}
                         onClick={() => setBaseImage(img.value)}
                         className={cn(
-                          "flex items-start gap-2 px-3 py-2 text-left rounded-md border text-xs transition-colors",
-                          isSelected
-                            ? "border-primary bg-accent/50"
-                            : "border-border/40 hover:bg-accent/30"
+                          "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors",
+                          isSelected ? "bg-accent/40" : "hover:bg-accent/30"
                         )}
                       >
                         <Icon
-                          className="w-4 h-4 mt-0.5 shrink-0"
+                          className="w-4 h-4 shrink-0"
                           style={brandColor ? { color: brandColor } : undefined}
                         />
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium flex items-center gap-1.5">
-                            {img.label}
-                            {img.recommended && (
-                              <span className="text-[9px] px-1 py-0 rounded bg-primary/20 text-primary-hover">RECOMMENDED</span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5">
-                            {img.description}
-                          </div>
-                        </div>
+                        <span className="min-w-0 flex-1 flex items-center gap-1.5">
+                          <span className="font-medium truncate">{img.label}</span>
+                          {img.recommended && (
+                            <span className="shrink-0 text-[9px] px-1 py-0 rounded bg-primary/20 text-primary-hover">
+                              RECOMMENDED
+                            </span>
+                          )}
+                        </span>
+                        <ImageDescription>{img.description}</ImageDescription>
+                        {isSelected && <Check className="w-3.5 h-3.5 shrink-0 text-success" />}
                       </button>
                     )
                   })}
+                  {filteredBaseImages.length === 0 && (
+                    <p className="text-xs text-muted-foreground text-center py-6">
+                      No images found{imageSearch ? ` for "${imageSearch}"` : ""}.
+                    </p>
+                  )}
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => setIsCustomImage(true)}>
                   Use custom image
