@@ -18,6 +18,7 @@ import {
 import { StepIdentity } from "./create-crew/step-identity"
 import { StepLineup } from "./create-crew/step-lineup"
 import { StepContainer } from "./create-crew/step-container"
+import { BaseImagePanel, effectiveBaseImage, patchImage } from "./create-crew/base-image"
 import { StepReview } from "./create-crew/step-review"
 import { submitCrew } from "./create-crew/submit"
 import { INITIAL_STATE, type WizardState, type WizardStep } from "./create-crew/types"
@@ -165,6 +166,10 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   // the surface — and the click that lands you on Review ("Skip to defaults")
   // unmounts the very button that had it. CreateSurfaceFooter exposes no ref
   // to its primary, hence the query: the primary is its last button.
+  // The base-image picker, as a panel this surface swaps to rather than a
+  // second dialog over it.
+  const [panel, setPanel] = useState<null | "image">(null)
+
   const footerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (step === 4 && !busy) {
@@ -181,37 +186,63 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
       dirty={dirty}
       discardLabel="this crew"
       onSubmit={() => {
+        // ⌘↵ inside the picker closes the picker; it must not also advance the
+        // step underneath it.
+        if (panel) { setPanel(null); return }
         if (stepValid) advance()
       }}
     >
+      {/* The base-image catalogue is a PANEL, not a list on the step: the
+          surface swaps its header, body and footer for it and the back arrow
+          returns. Same shape as the icon picker, and the reason a nine-item
+          catalogue fits on a step that also carries tooling, network and
+          sizing. */}
       <CreateSurfaceHeader
         concept="crews"
         context="Crews"
-        title="New crew"
-        description={STEP_DESCRIPTION[step]}
-        onBack={step > 1 ? back : undefined}
+        title={panel === "image" ? "Base image — new crew" : "New crew"}
+        description={
+          panel === "image"
+            ? "What the container starts from. Node 22 is the recommendation for most agent work; the rest are there for a crew that needs a toolchain preinstalled."
+            : STEP_DESCRIPTION[step]
+        }
+        onBack={panel ? () => setPanel(null) : step > 1 ? back : undefined}
         onClose={() => onOpenChange(false)}
         meta={
-          <span className="max-sm:hidden">
-            {step === 4 ? "ready to create" : `step ${step} of 4`}
-          </span>
+          panel ? undefined : (
+            <span className="max-sm:hidden">
+              {step === 4 ? "ready to create" : `step ${step} of 4`}
+            </span>
+          )
         }
       />
 
       {/* The kit's step strip, which draws its own landmark — this used to
-          wrap it in a second <nav>. */}
-      <CreateSurfaceSteps
-        ariaLabel="Wizard progress"
-        steps={CREW_STEPS}
-        current={step - 1}
-        onJump={(i) => setStep((i + 1) as WizardStep)}
-      />
+          wrap it in a second <nav>. Hidden inside a panel: the panel is not a
+          step, and a strip saying "3 of 4" over a picker is a lie about where
+          you are. */}
+      {!panel && (
+        <CreateSurfaceSteps
+          ariaLabel="Wizard progress"
+          steps={CREW_STEPS}
+          current={step - 1}
+          onJump={(i) => setStep((i + 1) as WizardStep)}
+        />
+      )}
 
       <CreateSurfaceBody>
-        {step === 1 && <StepIdentity state={state} setState={setState} />}
-        {step === 2 && <StepLineup state={state} setState={setState} workspaceId={workspaceId} />}
-        {step === 3 && <StepContainer state={state} setState={setState} />}
-        {step === 4 && (
+        {panel === "image" && (
+          <BaseImagePanel
+            value={effectiveBaseImage(state)}
+            onChange={(image) => setState(patchImage(state, image))}
+          />
+        )}
+        {!panel && step === 1 && <StepIdentity state={state} setState={setState} />}
+        {!panel && step === 2 && <StepLineup state={state} setState={setState} workspaceId={workspaceId} />}
+        {!panel && step === 3 && (
+          <StepContainer state={state} setState={setState} onPickImage={() => setPanel("image")} />
+        )}
+        {!panel && step === 4 && (
           <StepReview
             state={state}
             onEdit={(s) => setStep(s)}
@@ -228,10 +259,21 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
           // position twice over — the numbered chips on a pointer device, and
           // "3 / 4" beside a progress bar on a phone — and the header's meta
           // says it a third time. The footer's job is the keyboard hint.
-          hint={step === 4 ? "⌘+Enter to confirm · Esc cancel" : "⌘+Enter to continue"}
-          onCancel={() => onOpenChange(false)}
+          hint={
+            panel
+              ? undefined
+              : step === 4
+                ? "⌘+Enter to confirm · Esc cancel"
+                : "⌘+Enter to continue"
+          }
+          // Inside the panel, Cancel means "back out of the panel" — the same
+          // rule the project modal's icon panel follows, and the reason
+          // guardCancel is off there: nothing is discarded by leaving a picker.
+          onCancel={panel ? () => setPanel(null) : () => onOpenChange(false)}
+          guardCancel={!panel}
+          cancelLabel={panel ? "Back" : "Cancel"}
           secondary={
-            step === 3 ? (
+            !panel && step === 3 ? (
               <CreateSurfaceSecondaryAction
                 icon={FastForward}
                 onClick={skipToReview}
@@ -242,11 +284,13 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
               </CreateSurfaceSecondaryAction>
             ) : undefined
           }
-          primaryLabel={step === 4 ? (busy ? "Creating…" : "Create crew") : "Continue"}
-          primaryIcon={step === 4 ? Check : undefined}
-          onPrimary={advance}
-          primaryDisabled={!stepValid}
-          busy={busy}
+          primaryLabel={
+            panel ? "Use this image" : step === 4 ? (busy ? "Creating…" : "Create crew") : "Continue"
+          }
+          primaryIcon={!panel && step === 4 ? Check : undefined}
+          onPrimary={panel ? () => setPanel(null) : advance}
+          primaryDisabled={panel ? false : !stepValid}
+          busy={panel ? false : busy}
         />
       </div>
     </CreateSurface>

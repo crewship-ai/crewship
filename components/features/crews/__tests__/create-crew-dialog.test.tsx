@@ -430,4 +430,53 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       expect(s1).not.toBeDisabled()
     })
   })
+
+  // ── The base-image catalogue is a panel, not a list on the step ──────────
+  //
+  // /design opens the catalogue the way the icon picker opens: the surface
+  // swaps its header, body and footer, and the back arrow returns. Rendering
+  // nine radio rows inline on a step that also carries tooling, network and
+  // sizing is what made Container read as a list of lists.
+  describe("<CreateCrewDialog> — the base image panel", () => {
+    async function reachContainer() {
+      setupFetch([
+        (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
+      ])
+      renderDialog()
+      fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
+      fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+      await waitFor(() => screen.getByRole("button", { name: /^Empty crew/ }))
+      fireEvent.click(screen.getByRole("button", { name: /^Empty crew/ }))
+      fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+      await waitFor(() => screen.getByText("Base image"))
+    }
+
+    it("swaps the surface for the picker, and says where you are", async () => {
+      await reachContainer()
+      fireEvent.click(screen.getByRole("button", { name: /Change/ }))
+
+      await waitFor(() => expect(screen.getByText("Base image — new crew")).toBeInTheDocument())
+      // A step strip reading "3 of 4" over a picker is a lie about where you
+      // are: the panel is not a step.
+      expect(screen.queryByRole("button", { name: /Step 3: Container/ })).toBeNull()
+      // And the primary is the panel's, not the wizard's.
+      expect(screen.getByRole("button", { name: /Use this image/ })).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /^Continue$/ })).toBeNull()
+    })
+
+    it("comes back to the step it left, with the pick applied", async () => {
+      await reachContainer()
+      fireEvent.click(screen.getByRole("button", { name: /Change/ }))
+      await screen.findByText("Base image — new crew")
+
+      // Picker cells are radios, not plain buttons — CreateSurfacePicker
+      // renders a radiogroup so a keyboard user gets arrow-key selection.
+      fireEvent.click(await screen.findByRole("radio", { name: /Ubuntu 24\.04/ }))
+      fireEvent.click(screen.getByRole("button", { name: /Use this image/ }))
+
+      await waitFor(() => expect(screen.getByRole("button", { name: /Change/ })).toHaveTextContent("ubuntu"))
+      // Back on the step, not left in the panel.
+      expect(screen.getByRole("button", { name: /^Continue$/ })).toBeInTheDocument()
+    })
+  })
 })

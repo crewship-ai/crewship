@@ -13,6 +13,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { useAbilities } from "@/hooks/use-abilities"
 import { PACKAGE_REGISTRY_DOMAINS, mergeDomains } from "../registry-presets"
+import { BaseImageRow } from "./base-image"
 import { Chip, ChipRow, CustomNumberChip, DomainChips, prettyMemory } from "./runtime-controls"
 import {
   CPU_PRESETS, CPU_MIN, CPU_MAX,
@@ -41,6 +42,11 @@ interface Props {
   setState: (patch: Partial<WizardState>) => void
 }
 
+interface StepProps extends Props {
+  /** Opens the wizard's base-image panel. The catalogue is not on this step. */
+  onPickImage: () => void
+}
+
 /**
  * Everything about the box the crew runs in, on one step.
  *
@@ -66,12 +72,19 @@ interface Props {
  * reads the real `/api/v1/features/catalog` and already brand-colours the
  * image icons — the chrome around it changed, not the capability inside it.
  */
-export function StepContainer({ state, setState }: Props) {
+export function StepContainer({ state, setState, onPickImage }: StepProps) {
   const { role } = useAbilities()
   const canEditPrivileged = role === "OWNER" || role === "ADMIN"
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Base image: one row saying what the crew runs on, and a panel to
+          change it in. The catalogue used to be nine radio rows inline, on a
+          step that also carries tooling, network and sizing. */}
+      <CreateSurfaceSection title="Base image" icon={HardDrive} accent="teal">
+        <BaseImageRow state={state} onChange={onPickImage} />
+      </CreateSurfaceSection>
+
       {/* Sections, not a tab strip.
        *
        * This used to wrap RuntimeConfig whole inside one "Image and tooling"
@@ -94,6 +107,9 @@ export function StepContainer({ state, setState }: Props) {
         })}
         canEditPrivileged={canEditPrivileged}
         layout="sections"
+        // The row above owns the image; without this the catalogue would be
+        // on the step twice.
+        hideBaseImage
         // Network and Size sit under this on the same step. At the
         // component's own 420px both landed roughly two screens down, which
         // is the "where did it go" the old two-step wizard had for other

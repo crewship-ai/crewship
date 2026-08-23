@@ -50,9 +50,10 @@ vi.mock("@/hooks/use-abilities", () => ({
 
 function renderStep(overrides: Partial<WizardState> = {}) {
   const setState = vi.fn()
+  const onPickImage = vi.fn()
   const state: WizardState = { ...INITIAL_STATE, ...overrides }
-  const utils = render(<StepContainer state={state} setState={setState} />)
-  return { setState, state, ...utils }
+  const utils = render(<StepContainer state={state} setState={setState} onPickImage={onPickImage} />)
+  return { setState, onPickImage, state, ...utils }
 }
 
 /** Size lives behind a disclosure; open it before asserting on its controls. */
@@ -212,5 +213,48 @@ describe("<StepContainer> — size", () => {
     fireEvent.blur(input)
     expect(setState).not.toHaveBeenCalled()
     expect(screen.getByRole("alert")).toHaveTextContent(/Enter \d+-\d+ MB/)
+  })
+})
+
+// ── The base image is a row, not a catalogue ─────────────────────────────
+//
+// Nine radio rows and a search box used to sit inline on this step, which
+// also carries tooling, network and sizing — a step made of lists. /design
+// shows one row saying what the crew runs on, with the catalogue behind it as
+// a panel the surface swaps to.
+describe("<StepContainer> — base image", () => {
+  it("says what the crew will run, defaults included", () => {
+    renderStep()
+    const row = screen.getByRole("button", { name: /Change/ })
+    // The wizard sends nothing for the image unless asked, and the server's
+    // default is what it will get; the row says so rather than looking unset.
+    expect(row).toHaveTextContent("debian:bookworm-slim")
+  })
+
+  // DEFAULT_BASE_IMAGE is not one of BASE_IMAGES' full registry paths, so a
+  // plain catalogue lookup misses it and the row called the shipped default
+  // "Custom image" — the one label that means "an operator typed this".
+  // isCustomBaseImage() has always excluded it; the row now agrees.
+  it("does not call the shipped default a custom image", () => {
+    renderStep()
+    const row = screen.getByRole("button", { name: /Change/ })
+    expect(row).not.toHaveTextContent(/Custom image/)
+    expect(row).toHaveTextContent(/default/i)
+  })
+
+  it("does call a registry reference a custom image", () => {
+    renderStep({ runtimeImage: "ghcr.io/acme/thing:v1" })
+    expect(screen.getByRole("button", { name: /Change/ })).toHaveTextContent(/Custom image/)
+  })
+
+  it("shows a picked image by its catalogue name", () => {
+    renderStep({ runtimeImage: "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm" })
+    expect(screen.getByRole("button", { name: /Change/ })).toHaveTextContent(/Node 22/)
+  })
+
+  it("calls up to the wizard rather than opening a catalogue in place", () => {
+    const { onPickImage } = renderStep()
+    fireEvent.click(screen.getByRole("button", { name: /Change/ }))
+    expect(onPickImage).toHaveBeenCalledTimes(1)
   })
 })

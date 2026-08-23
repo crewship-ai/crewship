@@ -80,6 +80,16 @@ interface RuntimeConfigProps {
    * nowhere else.
    */
   layout?: "tabs" | "sections"
+  /**
+   * Suppress the base-image block.
+   *
+   * New crew renders the image as a summary row plus a picker panel, the way
+   * /design specifies, so the component would otherwise show the catalogue a
+   * second time on the same step. The image itself still flows through
+   * `value.devcontainerConfig`, which this component syncs from — so the
+   * caller owning the control does not mean the caller owning the state.
+   */
+  hideBaseImage?: boolean
 }
 
 interface CatalogFeature {
@@ -145,7 +155,7 @@ function ImageDescription({ children }: { children: ReactNode }) {
 }
 
 
-export function RuntimeConfig({ value, onChange, canEditPrivileged = false, browserHeight = "420px", layout = "tabs" }: RuntimeConfigProps) {
+export function RuntimeConfig({ value, onChange, canEditPrivileged = false, browserHeight = "420px", layout = "tabs", hideBaseImage = false }: RuntimeConfigProps) {
   // Parse initial state from value
   const initialDC = useMemo(() => parseDevcontainerConfig(value.devcontainerConfig), [value.devcontainerConfig])
   const initialFull = useMemo(() => parseDevcontainerFull(value.devcontainerConfig), [value.devcontainerConfig])
@@ -977,9 +987,11 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
   if (layout === "sections") {
     return (
       <div className="flex flex-col gap-4">
-        <CreateSurfaceSection title="Base image" icon={HardDrive} accent="teal">
-          {baseImagePane}
-        </CreateSurfaceSection>
+        {!hideBaseImage && (
+          <CreateSurfaceSection title="Base image" icon={HardDrive} accent="teal">
+            {baseImagePane}
+          </CreateSurfaceSection>
+        )}
 
         <CreateSurfaceSection
           title="Preinstalled tooling"
