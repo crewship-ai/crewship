@@ -144,6 +144,32 @@ test.describe("onboarding wizard — first-run flow", () => {
       }),
     )
 
+    // Step 2 now PROVES the token before it stores it: persistAdapterCredential
+    // calls POST /api/v1/credentials/test, and a key that does not work is not
+    // written at all. That is the right product behaviour — it is what stops a
+    // crew launching around a dead token — and it is fatal to this spec, which
+    // types FAKE_API_KEY. Without the stub the real endpoint asks Anthropic
+    // about a key that was never real, the answer is no, POST /credentials
+    // never fires, and the spec times out waiting for it.
+    //
+    // Stubbed for the same reason as the runtime probe above: what is under
+    // test is the WIZARD, not whether the CI runner can reach a model provider.
+    // The endpoint's own behaviour is covered by internal/api's
+    // credentials_test_endpoint tests, against a stubbed provider, where it
+    // belongs.
+    await page.route("**/api/v1/credentials/test", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        // The real shape (internal/api/credentials_test_endpoint.go):
+        // `supported` says the server can check this credential type at all,
+        // `valid` is the provider's verdict. Both are read, and a stub that
+        // returns only `valid` is refused with "This credential type cannot
+        // be verified before setup."
+        body: JSON.stringify({ supported: true, valid: true, status: 200 }),
+      }),
+    )
+
     // Bootstrap form
     await page.goto("/bootstrap")
     await page.waitForSelector("#full_name")
@@ -233,15 +259,21 @@ test.describe("onboarding wizard — first-run flow", () => {
     await launch.click()
     expect((await setupRespPromise).status()).toBe(201)
 
-    // The wizard's last click. It used to land on /crews/agents/<id>/chat,
-    // a route the /crews redesign deleted — so this assertion passed only
-    // while a brand-new user's first click 404'd. Chat is /chat/<slug>.
-    //
-    // handleLaunch (app/(onboarding)/onboarding/page.tsx) resolves the slug
-    // with one GET /agents/<id> and falls back to the dashboard when that
-    // lookup returns nothing, so BOTH landing pages are reachable by
-    // design. Wait for either and then assert the good one: a fallback is
-    // then a one-line failure naming its cause instead of a 15s timeout.
+    // Launch no longer redirects. It holds on a receipt — the last thing a
+    // person saw of their own setup used to be a chat composer, which never
+    // told them what had been built, and with more than one crew there is no
+    // single chat that represents the work. So the navigation is now a click,
+    // and this spec has to make it.
+    await expect(page.getByRole("heading", { name: /your crew is ready|your \d+ crews are ready/i }))
+      .toBeVisible({ timeout: 15_000 })
+
+    // "Start chatting" when the agent slug resolved, "Go to dashboard" when it
+    // did not — handleLaunch resolves it with one GET /agents/<id> and falls
+    // back deliberately, so both buttons are legitimate. Take whichever is
+    // offered, then assert below that it was the good one: a fallback becomes
+    // a one-line failure naming its cause instead of a 15s timeout.
+    await page.getByRole("button", { name: /start chatting|go to dashboard/i }).first().click()
+
     await page.waitForURL((url) => /^\/chat\/[^/]+$/.test(url.pathname) || url.pathname === "/", {
       timeout: 15_000,
     })

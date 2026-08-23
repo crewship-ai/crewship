@@ -28,6 +28,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -3446,5 +3447,85 @@ func TestAgentChats_ListPopulatedFields(t *testing.T) {
 	}
 	if chats[0]["title"] != "Sample" {
 		t.Errorf("title = %v, want Sample", chats[0]["title"])
+	}
+}
+
+// Slugs from names that are not written in English.
+//
+// slugify iterated []byte and kept only ASCII a-z0-9-, so every multi-byte
+// character was DROPPED rather than folded: "Hlídač dostupnosti" became
+// "hlda-dostupnosti" (í and č gone, taking the readable word with them), and a
+// name with no ASCII at all — "Дозорный" — produced the empty string, which
+// the crew endpoint then reported as the self-contradicting "crew slug already
+// exists: crew_slug must contain only lowercase letters, numbers, and
+// hyphens". The user had done nothing wrong; the server's own slugifier had.
+//
+// This is the third byte-vs-rune fault on the non-ASCII path in this branch,
+// after the proposal marker's role and crew_name ceilings, and it is the one
+// that reaches furthest: the onboarding Guide has to name a target crew BY
+// SLUG to author a routine for it (internal_delegated_crew.go), and a slug it
+// cannot predict from the name it proposed is one it has to be told.
+func TestSlugifyFoldsDiacriticsInsteadOfDroppingThem(t *testing.T) {
+	cases := []struct{ name, in, out, why string }{
+		{
+			name: "czech",
+			in:   "Hlídač dostupnosti",
+			out:  "hlidac-dostupnosti",
+			why:  "the literal case that shipped broken as hlda-dostupnosti",
+		},
+		{"polish", "Łódź Zespół", "lodz-zespol", "ł has no decomposition — it needs the explicit fold"},
+		{"german", "Grüße Straße", "grusse-strasse", "ß expands to ss rather than vanishing"},
+		{"french", "Équipe Réseau", "equipe-reseau", ""},
+		{"nordic", "Ørn Ångström", "orn-angstrom", "ø likewise has no decomposition"},
+		{"spanish", "Señal Mañana", "senal-manana", ""},
+		{"ascii is untouched", "Hello World", "hello-world", "the common path must not move"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := slugify(c.in); got != c.out {
+				t.Errorf("slugify(%q) = %q, want %q — %s", c.in, got, c.out, c.why)
+			}
+		})
+	}
+}
+
+// A script this cannot transliterate still must not silently yield "". Callers
+// treat the empty string as "the name is unusable", and for a perfectly good
+// Cyrillic or Japanese crew name that is a lie about the input. Falling back to
+// a stable hash keeps the name addressable; the crew's display name, which is
+// what a person actually reads, is unaffected.
+func TestSlugifyNeverReturnsEmptyForANonEmptyName(t *testing.T) {
+	for _, in := range []string{"Дозорный", "監視員", "Φύλακας", "מוניטור"} {
+		got := slugify(in)
+		if got == "" {
+			t.Errorf("slugify(%q) = \"\" — the name cannot be used at all", in)
+			continue
+		}
+		if !regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`).MatchString(got) {
+			t.Errorf("slugify(%q) = %q, which is not a legal slug", in, got)
+		}
+	}
+	// Genuinely empty input stays empty: there is no name to preserve, and
+	// callers rely on "" to reject it.
+	for _, in := range []string{"", "   ", "!!!", "___---"} {
+		if got := slugify(in); got != "" {
+			t.Errorf("slugify(%q) = %q, want \"\" — nothing was named", in, got)
+		}
+	}
+}
+
+// Two different names must not collapse onto one slug. Before the fold they
+// could: dropping every non-ASCII byte mapped "Hlídač" and "Hldac" together.
+func TestSlugifyKeepsDistinctNamesDistinct(t *testing.T) {
+	seen := map[string]string{}
+	for _, name := range []string{
+		"Hlídač dostupnosti", "Hlídač webu", "Sběrač novinek",
+		"Дозорный", "監視員", "Watcher",
+	} {
+		s := slugify(name)
+		if prev, clash := seen[s]; clash {
+			t.Errorf("%q and %q both slugify to %q", prev, name, s)
+		}
+		seen[s] = name
 	}
 }

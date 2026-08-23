@@ -1743,10 +1743,18 @@ export default function OnboardingPage() {
               <div className="space-y-5 pb-6 lg:pb-8">
                 <div>
                   <h2 className="text-2xl font-semibold tracking-tight">
-                    {createdCrews.length === 1 ? "Your crew is ready" : `Your ${createdCrews.length} crews are ready`}
+                    {/* Zero is a real case, not a guard against one. Only
+                        proposals the Guide made land in createdCrews; the
+                        template path creates its crew inside POST
+                        /onboarding/setup and never reports a roster back, so
+                        this screen used to greet those users with
+                        "Your 0 crews are ready" over an empty list. */}
+                    {createdCrews.length <= 1 ? "Your crew is ready" : `Your ${createdCrews.length} crews are ready`}
                   </h2>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Here is what Crewship just built for you.
+                    {createdCrews.length === 0
+                      ? "Setup is complete — your crew is deployed and ready to talk to."
+                      : "Here is what Crewship just built for you."}
                   </p>
                 </div>
 

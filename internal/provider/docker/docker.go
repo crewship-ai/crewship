@@ -648,15 +648,6 @@ const localCacheImagePrefix = "crewship-cache:"
 // error "pull access denied for crewship-cache, repository does not exist".
 var ErrCachedImageMissing = errors.New("cached devcontainer image missing locally; crew needs reprovisioning")
 
-// imagePresentLocally reports whether ref exists in the local image store.
-// Best-effort: any inspect failure (not-found, transport error, timeout) is
-// treated as "not present" so callers fall through to their not-present path.
-// Bounded by a short timeout so a wedged daemon can't block the caller.
-func (p *Provider) imagePresentLocally(ctx context.Context, ref string) bool {
-	present, err := p.ImagePresentLocally(ctx, ref)
-	return err == nil && present
-}
-
 // ImagePresentLocally reports whether ref exists in the local image store,
 // distinguishing "definitely absent" (false, nil) from "couldn't tell"
 // (false, err). Exported so higher layers — notably the chatbridge
