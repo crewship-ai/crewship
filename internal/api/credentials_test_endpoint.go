@@ -53,23 +53,29 @@ type testResult struct {
 // drives every id below through probeProviderInner and rejects any that lands
 // in the default branch.
 //
-// OPENAI_COMPAT is deliberately NOT here even though its credential is the one
-// most worth testing. Its endpoint is operator-supplied, so probing it means
-// crewshipd dialling a caller-chosen host: the SSRF shape probeProvider's
-// dialEndpoint flag exists to contain, and containing it needs the whole
-// resolve-then-pin dialer the sidecar has and this path does not. An absent
-// "Test value" button is the honest answer; a green tick from a host we were
-// tricked into dialling is not.
+// OPENAI_COMPAT is here (#2043) on the same terms ENDPOINT_URL already had, and
+// the terms are what make it safe. Its endpoint is operator-supplied, so it is
+// dialled only from the role-gated stored path (dialEndpoint), through
+// probeLocalModelEndpoint's dialer: endpointDialControl runs after DNS with the
+// concrete IP and refuses link-local/metadata, and redirects are never followed,
+// so a 3xx cannot walk the probe onto a host the guard already refused.
+//
+// The probe asks for a model list and offers NO credential — not the stored
+// apiKey, not the custom headers. Reachability is what an operator cannot
+// otherwise find out; authentication is not worth making the Test button into a
+// way to post the stored secret to a baseURL that whoever holds "update" on the
+// credential can repoint at will.
 var probeSupportedProviders = map[string]struct{}{
-	"ANTHROPIC":  {},
-	"OPENAI":     {},
-	"GOOGLE":     {},
-	"OPENROUTER": {},
-	"CURSOR":     {},
-	"FACTORY":    {},
-	"GITHUB":     {},
-	"GITLAB":     {},
-	"VERCEL":     {},
+	"ANTHROPIC":     {},
+	"OPENAI":        {},
+	"OPENAI_COMPAT": {},
+	"GOOGLE":        {},
+	"OPENROUTER":    {},
+	"CURSOR":        {},
+	"FACTORY":       {},
+	"GITHUB":        {},
+	"GITLAB":        {},
+	"VERCEL":        {},
 }
 
 // probeNoValidationMsg is the default branch's answer: honest text wrapped in
@@ -198,6 +204,30 @@ func probeProviderInner(ctx context.Context, provider, ctype, value string, dial
 		defer resp.Body.Close()
 		io.Copy(io.Discard, resp.Body)
 		return openRouterProbeResult(resp.StatusCode)
+
+	case "OPENAI_COMPAT":
+		// #2043: the credential most in need of a connectivity test was the only
+		// LLM provider that could not get one. A hosted vendor's key is wrong in
+		// exactly one way; a bring-your-own endpoint is unreachable from the
+		// server, or fails TLS, or has the wrong path prefix, or serves no model
+		// list — and every one of those used to arrive as a green
+		// "No validation available".
+		//
+		// Only the base URL is used. The stored apiKey and custom headers are
+		// deliberately not offered: see probeSupportedProviders.
+		_, baseURL, _, err := providerEndpointFromValue(provider, value)
+		if err != nil {
+			return testResult{Error: err.Error()}
+		}
+		if baseURL == "" {
+			return testResult{Error: "credential value carries no endpoint URL — expected {\"baseURL\":…} (e.g. https://gateway.internal/v1)"}
+		}
+		if !dialEndpoint {
+			// Body path is RequireAuth-only, with no workspace or role floor.
+			// Same line the ENDPOINT_URL branch holds below.
+			return testResult{Valid: true, Error: "endpoint URL is well-formed (reachability is checked by testing the saved credential)"}
+		}
+		return probeLocalModelEndpoint(ctx, baseURL)
 
 	case "CURSOR":
 		// Cursor token validation: ping the auth endpoint with the token.

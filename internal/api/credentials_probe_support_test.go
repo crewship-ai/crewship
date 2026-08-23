@@ -64,6 +64,11 @@ func TestProbeSupported_ProbelessRegistrationFails(t *testing.T) {
 		// the wizard's Test button is the first thing that tells an operator
 		// the key works.
 		"OPENROUTER",
+		// OPENAI_COMPAT (#2043): the operator supplies the host, so it is the
+		// credential with the most ways to be wrong and was the only LLM
+		// provider with no probe at all. Reachability only — the arm offers
+		// neither the stored apiKey nor the custom headers.
+		"OPENAI_COMPAT",
 		"CURSOR", "FACTORY",
 		// The three the frontend cli-flag gate was hiding.
 		"GITHUB", "GITLAB", "VERCEL",
@@ -99,7 +104,11 @@ func TestProbeSupported_ProbelessRegistrationFails(t *testing.T) {
 func TestProbeSupported_UnregisteredProviderStaysUnsupported(t *testing.T) {
 	t.Parallel()
 
-	for _, p := range []string{"NOTION", "AWS", "OPENAI_COMPAT", "", "UNKNOWN_BRAND", "openrouter"} {
+	// OPENAI_COMPAT used to sit in this list and now carries a probe (#2043),
+	// which is why the fixtures are checked against the map below rather than
+	// trusted: a name that quietly gains a probe would otherwise turn this test
+	// into one that asserts nothing.
+	for _, p := range []string{"NOTION", "AWS", "BEDROCK", "", "UNKNOWN_BRAND", "openrouter", "openai_compat"} {
 		if _, registered := probeSupportedProviders[p]; registered {
 			t.Fatalf("fixture %q is registered; pick a name that is not, or this proves nothing", p)
 		}
@@ -210,13 +219,17 @@ func TestDefaultEnvVar_ExposesTestable(t *testing.T) {
 		"UNKNOWN": {"", false},
 		// The phase-2 pair, and the two fields' independence again — from the
 		// other side this time. OpenRouter has both: a conventional variable an
-		// unrouted OpenCode crew still reads, and a probe. OPENAI_COMPAT has
-		// neither, and neither absence is an oversight: its credential is an
-		// endpoint object no agent-side tool reads from env, and probing an
-		// operator-supplied host from crewshipd is the SSRF surface the probe
-		// path is not built for.
+		// unrouted OpenCode crew still reads, and a probe.
+		//
+		// OPENAI_COMPAT has a probe and no env var, and both are deliberate. Its
+		// credential is an endpoint object no agent-side tool reads from env, so
+		// there is no conventional variable to name. It became testable in #2043:
+		// the wizard's pre-save Test syntax-checks the endpoint without dialling
+		// (the body path is RequireAuth-only), and says so in its result text;
+		// `credential test-stored` is what actually reaches the host, from the
+		// role-gated path.
 		"OPENROUTER":    {"OPENROUTER_API_KEY", true},
-		"OPENAI_COMPAT": {"", false},
+		"OPENAI_COMPAT": {"", true},
 	}
 
 	for prov, want := range cases {
