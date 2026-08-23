@@ -50,7 +50,10 @@ export function StepIdentity({ state, setState }: Props) {
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            className="text-[11px] text-muted-foreground hover:text-foreground/80 transition-colors capitalize"
+            // Padding, not size: it is a caption that happens to be clickable,
+            // and 17px of text is a 17px target. The icon above opens the same
+            // picker and is large; this still has to be hittable.
+            className="capitalize text-[11px] text-muted-foreground transition-colors hover:text-foreground/80 max-sm:px-2 max-sm:py-4"
           >
             {state.icon} · {state.color}
           </button>
@@ -67,7 +70,7 @@ export function StepIdentity({ state, setState }: Props) {
                 onChange={(e) => onNameChange(e.target.value)}
                 autoFocus
                 placeholder="Engineering"
-                className="mt-1.5 w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
+                className="mt-1.5 w-full rounded-md border border-white/15 bg-background px-3 py-2 text-sm outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 max-sm:h-12"
               />
             </div>
             <div>
@@ -77,7 +80,7 @@ export function StepIdentity({ state, setState }: Props) {
                 value={state.slug}
                 onChange={(e) => setState({ slug: e.target.value, slugTouched: true })}
                 placeholder="engineering"
-                className="mt-1.5 w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
+                className="mt-1.5 w-full rounded-md border border-white/15 bg-background px-3 py-2 font-mono text-sm outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 max-sm:h-12"
               />
             </div>
           </div>
@@ -94,7 +97,7 @@ export function StepIdentity({ state, setState }: Props) {
               value={state.description}
               onChange={(e) => setState({ description: e.target.value })}
               placeholder="What does this crew do, in one line?"
-              className="mt-1.5 w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
+              className="mt-1.5 w-full rounded-md border border-white/15 bg-background px-3 py-2 text-sm outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 max-sm:h-12"
             />
           </div>
 

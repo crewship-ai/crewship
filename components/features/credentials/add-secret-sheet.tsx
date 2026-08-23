@@ -83,6 +83,7 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
     >
       <CreateSurfaceHeader
         concept="credentials"
+        context="Credentials"
         title="Add a credential"
         description={
           <>

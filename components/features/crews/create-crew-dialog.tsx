@@ -186,6 +186,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
     >
       <CreateSurfaceHeader
         concept="crews"
+        context="Crews"
         title="New crew"
         description={STEP_DESCRIPTION[step]}
         onBack={step > 1 ? back : undefined}

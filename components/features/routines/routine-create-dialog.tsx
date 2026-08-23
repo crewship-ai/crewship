@@ -645,6 +645,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     >
       <CreateSurfaceHeader
         concept="routines"
+        context="Routines"
         title={headerTitle}
         description={headerSub}
         onBack={mode === "entry" ? undefined : () => setMode("entry")}

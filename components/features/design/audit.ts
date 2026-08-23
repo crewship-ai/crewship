@@ -146,8 +146,12 @@ export const DOORS: Door[] = [
     primary: "raw <button>",
     cmdEnter: false,
     mobile: false,
-    proposed: "md",
-    migrated: { on: "2026-08-23", note: "All sixteen fields of createAgentRequest verified present against the Go struct after the move." },
+    // Proposed at md and landed at lg. Sixteen fields, a template browser and
+    // four disclosures do not fit a 640px column without the disclosures
+    // becoming the whole surface — the proposal was made from the field list,
+    // not from the built screen.
+    proposed: "md → shipped lg",
+    migrated: { on: "2026-08-23", note: "Landed at lg, not the md this row proposed. All sixteen fields of createAgentRequest verified present against the Go struct after the move." },
   },
   {
     page: "Skills",
@@ -158,8 +162,11 @@ export const DOORS: Door[] = [
     primary: "<Button> default h-9",
     cmdEnter: false,
     mobile: false,
-    proposed: "sm",
-    migrated: { on: "2026-08-23", note: "Three sources behind one door, on the shell's Choice instead of a Radix tab strip." },
+    // Proposed at sm and landed at md, for the same reason New agent did: the
+    // proposal was made from the field list, and three source tiles side by
+    // side do not fit 480px.
+    proposed: "sm → shipped md",
+    migrated: { on: "2026-08-23", note: "Landed at md, not the sm this row proposed. Three sources behind one door, on the shell's Choice instead of a Radix tab strip." },
   },
   {
     page: "Credentials",

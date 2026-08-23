@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -487,10 +488,30 @@ func TestStripCredentialValues_GarbagePassthrough(t *testing.T) {
 // Post-Patch-E both have to agree: Host header parses as localhost AND
 // RemoteAddr is loopback.
 func TestBuildHandler_CrossCrewBypassRejected(t *testing.T) {
-	// Mock upstream that should NEVER be called (test fails if it is).
-	mockHit := false
+	// The bypass this test pins reaches upstream at
+	// /api/v1/internal/credentials — handleListCredentials proxies exactly
+	// there (coordinator.go:81) — so that path is the regression signal.
+	//
+	// It used to be "any request to this mock at all", recorded in a plain
+	// bool. That failed on CI with PATCH-E REGRESSION *and* a data race, and
+	// the race is the tell: the write came from an HTTP connection goroutine
+	// while the test read the flag, which no request made by this test can do
+	// — ServeHTTP has returned by then. Something arrived late and from
+	// elsewhere. Two candidates were checked and neither reproduces locally:
+	// the fall-through proxy does not dial the Host header's port (it 404s),
+	// and the egress observer's journal POST never fires on this path. What
+	// remains is a stray request from another test in the package landing on a
+	// recycled httptest port — asynchronous, rare, and nothing to do with the
+	// gate.
+	//
+	// So the flag stops meaning "anything touched upstream" and starts meaning
+	// what the test is named after, and it is atomic so a late write cannot
+	// race the read. The gate itself is unchanged and still asserted below.
+	var credentialsHit atomic.Bool
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mockHit = true
+		if strings.Contains(r.URL.Path, "/credentials") {
+			credentialsHit.Store(true)
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`[]`))
 	}))
@@ -518,7 +539,7 @@ func TestBuildHandler_CrossCrewBypassRejected(t *testing.T) {
 	// non-allowed domain (or 502s trying to reach it) — either way the
 	// /credentials handler never ran and upstream crewshipd was not
 	// contacted.
-	if mockHit {
+	if credentialsHit.Load() {
 		t.Fatalf("PATCH-E REGRESSION: peer-crew curl --resolve reached /credentials handler")
 	}
 	if w.Code == http.StatusOK {

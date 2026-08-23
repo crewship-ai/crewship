@@ -956,6 +956,10 @@ export function CreateSurfaceTitleInput({ className, ...props }: React.Component
       type="text"
       className={cn(
         "w-full bg-transparent text-base font-medium text-foreground outline-none placeholder:text-muted-foreground/50",
+        // The box is as tall as its line on a desktop, which is the look. On a
+        // phone that is a 24px target for the first thing you are asked to
+        // type, so it gets padding rather than a border it should not have.
+        "max-sm:py-2.5 group-data-[mobile=true]/surface:py-2.5",
         className,
       )}
       {...props}
@@ -1039,7 +1043,13 @@ export function CreateSurfacePill({
       disabled={readOnly || props.disabled}
       className={cn(
         "flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-hairline bg-foreground/[0.04] px-2.5 text-xs transition-colors",
-        "max-sm:h-10 group-data-[mobile=true]/surface:h-10",
+        // h-12, not h-10. The phone twin was here all along and it was short:
+        // `--spacing: 0.23rem` makes h-10 36.8px, measured on an iPhone 13,
+        // against the 44 every platform guideline asks for. h-11 does not
+        // reach it either (40.5) — h-12 is the touch-target class in this
+        // repo, and this is the control New issue and New project are made of.
+        "max-sm:px-3 max-sm:text-sm group-data-[mobile=true]/surface:px-3",
+        "max-sm:h-12 group-data-[mobile=true]/surface:h-12",
         !readOnly && "hover:bg-foreground/[0.08]",
         readOnly && "cursor-default",
         set ? "text-foreground/85" : "text-muted-foreground",
