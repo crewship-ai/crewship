@@ -163,4 +163,23 @@ describe("Import routine bundle on CreateSurface", () => {
     fireEvent.click(screen.getByRole("button", { name: /^import$/i }))
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
   })
+
+  // The copy described a behaviour the endpoint does not have: Import's save
+  // returns 409 "slug already exists in workspace" on a collision and writes
+  // nothing (internal/api/pipelines_crud.go). Telling an operator their
+  // existing routine may be replaced is worse than saying nothing — it invites
+  // them to export a backup they do not need, and it would be a data-loss
+  // warning if the endpoint ever grew the behaviour it names.
+  it("does not promise a replace the endpoint refuses to do", () => {
+    render(<ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />)
+    const body = shell()!.textContent ?? ""
+    expect(body).not.toMatch(/existing routine is replaced/i)
+    expect(body).toMatch(/refused/i)
+    expect(body).toMatch(/nothing already saved is overwritten/i)
+  })
+
+  it("carries the breadcrumb every other door has", () => {
+    render(<ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />)
+    expect(screen.getByText("Routines")).toBeInTheDocument()
+  })
 })

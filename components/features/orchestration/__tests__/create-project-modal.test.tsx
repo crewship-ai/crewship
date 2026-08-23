@@ -138,13 +138,18 @@ describe("CreateProjectModal", () => {
   // The pills moved into the shell's pill row and are now CreateSurfacePill,
   // which Radix anchors its popover to via `asChild`. If that ref did not land
   // on the button the popover would not open at all.
-  it("still opens the status popover from the pill and applies the pick", async () => {
+  // Status is a chip row in the body now, not a pill hiding a popover: every
+  // option is on screen and picking one is a single click. The assertion that
+  // matters is unchanged — the pick sticks.
+  it("applies a status pick from the chip row", async () => {
     render(<CreateProjectModal {...defaultProps} />)
-    fireEvent.click(screen.getByText("Backlog"))
-    fireEvent.click(await screen.findByText("Planned"))
+    const backlog = screen.getByRole("radio", { name: /Backlog/ })
+    expect(backlog).toHaveAttribute("aria-checked", "true")
+
+    fireEvent.click(screen.getByRole("radio", { name: /Planned/ }))
     await waitFor(() => {
-      expect(screen.getByText("Planned")).toBeInTheDocument()
-      expect(screen.queryByText("Backlog")).not.toBeInTheDocument()
+      expect(screen.getByRole("radio", { name: /Planned/ })).toHaveAttribute("aria-checked", "true")
+      expect(screen.getByRole("radio", { name: /Backlog/ })).toHaveAttribute("aria-checked", "false")
     })
   })
 
@@ -182,20 +187,29 @@ describe("CreateProjectModal", () => {
     expect(screen.getByText("Lead")).toBeInTheDocument()
   })
 
-  it("shows Start and Target date pills", () => {
+  // Both dates are date inputs under Planning. As pills they were a popover
+  // each, so the two fields most likely to be filled together needed four
+  // clicks and never appeared side by side.
+  it("shows Start and Target as date fields, not pills", () => {
     render(<CreateProjectModal {...defaultProps} />)
-    expect(screen.getByText("Start")).toBeInTheDocument()
-    expect(screen.getByText("Target")).toBeInTheDocument()
+    const start = screen.getByLabelText(/Start date/i)
+    const target = screen.getByLabelText(/Target date/i)
+    expect(start).toHaveAttribute("type", "date")
+    expect(target).toHaveAttribute("type", "date")
   })
 
   // Milestones are created by POST /api/v1/projects/{projectId}/milestones,
   // which 404s unless the project already exists — so nothing in a *create*
   // modal can call it. The section here had an add button with no onClick at
   // all: a control that does nothing.
-  it("does not offer a Milestones section it cannot back", () => {
+  it("does not offer a Milestones control it cannot back", () => {
     render(<CreateProjectModal {...defaultProps} />)
-    expect(screen.queryByText("Milestones")).not.toBeInTheDocument()
+    // The section exists and says why it is empty — what must not exist is a
+    // control. The old one was an add button with no onClick at all.
+    expect(screen.getByText("Milestones")).toBeInTheDocument()
+    expect(screen.getByText(/Milestones cannot be created here/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "+" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /add milestone/i })).not.toBeInTheDocument()
   })
 
   // No `summary` column on projects and no `summary` field on the create

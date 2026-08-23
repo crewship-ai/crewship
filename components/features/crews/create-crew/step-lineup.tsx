@@ -11,6 +11,9 @@ import { asCrewColor, type WizardState } from "./types"
 interface Props {
   state: WizardState
   setState: (patch: Partial<WizardState>) => void
+  /** The dialog's workspace. GET /api/v1/crew-templates is wsCtx-wrapped and
+   *  400s without it — see the fetch in BrowseTemplates. */
+  workspaceId: string
 }
 
 export function StepLineup(props: Props) {
@@ -57,7 +60,7 @@ function ModeTabs({ state, setMode }: { state: WizardState; setMode: (m: WizardS
 
 type SourceFilter = "builtin" | "mine" | "workspace" | "marketplace"
 
-function BrowseTemplates({ state, setState }: Props) {
+function BrowseTemplates({ state, setState, workspaceId }: Props) {
   const [templates, setTemplates] = useState<CrewTemplate[] | null>(null)
   const [query, setQuery] = useState("")
   const [source, setSource] = useState<SourceFilter>("builtin")
@@ -66,7 +69,11 @@ function BrowseTemplates({ state, setState }: Props) {
 
   useEffect(() => {
     let cancelled = false
-    apiFetch("/api/v1/crew-templates")
+    // The workspace goes in the query string, not because this list is
+    // workspace-scoped data the client wants filtered, but because the route
+    // is wrapped in RequireWorkspace: no workspace_id anywhere in query, path
+    // or header and the request never reaches the handler at all.
+    apiFetch(`/api/v1/crew-templates?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: CrewTemplate[]) => {
         if (!cancelled) setTemplates(Array.isArray(data) ? data : [])
@@ -78,7 +85,7 @@ function BrowseTemplates({ state, setState }: Props) {
         }
       })
     return () => { cancelled = true }
-  }, [])
+  }, [workspaceId])
 
   // Client-side filtering. Server-side q/source/category support is a follow-up.
   const filtered = useMemo(() => {

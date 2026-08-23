@@ -119,7 +119,7 @@ describe("ConnectOAuthDialog — the shell", () => {
     const { onOpenChange } = renderDialog()
     await waitFor(() => expect(shell()).not.toBeNull())
 
-    fireEvent.click(screen.getByRole("button", { name: "Google" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Google/ }))
     fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "abc" } })
 
     fireEvent.keyDown(shell()!, { key: "Escape" })
@@ -130,6 +130,46 @@ describe("ConnectOAuthDialog — the shell", () => {
   })
 })
 
+describe("ConnectOAuthDialog — the picker is tiles, like every other picker", () => {
+  // /design's blurb for this door is one sentence: "Was a bare 448px form with
+  // the default dialog padding. Now the same tiles as every other picker." The
+  // shell landed and the picker did not — the providers stayed a row of 24px
+  // pills carrying a label and nothing else, so the one thing a person needs
+  // in order to choose (what access they are about to hand over) was the one
+  // thing not on screen.
+  it("renders each provider as a tile carrying the scopes it will ask for", async () => {
+    renderDialog()
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/oauth/providers?workspace_id=ws1"),
+    )
+
+    const google = await screen.findByRole("button", { name: /^Google/ })
+    // The scopes come from the server's provider record, not a hardcoded
+    // string: an operator who narrows google's default_scopes must see the
+    // narrowed list here.
+    // Rendered as the tile's second line, space/comma-separated scopes
+    // joined with the middot the rest of the kit uses.
+    expect(google).toHaveTextContent("openid · email")
+  })
+
+  it("marks the picked provider as pressed rather than restyling a pill", async () => {
+    renderDialog()
+    const google = await screen.findByRole("button", { name: /^Google/ })
+    expect(google).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(google)
+    await waitFor(() => expect(google).toHaveAttribute("aria-pressed", "true"))
+  })
+
+  it("disables a provider the server has not configured", async () => {
+    renderDialog()
+    // PROVIDERS carries google only; every other shortcut is unconfigured and
+    // must not look pickable.
+    const github = await screen.findByRole("button", { name: /^GitHub/ })
+    await waitFor(() => expect(github).toBeDisabled())
+  })
+})
+
 describe("ConnectOAuthDialog — the request it has always issued", () => {
   it("creates an OAUTH2 credential with the typed client details", async () => {
     const { onSuccess } = renderDialog()
@@ -137,7 +177,7 @@ describe("ConnectOAuthDialog — the request it has always issued", () => {
       expect(apiFetch).toHaveBeenCalledWith("/api/v1/oauth/providers?workspace_id=ws1"),
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Google" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Google/ }))
     fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "cid" } })
     fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "csecret" } })
     fireEvent.click(screen.getByRole("button", { name: /authorize/i }))
@@ -175,7 +215,7 @@ describe("ConnectOAuthDialog — the request it has always issued", () => {
     renderDialog()
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
 
-    fireEvent.click(screen.getByRole("button", { name: "Google" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Google/ }))
     fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "cid" } })
     fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "csecret" } })
     fireEvent.click(screen.getByRole("button", { name: /authorize/i }))
@@ -193,7 +233,7 @@ describe("ConnectOAuthDialog — the request it has always issued", () => {
     const { onOpenChange } = renderDialog()
     await waitFor(() => expect(shell()).not.toBeNull())
 
-    fireEvent.click(screen.getByRole("button", { name: "Google" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Google/ }))
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
@@ -222,7 +262,7 @@ describe("ConnectOAuthDialog — the request it has always issued", () => {
 
     expect(screen.getByRole("button", { name: /authorize/i })).toBeDisabled()
 
-    fireEvent.click(screen.getByRole("button", { name: "Google" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Google/ }))
     fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "cid" } })
     expect(screen.getByRole("button", { name: /authorize/i })).toBeDisabled()
 
@@ -238,7 +278,7 @@ describe("ConnectOAuthDialog — the request it has always issued", () => {
       expect(apiFetch).toHaveBeenCalledWith("/api/v1/oauth/providers?workspace_id=ws1"),
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Google" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Google/ }))
     fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "cid" } })
     fireEvent.change(screen.getByLabelText("Client Secret"), { target: { value: "csecret" } })
 

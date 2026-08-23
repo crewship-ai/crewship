@@ -79,17 +79,23 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
         )}
       </Row>
 
-      {hasContainerOverrides(state) && (
-        <Row label="Image" onEdit={onEdit && (() => onEdit(3))}>
-          <Pill>{summaryBaseImage(state)}</Pill>
-          {summaryFeatureCount(state.devcontainerConfig) > 0 && (
-            <Pill>{summaryFeatureCount(state.devcontainerConfig)} feature{summaryFeatureCount(state.devcontainerConfig) === 1 ? "" : "s"}</Pill>
-          )}
-          {summaryRuntimeCount(state.miseConfig) > 0 && (
-            <Pill>{summaryRuntimeCount(state.miseConfig)} runtime{summaryRuntimeCount(state.miseConfig) === 1 ? "" : "s"}</Pill>
-          )}
-        </Row>
-      )}
+      {/* Unconditional. This used to render only when the state carried an
+          override, which hid the row for exactly the crews that never opened
+          the image list — so the step offering nine base images was reviewed
+          by a summary with no image in it. The default is a choice too, and
+          the row says which one it is. */}
+      <Row label="Runs on" onEdit={onEdit && (() => onEdit(3))}>
+        <Pill>{summaryBaseImage(state)}</Pill>
+        {!hasContainerOverrides(state) && (
+          <span className="text-[11px] text-muted-foreground">the shipped default</span>
+        )}
+        {summaryFeatureCount(state.devcontainerConfig) > 0 && (
+          <Pill>{summaryFeatureCount(state.devcontainerConfig)} feature{summaryFeatureCount(state.devcontainerConfig) === 1 ? "" : "s"}</Pill>
+        )}
+        {summaryRuntimeCount(state.miseConfig) > 0 && (
+          <Pill>{summaryRuntimeCount(state.miseConfig)} runtime{summaryRuntimeCount(state.miseConfig) === 1 ? "" : "s"}</Pill>
+        )}
+      </Row>
 
       <Row label="After create">
         <span className="text-muted-foreground text-[12px] leading-relaxed">

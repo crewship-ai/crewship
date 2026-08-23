@@ -1,7 +1,19 @@
 "use client"
 
 import { useCallback, useState, useEffect, useRef } from "react"
-import { ExternalLink } from "lucide-react"
+import {
+  Cloud,
+  CreditCard,
+  ExternalLink,
+  FileText,
+  GitBranch,
+  GitMerge,
+  Globe,
+  LayoutGrid,
+  MessageSquare,
+  Route,
+  Wrench,
+} from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -9,25 +21,59 @@ import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
-import { CREATE_SURFACE_INPUT } from "@/components/layout/create-surface"
+import type { AccentName } from "@/lib/concept-accents"
+import {
+  CREATE_SURFACE_INPUT,
+  CreateSurfaceTile,
+  type SurfaceIcon as SurfaceIconComponent,
+} from "@/components/layout/create-surface"
 import type { Credential, OAuthProvider } from "../types"
 import { deriveCredentialName } from "../lib/credential-helpers"
 
 // ---------------------------------------------------------------------------
-// Provider shortcuts shown as pill buttons
+// Provider shortcuts
+//
+// Rendered as pills inline (the MCP credential picker, where this is one field
+// among many) and as tiles in a CreateSurface (Credentials → Connect via
+// OAuth, where picking the provider IS the surface). The glyph and accent are
+// only read by the tile layout; the pills have never carried either.
 // ---------------------------------------------------------------------------
 
-const OAUTH_PROVIDER_SHORTCUTS: { key: string; label: string }[] = [
-  { key: "google", label: "Google" },
-  { key: "github", label: "GitHub" },
-  { key: "slack", label: "Slack" },
-  { key: "microsoft", label: "Microsoft" },
-  { key: "linear", label: "Linear" },
-  { key: "gitlab", label: "GitLab" },
-  { key: "notion", label: "Notion" },
-  { key: "stripe", label: "Stripe" },
-  { key: "cloudflare", label: "Cloudflare" },
+interface OAuthShortcut {
+  key: string
+  label: string
+  icon: SurfaceIconComponent
+  accent: AccentName
+}
+
+const OAUTH_PROVIDER_SHORTCUTS: OAuthShortcut[] = [
+  { key: "google", label: "Google", icon: Globe, accent: "blue" },
+  { key: "github", label: "GitHub", icon: GitBranch, accent: "slate" },
+  { key: "slack", label: "Slack", icon: MessageSquare, accent: "red" },
+  { key: "microsoft", label: "Microsoft", icon: LayoutGrid, accent: "sky" },
+  { key: "linear", label: "Linear", icon: Route, accent: "purple" },
+  { key: "gitlab", label: "GitLab", icon: GitMerge, accent: "amber" },
+  { key: "notion", label: "Notion", icon: FileText, accent: "slate" },
+  { key: "stripe", label: "Stripe", icon: CreditCard, accent: "purple" },
+  { key: "cloudflare", label: "Cloudflare", icon: Cloud, accent: "gold" },
 ]
+
+/**
+ * The scope list as a tile subtitle.
+ *
+ * Google states its scopes as full URLs — three of them run to 130 characters
+ * and wrap a 480px tile to three lines, which buries the provider name they
+ * are meant to annotate. The trailing segment is the part that carries the
+ * meaning (`.../auth/drive` → `drive`), and the full string is still what gets
+ * sent: this shortens the label, not the request.
+ */
+function formatScopes(raw: string): string {
+  return raw
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map((s) => (s.startsWith("http") ? s.replace(/\/+$/, "").split("/").pop() || s : s))
+    .join(" · ")
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -60,6 +106,17 @@ export interface OAuthFormProps {
    * the action's state changes; the callback itself must be stable.
    */
   onActionChange?: (action: OAuthFormAction) => void
+  /**
+   * How the provider shortcuts are drawn.
+   *
+   * `inline` (default) is the pill row the MCP credential picker has always
+   * shown, where this form is one control inside a larger config panel.
+   * `surface` is the tile list /design specifies for Credentials → Connect via
+   * OAuth: glyph, name, and the scopes the provider will be asked for, which
+   * is the fact a person needs before handing over access and the one a pill
+   * has no room to carry.
+   */
+  variant?: "inline" | "surface"
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +130,7 @@ export function OAuthForm({
   onSelectCredential,
   onCancel,
   onActionChange,
+  variant = "inline",
 }: OAuthFormProps) {
   const [providers, setProviders] = useState<Record<string, OAuthProvider>>({})
   const [providersFetched, setProvidersFetched] = useState(false)
@@ -385,39 +443,80 @@ export function OAuthForm({
   authorizeRef.current = handleAuthorize
 
   return (
-    <div className="p-3 space-y-3">
-      <div className="text-xs font-medium">Connect with OAuth</div>
+    <div className={cn("space-y-3", variant === "surface" ? "p-0" : "p-3")}>
+      {/* In a CreateSurface the header two rows up already says "Connect via
+          OAuth"; repeating it is the duplicated-title shape the shell exists
+          to remove. Inline, this label is the only thing naming the form. */}
+      {variant === "inline" && <div className="text-xs font-medium">Connect with OAuth</div>}
 
-      {/* Provider shortcuts. `max-sm:h-12`: this form is also used un-migrated
-          inline in the MCP credential picker, so unlike the rest of the
-          create surfaces these pills never picked up a phone size — measured
-          at 24.15px tall (`h-6`) on an iPhone 13, well short of the 44px
-          floor either place this renders. */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {OAUTH_PROVIDER_SHORTCUTS.map((p) => (
+      {variant === "surface" ? (
+        <div className="space-y-2">
+          {OAUTH_PROVIDER_SHORTCUTS.map((p) => {
+            const provider = providers[p.key]
+            const unavailable = !providersFetched || (providersFetched && !provider)
+            return (
+              <CreateSurfaceTile
+                key={p.key}
+                icon={p.icon}
+                accent={p.accent}
+                title={p.label}
+                // Before the providers land there is nothing truthful to say
+                // about scopes, so the tile says nothing rather than guessing.
+                description={
+                  provider?.default_scopes
+                    ? formatScopes(provider.default_scopes)
+                    : providersFetched
+                      ? "Not configured on this server"
+                      : undefined
+                }
+                selected={selectedProvider === p.key}
+                onClick={() => handleProviderSelect(p.key)}
+                disabled={unavailable || authorizing}
+              />
+            )
+          })}
+          <CreateSurfaceTile
+            icon={Wrench}
+            accent="slate"
+            title="Custom"
+            description="Any OAuth2 endpoint — you supply the authorise and token URLs."
+            selected={selectedProvider === "custom"}
+            onClick={handleCustom}
+            disabled={authorizing}
+          />
+        </div>
+      ) : (
+        /* Provider shortcuts. `max-sm:h-12`: this form is also used
+           un-migrated inline in the MCP credential picker, so unlike the rest
+           of the create surfaces these pills never picked up a phone size —
+           measured at 24.15px tall (`h-6`) on an iPhone 13, well short of the
+           44px floor either place this renders. */
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {OAUTH_PROVIDER_SHORTCUTS.map((p) => (
+            <Button
+              key={p.key}
+              type="button"
+              variant={selectedProvider === p.key ? "default" : "outline"}
+              size="sm"
+              className="h-6 text-[10px] px-2 max-sm:h-12 max-sm:px-3 max-sm:text-sm"
+              onClick={() => handleProviderSelect(p.key)}
+              disabled={!providersFetched || authorizing || (providersFetched && !providers[p.key])}
+            >
+              {p.label}
+            </Button>
+          ))}
           <Button
-            key={p.key}
             type="button"
-            variant={selectedProvider === p.key ? "default" : "outline"}
+            variant={selectedProvider === "custom" ? "default" : "outline"}
             size="sm"
             className="h-6 text-[10px] px-2 max-sm:h-12 max-sm:px-3 max-sm:text-sm"
-            onClick={() => handleProviderSelect(p.key)}
-            disabled={!providersFetched || authorizing || (providersFetched && !providers[p.key])}
+            onClick={handleCustom}
+            disabled={authorizing}
           >
-            {p.label}
+            Custom
           </Button>
-        ))}
-        <Button
-          type="button"
-          variant={selectedProvider === "custom" ? "default" : "outline"}
-          size="sm"
-          className="h-6 text-[10px] px-2 max-sm:h-12 max-sm:px-3 max-sm:text-sm"
-          onClick={handleCustom}
-          disabled={authorizing}
-        >
-          Custom
-        </Button>
-      </div>
+        </div>
+      )}
 
       {selectedProvider && (
         <div className="space-y-2">
@@ -546,7 +645,9 @@ export function OAuthForm({
         </div>
       )}
 
-      {!selectedProvider && (
+      {/* The tiles say what they are; the pills do not, so only the pill
+          layout needs telling the reader what the row above is for. */}
+      {!selectedProvider && variant === "inline" && (
         <p className="text-xs text-muted-foreground">
           Select a provider above or choose Custom for any OAuth2 endpoint.
         </p>

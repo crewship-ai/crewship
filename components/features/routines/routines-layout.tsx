@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
@@ -12,6 +12,7 @@ import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-
 import {
   CreateSurface,
   CreateSurfaceBody,
+  CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceHeader,
   CreateSurfaceRefusal,
@@ -373,6 +374,7 @@ export function ImportRoutineDialog({
   const [json, setJson] = useState("")
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const bundleFieldId = useId()
 
   const submit = async () => {
     setErr(null)
@@ -412,22 +414,29 @@ export function ImportRoutineDialog({
       <CreateSurfaceHeader
         icon={Upload}
         accent="purple"
-        title="Import routine bundle"
+        context="Routines"
+        title="Import a bundle"
+        description="Exported from another workspace, or shared by an agent. Authorship metadata is preserved."
         onClose={onClose}
       />
 
       <CreateSurfaceBody className="flex flex-col gap-3">
-        <p className="text-xs text-muted-foreground">
-          Paste a routine bundle JSON (exported from another workspace via Export bundle, or
-          shared by an agent). Import preserves authorship metadata; the bundle&apos;s slug must be
-          unique in this workspace or the existing routine is replaced.
-        </p>
-        <textarea
-          value={json}
-          onChange={(e) => setJson(e.target.value)}
-          placeholder='{"slug":"…","definition":{…},"versions":[…]}'
-          className="h-64 w-full resize-none rounded-md border border-hairline bg-background p-2 font-mono text-[11px] text-foreground outline-none focus:border-primary"
-        />
+        <CreateSurfaceField
+          label="Bundle JSON"
+          // What the endpoint actually does on a collision: 409, and the
+          // routine already here is left exactly as it was. The old wording
+          // ("…or the existing routine is replaced") described a replace this
+          // import has never performed.
+          hint="A slug already in use here is refused — nothing already saved is overwritten."
+        >
+          <textarea
+            id={bundleFieldId}
+            value={json}
+            onChange={(e) => setJson(e.target.value)}
+            placeholder='{"slug":"…","definition":{…},"versions":[…]}'
+            className="h-64 w-full resize-none rounded-md border border-hairline bg-background p-2 font-mono text-[11px] text-foreground outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
+        </CreateSurfaceField>
       </CreateSurfaceBody>
 
       {/* The parse failure and the server's refusal arrive at the same place,

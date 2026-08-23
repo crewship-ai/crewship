@@ -119,8 +119,11 @@ describe("ImportSkillDialog", () => {
     fireEvent.change(screen.getByLabelText(/ref \(optional\)/i), { target: { value: "main" } })
     fireEvent.change(screen.getByLabelText(/vendor namespace/i), { target: { value: "community" } })
     // Both default OFF, and both must reach the wire as booleans either way.
+    // Dry run is repo-only and sits in the source block; the licence gate is
+    // shared by all three sources and sits in the disclosure below them.
     fireEvent.click(screen.getByLabelText(/dry run/i))
-    fireEvent.click(screen.getByLabelText(/skip license gate/i))
+    fireEvent.click(screen.getByRole("button", { name: /licensing/i }))
+    fireEvent.click(screen.getByLabelText(/allow unrecognised licences/i))
 
     fireEvent.click(screen.getByRole("button", { name: /^preview$/i }))
 
@@ -151,6 +154,51 @@ describe("ImportSkillDialog", () => {
     expect(refusal.textContent).toContain("that URL is not a SKILL.md")
     // …and it does NOT close the surface.
     expect(surface()).not.toBeNull()
+  })
+
+  // The licence gate was reachable from the repository source only, while all
+  // three sources send `allow_unsafe_license` — so a URL import of a skill
+  // whose licence the SPDX scanner cannot identify (skills.go:355 reads the
+  // flag on this route too) was refused by the server with the one control
+  // that would let it through rendered on a different tab. /design puts
+  // Licensing in a disclosure below the source, where every source has it.
+  describe("the licence gate", () => {
+    it("is reachable from the URL source, not just the repository one", async () => {
+      apiFetch.mockResolvedValue(jsonResponse(IMPORTED))
+      openDialog()
+
+      fireEvent.click(screen.getByRole("button", { name: /licensing/i }))
+      fireEvent.click(screen.getByLabelText(/allow unrecognised licences/i))
+
+      fireEvent.change(screen.getByLabelText(/SKILL\.md URL/i), {
+        target: { value: "https://github.com/org/repo/blob/main/s/SKILL.md" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: /^import$/i }))
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+      expect(bodyOf(apiFetch.mock.calls[0])).toEqual({
+        url: "https://github.com/org/repo/blob/main/s/SKILL.md",
+        allow_unsafe_license: true,
+      })
+    })
+
+    it("says which way it is currently set without being opened", () => {
+      openDialog()
+      expect(screen.getByText(/recognised licences only/i)).toBeInTheDocument()
+    })
+
+    it("still defaults to refusing what the scanner cannot identify", async () => {
+      apiFetch.mockResolvedValue(jsonResponse(IMPORTED))
+      openDialog()
+
+      fireEvent.change(screen.getByLabelText(/SKILL\.md URL/i), {
+        target: { value: "https://github.com/org/repo/blob/main/s/SKILL.md" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: /^import$/i }))
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+      expect(bodyOf(apiFetch.mock.calls[0]).allow_unsafe_license).toBe(false)
+    })
   })
 
   it("guards a dismissal once there is unsaved input", async () => {

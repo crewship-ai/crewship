@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { z } from "zod"
-import { Upload, AlertTriangle, Check, Eye } from "lucide-react"
+import { Upload, AlertTriangle, Check, Eye, Shield } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,7 @@ import {
   CreateSurface,
   CreateSurfaceBody,
   CreateSurfaceChoice,
+  CreateSurfaceDisclosure,
   CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceGrid,
@@ -232,8 +233,11 @@ export function ImportSkillDialog({
         <CreateSurfaceHeader
           concept="skills"
           context="Skills"
-          title="Import Skill"
-          description="Import a skill from a GitHub URL or paste a SKILL.md file directly."
+          title="Import a skill"
+          // Named all three sources: the old line stopped at "a GitHub URL or
+          // paste a SKILL.md", which is the two that were tabs before the
+          // repository source was added.
+          description="From a GitHub URL, a pasted SKILL.md, or a whole repository at once."
           onClose={closeAndReset}
         />
 
@@ -363,31 +367,6 @@ export function ImportSkillDialog({
                   </label>
                 }
               />
-              <CreateSurfaceToggleRow
-                icon={AlertTriangle}
-                accent="red"
-                label={
-                  <label
-                    htmlFor="repo-unsafe-license"
-                    className="flex cursor-pointer items-center text-warn max-sm:min-h-12"
-                  >
-                    Skip license gate
-                  </label>
-                }
-                control={
-                  <label
-                    htmlFor="repo-unsafe-license"
-                    className="flex cursor-pointer items-center justify-center max-sm:min-h-12 max-sm:min-w-12"
-                  >
-                    <Checkbox
-                      id="repo-unsafe-license"
-                      checked={unsafeLicense}
-                      onCheckedChange={(v) => setUnsafeLicense(v === true)}
-                    />
-                  </label>
-                }
-              />
-
               {bulkResult && (
                 <CreateSurfaceNotice tone="ok" icon={Check}>
                   <span className="block font-medium text-success">
@@ -436,6 +415,49 @@ export function ImportSkillDialog({
               />
             </CreateSurfaceField>
           )}
+
+          {/* Below the source, not inside one of them.
+           *
+           * This switch lived in the repository branch, so it was on screen
+           * for one of the three sources — while all three put
+           * `allow_unsafe_license` on the wire and the single-skill route
+           * reads it (internal/api/skills.go). A skill whose licence the SPDX
+           * scanner cannot identify was therefore refused by the server with
+           * the control that would have allowed it rendered on another tab.
+           * Folded, because the default is the safe one and most imports
+           * never need to look. */}
+          <CreateSurfaceDisclosure
+            icon={Shield}
+            accent="amber"
+            label="Licensing"
+            summary={unsafeLicense ? "unrecognised licences allowed" : "recognised licences only"}
+          >
+            <CreateSurfaceToggleRow
+              icon={AlertTriangle}
+              accent="red"
+              label={
+                <label
+                  htmlFor="skill-unsafe-license"
+                  className="flex cursor-pointer items-center text-warn max-sm:min-h-12"
+                >
+                  Allow unrecognised licences
+                </label>
+              }
+              hint="Off refuses any skill whose licence the scanner cannot identify (MIT, Apache-2.0, BSD-2/3, ISC, CC0-1.0, MPL-2.0, Unlicense, 0BSD are recognised). Leave it off unless you know the source."
+              control={
+                <label
+                  htmlFor="skill-unsafe-license"
+                  className="flex cursor-pointer items-center justify-center max-sm:min-h-12 max-sm:min-w-12"
+                >
+                  <Checkbox
+                    id="skill-unsafe-license"
+                    checked={unsafeLicense}
+                    onCheckedChange={(v) => setUnsafeLicense(v === true)}
+                  />
+                </label>
+              }
+            />
+          </CreateSurfaceDisclosure>
         </CreateSurfaceBody>
 
         <CreateSurfaceRefusal message={error} onDismiss={() => setError(null)} />

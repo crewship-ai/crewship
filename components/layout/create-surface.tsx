@@ -1121,6 +1121,10 @@ export function CreateSurfaceTile({
       className={cn(
         "group/tile flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
         "max-sm:p-3.5 group-data-[mobile=true]/surface:p-3.5",
+        // A tile that cannot be picked has to look it. Without this a
+        // `disabled` tile keeps the hover border and the full-strength label,
+        // so the only feedback is the click doing nothing.
+        "disabled:pointer-events-none disabled:opacity-45",
         selected
           ? "border-primary/40 bg-primary/[0.08]"
           : "border-hairline bg-foreground/[0.02] hover:border-border hover:bg-foreground/[0.05]",

@@ -665,8 +665,23 @@ describe("CreateIssueModal — the fields the API takes", () => {
     fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Cleared" } })
     fireEvent.click(screen.getByText("Estimate"))
     fireEvent.click(await screen.findByText("5 points"))
+    // Let the popover finish closing before reopening it.
+    //
+    // Picking a value calls setEstimateOpen(false), and Radix unmounts the
+    // content asynchronously. Clicking the pill again while that unmount is
+    // still in flight makes the reopen race it: the content that comes back
+    // can be the node being torn down, so the "Clear estimate" click lands on
+    // a detached element and does nothing — no error, no state change, and a
+    // POST that still carries the estimate. It reproduced only with enough
+    // files running beside this one, which is what a missing barrier looks
+    // like rather than a broken component.
+    await waitFor(() => expect(screen.queryByText("5 points")).toBeNull())
+
     fireEvent.click(screen.getByText("5 pts"))
     fireEvent.click(await screen.findByText(/clear estimate/i))
+    // The pill going back to "Estimate" is the clear having landed.
+    await screen.findByText("Estimate")
+
     fireEvent.click(screen.getByText("Create issue"))
 
     await waitFor(() => expect(postBody(fetchMock)).not.toBeNull())

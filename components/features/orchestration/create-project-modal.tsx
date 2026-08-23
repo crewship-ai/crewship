@@ -3,22 +3,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
+  CalendarDays,
   Check,
   User,
   UserX,
-  Calendar,
   FolderKanban,
+  Milestone,
+  Palette,
 } from "lucide-react"
 import {
   CreateSurface,
   CreateSurfaceBody,
+  CreateSurfaceChoice,
+  CreateSurfaceField,
   CreateSurfaceFooter,
+  CreateSurfaceGrid,
   CreateSurfaceHeader,
   CreateSurfaceNotice,
   CreateSurfacePicker,
   CreateSurfacePill,
   CreateSurfacePills,
   CreateSurfaceRefusal,
+  CreateSurfaceSection,
   CreateSurfaceTitleInput,
 } from "@/components/layout/create-surface"
 import {
@@ -48,7 +54,6 @@ import {
 } from "@/lib/entities"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { cn } from "@/lib/utils"
 import { ISSUE_ICON_COLORS } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
@@ -56,6 +61,11 @@ import type { IssueLabel, IssuePriority, ProjectStatus } from "@/lib/types/missi
 import type { CrewSummary } from "@/lib/types/orchestration"
 
 const PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
+
+/** The two date fields. `h-12` on a phone because `--spacing` is 0.23rem, so
+ *  the usual h-11 lands at 40.5px — under the 44px floor. */
+const DATE_INPUT_CLASS =
+  "h-8 w-full rounded-md border border-hairline bg-background px-2 text-xs text-foreground outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 max-sm:h-12 max-sm:text-sm"
 
 const PROJECT_STATUSES: { value: ProjectStatus; label: string; color: string }[] = [
   { value: "backlog", label: "Backlog", color: ISSUE_ICON_COLORS.BACKLOG },
@@ -150,11 +160,7 @@ export function CreateProjectModal({
   const [panel, setPanel] = useState<null | "icon">(null)
   const [iconQuery, setIconQuery] = useState("")
   const [iconCategory, setIconCategory] = useState<string | null>(null)
-  const [statusOpen, setStatusOpen] = useState(false)
-  const [priorityOpen, setPriorityOpen] = useState(false)
   const [leadOpen, setLeadOpen] = useState(false)
-  const [startOpen, setStartOpen] = useState(false)
-  const [targetOpen, setTargetOpen] = useState(false)
 
   // A ref, not the `saving` state, and it is the difference between one create
   // and two. The footer's primary is disabled while `saving` is true, but ⌘↵
@@ -240,7 +246,6 @@ export function CreateProjectModal({
     setRefusal(null)
   }
 
-  const statusInfo = PROJECT_STATUSES.find((s) => s.value === status) ?? PROJECT_STATUSES[0]
   const selectedLead = leadId ? (agents.find((a) => a.id === leadId) ?? null) : null
   const leadName = selectedLead?.name ?? null
 
@@ -375,7 +380,9 @@ export function CreateProjectModal({
 
         {!panel && (
           <>
-        {/* Icon + Name row */}
+        {/* Identity — the icon and colour ARE the project in every list it
+            appears in, so they are not buried behind an "appearance" tab. */}
+        <CreateSurfaceSection title="Identity" icon={Palette} accent="blue">
         <div className="flex items-start gap-3">
           <button
             type="button"
@@ -398,9 +405,9 @@ export function CreateProjectModal({
             />
           </div>
         </div>
+        </CreateSurfaceSection>
 
-        {/* Description */}
-        <div className="border-t border-hairline pt-3">
+        <CreateSurfaceSection title="Brief" hint="shown on the project page">
           <TiptapEditor
             content={description}
             onChange={setDescription}
@@ -411,9 +418,78 @@ export function CreateProjectModal({
             // taller than the thing it formats and every paragraph pushed the
             // caret against the bottom edge. This is the one field on the
             // surface people actually write IN rather than fill.
-            className="min-h-[280px]"
+            //
+            // 200, not the 280 it grew to: with Planning back in the body the
+            // brief is no longer the only thing in the scrollport, and at 280
+            // it pushed the status and dates below the fold on a laptop —
+            // which is how they came to be pills nobody opened.
+            className="min-h-[200px]"
           />
-        </div>
+        </CreateSurfaceSection>
+
+        {/* Planning — in the body, not behind four pills.
+         *
+         * Status, priority and the two dates were pill-and-popover, on the
+         * grounds that the shell has a pill row and this is what it is for.
+         * That holds for New issue, which is a compose surface used dozens of
+         * times a day where every keystroke counts. A project is created
+         * rarely and deliberately, and a popover hides both the options and
+         * the fact that a choice was available: /design shows them as chip
+         * rows and date fields, and this is that. */}
+        <CreateSurfaceSection title="Planning" icon={CalendarDays} accent="amber">
+          <CreateSurfaceGrid>
+            <CreateSurfaceField label="Status">
+              <CreateSurfaceChoice
+                ariaLabel="Project status"
+                value={status}
+                onChange={setStatus}
+                options={PROJECT_STATUSES.map((s) => ({
+                  value: s.value,
+                  label: (
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
+                      {s.label}
+                    </span>
+                  ),
+                }))}
+              />
+            </CreateSurfaceField>
+            <CreateSurfaceField label="Priority">
+              <CreateSurfaceChoice
+                ariaLabel="Project priority"
+                value={priority}
+                onChange={setPriority}
+                options={PRIORITIES.map((p) => ({
+                  value: p,
+                  label: (
+                    <span className="flex items-center gap-1.5">
+                      <PriorityIcon priority={p} className="h-3.5 w-3.5" />
+                      {priorityLabel[p]}
+                    </span>
+                  ),
+                }))}
+              />
+            </CreateSurfaceField>
+            <CreateSurfaceField label="Start date" htmlFor="project-start">
+              <input
+                id="project-start"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className={DATE_INPUT_CLASS}
+              />
+            </CreateSurfaceField>
+            <CreateSurfaceField label="Target date" htmlFor="project-target">
+              <input
+                id="project-target"
+                type="date"
+                value={targetDate}
+                onChange={(e) => setTargetDate(e.target.value)}
+                className={DATE_INPUT_CLASS}
+              />
+            </CreateSurfaceField>
+          </CreateSurfaceGrid>
+        </CreateSurfaceSection>
 
         {/* Milestones cannot be created here: POST
             /api/v1/projects/{projectId}/milestones 404s until the project
@@ -422,11 +498,13 @@ export function CreateProjectModal({
             to be a code comment only — the user was told nothing. Said
             out loud instead, matching the read-only reference at
             components/features/design/surfaces/issues.tsx:341-353. */}
-        <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
-          Milestones cannot be created here — the endpoint refuses until the project exists — and there is
-          no screen anywhere in the web UI that can create one. The CLI can:{" "}
-          <code className="font-mono">crewship milestone create</code>.
-        </CreateSurfaceNotice>
+        <CreateSurfaceSection title="Milestones" icon={Milestone} accent="purple">
+          <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
+            Milestones cannot be created here — the endpoint refuses until the project exists — and there is
+            no screen anywhere in the web UI that can create one. The CLI can:{" "}
+            <code className="font-mono">crewship milestone create</code>.
+          </CreateSurfaceNotice>
+        </CreateSurfaceSection>
           </>
         )}
       </CreateSurfaceBody>
@@ -437,59 +515,11 @@ export function CreateProjectModal({
           phone instead of wrapping onto three. Hidden on the icon panel —
           the pills describe the project, not the icon, and there is no room
           for both above a 44px footer. */}
+      {/* The pill row is down to the one control that is a search, not a
+          choice: a workspace can have hundreds of agents, and a chip row of
+          hundreds is not a chip row. Status, priority and the dates moved into
+          the body's Planning section where /design puts them. */}
       {!panel && <CreateSurfacePills>
-        {/* Status */}
-        <Popover open={statusOpen} onOpenChange={setStatusOpen}>
-          <PopoverTrigger asChild>
-            <CreateSurfacePill set={status !== "backlog"}>
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusInfo.color }} />
-              <span>{statusInfo.label}</span>
-            </CreateSurfacePill>
-          </PopoverTrigger>
-          <PopoverContent className="w-[180px] p-1" align="start">
-            {PROJECT_STATUSES.map((s) => (
-              <button
-                key={s.value}
-                onClick={() => { setStatus(s.value); setStatusOpen(false) }}
-                className={cn(
-                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
-                  status === s.value ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
-                )}
-              >
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
-                <span>{s.label}</span>
-                {status === s.value && <Check className="ml-auto h-3 w-3" />}
-              </button>
-            ))}
-          </PopoverContent>
-        </Popover>
-
-        {/* Priority */}
-        <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
-          <PopoverTrigger asChild>
-            <CreateSurfacePill set={priority !== "none"}>
-              <PriorityIcon priority={priority} className="h-3.5 w-3.5" />
-              <span>{priorityLabel[priority]}</span>
-            </CreateSurfacePill>
-          </PopoverTrigger>
-          <PopoverContent className="w-[180px] p-1" align="start">
-            {PRIORITIES.map((p) => (
-              <button
-                key={p}
-                onClick={() => { setPriority(p); setPriorityOpen(false) }}
-                className={cn(
-                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
-                  priority === p ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
-                )}
-              >
-                <PriorityIcon priority={p} className="h-3.5 w-3.5" />
-                <span>{priorityLabel[p]}</span>
-                {priority === p && <Check className="ml-auto h-3 w-3" />}
-              </button>
-            ))}
-          </PopoverContent>
-        </Popover>
-
         {/* Lead */}
         <Popover open={leadOpen} onOpenChange={setLeadOpen}>
           <PopoverTrigger asChild>
@@ -573,58 +603,6 @@ export function CreateProjectModal({
                 )}
               </CommandList>
             </Command>
-          </PopoverContent>
-        </Popover>
-
-        {/* Start date */}
-        <Popover open={startOpen} onOpenChange={setStartOpen}>
-          <PopoverTrigger asChild>
-            <CreateSurfacePill icon={Calendar} set={startDate !== ""}>
-              <span>{startDate || "Start"}</span>
-            </CreateSurfacePill>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-3" align="start">
-            <p className="text-xs text-muted-foreground mb-2">Start date</p>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => { setStartDate(e.target.value); setStartOpen(false) }}
-              className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
-            />
-            {startDate && (
-              <button
-                onClick={() => { setStartDate(""); setStartOpen(false) }}
-                className="block mt-2 text-xs text-muted-foreground hover:text-foreground"
-              >
-                Clear
-              </button>
-            )}
-          </PopoverContent>
-        </Popover>
-
-        {/* Target date */}
-        <Popover open={targetOpen} onOpenChange={setTargetOpen}>
-          <PopoverTrigger asChild>
-            <CreateSurfacePill icon={Calendar} set={targetDate !== ""}>
-              <span>{targetDate || "Target"}</span>
-            </CreateSurfacePill>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-3" align="start">
-            <p className="text-xs text-muted-foreground mb-2">Target date</p>
-            <input
-              type="date"
-              value={targetDate}
-              onChange={(e) => { setTargetDate(e.target.value); setTargetOpen(false) }}
-              className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
-            />
-            {targetDate && (
-              <button
-                onClick={() => { setTargetDate(""); setTargetOpen(false) }}
-                className="block mt-2 text-xs text-muted-foreground hover:text-foreground"
-              >
-                Clear
-              </button>
-            )}
           </PopoverContent>
         </Popover>
 

@@ -104,6 +104,7 @@ export function ConnectOAuthDialog({ workspaceId, open, onOpenChange, onSuccess 
             }}
             onCancel={() => onOpenChange(false)}
             onActionChange={handleActionChange}
+            variant="surface"
           />
         </div>
       </CreateSurfaceBody>

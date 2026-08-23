@@ -209,7 +209,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 
       <CreateSurfaceBody>
         {step === 1 && <StepIdentity state={state} setState={setState} />}
-        {step === 2 && <StepLineup state={state} setState={setState} />}
+        {step === 2 && <StepLineup state={state} setState={setState} workspaceId={workspaceId} />}
         {step === 3 && <StepContainer state={state} setState={setState} />}
         {step === 4 && (
           <StepReview

@@ -60,13 +60,13 @@ function harness(initial: Partial<WizardState> = {}, templates: CrewTemplate[] =
   })
   vi.stubGlobal("fetch", fetchMock)
 
-  const r = render(<StepLineup state={state} setState={setState} />)
+  const r = render(<StepLineup state={state} setState={setState} workspaceId="ws_probe" />)
   return {
     ...r,
     setState,
     rerenderWith: (patch: Partial<WizardState>) => {
       state = { ...state, ...patch }
-      r.rerender(<StepLineup state={state} setState={setState} />)
+      r.rerender(<StepLineup state={state} setState={setState} workspaceId="ws_probe" />)
     },
   }
 }
@@ -131,6 +131,21 @@ describe("<StepLineup> — browse mode (template fetch)", () => {
         expect.stringContaining("/api/v1/crew-templates"),
         expect.objectContaining({ credentials: "include" }),
       )
+    })
+  })
+
+  // The route is wsCtx-wrapped (router_crews.go) and RequireWorkspace replies
+  // 400 "workspace_id is required" when the request carries none in query,
+  // path or header. The old assertion above only proved the path prefix, so a
+  // request the server refuses outright still passed it — and did, all the way
+  // onto dev2, where step 2 read "Failed to load: HTTP 400" with the wizard's
+  // whole template catalogue empty.
+  it("sends workspace_id — the route refuses the request without it", async () => {
+    harness({ mode: "browse" }, [TPL_BUILTIN_ENG])
+    await waitFor(() => {
+      const calls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      const url = String(calls.find((c) => String(c[0]).includes("/crew-templates"))?.[0] ?? "")
+      expect(new URL(url, "http://x").searchParams.get("workspace_id")).toBe("ws_probe")
     })
   })
 
@@ -287,7 +302,7 @@ describe("<StepLineup> — fetch failure", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     let state: WizardState = { ...INITIAL_STATE, mode: "browse" }
-    render(<StepLineup state={state} setState={(p) => { state = { ...state, ...p } }} />)
+    render(<StepLineup state={state} setState={(p) => { state = { ...state, ...p } }} workspaceId="ws_probe" />)
 
     await waitFor(() => {
       expect(screen.getByText(/Failed to load/)).toBeInTheDocument()
