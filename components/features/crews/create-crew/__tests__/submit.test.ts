@@ -113,12 +113,17 @@ describe("submitCrew — blank mode", () => {
     expect(fetcher.calls[0].body).not.toHaveProperty("description")
   })
 
-  it("omits container_ttl_hours when ttl is null (Never)", async () => {
+  // This used to assert the opposite — that null (the "Never" chip) omitted the
+  // field. Omitting it means NULL in the column, which the server reads as
+  // "never configured" and resolves to the 4 h default, so the one chip that
+  // promises not to stop the crew was the one that stopped it. 0 is the
+  // never-stop sentinel. Full coverage in submit-ttl-never.test.ts.
+  it("sends container_ttl_hours: 0 when ttl is null (Never)", async () => {
     fetcher.queueResponse({ ok: true, body: { id: "x", slug: "x", name: "X" } })
 
     await submitCrew(WS, fullState({ mode: "empty", ttlHours: null }))
 
-    expect(fetcher.calls[0].body).not.toHaveProperty("container_ttl_hours")
+    expect(fetcher.calls[0].body).toHaveProperty("container_ttl_hours", 0)
   })
 
   it("omits allowed_domains when network_mode is free", async () => {

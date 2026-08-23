@@ -2,12 +2,10 @@
 
 import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
-import { useReactionsStore } from "@/stores/reactions-store"
 import { useEffect } from "react"
 import { useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
-import { ReactionPicker } from "./reactions/reaction-picker"
-import { ReactionsRow } from "./reactions/reactions-row"
+import { TurnReactions, TurnReactionPicker } from "./reactions/turn-reactions"
 import {
   Message,
   MessageContent,
@@ -564,27 +562,14 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: As
         </button>
       )}
 
-      {/* Reactions row */}
-      <TurnReactions turnId={turn.id} streaming={turn.isStreaming} />
+      {/* Reactions row — server-backed, so it needs the chat id */}
+      <TurnReactions chatId={chatId} messageId={turn.id} streaming={turn.isStreaming} />
 
       {/* Actions (only when done streaming and has text content) */}
       {!turn.isStreaming && fullText && !hasDelegation && (
         <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} chatId={chatId} />
       )}
     </Message>
-  )
-}
-
-function TurnReactions({ turnId, streaming }: { turnId: string; streaming: boolean }) {
-  const reactions = useReactionsStore((s) => s.byTurn[turnId])
-  const toggle = useReactionsStore((s) => s.toggle)
-  if (streaming || !reactions || Object.keys(reactions).length === 0) return null
-  return (
-    <ReactionsRow
-      reactions={reactions}
-      onToggle={(emoji) => toggle(turnId, emoji)}
-      className="mt-1"
-    />
   )
 }
 
@@ -675,7 +660,7 @@ function TurnFeedbackActions({
           className={"h-3.5 w-3.5 " + (submitted.not_helpful ? "text-destructive" : "")}
         />
       </MessageAction>
-      <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
+      <TurnReactionPicker chatId={chatId} messageId={turn.id} />
     </MessageActions>
   )
 }

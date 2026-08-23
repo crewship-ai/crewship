@@ -8,7 +8,6 @@ import {
   User,
   Bot,
   UserX,
-  Tag,
   Calendar,
   Search,
 } from "lucide-react"
@@ -31,9 +30,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { LabelBadge } from "@/components/features/issues/label-badge"
 import dynamic from "next/dynamic"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { CrewIcon } from "@/components/ui/crew-icon"
@@ -69,6 +66,13 @@ interface CreateProjectModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   crews: CrewSummary[]
+  /**
+   * Workspace issue labels. Unused: labels are an *issue* concept
+   * (labels/mission_labels) — there is no project_labels table and
+   * POST /api/v1/projects binds no labels field, so a picker here could only
+   * discard what the user chose. Kept on the props so the caller does not have
+   * to change; wire it up if project labels ever ship.
+   */
   labels: IssueLabel[]
   workspaceId: string
   onCreated: () => void
@@ -78,12 +82,11 @@ export function CreateProjectModal({
   open,
   onOpenChange,
   crews: _crews,
-  labels,
+  labels: _labels,
   workspaceId,
   onCreated,
 }: CreateProjectModalProps) {
   const [name, setName] = useState("")
-  const [summary, setSummary] = useState("")
   const [description, setDescription] = useState("")
   const [icon, setIcon] = useState("rocket")
   const [color, setColor] = useState("blue")
@@ -93,7 +96,6 @@ export function CreateProjectModal({
   const [leadId, setLeadId] = useState<string | null>(null)
   const [startDate, setStartDate] = useState("")
   const [targetDate, setTargetDate] = useState("")
-  const [selectedLabels, setSelectedLabels] = useState<string[]>([])
   const [agents, setAgents] = useState<AssigneeOption[]>([])
   const [saving, setSaving] = useState(false)
 
@@ -106,7 +108,6 @@ export function CreateProjectModal({
   const [leadOpen, setLeadOpen] = useState(false)
   const [startOpen, setStartOpen] = useState(false)
   const [targetOpen, setTargetOpen] = useState(false)
-  const [labelsOpen, setLabelsOpen] = useState(false)
 
   const nameRef = useRef<HTMLInputElement>(null)
 
@@ -148,7 +149,6 @@ export function CreateProjectModal({
 
   function reset() {
     setName("")
-    setSummary("")
     setDescription("")
     setIcon("rocket")
     setColor("blue")
@@ -158,7 +158,6 @@ export function CreateProjectModal({
     setLeadId(null)
     setStartDate("")
     setTargetDate("")
-    setSelectedLabels([])
   }
 
   const statusInfo = PROJECT_STATUSES.find((s) => s.value === status) ?? PROJECT_STATUSES[0]
@@ -178,10 +177,12 @@ export function CreateProjectModal({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          // Every key here is bound by the create request struct in
+          // internal/api/project_handler.go. readJSON() does not reject unknown
+          // fields, so anything extra would be accepted with a 201 and dropped.
           body: JSON.stringify({
             name: name.trim(),
             description: description.trim() || undefined,
-            summary: summary?.trim() || undefined,
             icon,
             color,
             status,
@@ -190,7 +191,6 @@ export function CreateProjectModal({
             lead_id: leadId ?? undefined,
             start_date: startDate || undefined,
             target_date: targetDate || undefined,
-            labels: selectedLabels.length > 0 ? selectedLabels : undefined,
           }),
         },
       )
@@ -210,7 +210,7 @@ export function CreateProjectModal({
     } finally {
       setSaving(false)
     }
-  }, [name, description, summary, icon, color, status, priority, leadType, leadId, startDate, targetDate, selectedLabels, workspaceId, onCreated, onOpenChange])
+  }, [name, description, icon, color, status, priority, leadType, leadId, startDate, targetDate, workspaceId, onCreated, onOpenChange])
 
   // Cmd+Enter to submit
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -219,12 +219,6 @@ export function CreateProjectModal({
       handleSubmit()
     }
   }, [handleSubmit])
-
-  function toggleLabel(labelId: string) {
-    setSelectedLabels((prev) =>
-      prev.includes(labelId) ? prev.filter((id) => id !== labelId) : [...prev, labelId],
-    )
-  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -360,7 +354,7 @@ export function CreateProjectModal({
                 </PopoverContent>
               </Popover>
 
-              {/* Name + Summary */}
+              {/* Name */}
               <div className="flex-1 min-w-0">
                 <label htmlFor="project-name" className="sr-only">Project name</label>
                 <input
@@ -371,15 +365,6 @@ export function CreateProjectModal({
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Project name"
                   className="w-full bg-transparent text-base font-medium text-foreground placeholder:text-muted-foreground/50 outline-none"
-                />
-                <label htmlFor="project-summary" className="sr-only">Project summary</label>
-                <input
-                  id="project-summary"
-                  type="text"
-                  value={summary}
-                  onChange={(e) => setSummary(e.target.value)}
-                  placeholder="Add a short summary..."
-                  className="w-full bg-transparent text-sm text-muted-foreground placeholder:text-muted-foreground/40 outline-none mt-1"
                 />
               </div>
             </div>
@@ -546,37 +531,9 @@ export function CreateProjectModal({
                 </PopoverContent>
               </Popover>
 
-              {/* Labels */}
-              {labels.length > 0 && (
-                <Popover open={labelsOpen} onOpenChange={setLabelsOpen}>
-                  <PopoverTrigger asChild>
-                    <button className={cn(
-                      "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                      selectedLabels.length > 0 ? "text-foreground/80" : "text-muted-foreground",
-                    )}>
-                      <Tag className="h-3 w-3" />
-                      <span>{selectedLabels.length > 0 ? `${selectedLabels.length} label${selectedLabels.length > 1 ? "s" : ""}` : "Labels"}</span>
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[240px] p-1" align="start">
-                    <div className="max-h-[200px] overflow-y-auto">
-                      {labels.map((label) => (
-                        <button
-                          key={label.id}
-                          onClick={() => toggleLabel(label.id)}
-                          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors"
-                        >
-                          <Checkbox
-                            checked={selectedLabels.includes(label.id)}
-                            className="pointer-events-none h-3.5 w-3.5"
-                          />
-                          <LabelBadge label={label} />
-                        </button>
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              )}
+              {/* No labels pill: labels are an issue concept. There is no
+                  project_labels table and no labels field on the create
+                  request, so a picker here would discard the selection. */}
             </div>
           </div>
 
@@ -591,13 +548,9 @@ export function CreateProjectModal({
             />
           </div>
 
-          {/* Milestones section (future) */}
-          <div className="px-5 py-2.5 border-t border-white/[0.06] flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Milestones</span>
-            <button className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.06] transition-colors text-xs">
-              +
-            </button>
-          </div>
+          {/* No milestones section: POST /api/v1/projects/{projectId}/milestones
+              404s unless the project already exists, so nothing here can create
+              one. Milestones are added after the project is created. */}
         </div>
 
         {/* ── Footer ── */}

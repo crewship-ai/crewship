@@ -76,12 +76,16 @@ export function StepRuntime({ state, setState }: Props) {
           </ChipRow>
         </ResourceCell>
 
+        {/* Auto-stop. "Never" (ttlHours === null) is `--ttl 0`, NOT an omitted
+            flag: omitting --ttl leaves the column NULL and the server applies
+            its 4 h default. submit.ts sends 0 for this chip, so the CLI hint
+            has to name the command that does the same thing. */}
         <ResourceCell
           icon={Clock}
           label="Auto-stop"
           value={state.ttlHours === null ? "Never" : `${state.ttlHours} h idle`}
           help="Saves cost"
-          cli={state.ttlHours === null ? "(no --ttl)" : `--ttl ${state.ttlHours}`}
+          cli={state.ttlHours === null ? "--ttl 0" : `--ttl ${state.ttlHours}`}
           tone="amber"
         >
           <ChipRow>

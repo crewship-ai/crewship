@@ -89,7 +89,7 @@ describe("<StepRuntime> — CPU", () => {
 })
 
 describe("<StepRuntime> — TTL", () => {
-  it("Never preset patches ttlHours to null and CLI flag indicates no --ttl", () => {
+  it("Never preset patches ttlHours to null", () => {
     const { setState } = harness({ ttlHours: 24 })
     fireEvent.click(screen.getByRole("button", { name: "Never" }))
     expect(setState).toHaveBeenCalledWith({ ttlHours: null })
@@ -100,9 +100,12 @@ describe("<StepRuntime> — TTL", () => {
     expect(screen.getByText("4 h idle")).toBeInTheDocument()
   })
 
-  it("shows '(no --ttl)' CLI hint when ttlHours is null", () => {
+  // The hint must name the CLI invocation that produces the same crew. An
+  // omitted --ttl is the server default (4 h), not never-stop, so "Never" has
+  // to read as `--ttl 0` — matching the 0 submit.ts sends.
+  it("shows the '--ttl 0' CLI hint when ttlHours is null (Never)", () => {
     harness({ ttlHours: null })
-    expect(screen.getByText(/\(no --ttl\)/)).toBeInTheDocument()
+    expect(screen.getByText("--ttl 0")).toBeInTheDocument()
   })
 })
 

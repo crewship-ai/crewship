@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { formatRelativeTime } from "@/lib/time"
 import { apiFetch } from "@/lib/api-fetch"
+import { checkpointIdOf, checkpointLabelOf } from "./checkpoint-ref"
 import type { JournalEntry } from "@/lib/types/journal"
 
 interface CheckpointMarkerProps {
@@ -30,19 +31,15 @@ interface CheckpointMarkerProps {
 export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
   const [restoring, setRestoring] = useState(false)
 
-  const label =
-    typeof entry.payload?.label === "string"
-      ? (entry.payload.label as string)
-      : typeof entry.payload?.name === "string"
-        ? (entry.payload.name as string)
-        : "Checkpoint"
-
-  const checkpointId =
-    typeof entry.payload?.checkpoint_id === "string"
-      ? (entry.payload.checkpoint_id as string)
-      : entry.id
+  const label = checkpointLabelOf(entry) ?? "Checkpoint"
+  // Same resolution the fork path uses — the checkpoint id lives in refs, and
+  // `entry.id` (the journal row) is not a substitute for it. Null means the
+  // entry can't address a checkpoint, so restore is disabled rather than
+  // firing a request that can only 404.
+  const checkpointId = checkpointIdOf(entry)
 
   async function handleRestore() {
+    if (!checkpointId) return
     setRestoring(true)
     try {
       const res = await apiFetch(`/api/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST" })
@@ -90,7 +87,7 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
                 <GitBranch className="h-3 w-3 mr-1.5" />
                 Fork from here
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleRestore} disabled={restoring}>
+              <DropdownMenuItem onClick={handleRestore} disabled={restoring || !checkpointId}>
                 {restoring ? (
                   <Spinner className="h-3 w-3 mr-1.5" />
                 ) : (
