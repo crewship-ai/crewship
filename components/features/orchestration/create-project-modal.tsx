@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Check,
   User,
-  Bot,
   UserX,
   Calendar,
   FolderKanban,
@@ -47,6 +46,7 @@ import {
   CREW_ICON_CATEGORIES, GRADIENT_PALETTES,
 } from "@/lib/entities"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { cn } from "@/lib/utils"
 import { ISSUE_ICON_COLORS } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
@@ -81,6 +81,31 @@ interface CreateProjectModalProps {
   onCreated: () => void
 }
 
+/** What GET /api/v1/agents actually returns, narrowed to what is used here. */
+interface RawAgent {
+  id: string
+  name: string
+  slug?: string
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  avatar_url?: string | null
+  crew?: { avatar_style?: string | null } | null
+}
+
+/**
+ * An agent, with the face it wears everywhere else.
+ *
+ * `AssigneeOption` (assignee-picker.tsx) carries id/name/type/slug only. Rather
+ * than widen a type three other surfaces import, this narrows the widening to
+ * the one modal that needs it.
+ */
+type LeadOption = AssigneeOption & {
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  avatar_url?: string | null
+  crew_avatar_style?: string | null
+}
+
 export function CreateProjectModal({
   open,
   onOpenChange,
@@ -99,7 +124,7 @@ export function CreateProjectModal({
   const [leadId, setLeadId] = useState<string | null>(null)
   const [startDate, setStartDate] = useState("")
   const [targetDate, setTargetDate] = useState("")
-  const [agents, setAgents] = useState<AssigneeOption[]>([])
+  const [agents, setAgents] = useState<LeadOption[]>([])
   const [saving, setSaving] = useState(false)
   // What the server said when it said no. Shown in the shell's refusal band,
   // which sits outside the scrollport — the toast below it is kept because it
@@ -143,9 +168,21 @@ export function CreateProjectModal({
         const data = await res.json()
         const list = Array.isArray(data) ? data : data.agents ?? []
         if (!cancelled) {
+          // The avatar fields were dropped in this map, which is why the lead
+          // picker drew a row of identical grey bots while the same agents
+          // wear faces on the board behind it. GET /api/v1/agents returns all
+          // four; the seed falls back to the name, which is the only reason
+          // an avatar appears anywhere (every agent here has a NULL seed).
           setAgents(
-            list.map((a: { id: string; name: string; slug?: string }) => ({
-              id: a.id, name: a.name, type: "agent" as const, slug: a.slug,
+            list.map((a: RawAgent) => ({
+              id: a.id,
+              name: a.name,
+              type: "agent" as const,
+              slug: a.slug,
+              avatar_seed: a.avatar_seed,
+              avatar_style: a.avatar_style,
+              avatar_url: a.avatar_url,
+              crew_avatar_style: a.crew?.avatar_style ?? null,
             })),
           )
         }
@@ -170,11 +207,8 @@ export function CreateProjectModal({
   }
 
   const statusInfo = PROJECT_STATUSES.find((s) => s.value === status) ?? PROJECT_STATUSES[0]
-  const leadName = (() => {
-    if (!leadId) return null
-    const found = agents.find((a) => a.id === leadId)
-    return found?.name ?? null
-  })()
+  const selectedLead = leadId ? (agents.find((a) => a.id === leadId) ?? null) : null
+  const leadName = selectedLead?.name ?? null
 
   // Anything the person has typed or picked. Drives the shell's discard guard,
   // which covers Esc, the overlay click and the header's × — the three routes
@@ -254,7 +288,11 @@ export function CreateProjectModal({
       <CreateSurfaceHeader
         icon={FolderKanban}
         accent="blue"
-        context="CRE"
+        // Not a key prefix. "CRE" was copied across from the issue modal,
+        // where it is the fallback for `crew.slug.slice(0, 3)` — a project is
+        // workspace-scoped and has no crew, so the literal froze into a string
+        // that reads as truncated text. Every other door names its page here.
+        context="Projects"
         title="New project"
         onClose={() => onOpenChange(false)}
       />
@@ -387,7 +425,12 @@ export function CreateProjectModal({
             onChange={setDescription}
             placeholder="Write a description, a project brief, or collect ideas..."
             compact
-            className="min-h-[120px]"
+            // A project brief is prose with a full toolbar above it — headings,
+            // lists, tables, code. 120px is four lines, so the toolbar was
+            // taller than the thing it formats and every paragraph pushed the
+            // caret against the bottom edge. This is the one field on the
+            // surface people actually write IN rather than fill.
+            className="min-h-[280px]"
           />
         </div>
 
@@ -456,7 +499,22 @@ export function CreateProjectModal({
         {/* Lead */}
         <Popover open={leadOpen} onOpenChange={setLeadOpen}>
           <PopoverTrigger asChild>
-            <CreateSurfacePill icon={leadType === "agent" ? Bot : User} set={leadId !== null}>
+            <CreateSurfacePill
+              icon={leadType === "agent" ? undefined : User}
+              leading={
+                leadType === "agent" && selectedLead ? (
+                  <AgentAvatar
+                    seed={selectedLead.avatar_seed || selectedLead.name}
+                    style={selectedLead.avatar_style || selectedLead.crew_avatar_style}
+                    agentId={selectedLead.id}
+                    avatarUrl={selectedLead.avatar_url}
+                    alt=""
+                    className="h-3.5 w-3.5 shrink-0"
+                  />
+                ) : undefined
+              }
+              set={leadId !== null}
+            >
               <span>{leadName ?? "Lead"}</span>
             </CreateSurfacePill>
           </PopoverTrigger>
@@ -479,7 +537,14 @@ export function CreateProjectModal({
                         key={agent.id}
                         onSelect={() => { setLeadType("agent"); setLeadId(agent.id); setLeadOpen(false) }}
                       >
-                        <Bot className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                        <AgentAvatar
+                          seed={agent.avatar_seed || agent.name}
+                          style={agent.avatar_style || agent.crew_avatar_style}
+                          agentId={agent.id}
+                          avatarUrl={agent.avatar_url}
+                          alt=""
+                          className="mr-2 h-4 w-4 shrink-0"
+                        />
                         <span className="text-xs">{agent.name}</span>
                         {leadId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
                       </CommandItem>

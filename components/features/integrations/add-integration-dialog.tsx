@@ -140,7 +140,11 @@ export function AddIntegrationDialog({
   )
 
   return (
-    <CreateSurface open={open} onOpenChange={onOpenChange} size="xl">
+    // lg, not xl. Step one is two tiles and step two is a grid of services in
+    // named sections — 960px gave the two tiles a third of a screen each and
+    // made a dialog wider than most of the pages behind it. 800px still holds
+    // the service grid two-up and reads as a dialog rather than a takeover.
+    <CreateSurface open={open} onOpenChange={onOpenChange} size="lg">
       <CreateSurfaceHeader
         concept="integrations"
         context="Integrations"

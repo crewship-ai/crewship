@@ -70,14 +70,14 @@ function chooseNotifications() {
 describe("AddIntegrationDialog", () => {
   beforeEach(() => cleanup())
 
-  it("mounts the shared create surface at the xl width", () => {
+  it("mounts the shared create surface at the lg width", () => {
     renderDialog()
 
     const content = document.querySelector('[data-slot="dialog-content"]')
     expect(content).not.toBeNull()
     // The shell's own geometry, not a per-dialog `sm:max-w-2xl`.
     expect(content!.className).toContain("group/surface")
-    expect(content!.className).toContain("sm:max-w-[960px]")
+    expect(content!.className).toContain("sm:max-w-[800px]")
     expect(content!.className).not.toContain("sm:max-w-2xl")
   })
 

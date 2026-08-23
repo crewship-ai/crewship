@@ -1,9 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react"
 import { CreateIssueModal } from "../create-issue-modal"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { getCrewIconDef } from "@/lib/crew-icons"
 import { resolveRoutineIcon } from "@/lib/routine-identity"
+
+// Testing Library's async default is 1000ms while vitest.config.ts allows a
+// test 30000, so under a full-suite run — 523 files, ~230s of test time on a
+// shared box — the assertion, not the code, is what runs out of road. Seen as
+// one failure in `distinguishes a failed agent load` that passes alone and on
+// the next full run. Every await in this file goes through a render, an effect
+// and a stubbed fetch, so raise the floor for the file rather than annotate
+// seventeen call sites.
+configure({ asyncUtilTimeout: 5000 })
 
 // Mock sonner toast
 vi.mock("sonner", () => ({

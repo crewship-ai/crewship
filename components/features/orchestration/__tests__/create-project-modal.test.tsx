@@ -79,13 +79,13 @@ describe("CreateProjectModal", () => {
 
   it("shows header breadcrumb", () => {
     render(<CreateProjectModal {...defaultProps} />)
-    // CreateSurfaceHeader puts the title in an h2 AND, when the surface passes
-    // no description, repeats it in a visually hidden DialogDescription so
-    // Radix stops warning about a missing description. So "New project" is in
-    // the document twice by design and a bare getByText finds both — match the
-    // heading instead.
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("New project")
-    expect(screen.getByText("CRE")).toBeInTheDocument()
+    // Context and title are one h2 — two headings side by side would compute an
+    // accessible name with no gap in it. Assert the whole string, separator
+    // included: asserting each word alone passes even when they concatenate.
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Projects › New project")
+    // Not "CRE". A project is workspace-scoped; the three-letter key is the
+    // issue modal's crew-slug prefix and means nothing here.
+    expect(screen.queryByText("CRE")).not.toBeInTheDocument()
   })
 
   // The shell, not a bespoke 720px dialog: one overlay, four widths, and the

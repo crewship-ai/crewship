@@ -189,7 +189,7 @@ export const DOORS: Door[] = [
     page: "Integrations",
     action: "Add integration",
     concept: "integrations",
-    size: "xl",
+    size: "lg",
     archetype: "Pick",
     blurb: "Kind, then service — the right shape already. It gains a footer and delivery defaults.",
     fields: ["kind", "service", "search", "retries", "quiet hours"],

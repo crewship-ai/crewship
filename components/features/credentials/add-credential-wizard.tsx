@@ -83,8 +83,28 @@ import {
 } from "@/lib/credentials/item-types"
 import { isValidEnvVarName, suggestEnvVarName } from "@/lib/env-var-name"
 import { cn } from "@/lib/utils"
+import { ACCENT, type Accent } from "@/lib/concept-accents"
 import { BrandPicker } from "./brand-picker"
 import { CREDENTIAL_TIERS } from "./credential-form"
+
+/**
+ * A colour per shape.
+ *
+ * Not decoration and not arbitrary: the hue follows what the secret IS, so the
+ * same idea wears the same colour wherever it appears. Amber for the bearer
+ * secrets that are simply a string, purple for an identity, gold for a
+ * key-and-id pair, teal for a private key, blue for a file, green for the one
+ * that exists to prove trust. Every value is a token globals.css already
+ * declares — see lib/concept-accents.ts for why none of them is a new one.
+ */
+const SHAPE_ACCENT: Partial<Record<ItemTypeKey, Accent>> = {
+  TOKEN: ACCENT.amber,
+  LOGIN: ACCENT.purple,
+  KEYPAIR: ACCENT.gold,
+  SSH_KEY: ACCENT.teal,
+  FILE: ACCENT.blue,
+  CERTIFICATE: ACCENT.green,
+}
 
 const TYPE_ICON: Record<ItemTypeKey, React.ComponentType<{ className?: string }>> = {
   TOKEN: KeyRound,
@@ -421,6 +441,7 @@ export function AddCredentialWizard({
               {CREDENTIAL_ITEM_TYPES.map((t) => {
                 const Icon = TYPE_ICON[t.key]
                 const selected = t.key === itemTypeKey
+                const tone = SHAPE_ACCENT[t.key] ?? ACCENT.slate
                 return (
                   <button
                     key={t.key}
@@ -437,13 +458,20 @@ export function AddCredentialWizard({
                         : "border-border/60 bg-card hover:border-border hover:bg-surface-raised",
                     )}
                   >
+                    {/* The glyph carries the shape's own colour whether or not
+                        the tile is selected. Six identical grey squares are
+                        read by their captions every time; six colours are told
+                        apart before the caption is read, which is the whole
+                        job of a pick-one grid. Selection stays the blue
+                        border and fill, so "which is chosen" and "which is
+                        which" never compete for the same channel. */}
                     <span
                       className={cn(
-                        "mb-0.5 flex h-7 w-7 items-center justify-center rounded-lg",
-                        selected ? "bg-primary/20 text-primary" : "bg-surface-raised text-muted-foreground",
+                        "mb-0.5 flex h-7 w-7 items-center justify-center rounded-lg border",
+                        tone.chip,
                       )}
                     >
-                      <Icon className="h-4 w-4" />
+                      <Icon className={cn("h-4 w-4", tone.fg)} />
                     </span>
                     <span className="type-row font-medium leading-tight text-foreground">{t.label}</span>
                     <span className="type-meta leading-snug text-muted-foreground">{t.blurb}</span>
