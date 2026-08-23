@@ -6,10 +6,16 @@ import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow,
   Plus, Upload,
-  X, ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import {
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceRefusal,
+} from "@/components/layout/create-surface"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
@@ -352,7 +358,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 // Inline import dialog. Plain JSON paste flow — agents and the CLI use
 // the same /pipelines/import endpoint. Drag-and-drop and URL import
 // are follow-ups; paste covers the demo case.
-function ImportRoutineDialog({
+//
+// One question, one paste: `sm` on the shared create shell. Exported so its
+// own test can drive it without standing the whole page up.
+export function ImportRoutineDialog({
   workspaceId,
   onClose,
   onImported,
@@ -388,43 +397,51 @@ function ImportRoutineDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
+    <CreateSurface
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      size="sm"
+      dirty={json.trim() !== ""}
+      discardLabel="this bundle"
+      onSubmit={() => {
+        if (!busy && json.trim()) void submit()
+      }}
     >
-      <div
-        className="w-full max-w-2xl rounded-lg border border-white/10 bg-card shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-          <h3 className="text-sm font-medium">Import routine bundle</h3>
-          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={onClose}>
-            <X className="h-3 w-3" />
-          </Button>
-        </div>
-        <div className="space-y-3 p-4">
-          <p className="text-xs text-muted-foreground">
-            Paste a routine bundle JSON (exported from another workspace via Export bundle, or
-            shared by an agent). Import preserves authorship metadata; the bundle's slug must be
-            unique in this workspace or the existing routine is replaced.
-          </p>
-          <textarea
-            value={json}
-            onChange={(e) => setJson(e.target.value)}
-            placeholder='{"slug":"…","definition":{…},"versions":[…]}'
-            className="h-64 w-full resize-none rounded-md border border-white/10 bg-background p-2 font-mono text-[11px]"
-          />
-          {err && <div className="text-xs text-destructive">Error: {err}</div>}
-          <div className="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={onClose} disabled={busy}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={submit} disabled={busy || !json.trim()}>
-              {busy ? "Importing…" : "Import"}
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
+      <CreateSurfaceHeader
+        icon={Upload}
+        accent="purple"
+        title="Import routine bundle"
+        onClose={onClose}
+      />
+
+      <CreateSurfaceBody className="flex flex-col gap-3">
+        <p className="text-xs text-muted-foreground">
+          Paste a routine bundle JSON (exported from another workspace via Export bundle, or
+          shared by an agent). Import preserves authorship metadata; the bundle&apos;s slug must be
+          unique in this workspace or the existing routine is replaced.
+        </p>
+        <textarea
+          value={json}
+          onChange={(e) => setJson(e.target.value)}
+          placeholder='{"slug":"…","definition":{…},"versions":[…]}'
+          className="h-64 w-full resize-none rounded-md border border-hairline bg-background p-2 font-mono text-[11px] text-foreground outline-none focus:border-primary"
+        />
+      </CreateSurfaceBody>
+
+      {/* The parse failure and the server's refusal arrive at the same place,
+          out of the scrollport, instead of under a 256px textarea. */}
+      <CreateSurfaceRefusal message={err == null ? null : `Error: ${err}`} onDismiss={() => setErr(null)} />
+
+      <CreateSurfaceFooter
+        onCancel={onClose}
+        primaryLabel={busy ? "Importing…" : "Import"}
+        primaryIcon={Upload}
+        onPrimary={submit}
+        primaryDisabled={!json.trim()}
+        busy={busy}
+      />
+    </CreateSurface>
   )
 }

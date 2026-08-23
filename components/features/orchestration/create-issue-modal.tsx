@@ -2,9 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  X,
   Paperclip,
-  ChevronRight,
   User,
   Bot,
   UserX,
@@ -13,13 +11,18 @@ import {
   FolderKanban,
   ScrollText,
 } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceDescriptionInput,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfacePill,
+  CreateSurfacePills,
+  CreateSurfaceRefusal,
+  CreateSurfaceTitleInput,
+} from "@/components/layout/create-surface"
 import {
   Popover,
   PopoverContent,
@@ -83,6 +86,9 @@ export function CreateIssueModal({
   const [agents, setAgents] = useState<AssigneeOption[]>([])
   const [createMore, setCreateMore] = useState(false)
   const [saving, setSaving] = useState(false)
+  // What the server said when it said no. The toast stays — this is the copy
+  // that is still on screen when you look back up.
+  const [refusal, setRefusal] = useState<string | null>(null)
 
   // Popover states
   const [crewOpen, setCrewOpen] = useState(false)
@@ -144,7 +150,19 @@ export function CreateIssueModal({
     setProjectId(null)
     setSelectedLabels([])
     setRoutineId(null)
+    setRefusal(null)
   }
+
+  // Anything typed or picked that closing would throw away. The crew is not
+  // in here: it auto-selects on open, so it is never the user's input.
+  const dirty =
+    title.trim() !== "" ||
+    description.trim() !== "" ||
+    priority !== "none" ||
+    assigneeId !== null ||
+    projectId !== null ||
+    routineId !== null ||
+    selectedLabels.length > 0
 
   const selectedCrew = crews.find((c) => c.id === crewId)
   const crewPrefix = selectedCrew?.slug?.toUpperCase().slice(0, 3) ?? "CRE"
@@ -161,6 +179,7 @@ export function CreateIssueModal({
     if (!title.trim()) { toast.error("Title is required"); return }
 
     setSaving(true)
+    setRefusal(null)
     try {
       const res = await apiFetch(
         `/api/v1/crews/${crewId}/issues?workspace_id=${encodeURIComponent(workspaceId)}`,
@@ -183,6 +202,7 @@ export function CreateIssueModal({
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         toast.error(body?.detail ?? "Failed to create issue")
+        setRefusal(body?.detail ?? "Failed to create issue")
         return
       }
 
@@ -198,18 +218,11 @@ export function CreateIssueModal({
       }
     } catch {
       toast.error("Failed to create issue")
+      setRefusal("Failed to create issue")
     } finally {
       setSaving(false)
     }
   }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, workspaceId, onCreated, createMore, onOpenChange])
-
-  // Cmd+Enter to submit
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault()
-      handleSubmit()
-    }
-  }, [handleSubmit])
 
   function toggleLabel(labelId: string) {
     setSelectedLabels((prev) =>
@@ -218,22 +231,31 @@ export function CreateIssueModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        className="sm:max-w-[640px] p-0 gap-0 overflow-hidden"
-        onKeyDown={handleKeyDown}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-      >
-        <DialogTitle className="sr-only">New Issue</DialogTitle>
-
-        {/* ── Header ── */}
-        <div className="flex items-center gap-1.5 px-4 py-3 border-b border-white/[0.06]">
-          {/* Crew selector */}
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      dirty={dirty}
+      discardLabel="this issue"
+      size="md"
+      onSubmit={handleSubmit}
+    >
+      {/* ── Header ── */}
+      <CreateSurfaceHeader
+        concept="issues"
+        title="New issue"
+        onClose={() => onOpenChange(false)}
+        // The crew is the breadcrumb: it says where the issue lands before
+        // anything is typed. It is also the only place the crew can be
+        // changed, which is why it is a control and not a label.
+        context={
           <Popover open={crewOpen} onOpenChange={setCrewOpen}>
             <PopoverTrigger asChild>
-              <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                <span className="font-medium">{crewPrefix}</span>
+              <button
+                type="button"
+                aria-label="Select crew"
+                className="font-medium transition-colors hover:text-foreground"
+              >
+                {crewPrefix}
               </button>
             </PopoverTrigger>
             <PopoverContent className="w-[200px] p-0" align="start">
@@ -256,243 +278,217 @@ export function CreateIssueModal({
               </Command>
             </PopoverContent>
           </Popover>
+        }
+      />
 
-          <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
-          <span className="text-xs text-muted-foreground">New issue</span>
+      {/* ── Body ── */}
+      <CreateSurfaceBody className="space-y-1">
+        <CreateSurfaceTitleInput
+          ref={titleRef}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Issue title"
+        />
+        <CreateSurfaceDescriptionInput
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Add description..."
+          rows={3}
+        />
+      </CreateSurfaceBody>
 
-          <div className="flex-1" />
+      {/* ── Metadata pills ── */}
+      <CreateSurfacePills>
+        {/* Status (read-only) */}
+        <CreateSurfacePill readOnly>
+          <StatusIcon status="BACKLOG" className="h-3.5 w-3.5" />
+          <span>Backlog</span>
+        </CreateSurfacePill>
 
-          <button
-            onClick={() => onOpenChange(false)}
-            className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        {/* ── Body ── */}
-        <div className="px-5 pt-4 pb-2 space-y-1">
-          {/* Title */}
-          <input
-            ref={titleRef}
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Issue title"
-            className="w-full bg-transparent text-base font-medium text-foreground placeholder:text-muted-foreground/50 outline-none"
-          />
-
-          {/* Description */}
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Add description..."
-            rows={3}
-            className="w-full bg-transparent text-sm text-muted-foreground placeholder:text-muted-foreground/40 outline-none resize-none mt-1"
-          />
-        </div>
-
-        {/* ── Metadata pills ── */}
-        <div className="px-5 py-2 flex items-center gap-1.5 flex-wrap border-t border-white/[0.04]">
-          {/* Status (read-only) */}
-          <div className="h-7 px-2.5 rounded-md text-xs text-muted-foreground bg-white/[0.04] border border-white/[0.06] flex items-center gap-1.5">
-            <StatusIcon status="BACKLOG" className="h-3.5 w-3.5" />
-            <span>Backlog</span>
-          </div>
-
-          {/* Priority */}
-          <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
-            <PopoverTrigger asChild>
-              <button className={cn(
-                "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                priority !== "none" ? "text-foreground/80" : "text-muted-foreground",
-              )}>
-                <PriorityIcon priority={priority} className="h-3.5 w-3.5" />
-                <span>{priorityLabel[priority]}</span>
+        {/* Priority */}
+        <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill set={priority !== "none"}>
+              <PriorityIcon priority={priority} className="h-3.5 w-3.5" />
+              <span>{priorityLabel[priority]}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[180px] p-1" align="start">
+            {PRIORITIES.map((p) => (
+              <button
+                key={p}
+                onClick={() => { setPriority(p); setPriorityOpen(false) }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
+                  priority === p ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
+                )}
+              >
+                <PriorityIcon priority={p} className="h-3.5 w-3.5" />
+                <span>{priorityLabel[p]}</span>
+                {priority === p && <Check className="ml-auto h-3 w-3" />}
               </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[180px] p-1" align="start">
-              {PRIORITIES.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => { setPriority(p); setPriorityOpen(false) }}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
-                    priority === p ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
-                  )}
-                >
-                  <PriorityIcon priority={p} className="h-3.5 w-3.5" />
-                  <span>{priorityLabel[p]}</span>
-                  {priority === p && <Check className="ml-auto h-3 w-3" />}
-                </button>
-              ))}
-            </PopoverContent>
-          </Popover>
+            ))}
+          </PopoverContent>
+        </Popover>
 
-          {/* Assignee */}
-          {crewId && (
-            <Popover open={assigneeOpen} onOpenChange={setAssigneeOpen}>
-              <PopoverTrigger asChild>
-                <button className={cn(
-                  "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                  assigneeId ? "text-foreground/80" : "text-muted-foreground",
-                )}>
-                  {assigneeType === "agent" && <Bot className="h-3 w-3" />}
-                  {assigneeType === "user" && <User className="h-3 w-3" />}
-                  {!assigneeType && <User className="h-3 w-3" />}
-                  <span>{assigneeName ?? "Assignee"}</span>
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[220px] p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search assignee..." className="h-8 text-xs" />
-                  <CommandList>
-                    <CommandEmpty>No results found.</CommandEmpty>
-                    <CommandGroup>
-                      <CommandItem onSelect={() => { setAssigneeType(null); setAssigneeId(null); setAssigneeOpen(false) }}>
-                        <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-xs">Unassigned</span>
-                        {!assigneeId && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </CommandItem>
-                    </CommandGroup>
-                    {agents.length > 0 && (
-                      <CommandGroup heading="Agents">
-                        {agents.map((agent) => (
-                          <CommandItem
-                            key={agent.id}
-                            onSelect={() => { setAssigneeType("agent"); setAssigneeId(agent.id); setAssigneeOpen(false) }}
-                          >
-                            <Bot className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-xs">{agent.name}</span>
-                            {assigneeId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    )}
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          )}
-
-          {/* Project */}
-          <Popover open={projectOpen} onOpenChange={setProjectOpen}>
+        {/* Assignee */}
+        {crewId && (
+          <Popover open={assigneeOpen} onOpenChange={setAssigneeOpen}>
             <PopoverTrigger asChild>
-              <button className={cn(
-                "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                projectId ? "text-foreground/80" : "text-muted-foreground",
-              )}>
-                <FolderKanban className="h-3 w-3" />
-                <span>{selectedProject?.name ?? "Project"}</span>
-              </button>
+              <CreateSurfacePill
+                icon={assigneeType === "agent" ? Bot : User}
+                accent="purple"
+                set={assigneeId !== null}
+              >
+                <span>{assigneeName ?? "Assignee"}</span>
+              </CreateSurfacePill>
             </PopoverTrigger>
             <PopoverContent className="w-[220px] p-0" align="start">
               <Command>
-                <CommandInput placeholder="Search project..." className="h-8 text-xs" />
+                <CommandInput placeholder="Search assignee..." className="h-8 text-xs" />
                 <CommandList>
-                  <CommandEmpty>No projects found.</CommandEmpty>
+                  <CommandEmpty>No results found.</CommandEmpty>
                   <CommandGroup>
-                    <CommandItem onSelect={() => { setProjectId(null); setProjectOpen(false) }}>
-                      <span className="text-xs text-muted-foreground">No project</span>
-                      {!projectId && <Check className="ml-auto h-3.5 w-3.5" />}
+                    <CommandItem onSelect={() => { setAssigneeType(null); setAssigneeId(null); setAssigneeOpen(false) }}>
+                      <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-xs">Unassigned</span>
+                      {!assigneeId && <Check className="ml-auto h-3.5 w-3.5" />}
                     </CommandItem>
-                    {projects.map((p) => (
-                      <CommandItem
-                        key={p.id}
-                        onSelect={() => { setProjectId(p.id); setProjectOpen(false) }}
-                      >
-                        <FolderKanban className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="text-xs">{p.name}</span>
-                        {projectId === p.id && <Check className="ml-auto h-3.5 w-3.5" />}
-                      </CommandItem>
-                    ))}
                   </CommandGroup>
+                  {agents.length > 0 && (
+                    <CommandGroup heading="Agents">
+                      {agents.map((agent) => (
+                        <CommandItem
+                          key={agent.id}
+                          onSelect={() => { setAssigneeType("agent"); setAssigneeId(agent.id); setAssigneeOpen(false) }}
+                        >
+                          <Bot className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-xs">{agent.name}</span>
+                          {assigneeId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
                 </CommandList>
               </Command>
             </PopoverContent>
           </Popover>
+        )}
 
-          {/* Routine — bind a saved routine to handle this issue */}
-          <Popover open={routineOpen} onOpenChange={setRoutineOpen}>
-            <PopoverTrigger asChild>
-              <button className={cn(
-                "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                routineId ? "text-foreground/80" : "text-muted-foreground",
-              )}>
-                <ScrollText className="h-3 w-3" />
-                <span>{selectedRoutine?.name ?? "Routine"}</span>
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[280px] p-0" align="start">
-              <Command>
-                <CommandInput placeholder="Search routines..." className="h-8 text-xs" />
-                <CommandList>
-                  <CommandEmpty>No routines yet — create one in /routines.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem onSelect={() => { setRoutineId(null); setRoutineOpen(false) }}>
-                      <span className="text-xs text-muted-foreground">No routine</span>
-                      {!routineId && <Check className="ml-auto h-3.5 w-3.5" />}
-                    </CommandItem>
-                    {routines.map((r) => (
-                      <CommandItem
-                        key={r.id}
-                        onSelect={() => { setRoutineId(r.id); setRoutineOpen(false) }}
-                      >
-                        <ScrollText className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-medium truncate">{r.name}</div>
-                          <div className="text-[10px] text-muted-foreground truncate">{r.slug}</div>
-                        </div>
-                        {routineId === r.id && <Check className="ml-2 h-3.5 w-3.5 shrink-0" />}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-
-          {/* Labels */}
-          {labels.length > 0 && (
-            <Popover open={labelsOpen} onOpenChange={setLabelsOpen}>
-              <PopoverTrigger asChild>
-                <button className={cn(
-                  "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                  selectedLabels.length > 0 ? "text-foreground/80" : "text-muted-foreground",
-                )}>
-                  <Tag className="h-3 w-3" />
-                  <span>{selectedLabels.length > 0 ? `${selectedLabels.length} label${selectedLabels.length > 1 ? "s" : ""}` : "Labels"}</span>
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[240px] p-1" align="start">
-                <div className="max-h-[200px] overflow-y-auto">
-                  {labels.map((label) => (
-                    <button
-                      key={label.id}
-                      onClick={() => toggleLabel(label.id)}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors"
+        {/* Project */}
+        <Popover open={projectOpen} onOpenChange={setProjectOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={FolderKanban} accent="blue" set={projectId !== null}>
+              <span>{selectedProject?.name ?? "Project"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[220px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search project..." className="h-8 text-xs" />
+              <CommandList>
+                <CommandEmpty>No projects found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem onSelect={() => { setProjectId(null); setProjectOpen(false) }}>
+                    <span className="text-xs text-muted-foreground">No project</span>
+                    {!projectId && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </CommandItem>
+                  {projects.map((p) => (
+                    <CommandItem
+                      key={p.id}
+                      onSelect={() => { setProjectId(p.id); setProjectOpen(false) }}
                     >
-                      <Checkbox
-                        checked={selectedLabels.includes(label.id)}
-                        className="pointer-events-none h-3.5 w-3.5"
-                      />
-                      <LabelBadge label={label} />
-                    </button>
+                      <FolderKanban className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-xs">{p.name}</span>
+                      {projectId === p.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                    </CommandItem>
                   ))}
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
-        </div>
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
 
-        {/* ── Footer ── */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-white/[0.06]">
-          <div className="flex items-center gap-3">
+        {/* Routine — bind a saved routine to handle this issue */}
+        <Popover open={routineOpen} onOpenChange={setRoutineOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill concept="routines" set={routineId !== null}>
+              <span>{selectedRoutine?.name ?? "Routine"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[280px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search routines..." className="h-8 text-xs" />
+              <CommandList>
+                <CommandEmpty>No routines yet — create one in /routines.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem onSelect={() => { setRoutineId(null); setRoutineOpen(false) }}>
+                    <span className="text-xs text-muted-foreground">No routine</span>
+                    {!routineId && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </CommandItem>
+                  {routines.map((r) => (
+                    <CommandItem
+                      key={r.id}
+                      onSelect={() => { setRoutineId(r.id); setRoutineOpen(false) }}
+                    >
+                      <ScrollText className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium truncate">{r.name}</div>
+                        <div className="text-[10px] text-muted-foreground truncate">{r.slug}</div>
+                      </div>
+                      {routineId === r.id && <Check className="ml-2 h-3.5 w-3.5 shrink-0" />}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
+        {/* Labels */}
+        {labels.length > 0 && (
+          <Popover open={labelsOpen} onOpenChange={setLabelsOpen}>
+            <PopoverTrigger asChild>
+              <CreateSurfacePill icon={Tag} accent="green" set={selectedLabels.length > 0}>
+                <span>{selectedLabels.length > 0 ? `${selectedLabels.length} label${selectedLabels.length > 1 ? "s" : ""}` : "Labels"}</span>
+              </CreateSurfacePill>
+            </PopoverTrigger>
+            <PopoverContent className="w-[240px] p-1" align="start">
+              <div className="max-h-[200px] overflow-y-auto">
+                {labels.map((label) => (
+                  <button
+                    key={label.id}
+                    onClick={() => toggleLabel(label.id)}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors"
+                  >
+                    <Checkbox
+                      checked={selectedLabels.includes(label.id)}
+                      className="pointer-events-none h-3.5 w-3.5"
+                    />
+                    <LabelBadge label={label} />
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
+      </CreateSurfacePills>
+
+      {/* ── Refusal ── */}
+      <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
+
+      {/* ── Footer ── */}
+      <CreateSurfaceFooter
+        hint={
+          <>
+            <kbd className="font-mono">⌘↵</kbd> to create · <kbd className="font-mono">Esc</kbd> to cancel
+          </>
+        }
+        aside={
+          <>
+            {/* Decorative. The attachment endpoints exist; this modal has
+                never called them, and this migration does not start. */}
             <Paperclip className="h-3.5 w-3.5 text-muted-foreground/40" />
-          </div>
-
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
               <Switch
                 size="sm"
                 checked={createMore}
@@ -500,17 +496,14 @@ export function CreateIssueModal({
               />
               Create more
             </label>
-            <button
-              onClick={handleSubmit}
-              disabled={saving || !title.trim() || !crewId}
-              className="h-7 px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 transition-colors"
-            >
-              {saving && <Spinner className="h-3 w-3" />}
-              Create issue
-            </button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+          </>
+        }
+        onCancel={() => onOpenChange(false)}
+        primaryLabel="Create issue"
+        primaryDisabled={!title.trim() || !crewId}
+        busy={saving}
+        onPrimary={handleSubmit}
+      />
+    </CreateSurface>
   )
 }

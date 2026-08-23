@@ -202,6 +202,140 @@ describe("CreateIssueModal", () => {
 
   it("shows crew selector in header breadcrumb", () => {
     render(<CreateIssueModal {...defaultProps} />)
-    expect(screen.getByText("New issue")).toBeInTheDocument()
+    // CreateSurfaceHeader renders `context › Title` as ONE heading (two
+    // headings would make the accessible name "ENGNew issue"), and adds an
+    // sr-only DialogDescription echoing the title when the surface passes no
+    // description — so a bare getByText("New issue") now matches twice.
+    const heading = screen.getByRole("heading", { level: 2 })
+    expect(heading.textContent).toContain("ENG")
+    expect(heading.textContent).toContain("New issue")
+  })
+
+  // ── The shared shell ────────────────────────────────────────────────────
+  //
+  // New issue is the surface `components/layout/create-surface.tsx` was
+  // designed from, so it is the one that must actually mount it rather than
+  // re-draw the same geometry by hand.
+
+  it("mounts the shared CreateSurface shell", () => {
+    render(<CreateIssueModal {...defaultProps} />)
+
+    const content = document.querySelector('[data-slot="dialog-content"]')
+    expect(content).not.toBeNull()
+
+    // SHELL_BASE, the `md` width, and the bottom-sheet geometry — none of
+    // which a hand-rolled DialogContent carries.
+    expect(content!.className).toContain("group/surface")
+    expect(content!.className).toContain("sm:max-w-[640px]")
+    expect(content!.className).toContain("max-sm:rounded-t-2xl")
+
+    // The shell's footer always offers Cancel, leftmost of the action group.
+    expect(screen.getByText("Cancel")).toBeInTheDocument()
+  })
+
+  it("still POSTs the same create-issue request from the shell footer", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+    global.fetch = mockFetch
+
+    render(<CreateIssueModal {...defaultProps} />)
+
+    // It has to be the shell's primary that fires the request, not a raw
+    // <button> that happens to say the same words.
+    const content = document.querySelector('[data-slot="dialog-content"]')
+    expect(content).not.toBeNull()
+    expect(content!.className).toContain("group/surface")
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Shell issue" },
+    })
+    fireEvent.change(screen.getByPlaceholderText("Add description..."), {
+      target: { value: "Body text" },
+    })
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => {
+      const createCall = mockFetch.mock.calls.find(
+        (call: [string, RequestInit?]) => typeof call[1] === "object" && call[1]?.method === "POST",
+      )
+      expect(createCall).toBeDefined()
+      expect(createCall![0]).toBe(
+        "/api/v1/crews/crew-1/issues?workspace_id=ws-1",
+      )
+      expect(JSON.parse(createCall![1]!.body as string)).toEqual({
+        title: "Shell issue",
+        description: "Body text",
+        priority: "none",
+      })
+    })
+  })
+
+  it("still submits on ⌘↵, now wired by the shell rather than by hand", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+    global.fetch = mockFetch
+
+    render(<CreateIssueModal {...defaultProps} />)
+
+    const titleInput = screen.getByPlaceholderText("Issue title")
+    fireEvent.change(titleInput, { target: { value: "Keyboard issue" } })
+    fireEvent.keyDown(titleInput, { key: "Enter", metaKey: true })
+
+    await waitFor(() => {
+      const createCall = mockFetch.mock.calls.find(
+        (call: [string, RequestInit?]) => typeof call[1] === "object" && call[1]?.method === "POST",
+      )
+      expect(createCall).toBeDefined()
+      expect(JSON.parse(createCall![1]!.body as string).title).toBe("Keyboard issue")
+    })
+  })
+
+  it("still opens the pill popovers now that the pill is the trigger", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+    global.fetch = mockFetch
+
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Urgent one" } })
+
+    // CreateSurfacePill is a plain function component; Radix's asChild needs
+    // the ref to reach the <button> for the popover to anchor and open.
+    fireEvent.click(screen.getByText("No priority"))
+    fireEvent.click(await screen.findByText("Urgent"))
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => {
+      const createCall = mockFetch.mock.calls.find(
+        (call: [string, RequestInit?]) => typeof call[1] === "object" && call[1]?.method === "POST",
+      )
+      expect(createCall).toBeDefined()
+      expect(JSON.parse(createCall![1]!.body as string).priority).toBe("urgent")
+    })
+  })
+
+  it("surfaces a server refusal in the band, not only in a toast", async () => {
+    const { toast } = await import("sonner")
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ detail: "Title is already taken" }),
+      })
+
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Dup" } })
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Title is already taken")
+    })
+
+    const alert = await screen.findByRole("alert")
+    expect(alert.textContent).toContain("Title is already taken")
   })
 })

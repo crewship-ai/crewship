@@ -230,6 +230,7 @@ export function CreateSurface({
   className,
   children,
 }: CreateSurfaceProps) {
+  const contentRef = React.useRef<HTMLDivElement>(null)
   const [confirmingDiscard, setConfirmingDiscard] = React.useState(false)
   // What to run once the person confirms. Held in a ref rather than state so
   // confirming does not depend on a render landing first.
@@ -273,13 +274,26 @@ export function CreateSurface({
     <>
     <Dialog open={open} onOpenChange={requestOpenChange}>
       <DialogContent
+        ref={contentRef}
         aria-label={ariaLabel}
+        // Radix's own opt-out for the missing-description warning. The header
+        // renders a description when it has one and nothing when it does not;
+        // echoing the title into an sr-only node to silence the warning is what
+        // made screen readers say "New project. New project.".
+        aria-describedby={undefined}
         showCloseButton={false}
         onKeyDown={handleKeyDown}
+        tabIndex={-1}
         // Focus goes to the first real field, not to the close button, so the
-        // surface opens ready to type. Callers with no field focus something
-        // themselves rather than dropping this.
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        // surface opens ready to type — but if the caller has no field to
+        // focus, focus must still land INSIDE the surface, or ⌘↵ never reaches
+        // the handler above and the shell's headline promise is silently false
+        // until the user clicks. A field's own autoFocus runs after this and
+        // wins, so this is a floor, not an override.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          contentRef.current?.focus({ preventScroll: true })
+        }}
         className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, className)}
       >
         <SheetGrabber />
@@ -394,6 +408,17 @@ export interface CreateSurfaceHeaderProps {
   onClose: () => void
   /** Right of the title, left of the close — step counters, a mode switch. */
   meta?: React.ReactNode
+  /**
+   * Keep `context` visible on a phone.
+   *
+   * `context` is hidden below `sm` because it is normally a breadcrumb and the
+   * row has no width to spare. On New issue it is the CREW SELECTOR, and crew
+   * is required — so hiding it shipped a surface whose landing place could not
+   * be chosen on a phone, with no caller-side workaround (a child cannot
+   * un-hide itself under a `display:none` parent). Set this whenever `context`
+   * is interactive.
+   */
+  keepContext?: boolean
 }
 
 export function CreateSurfaceHeader({
@@ -406,6 +431,7 @@ export function CreateSurfaceHeader({
   onBack,
   onClose,
   meta,
+  keepContext = false,
 }: CreateSurfaceHeaderProps) {
   const inDialog = React.useContext(InDialog)
   const guard = React.useContext(CloseGuard)
@@ -421,7 +447,7 @@ export function CreateSurfaceHeader({
             size="icon-xs"
             onClick={onBack}
             aria-label="Back"
-            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11 group-data-[mobile=true]/surface:h-11 group-data-[mobile=true]/surface:w-11"
+            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground max-sm:h-12 max-sm:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -437,10 +463,31 @@ export function CreateSurfaceHeader({
           <h2 className="flex min-w-0 items-center gap-1.5 text-sm font-medium leading-none">
             {context != null && (
               <>
-                <span className="truncate font-normal text-muted-foreground max-sm:hidden group-data-[mobile=true]/surface:hidden">
+                <span
+                  className={cn(
+                    "truncate font-normal text-muted-foreground",
+                    !keepContext && "max-sm:hidden group-data-[mobile=true]/surface:hidden",
+                  )}
+                >
                   {context}
                 </span>
-                <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground-soft max-sm:hidden group-data-[mobile=true]/surface:hidden" />
+                <ChevronRight
+                  aria-hidden
+                  className={cn(
+                    "h-3 w-3 shrink-0 text-muted-foreground-soft",
+                    !keepContext && "max-sm:hidden group-data-[mobile=true]/surface:hidden",
+                  )}
+                />
+                {/* A real text node, or the accessible name concatenates.
+                 *
+                 * The comment above says one <h2> exists so the name is not
+                 * "IssuesNew issue" — and then the separator was an icon,
+                 * which contributes nothing, so the computed name was exactly
+                 * that: "SMONew issue". Measured in the browser, not guessed.
+                 * sub-bar.tsx already solved this with a literal " / "; this is
+                 * the same fix, hidden from sight because the chevron is the
+                 * visible separator. */}
+                <span className="sr-only"> › </span>
               </>
             )}
             <span className="truncate text-foreground">{title}</span>
@@ -460,31 +507,30 @@ export function CreateSurfaceHeader({
           size="icon-xs"
           onClick={() => guard(onClose)}
           aria-label="Close"
-          className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11 group-data-[mobile=true]/surface:h-11 group-data-[mobile=true]/surface:w-11"
+          className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground max-sm:h-12 max-sm:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
         >
           <X className="h-4 w-4" />
         </Button>
       </div>
 
-      {description != null ? (
-        inDialog ? (
+      {/* No description means NO node.
+       *
+       * This used to render `<DialogDescription className="sr-only">{title}`
+       * to silence Radix's missing-description warning. The cost was not
+       * obvious until eleven surfaces migrated at once: a screen reader read
+       * "New project. New project.", and `getByText(title)` matched twice, so
+       * two agents had to rewrite existing assertions that were not wrong.
+       * The warning is silenced properly instead — `CreateSurface` passes
+       * `aria-describedby={undefined}` to DialogContent, which is Radix's own
+       * opt-out. */}
+      {description != null &&
+        (inDialog ? (
           <DialogDescription className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
             {description}
           </DialogDescription>
         ) : (
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
-        )
-      ) : (
-        // Radix warns when a dialog has no description. A surface that has
-        // nothing to add still needs the node, so render it hidden rather than
-        // teaching people to pass filler prose. A preview frame has no Radix
-        // root to warn, and no name to contribute to — it renders nothing.
-        inDialog && (
-          <DialogDescription className="sr-only">
-            {typeof title === "string" ? title : "Create"}
-          </DialogDescription>
-        )
-      )}
+        ))}
     </div>
   )
 }
@@ -502,17 +548,25 @@ export function CreateSurfaceSteps({
   steps,
   current,
   onJump,
+  ariaLabel = "Steps",
 }: {
   steps: CreateSurfaceStep[]
   /** Index into `steps`, 0-based. */
   current: number
   /** Only ever called for a step already completed — you cannot skip forward. */
   onJump?: (index: number) => void
+  /** Names the landmark. "Add credential steps", "Wizard progress". */
+  ariaLabel?: string
 }) {
   const pct = steps.length > 1 ? ((current + 1) / steps.length) * 100 : 100
 
+  // A <nav>, because two migrations wrapped this in one by hand to keep an
+  // existing landmark test green — and every chip carries "Step N: Label",
+  // because naming them by visible text alone broke
+  // e2e/create-crew-wizard.spec.ts and forced six unit assertions to change
+  // that were not wrong.
   return (
-    <div className="shrink-0 border-b border-hairline px-4 py-2 sm:px-5">
+    <nav aria-label={ariaLabel} className="shrink-0 border-b border-hairline px-4 py-2 sm:px-5">
       {/* Pointer device: the whole path, so you can see what is still coming
           and click back into what you already answered. */}
       <div className="flex items-center gap-1 overflow-x-auto max-sm:hidden group-data-[mobile=true]/surface:hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
@@ -524,6 +578,7 @@ export function CreateSurfaceSteps({
               {i > 0 && <span className="h-px w-3 shrink-0 bg-border" aria-hidden />}
               <button
                 type="button"
+                aria-label={`Step ${i + 1}: ${step.label}`}
                 aria-current={active ? "step" : undefined}
                 disabled={!done || !onJump}
                 onClick={() => done && onJump?.(i)}
@@ -572,7 +627,7 @@ export function CreateSurfaceSteps({
           />
         </div>
       </div>
-    </div>
+    </nav>
   )
 }
 
@@ -580,13 +635,38 @@ export function CreateSurfaceSteps({
  * Body — the one scrollport.
  * ------------------------------------------------------------------------ */
 
-export function CreateSurfaceBody({ className, children, ...props }: React.ComponentProps<"div">) {
+export interface CreateSurfaceBodyProps extends React.ComponentProps<"div"> {
+  /**
+   * Off for a body that brings its own padding, or that IS a full-bleed
+   * editor. Do not reach for `className="p-0"` — the padding is declared at
+   * two breakpoints, so an unprefixed `p-0` loses to `sm:px-5 sm:py-4` in
+   * tailwind-merge and you need the `sm:` twin as well. Three separate
+   * migrations landed on that trap before this prop existed.
+   */
+  padded?: boolean
+  /**
+   * Off for a body that manages its own inner scrollports — a two-pane editor,
+   * a virtualised list. The body stays the flex child that shrinks; it just
+   * stops being the thing that scrolls.
+   */
+  scroll?: boolean
+}
+
+export function CreateSurfaceBody({
+  padded = true,
+  scroll = true,
+  className,
+  children,
+  ...props
+}: CreateSurfaceBodyProps) {
   return (
     <div
       className={cn(
         // min-h-0 is what actually lets this shrink inside the flex column;
         // without it the body pushes the footer off a short viewport.
-        "min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3.5 sm:px-5 sm:py-4",
+        "min-h-0 flex-1",
+        scroll ? "overflow-y-auto overscroll-contain" : "overflow-hidden",
+        padded && "px-4 py-3.5 sm:px-5 sm:py-4",
         className,
       )}
       {...props}
@@ -595,6 +675,16 @@ export function CreateSurfaceBody({ className, children, ...props }: React.Compo
     </div>
   )
 }
+
+/**
+ * The touch-target class for a caller's own `<input>` / `<select>`.
+ *
+ * The shell grows its OWN controls at the phone breakpoint, but a body full of
+ * bare inputs belongs to the surface, and four migrations each re-derived
+ * 44.16px by hand — one of them landed on `h-11` (40.5px) doing it, which is
+ * exactly the `--spacing: 0.23rem` trap this file warns about at the top.
+ */
+export const CREATE_SURFACE_INPUT = "h-8 text-xs max-sm:h-12 max-sm:text-sm"
 
 /* --------------------------------------------------------------------------
  * Structure inside the body — Section, Grid, Field, Choice, ToggleRow,
@@ -884,6 +974,15 @@ export interface CreateSurfacePillProps extends React.ComponentProps<"button"> {
   icon?: SurfaceIconComponent
   concept?: string
   accent?: AccentName
+  /**
+   * An arbitrary node before the label, winning over `icon`/`concept`.
+   *
+   * `SurfaceIconComponent` takes className and style only, so a prop-driven
+   * glyph (`<PriorityIcon priority=… />`, `<StatusIcon status=… />`) or a
+   * coloured swatch cannot be an icon at all. Three migrations put those in as
+   * children and lost the pill's sizing contract; this is where they go.
+   */
+  leading?: React.ReactNode
   /** Set = the pill carries a value, so it renders at full strength. */
   set?: boolean
   /** Read-only facts (a status the surface does not let you change). */
@@ -894,6 +993,7 @@ export function CreateSurfacePill({
   icon,
   concept,
   accent,
+  leading,
   set = false,
   readOnly = false,
   className,
@@ -914,14 +1014,16 @@ export function CreateSurfacePill({
       )}
       {...props}
     >
-      {(icon || concept) && (
-        <ConceptIcon
-          concept={concept}
-          icon={icon}
-          accent={accent ?? (set ? undefined : "slate")}
-          size="sm"
-          className="h-3.5 w-3.5"
-        />
+      {leading ?? (
+        (icon || concept) && (
+          <ConceptIcon
+            concept={concept}
+            icon={icon}
+            accent={accent ?? (set ? undefined : "slate")}
+            size="sm"
+            className="h-3.5 w-3.5"
+          />
+        )
       )}
       {children}
     </button>
@@ -937,6 +1039,15 @@ export interface CreateSurfaceTileProps extends Omit<React.ComponentProps<"butto
   icon?: SurfaceIconComponent
   concept?: string
   accent?: AccentName
+  /**
+   * An arbitrary node in the icon slot, winning over `icon`/`concept`.
+   *
+   * A brand mark that already carries its own tinted tile (ProviderMark, a
+   * CrewIcon with a status ring) renders a tile inside a tile in the wrong
+   * colour when forced through ConceptIcon. Two catalogues hand-rolled a copy
+   * of this component's class list rather than accept that.
+   */
+  leading?: React.ReactNode
   title: React.ReactNode
   description?: React.ReactNode
   /** Right-hand annotation — a count, a tier badge, "recommended". */
@@ -948,6 +1059,7 @@ export function CreateSurfaceTile({
   icon,
   concept,
   accent,
+  leading,
   title,
   description,
   meta,
@@ -969,8 +1081,10 @@ export function CreateSurfaceTile({
       )}
       {...props}
     >
-      {(icon || concept) && (
-        <ConceptIcon concept={concept} icon={icon} accent={accent} variant="chip" size="md" />
+      {leading ?? (
+        (icon || concept) && (
+          <ConceptIcon concept={concept} icon={icon} accent={accent} variant="chip" size="md" />
+        )
       )}
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
@@ -1360,28 +1474,61 @@ export function CreateSurfaceNotice({
  * is it generalised.
  * ------------------------------------------------------------------------ */
 
-export interface CreateSurfaceRefusalProps {
+export interface CreateSurfaceRefusalProps extends Omit<React.ComponentProps<"div">, "children"> {
   /** One sentence, in the user's terms. Null hides the whole band. */
   message: React.ReactNode | null
-  /** Field-level detail from a 400/422, rendered as rows you can act on. */
-  fields?: { field: string; reason: string }[]
+  /**
+   * Not every band outside the scrollport is a refusal.
+   *
+   * Three surfaces needed a second and third band here — a dry run reports
+   * PASS or fail, a partial save is a warning, and "Name is still empty" is a
+   * blocker that must be visible on a phone (where `hint` is not). All three
+   * hand-rolled this component's geometry rather than get a tone.
+   */
+  tone?: "error" | "warn" | "ok" | "info"
+  /**
+   * Field-level detail from a 400/422, rendered as rows you can act on.
+   *
+   * `detail` is the third rank — "(used by 2 panels)" — which the page importer
+   * had to flatten into `reason` before this existed. A refusal that names a
+   * location is going to be common.
+   */
+  fields?: { field: string; reason: React.ReactNode; detail?: React.ReactNode }[]
   /** Present only when retrying can plausibly work — a 500, not a 400. */
   onRetry?: () => void
   /** Dismiss. Absent means the refusal stays until the input changes. */
   onDismiss?: () => void
 }
 
-export function CreateSurfaceRefusal({ message, fields, onRetry, onDismiss }: CreateSurfaceRefusalProps) {
+const BAND_TONE = {
+  error: { edge: "border-destructive/30 bg-destructive/[0.07]", glyph: "text-destructive" },
+  warn: { edge: "border-warn/30 bg-warn/[0.07]", glyph: "text-warn" },
+  ok: { edge: "border-success/30 bg-success/[0.07]", glyph: "text-success" },
+  info: { edge: "border-info/30 bg-info/[0.07]", glyph: "text-info" },
+} as const
+
+export function CreateSurfaceRefusal({
+  message,
+  fields,
+  onRetry,
+  onDismiss,
+  tone = "error",
+  className,
+  ...props
+}: CreateSurfaceRefusalProps) {
   if (message == null) return null
 
+  const t = BAND_TONE[tone]
   return (
     <div
-      role="alert"
-      aria-live="assertive"
-      className="shrink-0 border-t border-destructive/30 bg-destructive/[0.07] px-4 py-2.5 sm:px-5"
+      // Only a failure interrupts. A pass or a hint is polite.
+      role={tone === "error" ? "alert" : "status"}
+      aria-live={tone === "error" ? "assertive" : "polite"}
+      className={cn("shrink-0 border-t px-4 py-2.5 sm:px-5", t.edge, className)}
+      {...props}
     >
       <div className="flex items-start gap-2">
-        <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0 text-destructive" />
+        <TriangleAlert className={cn("mt-px h-3.5 w-3.5 shrink-0", t.glyph)} />
         <div className="min-w-0 flex-1">
           <p className="text-xs leading-relaxed text-foreground/90">{message}</p>
 
@@ -1389,8 +1536,11 @@ export function CreateSurfaceRefusal({ message, fields, onRetry, onDismiss }: Cr
             <ul className="mt-1.5 flex flex-col gap-0.5">
               {fields.map((f) => (
                 <li key={f.field} className="text-[11px] leading-relaxed">
-                  <span className="font-mono text-destructive">{f.field}</span>
+                  <span className={cn("font-mono", t.glyph)}>{f.field}</span>
                   <span className="text-muted-foreground"> — {f.reason}</span>
+                  {f.detail != null && (
+                    <span className="text-muted-foreground-soft"> {f.detail}</span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -1446,7 +1596,7 @@ export function CreateSurfaceLoading({ rows = 3 }: { rows?: number }) {
  * Footer — hint, then Cancel, then at most one secondary, then THE primary.
  * ------------------------------------------------------------------------ */
 
-export interface CreateSurfaceFooterProps {
+export interface CreateSurfaceFooterProps extends Omit<React.ComponentProps<"div">, "children"> {
   /**
    * Left-hand hint. Defaults to the keyboard contract, because it is true on
    * every surface now and was documented on almost none of them. Hidden on a
@@ -1459,9 +1609,29 @@ export interface CreateSurfaceFooterProps {
   cancelLabel?: string
   /** At most one. `Back`, `Skip to defaults`, `Preview`. */
   secondary?: React.ReactNode
-  primaryLabel: React.ReactNode
-  onPrimary: () => void
+  /**
+   * Optional. A Pick surface whose action IS the tile has no primary — and
+   * before this was optional it rendered no footer at all, and therefore no
+   * Cancel, contradicting this file's own "Cancel is always present" rule.
+   */
+  primaryLabel?: React.ReactNode
+  onPrimary?: () => void
   primaryDisabled?: boolean
+  /**
+   * Route the footer's Cancel through the discard guard.
+   *
+   * Off by default because half the surfaces overload Cancel as "back out of
+   * this panel", and prompting about unsaved work for closing a colour picker
+   * is worse than not prompting. On for a Cancel that genuinely means close —
+   * three migrations wrote a wrapper component to get this, because
+   * `useCreateSurfaceClose` cannot be read by the component that renders
+   * `CreateSurface`.
+   */
+  guardCancel?: boolean
+  /** Far left, before the hint. Survives to a phone, unlike `hint`. */
+  lead?: React.ReactNode
+  /** Focus the primary — a wizard landing on its Review step wants this. */
+  primaryRef?: React.Ref<HTMLButtonElement>
   /** Renders the spinner and locks both the primary and Cancel. */
   busy?: boolean
   primaryIcon?: SurfaceIconComponent
@@ -1482,15 +1652,24 @@ export function CreateSurfaceFooter({
   primaryDisabled = false,
   busy = false,
   primaryIcon: PrimaryIcon,
+  guardCancel = false,
+  lead,
+  primaryRef,
+  className,
+  ...props
 }: CreateSurfaceFooterProps) {
+  const guard = React.useContext(CloseGuard)
   return (
     <div
+      {...props}
       className={cn(
         "shrink-0 flex items-center gap-2 border-t border-hairline px-4 py-2.5 sm:px-5 sm:py-3",
         // Past the home indicator, not under it.
         "max-sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] group-data-[mobile=true]/surface:pb-3.5",
+        className,
       )}
     >
+      {lead}
       {hint != null && (
         <span className="text-[11px] text-muted-foreground-soft max-sm:hidden group-data-[mobile=true]/surface:hidden">
           {hint}
@@ -1501,14 +1680,16 @@ export function CreateSurfaceFooter({
       <Button
         variant="ghost"
         size="sm"
-        onClick={onCancel}
+        onClick={() => (guardCancel ? guard(onCancel) : onCancel())}
         disabled={busy}
         className="h-8 text-xs max-sm:h-12 max-sm:flex-1 max-sm:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm"
       >
         {cancelLabel}
       </Button>
       {secondary}
+      {primaryLabel != null && onPrimary != null && (
       <Button
+        ref={primaryRef}
         size="sm"
         onClick={onPrimary}
         disabled={primaryDisabled || busy}
@@ -1517,6 +1698,7 @@ export function CreateSurfaceFooter({
         {busy ? <Spinner className="h-3 w-3" /> : PrimaryIcon ? <PrimaryIcon className="h-3 w-3" /> : null}
         {primaryLabel}
       </Button>
+      )}
     </div>
   )
 }

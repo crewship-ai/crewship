@@ -773,12 +773,31 @@ describe("<PageEditor>", () => {
     renderEditor({ mode: "create", onClose }, () => okJSON({}))
     act(() => emitDocChange!("apiVersion: crewship/v1\nkind: Page\n"))
 
-    fireEvent.click(screen.getByLabelText("Close the page editor"))
+    // The header's ×. Esc and a click on the overlay now reach the same guard,
+    // which is the point of moving it into the shell: this file used to guard
+    // only the two routes it drew itself, and the confirm was an inline band
+    // rather than an AlertDialog. Hence the shell's wording ("unsaved input")
+    // in place of this file's ("unsaved changes") — same guard, one owner.
+    fireEvent.click(screen.getByLabelText("Close"))
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByText(/unsaved changes/i)).toBeTruthy()
+    expect(screen.getByText(/unsaved input/i)).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("button", { name: /discard/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it("asks before throwing it away from Cancel too, not only from the ×", () => {
+    // The shell deliberately does NOT guard the footer's Cancel on a caller's
+    // behalf, because half the surfaces overload it as "back out of this
+    // panel". On this one Cancel has always meant close, and has always asked
+    // first — so it opts in through `useCreateSurfaceClose`.
+    const onClose = vi.fn()
+    renderEditor({ mode: "create", onClose }, () => okJSON({}))
+    act(() => emitDocChange!("apiVersion: crewship/v1\nkind: Page\n"))
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByText(/unsaved input/i)).toBeTruthy()
   })
 
   it("closes straight away when nothing has been typed", () => {
@@ -786,6 +805,44 @@ describe("<PageEditor>", () => {
     renderEditor({ mode: "create", onClose }, () => okJSON({}))
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  // ── The shared shell (components/layout/create-surface.tsx) ──────────────
+  //
+  // This surface was one of the two that was not a Radix Dialog at all: a
+  // hand-rolled `fixed inset-0` with `bg-background/70 backdrop-blur-md`, 1100px
+  // wide, and therefore with no focus trap. Mounting the shell is what fixes
+  // that, and the test that matters is that mounting it changed the CHROME and
+  // nothing else — the same POST, the same body.
+
+  it("mounts the shared create surface at xl, with no hand-rolled frosted backdrop", async () => {
+    const { calls } = renderEditor({ mode: "create" }, () => okJSON({ slug: "new-page" }))
+
+    const content = document.querySelector('[data-slot="dialog-content"]')
+    expect(content).toBeTruthy()
+    // One of the four widths, not a twelfth bespoke one.
+    expect(content!.className).toContain("sm:max-w-[960px]")
+    expect(document.body.innerHTML).not.toContain("max-w-[1100px]")
+    // One overlay, from the shared DialogOverlay. No blur, ever.
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeTruthy()
+    expect(document.body.innerHTML).not.toContain("backdrop-blur")
+
+    // And the door behind it is unchanged: the same request, the same body.
+    fireEvent.click(screen.getByRole("button", { name: /create page/i }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].method).toBe("POST")
+    expect(calls[0].url).toContain("/api/v1/pages?workspace_id=ws-1")
+    const body = calls[0].body as PageWriteBody
+    expect(body.slug).toBe("new-page")
+    expect(body.panels[0].sla_seconds).toBe(300)
+  })
+
+  it("submits on ⌘↵, which the hand-rolled shell never wired", async () => {
+    const { calls } = renderEditor({ mode: "create" }, () => okJSON({ slug: "new-page" }))
+    const content = document.querySelector('[data-slot="dialog-content"]')!
+    fireEvent.keyDown(content, { key: "Enter", metaKey: true })
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].method).toBe("POST")
   })
 
   it("reports a transport failure as a transport failure, not as a refusal", async () => {

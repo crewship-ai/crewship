@@ -4,11 +4,12 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import {
   CreateSurface,
   CreateSurfaceBody,
+  CreateSurfacePill,
+  CreateSurfaceRefusal,
   CreateSurfaceFooter,
   CreateSurfaceFrame,
   CreateSurfaceHeader,
   CreateSurfaceLoading,
-  CreateSurfaceRefusal,
   CreateSurfaceSteps,
 } from "../create-surface"
 
@@ -59,9 +60,14 @@ describe("CreateSurface", () => {
     render(<Harness />)
     // Not two headings side by side: the accessible name has to read
     // "Platform › New issue", not "PlatformNew issue" or just "New issue".
-    const dialog = screen.getByRole("dialog")
-    expect(dialog).toHaveTextContent("Platform")
-    expect(dialog).toHaveTextContent("New issue")
+    //
+    // The first version of this test asserted each word separately and passed
+    // while the real computed name was "SMONew issue" — the chevron is an icon
+    // and contributes nothing, so the two spans ran together. Assert the
+    // SEPARATION, which is the part that was actually broken.
+    const heading = screen.getByRole("heading", { level: 2 })
+    expect(heading.textContent).not.toMatch(/PlatformNew/)
+    expect(heading.textContent?.replace(/\s+/g, " ").trim()).toBe("Platform › New issue")
   })
 
   it("renders exactly one primary and always a Cancel", () => {
@@ -312,5 +318,147 @@ describe("CreateSurfaceLoading", () => {
   it("says it is busy to a screen reader, not just to the eye", () => {
     render(<CreateSurfaceLoading />)
     expect(screen.getByText("Loading")).toBeInTheDocument()
+  })
+})
+
+// =============================================================================
+// The four defects eleven parallel migrations found in this shell. Each of
+// these fails on the version that shipped in the first commit.
+// =============================================================================
+
+describe("what the migrations caught", () => {
+  beforeEach(() => cleanup())
+
+  it("does not echo the title into the accessible tree", () => {
+    // It used to render <DialogDescription className="sr-only">{title}</> to
+    // silence Radix's warning. Screen readers said "New issue. New issue.",
+    // and getByText(title) matched twice — two agents had to rewrite existing
+    // assertions that were not wrong.
+    render(
+      <CreateSurface open onOpenChange={vi.fn()}>
+        <CreateSurfaceHeader title="New issue" onClose={vi.fn()} />
+        <CreateSurfaceBody>body</CreateSurfaceBody>
+      </CreateSurface>,
+    )
+    expect(screen.getAllByText("New issue")).toHaveLength(1)
+    expect(screen.getByRole("dialog")).not.toHaveAttribute("aria-describedby")
+  })
+
+  it("keeps an interactive context visible, because a phone still has to set it", () => {
+    // New issue's `context` IS the crew selector and crew is required, so
+    // hiding it below `sm` shipped a surface whose landing place could not be
+    // chosen on a phone — and a child cannot un-hide itself under display:none.
+    render(
+      <CreateSurface open onOpenChange={vi.fn()}>
+        <CreateSurfaceHeader
+          keepContext
+          context={<button type="button">Pick crew</button>}
+          title="New issue"
+          onClose={vi.fn()}
+        />
+        <CreateSurfaceBody>body</CreateSurfaceBody>
+      </CreateSurface>,
+    )
+    const wrapper = screen.getByRole("button", { name: "Pick crew" }).parentElement
+    expect(wrapper?.className ?? "").not.toContain("max-sm:hidden")
+  })
+
+  it("focuses itself on open so ⌘↵ is not dead before the first click", () => {
+    // The shortcut moved from a window listener onto the content's onKeyDown,
+    // and the shell suppresses Radix's auto-focus — so a surface with no
+    // autofocused field left focus on the opener and the shortcut did nothing.
+    const onSubmit = vi.fn()
+    render(
+      <CreateSurface open onOpenChange={vi.fn()} onSubmit={onSubmit}>
+        <CreateSurfaceHeader title="Add integration" onClose={vi.fn()} />
+        <CreateSurfaceBody>no fields here</CreateSurfaceBody>
+      </CreateSurface>,
+    )
+    const dialog = screen.getByRole("dialog")
+    expect(document.activeElement).toBe(dialog)
+
+    fireEvent.keyDown(document.activeElement!, { key: "Enter", metaKey: true })
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it("names every step, which is how an e2e selector finds one", () => {
+    // Naming chips by visible text alone broke e2e/create-crew-wizard.spec.ts
+    // (getByLabel("Step 1: Identity")) and forced six unit edits.
+    render(
+      <CreateSurfaceSteps
+        ariaLabel="Wizard progress"
+        current={1}
+        steps={[
+          { id: "identity", label: "Identity" },
+          { id: "lineup", label: "Lineup" },
+        ]}
+      />,
+    )
+    expect(screen.getByRole("navigation", { name: "Wizard progress" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Step 1: Identity")).toBeInTheDocument()
+    expect(screen.getByLabelText("Step 2: Lineup")).toBeInTheDocument()
+  })
+})
+
+describe("what the migrations asked for", () => {
+  beforeEach(() => cleanup())
+
+  it("renders a footer with no primary — and still a Cancel", () => {
+    // A Pick surface whose action is the tile used to get no footer at all,
+    // and therefore no Cancel, contradicting this shell's own rule.
+    const onCancel = vi.fn()
+    render(<CreateSurfaceFooter onCancel={onCancel} />)
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /create/i })).not.toBeInTheDocument()
+  })
+
+  it("routes Cancel through the guard only when asked", () => {
+    const onOpenChange = vi.fn()
+    const onCancel = vi.fn()
+    render(
+      <CreateSurface open onOpenChange={onOpenChange} dirty>
+        <CreateSurfaceHeader title="New crew" onClose={vi.fn()} />
+        <CreateSurfaceBody>body</CreateSurfaceBody>
+        <CreateSurfaceFooter guardCancel onCancel={onCancel} primaryLabel="Create" onPrimary={vi.fn()} />
+      </CreateSurface>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+  })
+
+  it("carries a non-error band, because a dry run also passes", () => {
+    render(<CreateSurfaceRefusal tone="ok" message="Dry run passed." />)
+    const band = screen.getByRole("status")
+    expect(band).toHaveTextContent("Dry run passed.")
+    expect(band).toHaveAttribute("aria-live", "polite")
+  })
+
+  it("gives a field refusal a third rank instead of flattening it", () => {
+    render(
+      <CreateSurfaceRefusal
+        message="One reference could not be bound."
+        fields={[{ field: "routine:nightly-sweep", reason: "no routine of that slug", detail: "(used by 2 panels)" }]}
+      />,
+    )
+    expect(screen.getByText("(used by 2 panels)")).toBeInTheDocument()
+  })
+
+  it("lets a pill carry a prop-driven glyph the icon slot cannot type", () => {
+    render(
+      <CreateSurfacePill leading={<span data-testid="swatch" />}>Urgent</CreateSurfacePill>,
+    )
+    expect(screen.getByTestId("swatch")).toBeInTheDocument()
+  })
+
+  it("lets a body opt out of being the scrollport", () => {
+    const { container } = render(
+      <CreateSurfaceBody padded={false} scroll={false}>
+        editor
+      </CreateSurfaceBody>,
+    )
+    const cls = container.firstElementChild?.className ?? ""
+    expect(cls).not.toContain("overflow-y-auto")
+    expect(cls).not.toContain("sm:px-5")
   })
 })

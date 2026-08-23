@@ -1,25 +1,31 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { motion } from "motion/react"
 import {
-  X,
   FlaskConical,
   Save,
   AlertTriangle,
-  ArrowLeft,
   Sparkles,
   GitFork,
   Wrench,
   Search,
   ChevronRight,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import {
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceLoading,
+  CreateSurfaceRefusal,
+  CreateSurfaceSecondaryAction,
+  CreateSurfaceTile,
+} from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
 import { CrewIcon } from "@/components/ui/crew-icon"
@@ -46,6 +52,12 @@ import { convertDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
 // The save endpoint (POST .../pipelines/save) requires a fresh passing
 // test_run; the advanced mode runs /test_run inline before /save so the
 // user sees explicit pass/fail. OWNER/ADMIN can toggle "skip test gate".
+//
+// The shell is CreateSurface (components/layout/create-surface.tsx), at a
+// single `lg` width for all four modes — it used to be 576px at the door,
+// 672px in the fork list and 768px × 90vh in the editor, so the footer moved
+// out from under the cursor every time you picked a mode. The four modes are
+// screens you go BACK from; the header's arrow is the shell's.
 
 interface Props {
   workspaceId: string
@@ -216,6 +228,15 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   // HMAC instead of trusting body's last_test_run_at — closes the
   // test-gate body-trust loophole. Cleared on edit + on save success.
   const [saveToken, setSaveToken] = useState<string | null>(null)
+  // What the server said when it refused the save. It was a toast only, which
+  // is the one moment of this surface's life you cannot afford to miss and the
+  // only one that used to fade on its own. The toast stays; this is the band
+  // between the body and the footer that does not scroll away.
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // The buffer as it was handed to the editor. Anything else means there is
+  // input to lose, which is what the shell's discard guard asks about.
+  const pristineText = useRef(liveText)
 
   // Reset to the entry screen each time the dialog opens. (Field state is
   // otherwise preserved across a close/reopen within the same session.)
@@ -424,6 +445,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       return
     }
     setBusy("saving")
+    setSaveError(null)
     try {
       const body: Record<string, unknown> = {
         slug: parsed["name"],
@@ -457,7 +479,9 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       onCreated(saved.slug)
       onClose()
     } catch (e) {
-      toast.error("Save failed", { description: e instanceof Error ? e.message : String(e) })
+      const msg = e instanceof Error ? e.message : String(e)
+      setSaveError(msg)
+      toast.error("Save failed", { description: msg })
     } finally {
       setBusy("none")
     }
@@ -532,92 +556,103 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
           ? "Editor — test-run, then save"
           : undefined
 
+  // The shell's discard guard — Esc and an overlay click ask before throwing
+  // input away, and the header's × asks too. The starter template the editor
+  // opens with is not input, so an untouched buffer is not dirty.
+  const dirty =
+    mode === "describe"
+      ? goal.trim() !== ""
+      : mode === "advanced"
+        ? name.trim() !== "" || description.trim() !== "" || liveText !== pristineText.current
+        : false
+
+  // ⌘↵ / Ctrl↵, wired once by the shell. It does whatever the mode's primary
+  // does, and nothing on the two modes whose actions are their list rows.
+  const handleKeyboardSubmit = () => {
+    if (busy !== "none") return
+    if (mode === "describe") {
+      handleDescribe()
+    } else if (mode === "advanced") {
+      if (skipTestGate) void handleSave()
+      else void handleTestAndSave()
+    }
+  }
+
+  const advancedPrimaryLabel = skipTestGate
+    ? busy === "saving"
+      ? "Saving…"
+      : "Save (skip test)"
+    : busy === "testing"
+      ? "Testing…"
+      : busy === "saving"
+        ? "Saving…"
+        : "Test & Save"
+
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.15 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
+    <CreateSurface
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      size="lg"
+      dirty={dirty}
+      discardLabel="this routine"
+      onSubmit={handleKeyboardSubmit}
+      // Width is fixed at lg for every mode; the EDITOR is the one mode that
+      // also needs a definite height, because a code pane and a step graph
+      // sized by their content give you a 400px dialog with a 200px editor in
+      // it. The shell fixes widths and leaves height to the content, so this
+      // is local — and it is the same cap the shell already applies.
+      className={mode === "advanced" ? "sm:h-[min(85vh,720px)]" : undefined}
     >
-      {/* Dim, do not blur. The shared DialogOverlay every other modal
-          in the product uses is a plain bg-black/50 — a blur here made
-          this one dialog look like a different application. */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: 8 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-        className={cn(
-          "flex w-full flex-col rounded-lg border border-white/10 bg-card shadow-2xl",
-          mode === "advanced"
-            ? "h-[90vh] max-w-3xl"
-            : mode === "fork"
-              ? "max-h-[85vh] max-w-2xl"
-              : "max-w-xl",
-        )}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-3 shrink-0">
-          {mode !== "entry" && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0"
-              onClick={() => setMode("entry")}
-              aria-label="Back"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-            </Button>
-          )}
-          <div className="min-w-0">
-            <h3 className="text-sm font-medium leading-tight">{headerTitle}</h3>
-            {headerSub && <p className="text-[11px] text-muted-foreground">{headerSub}</p>}
-          </div>
-          <Button size="sm" variant="ghost" className="ml-auto h-7 w-7 p-0" onClick={onClose} aria-label="Close">
-            <X className="h-3 w-3" />
-          </Button>
-        </div>
+      <CreateSurfaceHeader
+        concept="routines"
+        title={headerTitle}
+        description={headerSub}
+        onBack={mode === "entry" ? undefined : () => setMode("entry")}
+        onClose={onClose}
+      />
 
-        {/* ── ENTRY — three cards ─────────────────────────────────────── */}
-        {mode === "entry" && (
-          <div className="p-4 space-y-2.5">
-            <EntryCard
-              icon={Sparkles}
-              tone="primary"
-              star
-              title="Describe it"
-              description="Tell a Lead agent your goal in plain words. It drafts the routine with you in chat, asks a couple of questions, and shows a readable preview before anything is saved."
-              onClick={() => setMode("describe")}
-            />
-            <EntryCard
-              icon={GitFork}
-              title="Fork an existing routine"
-              description="Start from one of your workspace's own routines and tweak it. No curated catalog — the library grows from what you and your agents actually build."
-              onClick={() => setMode("fork")}
-            />
-            <EntryCard
-              icon={Wrench}
-              title="Write it yourself"
-              description="Author the DSL in the editor — YAML or JSON, with schema completion and the step graph beside it. Test-run and save without leaving the dialog."
-              onClick={() => setMode("advanced")}
-            />
-          </div>
-        )}
+      {/* ── ENTRY — three cards ───────────────────────────────────────── */}
+      {mode === "entry" && (
+        <CreateSurfaceBody className="flex flex-col gap-2.5">
+          <CreateSurfaceTile
+            icon={Sparkles}
+            accent="blue"
+            title="Describe it"
+            description="Tell a Lead agent your goal in plain words. It drafts the routine with you in chat, asks a couple of questions, and shows a readable preview before anything is saved."
+            meta={<Sparkles className="h-3 w-3 text-primary" aria-label="recommended" />}
+            className="border-primary/40 bg-primary/[0.06] hover:border-primary/60 hover:bg-primary/10"
+            onClick={() => setMode("describe")}
+          />
+          <CreateSurfaceTile
+            icon={GitFork}
+            accent="slate"
+            title="Fork an existing routine"
+            description="Start from one of your workspace's own routines and tweak it. No curated catalog — the library grows from what you and your agents actually build."
+            onClick={() => setMode("fork")}
+          />
+          <CreateSurfaceTile
+            icon={Wrench}
+            accent="slate"
+            title="Write it yourself"
+            description="Author the DSL in the editor — YAML or JSON, with schema completion and the step graph beside it. Test-run and save without leaving the dialog."
+            onClick={() => setMode("advanced")}
+          />
+        </CreateSurfaceBody>
+      )}
 
-        {/* ── DESCRIBE ────────────────────────────────────────────────── */}
-        {mode === "describe" && (
-          <div className="p-4 space-y-4">
+      {/* ── DESCRIBE ──────────────────────────────────────────────────── */}
+      {mode === "describe" && (
+        <>
+          <CreateSurfaceBody className="flex flex-col gap-4">
             <div className="flex items-end gap-3">
-              <div className="flex-1">
-                <label htmlFor="describe-crew" className="mb-1 block text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Owner (crew)
-                </label>
+              <CreateSurfaceField label="Owner (crew)" htmlFor="describe-crew" className="flex-1">
                 <select
                   id="describe-crew"
                   value={authorCrewId}
                   onChange={(e) => setAuthorCrewId(e.target.value)}
-                  className="h-8 w-full rounded-md border border-white/10 bg-background px-2 text-xs"
+                  className="h-8 w-full rounded-md border border-hairline bg-background px-2 text-xs text-foreground outline-none focus:border-primary max-sm:h-12 max-sm:text-sm"
                 >
                   <option value="">Choose a crew…</option>
                   {crews.map((c) => (
@@ -626,7 +661,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                     </option>
                   ))}
                 </select>
-              </div>
+              </CreateSurfaceField>
               <div className="pb-1.5 text-[11px] text-muted-foreground">
                 {authorCrewId ? (
                   describeLead ? (
@@ -643,19 +678,16 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
               </div>
             </div>
 
-            <div>
-              <label htmlFor="describe-goal" className="mb-1.5 block text-sm font-medium">
-                What should the routine do?
-              </label>
+            <CreateSurfaceField label="What should the routine do?" htmlFor="describe-goal">
               <textarea
                 id="describe-goal"
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
                 rows={4}
                 placeholder="Describe it in your own words. e.g. Every weekday morning, fetch the top 5 Hacker News stories, summarize each in one sentence, and post the digest to Slack #standup."
-                className="w-full resize-y rounded-md border border-white/10 bg-background p-2.5 text-[13px] leading-relaxed"
+                className="w-full resize-y rounded-md border border-hairline bg-background p-2.5 text-[13px] leading-relaxed text-foreground outline-none focus:border-primary"
               />
-            </div>
+            </CreateSurfaceField>
 
             <p className="text-[11px] leading-relaxed text-muted-foreground">
               {describeLead?.name ?? "The Lead"} will draft it and ask a couple of questions, then show a
@@ -663,259 +695,275 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
               integrations, your existing routines, and the routine schema.
             </p>
 
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <div className="flex gap-3 text-[11px] text-muted-foreground">
-                <button type="button" className="hover:text-foreground" onClick={() => setMode("fork")}>
-                  fork a routine
-                </button>
-                <button type="button" className="hover:text-foreground" onClick={() => setMode("advanced")}>
-                  JSON editor
-                </button>
-              </div>
-              <Button size="sm" className="gap-1.5" onClick={handleDescribe} disabled={!describeLead || !goal.trim()}>
-                <Sparkles className="h-3.5 w-3.5" />
-                Draft with {describeLead?.name ?? "a Lead"}
-              </Button>
+            <div className="flex gap-3 text-[11px] text-muted-foreground">
+              <button type="button" className="hover:text-foreground" onClick={() => setMode("fork")}>
+                fork a routine
+              </button>
+              <button type="button" className="hover:text-foreground" onClick={() => setMode("advanced")}>
+                JSON editor
+              </button>
             </div>
-          </div>
-        )}
+          </CreateSurfaceBody>
 
-        {/* ── FORK ────────────────────────────────────────────────────── */}
-        {mode === "fork" && (
-          <div className="flex min-h-0 flex-1 flex-col p-4">
-            <div className="relative mb-3 shrink-0">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={forkSearch}
-                onChange={(e) => setForkSearch(e.target.value)}
-                placeholder="Search your routines…"
-                className="h-8 pl-8 text-xs"
-              />
+          <CreateSurfaceFooter
+            onCancel={onClose}
+            primaryLabel={`Draft with ${describeLead?.name ?? "a Lead"}`}
+            primaryIcon={Sparkles}
+            primaryDisabled={!describeLead || !goal.trim()}
+            onPrimary={handleDescribe}
+          />
+        </>
+      )}
+
+      {/* ── FORK ──────────────────────────────────────────────────────── */}
+      {mode === "fork" && (
+        <CreateSurfaceBody className="flex flex-col gap-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={forkSearch}
+              onChange={(e) => setForkSearch(e.target.value)}
+              placeholder="Search your routines…"
+              className="h-8 pl-8 text-xs max-sm:h-12 max-sm:text-sm"
+            />
+          </div>
+          {routinesLoading ? (
+            <CreateSurfaceLoading rows={3} />
+          ) : filteredRoutines.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border/60 px-3 py-6 text-center text-xs text-muted-foreground">
+              {routines.length === 0
+                ? "No routines yet. Describe one, or write the first yourself."
+                : "No routines match your search."}
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {routinesLoading ? (
-                <div className="flex items-center justify-center py-10 text-xs text-muted-foreground">
-                  <Spinner className="mr-2 h-3.5 w-3.5" /> Loading routines…
-                </div>
-              ) : filteredRoutines.length === 0 ? (
-                <div className="rounded-md border border-dashed border-white/10 px-3 py-6 text-center text-xs text-muted-foreground">
-                  {routines.length === 0
-                    ? "No routines yet. Describe one, or write the first yourself."
-                    : "No routines match your search."}
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {filteredRoutines.map((r) => (
+          ) : (
+            <div className="space-y-1">
+              {filteredRoutines.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  disabled={forking}
+                  onClick={() => handleForkPick(r)}
+                  className="group flex w-full items-center gap-3 rounded-md border border-hairline bg-foreground/[0.02] px-3 py-2 text-left transition-colors hover:border-border hover:bg-foreground/[0.05] disabled:opacity-50"
+                >
+                  <span className="relative shrink-0">
+                    <CrewIcon
+                      icon={resolveRoutineIcon(r)}
+                      color={resolveRoutineColor(r)}
+                      size="sm"
+                      className="!h-6 !w-6 !rounded-md"
+                    />
+                    <span
+                      aria-hidden
+                      title={r.last_invocation_status ?? "never invoked"}
+                      className={cn(
+                        "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                        forkStatusDot(r),
+                      )}
+                    />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs font-medium">{r.name || r.slug}</div>
+                    <div className="truncate font-mono text-[10px] text-muted-foreground-soft">
+                      {r.slug}
+                    </div>
+                    {r.description && (
+                      <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{r.description}</p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-[10px] text-muted-foreground-soft">
+                    {r.invocation_count > 0 ? `ran ${r.invocation_count}×` : "never run"}
+                  </span>
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="rounded-md border border-dashed border-border/60 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+            Forking copies a routine&apos;s definition into the editor so you can adapt it — the original is
+            untouched. Save creates a new routine.
+          </p>
+        </CreateSurfaceBody>
+      )}
+
+      {/* ── ADVANCED (the DSL editor) ─────────────────────────────────── */}
+      {mode === "advanced" && (
+        <>
+          {/* The body is the shell's scrollport everywhere else; here it is a
+              two-pane frame, because a code editor that scrolls the dialog
+              instead of itself is not a code editor. */}
+          <CreateSurfaceBody className="flex overflow-y-hidden p-0 sm:p-0">
+            <aside className="w-56 shrink-0 overflow-y-auto border-r border-hairline p-3">
+              <div className="mb-3">
+                <label htmlFor="routine-name" className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Name
+                </label>
+                <Input
+                  id="routine-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Friendly name"
+                  className="h-7 text-xs"
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Slug is derived from the DSL <code className="font-mono">name</code> field.
+                </p>
+              </div>
+              <div className="mb-3">
+                <label htmlFor="routine-description" className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Description
+                </label>
+                <textarea
+                  id="routine-description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  placeholder="One-line summary"
+                  className="w-full resize-none rounded-md border border-hairline bg-background p-1.5 text-xs text-foreground outline-none focus:border-primary"
+                />
+              </div>
+              <div className="mb-3">
+                <label htmlFor="routine-author-crew" className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Author crew
+                </label>
+                <select
+                  id="routine-author-crew"
+                  value={authorCrewId}
+                  onChange={(e) => setAuthorCrewId(e.target.value)}
+                  className="h-7 w-full rounded-md border border-hairline bg-background px-1.5 text-xs text-foreground outline-none focus:border-primary"
+                >
+                  <option value="">— choose at runtime —</option>
+                  {crews.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Crew whose agents + credentials run this routine.
+                </p>
+              </div>
+
+              <div className="my-3 border-t border-hairline" />
+
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Starter templates
+                </label>
+                <div className="mt-1 space-y-1">
+                  {STARTER_TEMPLATES.map((t) => (
                     <button
-                      key={r.id}
+                      key={t.id}
                       type="button"
-                      disabled={forking}
-                      onClick={() => handleForkPick(r)}
-                      className="group flex w-full items-center gap-3 rounded-md border border-white/[0.06] bg-card/40 px-3 py-2 text-left transition-colors hover:border-white/15 hover:bg-card disabled:opacity-50"
+                      onClick={() => applyTemplate(t.id)}
+                      className="w-full rounded-md border border-hairline bg-foreground/[0.02] px-2 py-1.5 text-left text-xs transition-colors hover:border-border hover:bg-foreground/[0.05]"
                     >
-                      <span className="relative shrink-0">
-                        <CrewIcon
-                          icon={resolveRoutineIcon(r)}
-                          color={resolveRoutineColor(r)}
-                          size="sm"
-                          className="!h-6 !w-6 !rounded-md"
-                        />
-                        <span
-                          aria-hidden
-                          title={r.last_invocation_status ?? "never invoked"}
-                          className={cn(
-                            "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
-                            forkStatusDot(r),
-                          )}
-                        />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs font-medium">{r.name || r.slug}</div>
-                        <div className="truncate font-mono text-[10px] text-muted-foreground-soft">
-                          {r.slug}
-                        </div>
-                        {r.description && (
-                          <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{r.description}</p>
-                        )}
-                      </div>
-                      <span className="shrink-0 text-[10px] text-muted-foreground-soft">
-                        {r.invocation_count > 0 ? `ran ${r.invocation_count}×` : "never run"}
-                      </span>
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                      <div className="font-medium">{t.label}</div>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2">{t.description}</p>
                     </button>
                   ))}
                 </div>
-              )}
-            </div>
-            <p className="mt-3 shrink-0 rounded-md border border-dashed border-white/10 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-              Forking copies a routine&apos;s definition into the editor so you can adapt it — the original is
-              untouched. Save creates a new routine.
-            </p>
-          </div>
-        )}
+              </div>
+            </aside>
 
-        {/* ── ADVANCED (JSON DSL) ─────────────────────────────────────── */}
-        {mode === "advanced" && (
-          <>
-            <div className="flex flex-1 overflow-hidden">
-              <aside className="w-56 shrink-0 border-r border-white/[0.06] p-3 overflow-y-auto">
-                <div className="mb-3">
-                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Name</label>
-                  <Input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Friendly name"
-                    className="h-7 text-xs"
-                  />
-                  <p className="mt-1 text-[10px] text-muted-foreground">
-                    Slug is derived from the DSL <code className="font-mono">name</code> field.
-                  </p>
-                </div>
-                <div className="mb-3">
-                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Description
-                  </label>
-                  <textarea
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={3}
-                    placeholder="One-line summary"
-                    className="w-full resize-none rounded-md border border-white/10 bg-background p-1.5 text-xs"
-                  />
-                </div>
-                <div className="mb-3">
-                  <label htmlFor="routine-author-crew" className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Author crew
-                  </label>
-                  <select
-                    id="routine-author-crew"
-                    value={authorCrewId}
-                    onChange={(e) => setAuthorCrewId(e.target.value)}
-                    className="h-7 w-full rounded-md border border-white/10 bg-background px-1.5 text-xs"
-                  >
-                    <option value="">— choose at runtime —</option>
-                    {crews.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-[10px] text-muted-foreground">
-                    Crew whose agents + credentials run this routine.
-                  </p>
-                </div>
-
-                <div className="my-3 border-t border-white/[0.06]" />
-
-                <div>
-                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Starter templates
-                  </label>
-                  <div className="mt-1 space-y-1">
-                    {STARTER_TEMPLATES.map((t) => (
+            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+              {/* The bar the routine editor has, because this is the
+                  same job: format toggle, the slug the DSL will save
+                  under, and the parse error WITH its line — the old
+                  strip said "invalid JSON" and left you to find it. */}
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline px-3 py-1.5">
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+                    {(["yaml", "json"] as const).map((f) => (
                       <button
-                        key={t.id}
-                        onClick={() => applyTemplate(t.id)}
-                        className="w-full rounded-md border border-white/[0.06] bg-card/40 px-2 py-1.5 text-left text-xs hover:border-white/15 hover:bg-card transition-colors"
+                        key={f}
+                        type="button"
+                        onClick={() => switchDslFormat(f)}
+                        aria-pressed={dslFormat === f}
+                        className={cn(
+                          "rounded px-1.5 py-0.5 font-mono text-[10px] uppercase transition-colors",
+                          dslFormat === f
+                            ? "bg-primary/15 text-primary"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
                       >
-                        <div className="font-medium">{t.label}</div>
-                        <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2">{t.description}</p>
+                        {f}
                       </button>
                     ))}
                   </div>
+                  <span className="font-mono">slug: {slug}</span>
                 </div>
-              </aside>
-
-              <div className="flex flex-1 flex-col overflow-hidden">
-                {/* The bar the routine editor has, because this is the
-                    same job: format toggle, the slug the DSL will save
-                    under, and the parse error WITH its line — the old
-                    strip said "invalid JSON" and left you to find it. */}
-                <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-1.5 shrink-0">
-                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-                      {(["yaml", "json"] as const).map((f) => (
-                        <button
-                          key={f}
-                          type="button"
-                          onClick={() => switchDslFormat(f)}
-                          aria-pressed={dslFormat === f}
-                          className={cn(
-                            "rounded px-1.5 py-0.5 font-mono text-[10px] uppercase transition-colors",
-                            dslFormat === f
-                              ? "bg-primary/15 text-primary"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {f}
-                        </button>
-                      ))}
-                    </div>
-                    <span className="font-mono">slug: {slug}</span>
-                  </div>
-                  {parseError ? (
-                    <span className="truncate text-[10px] text-destructive" title={parseError}>
-                      {parseError}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-success">syntax ok</span>
-                  )}
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-                  {/* The graph, beside the code. You could not see what
-                      you were building until after it was saved. */}
-                  <div className="relative min-h-[160px] w-full min-w-0 flex-1 border-b border-white/[0.06] md:min-w-[240px] md:border-b-0 md:border-r">
-                    {parsedDSL ? (
-                      <RoutineDefinitionCanvas
-                        definition={parsedDSL}
-                        slug={slug}
-                        name={name || slug}
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center px-4 text-center text-[11px] text-muted-foreground-soft">
-                        The graph appears once the definition parses.
-                      </div>
-                    )}
-                  </div>
-                  <div className="min-h-[200px] w-full min-w-0 flex-1 overflow-hidden md:w-[52%] md:flex-none">
-                    <FileEditor
-                      key={editorKey}
-                      code={dslText}
-                      language={dslFormat}
-                      onDocChange={handleDocChange}
-                      extraExtensions={dslExtensions}
-                      onSave={(next) => {
-                        bufferRef.current = next
-                        setLiveText(next)
-                      }}
-                    />
-                  </div>
-                </div>
-                {testResult && (
-                  <div
-                    className={cn(
-                      "border-t px-3 py-2 text-xs",
-                      testResult.passed ? "border-success/30 bg-success/5 text-success" : "border-destructive/30 bg-destructive/5 text-destructive",
-                    )}
-                  >
-                    <div className="flex items-center gap-1.5 font-medium">
-                      {testResult.passed ? "Test passed" : "Test failed"}
-                    </div>
-                    <p className="mt-0.5 font-mono text-[10px] opacity-80">{testResult.details}</p>
-                  </div>
+                {parseError ? (
+                  <span className="truncate text-[10px] text-destructive" title={parseError}>
+                    {parseError}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-success">syntax ok</span>
                 )}
               </div>
+              <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+                {/* The graph, beside the code. You could not see what
+                    you were building until after it was saved. */}
+                <div className="relative min-h-[160px] w-full min-w-0 flex-1 border-b border-hairline md:min-w-[240px] md:border-b-0 md:border-r">
+                  {parsedDSL ? (
+                    <RoutineDefinitionCanvas
+                      definition={parsedDSL}
+                      slug={slug}
+                      name={name || slug}
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center px-4 text-center text-[11px] text-muted-foreground-soft">
+                      The graph appears once the definition parses.
+                    </div>
+                  )}
+                </div>
+                <div className="min-h-[200px] w-full min-w-0 flex-1 overflow-hidden md:w-[52%] md:flex-none">
+                  <FileEditor
+                    key={editorKey}
+                    code={dslText}
+                    language={dslFormat}
+                    onDocChange={handleDocChange}
+                    extraExtensions={dslExtensions}
+                    onSave={(next) => {
+                      bufferRef.current = next
+                      setLiveText(next)
+                    }}
+                  />
+                </div>
+              </div>
             </div>
+          </CreateSurfaceBody>
 
-            {/* Footer */}
-            <div className="flex items-center justify-between gap-2 border-t border-white/[0.06] px-3 py-2 shrink-0">
-              {/* Shown only to the roles the server will accept it
-                  from. It was always visible, so a MANAGER could tick
-                  an escape hatch and get a 403 for their trouble — an
-                  affordance that cannot work is worse than an absent
-                  one, because it reads as a bug in the product rather
-                  than a limit on the person. */}
-              {canSkipGate ? (
+          {/* Both verdicts sit outside the scrollport, next to the button that
+              produced them. */}
+          {testResult && (
+            <div
+              className={cn(
+                "shrink-0 border-t px-4 py-2 text-xs sm:px-5",
+                testResult.passed
+                  ? "border-success/30 bg-success/5 text-success"
+                  : "border-destructive/30 bg-destructive/5 text-destructive",
+              )}
+            >
+              <div className="flex items-center gap-1.5 font-medium">
+                {testResult.passed ? "Test passed" : "Test failed"}
+              </div>
+              <p className="mt-0.5 font-mono text-[10px] opacity-80">{testResult.details}</p>
+            </div>
+          )}
+
+          <CreateSurfaceRefusal
+            message={saveError == null ? null : `Save failed — ${saveError}`}
+            onDismiss={() => setSaveError(null)}
+          />
+
+          <CreateSurfaceFooter
+            /* Shown only to the roles the server will accept it from. It was
+               always visible, so a MANAGER could tick an escape hatch and get
+               a 403 for their trouble — an affordance that cannot work is
+               worse than an absent one, because it reads as a bug in the
+               product rather than a limit on the person. */
+            aside={
+              canSkipGate ? (
                 <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
                   <input
                     type="checkbox"
@@ -926,91 +974,26 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                   Skip test-run gate
                   <AlertTriangle className="h-2.5 w-2.5" />
                 </label>
-              ) : (
-                <span />
-              )}
-              <div className="flex gap-2">
-                <Button size="sm" variant="ghost" onClick={onClose} disabled={busy !== "none"}>
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleTestRun}
-                  disabled={busy !== "none"}
-                  className="gap-1.5"
-                >
-                  <FlaskConical className="h-3 w-3" />
-                  {busy === "testing" ? "Testing…" : "Test only"}
-                </Button>
-                {skipTestGate ? (
-                  <Button
-                    size="sm"
-                    onClick={() => handleSave()}
-                    disabled={busy !== "none"}
-                    className="gap-1.5"
-                  >
-                    <Save className="h-3 w-3" />
-                    {busy === "saving" ? "Saving…" : "Save (skip test)"}
-                  </Button>
-                ) : (
-                  <Button size="sm" onClick={handleTestAndSave} disabled={busy !== "none"} className="gap-1.5">
-                    <Save className="h-3 w-3" />
-                    {busy === "testing" ? "Testing…" : busy === "saving" ? "Saving…" : "Test & Save"}
-                  </Button>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </motion.div>
-    </motion.div>
-  )
-}
-
-function EntryCard({
-  icon: Icon,
-  title,
-  description,
-  onClick,
-  tone = "default",
-  star = false,
-}: {
-  icon: ComponentType<{ className?: string }>
-  title: string
-  description: string
-  onClick: () => void
-  tone?: "default" | "primary"
-  star?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-        tone === "primary"
-          ? "border-primary/40 bg-primary/[0.06] hover:border-primary/60 hover:bg-primary/10"
-          : "border-white/[0.08] bg-card/40 hover:border-white/20 hover:bg-card",
+              ) : undefined
+            }
+            onCancel={onClose}
+            secondary={
+              <CreateSurfaceSecondaryAction
+                icon={FlaskConical}
+                onClick={handleTestRun}
+                disabled={busy !== "none"}
+              >
+                {busy === "testing" ? "Testing…" : "Test only"}
+              </CreateSurfaceSecondaryAction>
+            }
+            primaryLabel={advancedPrimaryLabel}
+            primaryIcon={Save}
+            onPrimary={skipTestGate ? () => handleSave() : handleTestAndSave}
+            busy={busy !== "none"}
+          />
+        </>
       )}
-    >
-      <span
-        className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
-          tone === "primary" ? "bg-primary/20 text-primary" : "bg-white/[0.06] text-muted-foreground",
-        )}
-      >
-        <Icon className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-sm font-medium">
-          {title}
-          {star && <Sparkles className="h-3 w-3 text-primary" aria-label="recommended" />}
-        </div>
-        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{description}</p>
-      </div>
-      <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-    </button>
+    </CreateSurface>
   )
 }
 

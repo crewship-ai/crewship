@@ -79,8 +79,92 @@ describe("CreateProjectModal", () => {
 
   it("shows header breadcrumb", () => {
     render(<CreateProjectModal {...defaultProps} />)
-    expect(screen.getByText("New project")).toBeInTheDocument()
+    // CreateSurfaceHeader puts the title in an h2 AND, when the surface passes
+    // no description, repeats it in a visually hidden DialogDescription so
+    // Radix stops warning about a missing description. So "New project" is in
+    // the document twice by design and a bare getByText finds both — match the
+    // heading instead.
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("New project")
     expect(screen.getByText("CRE")).toBeInTheDocument()
+  })
+
+  // The shell, not a bespoke 720px dialog: one overlay, four widths, and the
+  // bottom-sheet geometry on a phone — none of which this modal had.
+  it("mounts the shared CreateSurface shell", () => {
+    const { baseElement } = render(<CreateProjectModal {...defaultProps} />)
+    const content = baseElement.querySelector('[data-slot="dialog-content"]')
+    expect(content).not.toBeNull()
+    const classes = content!.getAttribute("class") ?? ""
+    expect(classes).toContain("group/surface") // SHELL_BASE
+    expect(classes).toContain("sm:max-w-[640px]") // size="md"
+    expect(classes).toContain("max-sm:rounded-t-2xl") // bottom sheet
+    expect(classes).not.toContain("sm:max-w-[720px]") // the old bespoke width
+  })
+
+  it("keeps the primary action in the shell footer and posts the same body", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "proj-1" }) })
+    global.fetch = mockFetch
+
+    const { baseElement } = render(<CreateProjectModal {...defaultProps} />)
+    fireEvent.change(screen.getByPlaceholderText("Project name"), { target: { value: "Alpha" } })
+
+    const primary = screen.getByText("Create project")
+    // The shell's Button, inside the shell's dialog — not a hand-rolled
+    // `h-7 px-3 rounded-md bg-primary` eighth variant of the confirm button.
+    expect(primary).toHaveAttribute("data-slot", "button")
+    expect(baseElement.querySelector('[data-slot="dialog-content"]')!.contains(primary)).toBe(true)
+
+    fireEvent.click(primary)
+
+    await waitFor(() => {
+      const createCall = mockFetch.mock.calls.find(
+        (call: [string, RequestInit?]) => typeof call[1] === "object" && call[1]?.method === "POST"
+      )
+      expect(createCall).toBeDefined()
+      expect(createCall![0]).toContain("/api/v1/projects?workspace_id=ws-1")
+      // JSON.stringify drops the undefined optionals, so this is the whole body.
+      expect(JSON.parse(createCall![1]!.body as string)).toEqual({
+        name: "Alpha",
+        icon: "rocket",
+        color: "blue",
+        status: "backlog",
+        priority: "none",
+      })
+    })
+  })
+
+  // The pills moved into the shell's pill row and are now CreateSurfacePill,
+  // which Radix anchors its popover to via `asChild`. If that ref did not land
+  // on the button the popover would not open at all.
+  it("still opens the status popover from the pill and applies the pick", async () => {
+    render(<CreateProjectModal {...defaultProps} />)
+    fireEvent.click(screen.getByText("Backlog"))
+    fireEvent.click(await screen.findByText("Planned"))
+    await waitFor(() => {
+      expect(screen.getByText("Planned")).toBeInTheDocument()
+      expect(screen.queryByText("Backlog")).not.toBeInTheDocument()
+    })
+  })
+
+  // A toast has faded by the time you look up. CreateSurfaceRefusal parks the
+  // refusal between the body and the footer, outside the scrollport.
+  it("shows a server refusal in a band, not only a toast", async () => {
+    const { toast } = await import("sonner")
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ detail: "Name already taken" }),
+      })
+
+    render(<CreateProjectModal {...defaultProps} />)
+    fireEvent.change(screen.getByPlaceholderText("Project name"), { target: { value: "Test" } })
+    fireEvent.click(screen.getByText("Create project"))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Name already taken")
+    expect(toast.error).toHaveBeenCalledWith("Name already taken")
   })
 
   it("shows Backlog status pill by default", () => {

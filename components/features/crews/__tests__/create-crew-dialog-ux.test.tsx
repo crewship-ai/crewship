@@ -83,6 +83,15 @@ afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks() })
 // Keyboard shortcuts
 // =============================================================================
 
+// ⌘↵ is the SHELL's now (components/layout/create-surface.tsx), wired on the
+// dialog rather than on `window` — one implementation for all twelve create
+// surfaces instead of nine of them forgetting it. So the key goes to the
+// dialog, which is where a modal's focus is anyway; dispatching on `window`
+// exercises a listener the wizard no longer owns.
+function pressInDialog(init: KeyboardEventInit) {
+  fireEvent.keyDown(screen.getByRole("dialog"), init)
+}
+
 describe("<CreateCrewDialog> — keyboard", () => {
   it("⌘+Enter advances when the current step is valid", async () => {
     setupFetch([(c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null])
@@ -92,7 +101,7 @@ describe("<CreateCrewDialog> — keyboard", () => {
 
     // Press Cmd+Enter
     act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true }))
+      pressInDialog({ key: "Enter", metaKey: true })
     })
 
     await waitFor(() => {
@@ -107,7 +116,7 @@ describe("<CreateCrewDialog> — keyboard", () => {
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
 
     act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true }))
+      pressInDialog({ key: "Enter", ctrlKey: true })
     })
 
     await waitFor(() => {
@@ -120,7 +129,7 @@ describe("<CreateCrewDialog> — keyboard", () => {
     renderDialog()
     // Step 1 is invalid (empty name) — Cmd+Enter should be a no-op.
     act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true }))
+      pressInDialog({ key: "Enter", metaKey: true })
     })
     expect(screen.getAllByText(/step 1 of 4/i).length).toBeGreaterThanOrEqual(1)
   })
@@ -148,7 +157,7 @@ describe("<CreateCrewDialog> — keyboard", () => {
 
     // ⌘+Enter on Review submits
     act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true }))
+      pressInDialog({ key: "Enter", metaKey: true })
     })
 
     await waitFor(() => {
@@ -163,7 +172,7 @@ describe("<CreateCrewDialog> — keyboard", () => {
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
 
     act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+      pressInDialog({ key: "Enter" })
     })
 
     expect(screen.getAllByText(/step 1 of 4/i).length).toBeGreaterThanOrEqual(1)
@@ -184,10 +193,12 @@ describe("<CreateCrewDialog> — step strip", () => {
   it("active step button has aria-current='step'", () => {
     setupFetch([])
     renderDialog()
-    const step1 = screen.getByLabelText(/Step 1: Identity/)
+    // The chips are named by their visible label now — CreateSurfaceSteps
+    // draws the strip, and it carries no per-step aria-label.
+    const step1 = screen.getByRole("button", { name: /Identity/ })
     expect(step1).toHaveAttribute("aria-current", "step")
 
-    const step2 = screen.getByLabelText(/Step 2: Lineup/)
+    const step2 = screen.getByRole("button", { name: /Lineup/ })
     expect(step2).not.toHaveAttribute("aria-current")
   })
 
@@ -203,7 +214,7 @@ describe("<CreateCrewDialog> — step strip", () => {
     })
 
     // Now Step 1 is completed → click jumps back
-    fireEvent.click(screen.getByLabelText(/Step 1: Identity/))
+    fireEvent.click(screen.getByRole("button", { name: /Identity/ }))
     expect(screen.getAllByText(/step 1 of 4/i).length).toBeGreaterThanOrEqual(1)
   })
 
@@ -212,11 +223,11 @@ describe("<CreateCrewDialog> — step strip", () => {
     renderDialog()
 
     // Future step (Step 3) is disabled
-    const step3 = screen.getByLabelText(/Step 3: Runtime/)
+    const step3 = screen.getByRole("button", { name: /Runtime/ })
     expect(step3).toBeDisabled()
 
     // Active step (Step 1) is also disabled (cursor-default, no jump)
-    const step1 = screen.getByLabelText(/Step 1: Identity/)
+    const step1 = screen.getByRole("button", { name: /Identity/ })
     expect(step1).toBeDisabled()
   })
 })

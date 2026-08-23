@@ -2,21 +2,24 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  X,
-  ChevronRight,
   Check,
   User,
   Bot,
   UserX,
   Calendar,
+  FolderKanban,
   Search,
 } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
 import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfacePill,
+  CreateSurfacePills,
+  CreateSurfaceRefusal,
+  CreateSurfaceTitleInput,
+} from "@/components/layout/create-surface"
 import {
   Popover,
   PopoverContent,
@@ -98,6 +101,10 @@ export function CreateProjectModal({
   const [targetDate, setTargetDate] = useState("")
   const [agents, setAgents] = useState<AssigneeOption[]>([])
   const [saving, setSaving] = useState(false)
+  // What the server said when it said no. Shown in the shell's refusal band,
+  // which sits outside the scrollport — the toast below it is kept because it
+  // is the notification the rest of the app uses, but the toast is what fades.
+  const [refusal, setRefusal] = useState<string | null>(null)
 
   // Popover states
   const [iconOpen, setIconOpen] = useState(false)
@@ -117,7 +124,8 @@ export function CreateProjectModal({
     return searchCrewIcons(iconQuery)
   }, [iconQuery, iconCategory])
 
-  // Focus name on open
+  // Focus name on open. The shell suppresses Radix's own autofocus so the
+  // surface opens on the first real field rather than on the close button.
   useEffect(() => {
     if (open) {
       setTimeout(() => nameRef.current?.focus(), 100)
@@ -158,6 +166,7 @@ export function CreateProjectModal({
     setLeadId(null)
     setStartDate("")
     setTargetDate("")
+    setRefusal(null)
   }
 
   const statusInfo = PROJECT_STATUSES.find((s) => s.value === status) ?? PROJECT_STATUSES[0]
@@ -167,10 +176,25 @@ export function CreateProjectModal({
     return found?.name ?? null
   })()
 
+  // Anything the person has typed or picked. Drives the shell's discard guard,
+  // which covers Esc, the overlay click and the header's × — the three routes
+  // out that this modal previously took without asking.
+  const dirty =
+    name.trim() !== "" ||
+    description.trim() !== "" ||
+    icon !== "rocket" ||
+    color !== "blue" ||
+    status !== "backlog" ||
+    priority !== "none" ||
+    leadId !== null ||
+    startDate !== "" ||
+    targetDate !== ""
+
   const handleSubmit = useCallback(async () => {
     if (!name.trim()) { toast.error("Project name is required"); return }
 
     setSaving(true)
+    setRefusal(null)
     try {
       const res = await apiFetch(
         `/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`,
@@ -197,7 +221,9 @@ export function CreateProjectModal({
 
       if (!res.ok) {
         const body = await res.json().catch(() => null)
-        toast.error(body?.detail ?? "Failed to create project")
+        const detail = body?.detail ?? "Failed to create project"
+        setRefusal(detail)
+        toast.error(detail)
         return
       }
 
@@ -206,372 +232,331 @@ export function CreateProjectModal({
       onOpenChange(false)
       onCreated()
     } catch {
+      setRefusal("Failed to create project")
       toast.error("Failed to create project")
     } finally {
       setSaving(false)
     }
   }, [name, description, icon, color, status, priority, leadType, leadId, startDate, targetDate, workspaceId, onCreated, onOpenChange])
 
-  // Cmd+Enter to submit
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault()
-      handleSubmit()
-    }
-  }, [handleSubmit])
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        className="sm:max-w-[720px] p-0 gap-0 overflow-hidden flex flex-col max-h-[85vh]"
-        onKeyDown={handleKeyDown}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-      >
-        <DialogTitle className="sr-only">New Project</DialogTitle>
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="md"
+      dirty={dirty}
+      discardLabel="this project"
+      // ⌘↵ comes from the shell now. handleSubmit keeps its own empty-name
+      // guard because the keyboard route reaches it while the footer's primary
+      // is still disabled.
+      onSubmit={handleSubmit}
+    >
+      <CreateSurfaceHeader
+        icon={FolderKanban}
+        accent="blue"
+        context="CRE"
+        title="New project"
+        onClose={() => onOpenChange(false)}
+      />
 
-        {/* ── Header ── */}
-        <div className="flex items-center gap-1.5 px-4 py-3 border-b border-white/[0.06] shrink-0">
-          <span className="text-xs font-medium text-muted-foreground">CRE</span>
-          <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
-          <span className="text-xs text-muted-foreground">New project</span>
-          <div className="flex-1" />
-          <button
-            onClick={() => onOpenChange(false)}
-            className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        {/* ── Body (scrollable) ── */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="px-5 pt-4 pb-2">
-            {/* Icon + Name row */}
-            <div className="flex items-start gap-3 mb-2">
-              {/* Icon button — uses crew icon system */}
-              <Popover open={iconOpen} onOpenChange={(v) => { setIconOpen(v); if (!v) { setIconQuery(""); setIconCategory(null) } }}>
-                <PopoverTrigger asChild>
-                  <button className="shrink-0 relative group cursor-pointer">
-                    <CrewIcon icon={icon} color={color} size="lg" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[340px] sm:w-[400px] p-0 rounded-2xl" align="start" sideOffset={8}>
-                  {/* Color picker row */}
-                  <div className="px-4 pt-4 pb-3 border-b">
-                    <div className="flex items-center justify-between mb-3">
-                      {GRADIENT_PALETTES.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => setColor(p.id)}
-                          className="transition-all hover:scale-105 shrink-0"
-                        >
-                          <CrewIcon
-                            icon={icon}
-                            color={p.id}
-                            size="sm"
-                            className={cn(
-                              "transition-all",
-                              color === p.id ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-110" : "opacity-50 hover:opacity-100",
-                            )}
-                          />
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-micro text-muted-foreground">Pick a color, then choose an icon below</p>
-                  </div>
-
-                  {/* Search */}
-                  <div className="px-4 pt-3 pb-2">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <Input
-                        value={iconQuery}
-                        onChange={(e) => { setIconQuery(e.target.value); setIconCategory(null) }}
-                        placeholder="Search icons..."
-                        className="pl-9 h-8 text-xs"
+      <CreateSurfaceBody className="flex flex-col gap-4">
+        {/* Icon + Name row */}
+        <div className="flex items-start gap-3">
+          {/* Icon button — uses crew icon system */}
+          <Popover open={iconOpen} onOpenChange={(v) => { setIconOpen(v); if (!v) { setIconQuery(""); setIconCategory(null) } }}>
+            <PopoverTrigger asChild>
+              <button type="button" aria-label="Change project icon" className="shrink-0 relative group cursor-pointer">
+                <CrewIcon icon={icon} color={color} size="lg" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[340px] sm:w-[400px] p-0 rounded-2xl" align="start" sideOffset={8}>
+              {/* Color picker row */}
+              <div className="px-4 pt-4 pb-3 border-b">
+                <div className="flex items-center justify-between mb-3">
+                  {GRADIENT_PALETTES.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setColor(p.id)}
+                      className="transition-all hover:scale-105 shrink-0"
+                    >
+                      <CrewIcon
+                        icon={icon}
+                        color={p.id}
+                        size="sm"
+                        className={cn(
+                          "transition-all",
+                          color === p.id ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-110" : "opacity-50 hover:opacity-100",
+                        )}
                       />
-                    </div>
-                  </div>
-
-                  {/* Category chips */}
-                  <div className="px-4 pb-2">
-                    <div className="flex flex-wrap gap-1">
-                      {CREW_ICON_CATEGORIES.map((cat) => (
-                        <button
-                          key={cat}
-                          type="button"
-                          onClick={() => {
-                            if (iconCategory === cat) { setIconCategory(null); setIconQuery("") }
-                            else { setIconCategory(cat); setIconQuery("") }
-                          }}
-                          className={cn(
-                            "px-2 py-0.5 text-micro rounded-full capitalize transition-colors",
-                            iconCategory === cat
-                              ? "bg-primary text-primary-foreground font-medium"
-                              : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
-                          )}
-                        >
-                          {cat}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Icon grid */}
-                  <div className="px-4 pb-4">
-                    <div className="grid grid-cols-8 gap-1 max-h-[240px] overflow-y-auto rounded-lg border bg-muted/20 p-2">
-                      {iconResults.map((iconName) => {
-                        const def = getCrewIconDef(iconName)
-                        const IconComp = def.icon
-                        const isSelected = icon === iconName
-                        return (
-                          <button
-                            key={iconName}
-                            type="button"
-                            title={def.label}
-                            onClick={() => { setIcon(iconName); setIconOpen(false) }}
-                            className={cn(
-                              "aspect-square rounded-lg flex items-center justify-center transition-all",
-                              isSelected
-                                ? "bg-primary text-primary-foreground shadow-sm scale-110"
-                                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                            )}
-                          >
-                            <IconComp className="h-4 w-4" />
-                          </button>
-                        )
-                      })}
-                      {iconResults.length === 0 && (
-                        <p className="col-span-8 text-center text-xs text-muted-foreground py-8">No icons found</p>
-                      )}
-                    </div>
-                    <p className="text-micro text-muted-foreground mt-2 text-center">
-                      {iconResults.length} icons {iconCategory ? `in ${iconCategory}` : "available"}
-                    </p>
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              {/* Name */}
-              <div className="flex-1 min-w-0">
-                <label htmlFor="project-name" className="sr-only">Project name</label>
-                <input
-                  id="project-name"
-                  ref={nameRef}
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Project name"
-                  className="w-full bg-transparent text-base font-medium text-foreground placeholder:text-muted-foreground/50 outline-none"
-                />
+                    </button>
+                  ))}
+                </div>
+                <p className="text-micro text-muted-foreground">Pick a color, then choose an icon below</p>
               </div>
-            </div>
 
-            {/* Metadata pills */}
-            <div className="flex items-center gap-1.5 flex-wrap py-2 border-t border-white/[0.04] mt-2">
-              {/* Status */}
-              <Popover open={statusOpen} onOpenChange={setStatusOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    status !== "backlog" ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusInfo.color }} />
-                    <span>{statusInfo.label}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[180px] p-1" align="start">
-                  {PROJECT_STATUSES.map((s) => (
+              {/* Search */}
+              <div className="px-4 pt-3 pb-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={iconQuery}
+                    onChange={(e) => { setIconQuery(e.target.value); setIconCategory(null) }}
+                    placeholder="Search icons..."
+                    className="pl-9 h-8 text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Category chips */}
+              <div className="px-4 pb-2">
+                <div className="flex flex-wrap gap-1">
+                  {CREW_ICON_CATEGORIES.map((cat) => (
                     <button
-                      key={s.value}
-                      onClick={() => { setStatus(s.value); setStatusOpen(false) }}
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        if (iconCategory === cat) { setIconCategory(null); setIconQuery("") }
+                        else { setIconCategory(cat); setIconQuery("") }
+                      }}
                       className={cn(
-                        "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
-                        status === s.value ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
+                        "px-2 py-0.5 text-micro rounded-full capitalize transition-colors",
+                        iconCategory === cat
+                          ? "bg-primary text-primary-foreground font-medium"
+                          : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
                       )}
                     >
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
-                      <span>{s.label}</span>
-                      {status === s.value && <Check className="ml-auto h-3 w-3" />}
+                      {cat}
                     </button>
                   ))}
-                </PopoverContent>
-              </Popover>
+                </div>
+              </div>
 
-              {/* Priority */}
-              <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    priority !== "none" ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    <PriorityIcon priority={priority} className="h-3.5 w-3.5" />
-                    <span>{priorityLabel[priority]}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[180px] p-1" align="start">
-                  {PRIORITIES.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => { setPriority(p); setPriorityOpen(false) }}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
-                        priority === p ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
-                      )}
-                    >
-                      <PriorityIcon priority={p} className="h-3.5 w-3.5" />
-                      <span>{priorityLabel[p]}</span>
-                      {priority === p && <Check className="ml-auto h-3 w-3" />}
-                    </button>
-                  ))}
-                </PopoverContent>
-              </Popover>
-
-              {/* Lead */}
-              <Popover open={leadOpen} onOpenChange={setLeadOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    leadId ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    {leadType === "agent" ? <Bot className="h-3 w-3" /> : <User className="h-3 w-3" />}
-                    <span>{leadName ?? "Lead"}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[220px] p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search lead..." className="h-8 text-xs" />
-                    <CommandList>
-                      <CommandEmpty>No results found.</CommandEmpty>
-                      <CommandGroup>
-                        <CommandItem onSelect={() => { setLeadType(null); setLeadId(null); setLeadOpen(false) }}>
-                          <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-xs">No lead</span>
-                          {!leadId && <Check className="ml-auto h-3.5 w-3.5" />}
-                        </CommandItem>
-                      </CommandGroup>
-                      {agents.length > 0 && (
-                        <CommandGroup heading="Agents">
-                          {agents.map((agent) => (
-                            <CommandItem
-                              key={agent.id}
-                              onSelect={() => { setLeadType("agent"); setLeadId(agent.id); setLeadOpen(false) }}
-                            >
-                              <Bot className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                              <span className="text-xs">{agent.name}</span>
-                              {leadId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      )}
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-
-              {/* Start date */}
-              <Popover open={startOpen} onOpenChange={setStartOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    startDate ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    <Calendar className="h-3 w-3" />
-                    <span>{startDate || "Start"}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-3" align="start">
-                  <p className="text-xs text-muted-foreground mb-2">Start date</p>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => { setStartDate(e.target.value); setStartOpen(false) }}
-                    className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
-                  />
-                  {startDate && (
-                    <button
-                      onClick={() => { setStartDate(""); setStartOpen(false) }}
-                      className="block mt-2 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Clear
-                    </button>
+              {/* Icon grid */}
+              <div className="px-4 pb-4">
+                <div className="grid grid-cols-8 gap-1 max-h-[240px] overflow-y-auto rounded-lg border bg-muted/20 p-2">
+                  {iconResults.map((iconName) => {
+                    const def = getCrewIconDef(iconName)
+                    const IconComp = def.icon
+                    const isSelected = icon === iconName
+                    return (
+                      <button
+                        key={iconName}
+                        type="button"
+                        title={def.label}
+                        onClick={() => { setIcon(iconName); setIconOpen(false) }}
+                        className={cn(
+                          "aspect-square rounded-lg flex items-center justify-center transition-all",
+                          isSelected
+                            ? "bg-primary text-primary-foreground shadow-sm scale-110"
+                            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                        )}
+                      >
+                        <IconComp className="h-4 w-4" />
+                      </button>
+                    )
+                  })}
+                  {iconResults.length === 0 && (
+                    <p className="col-span-8 text-center text-xs text-muted-foreground py-8">No icons found</p>
                   )}
-                </PopoverContent>
-              </Popover>
+                </div>
+                <p className="text-micro text-muted-foreground mt-2 text-center">
+                  {iconResults.length} icons {iconCategory ? `in ${iconCategory}` : "available"}
+                </p>
+              </div>
+            </PopoverContent>
+          </Popover>
 
-              {/* Target date */}
-              <Popover open={targetOpen} onOpenChange={setTargetOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    targetDate ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    <Calendar className="h-3 w-3" />
-                    <span>{targetDate || "Target"}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-3" align="start">
-                  <p className="text-xs text-muted-foreground mb-2">Target date</p>
-                  <input
-                    type="date"
-                    value={targetDate}
-                    onChange={(e) => { setTargetDate(e.target.value); setTargetOpen(false) }}
-                    className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
-                  />
-                  {targetDate && (
-                    <button
-                      onClick={() => { setTargetDate(""); setTargetOpen(false) }}
-                      className="block mt-2 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </PopoverContent>
-              </Popover>
-
-              {/* No labels pill: labels are an issue concept. There is no
-                  project_labels table and no labels field on the create
-                  request, so a picker here would discard the selection. */}
-            </div>
-          </div>
-
-          {/* Description */}
-          <div className="px-5 pb-4 border-t border-white/[0.04]">
-            <TiptapEditor
-              content={description}
-              onChange={setDescription}
-              placeholder="Write a description, a project brief, or collect ideas..."
-              compact
-              className="min-h-[120px]"
+          {/* Name */}
+          <div className="flex-1 min-w-0">
+            <label htmlFor="project-name" className="sr-only">Project name</label>
+            <CreateSurfaceTitleInput
+              id="project-name"
+              ref={nameRef}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Project name"
             />
           </div>
-
-          {/* No milestones section: POST /api/v1/projects/{projectId}/milestones
-              404s unless the project already exists, so nothing here can create
-              one. Milestones are added after the project is created. */}
         </div>
 
-        {/* ── Footer ── */}
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-white/[0.06] shrink-0">
-          <button
-            onClick={() => onOpenChange(false)}
-            disabled={saving}
-            className="h-7 px-3 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving || !name.trim()}
-            className="h-7 px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 transition-colors"
-          >
-            {saving && <Spinner className="h-3 w-3" />}
-            Create project
-          </button>
+        {/* Description */}
+        <div className="border-t border-hairline pt-3">
+          <TiptapEditor
+            content={description}
+            onChange={setDescription}
+            placeholder="Write a description, a project brief, or collect ideas..."
+            compact
+            className="min-h-[120px]"
+          />
         </div>
-      </DialogContent>
-    </Dialog>
+
+        {/* No milestones section: POST /api/v1/projects/{projectId}/milestones
+            404s unless the project already exists, so nothing here can create
+            one. Milestones are added after the project is created. */}
+      </CreateSurfaceBody>
+
+      {/* Metadata pills. Same five controls in the same order as before; they
+          moved out of the scrollport into the shell's pill row, which is the
+          slot for exactly this and keeps them on one scrolling line on a
+          phone instead of wrapping onto three. */}
+      <CreateSurfacePills>
+        {/* Status */}
+        <Popover open={statusOpen} onOpenChange={setStatusOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill set={status !== "backlog"}>
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusInfo.color }} />
+              <span>{statusInfo.label}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[180px] p-1" align="start">
+            {PROJECT_STATUSES.map((s) => (
+              <button
+                key={s.value}
+                onClick={() => { setStatus(s.value); setStatusOpen(false) }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
+                  status === s.value ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
+                )}
+              >
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
+                <span>{s.label}</span>
+                {status === s.value && <Check className="ml-auto h-3 w-3" />}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+
+        {/* Priority */}
+        <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill set={priority !== "none"}>
+              <PriorityIcon priority={priority} className="h-3.5 w-3.5" />
+              <span>{priorityLabel[priority]}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[180px] p-1" align="start">
+            {PRIORITIES.map((p) => (
+              <button
+                key={p}
+                onClick={() => { setPriority(p); setPriorityOpen(false) }}
+                className={cn(
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
+                  priority === p ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
+                )}
+              >
+                <PriorityIcon priority={p} className="h-3.5 w-3.5" />
+                <span>{priorityLabel[p]}</span>
+                {priority === p && <Check className="ml-auto h-3 w-3" />}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+
+        {/* Lead */}
+        <Popover open={leadOpen} onOpenChange={setLeadOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={leadType === "agent" ? Bot : User} set={leadId !== null}>
+              <span>{leadName ?? "Lead"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[220px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search lead..." className="h-8 text-xs" />
+              <CommandList>
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem onSelect={() => { setLeadType(null); setLeadId(null); setLeadOpen(false) }}>
+                    <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs">No lead</span>
+                    {!leadId && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </CommandItem>
+                </CommandGroup>
+                {agents.length > 0 && (
+                  <CommandGroup heading="Agents">
+                    {agents.map((agent) => (
+                      <CommandItem
+                        key={agent.id}
+                        onSelect={() => { setLeadType("agent"); setLeadId(agent.id); setLeadOpen(false) }}
+                      >
+                        <Bot className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-xs">{agent.name}</span>
+                        {leadId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
+        {/* Start date */}
+        <Popover open={startOpen} onOpenChange={setStartOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={Calendar} set={startDate !== ""}>
+              <span>{startDate || "Start"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-3" align="start">
+            <p className="text-xs text-muted-foreground mb-2">Start date</p>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => { setStartDate(e.target.value); setStartOpen(false) }}
+              className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
+            />
+            {startDate && (
+              <button
+                onClick={() => { setStartDate(""); setStartOpen(false) }}
+                className="block mt-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            )}
+          </PopoverContent>
+        </Popover>
+
+        {/* Target date */}
+        <Popover open={targetOpen} onOpenChange={setTargetOpen}>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={Calendar} set={targetDate !== ""}>
+              <span>{targetDate || "Target"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-3" align="start">
+            <p className="text-xs text-muted-foreground mb-2">Target date</p>
+            <input
+              type="date"
+              value={targetDate}
+              onChange={(e) => { setTargetDate(e.target.value); setTargetOpen(false) }}
+              className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
+            />
+            {targetDate && (
+              <button
+                onClick={() => { setTargetDate(""); setTargetOpen(false) }}
+                className="block mt-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            )}
+          </PopoverContent>
+        </Popover>
+
+        {/* No labels pill: labels are an issue concept. There is no
+            project_labels table and no labels field on the create
+            request, so a picker here would discard the selection. */}
+      </CreateSurfacePills>
+
+      <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
+
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel="Create project"
+        onPrimary={handleSubmit}
+        primaryDisabled={!name.trim()}
+        busy={saving}
+      />
+    </CreateSurface>
   )
 }

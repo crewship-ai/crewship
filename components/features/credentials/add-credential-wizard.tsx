@@ -31,14 +31,21 @@
  * impossible — UNIQUE(workspace_id, name) meant the second one would have had
  * to be called GH_TOKEN too.
  *
- * LAYOUT. The component owns a three-band flex column — step bar, scrolling
- * body, docked footer — rather than one long scroll. On a phone the dialog is
- * the whole screen (see add-secret-sheet.tsx), and a footer inside the
- * scrollport means "Save secret" is somewhere below a PEM key. The bands are
- * here rather than in the shell because only this file knows which control
- * belongs in which band. Everything visual comes from the detail kit
- * (components/ui/detail) — this dialog predates it and had been inventing its
- * own cards, labels and pills at its own sizes.
+ * LAYOUT. The component owns a three-band column — step bar, scrolling body,
+ * docked footer — rather than one long scroll: a footer inside the scrollport
+ * means "Save secret" is somewhere below a PEM key. The bands are still
+ * chosen here, because only this file knows which control belongs in which
+ * one, but they are now the SHELL's bands (CreateSurfaceSteps /
+ * CreateSurfaceBody / CreateSurfaceFooter, and CreateSurfaceRefusal for what
+ * the server said when it said no) rather than three hand-rolled divs. The
+ * container above them is CreateSurface — see add-secret-sheet.tsx for what
+ * that changed. Inside the body everything visual still comes from the detail
+ * kit (components/ui/detail): the shell owns the room, not the furniture.
+ *
+ * Two things travel back up to the shell, because the shell owns the gestures
+ * and this file owns the state they act on: `dirty` (so Esc, the overlay and
+ * the × ask before throwing a half-typed secret away) and the primary action
+ * (so ⌘↵ does whatever the footer's primary does on the step you are on).
  */
 
 import * as React from "react"
@@ -51,9 +58,15 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { DetailCard, FieldLabel } from "@/components/ui/detail"
+import {
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceRefusal,
+  CreateSurfaceSecondaryAction,
+  CreateSurfaceSteps,
+} from "@/components/layout/create-surface"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
@@ -103,14 +116,32 @@ export interface AddCredentialWizardProps {
   onSuccess: () => void
   onCancel: () => void
   knownTags?: string[]
+  /**
+   * Reports whether there is unsaved input, for the shell's discard guard.
+   * Optional so the wizard still renders standalone (and in its own tests)
+   * without a CreateSurface around it.
+   */
+  onDirtyChange?: (dirty: boolean) => void
+  /**
+   * Where the shell picks up ⌘↵. The primary action depends on the step, and
+   * the step lives here.
+   */
+  primaryRef?: React.MutableRefObject<(() => void) | null>
 }
 
 type Step = "type" | "values" | "scope"
 
-const STEP_ORDER: Step[] = ["type", "values", "scope"]
+/** The three steps, in order, as the shell's step bar wants them. */
+const STEPS: { id: Step; label: string }[] = [
+  { id: "type", label: "Shape" },
+  { id: "values", label: "Values" },
+  { id: "scope", label: "Delivery" },
+]
+
+const STEP_ORDER: Step[] = STEPS.map((s) => s.id)
 
 export function AddCredentialWizard({
-  workspaceId, onSuccess, onCancel, knownTags,
+  workspaceId, onSuccess, onCancel, knownTags, onDirtyChange, primaryRef,
 }: AddCredentialWizardProps) {
   const { abilities } = useAbilities()
   // POST /credentials/bindings is roleManage — OWNER/ADMIN — and the handler
@@ -199,6 +230,30 @@ export function AddCredentialWizard({
   // Continue button being dead is not an explanation; naming the box is.
   const blocker = missingRequired ?? (name.trim() ? null : "Name")
   const stepIndex = STEP_ORDER.indexOf(step)
+
+  /**
+   * Is there anything to lose?
+   *
+   * Typed input only. The SHAPE is deliberately not in here: TOKEN is
+   * preselected, and picking "Certificate" without filling anything in is a
+   * choice with no data behind it — prompting for it would teach people to
+   * click through the guard, which is how a guard stops working.
+   */
+  const dirty = Boolean(
+    primaryValue ||
+      username ||
+      accountLabel ||
+      name ||
+      tagDraft ||
+      tags.length > 0 ||
+      slotTouched ||
+      providerTouched.current ||
+      Object.values(extras).some((v) => v.trim()) ||
+      custom.some((f) => f.key.trim() || f.value.trim()),
+  )
+  React.useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
 
   async function submit() {
     setError(null)
@@ -310,21 +365,47 @@ export function AddCredentialWizard({
     }
   }
 
+  /**
+   * What the footer's primary does, which is also what ⌘↵ does. Guarded here
+   * rather than in the shell — CreateSurface fires `onSubmit` unconditionally
+   * and expects the surface to know when it is not submittable.
+   */
+  function primaryAction() {
+    if (submitting) return
+    if (step === "scope") {
+      void submit()
+      return
+    }
+    if (step === "values" && blocker) return
+    setStep(step === "type" ? "values" : "scope")
+  }
+
+  // No dependency array: the action closes over every field, so the shell has
+  // to be handed the current one after each commit rather than a stale one.
+  React.useEffect(() => {
+    if (!primaryRef) return
+    primaryRef.current = primaryAction
+    return () => {
+      primaryRef.current = null
+    }
+  })
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-hairline px-4 py-2.5 sm:px-5">
-        <StepBar
-          index={stepIndex}
-          onGoTo={(s) => { if (STEP_ORDER.indexOf(s) <= stepIndex) setStep(s) }}
+    <>
+      {/* The landmark is here rather than in the shell because
+          CreateSurfaceSteps renders a bare div; this surface had one before
+          the migration and dropping it would be a silent a11y regression. */}
+      <nav aria-label="Add credential steps" className="shrink-0">
+        <CreateSurfaceSteps
+          steps={STEPS}
+          current={stepIndex}
+          onJump={(i) => setStep(STEP_ORDER[i])}
         />
-      </div>
+      </nav>
 
       {/* The only scrollport. Everything that has to stay reachable — the step
           bar above, the actions below — lives outside it. */}
-      <div
-        data-testid="wizard-body"
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-5"
-      >
+      <CreateSurfaceBody data-testid="wizard-body" className="space-y-3">
         {step === "type" && (
           <>
             <div>
@@ -724,153 +805,60 @@ export function AddCredentialWizard({
             </DetailCard>
           </>
         )}
-      </div>
+      </CreateSurfaceBody>
 
-      {/* Docked. On a phone this is the only part of the dialog guaranteed to
-          be on screen, so it also carries whatever is blocking the next move —
-          a dead Continue button eight fields below the fold explains nothing. */}
-      <div
-        data-testid="wizard-footer"
-        className={cn(
-          "shrink-0 space-y-2 border-t border-hairline bg-surface-subtle/60 px-4 py-3 sm:px-5",
-          "max-sm:pb-[max(0.75rem,env(safe-area-inset-bottom))]",
-        )}
-      >
+      {/* Docked, and outside the scrollport for the same reason the buttons
+          are: on a phone this is the only part of the surface guaranteed to be
+          on screen, so it also carries whatever is blocking the next move — a
+          dead Continue button eight fields below the fold explains nothing.
+          The wrapper is one band stack, not a second footer; each strip draws
+          its own top rule the way CreateSurfaceRefusal does. */}
+      <div data-testid="wizard-footer" className="shrink-0">
         {step === "values" && blocker && (
-          <p className="type-meta text-muted-foreground">
+          <p className="border-t border-hairline px-4 py-2 type-meta text-muted-foreground sm:px-5">
             <span className="font-medium text-foreground/80">{blocker}</span> is still empty.
           </p>
         )}
-        {error && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/[0.05] px-3 py-2 type-meta leading-relaxed break-words text-destructive">
-            {error}
-          </div>
-        )}
+
+        {/* The shell's refusal band: a 409 on the name is the one thing here
+            that must not be scrolled past or faded out. */}
+        <CreateSurfaceRefusal message={error} />
+
         {/* Bounded: a partial-save warning quotes whatever the server said
             about every part that failed, and an unbounded one would push the
             buttons it belongs to off a phone. */}
         {warning && (
-          <div className="max-h-24 overflow-y-auto rounded-md border border-warn/40 bg-warn/[0.06] px-3 py-2 type-meta leading-relaxed break-words">
+          <div className="max-h-24 overflow-y-auto border-t border-warn/40 bg-warn/[0.06] px-4 py-2.5 type-meta leading-relaxed break-words sm:px-5">
             {warning}
           </div>
         )}
 
-        <div className="flex items-center gap-2">
-          {step === "type" ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="max-sm:h-11 max-sm:flex-1"
-              onClick={onCancel}
-            >
-              Cancel
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="max-sm:h-11 max-sm:flex-1"
-              disabled={submitting}
-              onClick={() => setStep(step === "scope" ? "values" : "type")}
-            >
-              <ChevronLeft className="mr-1 h-3.5 w-3.5" /> Back
-            </Button>
-          )}
-
-          {step === "scope" ? (
-            <Button
-              type="button"
-              size="sm"
-              className="ml-auto max-sm:h-11 max-sm:flex-1"
-              onClick={submit}
-              disabled={submitting}
-            >
-              {submitting && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
-              Save secret
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              className="ml-auto max-sm:h-11 max-sm:flex-1"
-              disabled={step === "values" && Boolean(blocker)}
-              onClick={() => setStep(step === "type" ? "values" : "scope")}
-            >
-              Continue
-            </Button>
-          )}
-        </div>
+        <CreateSurfaceFooter
+          hint={
+            <>
+              <kbd className="font-mono">⌘↵</kbd> to {step === "scope" ? "save" : "continue"} ·{" "}
+              <kbd className="font-mono">Esc</kbd> to cancel
+            </>
+          }
+          onCancel={onCancel}
+          secondary={
+            step === "type" ? undefined : (
+              <CreateSurfaceSecondaryAction
+                icon={ChevronLeft}
+                disabled={submitting}
+                onClick={() => setStep(step === "scope" ? "values" : "type")}
+              >
+                Back
+              </CreateSurfaceSecondaryAction>
+            )
+          }
+          primaryLabel={step === "scope" ? "Save secret" : "Continue"}
+          onPrimary={primaryAction}
+          primaryDisabled={step === "values" && Boolean(blocker)}
+          busy={submitting}
+        />
       </div>
-    </div>
-  )
-}
-
-const STEP_LABELS = ["Shape", "Values", "Delivery"] as const
-
-/**
- * Where you are, and the way back.
- *
- * Three pills tinted by state was the whole of it before, which told a screen
- * reader nothing and told a phone to wrap. The state is in `aria-current` now,
- * a finished step is a real target (nothing here is destructive, and being
- * unable to go back and change the shape was the flow's sharpest edge), and
- * below `sm` only the current label takes horizontal space — the others stay
- * in the accessibility tree via sr-only, so the buttons keep their names.
- */
-function StepBar({ index, onGoTo }: { index: number; onGoTo: (s: Step) => void }) {
-  return (
-    <nav aria-label="Add credential steps">
-      <ol className="flex items-center gap-2">
-        {STEP_ORDER.map((key, i) => {
-          const done = i < index
-          const current = i === index
-          return (
-            <React.Fragment key={key}>
-              {i > 0 && (
-                <li aria-hidden="true" className="min-w-3 flex-1">
-                  <span className={cn("block h-px rounded", done || current ? "bg-primary/40" : "bg-border/60")} />
-                </li>
-              )}
-              <li>
-                <button
-                  type="button"
-                  disabled={i > index}
-                  aria-current={current ? "step" : undefined}
-                  onClick={() => onGoTo(key)}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-full border py-1 pl-1 pr-2.5 transition-colors",
-                    "disabled:cursor-default disabled:opacity-70",
-                    current
-                      ? "border-primary/40 bg-primary/10 text-foreground"
-                      : done
-                        ? "border-success/30 text-success hover:border-success/60"
-                        : "border-border/60 text-muted-foreground",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "flex h-5 w-5 shrink-0 items-center justify-center rounded-full type-meta font-semibold leading-none",
-                      current
-                        ? "bg-primary text-primary-foreground"
-                        : done
-                          ? "bg-success/20 text-success"
-                          : "bg-surface-raised text-muted-foreground-soft",
-                    )}
-                  >
-                    {done ? <Check className="h-3 w-3" /> : i + 1}
-                  </span>
-                  <span className={cn("type-meta font-medium", !current && "max-sm:sr-only")}>
-                    {STEP_LABELS[i]}
-                  </span>
-                </button>
-              </li>
-            </React.Fragment>
-          )
-        })}
-      </ol>
-    </nav>
+    </>
   )
 }
 

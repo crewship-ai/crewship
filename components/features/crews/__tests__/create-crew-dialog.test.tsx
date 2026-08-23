@@ -413,15 +413,17 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
 
-    // Step 2 button is "ahead" of step 1 — disabled
-    const step2Btn = screen.getByLabelText(/Step 2: Lineup/)
+    // Step 2 button is "ahead" of step 1 — disabled.
+    // CreateSurfaceSteps names its chips by their visible label ("2 Lineup");
+    // the old hand-rolled strip carried an aria-label ("Step 2: Lineup").
+    const step2Btn = screen.getByRole("button", { name: /Lineup/ })
     expect(step2Btn).toBeDisabled()
 
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     // After advancing, Step 1 button is now "completed" → clickable
     await waitFor(() => {
-      const s1 = screen.getByLabelText(/Step 1: Identity/)
+      const s1 = screen.getByRole("button", { name: /Identity/ })
       expect(s1).not.toBeDisabled()
     })
   })

@@ -1,13 +1,20 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Check, ChevronRight, FastForward } from "lucide-react"
+import { Check, FastForward } from "lucide-react"
+
 import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
-import { cn } from "@/lib/utils"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceRefusal,
+  CreateSurfaceSecondaryAction,
+  CreateSurfaceSteps,
+  type CreateSurfaceStep,
+} from "@/components/layout/create-surface"
 import { StepIdentity } from "./create-crew/step-identity"
 import { StepLineup } from "./create-crew/step-lineup"
 import { StepRuntime } from "./create-crew/step-runtime"
@@ -23,12 +30,31 @@ export interface CreateCrewDialogProps {
   onCreated: () => void
 }
 
-const STEP_LABELS: Record<WizardStep, { title: string; sub: string }> = {
-  1: { title: "Identity", sub: "icon, color, name" },
-  2: { title: "Lineup", sub: "template or blank" },
-  3: { title: "Runtime", sub: "resources, network" },
-  4: { title: "Container", sub: "image, MCP — optional" },
-  5: { title: "Review", sub: "create" },
+/**
+ * Five steps, and the strip says five.
+ *
+ * The counter beside the title still reads "step N of 4" — Review counted as
+ * the confirmation rather than a question — because that is the wording the
+ * product and the e2e spec use today, and this migration changes no copy. The
+ * old strip drew four chips and then no active one on Review, which is why the
+ * counter had to special-case it with "ready to create". Five here is what the
+ * state machine actually has, and it keeps the phone progress bar honest
+ * (`aria-valuenow` of 5 against a max of 4 is not a valid progressbar).
+ */
+const CREW_STEPS: CreateSurfaceStep[] = [
+  { id: "identity", label: "Identity" },
+  { id: "lineup", label: "Lineup" },
+  { id: "runtime", label: "Runtime" },
+  { id: "container", label: "Container" },
+  { id: "review", label: "Review" },
+]
+
+const STEP_DESCRIPTION: Record<WizardStep, string> = {
+  1: "Crews group agents that work together. Pick a recognizable icon and name.",
+  2: "The agents this crew starts with. Pick a curated lineup, or stay empty and add agents later.",
+  3: "Resource limits and network policy for the crew's container. Defaults are sane.",
+  4: "Container image, devcontainer features, and MCP servers. All optional — skip to defaults if unsure.",
+  5: "Last look before commit. Click any section to jump back.",
 }
 
 export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }: CreateCrewDialogProps) {
@@ -36,6 +62,10 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   const [step, setStep] = useState<WizardStep>(1)
   const [state, setStateFull] = useState<WizardState>(INITIAL_STATE)
   const [busy, setBusy] = useState(false)
+  // What the server said when it said no. The toast stays (a wizard that
+  // closes on success wants one), but the band is the copy you can still read
+  // ten seconds later, and it sits outside the scrollport.
+  const [refusal, setRefusal] = useState<string | null>(null)
 
   // Reset to fresh state every time the dialog re-opens.
   useEffect(() => {
@@ -43,6 +73,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
       setStep(1)
       setStateFull(INITIAL_STATE)
       setBusy(false)
+      setRefusal(null)
     }
   }, [open])
 
@@ -55,6 +86,14 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 
   const lineupSummary = useMemo(() => deriveLineupSummary(state), [state])
 
+  // What the discard guard protects. Past Step 1 there is always work to lose
+  // (the lineup step auto-picks a template on mount, so state alone would say
+  // "dirty" a beat later anyway); on Step 1 it is whatever has been typed.
+  const dirty = useMemo(
+    () => step > 1 || JSON.stringify(state) !== JSON.stringify(INITIAL_STATE),
+    [step, state],
+  )
+
   // submittingRef is a synchronous latch — `busy` is only updated on the next
   // render, so two fast clicks (or ⌘+Enter while a click is mid-flight) can
   // both observe busy=false and fire submit twice, creating duplicate crews.
@@ -65,6 +104,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
     if (submittingRef.current || busy) return
     submittingRef.current = true
     setBusy(true)
+    setRefusal(null)
     try {
       const result = await submitCrew(workspaceId, state)
       // applyOverrides() inside submit fires toast.warning when partial=true.
@@ -77,7 +117,9 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
       onCreated()
       router.replace(`/crews?crew=${encodeURIComponent(result.slug)}`)
     } catch (e) {
-      toast.error(`Could not create crew: ${e instanceof Error ? e.message : String(e)}`)
+      const message = e instanceof Error ? e.message : String(e)
+      setRefusal(`Could not create crew: ${message}`)
+      toast.error(`Could not create crew: ${message}`)
     } finally {
       setBusy(false)
       submittingRef.current = false
@@ -92,7 +134,11 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
     setStep((step + 1) as WizardStep)
   }
 
+  // Inert rather than absent while a create is in flight: the header's back
+  // arrow has no disabled state (absent means "no arrow", not "a dead one"),
+  // and making it vanish for the length of a POST shifts the title sideways.
   const back = () => {
+    if (busy) return
     if (step > 1) setStep((step - 1) as WizardStep)
   }
 
@@ -113,164 +159,97 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   // Auto-focus the primary action when the user lands on Review (Step 5) so
   // ⌘+Enter is unambiguous and screen readers announce "Create crew" first.
   // Step 1's Name input keeps its inline `autoFocus` (mounts fresh each entry).
-  const primaryActionRef = useRef<HTMLButtonElement>(null)
+  //
+  // It matters more than it used to: ⌘↵ is now the shell's, wired on the
+  // dialog rather than on `window`, so it needs focus to be somewhere inside
+  // the surface — and the click that lands you on Review ("Skip to defaults")
+  // unmounts the very button that had it. CreateSurfaceFooter exposes no ref
+  // to its primary, hence the query: the primary is its last button.
+  const footerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (step === 5 && !busy) {
-      primaryActionRef.current?.focus()
+      const buttons = footerRef.current?.querySelectorAll("button")
+      buttons?.[buttons.length - 1]?.focus()
     }
   }, [step, busy])
 
-  // Cmd+Enter advances/submits on supported steps.
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault()
+  return (
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="lg"
+      dirty={dirty}
+      discardLabel="this crew"
+      onSubmit={() => {
         if (stepValid) advance()
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, step, stepValid, state])
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className={cn(
-          "p-0 overflow-hidden",
-          step === 2 ? "sm:max-w-[940px]" : "sm:max-w-[680px]",
-        )}
-      >
-        <DialogHeader className="px-5 pt-4 pb-3 border-b border-white/10">
-          <DialogTitle className="text-base">
-            New crew
-            <span className="ml-2 text-sm text-muted-foreground font-normal">
-              {step === 5 ? "— ready to create" : `— step ${step} of 4`}
-            </span>
-          </DialogTitle>
-          <DialogDescription className="text-[12.5px]">
-            {step === 1 && "Crews group agents that work together. Pick a recognizable icon and name."}
-            {step === 2 && "The agents this crew starts with. Pick a curated lineup, or stay empty and add agents later."}
-            {step === 3 && "Resource limits and network policy for the crew's container. Defaults are sane."}
-            {step === 4 && "Container image, devcontainer features, and MCP servers. All optional — skip to defaults if unsure."}
-            {step === 5 && "Last look before commit. Click any section to jump back."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <StepStrip step={step} onJump={(s) => s < step && setStep(s)} />
-
-        <div className="px-5 py-4 max-h-[58vh] overflow-y-auto">
-          {step === 1 && <StepIdentity state={state} setState={setState} />}
-          {step === 2 && <StepLineup state={state} setState={setState} />}
-          {step === 3 && <StepRuntime state={state} setState={setState} />}
-          {step === 4 && <StepContainer state={state} setState={setState} workspaceId={workspaceId} />}
-          {step === 5 && (
-            <StepReview
-              state={state}
-              onEdit={(s) => setStep(s)}
-              lineupSummary={lineupSummary}
-            />
-          )}
-        </div>
-
-        <div className="px-5 py-3 border-t border-white/10 flex items-center gap-2">
-          <span className="text-[11.5px] text-muted-foreground mr-auto">
-            {step === 5
-              ? "⌘+Enter to confirm · Esc cancel"
-              : `Step ${step} of 4 · ⌘+Enter to continue`}
-          </span>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            disabled={busy}
-            className="text-sm px-3 py-1.5 rounded text-muted-foreground hover:text-foreground"
-          >
-            Cancel
-          </button>
-          {step > 1 && (
-            <button
-              type="button"
-              onClick={back}
-              disabled={busy}
-              className="text-sm px-3 py-1.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5"
-            >
-              ← Back
-            </button>
-          )}
-          {step === 4 && (
-            <button
-              type="button"
-              onClick={skipToReview}
-              disabled={busy}
-              className="text-sm px-3 py-1.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5 flex items-center gap-1.5"
-              title="Skip to Review with default container settings"
-            >
-              <FastForward className="h-3.5 w-3.5" />
-              Skip to defaults
-            </button>
-          )}
-          <button
-            ref={primaryActionRef}
-            type="button"
-            onClick={advance}
-            disabled={!stepValid || busy}
-            className="text-sm px-3.5 py-1.5 rounded bg-primary hover:bg-primary text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-          >
-            {busy && <span className="h-3 w-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />}
-            {step === 5 ? (busy ? "Creating…" : "✓ Create crew") : "Continue"}
-            {step < 5 && !busy && <ChevronRight className="h-3.5 w-3.5" />}
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep) => void }) {
-  const steps = [1, 2, 3, 4] as const
-  return (
-    <nav
-      aria-label="Wizard progress"
-      className="px-5 py-3 border-b border-white/10 bg-card/50 flex items-center gap-3"
+      }}
     >
-      {steps.map((n, i) => (
-        <Fragment key={n}>
-          <div className="flex items-center gap-2 text-[12px] shrink-0 min-w-0">
-            <button
-              type="button"
-              disabled={n >= step}
-              onClick={() => onJump(n)}
-              aria-current={n === step ? "step" : undefined}
-              className={cn(
-                "h-6 w-6 rounded-full border text-[11px] font-semibold flex items-center justify-center transition-all shrink-0",
-                n < step
-                  ? "bg-success/20 border-success/50 text-success hover:scale-110 cursor-pointer"
-                  : n === step
-                    ? "bg-primary/20 border-primary text-primary ring-2 ring-primary/20"
-                    : "bg-card border-white/10 text-muted-foreground cursor-default",
-              )}
-              aria-label={`Step ${n}: ${STEP_LABELS[n].title}`}
-            >
-              {n < step ? <Check className="h-3 w-3" strokeWidth={3} /> : n}
-            </button>
-            <div className={cn("flex flex-col leading-tight min-w-0", n !== step && "opacity-60")}>
-              <span className="font-medium truncate">{STEP_LABELS[n].title}</span>
-              <span className="text-[10.5px] text-muted-foreground truncate">{STEP_LABELS[n].sub}</span>
-            </div>
-          </div>
-          {i < steps.length - 1 && (
-            <div
-              aria-hidden="true"
-              className={cn(
-                "flex-1 h-px min-w-[16px] transition-colors",
-                n < step ? "bg-success/40" : "bg-white/10",
-              )}
-            />
-          )}
-        </Fragment>
-      ))}
-    </nav>
+      <CreateSurfaceHeader
+        concept="crews"
+        title="New crew"
+        description={STEP_DESCRIPTION[step]}
+        onBack={step > 1 ? back : undefined}
+        onClose={() => onOpenChange(false)}
+        meta={
+          <span className="max-sm:hidden">
+            {step === 5 ? "ready to create" : `step ${step} of 4`}
+          </span>
+        }
+      />
+
+      {/* The kit's step strip, inside the landmark it does not draw itself. */}
+      <nav aria-label="Wizard progress" className="shrink-0">
+        <CreateSurfaceSteps
+          steps={CREW_STEPS}
+          current={step - 1}
+          onJump={(i) => setStep((i + 1) as WizardStep)}
+        />
+      </nav>
+
+      <CreateSurfaceBody>
+        {step === 1 && <StepIdentity state={state} setState={setState} />}
+        {step === 2 && <StepLineup state={state} setState={setState} />}
+        {step === 3 && <StepRuntime state={state} setState={setState} />}
+        {step === 4 && <StepContainer state={state} setState={setState} workspaceId={workspaceId} />}
+        {step === 5 && (
+          <StepReview
+            state={state}
+            onEdit={(s) => setStep(s)}
+            lineupSummary={lineupSummary}
+          />
+        )}
+      </CreateSurfaceBody>
+
+      <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
+
+      <div ref={footerRef} className="shrink-0">
+        <CreateSurfaceFooter
+          hint={
+            step === 5
+              ? "⌘+Enter to confirm · Esc cancel"
+              : `Step ${step} of 4 · ⌘+Enter to continue`
+          }
+          onCancel={() => onOpenChange(false)}
+          secondary={
+            step === 4 ? (
+              <CreateSurfaceSecondaryAction
+                icon={FastForward}
+                onClick={skipToReview}
+                disabled={busy}
+                title="Skip to Review with default container settings"
+              >
+                Skip to defaults
+              </CreateSurfaceSecondaryAction>
+            ) : undefined
+          }
+          primaryLabel={step === 5 ? (busy ? "Creating…" : "Create crew") : "Continue"}
+          primaryIcon={step === 5 ? Check : undefined}
+          onPrimary={advance}
+          primaryDisabled={!stepValid}
+          busy={busy}
+        />
+      </div>
+    </CreateSurface>
   )
 }
 

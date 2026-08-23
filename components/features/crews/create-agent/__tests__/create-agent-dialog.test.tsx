@@ -61,6 +61,73 @@ describe("CreateAgentDialog", () => {
     expect(screen.queryByText(/no crews yet/i)).not.toBeInTheDocument()
   })
 
+  // ── The shared shell ────────────────────────────────────────────────
+  // This surface used to draw its own modal: a bare DialogContent pinned
+  // to sm:max-w-[640px] with a hand-rolled header, a scrollport that
+  // swallowed the footer's height budget, and a window-level ⌘↵ listener.
+  // It now mounts components/layout/create-surface.tsx like every other
+  // create door, so the assertions below are about the SHELL, not about
+  // anything this dialog draws itself.
+  it("mounts the shared CreateSurface shell at size lg", () => {
+    renderDialog()
+    const content = document.querySelector('[data-slot="dialog-content"]')
+    expect(content).not.toBeNull()
+    const cls = content!.className
+    // The shell's own geometry: the surface group, the fixed lg width,
+    // and the bottom-sheet breakpoint it brings for free.
+    expect(cls).toContain("group/surface")
+    expect(cls).toContain("sm:max-w-[800px]")
+    expect(cls).toContain("max-sm:rounded-t-2xl")
+  })
+
+  it("still issues the same POST from inside the shell", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ name: "Filip", slug: "filip" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    renderDialog()
+
+    // The primary lives in the shell's footer now, outside the scrollport.
+    const content = document.querySelector('[data-slot="dialog-content"]')!
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    const createBtn = screen.getByRole("button", { name: /create agent/i })
+    expect(content.contains(createBtn)).toBe(true)
+    fireEvent.click(createBtn)
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(String(url)).toContain("/api/v1/agents")
+    expect(init?.method).toBe("POST")
+  })
+
+  it("shows a refusal band — not just a toast — when the server says no", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValueOnce(
+      new Response("slug taken", { status: 409 }),
+    )
+    renderDialog()
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
+
+    // The band sits between the body and the footer, so it cannot be
+    // scrolled past the way the old toast could be missed entirely.
+    const band = await screen.findByRole("alert")
+    expect(band).toHaveTextContent(/slug taken/i)
+  })
+
+  it("asks before throwing away typed input on Esc", async () => {
+    const onOpenChange = vi.fn()
+    renderDialog({ onOpenChange })
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+
+    fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" })
+
+    // The shell's discard guard: the dialog does not close until confirmed.
+    await screen.findByText(/unsaved input/i)
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
   it("shows validation hint when name is too short", () => {
     renderDialog()
     const nameInput = screen.getByPlaceholderText("Filip") as HTMLInputElement
