@@ -769,6 +769,152 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
     </div>
   )
 
+  /**
+   * The tooling browser, the way /design draws it.
+   *
+   * The tabs-era list is a table: a row per feature carrying name, ref,
+   * description, publisher, tier, size hint and a Switch. That is the right
+   * density for the crew's Settings editor, where this component owns the
+   * page. On a create step it is six columns of metadata for a decision that
+   * is "yes or no", and the features already chosen scroll away above it.
+   *
+   * So: categories without counts, the picked ones as chips that stay put,
+   * and rows that are one click each. The only annotation kept is the tier,
+   * and only when it is NOT official — "this feature is published by someone
+   * other than devcontainers" is a trust signal, and dropping it to match a
+   * specimen would be losing a warning rather than losing chrome.
+   */
+  const toolingPaneSections = (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-1.5">
+        {CATEGORY_FILTERS.filter((c) => c !== "all").map((cat) => {
+          const active = featureCategoryFilter === cat
+          return (
+            <button
+              key={cat}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setFeatureCategoryFilter(active ? "all" : cat)}
+              className={cn(
+                "h-8 rounded-full border px-3 text-xs transition-colors max-sm:h-12 group-data-[mobile=true]/surface:h-12",
+                active
+                  ? "border-primary/40 bg-primary/15 text-primary-hover"
+                  : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {CATEGORY_LABELS[cat] ?? cat}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground-soft" />
+        <Input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search features — ansible, terraform, docker, aws-cli…"
+          aria-label="Search features"
+          className="h-8 pl-8 text-xs max-sm:h-12 max-sm:text-sm"
+        />
+      </div>
+
+      {/* Picked first, so what you chose never scrolls away. */}
+      {selectedFeatureCount > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Object.keys(selectedFeatures).map((ref) => {
+            const tool = featureRefToTool(ref)
+            const BrandIcon = getBrandIcon(tool)
+            const brandColor = getBrandColor(tool)
+            return (
+              <button
+                key={ref}
+                type="button"
+                onClick={() => toggleFeature(ref)}
+                aria-label={`Remove ${tool}`}
+                className="flex h-7 items-center gap-1.5 rounded-md border border-primary/40 bg-primary/[0.12] pl-2 pr-1.5 text-xs text-primary-hover transition-colors hover:bg-primary/20 max-sm:h-10 group-data-[mobile=true]/surface:h-10"
+              >
+                {BrandIcon && (
+                  <BrandIcon className="h-3.5 w-3.5" style={brandColor ? { color: brandColor } : undefined} />
+                )}
+                {tool}
+                <X className="h-3 w-3 opacity-60" />
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {catalogLoading ? (
+        <div className="space-y-1">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-7 rounded-md" />
+          ))}
+        </div>
+      ) : catalogError ? (
+        <div className="flex flex-col items-center gap-2 py-6">
+          <AlertCircle className="h-5 w-5 text-destructive" />
+          <p className="text-xs text-muted-foreground">The feature catalogue did not load.</p>
+          <Button size="sm" variant="outline" onClick={fetchCatalog}>Try again</Button>
+        </div>
+      ) : filteredCatalog.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-xs text-muted-foreground">
+          {searchQuery.trim() ? `Nothing matches “${searchQuery}”.` : "No features in this category."}
+        </p>
+      ) : (
+        <div
+          style={{ maxHeight: browserHeight }}
+          className="space-y-1 overflow-y-auto overscroll-contain rounded-lg border border-hairline bg-foreground/[0.02] p-1.5"
+        >
+          {filteredCatalog.map((feature) => {
+            const picked = feature.ref in selectedFeatures
+            const tool = featureRefToTool(feature.ref)
+            const BrandIcon = getBrandIcon(tool) || getBrandIcon(feature.icon || "")
+            const brandColor = getBrandColor(tool) || getBrandColor(feature.icon || "")
+            return (
+              <button
+                key={feature.ref}
+                type="button"
+                aria-pressed={picked}
+                onClick={() => toggleFeature(feature.ref)}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
+                  picked ? "bg-primary/[0.12]" : "hover:bg-foreground/[0.06]",
+                )}
+              >
+                {BrandIcon ? (
+                  <BrandIcon className="h-4 w-4 shrink-0" style={brandColor ? { color: brandColor } : undefined} />
+                ) : (
+                  <Package className="h-4 w-4 shrink-0 text-muted-foreground-soft" />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs text-foreground">{feature.name}</span>
+                  {feature.description && (
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {feature.description}
+                    </span>
+                  )}
+                </span>
+                {feature.tier && feature.tier !== "official" && (
+                  <span
+                    className={cn(
+                      "shrink-0 text-[10px] font-mono",
+                      feature.tier === "community" ? "text-info/70" : "text-warn/80",
+                    )}
+                    title={`Published by ${feature.publisher} (${feature.tier})`}
+                  >
+                    {feature.tier}
+                  </span>
+                )}
+                {picked && <Check className="h-3.5 w-3.5 shrink-0 text-primary-hover" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+
   const runtimesPane = (
     <div className="space-y-3">
         <p className="text-[11px] text-muted-foreground">
@@ -999,7 +1145,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           accent="amber"
           hint="devcontainer features"
         >
-          {toolingPane}
+          {toolingPaneSections}
         </CreateSurfaceSection>
 
         {/* Folded, not dropped. /design's specimen for this step shows base

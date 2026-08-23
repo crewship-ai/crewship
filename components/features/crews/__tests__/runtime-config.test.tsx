@@ -223,3 +223,98 @@ describe("RuntimeConfig — the base image rows", () => {
     expect(within(group).getAllByRole("button", { name: /image details/i }).length).toBeGreaterThan(1)
   })
 })
+
+// ── The tooling browser under sections ───────────────────────────────────
+//
+// The tabs-era row is a table: name, ref, description, publisher, tier, size
+// hint and a Switch. Right for the Settings editor, six columns of metadata
+// for a yes/no question on a create step — and the features already chosen
+// scroll away above the list.
+describe("RuntimeConfig — tooling under sections", () => {
+  // The shared stub serves an empty catalogue; these tests need rows.
+  const FEATURES = [
+    {
+      ref: "ghcr.io/devcontainers/features/anaconda:1",
+      name: "Anaconda",
+      description: "Python distribution",
+      category: "languages",
+      icon: "python",
+      size_hint: "1.2 GB",
+      publisher: "devcontainers",
+      tier: "official",
+    },
+    {
+      ref: "ghcr.io/some-person/features/oddity:1",
+      name: "Oddity",
+      description: "A community feature",
+      category: "tools",
+      icon: "",
+      size_hint: "4 MB",
+      publisher: "some-person",
+      tier: "community",
+    },
+  ]
+
+  function stubWithFeatures() {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ features: FEATURES, runtimes: [] }),
+      text: async () => "{}",
+    })))
+  }
+
+  function renderSections() {
+    stubWithFeatures()
+    return render(
+      <RuntimeConfig
+        value={{ runtimeImage: "", devcontainerConfig: "", miseConfig: "" }}
+        onChange={() => {}}
+        layout="sections"
+      />,
+    )
+  }
+
+  it("offers categories without a count column", async () => {
+    renderSections()
+    await screen.findByText("Preinstalled tooling")
+    const languages = screen.getByRole("button", { name: "Languages" })
+    // "Languages 116" is the tabs layout; the label alone is the specimen.
+    expect(languages.textContent).toBe("Languages")
+    expect(screen.queryByRole("button", { name: /^All/ })).toBeNull()
+  })
+
+  it("toggles a feature by clicking the row, not by hunting a switch", async () => {
+    renderSections()
+    await screen.findByText("Preinstalled tooling")
+
+    const row = await screen.findByRole("button", { name: /Anaconda/ })
+    expect(row).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(row)
+    await waitFor(() => expect(row).toHaveAttribute("aria-pressed", "true"))
+  })
+
+  it("keeps what you picked on screen once the list scrolls", async () => {
+    renderSections()
+    await screen.findByText("Preinstalled tooling")
+    fireEvent.click(await screen.findByRole("button", { name: /Anaconda/ }))
+
+    // A chip above the list, removable, holding its place while you search on.
+    const chip = await screen.findByRole("button", { name: /^Remove / })
+    expect(chip).toBeInTheDocument()
+    fireEvent.click(chip)
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull())
+  })
+
+  it("flags a feature nobody official published, and says nothing when official", async () => {
+    renderSections()
+    await screen.findByText("Preinstalled tooling")
+
+    // Tier is the one annotation kept from the dense row: dropping it to match
+    // a specimen would lose a trust signal rather than lose chrome.
+    const odd = await screen.findByRole("button", { name: /Oddity/ })
+    expect(odd).toHaveTextContent("community")
+    // "official" is the unremarkable case and does not earn a column.
+    expect(await screen.findByRole("button", { name: /Anaconda/ })).not.toHaveTextContent(/official/i)
+  })
+})
