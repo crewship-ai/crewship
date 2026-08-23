@@ -990,7 +990,16 @@ spec:
 // The list commands are covered here as a group rather than one test each,
 // because the defect was not in any one of them: it was that a new list
 // command starts from a tabwriter unless something says otherwise.
+// Every case here runs `-f quiet`, which is Cobra writing "quiet" into the
+// package-level flagFormat. The fixture helpers do call guardCLIState, but only
+// from inside the subtests, and guardCLIState deliberately no-ops for a subtest
+// because "the parent owns the reset" — and this parent never registered one.
+// So the reset was nobody's, flagFormat stayed "quiet" for the rest of the
+// binary, and under -shuffle=on the next test asserting on a human table read
+// one key column instead. It surfaced on seed 1787470417284539161 as
+// TestCrewGetRunE_DefaultsForNullables getting "Bare\n" for a crew detail view.
 func TestPageCLI_QuietPrintsOnlyTheKeyColumn(t *testing.T) {
+	guardCLIState(t)
 	tests := []struct {
 		name    string
 		path    string
