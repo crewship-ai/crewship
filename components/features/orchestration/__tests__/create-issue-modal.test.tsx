@@ -6,12 +6,18 @@ import { getCrewIconDef } from "@/lib/crew-icons"
 import { resolveRoutineIcon } from "@/lib/routine-identity"
 
 // Testing Library's async default is 1000ms while vitest.config.ts allows a
-// test 30000, so under a full-suite run — 523 files, ~230s of test time on a
-// shared box — the assertion, not the code, is what runs out of road. Seen as
-// one failure in `distinguishes a failed agent load` that passes alone and on
-// the next full run. Every await in this file goes through a render, an effect
-// and a stubbed fetch, so raise the floor for the file rather than annotate
-// seventeen call sites.
+// test 30000, so under a full-suite run — 523 files on a shared box — the
+// assertion, not the code, is what runs out of road. Every await here goes
+// through a render, an effect and a stubbed fetch, so raise the floor for the
+// file rather than annotate seventeen call sites.
+//
+// The waits below are `waitFor(() => expect(getBy…))`, not
+// `expect(await findBy…)`. The two are not equivalent under load: findBy
+// resolves the node and hands it to a matcher that runs one tick later, and a
+// node React found mid-commit can be detached by then — which reports as
+// "element could not be found in the document" about an element the query just
+// returned. waitFor retries the whole assertion, so the transient loses and a
+// genuinely absent node still fails.
 configure({ asyncUtilTimeout: 5000 })
 
 // Mock sonner toast
@@ -467,7 +473,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
     })
 
     fireEvent.click(screen.getByText("Assignee"))
-    expect(await screen.findByText("Morgan")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText("Morgan")).toBeInTheDocument())
   })
 
   it("says the crew has no agents instead of showing a silently empty list", async () => {
@@ -493,8 +499,38 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
 
     fireEvent.click(screen.getByText("Assignee"))
 
-    expect(await screen.findByText(/could not be loaded/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/could not be loaded/i)).toBeInTheDocument())
     expect(screen.queryByText(/no agents/i)).toBeNull()
+  })
+
+  it("retries the agent load from the error state", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+    ) as unknown as typeof fetch
+
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+    fireEvent.click(screen.getByText("Assignee"))
+    await screen.findByText(/could not be loaded/i)
+
+    // The retry has to be a control. Re-picking the crew that is already
+    // picked sets the same id, so React bails out and the effect never
+    // re-runs — the previous copy told the reader to do something that
+    // silently did nothing.
+    const retried = stubAgents({ "crew-2": [morgan] })
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }))
+
+    // Asserts the request, not the repainted list. Whether the popover is
+    // still open a tick later is Radix's business and moves with machine
+    // load; whether the button re-asks the server is this button's whole
+    // contract, and it fails on the old copy-only version because there is
+    // no button to click at all.
+    await waitFor(() =>
+      expect(
+        retried.mock.calls.some(
+          (c) => typeof c[0] === "string" && c[0].includes("crew_id=crew-2"),
+        ),
+      ).toBe(true),
+    )
   })
 
   // ── 2. Agents in the assignee picker have no avatar ─────────────────────

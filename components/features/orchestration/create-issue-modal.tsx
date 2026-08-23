@@ -125,6 +125,8 @@ export function CreateIssueModal({
   const [routineId, setRoutineId] = useState<string | null>(null)
   const [agents, setAgents] = useState<AgentAssigneeOption[]>([])
   const [agentLoad, setAgentLoad] = useState<AgentLoad>("idle")
+  /** Bumped by the error state's Try again, purely to re-run the fetch effect. */
+  const [agentReload, setAgentReload] = useState(0)
   const [createMore, setCreateMore] = useState(false)
   const [saving, setSaving] = useState(false)
   // What the server said when it said no. The toast stays — this is the copy
@@ -210,7 +212,7 @@ export function CreateIssueModal({
     }
     fetchAgents()
     return () => { cancelled = true }
-  }, [crewId, workspaceId])
+  }, [crewId, workspaceId, agentReload])
 
   function reset() {
     setTitle("")
@@ -444,9 +446,26 @@ export function CreateIssueModal({
                     <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading agents…</p>
                   )}
                   {agentLoad === "error" && (
-                    <p role="status" className="px-3 py-2 text-[11px] leading-relaxed text-destructive">
-                      Agents could not be loaded. Re-pick the crew to try again.
-                    </p>
+                    // Stacked, not a row: the popover is 200px wide and a row
+                    // put "Try again" in a two-line column beside the message.
+                    <div role="status" className="flex flex-col items-start gap-1 px-3 py-2">
+                      <span className="text-[11px] leading-relaxed text-destructive">
+                        Agents could not be loaded.
+                      </span>
+                      {/* This used to read "re-pick the crew to try again",
+                          which was advice that did not work: picking the crew
+                          that is already picked sets the same id, React bails
+                          out of the render, and the effect never re-runs. A
+                          button that bumps a nonce is the retry the sentence
+                          was promising. */}
+                      <button
+                        type="button"
+                        onClick={() => setAgentReload((n) => n + 1)}
+                        className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        Try again
+                      </button>
+                    </div>
                   )}
                   {agentLoad === "ready" && agents.length === 0 && (
                     <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
