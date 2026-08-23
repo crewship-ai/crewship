@@ -32,6 +32,12 @@ const (
 	// recoveries"), a name is a LABEL. They had one ceiling and it was sized
 	// for the label, which is what made a perfectly reasonable role fatal.
 	onboardingProposalRoleMaxLen = 200
+	// A crew name is the field most likely to be written in the user's own
+	// language, and it was the last one still counted in BYTES after the role
+	// ceiling was fixed — 120 bytes is about 60 accented characters, so a
+	// perfectly ordinary Czech or Greek crew name discarded the whole marker.
+	// Runes, like the two above.
+	onboardingProposalCrewNameMaxLen = 120
 	// Mirrors internal/api's onboardingProposalMaxTools. Two constants because
 	// this package must not import the api package; the api side re-checks.
 	onboardingProposalMaxTools = 5
@@ -103,7 +109,7 @@ func onboardingProposalMetadata(agentSlug, text string) map[string]any {
 	suggestion.TemplateSlug = strings.TrimSpace(suggestion.TemplateSlug)
 	suggestion.LLMProvider = strings.ToUpper(strings.TrimSpace(suggestion.LLMProvider))
 	suggestion.LLMModel = strings.TrimSpace(suggestion.LLMModel)
-	if suggestion.CrewName == "" || len(suggestion.CrewName) > 120 {
+	if suggestion.CrewName == "" || utf8.RuneCountInString(suggestion.CrewName) > onboardingProposalCrewNameMaxLen {
 		return nil
 	}
 	// template_slug is optional once agents are named directly — a bespoke

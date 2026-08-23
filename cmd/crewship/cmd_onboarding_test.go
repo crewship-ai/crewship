@@ -247,3 +247,85 @@ func TestOnboardingSetupAgentStart_TransportErrorIsConnectionExit(t *testing.T) 
 		t.Errorf("exit code = %d, want cli.ExitConnection (%d)", code, cli.ExitConnection)
 	}
 }
+
+// --agent is the CLI's reach into the custom-roster branch. The API dropped
+// the template_slug requirement once a roster could be named outright, and
+// that branch — a bespoke crew with no matching builtin — is the one the
+// Guide actually takes, so a CLI stuck on --template-slug left the main new
+// code path with no acceptance coverage at all (CLAUDE.md: every API endpoint
+// gets a CLI command, and its acceptance test drives the CLI binary).
+func TestParseProposalAgentFlags(t *testing.T) {
+	cases := []struct {
+		name    string
+		specs   []string
+		want    []map[string]string
+		wantErr string
+		why     string
+	}{
+		{
+			name:  "no flags is not an error",
+			specs: nil,
+			want:  nil,
+			why:   "--template-slug alone stays a valid way to create a proposal",
+		},
+		{
+			name:  "one agent",
+			specs: []string{"Uptime Watcher:Polls the status page and reports outages"},
+			want:  []map[string]string{{"name": "Uptime Watcher", "role": "Polls the status page and reports outages"}},
+		},
+		{
+			name:  "a role containing a colon keeps all of it",
+			specs: []string{"Reporter:Summarises the feed: hourly, in Czech"},
+			want:  []map[string]string{{"name": "Reporter", "role": "Summarises the feed: hourly, in Czech"}},
+			why:   "splitting on every colon would silently truncate an ordinary sentence",
+		},
+		{
+			name:  "surrounding space is not part of the name",
+			specs: []string{"  Watcher : watches things  "},
+			want:  []map[string]string{{"name": "Watcher", "role": "watches things"}},
+		},
+		{
+			name:  "non-ASCII survives",
+			specs: []string{"Hlídač dostupnosti:Kontroluje dostupnost webu a hlásí výpadky"},
+			want:  []map[string]string{{"name": "Hlídač dostupnosti", "role": "Kontroluje dostupnost webu a hlásí výpadky"}},
+			why:   "the roster path has already been broken once by byte-oriented handling",
+		},
+		{
+			name:    "missing colon",
+			specs:   []string{"JustAName"},
+			wantErr: "missing its role",
+		},
+		{
+			name:    "blank role",
+			specs:   []string{"Name:   "},
+			wantErr: "needs both a name and a role",
+		},
+		{
+			name:    "blank name",
+			specs:   []string{" :a role"},
+			wantErr: "needs both a name and a role",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseProposalAgentFlags(tc.specs)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want one containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %d agents, want %d (%+v)", len(got), len(tc.want), got)
+			}
+			for i := range tc.want {
+				if got[i]["name"] != tc.want[i]["name"] || got[i]["role"] != tc.want[i]["role"] {
+					t.Errorf("agent[%d] = %+v, want %+v — %s", i, got[i], tc.want[i], tc.why)
+				}
+			}
+		})
+	}
+}

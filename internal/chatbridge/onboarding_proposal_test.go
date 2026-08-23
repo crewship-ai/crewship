@@ -157,3 +157,37 @@ func TestOnboardingProposalMetadataRejectsUntrustedOrMalformedMarkers(t *testing
 		})
 	}
 }
+
+// The same byte-vs-rune bug as TestOnboardingProposalMetadataAcceptsNonASCIIRoles,
+// one field over. The role ceiling was fixed to count runes; crew_name kept a
+// `len() > 120` byte check, and a crew name is the field most likely to be
+// written in the user's own language. A Czech, Greek or Japanese name over 120
+// BYTES — roughly 60 accented characters, well inside what the field is meant
+// to allow — discarded the entire marker via a silent `return nil`. Same
+// symptom as before: the Guide describes a crew, no card ever appears, nothing
+// is logged.
+func TestOnboardingProposalMetadataCountsCrewNameInRunesNotBytes(t *testing.T) {
+	t.Parallel()
+	// 70 accented runes = 140 bytes: legal by runes, fatal by bytes.
+	name := strings.Repeat("ě", 70)
+	if len(name) <= onboardingProposalCrewNameMaxLen {
+		t.Fatalf("fixture no longer exercises the bug: %d bytes is under the %d ceiling",
+			len(name), onboardingProposalCrewNameMaxLen)
+	}
+	text := `<!-- crewship:onboarding-proposal {"crew_name":"` + name + `","template_slug":"customer-support"} -->`
+	if onboardingProposalMetadata(onboardingSetupAgentSlug, text) == nil {
+		t.Error("a 70-rune crew name was rejected — the ceiling is still counting bytes")
+	}
+}
+
+// Genuinely over the ceiling is still a hard reject, unlike a role: a crew
+// name is a LABEL on a card, and a 200-character one is a malformed marker
+// rather than a long sentence that can be trimmed.
+func TestOnboardingProposalMetadataRejectsAnOverlongCrewName(t *testing.T) {
+	t.Parallel()
+	name := strings.Repeat("ě", onboardingProposalCrewNameMaxLen+1)
+	text := `<!-- crewship:onboarding-proposal {"crew_name":"` + name + `","template_slug":"customer-support"} -->`
+	if onboardingProposalMetadata(onboardingSetupAgentSlug, text) != nil {
+		t.Error("a crew name past the rune ceiling was accepted")
+	}
+}

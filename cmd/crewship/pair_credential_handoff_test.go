@@ -129,3 +129,73 @@ func TestLooksLikeRawAnthropicAPIKey(t *testing.T) {
 		}
 	}
 }
+
+// Which workspace the paired token lands in.
+//
+// GET /api/v1/workspaces sorts created_at DESC; every onboarding handler
+// resolves the user's membership ASC. Taking list[0] wrote the token to the
+// NEWEST workspace while the deploy path read the oldest, and because
+// autoAssignCredentials links workspace credentials at deploy time, the crew
+// came up with no credential and no way to repair it — the failure this
+// file's header exists to describe, reintroduced one function down.
+func TestOldestWorkspaceID(t *testing.T) {
+	cases := []struct {
+		name string
+		list []workspaceRef
+		want string
+		why  string
+	}{
+		{
+			name: "single workspace",
+			list: []workspaceRef{{ID: "ws_only", CreatedAt: "2026-01-01T00:00:00Z"}},
+			want: "ws_only",
+			why:  "the overwhelmingly common case must be untouched",
+		},
+		{
+			name: "newest first, as the API really returns them",
+			list: []workspaceRef{
+				{ID: "ws_new", CreatedAt: "2026-08-01T00:00:00Z"},
+				{ID: "ws_old", CreatedAt: "2026-01-01T00:00:00Z"},
+			},
+			want: "ws_old",
+			why:  "this is the bug: list[0] is the newest, the backend uses the oldest",
+		},
+		{
+			name: "no timestamps anywhere",
+			list: []workspaceRef{{ID: "ws_a"}, {ID: "ws_b"}},
+			want: "ws_a",
+			why:  "nothing to sort on — server order stands, which is the old behaviour",
+		},
+		{
+			name: "one row missing its timestamp",
+			list: []workspaceRef{
+				{ID: "ws_untimed"},
+				{ID: "ws_timed", CreatedAt: "2026-01-01T00:00:00Z"},
+			},
+			want: "ws_untimed",
+			why:  "an incomparable row must not be displaced by a guess",
+		},
+		{
+			name: "empty list",
+			list: nil,
+			want: "",
+			why:  "no workspace is a real answer, not an index panic",
+		},
+		{
+			name: "blank id skipped",
+			list: []workspaceRef{
+				{ID: "", CreatedAt: "2020-01-01T00:00:00Z"},
+				{ID: "ws_real", CreatedAt: "2026-01-01T00:00:00Z"},
+			},
+			want: "ws_real",
+			why:  "an id-less row would otherwise win on age and return nothing",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := oldestWorkspaceID(tc.list); got != tc.want {
+				t.Errorf("oldestWorkspaceID() = %q, want %q — %s", got, tc.want, tc.why)
+			}
+		})
+	}
+}

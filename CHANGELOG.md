@@ -11,6 +11,63 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Upgrading threw finished users back into the setup wizard.**
+  `onboarding_skipped_at` was added without a backfill, and
+  `OnboardingHandler.Status` reads a NULL there as "this completion was
+  interrupted, reopen it". Sound on a fresh install; on an upgrade every
+  pre-existing completion is NULL by construction, so anyone whose workspace
+  happened to hold no agents — they pressed Skip, or they finished properly
+  and later deleted their crews — was sent back to step one, and Status
+  *persisted* the downgrade rather than merely rendering it. Backfilled: a
+  completion recorded by a build that had no such column is, by definition,
+  not one this build may reopen.
+
+- **An OpenAI or Google workspace got a Claude model id.** The marker template
+  the Guide is told to emit interpolated its suggested model from
+  `providerRuntimeDefaults` (`gpt-5.5`, `gemini-2.5-pro`) while
+  `validateCrewModel` checked against `llm.CuratedModels`, which contains
+  neither. The Guide emitted the id it was handed, the validator missed it and
+  substituted the Anthropic default, and the crew was created as
+  OPENAI + CODEX_CLI + `claude-sonnet-5` — every field valid, the combination
+  unrunnable at the adapter on every run. Both now read the same catalogue.
+  A provider whose models live on the operator's own daemon (Ollama and
+  anything self-hosted) is told to omit the field instead of being handed a
+  Claude id to copy.
+
+- **A crew name in Czech, Greek or Japanese could discard the whole
+  proposal.** `crew_name` was still length-checked with `len()`, which counts
+  bytes — the same fault fixed for `role`, one field over. 120 bytes is about
+  60 accented characters, so an ordinary non-ASCII crew name silently dropped
+  the entire marker and no card ever appeared. Counted in runes now.
+
+- **`GET /system/runtime` reported `in_use` only to unprivileged callers.**
+  The onboarding wizard gates its Crew step on that field and blocks Continue
+  unless it is exactly `true`. It worked only because the probe sends no
+  workspace context and so never resolves a role; an owner who did would read
+  `undefined` and be stuck permanently behind a re-check button that could
+  never clear. Present on both branches now.
+
+- **The token landed after CLI pairing went to the wrong workspace.**
+  `GET /api/v1/workspaces` sorts `created_at DESC` while every onboarding
+  handler resolves the user's membership `ASC`, so taking the first row wrote
+  the freshly paired credential to the *newest* workspace for anyone who
+  belongs to more than one — and `autoAssignCredentials` links workspace
+  credentials to agents at deploy time, so the crew launched with none and
+  could not be repaired afterwards. The frontend already sorted for this
+  reason; the CLI now does too.
+
+- Wake automations compiled from an agent-authored page recorded the agent's
+  id in `automations.created_by`, a user-attribution column with no foreign
+  key to catch it.
+
+### Added
+
+- `crewship onboarding proposal create --agent "Name:Role"` (repeatable)
+  names a bespoke roster, so the CLI can finally reach the branch the Guide
+  actually takes. `--template-slug` is no longer required — give one or the
+  other. The role is split on the first colon only, because a role is a
+  sentence and routinely contains more.
+
 - **Everything the onboarding Guide built belonged to the Guide.** A routine
   or page authored during setup was attributed to `_crewship-setup`, the
   server-created crew the Crewship Guide itself runs in, because the sidecar

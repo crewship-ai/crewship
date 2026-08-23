@@ -258,7 +258,12 @@ func (h *PageHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := reconcileWakeAutomations(r.Context(), tx, req.WorkspaceID, pageID, doc.Metadata.Slug, gates, req.AgentID, now); err != nil {
+	// Empty author, NOT req.AgentID. That parameter is `authorUserID` and lands
+	// in automations.created_by, a user column — the same distinction
+	// insertPageVersionAuthoredByAgent draws for itself. There is no
+	// authorising human on this route, and no FK to catch the mistake, so an
+	// agent id here would sit in the column forever resolving to nobody.
+	if err := reconcileWakeAutomations(r.Context(), tx, req.WorkspaceID, pageID, doc.Metadata.Slug, gates, "", now); err != nil {
 		replyInternalError(w, h.logger, "compile page wake gates", err)
 		return
 	}

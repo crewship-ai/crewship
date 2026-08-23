@@ -384,16 +384,18 @@ func renderSetupAgentPrompt(prompt, provider, model string) string {
 	// created on opus too — an agent polling a status page every minute,
 	// forever, on the most expensive model in the catalogue, because of a
 	// decision that was only ever about how well the Guide reasons.
-	// PROVIDER-AWARE, not the bare crewAgentDefaultModel constant. That
-	// constant is the ANTHROPIC default; interpolating it unconditionally put
-	// a Claude model id in the marker for an OpenAI/Google/Ollama workspace —
-	// every field syntactically valid, the combination unrunnable, which is
-	// exactly the failure resolveSetupAgentRuntime's own docstring exists to
-	// describe. providerRuntimeDefaults is the same table the created crew's
-	// agents resolve through, so the marker can only ever suggest a model that
-	// workspace could actually run.
-	_, crewModelForProvider := providerRuntimeDefaults(provider)
-	prompt = strings.ReplaceAll(prompt, "{{CREW_MODEL}}", crewModelForProvider)
+	// PROVIDER-AWARE, and read from the SAME table validateCrewModel checks
+	// against. Interpolating the bare crewAgentDefaultModel constant put a
+	// Claude id in the marker for an OpenAI workspace; the first fix for that
+	// reached for providerRuntimeDefaults, which was no better — it answers
+	// "gpt-5.5"/"gemini-2.5-pro", neither of which is in llm.CuratedModels, so
+	// the Guide emitted the id it was handed, validateCrewModel missed it and
+	// substituted crewAgentDefaultModel, and the crew landed on OPENAI +
+	// CODEX_CLI + claude-sonnet-5. Every field valid, the combination
+	// unrunnable — the exact failure both attempts were written to prevent.
+	//
+	// One table now: whatever the prompt suggests, the validator accepts.
+	prompt = strings.ReplaceAll(prompt, "{{CREW_MODEL}}", crewDefaultModelForProvider(provider))
 	prompt = strings.ReplaceAll(prompt, "{{CREW_MODEL_MENU}}", crewModelMenu(provider))
 	prompt = strings.ReplaceAll(prompt, "{{RUNTIME_TOOL_MENU}}", runtimeToolMenu())
 	return strings.ReplaceAll(prompt, "{{MANIFEST_KINDS}}", strings.Join(manifest.KnownKinds(), ", "))
@@ -409,10 +411,39 @@ func renderSetupAgentPrompt(prompt, provider, model string) string {
 // naming the default, because inventing ids for it would produce exactly the
 // unrunnable configuration this whole file's runtime-resolution comments warn
 // about.
+// crewDefaultModelForProvider is the id the marker template suggests: the
+// MIDDLE tier of the provider's curated catalogue — "the sane default" — or
+// the empty string when this binary ships no catalogue for that provider.
+//
+// Empty is a real answer, not a failure. validateCrewModel already reads an
+// empty llm_model as "no override", so the crew falls through to whatever the
+// template or the workspace resolves. Naming a Claude id instead, which is
+// what both earlier versions of this did, produces a crew that fails at the
+// adapter on every single run.
+func crewDefaultModelForProvider(provider string) string {
+	tiers := crewModelTiers(provider)
+	switch len(tiers) {
+	case 0:
+		return ""
+	case 1:
+		return tiers[0].id
+	default:
+		// Index 1 is the middle tier by construction of crewModelTiers, and
+		// stays the middle one if a catalogue ever drops its cheap entry —
+		// hence len-based rather than hardcoded.
+		return tiers[1].id
+	}
+}
+
 func crewModelMenu(provider string) string {
 	tiers := crewModelTiers(provider)
 	if len(tiers) == 0 {
-		return "  - " + crewAgentDefaultModel + " — the workspace default; use it unless you have a reason not to."
+		// No id at all, deliberately. This branch used to name
+		// crewAgentDefaultModel, which is an ANTHROPIC id — handing an Ollama
+		// workspace a Claude model to copy into its marker, which is the one
+		// outcome the surrounding comments say must not happen.
+		return "  - This provider's models live on your own daemon, so there is no list here.\n" +
+			"    OMIT \"llm_model\" from the marker entirely and the workspace default applies."
 	}
 	lines := make([]string, 0, len(tiers))
 	for _, t := range tiers {

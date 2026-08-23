@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -124,16 +125,34 @@ conversational-onboarding.md §5.6).`,
 		llmProvider, _ := flags.GetString("llm-provider")
 		llmModel, _ := flags.GetString("llm-model")
 
+		agentSpecs, _ := flags.GetStringArray("agent")
+
 		if crewName == "" {
 			return fmt.Errorf("--crew-name is required")
 		}
-		if templateSlug == "" {
-			return fmt.Errorf("--template-slug is required")
+		// One of the two, not template only. The API stopped requiring
+		// template_slug once a roster can be named outright — a bespoke crew
+		// with no matching builtin is the branch the Guide actually takes —
+		// and a CLI that could not reach it left the main new code path
+		// without the acceptance coverage CLAUDE.md requires of every
+		// endpoint.
+		if templateSlug == "" && len(agentSpecs) == 0 {
+			return fmt.Errorf("give the roster either way: --template-slug to derive it, or --agent \"Name:Role\" (repeatable, 1-6) to name it")
+		}
+
+		agents, err := parseProposalAgentFlags(agentSpecs)
+		if err != nil {
+			return err
 		}
 
 		body := map[string]interface{}{
-			"crew_name":     crewName,
-			"template_slug": templateSlug,
+			"crew_name": crewName,
+		}
+		if templateSlug != "" {
+			body["template_slug"] = templateSlug
+		}
+		if len(agents) > 0 {
+			body["agents"] = agents
 		}
 		if crewSlug != "" {
 			body["crew_slug"] = crewSlug
@@ -309,7 +328,8 @@ create' (or finish onboarding's Launch step) before running this.`,
 
 func init() {
 	onboardingProposalCreateCmd.Flags().String("crew-name", "", "Crew display name (required)")
-	onboardingProposalCreateCmd.Flags().String("template-slug", "", "crew_templates slug to derive the roster from (required)")
+	onboardingProposalCreateCmd.Flags().String("template-slug", "", "crew_templates slug to derive the roster from (or use --agent)")
+	onboardingProposalCreateCmd.Flags().StringArray("agent", nil, "Name a roster agent as \"Name:Role\" (repeatable, 1-6; alternative to --template-slug)")
 	onboardingProposalCreateCmd.Flags().String("crew-slug", "", "Crew slug override (defaults to a slugified crew name)")
 	onboardingProposalCreateCmd.Flags().String("llm-provider", "", "Model override provider: ANTHROPIC|OPENAI|GOOGLE|CURSOR|FACTORY|OLLAMA (default ANTHROPIC)")
 	onboardingProposalCreateCmd.Flags().String("llm-model", "", "Model override — applied only to agents matching --llm-provider (Phase 1: template + model swap)")
@@ -323,4 +343,36 @@ func init() {
 	onboardingCmd.AddCommand(onboardingSetupAgentCmd)
 
 	rootCmd.AddCommand(onboardingCmd)
+}
+
+// parseProposalAgentFlags turns repeated --agent "Name:Role" values into the
+// roster the proposals endpoint accepts.
+//
+// Split on the FIRST colon only: a role is a sentence and routinely contains
+// one ("Watches uptime and alerts on failures: hourly"), so splitting on every
+// colon would silently truncate it. The name is the label before it.
+//
+// Deliberately not validating length or count here — the server owns those
+// ceilings (onboardingProposalAgentNameMaxLen / RoleMaxLen / MaxAgents), and a
+// second copy in the CLI is a second thing to drift. What this does check is
+// the shape it alone can see: that the operator actually wrote a colon, and
+// that neither side of it is blank.
+func parseProposalAgentFlags(specs []string) ([]map[string]string, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	out := make([]map[string]string, 0, len(specs))
+	for _, spec := range specs {
+		name, role, found := strings.Cut(spec, ":")
+		if !found {
+			return nil, fmt.Errorf("--agent %q is missing its role — use \"Name:Role\"", spec)
+		}
+		name = strings.TrimSpace(name)
+		role = strings.TrimSpace(role)
+		if name == "" || role == "" {
+			return nil, fmt.Errorf("--agent %q needs both a name and a role", spec)
+		}
+		out = append(out, map[string]string{"name": name, "role": role})
+	}
+	return out, nil
 }

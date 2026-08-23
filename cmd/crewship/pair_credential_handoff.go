@@ -202,16 +202,59 @@ func firstWorkspaceID(client *cli.Client) (string, error) {
 	if err := cli.CheckError(resp); err != nil {
 		return "", err
 	}
-	var list []struct {
-		ID string `json:"id"`
-	}
+	var list []workspaceRef
 	if err := cli.ReadJSON(resp, &list); err != nil {
 		return "", err
 	}
-	if len(list) == 0 {
-		return "", nil
+	return oldestWorkspaceID(list), nil
+}
+
+// workspaceRef is the slice of GET /api/v1/workspaces this file needs.
+type workspaceRef struct {
+	ID        string `json:"id"`
+	CreatedAt string `json:"created_at"`
+}
+
+// oldestWorkspaceID picks the workspace the onboarding BACKEND would pick.
+//
+// This is not a tie-break detail, it is the difference between the token
+// landing where the crew will look for it and landing nowhere. GET
+// /api/v1/workspaces sorts `created_at DESC` (workspaces.go), while every
+// onboarding handler resolves the user's membership with `ORDER BY
+// wm.created_at ASC LIMIT 1` (onboarding.go). Taking list[0] therefore wrote
+// the freshly paired token to the NEWEST workspace for anyone who belongs to
+// more than one, while the deploy path read the oldest — and
+// autoAssignCredentials links workspace credentials to agents at deploy time,
+// so the crew launched with no credential at all and could not be repaired
+// afterwards. That is the exact failure this file's header describes.
+//
+// The frontend already had to solve this (oldestWorkspaceFromWire in
+// components/features/onboarding/setup-agent-api.ts); this is its CLI twin,
+// down to preserving server order for legacy rows that carry no created_at.
+func oldestWorkspaceID(list []workspaceRef) string {
+	oldest := -1
+	for i, ws := range list {
+		if ws.ID == "" {
+			continue
+		}
+		if oldest < 0 {
+			oldest = i
+			continue
+		}
+		// A row without a timestamp cannot be compared, so it never displaces
+		// an incumbent — server order stands, which is the old behaviour and
+		// the only safe answer when there is nothing to sort on.
+		if ws.CreatedAt == "" || list[oldest].CreatedAt == "" {
+			continue
+		}
+		if ws.CreatedAt < list[oldest].CreatedAt {
+			oldest = i
+		}
 	}
-	return list[0].ID, nil
+	if oldest < 0 {
+		return ""
+	}
+	return list[oldest].ID
 }
 
 func listWorkspaceCredentials(client *cli.Client, wsID string) ([]pairedCredential, error) {

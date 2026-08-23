@@ -207,13 +207,27 @@ func TestSetupPrompt_ForbidsToolCallsWhileProposing(t *testing.T) {
 // CLAUDE model. Every field would have been individually valid and the
 // combination unrunnable — the exact failure resolveSetupAgentRuntime's
 // docstring describes.
+//
+// This test USED to hardcode {"OPENAI", "gpt-5.5"} and
+// {"GOOGLE", "gemini-2.5-pro"} — the values providerRuntimeDefaults returns —
+// and it passed while the product was broken, because it asserted against the
+// same wrong table the code read from. Neither id is in llm.CuratedModels, so
+// validateCrewModel rejected the model the prompt had just told the Guide to
+// emit and substituted the Anthropic default onto an OpenAI crew. A test that
+// pins a literal copied from the implementation cannot catch the
+// implementation being wrong; the assertion is now the PROPERTY that matters —
+// whatever the marker suggests, the validator must accept unchanged.
 func TestSetupPrompt_MarkerModelMatchesProvider(t *testing.T) {
-	for _, tc := range []struct{ provider, wantModel string }{
-		{"ANTHROPIC", crewAgentDefaultModel},
-		{"OPENAI", "gpt-5.5"},
-		{"GOOGLE", "gemini-2.5-pro"},
-	} {
-		t.Run(tc.provider, func(t *testing.T) {
+	for _, provider := range []string{"ANTHROPIC", "OPENAI", "GOOGLE"} {
+		t.Run(provider, func(t *testing.T) {
+			tc := struct{ provider, wantModel string }{provider, crewDefaultModelForProvider(provider)}
+			if tc.wantModel == "" {
+				t.Fatalf("%s has a curated catalogue but no suggested model", provider)
+			}
+			if resolved, substituted := validateCrewModel(provider, tc.wantModel); substituted {
+				t.Fatalf("the marker suggests %q for %s, which the validator swaps for %q",
+					tc.wantModel, provider, resolved)
+			}
 			_, setupModel := providerRuntimeDefaults(tc.provider)
 			prompt := renderSetupAgentPrompt(setupAgentSystemPromptTemplate, tc.provider, setupModel)
 			var marker string
@@ -807,8 +821,15 @@ func TestEnsureOnboardingSetupCrew_FollowsWorkspaceCredentialProvider(t *testing
 	if model != "gpt-5.5" {
 		t.Errorf("agent llm_model = %q, want gpt-5.5", model)
 	}
-	if !strings.Contains(prompt, `"llm_provider":"OPENAI","llm_model":"gpt-5.5"`) {
-		t.Error("proposal marker in setup prompt does not follow the selected runtime")
+	// The marker's model is the PROPOSED CREW's, not the Guide's own, and the
+	// two are deliberately different: the Guide runs the runtime default
+	// asserted above, while the crews it proposes get the middle tier of the
+	// provider's curated catalogue. This assertion used to demand the Guide's
+	// own gpt-5.5 here, which is not a curated id — so validateCrewModel threw
+	// it away and put claude-sonnet-5 on an OpenAI crew.
+	wantCrewModel := crewDefaultModelForProvider("OPENAI")
+	if !strings.Contains(prompt, `"llm_provider":"OPENAI","llm_model":"`+wantCrewModel+`"`) {
+		t.Errorf("proposal marker does not offer the curated OPENAI crew model %q", wantCrewModel)
 	}
 
 	var assigned int
@@ -914,5 +935,55 @@ func TestSetupAgentPrompt_TellsTheGuideItOwnsNothing(t *testing.T) {
 	contract := strings.Index(prompt, "REAL TOOL CONTRACT")
 	if own < 0 || contract < 0 || own > contract {
 		t.Errorf("the ownership rule must come before the tool contract (own=%d contract=%d)", own, contract)
+	}
+}
+
+// The model the prompt tells the Guide to emit must be one validateCrewModel
+// then ACCEPTS. Those two were derived from different tables — the prompt from
+// providerRuntimeDefaults, the check from llm.CuratedModels — and the tables
+// disagreed: providerRuntimeDefaults answers "gpt-5.5" for OPENAI and
+// "gemini-2.5-pro" for GOOGLE, neither of which is curated. So the Guide
+// dutifully emitted the id it was handed, validateCrewModel missed it, and
+// substituted crewAgentDefaultModel — a CLAUDE id — onto an OpenAI crew.
+// Provider OPENAI, adapter CODEX_CLI, model claude-sonnet-5: every field
+// valid, the combination unrunnable, which is the exact failure the
+// interpolation was added to prevent.
+func TestSetupAgentPrompt_SuggestsAModelTheValidatorAccepts(t *testing.T) {
+	for _, provider := range []string{"ANTHROPIC", "OPENAI", "GOOGLE"} {
+		t.Run(provider, func(t *testing.T) {
+			suggested := crewDefaultModelForProvider(provider)
+			if suggested == "" {
+				t.Fatalf("no default model offered for %s, which has a curated catalogue", provider)
+			}
+			resolved, substituted := validateCrewModel(provider, suggested)
+			if substituted {
+				t.Errorf("the prompt suggests %q for %s but the validator swaps it for %q",
+					suggested, provider, resolved)
+			}
+			// And it has to actually reach the prompt, not merely exist.
+			prompt := renderSetupAgentPrompt(setupAgentSystemPromptTemplate, provider, setupAgentModel)
+			if !strings.Contains(prompt, `"llm_model":"`+suggested+`"`) {
+				t.Errorf("%s prompt does not carry %q in the marker template", provider, suggested)
+			}
+		})
+	}
+}
+
+// A provider whose catalogue this binary does not ship (Ollama and anything
+// self-hosted — its models live on the daemon) must be told to OMIT the field,
+// never handed a Claude id to copy. An empty llm_model is already understood
+// as "no override" by validateCrewModel; a wrong one is a crew that fails at
+// the adapter on every run.
+func TestSetupAgentPrompt_OffersNoModelWhereThereIsNoCatalogue(t *testing.T) {
+	for _, provider := range []string{"OLLAMA", "CURSOR", "FACTORY"} {
+		t.Run(provider, func(t *testing.T) {
+			if got := crewDefaultModelForProvider(provider); got != "" {
+				t.Errorf("suggested %q for %s, which has no curated catalogue", got, provider)
+			}
+			prompt := renderSetupAgentPrompt(setupAgentSystemPromptTemplate, provider, setupAgentModel)
+			if strings.Contains(prompt, crewAgentDefaultModel) {
+				t.Errorf("%s prompt names the Anthropic default %q", provider, crewAgentDefaultModel)
+			}
+		})
 	}
 }

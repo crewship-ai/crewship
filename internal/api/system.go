@@ -285,10 +285,18 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]interface{}{
 		"available": true,
-		"runtime":   nil,
-		"version":   nil,
-		"socket":    nil,
-		"runtimes":  runtimes,
+		// in_use on BOTH branches. It was added only to the redacted arm
+		// above, which happened to work because the onboarding probe sends no
+		// workspace context and so never resolves a role — meaning an owner
+		// who did send one, or a switch from serverFetch to apiFetch, would
+		// read `undefined` and be stuck forever on "Docker is running, but
+		// this Crewship server isn't using it". A field the wizard gates on
+		// must not depend on the caller's privilege.
+		"in_use":   false,
+		"runtime":  nil,
+		"version":  nil,
+		"socket":   nil,
+		"runtimes": runtimes,
 		// Alongside an available runtime too, not only when none was found: an
 		// operator with one runtime installed still needs to be told what the
 		// others are (#1690).
@@ -296,6 +304,7 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, rt := range runtimes {
 		if rt.InUse {
+			resp["in_use"] = true
 			resp["runtime"], resp["version"], resp["socket"] = rt.Runtime, rt.Version, rt.Socket
 			break
 		}
