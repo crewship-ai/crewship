@@ -379,7 +379,7 @@ func crewRefSlug(field, ref string) (string, error) {
 	if !ok || kind != "crew" {
 		return "", fmt.Errorf("%s %q must be crew/<slug>", field, ref)
 	}
-	if !slugRE.MatchString(slug) {
+	if !crewSlugRE.MatchString(slug) {
 		return "", fmt.Errorf("%s %q: %q is not a crew slug", field, ref, slug)
 	}
 	return slug, nil

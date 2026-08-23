@@ -320,9 +320,9 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// the proposals would keep the crews while losing the only evidence of
 	// who agreed to them and on what terms.
 	"onboarding_proposals": IntentInclude,
-	"memory_versions":  IntentInclude,
-	"message_feedback": IntentInclude,
-	"mission_activity": IntentInclude,
+	"memory_versions":      IntentInclude,
+	"message_feedback":     IntentInclude,
+	"mission_activity":     IntentInclude,
 	// mission_code_links is the issue → pull-request/merge-request link
 	// (link-first Git integration). It round-trips: the link is a fact the
 	// user asserted, the same class as mission_relations, and the fetched

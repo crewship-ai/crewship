@@ -45,6 +45,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
+	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -72,7 +73,16 @@ type PageHandler struct {
 	// the alternative is a gate that does nothing for up to a minute after it
 	// is authored.
 	automationRefresh func(context.Context)
+	// policyResolver backs the autonomy gate on the agent-authored internal
+	// create route (pages_internal_save.go, policy.ActionPageCreate). Nil
+	// for every human-facing route on this handler — they need no gate, a
+	// human already passed the page.create role/capability check.
+	policyResolver *policy.Resolver
 }
+
+// SetPolicyResolver wires the autonomy resolver the internal create route
+// gates on. Same convention as AgentHandler/SkillProposedHandler.
+func (h *PageHandler) SetPolicyResolver(r *policy.Resolver) { h.policyResolver = r }
 
 // NewPageHandler builds the handler with the production clock.
 func NewPageHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *PageHandler {
