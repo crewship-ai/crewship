@@ -7,6 +7,7 @@ import type { LucideIcon } from "lucide-react"
 import {
   CreateSurface,
   CreateSurfaceBody,
+  CreateSurfaceFooter,
   CreateSurfaceGrid,
   CreateSurfaceHeader,
   CreateSurfaceSection,
@@ -37,10 +38,14 @@ import { ProviderMark } from "./provider-marks"
  *
  *  · It CREATES NOTHING. Picking a notification service closes the dialog and
  *    hands the host a `ServiceOption` so it can open that service's own form;
- *    picking Tools closes it and switches tabs. So there is no footer, because
- *    there is no primary action to put in one — the tiles ARE the action, and
- *    a "Continue" button beside them would be a second, redundant way to do
- *    the same thing.
+ *    picking Tools closes it and switches tabs. So the footer carries no
+ *    PRIMARY — the tiles ARE the action, and a "Continue" button beside them
+ *    would be a second, redundant way to do the same thing. It still carries
+ *    Cancel: `CreateSurfaceFooter` renders fine with `onCancel` and no
+ *    `primaryLabel` (see the prop's own comment in create-surface.tsx), and
+ *    every other door in the product reaches Cancel without relying on Esc or
+ *    the header's ×. The back arrow for step two is the header's `onBack`,
+ *    already wired below — that already fits, so the footer does not repeat it.
  *  · The search row sits BETWEEN the header and the body on purpose. The body
  *    is the shell's one scrollport; a filter that scrolls away from the list
  *    it filters is a filter you cannot see while reading the results.
@@ -314,6 +319,18 @@ export function AddIntegrationDialog({
           </div>
         )}
       </CreateSurfaceBody>
+
+      {/* No primary — the tiles are the action, so there is nothing for ⌘↵ to
+          confirm. The default hint names a key this surface never wires, so
+          it is overridden to the one key that does something here. */}
+      <CreateSurfaceFooter
+        hint={
+          <>
+            <kbd className="font-mono">Esc</kbd> to cancel
+          </>
+        }
+        onCancel={() => onOpenChange(false)}
+      />
     </CreateSurface>
   )
 }

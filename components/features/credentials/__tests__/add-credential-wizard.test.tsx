@@ -429,6 +429,37 @@ describe("saving", () => {
     ])
   })
 
+  // The create request already accepts `token_expires_at`
+  // (internal/api/credentials_mutate.go createCredentialRequest.TokenExpires)
+  // and writes it straight into the column the "Expiring" KPI and the 30-day
+  // warning read — the wizard just never offered a control for it.
+  it("sends the expiry date as an ISO string when the user sets one", async () => {
+    const { onSuccess } = renderWizard()
+    pickShape(/^token/i)
+    fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "expiring-thing" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.change(screen.getByLabelText(/expires on/i), { target: { value: "2027-01-15" } })
+    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).toMatchObject({ token_expires_at: "2027-01-15T00:00:00.000Z" })
+  })
+
+  it("omits the expiry entirely when the user leaves it blank", async () => {
+    const { onSuccess } = renderWizard()
+    pickShape(/^token/i)
+    fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "no-expiry-thing" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).not.toHaveProperty("token_expires_at")
+  })
+
   // Tags drive the sidebar's Tag facet. Dropping them from the create path
   // (the old flat form had them) would leave a filter nobody can populate
   // without a second visit to the edit dialog.

@@ -157,4 +157,27 @@ describe("AddIntegrationDialog", () => {
     expect(screen.queryByLabelText(/search notification services/i)).toBeNull()
     expect(screen.getByRole("button", { name: /somewhere crewship reaches a person/i })).toBeInTheDocument()
   })
+
+  // The tiles are the action, so this surface has no primary — but every
+  // other door in the product reaches Cancel without falling back to Esc or
+  // the header's ×, and this one did not (0 "Cancel" text nodes, confirmed on
+  // dev2 before the fix). A pointer user with no keyboard has to have
+  // something to click.
+  it("gives a pointer user a Cancel button on the first question", () => {
+    const props = renderDialog()
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+
+    expect(props.onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("keeps Cancel reachable after picking a kind", () => {
+    const props = renderDialog()
+    chooseNotifications()
+
+    const cancel = screen.getByRole("button", { name: "Cancel", exact: true })
+    fireEvent.click(cancel)
+
+    expect(props.onOpenChange).toHaveBeenCalledWith(false)
+  })
 })

@@ -204,6 +204,11 @@ export function AddCredentialWizard({
   const [crewPopoverOpen, setCrewPopoverOpen] = React.useState(false)
   const [slot, setSlot] = React.useState("")
   const [slotTouched, setSlotTouched] = React.useState(false)
+  // YYYY-MM-DD from the date input, or "" — same shape CredentialForm (the
+  // edit-only surface) already sends as `token_expires_at` on PATCH. Empty
+  // means "no expiry", not "unchanged" — there is nothing to preserve on a
+  // brand-new credential.
+  const [expiresAt, setExpiresAt] = React.useState("")
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [warning, setWarning] = React.useState<string | null>(null)
@@ -278,6 +283,7 @@ export function AddCredentialWizard({
       username ||
       accountLabel ||
       name ||
+      expiresAt ||
       tagDraft ||
       tags.length > 0 ||
       slotTouched ||
@@ -313,6 +319,12 @@ export function AddCredentialWizard({
       body.security_level = securityLevel
       if (itemType.usernameOnRow && username.trim()) body.username = username.trim()
       if (accountLabel.trim()) body.account_label = accountLabel.trim()
+      // Only when set — an absent key leaves the column NULL, which is what a
+      // brand-new row with no expiry should be. `internal/api/credentials_mutate.go`
+      // writes this straight into `credentials.token_expires_at` (createCredentialRequest.TokenExpires,
+      // json tag "token_expires_at"), same column and same ISO-string shape
+      // EditCredentialDialog already sends on PATCH.
+      if (expiresAt) body.token_expires_at = new Date(expiresAt).toISOString()
       if (scope === "CREW") body.crew_ids = crewIds
 
       const res = await apiFetch(`/api/v1/credentials?workspace_id=${encodeURIComponent(workspaceId)}`, {
@@ -796,6 +808,29 @@ export function AddCredentialWizard({
                 )}>
                   {CREDENTIAL_TIERS.find((t) => t.level === securityLevel)?.consequence}
                 </p>
+
+                {/* Same column the tier lives in, same section — "how hard is
+                    it to get" and "how long is it good for" are both about
+                    what this secret costs to keep around. Wired to
+                    `token_expires_at`, which the create request already
+                    accepts (internal/api/credentials_mutate.go) and which
+                    /credentials' "Expiring" KPI and 30-day warning read. */}
+                <CreateSurfaceField
+                  label="Expires on"
+                  hint="optional — drives the “Expiring” KPI and the 30-day warning on the credential list"
+                  htmlFor="cred-expires"
+                >
+                  <input
+                    id="cred-expires"
+                    type="date"
+                    value={expiresAt}
+                    onChange={(e) => setExpiresAt(e.target.value)}
+                    className={cn(
+                      FIELD,
+                      "w-[180px] rounded-md border border-border/60 bg-background px-2.5 font-mono text-foreground outline-none focus:border-primary",
+                    )}
+                  />
+                </CreateSurfaceField>
               </div>
             </CreateSurfaceSection>
 
