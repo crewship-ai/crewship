@@ -26,7 +26,17 @@ API key only (BYO). Subscription path (ChatGPT Plus/Pro via `codex login`) not y
 | API key | `OPENAI_API_KEY` | `sk-…` |
 | Service account | `OPENAI_API_KEY` | `sk-svcacct-…` |
 
-Crewship's sidecar passes the real `OPENAI_API_KEY` directly into the agent container env — Codex talks to `api.openai.com` over HTTPS CONNECT through the sidecar (sidecar reverse-proxy is wired only for Anthropic).
+With the sidecar enabled, Crewship puts only a disposable `OPENAI_API_KEY` in
+the agent environment and points Codex at the loopback reverse proxy. The
+sidecar injects the real OpenAI key after the request leaves the agent process.
+
+Credential-backed `OPENROUTER` and `OPENAI_COMPAT` models use Codex's native
+custom `model_provider` configuration for that invocation. For example,
+`openrouter/anthropic/claude-sonnet-4` is sent to
+`/llm/openrouter` with `anthropic/claude-sonnet-4` as Codex's provider-local
+model ID. The provider must implement the OpenAI **Responses API**; current
+Codex no longer supports `wire_api = "chat"`. Use the OpenCode adapter for a
+Chat-Completions-only compatible endpoint.
 
 ## Models
 

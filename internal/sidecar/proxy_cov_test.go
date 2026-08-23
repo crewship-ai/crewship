@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/llmroute"
 )
 
 // roundTripperFunc adapts a function to http.RoundTripper for faking the
@@ -381,11 +383,14 @@ func TestCovHandleConnectHijackUnsupported(t *testing.T) {
 }
 
 // TestCovInjectCredentialAnthropicOAuth covers the OAuth-token branch of
-// injectCredential: sk-ant-oat* tokens go in Authorization: Bearer, not
-// x-api-key.
+// Anthropic's auth: sk-ant-oat* tokens go in Authorization: Bearer, not
+// x-api-key. The branch used to be an `if strings.HasPrefix` inside
+// injectCredential; it is now the descriptor's first AuthRule, selected by the
+// shape of the token itself. Same behaviour, and now the only place it is
+// spelled out.
 func TestCovInjectCredentialAnthropicOAuth(t *testing.T) {
 	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
-	injectCredential(req, ProviderAnthropic, "sk-ant-oat01-abc")
+	llmroute.ApplyAuth(req, specFor(t, ProviderAnthropic), "sk-ant-oat01-abc", nil)
 
 	if got := req.Header.Get("Authorization"); got != "Bearer sk-ant-oat01-abc" {
 		t.Errorf("Authorization = %q", got)
@@ -480,6 +485,7 @@ func TestCovReverseProxyInjectsKeyAndObservesUsage(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "http://127.0.0.1:9119/v1/messages", strings.NewReader(`{"model":"claude-test-1"}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 
@@ -504,12 +510,29 @@ func TestCovReverseProxyInjectsKeyAndObservesUsage(t *testing.T) {
 	if !llmFired {
 		t.Fatal("OnLLMCall never fired")
 	}
-	// NOTE: copyAndObserveLLM passes string(ProviderAnthropic) ("ANTHROPIC")
-	// while parseLLMUsage switches on lowercase "anthropic", so token fields
-	// come back zero on this path today. Assert the provider tag is
-	// preserved; the token-count parsing itself is covered by usage_test.go.
-	if usage.Provider != string(ProviderAnthropic) {
-		t.Errorf("usage.Provider = %q", usage.Provider)
+	// This block used to assert usage.Provider == "ANTHROPIC" and said in its
+	// own comment that the token counts came back zero because
+	// copyAndObserveLLM passed the uppercase ProviderType into a parser that
+	// switched on lowercase. That is the bug, not the contract: every
+	// reverse- and forward-proxied call parsed zero tokens, so Anthropic
+	// posted $0 ledger rows and OpenAI/Gemini posted none at all.
+	//
+	// The fix splits the one string into two — a BodyCodec for the parser and
+	// a lowercase LedgerProvider for the ledger — so the assertions now pin
+	// the outcome the ledger needs: the paymaster rate-card key, and real
+	// counts including the cache split, which is the number the whole
+	// four-channel LLMUsage shape exists to carry.
+	if usage.Provider != "anthropic" {
+		t.Errorf("usage.Provider = %q, want the lowercase paymaster rate-card key %q", usage.Provider, "anthropic")
+	}
+	if usage.Model != "claude-test-1" {
+		t.Errorf("usage.Model = %q, want claude-test-1", usage.Model)
+	}
+	if usage.InputTokens != 120 || usage.OutputTokens != 45 {
+		t.Errorf("token counts = in:%d out:%d, want in:120 out:45 (zero here means the body was never parsed)", usage.InputTokens, usage.OutputTokens)
+	}
+	if usage.CachedInputTokens != 80 || usage.CacheCreationTokens != 10 {
+		t.Errorf("cache split = read:%d write:%d, want read:80 write:10", usage.CachedInputTokens, usage.CacheCreationTokens)
 	}
 	if quota.RemainingPct != 0.5 || quota.Window != "tokens_per_min" {
 		t.Errorf("quota = %+v", quota)
@@ -542,6 +565,7 @@ func TestCovReverseProxyUpstreamErrorFiresObserver(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "http://localhost:9119/v1/messages", strings.NewReader("{}"))
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 
@@ -566,7 +590,7 @@ func TestCovCopyAndObserveLLM_NoObserverPassthrough(t *testing.T) {
 
 	resp := jsonUpstreamResponse(http.StatusOK, "application/json", `{"ok":true}`, nil)
 	w := httptest.NewRecorder()
-	proxy.copyAndObserveLLM(w, resp, "anthropic")
+	proxy.copyAndObserveLLM(w, resp, "anthropic", "anthropic", "")
 	if w.Body.String() != `{"ok":true}` {
 		t.Errorf("body = %q", w.Body.String())
 	}
@@ -594,7 +618,7 @@ func TestCovCopyAndObserveLLM_SSEQuotaSignal(t *testing.T) {
 		"anthropic-ratelimit-requests-limit":     "100",
 	})
 	w := httptest.NewRecorder()
-	proxy.copyAndObserveLLM(w, resp, "anthropic")
+	proxy.copyAndObserveLLM(w, resp, "anthropic", "anthropic", "")
 	if w.Body.String() != "data: {}\n\n" {
 		t.Errorf("SSE body = %q", w.Body.String())
 	}
@@ -611,12 +635,30 @@ func TestCovCopyAndObserveLLM_SSEQuotaSignal(t *testing.T) {
 
 	// SSE response WITHOUT quota headers and no 429 → observer must NOT fire.
 	resp2 := jsonUpstreamResponse(http.StatusOK, "text/event-stream", "data: {}\n\n", nil)
-	proxy.copyAndObserveLLM(httptest.NewRecorder(), resp2, "anthropic")
+	proxy.copyAndObserveLLM(httptest.NewRecorder(), resp2, "anthropic", "anthropic", "")
 	mu.Lock()
 	if fired != 1 {
 		t.Errorf("observer fired on quota-less SSE response")
 	}
 	mu.Unlock()
+}
+
+func TestCovCopyAndObserveLLM_SSEUsageAndActor(t *testing.T) {
+	var got LLMUsage
+	proxy := NewProxy(ProxyConfig{
+		CredStore: NewCredStore(), Allowlist: NewDomainAllowlist(nil), Logger: covLogger(),
+		OnLLMCall: func(u LLMUsage, _ QuotaInfo, _, _ string) { got = u },
+	})
+	body := `data: {"type":"response.completed","response":{"model":"gpt-5.5","usage":{"input_tokens":12,"output_tokens":3}}}` + "\n\n"
+	resp := jsonUpstreamResponse(http.StatusOK, "text/event-stream", body, nil)
+	w := httptest.NewRecorder()
+	proxy.copyAndObserveLLM(w, resp, "openai", "openai", "agent-7")
+	if w.Body.String() != body {
+		t.Fatalf("SSE pass-through changed: %q", w.Body.String())
+	}
+	if got.AgentID != "agent-7" || got.Provider != "openai" || got.InputTokens != 12 || got.OutputTokens != 3 {
+		t.Fatalf("observed usage = %+v", got)
+	}
 }
 
 // --- boundedBuffer ---

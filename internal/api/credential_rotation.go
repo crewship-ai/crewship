@@ -155,11 +155,11 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// scope check so cross-workspace rotation attempts 404. The
 	// existing soft-delete filter applies — rotating a deleted
 	// credential makes no sense.
-	var oldEncrypted, credType, credStatus string
+	var oldEncrypted, credType, credStatus, credProvider string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT encrypted_value, type, status FROM credentials
+		SELECT encrypted_value, type, status, COALESCE(provider, '') FROM credentials
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credID, workspaceID).Scan(&oldEncrypted, &credType, &credStatus)
+		credID, workspaceID).Scan(&oldEncrypted, &credType, &credStatus, &credProvider)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "Credential not found")
@@ -187,8 +187,17 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// server does a field-level MERGE over the decrypted existing value: replace
 	// only the fields the request carries, keep the rest. A full-value rotate
 	// (no endpoint_* fields) still validates the whole new value.
+	//
+	// The gate is "does this credential STORE an endpoint object", not "is its
+	// type ENDPOINT_URL". An API_KEY credential whose provider takes its upstream
+	// from the credential (OPENAI_COMPAT) stores exactly the same
+	// {baseURL,apiKey,headers} shape, so keying on type alone sent it down the
+	// else-branch below: `--endpoint-auth-token` 400'd with a message saying it
+	// is not an endpoint credential, and a full-value rotate stored a bare key
+	// with no validation at all — silently discarding the baseURL and leaving a
+	// credential that routes nowhere.
 	valueToStore := req.Value
-	if credType == CredTypeEndpointURL {
+	if credType == CredTypeEndpointURL || providerNeedsEndpointValue(credProvider) {
 		merged, msg := mergeEndpointRotateValue(&req, oldEncrypted)
 		if msg != "" {
 			replyError(w, http.StatusBadRequest, msg)
@@ -198,7 +207,7 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	} else if req.hasEndpointFields() {
 		// Footgun guard: endpoint_* fields on a non-endpoint credential would
 		// otherwise be ignored while a caller believes they rotated auth.
-		replyError(w, http.StatusBadRequest, "endpoint_base_url/endpoint_auth_token/endpoint_headers are only valid for ENDPOINT_URL credentials")
+		replyError(w, http.StatusBadRequest, "endpoint_base_url/endpoint_auth_token/endpoint_headers are only valid for credentials that store an endpoint (type ENDPOINT_URL, or an OpenAI-compatible provider)")
 		return
 	}
 

@@ -17,6 +17,7 @@ func TestHealthReportsSidecarHash(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 
@@ -35,6 +36,7 @@ func TestHealthSidecarHashEmptyWhenUnset(t *testing.T) {
 	proxy := newTestProxy(nil, []string{"localhost"})
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 	if body := w.Body.String(); !strings.Contains(body, `"sidecar_hash":""`) {
@@ -52,6 +54,7 @@ func TestHealthReportsTokenFP(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 
@@ -70,10 +73,32 @@ func TestHealthTokenFPEmptyWhenUnset(t *testing.T) {
 	proxy := newTestProxy(nil, []string{"localhost"})
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 	if body := w.Body.String(); !strings.Contains(body, `"token_fp":""`) {
 		t.Errorf("health body should carry an empty token_fp when unset: %q", body)
+	}
+}
+
+func TestHealthReportsConfigFingerprintOnlyWhenConfigured(t *testing.T) {
+	proxy := newTestProxy(nil, []string{"localhost"})
+	proxy.configFingerprint = "a1b2c3d4e5f6"
+	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+	if body := w.Body.String(); !strings.Contains(body, `"config_fingerprint":"a1b2c3d4e5f6"`) {
+		t.Fatalf("health body missing config fingerprint: %q", body)
+	}
+
+	bare := newTestProxy(nil, []string{"localhost"})
+	bareReq := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
+	bareReq.RemoteAddr = "127.0.0.1:54321"
+	bw := httptest.NewRecorder()
+	bare.ServeHTTP(bw, bareReq)
+	if body := bw.Body.String(); strings.Contains(body, "config_fingerprint") {
+		t.Fatalf("unconfigured sidecar must omit config_fingerprint: %q", body)
 	}
 }
 

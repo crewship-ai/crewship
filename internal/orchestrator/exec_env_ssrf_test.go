@@ -33,13 +33,13 @@ func TestLocalModelExtraDomains_SSRF(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := localModelExtraDomains(mk(c.url, c.optIn))
+			got := proxiedEndpointDomains(mk(c.url, c.optIn))
 			if len(got) != len(c.want) {
-				t.Fatalf("localModelExtraDomains = %v, want %v", got, c.want)
+				t.Fatalf("proxiedEndpointDomains = %v, want %v", got, c.want)
 			}
 			for i := range got {
 				if got[i] != c.want[i] {
-					t.Fatalf("localModelExtraDomains = %v, want %v", got, c.want)
+					t.Fatalf("proxiedEndpointDomains = %v, want %v", got, c.want)
 				}
 			}
 		})

@@ -9,7 +9,9 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/keeper"
+	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"golang.org/x/term"
 )
 
@@ -29,6 +31,50 @@ func securityLevelHelp() string {
 // bearer token and repeatable `K=V` headers into the one-object JSON the server
 // stores (#961). The token/headers never appear in the plaintext value shown by
 // `credential list`. Returns the compact JSON string.
+// readAuthToken resolves the endpoint bearer token from --auth-token or
+// --auth-token-stdin, mirroring the --value/--value-stdin pair that already
+// exists for the credential's main value.
+//
+// A secret passed as a command-line argument is readable by anything that can
+// see the process table for as long as the command runs, and lands in the
+// operator's shell history besides. --value has had a stdin path since it was
+// added; --auth-token did not, so the documented way to rotate an endpoint key
+// was the insecure one. Returns the token and whether the caller supplied one
+// at all — rotate needs the distinction, because "not sent" and "sent empty"
+// mean different things to the server-side merge.
+func readAuthToken(flags *pflag.FlagSet) (string, bool, error) {
+	token, _ := flags.GetString("auth-token")
+	fromStdin, _ := flags.GetBool("auth-token-stdin")
+	if fromStdin {
+		if flags.Changed("auth-token") {
+			return "", false, cli.WithExitCode(
+				fmt.Errorf("--auth-token and --auth-token-stdin are mutually exclusive"), cli.ExitValidation)
+		}
+		scanner := bufio.NewScanner(os.Stdin)
+		if scanner.Scan() {
+			token = scanner.Text()
+		}
+		if err := scanner.Err(); err != nil {
+			return "", false, cli.WithExitCode(
+				fmt.Errorf("read --auth-token-stdin: %w", err), cli.ExitValidation)
+		}
+		// Empty stdin is a mistake, not an instruction to clear the token.
+		// --value-stdin already fails closed on this, and the asymmetry was a
+		// footgun with a silent, destructive outcome: a mistyped pipe that
+		// produced no bytes would send an empty token, the server would merge it
+		// over the stored one, and the credential would be left authenticating
+		// with nothing. Clearing a token deliberately is still possible and now
+		// has to be said out loud, with --auth-token "".
+		if token == "" {
+			return "", false, cli.WithExitCode(
+				fmt.Errorf("--auth-token-stdin got no input; pass --auth-token \"\" if you really mean to clear the stored token"),
+				cli.ExitValidation)
+		}
+		return token, true, nil
+	}
+	return token, flags.Changed("auth-token"), nil
+}
+
 func buildEndpointCredentialValue(baseURL, authToken string, headerPairs []string) (string, error) {
 	headers := map[string]string{}
 	for _, hp := range headerPairs {
@@ -55,6 +101,51 @@ func buildEndpointCredentialValue(baseURL, authToken string, headerPairs []strin
 	}
 	return string(raw), nil
 }
+
+// routeEndpointProvider reports whether a --provider value names a sidecar
+// route whose UPSTREAM comes out of the credential itself — today that is
+// OPENAI_COMPAT, a self-hosted or vendor OpenAI-compatible gateway.
+//
+// Those credentials carry {baseURL,apiKey,headers} as ONE object for the same
+// reason #961's ENDPOINT_URL does: the sidecar has nowhere to send the request
+// without the URL, and the URL is worthless to it without the key. Splitting
+// them across two credentials would make either half deliverable on its own.
+//
+// Matched case-insensitively — `credential create --provider openai_compat`
+// and `--provider OPENAI_COMPAT` are the same provider — and normalized to the
+// registry's UPPERCASE id before it reaches the server, which stores the
+// provider column verbatim.
+func routeEndpointProvider(provider string) (llmroute.Spec, bool) {
+	spec, ok := llmroute.Lookup(strings.ToUpper(strings.TrimSpace(provider)))
+	if !ok || !spec.UpstreamFromCredential {
+		return llmroute.Spec{}, false
+	}
+	return spec, true
+}
+
+// routeEndpointProviderIDs lists those providers for an error message, so a
+// rejected --base-url says which provider it WOULD have been valid for rather
+// than only that it was wrong.
+func routeEndpointProviderIDs() []string {
+	out := []string{}
+	for _, s := range llmroute.Specs() {
+		if s.UpstreamFromCredential {
+			out = append(out, s.ID)
+		}
+	}
+	return out
+}
+
+// endpointCredentialTypes are the two types a credential-supplied endpoint may
+// be stored as. API_KEY is the one phase 2 delivers to the sidecar's CredStore;
+// ENDPOINT_URL is the pre-existing #961 shape and is accepted so an operator
+// who already has one is not told their own credential is malformed.
+//
+// Any other type would be stored happily by the server and then never routed —
+// credpolicy resolves delivery by TYPE, and a SECRET carrying a base URL
+// reaches an agent's environment rather than the sidecar, which is the exact
+// leak this provider exists to close.
+var endpointCredentialTypes = map[string]bool{"API_KEY": true, "ENDPOINT_URL": true}
 
 // resolveCrewIDs resolves --crews values (crew slug or ID, in any order) to
 // crew IDs — the form the API's credential_crews junction expects. Blank
@@ -128,25 +219,99 @@ var credCreateCmd = &cobra.Command{
 			}
 		}
 
-		if value == "" {
-			return fmt.Errorf("--value or --value-stdin is required")
+		authToken, _, err := readAuthToken(flags)
+		if err != nil {
+			return err
 		}
+		headerPairs, _ := flags.GetStringArray("header")
+		baseURL, _ := flags.GetString("base-url")
+		endpointSpec, providerCarriesEndpoint := routeEndpointProvider(provider)
+
+		// A provider whose upstream comes from the credential (OPENAI_COMPAT)
+		// takes its endpoint on --base-url and its key on --value/--auth-token,
+		// and the two are stored as one object — the same shape #961 already
+		// defined for ENDPOINT_URL, so nothing new had to be invented on the
+		// server side.
+		switch {
+		case baseURL != "" && !providerCarriesEndpoint:
+			return cli.WithExitCode(fmt.Errorf(
+				"--base-url is only valid for a provider whose endpoint comes from the credential (%s); every other provider has a fixed upstream the sidecar already knows",
+				strings.Join(routeEndpointProviderIDs(), ", ")), cli.ExitValidation)
+
+		case providerCarriesEndpoint && baseURL == "":
+			return cli.WithExitCode(fmt.Errorf(
+				"--base-url is required for --provider %s: without it the sidecar has no upstream to forward to",
+				endpointSpec.ID), cli.ExitValidation)
+
+		case providerCarriesEndpoint:
+			if !endpointCredentialTypes[credType] {
+				return cli.WithExitCode(fmt.Errorf(
+					"--provider %s needs --type API_KEY (or ENDPOINT_URL); --type %s is delivered to the agent's environment instead of the sidecar, which would put the key in the container",
+					endpointSpec.ID, credType), cli.ExitValidation)
+			}
+			// The key may come the ordinary way (--value/--value-stdin) or on
+			// --auth-token, which is what an operator who already writes
+			// ENDPOINT_URL credentials will reach for.
+			key := authToken
+			if key == "" {
+				key = value
+			}
+			// A bearer token is one kind of auth material, not the only kind:
+			// an endpoint that authenticates on `X-Api-Key: …` has no token to
+			// give, and llmroute.ApplyAuth writes custom headers independently
+			// of the token. Requiring a key here made that endpoint — which the
+			// sidecar routes and the docs describe — impossible to create.
+			if key == "" && len(headerPairs) == 0 {
+				return cli.WithExitCode(
+					fmt.Errorf("--value, --value-stdin, --auth-token or --header is required: an endpoint with no auth material at all is not routed through the sidecar, so there is nothing to isolate"),
+					cli.ExitValidation)
+			}
+			v, err := buildEndpointCredentialValue(baseURL, key, headerPairs)
+			if err != nil {
+				// A malformed --header is a local validation failure, and the
+				// exit-code contract spells those 2. It used to leave here as a
+				// bare error (exit 1, "unclassified"), which tells a script that
+				// retried on 1 to retry a command that can never succeed.
+				return cli.WithExitCode(err, cli.ExitValidation)
+			}
+			value = v
 
 		// #961: an ENDPOINT_URL credential may carry an auth token + custom
-		// headers for an authenticated Ollama-behind-proxy / LiteLLM endpoint.
-		// When either is set, fold {baseURL,apiKey,headers} into the stored
-		// value as one credential object; with neither it stays a bare URL.
-		authToken, _ := flags.GetString("auth-token")
-		headerPairs, _ := flags.GetStringArray("header")
-		if authToken != "" || len(headerPairs) > 0 {
+		// headers for a self-hosted or gateway-fronted OpenAI-compatible
+		// endpoint that requires authentication. When either is set, fold
+		// {baseURL,apiKey,headers} into the stored value as one credential
+		// object; with neither it stays a bare URL.
+		case authToken != "" || len(headerPairs) > 0:
+			// Exit 2, like every sibling in this switch. These are argument
+			// errors settled before a request is built, so a script that retries
+			// on exit 1 must not be told to retry a command that can never
+			// succeed — that is the whole point of the contract.
 			if credType != "ENDPOINT_URL" {
-				return fmt.Errorf("--auth-token/--header are only valid with --type ENDPOINT_URL")
+				return cli.WithExitCode(fmt.Errorf(
+					"--auth-token/--header are only valid with --type ENDPOINT_URL, or with a provider whose endpoint comes from the credential (%s)",
+					strings.Join(routeEndpointProviderIDs(), ", ")), cli.ExitValidation)
+			}
+			if value == "" {
+				return cli.WithExitCode(
+					fmt.Errorf("--value or --value-stdin is required"), cli.ExitValidation)
 			}
 			v, err := buildEndpointCredentialValue(value, authToken, headerPairs)
 			if err != nil {
-				return err
+				return cli.WithExitCode(err, cli.ExitValidation)
 			}
 			value = v
+		}
+
+		if value == "" {
+			return cli.WithExitCode(
+				fmt.Errorf("--value or --value-stdin is required"), cli.ExitValidation)
+		}
+
+		// Normalize the provider to the registry's spelling before it is
+		// stored: the sidecar looks the provider column up case-sensitively,
+		// so a credential created as "openai_compat" would be routed by nothing.
+		if providerCarriesEndpoint {
+			provider = endpointSpec.ID
 		}
 
 		secLevel, _ := flags.GetInt("security-level")
@@ -212,18 +377,30 @@ var credCreateCmd = &cobra.Command{
 			cli.PrintWarning("--scope WORKSPACE is ignored when --crews is set; the credential will be scope=CREW")
 		}
 
-		valid, errMsg := testCredentialValue(client, provider, credType, value)
-		if valid {
-			cli.PrintSuccess("Key validated successfully")
+		// A credential-supplied endpoint is deliberately NOT probed. The stored
+		// value is an object rather than a bare key, and crewshipd will not dial
+		// an operator-supplied URL — reaching an arbitrary host from the server
+		// is an SSRF surface the probe path is not built for. Saying so is the
+		// honest answer; running no check and printing "validated successfully"
+		// would be a green tick over a test that never happened.
+		if providerCarriesEndpoint {
+			cli.PrintWarning(fmt.Sprintf(
+				"%s is not validated on create — Crewship does not dial an operator-supplied endpoint. The first agent call through the sidecar is the test.",
+				endpointSpec.ID))
 		} else {
-			msg := errMsg
-			if msg == "" {
-				msg = "key validation failed"
-			}
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", msg))
-			} else if !confirmInvalidKey(msg) {
-				return fmt.Errorf("aborted")
+			valid, errMsg := testCredentialValue(client, provider, credType, value)
+			if valid {
+				cli.PrintSuccess("Key validated successfully")
+			} else {
+				msg := errMsg
+				if msg == "" {
+					msg = "key validation failed"
+				}
+				if !term.IsTerminal(int(os.Stdin.Fd())) {
+					cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", msg))
+				} else if !confirmInvalidKey(msg) {
+					return fmt.Errorf("aborted")
+				}
 			}
 		}
 
@@ -353,6 +530,14 @@ var credUpdateCmd = &cobra.Command{
 					}
 					if err := cli.ReadJSON(metaResp, &cred); err != nil {
 						cli.PrintWarning("Could not parse credential metadata, skipping validation: " + err.Error())
+					} else if spec, ok := routeEndpointProvider(cred.Provider); ok {
+						// Same as create: crewshipd does not dial an
+						// operator-supplied endpoint, so there is no check to
+						// report the result of. Saying nothing happened beats a
+						// green tick over a probe that never ran.
+						cli.PrintWarning(fmt.Sprintf(
+							"%s is not validated on update — Crewship does not dial an operator-supplied endpoint.",
+							spec.ID))
 					} else {
 						valid, errMsg := testCredentialValue(client, cred.Provider, cred.Type, valStr)
 						if valid {
@@ -425,7 +610,10 @@ Examples:
 				value = scanner.Text()
 			}
 		}
-		authChanged := flags.Changed("auth-token")
+		rotateAuthToken, authChanged, err := readAuthToken(flags)
+		if err != nil {
+			return err
+		}
 		headerChanged := flags.Changed("header")
 		rotatingEndpointAuth := authChanged || headerChanged
 
@@ -463,13 +651,23 @@ Examples:
 				return err
 			}
 			var cred struct {
-				Type string `json:"type"`
+				Type     string `json:"type"`
+				Provider string `json:"provider"`
 			}
 			if err := cli.ReadJSON(metaResp, &cred); err != nil {
 				return err
 			}
-			if cred.Type != "ENDPOINT_URL" {
-				return fmt.Errorf("--auth-token/--header are only valid when rotating an ENDPOINT_URL credential (got %s)", cred.Type)
+			// The question is whether this credential STORES an endpoint
+			// object, not whether its type is ENDPOINT_URL. A provider whose
+			// upstream comes from the credential (OPENAI_COMPAT) stores the
+			// same {baseURL,apiKey,headers} shape under type API_KEY, and
+			// refusing the field-by-field form for it would leave a full-value
+			// rotate — which replaces the endpoint along with the key — as the
+			// only way to change that key.
+			_, providerCarriesEndpoint := routeEndpointProvider(cred.Provider)
+			if cred.Type != "ENDPOINT_URL" && !providerCarriesEndpoint {
+				return fmt.Errorf("--auth-token/--header are only valid when rotating a credential that stores an endpoint: type ENDPOINT_URL, or a provider whose endpoint comes from the credential (%s). Got type %s, provider %s",
+					strings.Join(routeEndpointProviderIDs(), ", "), cred.Type, cred.Provider)
 			}
 			// Send only the changed field(s); the server merges over the stored
 			// value so unspecified fields (headers when rotating the token, or
@@ -478,8 +676,7 @@ Examples:
 				body["endpoint_base_url"] = value
 			}
 			if authChanged {
-				authToken, _ := flags.GetString("auth-token")
-				body["endpoint_auth_token"] = authToken
+				body["endpoint_auth_token"] = rotateAuthToken
 			}
 			if headerChanged {
 				headerPairs, _ := flags.GetStringArray("header")

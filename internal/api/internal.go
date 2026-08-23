@@ -177,6 +177,23 @@ type mcpCredEntry struct {
 	Value    string `json:"value"`
 	Priority int    `json:"priority"`
 	Type     string `json:"type"`
+	// Provider is credentials.provider, UPPERCASE, and equals llmroute.Spec.ID
+	// for a routable LLM provider. It is what lets the sidecar CredStore hold a
+	// credential whose env-var name names no provider — before it travelled,
+	// such a credential was dropped between the vault and the sidecar with no
+	// log and no symptom but a 401 from the upstream.
+	//
+	// omitempty on this and the two below is load-bearing: a credential that
+	// carries none of them must serialise byte-identically to the pre-phase-2
+	// payload, so an older sidecar sees no change at all.
+	Provider string `json:"provider,omitempty"`
+	// BaseURL and Headers are populated only for a provider whose upstream
+	// comes from the credential itself (llmroute UpstreamFromCredential —
+	// OPENAI_COMPAT). They are the split halves of the stored
+	// {baseURL,apiKey,headers} object; Value carries the apiKey alone, never
+	// the JSON blob, because Value is what the sidecar injects as a token.
+	BaseURL string            `json:"base_url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 	// Username carries the cleartext identifier half of a USERPASS
 	// credential. Always empty for other types — the sidecar mount
 	// path branches on Type and only reads Username for USERPASS.

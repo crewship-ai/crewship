@@ -1,0 +1,10 @@
+method POST
+scheme https
+url.host api.openai.com
+req.host api.openai.com
+path /v1/chat/completions
+rawpath 
+rawquery 
+target /v1/chat/completions
+requesturi ""
+header Authorization: Bearer caller-supplied

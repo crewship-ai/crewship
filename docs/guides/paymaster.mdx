@@ -14,6 +14,12 @@ Paymaster owns cost accounting and budget enforcement. It is the read/write side
 Paymaster separates two billing models that **cannot share a single \$ aggregate**:
 
 - **Metered** — pay-per-token API-key calls. Real \$ math, real budgets.
+
+<Warning>
+  **Proxied agent calls recorded \$0 until August 2026.** `parseLLMUsage` matched on a lowercase provider name while the sidecar proxy passed an uppercase one, so no proxied response body was ever parsed and every such call wrote a zero-token, \$0 row. Any rollup, KPI or budget decision taken on proxied traffic before that fix was taken against zero.
+
+  The fix means those crews now post real token counts. Budgets that never fired on them can fire on the first day — the spend did not change, only the recording of it. Ceilings set while the rows read \$0 should be re-checked.
+</Warning>
 - **Flat-rate** — subscription credentials (Anthropic Max, ChatGPT Plus, etc.). The \$200/mo is paid up front; the marginal cost of one more token is \$0 from our perspective.
 
 Mixing them in the same KPI silently misleads operators, so the ledger row carries a `billing_mode` column and the UI keeps the two surfaces disjoint: KPIs and budgets show **metered** spend; subscriptions get a separate panel with call/token counts but no \$ figure.
@@ -129,7 +135,7 @@ Three values, written to every row:
 
 - **`precise`** — provider returned a usage block we trust verbatim (e.g. Anthropic non-streaming).
 - **`estimate`** — we computed it from `pricing.go` rates against parsed token counts.
-- **`unknown`** — flat-rate row, or we couldn't parse the response body (streaming with no body buffer, opaque proxy).
+- **`unknown`** — flat-rate row, or we couldn't parse the response body (for example an opaque proxy response or a stream with no terminal usage event).
 
 The dashboard surfaces these as badges next to \$ figures. Aggregate KPIs deliberately do **not** mix confidences — when a rollup spans multiple bands, the lowest band wins so the operator sees the floor of certainty, not the average.
 
@@ -363,12 +369,12 @@ What the sidecar can and cannot see:
 | Traffic shape | Token counts | Quota signals |
 |---|---|---|
 | Non-streaming JSON (Anthropic / OpenAI / Google) | **yes** — per-provider body parser | **yes** |
-| Streaming (`text/event-stream`) | **no** — body is opaque without a parallel SSE parser | **yes** — headers are always present |
+| Streaming (`text/event-stream`) | **yes, when the stream emits usage** — the bounded SSE parser understands Anthropic, OpenAI Responses/Chat, and Google event shapes | **yes** — headers are always present |
 | Pinned-cert TLS CONNECT (Claude Code Max OAuth tunnel) | **no** — body is end-to-end encrypted | **no** |
 
 For pinned-cert tunnels the sidecar emits a "credential was used" attribution row (`billing_mode=flat_rate`, no tokens, `cost_confidence=unknown`) so the Subscriptions panel still shows usage. We deliberately do not MITM with a custom CA — CLIs with pinned certs would reject it, and the honest answer is that the body is private.
 
-Body buffering uses `io.TeeReader` with a **10 MB cap** so streaming UX is preserved while a pathological upstream cannot OOM the sidecar. Reads beyond the cap pass through to the agent unmodified but are not parsed.
+Body observation uses `io.TeeReader` with a **10 MB cap** so streaming UX is preserved while a pathological upstream cannot OOM the sidecar. Both JSON and SSE responses continue to pass through after the cap; only bytes beyond it are omitted from usage parsing.
 
 Look for the `llm.call` journal entry: if it exists, the call was metered. If you see `exec.command` with `claude` and no `llm.call`, the OAuth tunnel was used and the row will land as flat-rate.
 

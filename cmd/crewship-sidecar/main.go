@@ -23,12 +23,14 @@ var version = "dev"
 // sidecarInput is the JSON payload piped via stdin from the orchestrator.
 // It carries credentials, optional memory configuration, and IPC config for assignment routing.
 type sidecarInput struct {
-	Credentials   []sidecar.Credential         `json:"credentials"`
-	Memory        *sidecar.MemoryConfig        `json:"memory,omitempty"`
-	IPC           *sidecar.IPCConfig           `json:"ipc,omitempty"`
-	CrewMembers   []sidecar.CrewMember         `json:"crew_members,omitempty"`
-	NetworkPolicy *sidecar.NetworkPolicyConfig `json:"network_policy,omitempty"`
-	MCPServers    []sidecar.MCPServerInput     `json:"mcp_servers,omitempty"`
+	Credentials       []sidecar.Credential         `json:"credentials"`
+	Memory            *sidecar.MemoryConfig        `json:"memory,omitempty"`
+	IPC               *sidecar.IPCConfig           `json:"ipc,omitempty"`
+	RouteAuth         *sidecar.RouteAuth           `json:"route_auth,omitempty"`
+	CrewMembers       []sidecar.CrewMember         `json:"crew_members,omitempty"`
+	NetworkPolicy     *sidecar.NetworkPolicyConfig `json:"network_policy,omitempty"`
+	MCPServers        []sidecar.MCPServerInput     `json:"mcp_servers,omitempty"`
+	ConfigFingerprint string                       `json:"config_fingerprint,omitempty"`
 }
 
 func main() {
@@ -110,14 +112,16 @@ func main() {
 	)
 
 	srv := sidecar.NewServer(sidecar.ServerConfig{
-		Addr:          *addr,
-		Credentials:   input.Credentials,
-		Memory:        input.Memory,
-		IPC:           input.IPC,
-		CrewMembers:   input.CrewMembers,
-		NetworkPolicy: input.NetworkPolicy,
-		MCPServers:    input.MCPServers,
-		Logger:        logger,
+		Addr:              *addr,
+		Credentials:       input.Credentials,
+		Memory:            input.Memory,
+		IPC:               input.IPC,
+		RouteAuth:         input.RouteAuth,
+		CrewMembers:       input.CrewMembers,
+		NetworkPolicy:     input.NetworkPolicy,
+		MCPServers:        input.MCPServers,
+		ConfigFingerprint: input.ConfigFingerprint,
+		Logger:            logger,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())

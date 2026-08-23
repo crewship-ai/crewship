@@ -231,6 +231,83 @@ func TestDeriveAgentToken_EmptyInputsFailClosed(t *testing.T) {
 	}
 }
 
+func TestLLMRouteToken_RoundTripAndTamperResistance(t *testing.T) {
+	t.Parallel()
+	routeValue := DeriveLLMRouteToken("crew-bound-route-key", "agent.with.dots")
+	if routeValue == "" || !strings.HasPrefix(routeValue, LLMRoutePrefix+".") {
+		t.Fatalf("invalid derived route token %q", routeValue)
+	}
+	if id, ok := ValidateLLMRouteToken("crew-bound-route-key", routeValue); !ok || id != "agent.with.dots" {
+		t.Fatalf("round trip = (%q,%v)", id, ok)
+	}
+	if _, ok := ValidateLLMRouteToken("other-key", routeValue); ok {
+		t.Fatal("route token validated under a different crew key")
+	}
+	parts := strings.Split(routeValue, ".")
+	if len(parts) != 3 || len(parts[1]) < 2 {
+		t.Fatalf("unexpected route token shape %q", routeValue)
+	}
+	parts[1] = parts[1][:len(parts[1])-1] + "A"
+	forged := strings.Join(parts, ".")
+	if _, ok := ValidateLLMRouteToken("crew-bound-route-key", forged); ok {
+		t.Fatal("tampered agent id validated")
+	}
+}
+
+func TestValidateLLMRouteTokenRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
+
+	const key = "crew-bound-route-key"
+	valid := DeriveLLMRouteToken(key, "agent-a")
+	tests := []struct {
+		name     string
+		routeKey string
+		value    string
+	}{
+		{"empty route key", "", valid},
+		{"missing prefix", key, strings.TrimPrefix(valid, LLMRoutePrefix+".")},
+		{"extra dot in signature", key, valid + ".trailing"},
+		{"empty encoded id", key, LLMRoutePrefix + "..deadbeef"},
+		{"invalid encoded id", key, LLMRoutePrefix + ".!!!.deadbeef"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if id, ok := ValidateLLMRouteToken(tc.routeKey, tc.value); ok || id != "" {
+				t.Fatalf("accepted malformed token: (%q,%v)", id, ok)
+			}
+		})
+	}
+}
+
+func TestDeriveLLMRouteKeyIsScopedAndFailClosed(t *testing.T) {
+	t.Parallel()
+
+	master := "master-secret"
+	crewKey := DeriveLLMRouteKey(master, "ws-a", "crew-a")
+	if crewKey == "" {
+		t.Fatal("expected a route key")
+	}
+	if crewKey == DeriveCrewToken(master, "ws-a", "crew-a") {
+		t.Fatal("route key must not be an internal API bearer token")
+	}
+	for name, other := range map[string]string{
+		"workspace": DeriveLLMRouteKey(master, "ws-b", "crew-a"),
+		"crew":      DeriveLLMRouteKey(master, "ws-a", "crew-b"),
+		"crewless":  DeriveLLMRouteKey(master, "ws-a", ""),
+	} {
+		if crewKey == other {
+			t.Fatalf("route key was not scoped by %s", name)
+		}
+	}
+	if got := DeriveLLMRouteKey("", "ws-a", "crew-a"); got != "" {
+		t.Fatalf("empty master: got %q, want empty", got)
+	}
+	if got := DeriveLLMRouteKey(master, "", "crew-a"); got != "" {
+		t.Fatalf("empty workspace: got %q, want empty", got)
+	}
+}
+
 func TestDeriveAgentToken_DomainSeparated(t *testing.T) {
 	t.Parallel()
 	// The per-agent MAC must not collide with the workspace-binding MAC even

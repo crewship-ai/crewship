@@ -14,6 +14,14 @@ import (
 // the v1 rate card — Opus 4.7 was 3× over because cached input was billed at
 // fresh-input rates). Zero on any field means "not reported by upstream".
 type LLMUsage struct {
+	// AgentID is resolved from the per-agent token embedded in the disposable
+	// proxy key. It is sidecar-local attribution metadata, never parsed from or
+	// sent to an upstream provider.
+	AgentID string
+	// Provider is the LOWERCASE paymaster rate-card key
+	// (llmroute.Spec.LedgerProvider), e.g. "anthropic" / "openrouter" — not
+	// the uppercase CredStore ProviderType and not the body codec. It is set
+	// by copyAndObserveLLM, never by parseLLMUsage.
 	Provider            string
 	Model               string
 	InputTokens         int64
@@ -47,25 +55,38 @@ type QuotaInfo struct {
 	HadStatus429 bool
 }
 
-// parseLLMUsage decodes the response body for a known LLM provider into
-// LLMUsage. Only non-streaming JSON responses are supported — streaming
-// (text/event-stream) returns zero usage because the stream's `usage` block
-// isn't visible until the body is closed, which happens *after* we'd have
-// already passed the body through to the client. Streaming usage tracking
-// would need a tee-reader + goroutine; deferred until we have a clear
-// product reason to spend the latency budget.
+// parseLLMUsage decodes the response body of a known LLM provider into
+// LLMUsage.
+//
+// `codec` names the BODY SHAPE, not the provider — llmroute.Spec.BodyCodec,
+// one of "anthropic" | "openai" | "google" | "" (don't parse). The two axes
+// are genuinely different: OpenRouter speaks the OpenAI body shape but bills
+// under its own rate card, so it parses with codec "openai" and posts ledger
+// rows under provider "openrouter".
+//
+// It deliberately does NOT set LLMUsage.Provider. That field is the paymaster
+// rate-card key (Spec.LedgerProvider) and is assigned by copyAndObserveLLM.
+// Before the codec/ledger split this function received the CredStore's
+// uppercase ProviderType ("ANTHROPIC") while the switch below matched
+// lowercase, so every branch fell through and every proxied call parsed zero
+// tokens — Anthropic posted $0 ledger rows and OpenAI/Gemini posted none at
+// all. Keeping the two names apart is what stops that recurring.
+//
+// This parser handles one JSON object. Streaming responses are tee'd without
+// delaying the client and their data events are passed through
+// parseLLMUsageSSE after EOF.
 //
 // Returns an empty LLMUsage on any parse failure — we never fail the proxy
 // over a usage parse error because the agent's call already succeeded
 // upstream, and surfacing a 502 to the client over a billing miss would be
 // a strictly worse outcome than a missing ledger row.
-func parseLLMUsage(provider, body string) LLMUsage {
-	out := LLMUsage{Provider: provider}
+func parseLLMUsage(codec, body string) LLMUsage {
+	var out LLMUsage
 	if body == "" {
 		return out
 	}
 
-	switch provider {
+	switch codec {
 	case "anthropic":
 		// Anthropic message body shape:
 		//   { "model": "...", "usage": {
@@ -96,15 +117,23 @@ func parseLLMUsage(provider, body string) LLMUsage {
 		out.CacheCreationTokens = msg.Usage.CacheCreationInputTokens
 
 	case "openai":
-		// OpenAI completion body shape (chat.completions and responses):
-		//   { "model": "...", "usage": {
-		//        "prompt_tokens": int,
-		//        "completion_tokens": int,
-		//        "prompt_tokens_details": { "cached_tokens": int }
-		//   } }
-		// The cached_tokens nested key landed on the public API in late 2024;
-		// older models still omit it, which is fine — we get zero and the
-		// paymaster math handles that.
+		// TWO usage shapes, because the codec serves two OpenAI APIs and they
+		// do not agree on field names.
+		//
+		//   chat.completions:  usage.prompt_tokens / completion_tokens
+		//                      usage.prompt_tokens_details.cached_tokens
+		//   responses:         usage.input_tokens / output_tokens
+		//                      usage.input_tokens_details.cached_tokens
+		//
+		// The sidecar proxies /openai/v1/responses (it has its own golden
+		// fixture), so the second family is not hypothetical. Parsing only the
+		// first meant every Responses call reported zero tokens and the cost
+		// event was dropped — the same silent-zero failure this whole codepath
+		// was just fixed for, surviving in the one API the comment above used
+		// to claim was already covered.
+		//
+		// Cached-token details landed on the public API in late 2024; older
+		// models omit them, which is fine — zero, and the paymaster math holds.
 		var msg struct {
 			Model string `json:"model"`
 			Usage struct {
@@ -113,22 +142,37 @@ func parseLLMUsage(provider, body string) LLMUsage {
 				PromptTokensDetails struct {
 					CachedTokens int64 `json:"cached_tokens"`
 				} `json:"prompt_tokens_details"`
+
+				InputTokens        int64 `json:"input_tokens"`
+				OutputTokens       int64 `json:"output_tokens"`
+				InputTokensDetails struct {
+					CachedTokens int64 `json:"cached_tokens"`
+				} `json:"input_tokens_details"`
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(body), &msg); err != nil {
 			return out
 		}
 		out.Model = msg.Model
-		// OpenAI's `prompt_tokens` includes cached tokens; subtract so the
+
+		// Whichever family the body actually used. A response carries one or
+		// the other, never both, so summing would be wrong and preferring a
+		// fixed one would zero the other.
+		in, outTok, cached := msg.Usage.PromptTokens, msg.Usage.CompletionTokens, msg.Usage.PromptTokensDetails.CachedTokens
+		if in == 0 && outTok == 0 && cached == 0 {
+			in, outTok, cached = msg.Usage.InputTokens, msg.Usage.OutputTokens, msg.Usage.InputTokensDetails.CachedTokens
+		}
+
+		// Both families' input count INCLUDES cached tokens; subtract so the
 		// fresh-input number we feed to paymaster.Estimate is what gets
 		// billed at the input rate (cached gets the cached rate).
-		fresh := msg.Usage.PromptTokens - msg.Usage.PromptTokensDetails.CachedTokens
+		fresh := in - cached
 		if fresh < 0 {
 			fresh = 0
 		}
 		out.InputTokens = fresh
-		out.OutputTokens = msg.Usage.CompletionTokens
-		out.CachedInputTokens = msg.Usage.PromptTokensDetails.CachedTokens
+		out.OutputTokens = outTok
+		out.CachedInputTokens = cached
 		// OpenAI does not report cache-write tokens separately — they bill at
 		// the input rate, which our pricing.go reflects by setting
 		// CacheWritePerM equal to InputPerM for OpenAI rows.
@@ -162,6 +206,72 @@ func parseLLMUsage(provider, body string) LLMUsage {
 	}
 
 	return out
+}
+
+// parseLLMUsageSSE extracts the last/cumulative usage values from Server-Sent
+// Events without delaying delivery: the proxy tees bytes to the client while
+// retaining only a bounded copy, then calls this after EOF. Providers use
+// three common event shapes: a normal response object in data:, OpenAI
+// Responses' {response:{...}}, and Anthropic's {message:{...}} start event.
+func parseLLMUsageSSE(codec, body string) LLMUsage {
+	var out LLMUsage
+	var dataLines []string
+	flush := func() {
+		if len(dataLines) == 0 {
+			return
+		}
+		data := strings.Join(dataLines, "\n")
+		dataLines = dataLines[:0]
+		if data == "[DONE]" {
+			return
+		}
+		candidates := []string{data}
+		var envelope struct {
+			Response json.RawMessage `json:"response"`
+			Message  json.RawMessage `json:"message"`
+		}
+		if json.Unmarshal([]byte(data), &envelope) == nil {
+			if len(envelope.Response) > 0 {
+				candidates = append(candidates, string(envelope.Response))
+			}
+			if len(envelope.Message) > 0 {
+				candidates = append(candidates, string(envelope.Message))
+			}
+		}
+		for _, candidate := range candidates {
+			mergeLLMUsageMax(&out, parseLLMUsage(codec, candidate))
+		}
+	}
+
+	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		if line == "" {
+			flush()
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	flush()
+	return out
+}
+
+func mergeLLMUsageMax(dst *LLMUsage, src LLMUsage) {
+	if src.Model != "" {
+		dst.Model = src.Model
+	}
+	if src.InputTokens > dst.InputTokens {
+		dst.InputTokens = src.InputTokens
+	}
+	if src.OutputTokens > dst.OutputTokens {
+		dst.OutputTokens = src.OutputTokens
+	}
+	if src.CachedInputTokens > dst.CachedInputTokens {
+		dst.CachedInputTokens = src.CachedInputTokens
+	}
+	if src.CacheCreationTokens > dst.CacheCreationTokens {
+		dst.CacheCreationTokens = src.CacheCreationTokens
+	}
 }
 
 // parseQuotaInfo extracts the most-restrictive remaining-quota signal from

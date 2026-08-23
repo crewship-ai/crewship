@@ -1,0 +1,10 @@
+method POST
+scheme http
+url.host generativelanguage.googleapis.com
+req.host generativelanguage.googleapis.com
+path /v1/models/gemini-pro:generateContent
+rawpath 
+rawquery key=AIzaSyREALGOOGLEKEY
+target /v1/models/gemini-pro:generateContent?key=AIzaSyREALGOOGLEKEY
+requesturi ""
+header X-Goog-Api-Key: AIzaSyREALGOOGLEKEY

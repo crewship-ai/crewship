@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -18,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
+	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -703,6 +705,10 @@ type sidecarHealth struct {
 	// non-empty mismatch means this container was orphaned by a master rotation
 	// and now holds a permanently-rejected token.
 	TokenFP string `json:"token_fp"`
+	// ConfigFingerprint identifies the exact credential set the running
+	// sidecar received. It is keyed, not a plain secret hash, so the
+	// loopback health endpoint cannot become an offline credential oracle.
+	ConfigFingerprint string `json:"config_fingerprint"`
 }
 
 // sidecarHashReporter is the optional capability a ContainerProvider implements
@@ -828,8 +834,11 @@ func DomainsHash(domains []string) string {
 // pre-#1160 sidecar that doesn't report domains_hash) can't prove the
 // allowlist is unchanged, so it fails toward the old, safe-but-noisier
 // behaviour rather than risk skipping a genuinely-needed restart.
-func sidecarNeedsRestart(health *sidecarHealth, desiredMode string, desiredDomains []string) bool {
+func sidecarNeedsRestart(health *sidecarHealth, desiredMode string, desiredDomains []string, desiredConfigFingerprint string) bool {
 	if health.NetworkMode != desiredMode {
+		return true
+	}
+	if desiredConfigFingerprint != "" && health.ConfigFingerprint != desiredConfigFingerprint {
 		return true
 	}
 	if desiredMode != "restricted" {
@@ -872,6 +881,14 @@ type SidecarIPCConfig struct {
 	AgentToken string `json:"agent_token,omitempty"`
 }
 
+// SidecarRouteAuth lets the sidecar validate any agent's derived LLM route
+// token without receiving the process-wide master or a complete crew roster.
+// Key is independently scoped to this workspace/crew and cannot authorize
+// internal API calls.
+type SidecarRouteAuth struct {
+	Key string `json:"key"`
+}
+
 // SidecarCrewMember describes a crew member accessible to lead agents for assignment.
 type SidecarCrewMember struct {
 	ID        string `json:"id"`
@@ -901,41 +918,14 @@ func startSidecar(
 	creds []Credential,
 	memoryCfg *SidecarMemoryConfig,
 	ipcCfg *SidecarIPCConfig,
+	routeAuth *SidecarRouteAuth,
 	crewMembers []SidecarCrewMember,
 	networkPolicy *SidecarNetworkPolicy,
 	mcpServers []MCPServerConfig,
+	configFingerprint string,
 	logger *slog.Logger,
 ) error {
-	// Field names/tags must match sidecar.Credential — the sidecar unmarshals the
-	// boot payload straight into that type.
-	type sidecarCred struct {
-		ID       string `json:"id"`
-		Provider string `json:"provider"`
-		Token    string `json:"token"`
-		Priority int    `json:"priority"`
-		// LeaseExpiresAt hands the grant's #1373 lease deadline to the CredStore
-		// so a leased provider key stops being served when its TTL lapses,
-		// instead of living as long as the container.
-		LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
-	}
-
-	var sc []sidecarCred
-	for _, c := range creds {
-		prov := credTypeToProvider(c)
-		if prov == "" {
-			continue
-		}
-		sc = append(sc, sidecarCred{
-			ID:             c.ID,
-			Provider:       prov,
-			Token:          c.PlainValue,
-			Priority:       c.Priority,
-			LeaseExpiresAt: c.LeaseExpiresAt,
-		})
-	}
-	if len(sc) == 0 {
-		sc = []sidecarCred{}
-	}
+	sc := buildSidecarCreds(creds, logger)
 
 	// Build the input payload (new object format that includes memory config and IPC config)
 	type sidecarMCPServer struct {
@@ -950,12 +940,14 @@ func startSidecar(
 		Credential  *MCPCredential    `json:"credential,omitempty"`
 	}
 	type sidecarInput struct {
-		Credentials   []sidecarCred         `json:"credentials"`
-		Memory        *SidecarMemoryConfig  `json:"memory,omitempty"`
-		IPC           *SidecarIPCConfig     `json:"ipc,omitempty"`
-		CrewMembers   []SidecarCrewMember   `json:"crew_members,omitempty"`
-		NetworkPolicy *SidecarNetworkPolicy `json:"network_policy,omitempty"`
-		MCPServers    []sidecarMCPServer    `json:"mcp_servers,omitempty"`
+		Credentials       []sidecarCred         `json:"credentials"`
+		Memory            *SidecarMemoryConfig  `json:"memory,omitempty"`
+		IPC               *SidecarIPCConfig     `json:"ipc,omitempty"`
+		RouteAuth         *SidecarRouteAuth     `json:"route_auth,omitempty"`
+		CrewMembers       []SidecarCrewMember   `json:"crew_members,omitempty"`
+		NetworkPolicy     *SidecarNetworkPolicy `json:"network_policy,omitempty"`
+		MCPServers        []sidecarMCPServer    `json:"mcp_servers,omitempty"`
+		ConfigFingerprint string                `json:"config_fingerprint,omitempty"`
 	}
 
 	// Only pass HTTP servers to sidecar — stdio servers are handled
@@ -974,12 +966,14 @@ func startSidecar(
 	}
 
 	input := sidecarInput{
-		Credentials:   sc,
-		Memory:        memoryCfg,
-		IPC:           ipcCfg,
-		CrewMembers:   crewMembers,
-		NetworkPolicy: networkPolicy,
-		MCPServers:    mcpInput,
+		Credentials:       sc,
+		Memory:            memoryCfg,
+		IPC:               ipcCfg,
+		RouteAuth:         routeAuth,
+		CrewMembers:       crewMembers,
+		NetworkPolicy:     networkPolicy,
+		MCPServers:        mcpInput,
+		ConfigFingerprint: configFingerprint,
 	}
 
 	credsJSON, err := json.Marshal(input)
@@ -1059,12 +1053,189 @@ func startSidecar(
 	return nil
 }
 
+// sidecarCred is one credential as the sidecar's CredStore receives it. Field
+// names and JSON tags must match sidecar.Credential — the sidecar unmarshals the
+// boot payload straight into that type, so a tag that drifts here does not fail
+// to compile, it silently delivers a credential with a missing field.
+type sidecarCred struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider"`
+	Token    string `json:"token"`
+	Priority int    `json:"priority"`
+	// LeaseExpiresAt hands the grant's #1373 lease deadline to the CredStore
+	// so a leased provider key stops being served when its TTL lapses,
+	// instead of living as long as the container.
+	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	// BaseURL and Headers are the credential-supplied upstream for a provider
+	// whose endpoint is not a constant (OPENAI_COMPAT). omitempty keeps the
+	// payload byte-identical for every credential without them, so an older
+	// sidecar sees exactly the bytes it saw before these fields existed.
+	BaseURL string            `json:"base_url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// sidecarConfigFingerprint returns a secret-safe identity for the exact
+// credential configuration a run needs. The master internal token is the
+// HMAC key and never enters the container; /health exposes only the result, so
+// even a low-entropy custom-header value cannot be guessed offline. Agent
+// identity is deliberately separate: a route token is self-verifying under the
+// crew-bound route key, so agents with the same credentials can reuse safely.
+//
+// Empty key returns no fingerprint. Internal auth is required in production;
+// a test/dev deployment that explicitly omits it must not publish an unkeyed
+// digest of credentials merely to gain a restart optimisation. Such a legacy
+// deployment retains its pre-existing reuse behaviour; production config
+// always supplies the key.
+func sidecarConfigFingerprint(key string, creds []Credential) string {
+	if key == "" {
+		return ""
+	}
+	sc := buildSidecarCreds(creds, nil)
+	sort.SliceStable(sc, func(i, j int) bool {
+		if sc[i].ID != sc[j].ID {
+			return sc[i].ID < sc[j].ID
+		}
+		if sc[i].Provider != sc[j].Provider {
+			return sc[i].Provider < sc[j].Provider
+		}
+		return sc[i].Priority < sc[j].Priority
+	})
+	payload, err := json.Marshal(struct {
+		Credentials []sidecarCred `json:"credentials"`
+	}{Credentials: sc})
+	if err != nil {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte("crewship-sidecar-config-v1\x00"))
+	mac.Write(payload)
+	return hex.EncodeToString(mac.Sum(nil))[:24]
+}
+
+// credentialIsolationFailedOpen reports whether this run hands the sidecar a
+// proxy-servable provider credential that it cannot bind to a configuration
+// identity.
+//
+// sidecarConfigFingerprint returns "" when no internal token is configured, and
+// an empty fingerprint is what makes Proxy.authorizeLLMRoute skip the route-token
+// check entirely — every agent sharing the crew container could then reach
+// whichever credential the proxy currently serves.
+//
+// Defence in depth, not an operational state: config.Load cannot produce an
+// empty internal token (operator value, else derived from ENCRYPTION_KEY, else a
+// per-boot random), so a crewshipd-launched sidecar always carries a fingerprint.
+// This guards the invariant against a future path that reaches the orchestrator
+// without going through Load.
+//
+// The gate asks whether the credential is servable by the LLM proxy, not merely
+// whether the CredStore loads it. Those differ: CURSOR and FACTORY deliberately
+// have no llmroute spec (see credTypeToProvider), so buildSidecarCreds keeps them
+// for their CredStore counts while the proxy's only two Select calls — both
+// spec-keyed — can never hand them out. Gating on CredStore membership would
+// raise the isolation alarm for a run whose sole credential is CURSOR_API_KEY,
+// and an alarm that names an exposure nobody can reach is one operators learn to
+// skip past. The fingerprint test short-circuits, so this scan only runs on the
+// already-degraded path.
+func credentialIsolationFailedOpen(configFingerprint string, creds []Credential) bool {
+	if configFingerprint != "" {
+		return false
+	}
+	for _, sc := range buildSidecarCreds(creds, nil) {
+		// Lookup, not LookupProvider: sc.Provider is the canonical spec ID
+		// credTypeToProvider already resolved, not the free-text column.
+		if _, ok := llmroute.Lookup(sc.Provider); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// buildSidecarCreds maps the delivered credentials onto the sidecar boot
+// payload, dropping every credential the CredStore has no provider for.
+//
+// Package-level rather than inline in startSidecar so the payload the sidecar
+// actually receives can be asserted directly, instead of through a container
+// exec script.
+func buildSidecarCreds(creds []Credential, logger *slog.Logger) []sidecarCred {
+	sc := []sidecarCred{}
+	for _, c := range creds {
+		prov := credTypeToProvider(c)
+		if prov == "" {
+			// A credential the vault delivered but the CredStore will never
+			// hold. Most are correct drops (OAuth tokens, GitHub PATs, an
+			// agent's own SECRET), so this is not a warning — but before it was
+			// logged at all, a genuinely misrouted LLM key vanished here with
+			// no trace and surfaced only as a 401 from the upstream, which
+			// blames the key rather than the delivery.
+			if logger != nil {
+				logger.Debug("credential not routed to sidecar credstore",
+					"credential_id", c.ID, "env_var", c.EnvVarName,
+					"type", c.Type, "provider", c.Provider)
+			}
+			continue
+		}
+		sc = append(sc, sidecarCred{
+			ID:             c.ID,
+			Provider:       prov,
+			Token:          c.PlainValue,
+			Priority:       c.Priority,
+			LeaseExpiresAt: c.LeaseExpiresAt,
+			BaseURL:        c.BaseURL,
+			Headers:        c.Headers,
+		})
+	}
+	return sc
+}
+
 // credTypeToProvider maps orchestrator credential types to sidecar provider types.
 // AI_CLI_TOKEN (OAuth) returns "" — these are injected directly as CLAUDE_CODE_OAUTH_TOKEN
 // env var in BuildEnvVarsSidecar rather than stored in the sidecar CredStore, because
 // the sidecar CredStore only supports x-api-key injection which won't work for OAuth tokens.
+//
+// The env-var switch runs FIRST and unchanged, so every credential that reaches
+// the CredStore today reaches it identically. The provider column is consulted
+// ONLY when the switch returns "" — i.e. only in the case that silently dropped
+// the credential before. Strictly additive.
+//
+// The ordering is not an implementation detail. Preferring the column would
+// change where an existing credential lands whenever the two disagree (a row
+// with provider=OPENAI delivered under ANTHROPIC_API_KEY is legal today and
+// lands under ANTHROPIC), and that is a behaviour change for credentials that
+// work.
+//
+// CURSOR and FACTORY keep their env-var arms and deliberately have no llmroute
+// spec: they need CredStore counts but must not reach the reverse-proxy path,
+// where a provider with no descriptor would previously have been forwarded
+// upstream unauthenticated.
 func credTypeToProvider(c Credential) string {
-	switch c.EnvVarName {
+	// EXCEPT for a provider whose upstream comes from the credential, which the
+	// env-var switch must never claim. AddCredential accepts any syntactically
+	// valid env_var_name for any provider, so an OPENAI_COMPAT credential
+	// carrying OPENAI_API_KEY resolved to OPENAI here — while buildSidecarCreds
+	// kept its BaseURL and Headers. The sidecar routes OPENAI to a fixed host,
+	// ignores the BaseURL, and the operator's gateway token is sent to
+	// api.openai.com. The wrong upstream receives a working credential, which is
+	// worse than any delivery failure.
+	//
+	// This is not the behaviour change the ordering above warns about: no
+	// credential predating this change can carry an UpstreamFromCredential
+	// provider, because that provider value did not exist.
+	if s, ok := llmroute.LookupProvider(c.Provider); ok && s.UpstreamFromCredential {
+		return s.ID
+	}
+	if p := credProviderFromEnvVar(c.EnvVarName); p != "" {
+		return p
+	}
+	if s, ok := llmroute.LookupProvider(c.Provider); ok {
+		return s.ID
+	}
+	return ""
+}
+
+// credProviderFromEnvVar is the pre-phase-2 mapping, verbatim: a credential's
+// agent-facing variable name to the sidecar provider that serves it.
+func credProviderFromEnvVar(envVar string) string {
+	switch envVar {
 	case "ANTHROPIC_API_KEY":
 		return "ANTHROPIC"
 	case "OPENAI_API_KEY":

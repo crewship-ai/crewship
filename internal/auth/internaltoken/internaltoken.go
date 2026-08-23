@@ -37,6 +37,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"strings"
 )
@@ -162,6 +163,81 @@ func agentMAC(master, workspaceID, agentID string) string {
 // Prefix/AgentPrefix it is a public format marker, not a secret; the
 // middleware branches on it to pick the crew-binding validation path.
 const CrewPrefix = "crwv1"
+
+// RouteFingerprintDelimiter separates the per-agent token embedded in an LLM
+// proxy dummy key from the keyed fingerprint of the credential set that run
+// expects. It is public framing, not secret material.
+const RouteFingerprintDelimiter = "~cfp~"
+
+// LLMRoutePrefix marks a provider-route token that a sidecar can validate
+// without holding the process-wide master or a complete crew roster. The key
+// is independently derived for this purpose; the agent id is encoded rather
+// than trusted, and the HMAC binds it.
+const LLMRoutePrefix = "llmrv1"
+
+const llmRouteKeyContext = "crewship llm route key v1\x00"
+const llmRouteContext = "crewship llm route identity v1\x00"
+
+// DeriveLLMRouteKey returns a purpose-limited key for validating disposable
+// provider-route tokens in one workspace/crew sidecar. It is deliberately not
+// an internal-API bearer token: handing it to the sidecar grants no authority
+// outside LLM route-token validation. A crew-less run is scoped to the
+// workspace. Empty master/workspace input fails closed.
+func DeriveLLMRouteKey(master, workspaceID, crewID string) string {
+	if master == "" || workspaceID == "" {
+		return ""
+	}
+	m := hmac.New(sha256.New, []byte(master))
+	m.Write([]byte(llmRouteKeyContext))
+	m.Write([]byte(workspaceID))
+	m.Write([]byte{0})
+	m.Write([]byte(crewID))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// DeriveLLMRouteToken creates an agent identity for disposable provider keys.
+// routeKey stays in crewshipd + the UID-1002 sidecar; only the derived token is
+// placed in the UID-1001 agent environment.
+func DeriveLLMRouteToken(routeKey, agentID string) string {
+	if routeKey == "" || agentID == "" {
+		return ""
+	}
+	encodedID := base64.RawURLEncoding.EncodeToString([]byte(agentID))
+	return LLMRoutePrefix + "." + encodedID + "." + llmRouteMAC(routeKey, agentID)
+}
+
+// ValidateLLMRouteToken verifies a derived route token and returns its bound
+// agent id. It fails closed on malformed input or an empty route key.
+func ValidateLLMRouteToken(routeKey, routeValue string) (string, bool) {
+	if routeKey == "" {
+		return "", false
+	}
+	rest, ok := strings.CutPrefix(routeValue, LLMRoutePrefix+".")
+	if !ok {
+		return "", false
+	}
+	encodedID, sig, ok := strings.Cut(rest, ".")
+	if !ok || encodedID == "" || sig == "" || strings.Contains(sig, ".") {
+		return "", false
+	}
+	rawID, err := base64.RawURLEncoding.DecodeString(encodedID)
+	if err != nil || len(rawID) == 0 {
+		return "", false
+	}
+	agentID := string(rawID)
+	expected := llmRouteMAC(routeKey, agentID)
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+		return "", false
+	}
+	return agentID, true
+}
+
+func llmRouteMAC(routeKey, agentID string) string {
+	m := hmac.New(sha256.New, []byte(routeKey))
+	m.Write([]byte(llmRouteContext))
+	m.Write([]byte(agentID))
+	return hex.EncodeToString(m.Sum(nil))
+}
 
 // crewDerivationContext domain-separates the crew-binding HMAC
 // (DeriveCrewToken) from the workspace-binding, caller-identity, and

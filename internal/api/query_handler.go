@@ -591,6 +591,7 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 			EnvVarName:     d.EnvVar,
 			Priority:       d.Priority,
 			Type:           d.Type,
+			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 		}
 		dec, err := encryption.Decrypt(d.EncryptedValue)
@@ -601,6 +602,28 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 			continue
 		}
 		c.PlainValue = dec
+		// A provider whose upstream lives in the credential (OPENAI_COMPAT)
+		// stores {baseURL,apiKey,headers} as one object. PlainValue becomes the
+		// sidecar's bearer token, so the object has to be split here too — this
+		// loader carries the provider column exactly like the boot path, and
+		// without the split the base URL and every custom header would be sent
+		// upstream AS the secret.
+		//
+		// A malformed endpoint value FAILS the query, matching the decrypt
+		// branch above and the parts branch below rather than the `continue`
+		// used by the boot loader in assignments.go. The two loaders differ on
+		// purpose and this one is not free to choose: it already fails the whole
+		// peer query on a failed decrypt, so continuing here would start a run
+		// without its provider credential, and that run dies at the first model
+		// call with an error about something else. One policy per function, and
+		// this function's is stated three lines below.
+		if providerNeedsEndpointValue(d.Provider) {
+			token, baseURL, headers, perr := providerEndpointFromValue(d.Provider, dec)
+			if perr != nil {
+				return nil, fmt.Errorf("endpoint credential %s (provider %s): %w", c.ID, d.Provider, perr)
+			}
+			c.PlainValue, c.BaseURL, c.Headers = token, baseURL, headers
+		}
 		// The credential's parts (PRD §2.2), through the same opener. This
 		// loader's policy for a failed decrypt is to fail the whole peer query
 		// rather than to run one credential short, and a part is no different:

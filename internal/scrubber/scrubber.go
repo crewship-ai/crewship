@@ -32,8 +32,23 @@ var builtinPatterns = []pattern{
 	// Anthropic API keys: sk-ant-* (also covers sk-ant-oat for OAuth tokens)
 	{name: "anthropic_key", re: regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{10,}`)},
 
-	// OpenAI API keys: sk-proj-*, sk-svcacct-*, sk-{48+ chars}
-	{name: "openai_key", re: regexp.MustCompile(`sk-(?:proj|svcacct)-[a-zA-Z0-9_-]{10,}|sk-[a-zA-Z0-9]{20,}`)},
+	// OpenRouter (used by OpenCode multi-provider routing): sk-or-*. Ahead of
+	// openai_key because that pattern's sk-… fallback below now accepts `-` and
+	// `_` too and would otherwise swallow this one, relabelling an OpenRouter
+	// key as an OpenAI key. Redaction is what matters, but the marker names the
+	// provider an operator then goes and rotates.
+	{name: "openrouter_key", re: regexp.MustCompile(`sk-or-[a-zA-Z0-9_-]{20,}`)},
+
+	// OpenAI API keys: sk-proj-*, sk-svcacct-*, sk-{20+ chars}.
+	//
+	// The trailing fallback's character class includes `-` and `_` because the
+	// sk- prefix is not OpenAI's alone: every OpenAI-compatible gateway an
+	// operator can now point us at (LiteLLM, vLLM, an OpenRouter-style proxy)
+	// mints its own sk-… key, and those routinely carry separators —
+	// `sk-my_proxy-abc…` matched nothing at all under the alphanumeric-only
+	// class and survived in logs only where the bearer_token or "apiKey":
+	// patterns happened to cover the same text.
+	{name: "openai_key", re: regexp.MustCompile(`sk-(?:proj|svcacct)-[a-zA-Z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{20,}`)},
 
 	// Google API keys: AIzaSy...
 	{name: "google_key", re: regexp.MustCompile(`AIzaSy[a-zA-Z0-9_-]{33}`)},
@@ -45,9 +60,6 @@ var builtinPatterns = []pattern{
 
 	// Factory Droid API keys: fact_* / factory_* (per Factory CLI docs).
 	{name: "factory_key", re: regexp.MustCompile(`fact(?:ory)?_[a-zA-Z0-9_-]{20,}`)},
-
-	// OpenRouter (used by OpenCode multi-provider routing): sk-or-*
-	{name: "openrouter_key", re: regexp.MustCompile(`sk-or-[a-zA-Z0-9_-]{20,}`)},
 
 	// xAI / Grok keys: xai-*
 	{name: "xai_key", re: regexp.MustCompile(`xai-[a-zA-Z0-9]{20,}`)},

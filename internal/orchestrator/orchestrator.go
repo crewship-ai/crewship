@@ -56,8 +56,12 @@ type AgentRunRequest struct {
 	// Without it a link is invisible to the model: it cannot learn another
 	// crew is reachable, so it refuses the work or guesses a crew-local
 	// endpoint and reports the crew as unreachable.
-	ConnectedCrews  []ConnectedCrew
-	SkipSidecar     bool   // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	ConnectedCrews []ConnectedCrew
+	SkipSidecar    bool // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	// sidecarActive is set by ensureSidecar after the instance-level switch and
+	// SkipSidecar have both been applied. Adapter command builders use it to
+	// emit provider-specific routing only when the loopback proxy really exists.
+	sidecarActive   bool
 	ApprovalMode    string // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
 	SkipConvHistory bool   // When true, skip injecting conversation history (used by assignment sub-agents)
 	// SuppressSessionStream opts this run OUT of the automatic publication of
@@ -72,7 +76,7 @@ type AgentRunRequest struct {
 	AllowedDomains        []string          // Extra allowed domains for restricted mode
 	AllowPrivateEndpoints bool              // #961: crew opted in to reach a private/LAN model endpoint (RFC1918/loopback). Link-local/metadata stay blocked regardless.
 	LocalModelBaseURL     string            // OpenAI-compatible local model endpoint; resolved from an ENDPOINT_URL credential by the chat resolver (#955), with the CREWSHIP_LOCAL_MODEL_BASE_URL env as a deprecated fallback applied in RunAgent. Empty = local models disabled.
-	LocalModelAPIKey      string            // Optional bearer token for an authenticated local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.apiKey, never the agent env.
+	LocalModelAPIKey      string            // Optional bearer token for an authenticated local endpoint (#961). On the sidecar-routed path it is NOT emitted at all — options.apiKey carries a dummy and the real key is held by the sidecar's CredStore. On the direct path it is inlined into OPENCODE_CONFIG_CONTENT, which IS an agent env var, so the key is visible in the container. See localModelConfigEnv.
 	LocalModelHeaders     map[string]string // Optional custom headers for the local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.headers.
 	MemoryMB              int
 	CPUs                  float64
@@ -167,6 +171,23 @@ type Credential struct {
 	// USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL. See
 	// internal/api/credentials_types.go for the closed enum.
 	Type string `json:"type,omitempty"`
+	// Provider is credentials.provider as delivered by the API tier: the
+	// service label, UPPERCASE, equal to llmroute.Spec.ID for a routable LLM
+	// provider and free-form ("GITHUB", "NONE", "") for everything else.
+	//
+	// It exists because a credential's agent-facing env-var name is not a
+	// reliable provider identity — OPENROUTER_API_KEY names no arm of
+	// credTypeToProvider's switch, so before this field an OpenRouter
+	// credential stored perfectly was dropped on the way to the sidecar. It is
+	// consulted ONLY when that switch declines; see credTypeToProvider.
+	Provider string `json:"provider,omitempty"`
+	// BaseURL and Headers carry the upstream for a provider whose endpoint is
+	// part of the credential rather than a constant (llmroute
+	// UpstreamFromCredential — OPENAI_COMPAT). Empty for every other
+	// credential. PlainValue holds the bare token in that case, never the
+	// stored {baseURL,apiKey,headers} object.
+	BaseURL string            `json:"base_url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 	// Username is the cleartext identifier half of a USERPASS credential
 	// (e.g. "user@gmail.com"). Empty for all other types. Kept separate
 	// from PlainValue so the env-var pair X_USERNAME / X_PASSWORD can
@@ -312,7 +333,12 @@ type Orchestrator struct {
 	// CREWSHIP_LOCAL_MODEL_BASE_URL env fallback at most once per process so
 	// it doesn't spam the log on every run.
 	localModelEnvFallbackWarned sync.Once
-	statsRegister               StatsRegisterFunc
+	// credentialIsolationFailOpenWarned fires once per process when a run
+	// carries routed provider credentials but no internal token, so
+	// sidecarConfigFingerprint returns "" and authorizeLLMRoute's per-agent
+	// isolation degrades to the legacy fail-open path (#2047/#2051).
+	credentialIsolationFailOpenWarned sync.Once
+	statsRegister                     StatsRegisterFunc
 	// crewTTL and containerBusy are the reaper's two injected inputs; see the
 	// type docs. Both nil-safe: with neither wired the reaper falls back to
 	// the TTL each run registered, which is the pre-#1662 behaviour.
@@ -382,6 +408,12 @@ type Orchestrator struct {
 	// per-run logger.Error is kept unconditionally for local stdout tails.
 	// Zero-value sync.Map is usable, so tests with a bare Orchestrator work.
 	staleSidecarJournaled sync.Map
+
+	// crewEgressExtras holds one *crewEgressExtras per container ID, carrying
+	// the per-agent half of the restricted-mode allowlist so every member of a
+	// crew computes the same desired set — see crewDesiredDomains
+	// (sidecar_domains.go). Zero-value works.
+	crewEgressExtras sync.Map
 
 	// sidecarLifecycleLocks holds one *sync.Mutex per container ID,
 	// serializing the sidecar check→decide→pkill→start sequence across
@@ -1292,6 +1324,30 @@ func (o *Orchestrator) warnLocalModelEnvFallbackOnce() {
 	o.localModelEnvFallbackWarned.Do(func() {
 		o.logger.Warn("local-model endpoint sourced from deprecated CREWSHIP_LOCAL_MODEL_BASE_URL env; " +
 			"migrate to an ENDPOINT_URL credential (crewship credential create --type ENDPOINT_URL --provider OLLAMA --value <url>)")
+	})
+}
+
+// warnCredentialIsolationFailOpenOnce logs a one-time warning when a run hands
+// the shared sidecar a proxy-servable provider credential with no internal
+// token configured. sidecarConfigFingerprint then returns "" and
+// authorizeLLMRoute cannot bind requests to a specific credential set, so a
+// concurrent agent sharing the same crew container could reach whichever
+// credential the proxy currently serves.
+//
+// This is an invariant tripwire, not an operational state: config.Load always
+// leaves Auth.InternalToken populated (operator value, else derived from
+// ENCRYPTION_KEY, else a per-boot random), so a server started through it
+// cannot reach here. Firing means something built an Orchestrator on a path
+// that bypassed Load — which is a bug to find, not a knob for an operator to
+// turn — so the message says so rather than sending them hunting a setting
+// they never had a way to omit.
+func (o *Orchestrator) warnCredentialIsolationFailOpenOnce(agentID string) {
+	o.credentialIsolationFailOpenWarned.Do(func() {
+		o.logger.Warn("sidecar credential isolation is fail-open: no internal token, so no config fingerprint "+
+			"binds a request to a credential set and a concurrent agent in the same crew container could reach "+
+			"another agent's provider credential. config.Load always populates auth.internal_token "+
+			"(CREWSHIP_INTERNAL_TOKEN), so reaching this means the server was built bypassing it — report it "+
+			"rather than reconfiguring", "agent_id", agentID)
 	})
 }
 
