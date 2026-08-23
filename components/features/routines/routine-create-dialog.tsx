@@ -592,7 +592,11 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         ? "fork one of your own routines"
         : mode === "advanced"
           ? "Editor — test-run, then save"
-          : undefined
+          // The entry screen had no subtitle, so three tiles appeared with
+          // nothing saying they are three routes to the same place. People
+          // read a picker as "which kind am I making", and the answer is that
+          // it does not matter — pick the one whose inputs you already have.
+          : "Three ways in. All three land on the same routine — pick the one you have inputs for."
 
   // The shell's discard guard — Esc and an overlay click ask before throwing
   // input away, and the header's × asks too. The starter template the editor

@@ -450,18 +450,21 @@ export function CreateAgentDialog({
                 />
               </CreateSurfaceField>
 
-              <CreateSurfaceField label="Role" htmlFor="agent-role">
-                <select
-                  id="agent-role"
+              {/* A chip row, like Tool profile further down this same form.
+                  Two short options is the case the kit's own note says a
+                  <select> loses: both are visible without opening anything,
+                  each hint explains the role rather than stating a limit, and
+                  the tap target is the chip instead of a 16px caret. */}
+              <CreateSurfaceField label="Role">
+                <CreateSurfaceChoice
+                  ariaLabel="Agent role"
                   value={draft.agentRole}
-                  onChange={(e) => {
-                    setDraft({ ...draft, agentRole: e.target.value as typeof draft.agentRole })
-                  }}
-                  className={INPUT_CLASS}
-                >
-                  <option value="AGENT">Agent</option>
-                  <option value="LEAD">Lead (1 per crew)</option>
-                </select>
+                  onChange={(agentRole) => setDraft({ ...draft, agentRole })}
+                  options={[
+                    { value: "AGENT", label: "Agent", hint: "Works on what it is given" },
+                    { value: "LEAD", label: "Lead", hint: "Can plan and delegate to the crew" },
+                  ]}
+                />
               </CreateSurfaceField>
 
               <CreateSurfaceField

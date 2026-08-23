@@ -224,11 +224,11 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 
       <div ref={footerRef} className="shrink-0">
         <CreateSurfaceFooter
-          hint={
-            step === 4
-              ? "⌘+Enter to confirm · Esc cancel"
-              : `Step ${step} of 4 · ⌘+Enter to continue`
-          }
+          // No step counter here. CreateSurfaceSteps already states the
+          // position twice over — the numbered chips on a pointer device, and
+          // "3 / 4" beside a progress bar on a phone — and the header's meta
+          // says it a third time. The footer's job is the keyboard hint.
+          hint={step === 4 ? "⌘+Enter to confirm · Esc cancel" : "⌘+Enter to continue"}
           onCancel={() => onOpenChange(false)}
           secondary={
             step === 3 ? (

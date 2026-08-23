@@ -235,4 +235,43 @@ describe("CreateAgentDialog", () => {
       expect(props.onOpenChange).not.toHaveBeenCalled()
     })
   })
+
+  // -- Role is a choice, not a dropdown -----------------------------------
+  //
+  // Two options, both short. The kit's own note on CreateSurfaceChoice says
+  // that beats a <select>: every option is visible without opening anything,
+  // and on a phone the target is the whole chip rather than a 16px caret.
+  // Tool profile further down this same form already used it, so the form
+  // disagreed with itself — and /design's specimen for this door shows the
+  // chip row.
+  describe("the Role control", () => {
+    it("offers both roles as visible options rather than a dropdown", async () => {
+      renderDialog()
+      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent/ })).toBeInTheDocument())
+
+      expect(screen.getByRole("radio", { name: /^Agent/ })).toHaveAttribute("aria-checked", "true")
+      expect(screen.getByRole("radio", { name: /^Lead/ })).toHaveAttribute("aria-checked", "false")
+      // The <select> it replaces.
+      expect(document.querySelector("#agent-role")).toBeNull()
+    })
+
+    it("says what each role does instead of parenthesising a limit", async () => {
+      renderDialog()
+      const lead = await screen.findByRole("radio", { name: /^Lead/ })
+      // CreateSurfaceChoice carries a hint as `title`, so this is a tooltip
+      // rather than visible text — a real limitation on touch, but it is the
+      // kit's behaviour for all twelve doors and not something to fork here.
+      // What matters for this door is that the hint states the capability;
+      // "Lead (1 per crew)" stated the limit and not what a Lead can do.
+      expect(lead).toHaveAttribute("title", expect.stringMatching(/plan and delegate/i))
+    })
+
+    it("switches role on click", async () => {
+      renderDialog()
+      fireEvent.click(await screen.findByRole("radio", { name: /^Lead/ }))
+      await waitFor(() =>
+        expect(screen.getByRole("radio", { name: /^Lead/ })).toHaveAttribute("aria-checked", "true"),
+      )
+    })
+  })
 })
