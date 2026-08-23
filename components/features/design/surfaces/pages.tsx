@@ -15,44 +15,64 @@
  */
 
 import * as React from "react"
-import { AlertTriangle, Eye, FileJson, LayoutTemplate, Upload, Wand2 } from "lucide-react"
+import { AlertTriangle, Eye, FileJson, Save, Upload, Wand2 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
 import {
   CreateSurfaceBody,
-  CreateSurfaceChoice,
   CreateSurfaceDropzone,
   CreateSurfaceField,
   CreateSurfaceFooter,
-  CreateSurfaceGrid,
   CreateSurfaceHeader,
   CreateSurfaceNotice,
+  CreateSurfaceRefusal,
   CreateSurfaceSecondaryAction,
   CreateSurfaceSection,
-  CreateSurfaceTitleInput,
-  CreateSurfaceToggleRow,
 } from "@/components/layout/create-surface"
 
-/* ══ Pages → New page ═══════════════════════════════════════════════════ */
+/* ══ Pages → New page ═══════════════════════════════════════════════════
+ *
+ * The first version of this specimen was a FORM — name, slug, visibility, a
+ * plain textarea, a live toggle. That is not what the door opens. The real
+ * surface (page-editor.tsx, 1116 lines) is a CodeMirror YAML buffer holding a
+ * `crewship/v1` Page document, with no form controls at all: everything beside
+ * the buffer is read out of it.
+ *
+ * The agent migrating it said so plainly — "the specimen is a different surface
+ * entirely… if it is meant as a redesign proposal it should say so, because it
+ * reads as the target". It read as the target, and a specimen that misdescribes
+ * the thing it proposes to replace moves the migration in the wrong direction.
+ * This is the third time I drew a shipped surface poorer or other than it is
+ * (credential shapes, the crew base image, this), and all three had the same
+ * cause: I did not read the component closely enough before drawing it.
+ *
+ * So this now shows the real shape — one buffer, the advisory bands that sit
+ * above it, and the footer — rather than a form nobody asked for.
+ * ══════════════════════════════════════════════════════════════════════ */
 
-const STARTER_YAML = `name: Fleet health
-panels:
-  - type: stat
-    title: Runs today
-    query: runs.count(since: "24h")
-  - type: table
-    title: Failing routines
-    query: routines.failing()`
+const PAGE_DOCUMENT = `apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: fleet-health
+  title: Fleet health
+spec:
+  panels:
+    - id: runs-today
+      schema: metric.v1
+      title: Runs today
+      sla: 5m
+      span: 3
+    - id: failing
+      schema: table.v1
+      title: Failing routines
+      span: 9
+      actions:
+        - label: Re-run all
+          routine: nightly-sweep`
 
 export function NewPageContent({ onClose }: { onClose: () => void }) {
-  const [name, setName] = React.useState("")
-  const [slug, setSlug] = React.useState("")
-  const [visibility, setVisibility] = React.useState<"private" | "workspace" | "public">("workspace")
-  const [yaml, setYaml] = React.useState(STARTER_YAML)
-  const [live, setLive] = React.useState(true)
-
-  const derived = slug || name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+  const [doc, setDoc] = React.useState(PAGE_DOCUMENT)
+  const dirty = doc !== PAGE_DOCUMENT
 
   return (
     <>
@@ -60,74 +80,55 @@ export function NewPageContent({ onClose }: { onClose: () => void }) {
         concept="pages"
         context="Pages"
         title="New page"
-        description="A page is panels on a grid. Write the YAML, or start from the template and edit it."
         onClose={onClose}
+        meta={
+          <span className="flex items-center gap-2">
+            <span className="rounded border border-hairline bg-foreground/[0.05] px-1.5 py-px font-mono text-[10px]">
+              kind: Page
+            </span>
+            {dirty && <span className="text-warn">unsaved</span>}
+          </span>
+        }
       />
 
-      <CreateSurfaceBody className="space-y-5">
-        <CreateSurfaceSection title="Identity" icon={LayoutTemplate} accent="green">
-          <CreateSurfaceTitleInput
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Page name"
-          />
-          <CreateSurfaceGrid>
-            <CreateSurfaceField label="Slug" htmlFor="page-slug" required hint="The URL this page lives at.">
-              <Input
-                id="page-slug"
-                value={derived}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="fleet-health"
-                className="h-8 font-mono text-xs max-sm:h-12 max-sm:text-sm"
-              />
-            </CreateSurfaceField>
-            <CreateSurfaceField label="Visible to">
-              <CreateSurfaceChoice
-                ariaLabel="Visibility"
-                value={visibility}
-                onChange={setVisibility}
-                options={[
-                  { value: "private", label: "Me" },
-                  { value: "workspace", label: "Workspace" },
-                  { value: "public", label: "Public link" },
-                ]}
-              />
-            </CreateSurfaceField>
-          </CreateSurfaceGrid>
-          {visibility === "public" && (
-            <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
-              A public page is readable by anyone with the link, without signing in. Panels that read
-              credentials refuse to render there.
-            </CreateSurfaceNotice>
-          )}
-        </CreateSurfaceSection>
+      {/* The advisory bands sit ABOVE the buffer and outside the scrollport,
+          because they warn about data loss. The kit has no band slot here yet
+          — the migration hand-rolled these, and it is gap #19 on the list. */}
+      <div className="shrink-0 border-b border-hairline bg-warn/[0.06] px-4 py-2 sm:px-5">
+        <span className="flex items-start gap-2 text-[11px] leading-relaxed text-foreground/85">
+          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-warn" />
+          Saving replaces the panel list. A panel you cannot see here would be deleted.
+        </span>
+      </div>
 
-        <CreateSurfaceSection title="Definition" icon={FileJson} accent="teal" hint="YAML">
-          <textarea
-            value={yaml}
-            onChange={(e) => setYaml(e.target.value)}
-            rows={12}
-            spellCheck={false}
-            aria-label="Page definition"
-            className="w-full resize-none rounded-lg border border-hairline bg-background p-2.5 font-mono text-[11px] leading-relaxed text-foreground/85 outline-none focus:border-primary"
-          />
-        </CreateSurfaceSection>
-
-        <CreateSurfaceToggleRow
-          concept="activity"
-          label="Live"
-          hint="Panels re-query on their own schedule. Off renders once and shows the timestamp it was rendered at."
-          control={<Switch checked={live} onCheckedChange={setLive} />}
+      <CreateSurfaceBody padded={false} scroll={false} className="flex flex-col">
+        <textarea
+          value={doc}
+          onChange={(e) => setDoc(e.target.value)}
+          spellCheck={false}
+          aria-label="Page document"
+          className="min-h-[320px] flex-1 resize-none bg-background p-4 font-mono text-[11px] leading-relaxed text-foreground/85 outline-none sm:p-5"
         />
       </CreateSurfaceBody>
 
+      <CreateSurfaceRefusal
+        tone="info"
+        message={
+          <>
+            The real surface is CodeMirror with schema completion and an inline linter, not a textarea — this
+            specimen shows the SHAPE. Six panel schemas are available:{" "}
+            <span className="font-mono">metric · series · status · table · narrative · embed</span>.
+          </>
+        }
+      />
+
       <CreateSurfaceFooter
-        hint="The definition is validated before the page is written."
+        hint="The document is validated before the page is written."
         onCancel={onClose}
+        guardCancel
         secondary={<CreateSurfaceSecondaryAction icon={Eye}>Preview</CreateSurfaceSecondaryAction>}
         primaryLabel="Create page"
-        primaryDisabled={!name.trim() || !derived}
+        primaryIcon={Save}
         onPrimary={onClose}
       />
     </>

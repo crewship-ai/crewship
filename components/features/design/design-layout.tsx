@@ -782,9 +782,16 @@ const SHELL_LABEL: Record<Shell, { text: string; className: string }> = {
 function AuditTable() {
   return (
     <section className="space-y-3">
-      <SectionHead icon={ListChecks} title="What each door opens today" hint="read out of the source, 2026-08-23">
-        Every row was read out of the component named in it. Amber is a divergence worth naming; red is one a
-        user can see without being told what to look for.
+      <SectionHead
+        icon={ListChecks}
+        title="What each door used to open"
+        hint={`all ${DIVERGENCE.migrated} of ${DIVERGENCE.doors} have since landed on the shell`}
+      >
+        Every row was read out of the component named in it, and every row is now history: all twelve doors
+        mount the shared shell. The before is kept rather than rewritten, because the argument for the shell IS
+        the eleven widths and the two overlays — an audit that erases itself as the work lands leaves this page
+        asserting a conclusion with nothing behind it. Amber was a divergence worth naming; red was one a user
+        could see without being told what to look for.
       </SectionHead>
 
       <div className="overflow-x-auto rounded-xl border border-hairline bg-card">
@@ -834,15 +841,38 @@ function AuditTable() {
                     <Mark ok={d.mobile} />
                   </td>
                   <td className="px-3 py-2">
-                    <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary-hover">
-                      {d.proposed}
-                    </span>
+                    {d.migrated ? (
+                      <span
+                        title={d.migrated.note}
+                        className="flex items-center gap-1 whitespace-nowrap rounded border border-success/30 bg-success/10 px-1.5 py-0.5 font-mono text-[10px] text-success"
+                      >
+                        <Check className="h-3 w-3" />
+                        {d.proposed}
+                      </span>
+                    ) : (
+                      <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary-hover">
+                        {d.proposed}
+                      </span>
+                    )}
                   </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {AUDIT_ROWS.filter((d) => d.migrated?.note).map((d) => (
+          <div key={`${d.page}-${d.action}`} className="rounded-lg border border-hairline bg-card p-3">
+            <div className="flex items-center gap-1.5">
+              <Check className="h-3 w-3 shrink-0 text-success" />
+              <span className="text-[11px] font-medium text-foreground">
+                {d.page} → {d.action}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{d.migrated!.note}</p>
+          </div>
+        ))}
       </div>
     </section>
   )

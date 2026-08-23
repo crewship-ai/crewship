@@ -107,8 +107,8 @@ export const DOORS: Door[] = [
     concept: "pages",
     size: "xl",
     archetype: "Compose",
-    blurb: "The widest surface in the product. Loses the backdrop blur and gains a focus trap.",
-    fields: ["name", "slug", "visibility", "definition (YAML)", "live"],
+    blurb: "A YAML document editor, not a form — the specimen said otherwise and was wrong. Loses the backdrop blur and gains a focus trap.",
+    fields: ["the page document (apiVersion, kind, metadata, spec.panels)"],
     Content: NewPageContent,
   },
   {

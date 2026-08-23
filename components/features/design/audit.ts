@@ -1,13 +1,19 @@
 /**
- * What every SubBar action actually opens today.
+ * What every SubBar action USED to open, and what it opens now.
  *
  * Read out of the components on 2026-08-23, not remembered. Each row names the
- * file so a claim here can be checked against the source in one jump, and so
- * the row stops being true the moment somebody fixes it.
+ * file so a claim here can be checked against the source in one jump.
  *
- * The DOORS are already unified — every one of these is a `SubBarPrimary` or
- * `SubBarSecondary` in the same row, at the same height, in the same order
- * (sub-bar.tsx). What is behind them is not, and this table is the argument.
+ * All twelve have since landed on the shared shell. The rows describe the
+ * BEFORE and are kept that way on purpose: the argument for the shell is the
+ * eleven widths, the three shells and the two overlays, and an audit that
+ * rewrites itself as the work lands leaves the page asserting a conclusion
+ * with nothing behind it. `migrated` carries the after.
+ *
+ * The DOORS were already unified before any of this — every one is a
+ * `SubBarPrimary` or `SubBarSecondary` in the same row, at the same height, in
+ * the same order (sub-bar.tsx). What sat behind them was not, and this table
+ * is why.
  */
 
 export type Shell =
@@ -35,6 +41,15 @@ export interface Door {
   mobile: boolean
   /** What it should become. */
   proposed: string
+  /**
+   * Landed on the shared shell.
+   *
+   * The row STAYS, describing what the door used to be. An audit that rewrites
+   * itself as the work lands stops being evidence — the argument for the shell
+   * IS the eleven widths and the two overlays, and deleting them once they are
+   * gone leaves a page asserting a conclusion with nothing behind it.
+   */
+  migrated?: { on: string; note?: string }
 }
 
 export const DOORS: Door[] = [
@@ -48,6 +63,7 @@ export const DOORS: Door[] = [
     cmdEnter: true,
     mobile: false,
     proposed: "md · reference",
+    migrated: { on: "2026-08-23", note: "The reference. Its shape became the shell; its pills, popovers and Create-more switch lifted across unchanged." },
   },
   {
     page: "Issues",
@@ -59,6 +75,7 @@ export const DOORS: Door[] = [
     cmdEnter: true,
     mobile: false,
     proposed: "md",
+    migrated: { on: "2026-08-23", note: "Pill row moved below the description into the slot the shell has for it — a visible reorder, flagged rather than hidden." },
   },
   {
     page: "Routines",
@@ -70,6 +87,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "lg · fixed",
+    migrated: { on: "2026-08-23", note: "Pinned at lg. CodeMirror, the YAML/JSON conversion and the /test_run → saveToken → /save chain survived intact." },
   },
   {
     page: "Routines",
@@ -81,6 +99,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "sm",
+    migrated: { on: "2026-08-23", note: "Now sm. The collision rule is a control instead of a paragraph." },
   },
   {
     page: "Pages",
@@ -92,6 +111,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "xl",
+    migrated: { on: "2026-08-23", note: "The blur and the hand-rolled overlay are gone, and it gained a focus trap it never had. First real user of the dirty guard." },
   },
   {
     page: "Pages",
@@ -103,6 +123,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "sm",
+    migrated: { on: "2026-08-23", note: "Keeps the unresolved-reference worklist, and is the first real user of CreateSurfaceRefusal's field list." },
   },
   {
     page: "Crews",
@@ -114,6 +135,7 @@ export const DOORS: Door[] = [
     cmdEnter: true,
     mobile: false,
     proposed: "lg · fixed",
+    migrated: { on: "2026-08-23", note: "Width pinned at lg, so the template browser lost ~70px of card width. The 680 → 940 jump mid-flow is gone." },
   },
   {
     page: "Crews",
@@ -125,6 +147,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "md",
+    migrated: { on: "2026-08-23", note: "All sixteen fields of createAgentRequest verified present against the Go struct after the move." },
   },
   {
     page: "Skills",
@@ -136,6 +159,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "sm",
+    migrated: { on: "2026-08-23", note: "Three sources behind one door, on the shell's Choice instead of a Radix tab strip." },
   },
   {
     page: "Credentials",
@@ -147,6 +171,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: true,
     proposed: "md",
+    migrated: { on: "2026-08-23", note: "The one door that already handled a phone. Its full-screen takeover became the shared bottom sheet — less vertical room, thumb-reachable primary." },
   },
   {
     page: "Credentials",
@@ -158,6 +183,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "sm",
+    migrated: { on: "2026-08-23", note: "On the shell, but its primary is still inside the scrollport: OAuthForm draws its own actions and is shared with the MCP picker." },
   },
   {
     page: "Integrations",
@@ -169,6 +195,7 @@ export const DOORS: Door[] = [
     cmdEnter: false,
     mobile: false,
     proposed: "xl",
+    migrated: { on: "2026-08-23", note: "Kind → service kept. Renders no primary, which the shell now allows rather than treating as a contradiction." },
   },
 ]
 
@@ -178,6 +205,7 @@ export const DOORS: Door[] = [
  */
 export const DIVERGENCE = {
   doors: DOORS.length,
+  migrated: DOORS.filter((d) => d.migrated).length,
   shells: new Set(DOORS.map((d) => d.shell)).size,
   widths: new Set(DOORS.flatMap((d) => d.width.split(" → "))).size,
   overlays: new Set(DOORS.map((d) => (d.shell === "hand-rolled-blur" ? "blur" : "dim"))).size,
