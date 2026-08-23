@@ -33,8 +33,14 @@ describe("create-crew/types", () => {
       expect(INITIAL_STATE.ttlHours).toBeNull()
     })
 
-    it("starts in restricted network mode (fail-safe default, matches backend)", () => {
-      expect(INITIAL_STATE.networkMode).toBe("restricted")
+    // Not the backend's fail-safe, on purpose. The server still writes
+    // `restricted` for any caller that says nothing (crew_defaults.go); the
+    // wizard is not that caller — it asks, and what it proposes is the
+    // product decision: open now, throttled later, with the allowlist built
+    // and one switch away. An allowlist that is still maturing fails as a
+    // silent timeout deep inside a run.
+    it("proposes open egress, with nothing listed", () => {
+      expect(INITIAL_STATE.networkMode).toBe("free")
       expect(INITIAL_STATE.allowedDomains).toEqual([])
     })
   })

@@ -1,6 +1,6 @@
 import type { CrewTemplateAgent } from "./api"
 
-export type WizardStep = 1 | 2 | 3 | 4 | 5
+export type WizardStep = 1 | 2 | 3 | 4
 
 export type LineupMode = "browse" | "empty"
 
@@ -79,11 +79,19 @@ export const INITIAL_STATE: WizardState = {
   memoryMB: 4096,
   cpus: 2,
   ttlHours: null,
-  // Fail-safe default matches the backend: a wizard-created crew is restricted
-  // (empty allowlist → LLM/CLI providers still reach via DefaultAllowedDomains).
-  // Without this the dashboard's submit always sent network_mode:"free"
-  // explicitly, so the API's restricted default never applied to the main path.
-  networkMode: "restricted",
+  // Open, and said out loud.
+  //
+  // This was "restricted" so the wizard would inherit the backend's fail-safe
+  // (database/crew_defaults.go), which is the right default for a code path
+  // that forgets to choose. The wizard is not that path: it asks, and the
+  // answer it proposes is the product decision — open now, throttled later,
+  // with the allowlist built and one switch away. An allowlist that is still
+  // maturing fails as a silent timeout deep inside a run, and defaulting to
+  // it hands every new crew that failure shape.
+  //
+  // The server constant is untouched on purpose: anything that creates a crew
+  // WITHOUT saying what it wants still gets restricted.
+  networkMode: "free",
   allowedDomains: [],
   runtimeImage: "",
   devcontainerConfig: "",

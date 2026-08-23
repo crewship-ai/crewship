@@ -117,7 +117,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     expect(screen.getByRole("button", { name: /Continue/ })).toBeDisabled()
   })
 
-  it("Step 2 — empty mode → Step 3 → Step 4 → Review → submit POSTs only /api/v1/crews once", async () => {
+  it("empty mode → Container → Review → submit POSTs only /api/v1/crews once", async () => {
     const calls = setupFetch([
       // Templates list
       (c) => c.url.includes("/crew-templates") && !c.url.includes("/deploy")
@@ -147,9 +147,8 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
     // Step 3 — Runtime defaults are valid → continue
     await waitFor(() => {
-      expect(screen.getByText("Container resources")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     // Step 4 — Container (optional) — skip via Skip-to-defaults to keep this happy
     // path from depending on RuntimeConfig / MCPConfigEditor mounting cleanly.
@@ -186,7 +185,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       color: expect.any(String),
       container_memory_mb: expect.any(Number),
       container_cpus: expect.any(Number),
-      network_mode: "restricted", // fail-safe default (wizard INITIAL_STATE)
+      network_mode: "free", // what the Container step proposes, and shows
     })
   })
 
@@ -223,9 +222,8 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
     // Step 3
     await waitFor(() => {
-      expect(screen.getByText("Container resources")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     // Step 4 — skip Container customisation
     await waitFor(() => {
@@ -297,8 +295,6 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByText("Container resources"))
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
     await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
@@ -333,9 +329,8 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
     await waitFor(() => {
-      expect(screen.getByText("Container resources")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
     // Step 4 — skip
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
@@ -354,7 +349,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })
 
-  it("Skip to defaults on Step 4 jumps directly to Review (Step 5)", async () => {
+  it("Skip to defaults on the Container step jumps directly to Review", async () => {
     setupFetch([
       (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
     ])
@@ -371,11 +366,10 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 2 → 3
     await waitFor(() => {
-      expect(screen.getByText("Container resources")).toBeInTheDocument()
+      expect(screen.getByText("Image and tooling")).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 3 → 4
 
-    // On Step 4, Skip-to-defaults is visible and jumps straight to Review.
+    // On Container, Skip-to-defaults is visible and jumps straight to Review.
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
     })

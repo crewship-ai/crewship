@@ -51,6 +51,16 @@ interface RuntimeConfigProps {
   /** Gates the privileged toggle in the Security tab (admin + workspace
    *  allow_privileged_credentials). Everything else stays editable. */
   canEditPrivileged?: boolean
+  /**
+   * Height of the feature / runtime browsers.
+   *
+   * 420px is right on the crew's Runtime tab, where this component owns the
+   * page. Inside the create wizard it is not alone on the step — Network and
+   * Size follow it — and a 420px list pushed both about two screens down.
+   * The caller says how much room it can spare rather than the component
+   * assuming it has the room it used to.
+   */
+  browserHeight?: string
 }
 
 interface CatalogFeature {
@@ -88,7 +98,7 @@ function extractRuntimes(json: unknown): RuntimeEntry[] {
 }
 
 
-export function RuntimeConfig({ value, onChange, canEditPrivileged = false }: RuntimeConfigProps) {
+export function RuntimeConfig({ value, onChange, canEditPrivileged = false, browserHeight = "420px" }: RuntimeConfigProps) {
   // Parse initial state from value
   const initialDC = useMemo(() => parseDevcontainerConfig(value.devcontainerConfig), [value.devcontainerConfig])
   const initialFull = useMemo(() => parseDevcontainerFull(value.devcontainerConfig), [value.devcontainerConfig])
@@ -569,7 +579,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false }: Ru
               ))}
             </div>
           ) : (
-            <ScrollArea className="h-[420px] rounded-md border border-border/40 bg-card/30">
+            <ScrollArea style={{ height: browserHeight }} className="rounded-md border border-border/40 bg-card/30">
               <div className="divide-y divide-border/40">
                 {filteredCatalog.map((feature) => {
                   const isSelected = feature.ref in selectedFeatures
@@ -727,7 +737,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false }: Ru
               ))}
             </div>
           ) : (
-            <ScrollArea className="h-[420px] rounded-md border border-border/40 bg-card/30">
+            <ScrollArea style={{ height: browserHeight }} className="rounded-md border border-border/40 bg-card/30">
               <div className="divide-y divide-border/40">
                 {filteredRuntimes.map((entry) => {
                   const isEnabled = entry.tool in miseTools

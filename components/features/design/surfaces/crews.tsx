@@ -514,11 +514,11 @@ export function NewCrewContent({ onClose }: { onClose: () => void }) {
                 <span className="inline-flex items-center gap-1.5">
                   Network
                   <Info>
-                    <strong className="text-foreground">Open is a proposal, not the shipped default.</strong>{" "}
-                    The server writes <code className="font-mono">restricted</code> on every create path today
-                    (<code className="font-mono">database/crew_defaults.go:13</code>) so a new code path cannot
-                    reintroduce allow-all by leaving the column out. Adopting open-by-default means changing
-                    that constant — a security decision, not a UI one.
+                    <strong className="text-foreground">Shipped.</strong>{" "}
+                    New crew proposes open egress and sends it explicitly. The server constant is
+                    deliberately unchanged (<code className="font-mono">database/crew_defaults.go</code> still
+                    writes <code className="font-mono">restricted</code>) so a new code path cannot reintroduce
+                    allow-all by leaving the column out — only a surface that asks the question may answer it.
                   </Info>
                 </span>
               }

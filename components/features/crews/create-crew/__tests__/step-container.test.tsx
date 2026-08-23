@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { StepContainer } from "../step-container"
 import { INITIAL_STATE, type WizardState } from "../types"
@@ -20,14 +20,9 @@ beforeEach(() => {
   )
 })
 
-
-// =============================================================================
-// RuntimeConfig + MCPConfigEditor are heavy components that fetch catalogs
-// and depend on browser APIs. Stub them with thin doubles that expose the
-// `value` / `onChange` contract so we can test wiring + summary chips without
-// pulling in their internals.
-// =============================================================================
-
+// RuntimeConfig fetches a 1308-row catalog and depends on browser APIs. A thin
+// double keeps its `value` / `onChange` contract so the wiring is testable
+// without its internals.
 vi.mock("../../runtime-config", () => ({
   RuntimeConfig: ({ value, onChange }: {
     value: { runtimeImage: string; devcontainerConfig: string; miseConfig: string }
@@ -49,150 +44,164 @@ vi.mock("../../runtime-config", () => ({
   ),
 }))
 
-vi.mock("@/components/features/mcp/mcp-config-editor", () => ({
-  MCPConfigEditor: ({ value, onChange, workspaceId }: {
-    value: string
-    onChange: (json: string) => void
-    workspaceId?: string
-  }) => (
-    <div data-testid="mcp-editor-stub">
-      <span data-testid="mcp-workspace-id">{workspaceId}</span>
-      <button
-        type="button"
-        onClick={() => onChange('{"mcpServers":{"github":{"command":"npx","args":[]}}}')}
-      >
-        Add GitHub MCP
-      </button>
-      <code data-testid="mcp-current-value">{value}</code>
-    </div>
-  ),
+vi.mock("@/hooks/use-abilities", () => ({
+  useAbilities: () => ({ role: "OWNER" }),
 }))
 
-function harness(initial: Partial<WizardState> = {}) {
-  let state: WizardState = { ...INITIAL_STATE, ...initial }
-  const setState = vi.fn((patch: Partial<WizardState>) => {
-    state = { ...state, ...patch }
-  })
-  const r = render(<StepContainer state={state} setState={setState} workspaceId="ws_test" />)
-  return {
-    ...r,
-    setState,
-    rerenderWith: (patch: Partial<WizardState>) => {
-      state = { ...state, ...patch }
-      r.rerender(<StepContainer state={state} setState={setState} workspaceId="ws_test" />)
-    },
-  }
+function renderStep(overrides: Partial<WizardState> = {}) {
+  const setState = vi.fn()
+  const state: WizardState = { ...INITIAL_STATE, ...overrides }
+  const utils = render(<StepContainer state={state} setState={setState} />)
+  return { setState, state, ...utils }
 }
 
-beforeEach(() => { /* clean slate */ })
-afterEach(() => { /* nothing global to undo */ })
+/** Size lives behind a disclosure; open it before asserting on its controls. */
+function openSize() {
+  fireEvent.click(screen.getByRole("button", { name: /^Size/ }))
+}
 
-describe("<StepContainer> — section structure", () => {
-  it("renders Image & features and MCP servers sections", () => {
-    harness()
-    expect(screen.getByText("Image & features")).toBeInTheDocument()
-    expect(screen.getByText("MCP servers")).toBeInTheDocument()
+describe("<StepContainer> — what the step is made of", () => {
+  it("puts image, network and size on one step", () => {
+    renderStep()
+    expect(screen.getByText("Image and tooling")).toBeInTheDocument()
+    expect(screen.getByText("Network")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^Size/ })).toBeInTheDocument()
   })
 
-  it("BOTH sections are always visible (no collapse) — RuntimeConfig + MCPConfigEditor mount immediately", () => {
-    harness()
+  it("mounts RuntimeConfig immediately rather than behind a disclosure", () => {
+    renderStep()
     expect(screen.getByTestId("runtime-config-stub")).toBeInTheDocument()
-    expect(screen.getByTestId("mcp-editor-stub")).toBeInTheDocument()
   })
 
-  it("MCPConfigEditor receives the workspaceId prop", () => {
-    harness()
-    expect(screen.getByTestId("mcp-workspace-id")).toHaveTextContent("ws_test")
+  // Tools reach agents through Composio and the integrations surface. A
+  // crew-level MCP editor in the create path was a second way to say the same
+  // thing, and the one nobody used.
+  it("does not offer an MCP editor", () => {
+    renderStep({ mcpConfig: '{"mcpServers":{"github":{"command":"npx"}}}' })
+    expect(screen.queryByTestId("mcp-editor-stub")).toBeNull()
+    expect(screen.queryByText(/MCP/i)).toBeNull()
   })
-})
 
-describe("<StepContainer> — value flow", () => {
-  it("RuntimeConfig.onChange propagates all 3 fields into wizard state", () => {
-    const { setState } = harness()
+  it("passes RuntimeConfig's changes up as a state patch", () => {
+    const { setState } = renderStep()
     fireEvent.click(screen.getByRole("button", { name: /Set base ubuntu/ }))
-
-    expect(setState).toHaveBeenCalledWith({
-      runtimeImage: "ubuntu:22.04",
-      devcontainerConfig: '{"image":"ubuntu:22.04","features":{"ghcr.io/devcontainers/features/git:1":{}}}',
-      miseConfig: "",
-    })
-  })
-
-  it("MCPConfigEditor.onChange propagates JSON string into mcpConfig", () => {
-    const { setState } = harness()
-    fireEvent.click(screen.getByRole("button", { name: /Add GitHub MCP/ }))
-
-    expect(setState).toHaveBeenCalledWith({
-      mcpConfig: '{"mcpServers":{"github":{"command":"npx","args":[]}}}',
-    })
+    expect(setState).toHaveBeenCalledWith(expect.objectContaining({ runtimeImage: "ubuntu:22.04" }))
+    // And it does not smuggle mcpConfig back in.
+    expect(setState.mock.calls[0][0]).not.toHaveProperty("mcpConfig")
   })
 })
 
-describe("<StepContainer> — summary chips", () => {
-  it("shows the default base image when nothing is configured", () => {
-    harness()
-    // "debian:bookworm-slim" appears in the intro text AND in the summary chip.
-    expect(screen.getAllByText("debian:bookworm-slim").length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText(/No servers configured/)).toBeInTheDocument()
+describe("<StepContainer> — network", () => {
+  // Open is the wizard's proposal: an allowlist that is still maturing fails
+  // as a silent timeout deep inside a run, which is the worst failure shape a
+  // platform has. The mechanism stays one switch away.
+  it("starts open, and says so", () => {
+    renderStep()
+    expect(screen.getByText("Open egress")).toBeInTheDocument()
+    expect(screen.queryByText(/Allowed hosts/)).toBeNull()
   })
 
-  it("shows feature count summary when devcontainer_config has features", () => {
-    harness({
-      devcontainerConfig: '{"image":"debian:bookworm-slim","features":{"a":{},"b":{},"c":{}}}',
-    })
-    expect(screen.getByText(/3 features/)).toBeInTheDocument()
+  it("switching on the allowlist patches networkMode and reveals the editor", () => {
+    const { setState, rerender } = renderStep()
+    fireEvent.click(screen.getByRole("switch", { name: /allowlist/i }))
+    expect(setState).toHaveBeenCalledWith({ networkMode: "restricted" })
+
+    rerender(<StepContainer state={{ ...INITIAL_STATE, networkMode: "restricted" }} setState={setState} />)
+    expect(screen.getByText(/Allowed hosts/)).toBeInTheDocument()
   })
 
-  it("singular vs plural for 1 feature", () => {
-    harness({
-      devcontainerConfig: '{"image":"debian:bookworm-slim","features":{"a":{}}}',
-    })
-    // Count is rendered in the section header chip; allow >=1 match because
-    // ancestor textContent also matches the regex.
-    expect(screen.getAllByText(/1 feature$/).length).toBeGreaterThanOrEqual(1)
+  it("switching back to open clears the domains rather than hiding them", () => {
+    const { setState } = renderStep({ networkMode: "restricted", allowedDomains: ["github.com"] })
+    fireEvent.click(screen.getByRole("switch", { name: /allowlist/i }))
+    expect(setState).toHaveBeenCalledWith({ networkMode: "free", allowedDomains: [] })
   })
 
-  it("renders MCP server count summary when mcpConfig has servers", () => {
-    harness({
-      mcpConfig: '{"mcpServers":{"github":{"command":"npx"},"slack":{"type":"http","url":"x"}}}',
-    })
-    expect(screen.getByText("2 servers configured")).toBeInTheDocument()
+  it("warns that an empty allowlist locks everything", () => {
+    renderStep({ networkMode: "restricted", allowedDomains: [] })
+    expect(screen.getByText(/locks all egress/i)).toBeInTheDocument()
   })
 
-  it("singular vs plural for MCP — 1 server", () => {
-    harness({
-      mcpConfig: '{"mcpServers":{"github":{"command":"npx"}}}',
-    })
-    expect(screen.getByText("1 server configured")).toBeInTheDocument()
+  it("does not warn once a host is listed", () => {
+    renderStep({ networkMode: "restricted", allowedDomains: ["github.com"] })
+    expect(screen.queryByText(/locks all egress/i)).toBeNull()
   })
 
-  it("'customized' badge appears once a non-default value is set", () => {
-    harness({
-      devcontainerConfig: '{"image":"alpine:3.19","features":{"a":{}}}',
-    })
-    expect(screen.getByText("customized")).toBeInTheDocument()
+  it("advertises wildcard subdomain support", () => {
+    renderStep({ networkMode: "restricted" })
+    expect(screen.getByText(/\*\.github\.com/)).toBeInTheDocument()
+  })
+})
+
+describe("<StepContainer> — size", () => {
+  // An administrator's question. It used to open a step of its own, which is
+  // why the wizard's third screen asked a new user to have an opinion about
+  // fractional cores before it asked what the crew was for.
+  it("is folded away, with the current values in the summary", () => {
+    renderStep()
+    expect(screen.getByRole("button", { name: /^Size/ })).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByText(/2 cores · 4 GB · no auto-stop/)).toBeInTheDocument()
   })
 
-  it("'configured' badge appears once an MCP server exists", () => {
-    harness({
-      mcpConfig: '{"mcpServers":{"github":{"command":"npx"}}}',
-    })
-    expect(screen.getByText("configured")).toBeInTheDocument()
+  it("summarises a TTL when one is set", () => {
+    renderStep({ ttlHours: 4 })
+    expect(screen.getByText(/stops after 4 h/)).toBeInTheDocument()
   })
 
-  it("counts mise tools from [tools] section in TOML", () => {
-    harness({
-      miseConfig: '[tools]\npython = "3.12"\nnode = "20"\n[other]\nnotcounted = "x"',
-    })
-    expect(screen.getByText(/2 runtimes/)).toBeInTheDocument()
+  it("patches memoryMB from a preset chip", () => {
+    const { setState } = renderStep()
+    openSize()
+    fireEvent.click(screen.getByRole("button", { name: "1 GB" }))
+    expect(setState).toHaveBeenCalledWith({ memoryMB: 1024 })
   })
 
-  it("ignores malformed JSON gracefully (no crash, count = 0)", () => {
-    harness({
-      devcontainerConfig: '{not valid json',
-      mcpConfig: '{also broken',
-    })
-    // Should still render. No "X features" pill, no "X servers" — fall-through.
-    expect(screen.getByText(/No servers configured/)).toBeInTheDocument()
+  it("patches cpus from a preset chip", () => {
+    const { setState } = renderStep()
+    openSize()
+    fireEvent.click(screen.getByRole("button", { name: "4" }))
+    expect(setState).toHaveBeenCalledWith({ cpus: 4 })
+  })
+
+  it("Never patches ttlHours to null", () => {
+    const { setState } = renderStep({ ttlHours: 4 })
+    openSize()
+    fireEvent.click(screen.getByRole("button", { name: "Never" }))
+    expect(setState).toHaveBeenCalledWith({ ttlHours: null })
+  })
+
+  it("shows the CLI flag each control maps to", () => {
+    renderStep()
+    openSize()
+    expect(screen.getByText("--memory-mb 4096")).toBeInTheDocument()
+    expect(screen.getByText("--cpus 2")).toBeInTheDocument()
+    expect(screen.getByText("--ttl 0")).toBeInTheDocument()
+  })
+
+  it("warns when the memory will not hold a second agent", () => {
+    renderStep({ memoryMB: 1024 })
+    openSize()
+    expect(screen.getByText(/cannot hold a second agent/i)).toBeInTheDocument()
+  })
+
+  it("Custom… opens a numeric input and commits a valid value", () => {
+    const { setState } = renderStep()
+    openSize()
+    const [customBtn] = screen.getAllByRole("button", { name: "Custom…" })
+    fireEvent.click(customBtn)
+    const input = screen.getByLabelText(/Custom MB value/i)
+    fireEvent.change(input, { target: { value: "8192" } })
+    fireEvent.blur(input)
+    expect(setState).toHaveBeenCalledWith({ memoryMB: 8192 })
+  })
+
+  it("refuses an out-of-range custom value and keeps the field open to say why", () => {
+    const { setState } = renderStep()
+    openSize()
+    const [customBtn] = screen.getAllByRole("button", { name: "Custom…" })
+    fireEvent.click(customBtn)
+    const input = screen.getByLabelText(/Custom MB value/i)
+    fireEvent.change(input, { target: { value: "999999" } })
+    fireEvent.blur(input)
+    expect(setState).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent(/Enter \d+-\d+ MB/)
   })
 })

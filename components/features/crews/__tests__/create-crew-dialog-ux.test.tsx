@@ -149,8 +149,7 @@ describe("<CreateCrewDialog> — keyboard", () => {
     await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByText("Container resources"))
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
@@ -223,7 +222,7 @@ describe("<CreateCrewDialog> — step strip", () => {
     renderDialog()
 
     // Future step (Step 3) is disabled
-    const step3 = screen.getByRole("button", { name: /Runtime/ })
+    const step3 = screen.getByRole("button", { name: /Container/ })
     expect(step3).toBeDisabled()
 
     // Active step (Step 1) is also disabled (cursor-default, no jump)
@@ -253,8 +252,7 @@ describe("<CreateCrewDialog> — loading state during submit", () => {
     await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByText("Container resources"))
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
@@ -296,8 +294,7 @@ describe("<CreateCrewDialog> — double-submit guard", () => {
     await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByText("Container resources"))
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
@@ -332,8 +329,7 @@ describe("<CreateCrewDialog> — Skip-to-defaults clears Step 4", () => {
     await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByText("Container resources"))
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
 
     // Step 4 — Skip-to-defaults
     await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))

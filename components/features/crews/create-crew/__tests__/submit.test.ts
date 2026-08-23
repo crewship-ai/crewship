@@ -61,6 +61,10 @@ function fullState(overrides: Partial<WizardState> = {}): WizardState {
     memoryMB: 2048,
     cpus: 1,
     ttlHours: 4,
+    // Pinned rather than inherited. These tests are about how submitCrew maps
+    // state onto the body; which mode the wizard proposes is types.test.ts's
+    // question, and inheriting it made these fail the day it changed.
+    networkMode: "restricted",
     ...overrides,
   }
 }

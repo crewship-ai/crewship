@@ -139,8 +139,7 @@ describe("<CreateCrewDialog> — CreateSurface shell", () => {
     await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByText("Container resources"))
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
@@ -159,7 +158,10 @@ describe("<CreateCrewDialog> — CreateSurface shell", () => {
       container_memory_mb: 4096,
       container_cpus: 2,
       container_ttl_hours: 0,
-      network_mode: "restricted",
+      // The wizard proposes open egress and says so on the step; the
+      // server's restricted default still applies to callers that say
+      // nothing (database/crew_defaults.go).
+      network_mode: "free",
     })
   })
 
@@ -179,8 +181,7 @@ describe("<CreateCrewDialog> — CreateSurface shell", () => {
     await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByText("Container resources"))
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))

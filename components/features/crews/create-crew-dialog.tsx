@@ -17,7 +17,6 @@ import {
 } from "@/components/layout/create-surface"
 import { StepIdentity } from "./create-crew/step-identity"
 import { StepLineup } from "./create-crew/step-lineup"
-import { StepRuntime } from "./create-crew/step-runtime"
 import { StepContainer } from "./create-crew/step-container"
 import { StepReview } from "./create-crew/step-review"
 import { submitCrew } from "./create-crew/submit"
@@ -31,20 +30,22 @@ export interface CreateCrewDialogProps {
 }
 
 /**
- * Five steps, and the strip says five.
+ * Four steps, and everything that counts them says four.
  *
- * The counter beside the title still reads "step N of 4" — Review counted as
- * the confirmation rather than a question — because that is the wording the
- * product and the e2e spec use today, and this migration changes no copy. The
- * old strip drew four chips and then no active one on Review, which is why the
- * counter had to special-case it with "ready to create". Five here is what the
- * state machine actually has, and it keeps the phone progress bar honest
- * (`aria-valuenow` of 5 against a max of 4 is not a valid progressbar).
+ * There were five, and the counter beside the title said "step N of 4"
+ * because Review was read as the confirmation rather than a question — a
+ * wording that survived from an older strip and left the header claiming
+ * "step 3 of 4" above a row of five chips.
+ *
+ * Runtime is gone as a step of its own. Resource limits are an
+ * administrator's question and now sit folded inside Container; the egress
+ * control went with them, next to the image it applies to. What is left is
+ * four questions, counted honestly, and a phone progress bar whose
+ * `aria-valuenow` matches its max.
  */
 const CREW_STEPS: CreateSurfaceStep[] = [
   { id: "identity", label: "Identity" },
   { id: "lineup", label: "Lineup" },
-  { id: "runtime", label: "Runtime" },
   { id: "container", label: "Container" },
   { id: "review", label: "Review" },
 ]
@@ -52,9 +53,8 @@ const CREW_STEPS: CreateSurfaceStep[] = [
 const STEP_DESCRIPTION: Record<WizardStep, string> = {
   1: "Crews group agents that work together. Pick a recognizable icon and name.",
   2: "The agents this crew starts with. Pick a curated lineup, or stay empty and add agents later.",
-  3: "Resource limits and network policy for the crew's container. Defaults are sane.",
-  4: "Container image, devcontainer features, and MCP servers. All optional — skip to defaults if unsure.",
-  5: "Last look before commit. Click any section to jump back.",
+  3: "The box this crew runs in — image, tooling, network. All optional; skip to defaults if unsure.",
+  4: "Last look before commit. Click any section to jump back.",
 }
 
 export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }: CreateCrewDialogProps) {
@@ -127,7 +127,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   }
 
   const advance = () => {
-    if (step === 5) {
+    if (step === 4) {
       submit()
       return
     }
@@ -153,7 +153,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
       miseConfig: INITIAL_STATE.miseConfig,
       mcpConfig: INITIAL_STATE.mcpConfig,
     })
-    setStep(5)
+    setStep(4)
   }
 
   // Auto-focus the primary action when the user lands on Review (Step 5) so
@@ -167,7 +167,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   // to its primary, hence the query: the primary is its last button.
   const footerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (step === 5 && !busy) {
+    if (step === 4 && !busy) {
       const buttons = footerRef.current?.querySelectorAll("button")
       buttons?.[buttons.length - 1]?.focus()
     }
@@ -192,7 +192,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
         onClose={() => onOpenChange(false)}
         meta={
           <span className="max-sm:hidden">
-            {step === 5 ? "ready to create" : `step ${step} of 4`}
+            {step === 4 ? "ready to create" : `step ${step} of 4`}
           </span>
         }
       />
@@ -209,9 +209,8 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
       <CreateSurfaceBody>
         {step === 1 && <StepIdentity state={state} setState={setState} />}
         {step === 2 && <StepLineup state={state} setState={setState} />}
-        {step === 3 && <StepRuntime state={state} setState={setState} />}
-        {step === 4 && <StepContainer state={state} setState={setState} workspaceId={workspaceId} />}
-        {step === 5 && (
+        {step === 3 && <StepContainer state={state} setState={setState} />}
+        {step === 4 && (
           <StepReview
             state={state}
             onEdit={(s) => setStep(s)}
@@ -225,13 +224,13 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
       <div ref={footerRef} className="shrink-0">
         <CreateSurfaceFooter
           hint={
-            step === 5
+            step === 4
               ? "⌘+Enter to confirm · Esc cancel"
               : `Step ${step} of 4 · ⌘+Enter to continue`
           }
           onCancel={() => onOpenChange(false)}
           secondary={
-            step === 4 ? (
+            step === 3 ? (
               <CreateSurfaceSecondaryAction
                 icon={FastForward}
                 onClick={skipToReview}
@@ -242,8 +241,8 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
               </CreateSurfaceSecondaryAction>
             ) : undefined
           }
-          primaryLabel={step === 5 ? (busy ? "Creating…" : "Create crew") : "Continue"}
-          primaryIcon={step === 5 ? Check : undefined}
+          primaryLabel={step === 4 ? (busy ? "Creating…" : "Create crew") : "Continue"}
+          primaryIcon={step === 4 ? Check : undefined}
           onPrimary={advance}
           primaryDisabled={!stepValid}
           busy={busy}
@@ -267,12 +266,10 @@ function stepIsValid(step: WizardStep, s: WizardState): boolean {
     if (s.mode === "browse") return !!s.pickedTemplateSlug
     return true // empty
   }
-  if (step === 3) {
-    return s.memoryMB > 0 && s.cpus > 0 &&
-      (s.networkMode === "free" || s.allowedDomains.length > 0 || s.networkMode === "restricted")
-    // restricted with zero domains is allowed (locks all egress) — explicit choice.
-  }
-  // step === 4 (Container) is always valid — all fields are optional.
+  // step === 3 (Container) is always valid: image and tooling are optional,
+  // an empty allowlist is an explicit choice that locks all egress, and the
+  // sizing chips cannot produce a zero — CustomNumberChip refuses anything
+  // outside [MIN, MAX] and keeps the previous value.
   return true
 }
 
