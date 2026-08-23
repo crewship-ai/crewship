@@ -136,4 +136,17 @@ describe("auto-stop 'Never' → container_ttl_hours: 0", () => {
       vi.unstubAllGlobals()
     }
   })
+
+
+  // The clamp existed and nothing reached it: every case above submits null or
+  // a positive, so `Math.max(0, …)` was dead code under test. Both handlers
+  // 400 on a negative, and ttlHours is a plain `number | null` — nothing in the
+  // wizard produces one today, but a 400 here costs the user the whole wizard.
+  it("clamps a negative TTL to the never-stop sentinel rather than sending a 400", async () => {
+    fetcher.queueResponse({ ok: true, body: { id: "x", slug: "x", name: "X" } })
+
+    await submitCrew(WS, baseState({ mode: "empty", ttlHours: -1 }))
+
+    expect(fetcher.calls[0].body).toHaveProperty("container_ttl_hours", 0)
+  })
 })

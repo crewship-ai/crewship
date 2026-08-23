@@ -233,8 +233,13 @@ export function AddSecretContent({ onClose }: { onClose: () => void }) {
   const [expiry, setExpiry] = React.useState("")
 
   const last = step === SECRET_STEPS.length - 1
-  const valid = step === 0 ? shape !== null : step === 1 ? value.trim() !== "" && name.trim() !== "" : slot.trim() !== ""
+  // Validate what the field SHOWS, not what was typed into it. `valid` read
+  // `slot` while the input rendered `derivedSlot`, so after naming a secret in
+  // step 2 the variable name looked filled — ANTHROPIC_PRODUCTION_KEY, right
+  // there — and Save stayed disabled until you retyped it by hand.
   const derivedSlot = slot || name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_")
+  const valid =
+    step === 0 ? shape !== null : step === 1 ? value.trim() !== "" && name.trim() !== "" : derivedSlot !== ""
 
   return (
     <>

@@ -71,13 +71,22 @@ export function ForkDialog({ open, onOpenChange, missionId, checkpointId, checkp
       }
       const body = (await res.json().catch(() => null)) as { new_mission_id?: string } | null
       const newMissionId = typeof body?.new_mission_id === "string" ? body.new_mission_id : ""
-      toast.success(
-        newMissionId ? `Forked into mission ${newMissionId.slice(0, 8)}` : "Mission forked",
-      )
+
+      // A 2xx without the id is not a success we can act on: the whole point
+      // of forking is to land in the fork, and "Mission forked" followed by
+      // staying on the source timeline is the worst of both — the user
+      // believes it worked and cannot find the result. Keep the dialog open
+      // and say so, rather than closing on a promise we cannot keep.
+      if (!newMissionId) {
+        setError("The server accepted the fork but did not say which mission it created.")
+        return
+      }
+
+      toast.success(`Forked into mission ${newMissionId.slice(0, 8)}`)
       onOpenChange(false)
       // The fork is a different mission; staying on the source timeline hides
       // the thing that was just created.
-      if (newMissionId) router.push(`/missions/${encodeURIComponent(newMissionId)}/timeline`)
+      router.push(`/missions/${encodeURIComponent(newMissionId)}/timeline`)
     } catch {
       setError("Couldn't reach the server. Check your connection and try again.")
     } finally {

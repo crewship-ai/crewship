@@ -49,7 +49,7 @@ import {
 } from "@/components/layout/create-surface"
 import { DIVERGENCE, DOORS as AUDIT_ROWS, TOKEN_DRIFT, type Shell } from "./audit"
 import { PARITY, SWEEP, parityTotals, summarise, type Severity, type UiState } from "./parity"
-import { DOORS_BY_PAGE, DoorDialog, DoorPhone, type Door } from "./surfaces/registry"
+import { DOORS, DOORS_BY_PAGE, DoorDialog, DoorPhone, type Door } from "./surfaces/registry"
 
 type Device = "desktop" | "phone"
 
@@ -107,9 +107,15 @@ export function DesignLayout() {
             >
               <span className="hidden sm:inline">Phone</span>
             </SubBarSecondary>
+            {/* By id, not by position. DOORS_BY_PAGE[4].doors[1] silently
+                opened a different door the moment a page or a door was
+                reordered — and it would have done so without failing a test. */}
             <SubBarPrimary
               icon={Sparkles}
-              onClick={() => openDoor(DOORS_BY_PAGE[4].doors[1])}
+              onClick={() => {
+                const d = DOORS.find((x) => x.id === "new-agent")
+                if (d) openDoor(d)
+              }}
             >
               New agent
             </SubBarPrimary>

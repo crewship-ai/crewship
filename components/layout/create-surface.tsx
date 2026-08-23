@@ -1003,6 +1003,12 @@ export function CreateSurfacePill({
   return (
     <button
       type="button"
+      {...props}
+      // AFTER the spread, not before. `disabled` is not destructured, so it
+      // rides along in `props`; with the spread applied last a caller passing
+      // an explicit `disabled={false}` overwrote this and a read-only pill —
+      // the surface's statement of a fact it will not let you change — became
+      // clickable.
       disabled={readOnly || props.disabled}
       className={cn(
         "flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-hairline bg-foreground/[0.04] px-2.5 text-xs transition-colors",
@@ -1012,7 +1018,6 @@ export function CreateSurfacePill({
         set ? "text-foreground/85" : "text-muted-foreground",
         className,
       )}
-      {...props}
     >
       {leading ?? (
         (icon || concept) && (

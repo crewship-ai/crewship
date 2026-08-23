@@ -1,10 +1,11 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useId, useState } from "react"
 import { ExternalLink, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { CREATE_SURFACE_INPUT, CreateSurfaceField } from "@/components/layout/create-surface"
 import { cn } from "@/lib/utils"
 import type { NotificationProvider, ProviderField } from "@/hooks/use-notification-channels"
 
@@ -26,6 +27,17 @@ interface ProviderFormProps {
  * indication of where the token comes from. Fields, labels and help text all
  * come from the server's provider registry, so this component renders whatever
  * the backend describes and never carries its own provider list.
+ *
+ * It renders inside `CreateSurface` (add-channel-dialog.tsx), so the field
+ * shape is the shell's `CreateSurfaceField` rather than a local one — which is
+ * also how these inputs finally got an accessible name. The label used to be a
+ * `<label>` that neither wrapped its input nor carried `htmlFor`, so every
+ * provider field was an anonymous text box: "Webhook URL" was on screen and
+ * nowhere in the accessibility tree.
+ *
+ * `Send test` stays HERE rather than moving to the surface's footer. It tests
+ * the fields directly above it, saves nothing, and the surface is allowed
+ * exactly one primary action — which is `Connect`.
  */
 export function ProviderForm({ provider, values, onChange, onTest }: ProviderFormProps) {
   const [testing, setTesting] = useState(false)
@@ -49,7 +61,7 @@ export function ProviderForm({ provider, values, onChange, onTest }: ProviderFor
   }, [onTest, provider.label])
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {provider.fields.map((field) => (
         <ProviderFieldRow
           key={field.key}
@@ -67,7 +79,7 @@ export function ProviderForm({ provider, values, onChange, onTest }: ProviderFor
           type="button"
           variant="soft"
           size="sm"
-          className="h-7 px-2.5 text-xs"
+          className="h-8 px-2.5 text-xs max-sm:h-12 max-sm:text-sm"
           disabled={testing || missingRequired}
           onClick={handleTest}
           title={missingRequired ? "Fill in the required fields first" : undefined}
@@ -99,13 +111,37 @@ function ProviderFieldRow({
   value: string
   onChange: (v: string) => void
 }) {
+  const id = `${useId()}-${field.key}`
+
   return (
-    <div className="space-y-1">
-      <label className="flex items-center gap-1 text-[11px] font-medium text-foreground/80">
-        {field.label}
-        {field.required && <span className="text-destructive">*</span>}
-      </label>
+    <CreateSurfaceField
+      label={field.label}
+      htmlFor={id}
+      required={field.required}
+      hint={
+        field.help || field.help_url ? (
+          <span className="block max-w-[440px]">
+            {field.help}
+            {field.help_url && (
+              <>
+                {" "}
+                <a
+                  href={field.help_url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-0.5 underline hover:text-foreground"
+                >
+                  Where do I find this?
+                  <ExternalLink className="size-2.5" />
+                </a>
+              </>
+            )}
+          </span>
+        ) : undefined
+      }
+    >
       <Input
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={field.placeholder}
@@ -114,27 +150,8 @@ function ProviderFieldRow({
         type={field.type === "password" || field.secret ? "password" : "text"}
         autoComplete="off"
         spellCheck={false}
-        className="h-7 max-w-[420px] text-xs"
+        className={cn(CREATE_SURFACE_INPUT, "max-w-[420px]")}
       />
-      {(field.help || field.help_url) && (
-        <p className="max-w-[440px] text-[11px] leading-snug text-muted-foreground">
-          {field.help}
-          {field.help_url && (
-            <>
-              {" "}
-              <a
-                href={field.help_url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex items-center gap-0.5 underline hover:text-foreground"
-              >
-                Where do I find this?
-                <ExternalLink className="size-2.5" />
-              </a>
-            </>
-          )}
-        </p>
-      )}
-    </div>
+    </CreateSurfaceField>
   )
 }

@@ -9,7 +9,6 @@ import {
   Check,
   Tag,
   FolderKanban,
-  ScrollText,
 } from "lucide-react"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import {
@@ -38,6 +37,9 @@ import {
 } from "@/components/ui/command"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { resolveRoutineColor, resolveRoutineIcon } from "@/lib/routine-identity"
 import { LabelBadge } from "@/components/features/issues/label-badge"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { StatusIcon } from "@/components/features/issues/status-icon"
@@ -49,6 +51,44 @@ import type { IssueLabel, IssuePriority, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 
 const PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
+
+/**
+ * An assignee row plus the three fields a face is drawn from.
+ *
+ * The shared `AssigneeOption` carries id/name/type/slug only, and widening it
+ * would change a type five other surfaces read. The roster draws an agent from
+ * `avatar_seed || name` and `avatar_style || crew.avatar_style` (see
+ * crews-explorer.tsx and agent-canvas.tsx); carrying the same three fields here
+ * is what makes the same agent wear the same face in both places.
+ */
+type AgentAssigneeOption = AssigneeOption & {
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  avatar_url?: string | null
+  /** The crew's default style, which an agent with none of its own inherits. */
+  crew_avatar_style?: string | null
+}
+
+/** The subset of GET /api/v1/agents this modal reads. */
+interface AgentRow {
+  id: string
+  name: string
+  slug?: string
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  avatar_url?: string | null
+  crew?: { avatar_style?: string | null } | null
+}
+
+/**
+ * Where the agent list is between "not asked yet" and "here it is".
+ *
+ * An empty `<CommandGroup>` renders identically whether the crew has nobody in
+ * it, the request 500'd, or the request is still in flight — which is the
+ * actual defect behind "the Assignee picker offers nobody". Three states, three
+ * sentences.
+ */
+type AgentLoad = "idle" | "loading" | "ready" | "error"
 
 interface CreateIssueModalProps {
   open: boolean
@@ -83,7 +123,8 @@ export function CreateIssueModal({
   const [projectId, setProjectId] = useState<string | null>(null)
   const [selectedLabels, setSelectedLabels] = useState<string[]>([])
   const [routineId, setRoutineId] = useState<string | null>(null)
-  const [agents, setAgents] = useState<AssigneeOption[]>([])
+  const [agents, setAgents] = useState<AgentAssigneeOption[]>([])
+  const [agentLoad, setAgentLoad] = useState<AgentLoad>("idle")
   const [createMore, setCreateMore] = useState(false)
   const [saving, setSaving] = useState(false)
   // What the server said when it said no. The toast stays — this is the copy
@@ -100,11 +141,27 @@ export function CreateIssueModal({
 
   const titleRef = useRef<HTMLInputElement>(null)
 
-  // Auto-select first crew when opening
+  // Auto-select a crew when opening.
+  //
+  // This used to be `crews[0]` — whichever crew the API happened to sort
+  // first. In a workspace that has ever run the e2e or smoke suites that is an
+  // `e2e-empty-…` / `smoke-…` crew with zero agents, so New issue opened onto a
+  // crew whose Assignee picker could only ever offer "Unassigned", on a board
+  // full of issues assigned to real agents. The surface looked broken and was
+  // in fact reporting the truth about a crew nobody meant to pick.
+  //
+  // The crew list already carries `_count.agents` (crews.go's crewCountResponse,
+  // passed through verbatim by orchestration-page-shell), so preferring a crew
+  // somebody is actually in costs no extra fetch and no new prop. It is a
+  // DEFAULT, not a restriction: the header still names the crew and still lets
+  // you change it to an empty one on purpose.
+  //
+  // `crews[0]` stays as the fallback, so a workspace whose crews are all empty
+  // — or a payload without `_count` — still lands somewhere rather than nowhere.
   useEffect(() => {
-    if (open && !crewId && crews.length > 0) {
-      setCrewId(crews[0].id)
-    }
+    if (!open || crewId || crews.length === 0) return
+    const staffed = crews.find((c) => (c._count?.agents ?? 0) > 0)
+    setCrewId((staffed ?? crews[0]).id)
   }, [open, crewId, crews])
 
   // Focus title on open
@@ -114,28 +171,42 @@ export function CreateIssueModal({
     }
   }, [open])
 
-  // Fetch agents when crew changes
+  // Fetch agents when crew changes.
+  //
+  // The failure paths used to be `if (!res.ok || cancelled) return` and a bare
+  // `catch {}`, which left `agents` holding whatever it held before and the
+  // picker showing the same empty list a genuinely empty crew shows. A refused
+  // or dropped request now says so.
   useEffect(() => {
     setAssigneeType(null)
     setAssigneeId(null)
-    if (!crewId) { setAgents([]); return }
+    if (!crewId) { setAgents([]); setAgentLoad("idle"); return }
     let cancelled = false
+    setAgents([])
+    setAgentLoad("loading")
     async function fetchAgents() {
       try {
         const res = await apiFetch(
           `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}&crew_id=${encodeURIComponent(crewId)}`,
         )
-        if (!res.ok || cancelled) return
+        if (cancelled) return
+        if (!res.ok) { setAgentLoad("error"); return }
         const data = await res.json()
-        const list = Array.isArray(data) ? data : data.agents ?? []
-        if (!cancelled) {
-          setAgents(
-            list.map((a: { id: string; name: string; slug?: string }) => ({
-              id: a.id, name: a.name, type: "agent" as const, slug: a.slug,
-            })),
-          )
-        }
-      } catch { /* ignore */ }
+        if (cancelled) return
+        const list: AgentRow[] = Array.isArray(data) ? data : data.agents ?? []
+        setAgents(
+          list.map((a) => ({
+            id: a.id, name: a.name, type: "agent" as const, slug: a.slug,
+            avatar_seed: a.avatar_seed,
+            avatar_style: a.avatar_style,
+            avatar_url: a.avatar_url,
+            crew_avatar_style: a.crew?.avatar_style ?? null,
+          })),
+        )
+        setAgentLoad("ready")
+      } catch {
+        if (!cancelled) setAgentLoad("error")
+      }
     }
     fetchAgents()
     return () => { cancelled = true }
@@ -168,11 +239,8 @@ export function CreateIssueModal({
   const crewPrefix = selectedCrew?.slug?.toUpperCase().slice(0, 3) ?? "CRE"
   const selectedProject = projects.find((p) => p.id === projectId)
   const selectedRoutine = routines.find((r) => r.id === routineId)
-  const assigneeName = (() => {
-    if (!assigneeId) return null
-    const found = agents.find((a) => a.id === assigneeId)
-    return found?.name ?? null
-  })()
+  const selectedAgent = assigneeId ? agents.find((a) => a.id === assigneeId) ?? null : null
+  const assigneeName = selectedAgent?.name ?? null
 
   const handleSubmit = useCallback(async () => {
     if (!crewId) { toast.error("Please select a crew"); return }
@@ -337,6 +405,19 @@ export function CreateIssueModal({
             <PopoverTrigger asChild>
               <CreateSurfacePill
                 icon={assigneeType === "agent" ? Bot : User}
+                // The pill is the picker's face when it is shut, so it wears
+                // the agent's, not a generic robot.
+                leading={
+                  selectedAgent ? (
+                    <AgentAvatar
+                      seed={selectedAgent.avatar_seed || selectedAgent.name}
+                      style={selectedAgent.avatar_style || selectedAgent.crew_avatar_style}
+                      agentId={selectedAgent.id}
+                      avatarUrl={selectedAgent.avatar_url}
+                      className="h-3.5 w-3.5 shrink-0"
+                    />
+                  ) : undefined
+                }
                 accent="purple"
                 set={assigneeId !== null}
               >
@@ -355,6 +436,24 @@ export function CreateIssueModal({
                       {!assigneeId && <Check className="ml-auto h-3.5 w-3.5" />}
                     </CommandItem>
                   </CommandGroup>
+                  {/* Three ways to have no agents to list, and they are not the
+                      same thing. Plain nodes rather than CommandItems: they are
+                      not selectable, and cmdk must not filter them away when
+                      the search box has text in it. */}
+                  {agentLoad === "loading" && (
+                    <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading agents…</p>
+                  )}
+                  {agentLoad === "error" && (
+                    <p role="status" className="px-3 py-2 text-[11px] leading-relaxed text-destructive">
+                      Agents could not be loaded. Re-pick the crew to try again.
+                    </p>
+                  )}
+                  {agentLoad === "ready" && agents.length === 0 && (
+                    <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                      No agents in {selectedCrew?.name ?? "this crew"} — pick another crew in the
+                      header to assign someone.
+                    </p>
+                  )}
                   {agents.length > 0 && (
                     <CommandGroup heading="Agents">
                       {agents.map((agent) => (
@@ -362,7 +461,17 @@ export function CreateIssueModal({
                           key={agent.id}
                           onSelect={() => { setAssigneeType("agent"); setAssigneeId(agent.id); setAssigneeOpen(false) }}
                         >
-                          <Bot className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                          {/* Exactly what crews-explorer.tsx and agent-canvas.tsx
+                              pass. Every agent in this database has a NULL
+                              avatar_seed, so the `|| name` fallback is the whole
+                              reason a face appears at all. */}
+                          <AgentAvatar
+                            seed={agent.avatar_seed || agent.name}
+                            style={agent.avatar_style || agent.crew_avatar_style}
+                            agentId={agent.id}
+                            avatarUrl={agent.avatar_url}
+                            className="mr-2 h-4 w-4 shrink-0"
+                          />
                           <span className="text-xs">{agent.name}</span>
                           {assigneeId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
                         </CommandItem>
@@ -378,7 +487,21 @@ export function CreateIssueModal({
         {/* Project */}
         <Popover open={projectOpen} onOpenChange={setProjectOpen}>
           <PopoverTrigger asChild>
-            <CreateSurfacePill icon={FolderKanban} accent="blue" set={projectId !== null}>
+            <CreateSurfacePill
+              icon={FolderKanban}
+              leading={
+                selectedProject ? (
+                  <CrewIcon
+                    icon={selectedProject.icon || "folder"}
+                    color={selectedProject.color}
+                    size="sm"
+                    className="!h-4 !w-4 !rounded-sm"
+                  />
+                ) : undefined
+              }
+              accent="blue"
+              set={projectId !== null}
+            >
               <span>{selectedProject?.name ?? "Project"}</span>
             </CreateSurfacePill>
           </PopoverTrigger>
@@ -397,7 +520,16 @@ export function CreateIssueModal({
                       key={p.id}
                       onSelect={() => { setProjectId(p.id); setProjectOpen(false) }}
                     >
-                      <FolderKanban className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                      {/* Projects carry a real icon and colour. `|| "folder"` is
+                          the fallback project-card-detail.tsx and
+                          issue-card-detail.tsx already use; CrewIcon handles the
+                          hex-vs-palette-id split via crewColorHex(). */}
+                      <CrewIcon
+                        icon={p.icon || "folder"}
+                        color={p.color}
+                        size="sm"
+                        className="mr-2 !h-5 !w-5 !rounded-md"
+                      />
                       <span className="text-xs">{p.name}</span>
                       {projectId === p.id && <Check className="ml-auto h-3.5 w-3.5" />}
                     </CommandItem>
@@ -411,7 +543,20 @@ export function CreateIssueModal({
         {/* Routine — bind a saved routine to handle this issue */}
         <Popover open={routineOpen} onOpenChange={setRoutineOpen}>
           <PopoverTrigger asChild>
-            <CreateSurfacePill concept="routines" set={routineId !== null}>
+            <CreateSurfacePill
+              concept="routines"
+              leading={
+                selectedRoutine ? (
+                  <CrewIcon
+                    icon={resolveRoutineIcon(selectedRoutine)}
+                    color={resolveRoutineColor(selectedRoutine)}
+                    size="sm"
+                    className="!h-4 !w-4 !rounded-sm"
+                  />
+                ) : undefined
+              }
+              set={routineId !== null}
+            >
               <span>{selectedRoutine?.name ?? "Routine"}</span>
             </CreateSurfacePill>
           </PopoverTrigger>
@@ -430,7 +575,16 @@ export function CreateIssueModal({
                       key={r.id}
                       onSelect={() => { setRoutineId(r.id); setRoutineOpen(false) }}
                     >
-                      <ScrollText className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                      {/* `pipelines` has no icon or colour column, so both are
+                          derived from the slug — the same two functions
+                          routines-explorer.tsx uses, because one routine
+                          rendering two different icons is worse than none. */}
+                      <CrewIcon
+                        icon={resolveRoutineIcon(r)}
+                        color={resolveRoutineColor(r)}
+                        size="sm"
+                        className="mr-2 !h-5 !w-5 !rounded-md"
+                      />
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-medium truncate">{r.name}</div>
                         <div className="text-[10px] text-muted-foreground truncate">{r.slug}</div>

@@ -10,12 +10,16 @@ import {
   GitFork,
   Wrench,
   Search,
+  Check,
+  ChevronsUpDown,
   ChevronRight,
+  Users,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
+  CREATE_SURFACE_INPUT,
   CreateSurface,
   CreateSurfaceBody,
   CreateSurfaceField,
@@ -26,8 +30,18 @@ import {
   CreateSurfaceSecondaryAction,
   CreateSurfaceTile,
 } from "@/components/layout/create-surface"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { FileEditor } from "@/components/features/files/file-editor"
@@ -151,6 +165,16 @@ export const STARTER_TEMPLATES = [
 interface Crew {
   id: string
   name: string
+  // The identity the crews API already returns and the roster already draws.
+  // A crew's colour is a hex on most rows and a palette id on the ones the
+  // wizard wrote — CrewIcon knows about both, which is why neither is
+  // normalised here.
+  icon?: string | null
+  color?: string | null
+  // The default avatar style for agents in the crew that have none of their
+  // own. Same fallback chain the roster uses, so a Lead does not get one face
+  // here and another two clicks away.
+  avatar_style?: string | null
 }
 
 interface AgentRec {
@@ -160,6 +184,9 @@ interface AgentRec {
   agent_role: string
   crew_id: string | null
   role_title?: string | null
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  avatar_url?: string | null
 }
 
 interface RoutineListItem {
@@ -288,6 +315,13 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       cancelled = true
     }
   }, [open, mode, workspaceId, routines.length])
+
+  // The chosen crew's own row — its icon and colour draw the picker's trigger,
+  // and its avatar_style is the fallback for a Lead that has none.
+  const describeCrew = useMemo<Crew | null>(
+    () => crews.find((c) => c.id === authorCrewId) ?? null,
+    [crews, authorCrewId],
+  )
 
   // The Lead agent for the chosen describe crew (LEAD role, same crew).
   // Falls back to any agent in the crew so a crew without an explicit Lead
@@ -648,25 +682,31 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
           <CreateSurfaceBody className="flex flex-col gap-4">
             <div className="flex items-end gap-3">
               <CreateSurfaceField label="Owner (crew)" htmlFor="describe-crew" className="flex-1">
-                <select
+                <CrewPicker
                   id="describe-crew"
+                  ariaLabel="Select crew"
+                  crews={crews}
                   value={authorCrewId}
-                  onChange={(e) => setAuthorCrewId(e.target.value)}
-                  className="h-8 w-full rounded-md border border-hairline bg-background px-2 text-xs text-foreground outline-none focus:border-primary max-sm:h-12 max-sm:text-sm"
-                >
-                  <option value="">Choose a crew…</option>
-                  {crews.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setAuthorCrewId}
+                  placeholder="Choose a crew…"
+                />
               </CreateSurfaceField>
               <div className="pb-1.5 text-[11px] text-muted-foreground">
                 {authorCrewId ? (
                   describeLead ? (
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="inline-block h-4 w-4 rounded-full bg-gradient-to-br from-purple to-notice" />
+                      {/* The Lead's own face, from the same (seed, style)
+                          fallback chain the roster uses — this was a purple
+                          gradient disc that stood for nobody, next to the name
+                          of somebody. */}
+                      <AgentAvatar
+                        seed={describeLead.avatar_seed || describeLead.name}
+                        style={describeLead.avatar_style || describeCrew?.avatar_style}
+                        agentId={describeLead.id}
+                        avatarUrl={describeLead.avatar_url}
+                        alt=""
+                        className="h-4 w-4 shrink-0"
+                      />
                       Lead: <b className="text-foreground">{describeLead.name}</b>
                     </span>
                   ) : (
@@ -825,19 +865,16 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                 <label htmlFor="routine-author-crew" className="text-[10px] uppercase tracking-wider text-muted-foreground">
                   Author crew
                 </label>
-                <select
+                <CrewPicker
                   id="routine-author-crew"
+                  ariaLabel="Select author crew"
+                  crews={crews}
                   value={authorCrewId}
-                  onChange={(e) => setAuthorCrewId(e.target.value)}
-                  className="h-7 w-full rounded-md border border-hairline bg-background px-1.5 text-xs text-foreground outline-none focus:border-primary"
-                >
-                  <option value="">— choose at runtime —</option>
-                  {crews.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setAuthorCrewId}
+                  placeholder="— choose at runtime —"
+                  clearLabel="— choose at runtime —"
+                  className="mt-1"
+                />
                 <p className="mt-1 text-[10px] text-muted-foreground">
                   Crew whose agents + credentials run this routine.
                 </p>
@@ -994,6 +1031,125 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         </>
       )}
     </CreateSurface>
+  )
+}
+
+/**
+ * The crew picker — a crew, drawn the way the rest of the product draws it.
+ *
+ * This was a native <select> in both places it appears, so the one screen that
+ * asks "whose crew is this?" answered with a column of names while the roster
+ * two clicks away shows Engineering as a blue terminal and Ops as a red
+ * server. The data was never missing: `icon` and `color` come back on the same
+ * `/api/v1/crews` response the <select> was already reading.
+ *
+ * The shape is the New-issue crew popover's — a Command list in a Popover —
+ * rather than a tile per crew, because this sits inline beside another field
+ * and a workspace with twenty crews would push the goal box off the screen.
+ * The one thing added to that idiom is the <CrewIcon>, which handles the
+ * hex/palette-id split on its own.
+ */
+function CrewPicker({
+  id,
+  crews,
+  value,
+  onChange,
+  placeholder,
+  clearLabel,
+  ariaLabel,
+  className,
+}: {
+  id: string
+  crews: Crew[]
+  value: string
+  onChange: (id: string) => void
+  /** Shown when nothing is chosen — the old select's first <option>. */
+  placeholder: string
+  /** Present where "no crew" is a real answer, absent where it is not. */
+  clearLabel?: string
+  ariaLabel: string
+  className?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const selected = crews.find((c) => c.id === value) ?? null
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          id={id}
+          type="button"
+          role="combobox"
+          aria-expanded={open}
+          aria-label={ariaLabel}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-md border border-hairline bg-background px-2 text-left text-foreground outline-none transition-colors hover:border-border focus:border-primary",
+            CREATE_SURFACE_INPUT,
+            className,
+          )}
+        >
+          {selected ? (
+            <CrewIcon
+              icon={selected.icon || "users"}
+              color={selected.color}
+              size="sm"
+              className="!h-5 !w-5 !rounded"
+            />
+          ) : (
+            <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+          )}
+          <span className={cn("min-w-0 flex-1 truncate", !selected && "text-muted-foreground")}>
+            {selected?.name ?? placeholder}
+          </span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[240px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search crews…" className="h-8 text-xs" />
+          <CommandList>
+            <CommandEmpty>No crews found.</CommandEmpty>
+            <CommandGroup>
+              {clearLabel && (
+                <CommandItem
+                  value={clearLabel}
+                  onSelect={() => {
+                    onChange("")
+                    setOpen(false)
+                  }}
+                >
+                  <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+                  <span className="truncate text-xs text-muted-foreground">{clearLabel}</span>
+                  {value === "" && <Check className="ml-auto h-3.5 w-3.5" />}
+                </CommandItem>
+              )}
+              {crews.map((crew) => (
+                <CommandItem
+                  key={crew.id}
+                  // The id rides along so two crews sharing a name still filter
+                  // and select independently; it is not rendered, so the row's
+                  // accessible name is still just the crew's.
+                  value={`${crew.name} ${crew.id}`}
+                  onSelect={() => {
+                    onChange(crew.id)
+                    setOpen(false)
+                  }}
+                >
+                  <CrewIcon
+                    icon={crew.icon || "users"}
+                    color={crew.color}
+                    size="sm"
+                    className="!h-5 !w-5 !rounded"
+                  />
+                  <span className="truncate text-xs">{crew.name}</span>
+                  {value === crew.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }
 

@@ -11,8 +11,8 @@
 
 import * as React from "react"
 import {
+  AlertTriangle,
   CalendarDays,
-  Check,
   Gauge,
   GitMerge,
   FolderKanban,
@@ -41,6 +41,7 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceGrid,
   CreateSurfaceHeader,
+  CreateSurfaceNotice,
   CreateSurfacePicker,
   CreateSurfacePill,
   CreateSurfacePills,
@@ -191,7 +192,6 @@ export function NewProjectContent({ onClose }: { onClose: () => void }) {
   // one already had. Two surfaces, one control — which is the whole point.
   const [panel, setPanel] = React.useState<null | "icon">(null)
   const [name, setName] = React.useState("")
-  const [summary, setSummary] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [icon, setIcon] = React.useState("rocket")
   const [iconSearch, setIconSearch] = React.useState("")
@@ -200,7 +200,6 @@ export function NewProjectContent({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = React.useState<"backlog" | "planned" | "started" | "paused">("backlog")
   const [priority, setPriority] = React.useState<"none" | "high" | "medium" | "low">("none")
   const [lead, setLead] = React.useState<string | null>(null)
-  const [milestones, setMilestones] = React.useState<string[]>([])
 
   // The catalogue's own search, so the results here are the results everywhere.
   const iconNames = searchCrewIcons(iconCategory ?? iconSearch)
@@ -277,13 +276,17 @@ export function NewProjectContent({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Project name"
               />
-              <Input
-                value={summary}
-                onChange={(e) => setSummary(e.target.value)}
-                placeholder="Add a short summary…"
-                aria-label="Summary"
-                className="h-8 text-xs max-sm:h-12 max-sm:text-sm"
-              />
+              {/* No summary input.
+               *
+               * This specimen used to render one, and it was arguing against
+               * its own PR: the same change removed it from the shipped modal
+               * because `POST /projects` binds no such field, there is no
+               * column, and readJSON does not reject unknown keys — so it was
+               * typed, toasted and discarded. A specimen that shows a control
+               * the product cannot honour reads as a target and would have
+               * put it straight back. Whether projects SHOULD have a summary
+               * is a product decision; until it is taken, this shows what the
+               * server accepts. */}
             </div>
           </div>
         </CreateSurfaceSection>
@@ -335,24 +338,18 @@ export function NewProjectContent({ onClose }: { onClose: () => void }) {
           </CreateSurfaceGrid>
         </CreateSurfaceSection>
 
-        <CreateSurfaceSection title="Milestones" icon={Milestone} accent="purple" hint="optional">
-          {milestones.map((m, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <Check className="h-3.5 w-3.5 shrink-0 text-success" />
-              <Input
-                defaultValue={m}
-                aria-label={`Milestone ${i + 1}`}
-                className="h-8 text-xs max-sm:h-12 max-sm:text-sm"
-              />
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={() => setMilestones((ms) => [...ms, `Milestone ${ms.length + 1}`])}
-            className="self-start rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground max-sm:w-full max-sm:py-3"
-          >
-            + Add milestone
-          </button>
+        <CreateSurfaceSection title="Milestones" icon={Milestone} accent="purple">
+          {/* Not a control, on purpose. MilestoneHandler.Create 404s until the
+              project exists, so this could never have worked from a create
+              surface — the shipped modal's "+ Add milestone" had no onClick at
+              all and was removed in this same change. Worse, there is no
+              post-create surface either: project-sidebar.tsx has 697 lines of
+              working milestone CRUD and is imported by nothing. */}
+          <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
+            Milestones cannot be created here — the endpoint refuses until the project exists — and there is
+            no screen anywhere in the web UI that can create one. The CLI can:{" "}
+            <code className="font-mono">crewship milestone create</code>.
+          </CreateSurfaceNotice>
         </CreateSurfaceSection>
           </>
         )}
@@ -367,9 +364,10 @@ export function NewProjectContent({ onClose }: { onClose: () => void }) {
         >
           {lead ?? "Lead"}
         </CreateSurfacePill>
-        <CreateSurfacePill icon={Tag} accent="green">
-          Labels
-        </CreateSurfacePill>
+        {/* No Labels pill. Labels are strictly an issue concept — the tables
+            are `labels` and `mission_labels`; there is no project_labels
+            anywhere in the repo, and the create handler binds nothing. The
+            shipped modal's picker was removed in this same change. */}
       </CreateSurfacePills>}
 
       <CreateSurfaceFooter

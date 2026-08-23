@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { CreateIssueModal } from "../create-issue-modal"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { getCrewIconDef } from "@/lib/crew-icons"
+import { resolveRoutineIcon } from "@/lib/routine-identity"
 
 // Mock sonner toast
 vi.mock("sonner", () => ({
@@ -337,5 +340,194 @@ describe("CreateIssueModal", () => {
 
     const alert = await screen.findByRole("alert")
     expect(alert.textContent).toContain("Title is already taken")
+  })
+})
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * The four defects the migration left behind.
+ *
+ * One functional (the assignee picker offered nobody) and three cosmetic —
+ * an agent, a project and a routine each rendering a generic glyph here and
+ * their real identity everywhere else in the product.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The lucide class token the icon kit renders for `name`, read out of the kit
+ * itself rather than retyped — a rename in `lib/crew-icons.ts` then fails this
+ * test instead of silently asserting on a glyph that no longer resolves.
+ */
+function iconToken(name: string): string {
+  const Icon = getCrewIconDef(name).icon
+  const { container, unmount } = render(<Icon />)
+  const token = Array.from(container.querySelector("svg")!.classList).find(
+    (c) => c.startsWith("lucide-") && c !== "lucide",
+  )!
+  unmount()
+  return token
+}
+
+/** The `[cmdk-item]` row whose visible text is `label`. */
+function commandRow(label: string): HTMLElement {
+  const row = screen.getByText(label).closest("[cmdk-item]")
+  expect(row).not.toBeNull()
+  return row as HTMLElement
+}
+
+// Two crews in the order the API returns them: the FIRST is empty, which is
+// exactly the live shape (`e2e-empty-…` and `smoke-…` sort ahead of the crews
+// that have anyone in them) and the reason the picker offered nobody.
+const emptyFirstCrews = [
+  { id: "crew-1", name: "Engineering", slug: "engineering", color: "blue", icon: "code", _count: { agents: 0, members: 1 } },
+  { id: "crew-2", name: "Design", slug: "design", color: "violet", icon: "palette", _count: { agents: 2, members: 1 } },
+]
+
+// `avatar_seed`/`avatar_style` are NULL on every agent in the dev database, so
+// these rows are the case the read-side surfaces fall back for.
+const morgan = {
+  id: "agent-morgan",
+  name: "Morgan",
+  slug: "morgan",
+  avatar_seed: null,
+  avatar_style: null,
+  avatar_url: null,
+  crew: { name: "Design", slug: "design", color: null, avatar_style: null },
+}
+
+const mockRoutines = [
+  {
+    id: "routine-1",
+    slug: "nightly-sweep",
+    name: "Nightly sweep",
+    dsl_version: "1",
+    definition_hash: "abc",
+    ephemeral: false,
+    workspace_visible: true,
+    invocation_count: 0,
+    authored_via: "user_api" as const,
+    created_at: "",
+    updated_at: "",
+  },
+]
+
+const iconProjects = [
+  {
+    id: "proj-1", workspace_id: "ws-1", name: "Launch Prep", slug: "launch-prep",
+    description: null, icon: "rocket", color: "#EC4899", status: "in_progress" as const,
+    priority: "high" as const, health: "on_track" as const,
+    lead_type: null, lead_id: null, start_date: null, target_date: null,
+    created_at: "", updated_at: "", issue_count: 5, done_count: 2, progress: 40,
+  },
+]
+
+describe("CreateIssueModal — identity and the empty assignee list", () => {
+  const originalFetch = global.fetch
+
+  /** Answers the agents fetch per crew; anything else is a bare ok. */
+  function stubAgents(byCrew: Record<string, unknown[]>) {
+    const fetchMock = vi.fn((url: string) => {
+      const m = /crew_id=([^&]+)/.exec(url)
+      if (url.startsWith("/api/v1/agents") && m) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(byCrew[m[1]] ?? []) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    return fetchMock
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    stubAgents({})
+  })
+
+  afterAll(() => {
+    global.fetch = originalFetch
+  })
+
+  // ── 1. The assignee picker offers nobody ────────────────────────────────
+
+  it("auto-selects a crew that HAS agents rather than whichever sorts first", async () => {
+    stubAgents({ "crew-2": [morgan] })
+
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+
+    // The header names where the issue will land, so the choice is visible
+    // and still overridable — it is not made behind the user's back.
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2 }).textContent).toContain("DES")
+    })
+
+    fireEvent.click(screen.getByText("Assignee"))
+    expect(await screen.findByText("Morgan")).toBeInTheDocument()
+  })
+
+  it("says the crew has no agents instead of showing a silently empty list", async () => {
+    const allEmpty = emptyFirstCrews.map((c) => ({ ...c, _count: { agents: 0, members: 1 } }))
+    stubAgents({})
+
+    render(<CreateIssueModal {...defaultProps} crews={allEmpty} />)
+
+    fireEvent.click(screen.getByText("Assignee"))
+
+    // Names the crew, so "there is nobody here" cannot be mistaken for
+    // "the list failed to arrive".
+    const note = await screen.findByText(/no agents/i)
+    expect(note.textContent).toContain("Engineering")
+  })
+
+  it("distinguishes a failed agent load from a crew with nobody in it", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+    ) as unknown as typeof fetch
+
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+
+    fireEvent.click(screen.getByText("Assignee"))
+
+    expect(await screen.findByText(/could not be loaded/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no agents/i)).toBeNull()
+  })
+
+  // ── 2. Agents in the assignee picker have no avatar ─────────────────────
+
+  it("wears the same face as the roster, seeded from the name when the seed is NULL", async () => {
+    stubAgents({ "crew-2": [morgan] })
+
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+
+    fireEvent.click(screen.getByText("Assignee"))
+    await screen.findByText("Morgan")
+
+    const img = commandRow("Morgan").querySelector("img")
+    expect(img).not.toBeNull()
+    // crews-explorer.tsx / agent-canvas.tsx both pass `avatar_seed || name`.
+    expect(img!.getAttribute("src")).toBe(getAgentAvatarUrl("Morgan", null))
+  })
+
+  // ── 3. The project picker shows a generic glyph ─────────────────────────
+
+  it("renders a project with its own icon and colour, not a folder", async () => {
+    render(<CreateIssueModal {...defaultProps} projects={iconProjects} />)
+
+    fireEvent.click(screen.getByText("Project"))
+    await screen.findByText("Launch Prep")
+
+    const row = commandRow("Launch Prep")
+    expect(row.querySelector(`svg.${iconToken("rocket")}`)).not.toBeNull()
+    // CrewIcon tints a raw hex inline; the class-based palette cannot express one.
+    expect(row.querySelector('[style*="#EC4899"]')).not.toBeNull()
+  })
+
+  // ── 4. The routine picker shows a generic glyph ─────────────────────────
+
+  it("renders a routine with the icon routines-explorer derives for it", async () => {
+    render(<CreateIssueModal {...defaultProps} routines={mockRoutines} />)
+
+    fireEvent.click(screen.getByText("Routine"))
+    await screen.findByText("Nightly sweep")
+
+    const row = commandRow("Nightly sweep")
+    const expected = iconToken(resolveRoutineIcon(mockRoutines[0]))
+    expect(row.querySelector(`svg.${expected}`)).not.toBeNull()
   })
 })

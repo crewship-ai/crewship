@@ -26,6 +26,8 @@ import {
 } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { Switch } from "@/components/ui/switch"
 import {
   CreateSurfaceBody,
@@ -36,6 +38,8 @@ import {
   CreateSurfaceGrid,
   CreateSurfaceHeader,
   CreateSurfaceNotice,
+  CreateSurfacePill,
+  CREATE_SURFACE_INPUT,
   CreateSurfaceSecondaryAction,
   CreateSurfaceSection,
   CreateSurfaceTile,
@@ -46,6 +50,13 @@ import {
 /* ══ Routines → New routine ═════════════════════════════════════════════ */
 
 type Mode = "entry" | "describe" | "fork" | "advanced"
+
+/** Shaped like the real crew rows — icon and colour are columns, not decoration. */
+const DEMO_CREWS = [
+  { slug: "engineering", name: "Engineering", icon: "terminal", color: "#3B82F6", lead: "Alex" },
+  { slug: "quality", name: "Quality", icon: "shield-check", color: "#10B981", lead: "Morgan" },
+  { slug: "ops", name: "Ops", icon: "server", color: "#EF4444", lead: "Jordan" },
+]
 
 const FORKABLE = [
   { slug: "nightly-sweep", name: "Nightly sweep", runs: "412 runs" },
@@ -64,7 +75,7 @@ export function NewRoutineContent({ onClose }: { onClose: () => void }) {
 
   // describe
   const [goal, setGoal] = React.useState("")
-  const [lead, setLead] = React.useState("keeper")
+  const [crew, setCrew] = React.useState("engineering")
 
   // fork
   const [forkSearch, setForkSearch] = React.useState("")
@@ -146,20 +157,44 @@ export function NewRoutineContent({ onClose }: { onClose: () => void }) {
                 className="rounded-lg border border-hairline bg-foreground/[0.02] p-2.5 text-xs leading-relaxed"
               />
             </CreateSurfaceSection>
+            {/* The shipped surface now shows the crew's icon and the lead's
+                avatar here — this mirror was still a bare <select> of names,
+                which is the same class of error as drawing New page as a form.
+                A specimen that lags the thing it documents argues for undoing
+                it. */}
+            <CreateSurfaceField
+              label="Owner crew"
+              hint="Which crew the routine belongs to. Its lead does the drafting."
+            >
+              <div className="flex flex-wrap gap-1.5">
+                {DEMO_CREWS.map((c) => (
+                  <CreateSurfacePill
+                    key={c.slug}
+                    leading={<CrewIcon icon={c.icon} color={c.color} size="sm" className="!h-4 !w-4 !rounded-sm" />}
+                    set={crew === c.slug}
+                    onClick={() => setCrew(c.slug)}
+                  >
+                    {c.name}
+                  </CreateSurfacePill>
+                ))}
+              </div>
+            </CreateSurfaceField>
+
             <CreateSurfaceField
               label="Drafted by"
-              htmlFor="routine-lead"
-              hint="A lead agent writes the definition. You get the diff, not a saved routine."
+              hint="The crew's lead writes the definition. You get the diff, not a saved routine."
             >
-              <select
-                id="routine-lead"
-                value={lead}
-                onChange={(e) => setLead(e.target.value)}
-                className="h-8 w-full rounded-md border border-hairline bg-background px-2 text-xs text-foreground outline-none focus:border-primary max-sm:h-12 max-sm:text-sm"
-              >
-                <option value="keeper">keeper — platform</option>
-                <option value="filip">filip — backend lead</option>
-              </select>
+              <span className="flex items-center gap-2 rounded-lg border border-hairline bg-foreground/[0.02] px-3 py-2">
+                <img
+                  src={getAgentAvatarUrl(DEMO_CREWS.find((c) => c.slug === crew)?.lead ?? "Alex", null)}
+                  alt=""
+                  className="h-5 w-5 shrink-0 rounded-md"
+                />
+                <span className="text-xs text-muted-foreground">Lead:</span>
+                <span className="text-xs font-medium text-foreground">
+                  {DEMO_CREWS.find((c) => c.slug === crew)?.lead ?? "Alex"}
+                </span>
+              </span>
             </CreateSurfaceField>
           </>
         )}
@@ -222,7 +257,7 @@ export function NewRoutineContent({ onClose }: { onClose: () => void }) {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="What it does, in one line."
-                  className="h-8 text-xs max-sm:h-12 max-sm:text-sm"
+                  className={CREATE_SURFACE_INPUT}
                 />
               </CreateSurfaceField>
             </CreateSurfaceSection>

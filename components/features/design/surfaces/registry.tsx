@@ -74,8 +74,8 @@ export const DOORS: Door[] = [
     concept: "issues",
     size: "md",
     archetype: "Compose",
-    blurb: "Same shape as New issue, one size up, with the planning fields it actually needs.",
-    fields: ["name", "summary", "description", "icon", "colour", "status", "priority", "lead", "start date", "target date", "labels", "milestones"],
+    blurb: "Same shape as New issue, one size up. Summary, labels and milestones are gone — the server binds none of them.",
+    fields: ["name", "description", "icon", "colour", "status", "priority", "lead", "start date", "target date"],
     Content: NewProjectContent,
   },
   {
