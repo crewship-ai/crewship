@@ -24,7 +24,27 @@ import (
 )
 
 // validSlugRe matches safe slug values (alphanumeric, hyphens, underscores).
-var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+//
+// The leading underscore is admitted deliberately, and this regex is kept in
+// step with orchestrator.validSlugRe on purpose. Both were
+// `^[a-zA-Z0-9][...]` — first character alphanumeric — and that excluded the
+// onboarding setup agent's slug, `_crewship-setup-guide`. The underscore
+// there is load-bearing: api.validSlugFormat refuses a leading underscore on
+// anything a user can type, so the setup crew cannot collide with a real one
+// by construction rather than by a reserved-name check somebody forgets.
+//
+// The orchestrator's copy was widened when it turned out to reject every
+// message to that agent. This one is the same regex on the terminal-attach
+// path and would have rejected every terminal opened against it — the same
+// bug, found only because the fix for the first one went looking for
+// siblings. Two validators disagreeing about what a legal slug is is what
+// produced the original outage; leaving a known identical copy unfixed would
+// have re-armed it on a different door.
+//
+// What this actually defends is path traversal and shell metacharacters in a
+// value that lands in container paths and exec argv. A leading underscore is
+// neither, and was already legal mid-slug.
+var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 
 // Handler manages WebSocket-based terminal sessions into crew containers.
 type Handler struct {

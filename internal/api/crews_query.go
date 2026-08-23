@@ -53,6 +53,12 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.workspace_id = ? AND c.deleted_at IS NULL
+		-- The onboarding setup crew (kind = 'setup') is a conversation
+		-- partner, not a crew the user made — it must never appear in
+		-- "your crews", nor count toward any total this list backs.
+		-- docs/prd/conversational-onboarding.md §5.3 item 2;
+		-- onboarding_setup_crew.go creates the rows this excludes.
+		AND c.kind != 'setup'
 		-- c.id DESC is the pagination tiebreaker: c.created_at is second-precision,
 		-- so timestamp ties are realistic and would otherwise make LIMIT/OFFSET
 		-- windows drop or duplicate rows between pages.

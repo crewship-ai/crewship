@@ -14,17 +14,22 @@ import (
 // All progress fields are optional — only present while a job is in flight or
 // has just completed.
 type provisionStatusResponse struct {
-	Status               string   `json:"status"`
-	Error                string   `json:"error,omitempty"`
-	CachedImage          *string  `json:"cached_image"`
-	ConfigHash           *string  `json:"config_hash"`
-	DevcontainerConfig   *string  `json:"devcontainer_config"`
-	Step                 int      `json:"step,omitempty"`
-	Total                int      `json:"total,omitempty"`
-	Message              string   `json:"message,omitempty"`
-	Steps                []string `json:"steps,omitempty"`
-	LogTail              []string `json:"log_tail,omitempty"`
-	AgentsPendingRestart int      `json:"agents_pending_restart,omitempty"`
+	Status             string  `json:"status"`
+	Error              string  `json:"error,omitempty"`
+	CachedImage        *string `json:"cached_image"`
+	ConfigHash         *string `json:"config_hash"`
+	DevcontainerConfig *string `json:"devcontainer_config"`
+	// DevcontainerConfigDefaulted is true when the crew has no devcontainer
+	// config of its own and is running on the server's default instead —
+	// surfaced so that's visible rather than looking identical to a crew an
+	// operator explicitly configured.
+	DevcontainerConfigDefaulted bool     `json:"devcontainer_config_defaulted,omitempty"`
+	Step                        int      `json:"step,omitempty"`
+	Total                       int      `json:"total,omitempty"`
+	Message                     string   `json:"message,omitempty"`
+	Steps                       []string `json:"steps,omitempty"`
+	LogTail                     []string `json:"log_tail,omitempty"`
+	AgentsPendingRestart        int      `json:"agents_pending_restart,omitempty"`
 	// ResolvedFeatures is what the image is actually made of. Absent (nil) for
 	// a crew provisioned before this was recorded — a different answer from an
 	// empty list, and reported differently.
@@ -133,6 +138,9 @@ var crewProvisionStatusCmd = &cobra.Command{
 		hasConfig := "no"
 		if result.DevcontainerConfig != nil {
 			hasConfig = "yes"
+			if result.DevcontainerConfigDefaulted {
+				hasConfig = "yes (default)"
+			}
 		}
 		pairs := [][]string{
 			{"Status", result.Status},

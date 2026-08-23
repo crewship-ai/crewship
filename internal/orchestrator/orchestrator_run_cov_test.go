@@ -118,12 +118,13 @@ func (s *covFailSetState) Set(ctx context.Context, bucket, key string, value []b
 // unavailable so the agent CLI runs via the plain `stdbuf -oL claude ...`
 // fallback, which keeps the full argv (incl. --system-prompt) observable.
 type covRunOpts struct {
-	stream       string // agent stdout
-	agentExit    int    // agent exit code
-	agentRunning bool   // ExecInspect "still running"
-	health       string // checkSidecar reply ("" → not running)
-	sidecarExit  int    // startSidecar health script exit code
-	failMCPWrite bool   // fail the .mcp.json write exec
+	stream          string // agent stdout
+	agentExit       int    // agent exit code
+	agentRunning    bool   // ExecInspect "still running"
+	agentInspectErr error  // ExecInspect error on the terminal agent-exec inspect
+	health          string // checkSidecar reply ("" → not running)
+	sidecarExit     int    // startSidecar health script exit code
+	failMCPWrite    bool   // fail the .mcp.json write exec
 }
 
 func covNewRunContainer(opts covRunOpts) *covContainer {
@@ -158,6 +159,9 @@ func covNewRunContainer(opts covRunOpts) *covContainer {
 		case "tmux-check":
 			return false, 1, nil // tmux missing → stdbuf fallback
 		case "agent-exec":
+			if opts.agentInspectErr != nil {
+				return false, 0, opts.agentInspectErr
+			}
 			return opts.agentRunning, opts.agentExit, nil
 		case "sidecar-start":
 			return false, opts.sidecarExit, nil
@@ -703,6 +707,115 @@ func TestRunAgent_ExitCodeMapping(t *testing.T) {
 			t.Errorf("run status = %q, want running", got)
 		}
 	})
+}
+
+// ---- exec inspect outcome (the ExecInspect-error fix) ----
+//
+// Regression coverage for the bug where the terminal
+// `o.container.ExecInspect` call's error was discarded: `running` and
+// `exitCode` silently kept their zero values, exitCode==0 fell into the
+// "completed" branch, and an inspection that could not run was reported as
+// a run that SUCCEEDED. The three cases below are the full decision table
+// for that call site: a clean exit, a failed exit, and — the one that
+// matters — the inspect call itself erroring.
+func TestRunAgent_ExecInspectOutcome(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		opts covRunOpts
+		// wantStatus is the persisted RunState.Status after the run.
+		wantStatus string
+		// wantErr, if non-empty, must be a substring of the returned error.
+		// Empty means RunAgent must return nil.
+		wantErr string
+		// wantOutcome, if set, must match the exec.command journal entry's
+		// "outcome" payload field (only set on the inspect-error path).
+		wantOutcome string
+	}{
+		{
+			// Symptom this prevents: none — this is the control case. A
+			// clean inspect (no error) with exit 0 must still read as a
+			// normal successful run once the new error-handling branch is
+			// in place, so the fix does not regress the common path.
+			name:       "inspect succeeds, exit 0 reads as completed",
+			opts:       covRunOpts{stream: "{}\n", agentExit: 0},
+			wantStatus: "completed",
+			wantErr:    "",
+		},
+		{
+			// Symptom this prevents: none — control case for the existing
+			// non-zero-exit branch, to pin it down before touching the
+			// inspect-error branch right above it in the source.
+			name:       "inspect succeeds, non-zero exit reads as error",
+			opts:       covRunOpts{stream: "{}\n", agentExit: 7},
+			wantStatus: "error",
+			wantErr:    "agent exited with code 7",
+		},
+		{
+			// THE case that matters. Before the fix: ExecInspect's error was
+			// assigned to `_`, exitCode defaulted to 0, running defaulted to
+			// false, and the run below was reported "completed" — a daemon
+			// that could not even be asked for the exit code came back
+			// looking like a clean success. Assert the opposite: the run
+			// must NOT be "completed", must persist a status the caller can
+			// see is not success, must return a non-nil error naming the
+			// real cause, and the Crow's Nest exec.command entry must say
+			// the outcome is unknown rather than reading as a normal pass
+			// or fail.
+			name:        "inspect errors: outcome must not read as success",
+			opts:        covRunOpts{stream: "{}\n", agentInspectErr: errors.New("dial unix docker.sock: connection refused")},
+			wantStatus:  "error",
+			wantErr:     "exec inspect failed",
+			wantOutcome: "unknown",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			st := newMemState()
+			j := &covJournal{}
+			o := New(covNewRunContainer(tc.opts), st, covQuietLogger())
+			o.SetJournal(j)
+
+			err := o.RunAgent(context.Background(), covRunReq(), nil)
+
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("RunAgent: unexpected error: %v", err)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("RunAgent error = %v, want substring %q", err, tc.wantErr)
+				}
+			}
+
+			if got := covRunStatus(t, st, "chat1"); got != tc.wantStatus {
+				t.Errorf("run status = %q, want %q", got, tc.wantStatus)
+			}
+			// The one assertion that would have failed before the fix: a
+			// run whose outcome could not be determined must never be
+			// recorded as "completed".
+			if got := covRunStatus(t, st, "chat1"); got == "completed" && tc.name == "inspect errors: outcome must not read as success" {
+				t.Fatalf("inspect error was reported as a successful run (status=completed) — the exact regression this test guards against")
+			}
+
+			if tc.wantOutcome != "" {
+				entries := j.byType("exec.command")
+				if len(entries) == 0 {
+					t.Fatal("expected an exec.command journal entry")
+				}
+				last := entries[len(entries)-1]
+				if last.Severity != "warn" {
+					t.Errorf("exec.command severity = %q, want warn", last.Severity)
+				}
+				if outcome, _ := last.Payload["outcome"].(string); outcome != tc.wantOutcome {
+					t.Errorf("exec.command payload[outcome] = %v, want %q", last.Payload["outcome"], tc.wantOutcome)
+				}
+			}
+		})
+	}
 }
 
 // ---- response journal tap ----

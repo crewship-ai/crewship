@@ -230,12 +230,17 @@ func unindexedForeignKeyCount(t *testing.T, db *DB) {
 	// after this ratchet was set and it stays unindexed on purpose, by the
 	// same rule as the rest — `pipelines` is soft-deleted (deleted_at), and
 	// no `DELETE FROM pipelines` exists in non-test Go, so there is no parent
-	// delete for an index to accelerate.
+	// delete for an index to accelerate. The 34th is
+	// onboarding_proposals.created_by, from v20260822144843: a users FK,
+	// unindexed for the same reason every other users FK is (see
+	// userForeignKeysStayUnindexed above). That migration's other new FK,
+	// applied_crew_id -> crews, IS indexed — crews are hard-deleted in
+	// internal/api/internal_status.go, so it does not add to this count.
 	//
 	// The remainder are the documented exclusions: parents that are never
 	// hard-deleted (`users`) or child tables that do not grow (settings rows,
 	// small config tables).
-	const want = 33
+	const want = 34
 	if len(unindexed) != want {
 		sort.Strings(unindexed)
 		t.Errorf("unindexed foreign key columns = %d, want %d.\n"+

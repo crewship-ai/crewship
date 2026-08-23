@@ -17,7 +17,26 @@ import (
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
-var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+// validSlugRe gates every AgentSlug before it is interpolated into an
+// in-container path (/crew/agents/<slug>, /output/<slug>, /secrets/<slug>,
+// /workspace/<slug>), a tmux session name, or a shell command — see
+// assembleSystemPrompt below, the one call site that checks it, ahead of
+// every other use in this package. What it actually defends against is
+// path traversal ("..", "/") and shell metacharacters; leading underscore
+// is neither. The leading underscore is deliberately admitted so the
+// onboarding setup crew/agent slugs (internal/api/onboarding_setup_crew.go:
+// "_crewship-setup" / "_crewship-setup-guide") can run at all — that
+// underscore is load-bearing there for a DIFFERENT reason: every slug a
+// user can type is validated by api.validSlugFormat
+// (`^[a-z0-9][a-z0-9_-]*$`) or produced by a generator that only emits
+// [a-z0-9-], so a leading underscore cannot collide with a user's crew or
+// agent slug, by construction, with no reservation list to keep in sync.
+// Rejecting it here would silence that agent completely (#actual bug: every
+// send failed with "invalid agent slug"), for a character this regex was
+// never trying to keep out. path.Base is still checked separately below to
+// close the traversal case outright, so widening the charset here does not
+// weaken it.
+var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 
 // AgentRunRequest describes everything needed to execute an agent run inside
 // a container, including identity, credentials, prompts, and resource limits.

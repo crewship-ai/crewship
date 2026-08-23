@@ -529,6 +529,42 @@ jobs:
       - name: Run C2 exit-code contract
         run: bash scripts/cli-exit-code-contract.sh
 
+  # ── Can a default crew actually run an agent? ──
+  #
+  # This job exists because the answer was NO for four months and nothing
+  # noticed. Crews created by onboarding stored a NULL devcontainer_config,
+  # fell through to bare debian:bookworm-slim, and the agent died with
+  # `stdbuf: failed to run command 'claude': No such file or directory`,
+  # exit 127. Every CI path that could have caught it either sets
+  # CREWSHIP_SKIP_SIDECAR=1 or is gated behind an unconfigured provider key,
+  # so all of them skipped and reported green.
+  #
+  # It is HERE and not in runtime-conformance.yml deliberately. That workflow
+  # is nightly + dispatch, and a nightly cannot protect this: by the time it
+  # is red the regression is already on main. The test needs no API key and no
+  # LLM — the sidecar's /health serves in-memory state and startSidecar
+  # accepts zero credentials — so there is nothing to defer it for. Measured
+  # ~4s warm, ~76s on a cold cache.
+  onboarding-default-boots:
+    needs: [merge-conflict-markers]
+    name: Default crew boots an agent
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Runtime facts
+        run: docker version
+      # Asserts, inside a real container built from the product's own default
+      # devcontainer config: uid 1001 resolves, `claude --version` exits 0,
+      # and the real sidecar answers /health with 200.
+      - name: Default devcontainer boots and runs the adapter
+        run: go test -tags conformance -run TestOnboardingDefaultBoots -v -count=1 ./internal/provider/docker/
+
   # ── Per-PR browser smoke ──
   # Five deterministic checks are selected in playwright.pr.config.ts. The
   # provider-backed chat send/receive path and the remaining specs stay in the

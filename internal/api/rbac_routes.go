@@ -127,6 +127,15 @@ func scopeForRoute(pattern string) string {
 		return "agents:write"
 	case "crews", "crew-connections", "crew-templates", "crew-ai-suggest":
 		return "crews:write"
+	case "onboarding":
+		// Only the proposal-mutating routes reach this table at all —
+		// /onboarding/status|complete|setup|setup-agent/start register via
+		// authedSelfMut (roleSelf, scope-exempt) and never call
+		// scopeForRoute. Applying an onboarding proposal's one write is a
+		// crew creation (deployCrewTemplate, same as crew-templates' own
+		// deploy), so it shares that resource's scope rather than inventing
+		// a new one.
+		return "crews:write"
 	case "credentials", "credential-rotations":
 		return "credentials:write"
 	case "skills":

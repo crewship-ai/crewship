@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/tokenutil"
 )
@@ -624,7 +625,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			scrubHandler(event)
 		}
 	})
-	o.streamOutput(execCtx, result, req, tappedHandler)
+	rawOutput := o.streamOutput(execCtx, result, req, tappedHandler)
 	// Drain the stream scrubber's overlap buffer now the stream has ended,
 	// so any secret straddling the final chunk (or short output held back
 	// entirely) is scrubbed and the redacted tail still reaches the user.
@@ -698,7 +699,45 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("run cancelled: %w", ctx.Err())
 	}
 
-	running, exitCode, _ := o.container.ExecInspect(ctx, result.ExecID)
+	running, exitCode, inspErr := o.container.ExecInspect(ctx, result.ExecID)
+	if inspErr != nil {
+		// ExecInspect itself failed — daemon unreachable, exec id already
+		// reaped, whatever — so `running` and `exitCode` above are their zero
+		// values, NOT a real answer. Letting that stand in for one is exactly
+		// the class of bug this package has shipped twice already: the
+		// sidecar health probe once reported an unreachable daemon as a
+		// failed (healthy) sidecar, and imagePresentLocally once reported it
+		// as a missing image. Here the zero values point the other way and
+		// are worse: exitCode==0 with running==false falls straight into the
+		// "completed" branch below, so an inspection that could not run
+		// would be reported as a run that SUCCEEDED — a failure invisible to
+		// everyone, since nothing about it looks wrong downstream.
+		//
+		// This function's own sibling, execExitStatus (memory.go), already
+		// codifies the doctrine for this exact call: an inspect error is an
+		// UNKNOWN outcome, and UNKNOWN degrades to failure, never to
+		// success, because a false failure costs a retry while a false
+		// success costs never knowing the run failed at all. Failing OPEN
+		// here — guessing `running=true` and coasting the run at "running"
+		// forever — would be a different flavor of the same invisible
+		// failure: nothing would ever re-inspect it, and the agent would
+		// stay marked busy indefinitely. So: fail CLOSED. Mark the run
+		// "error" (there is no third "unknown" terminal state in the
+		// RunState/audit enum — see runAuditActions — and "error" is the
+		// fail-safe member of the two that exist), log the reason, emit a
+		// distinct Crow's Nest entry so the exec.command block does not read
+		// as a clean or even a normal failed run, and return a typed error
+		// so callers can tell "the agent failed" apart from "we don't know
+		// what the agent did".
+		o.logger.Error("exec inspect failed; run outcome unknown, failing closed",
+			"agent_id", req.AgentID, "exec_id", result.ExecID, "error", inspErr)
+		o.failRun(ctx, req, runState.ID, "error")
+		o.emitExecEnd(ctx, req, result.ExecID, cmd, "warn",
+			fmt.Sprintf("%s: outcome UNKNOWN — exec inspect failed: %v", req.AgentSlug, inspErr),
+			execStart, map[string]any{"outcome": "unknown", "inspect_error": inspErr.Error()})
+		o.markAgentOnline(ctx, req, map[string]any{"reason": "exec_inspect_failed"})
+		return fmt.Errorf("exec inspect failed, run outcome unknown: %w", inspErr)
+	}
 	o.logger.Info("exec finished", "agent_id", req.AgentID, "running", running, "exit_code", exitCode)
 
 	// Crow's Nest: closing exec.command entry with exit code + duration
@@ -738,22 +777,27 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if exitCode != 0 {
 		status = "error"
 		o.logger.Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)
-		// Bridge-level error so the chat surfaces a visible message
-		// instead of an empty assistant bubble. exit_code 123 from
-		// Claude Code specifically means startup auth check failed —
-		// almost always a missing or wrong-shape CLAUDE_CODE_OAUTH_TOKEN.
-		// Other CLIs reuse the same code for "generic exec failure"; we
-		// still surface SOMETHING actionable instead of silence.
-		switch exitCode {
-		case 123:
-			execErr = fmt.Errorf( //nolint:staticcheck // ST1005: user-facing error rendered in chat / journal UI
-				"agent exited with code %d — most likely a missing or invalid CLI token. "+
-					"Run `claude setup-token` (or the equivalent for your adapter) and re-paste the value in Settings → Credentials.",
-				exitCode,
-			)
-		default:
-			execErr = fmt.Errorf("agent exited with code %d — check the journal for details", exitCode)
+		// Typed error (not just a rendered sentence) so a caller like
+		// chatbridge's classifyAdapterExecError can tell "the binary is
+		// missing" (exit 127, "No such file or directory") apart from "the
+		// binary ran and crashed" apart from "no diagnostic text at all" —
+		// see AdapterExecError's doc comment. The container's own captured
+		// output goes through the run's secret scrubber first: it is raw
+		// docker-exec stdout+stderr that never passed through
+		// wrapScrubHandler (that wrapper only sees parsed AgentEvents, and a
+		// missing-binary shell error never produces one), so it is the one
+		// piece of container output in this function that reaches a
+		// user-facing surface (chat metadata) unscrubbed otherwise.
+		var binary string
+		if len(cmd) > 0 {
+			binary = cmd[0]
 		}
+		outScrub := scrubber.New()
+		if len(secretValues) > 0 {
+			outScrub.AddSecretValues(secretValues...)
+		}
+		scrubbedOutput := outScrub.Scrub(strings.TrimSpace(rawOutput))
+		execErr = newAdapterExecError(req.CLIAdapter, binary, exitCode, scrubbedOutput)
 	} else if inBandErr := inBand.Err(); inBandErr != nil {
 		// Exit 0, but the CLI's own terminal event said the turn failed. Same
 		// treatment as a non-zero exit: the run is an error and the chat gets a

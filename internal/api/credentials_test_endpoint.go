@@ -121,10 +121,50 @@ func probeProvider(ctx context.Context, provider, ctype, value string, dialEndpo
 func probeProviderInner(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
 	switch provider {
 	case "ANTHROPIC":
-		// OAuth setup tokens (sk-ant-oat*) cannot be validated via standard API.
-		// They only work inside Claude Code's authenticated tunnel.
+		// OAuth CLI tokens ARE checkable, and used to be reported as valid
+		// without anyone asking. The comment that stood here claimed they
+		// "cannot be validated via standard API" — disproven by
+		// probeAnthropicCredential, which authenticates exactly this token
+		// shape against /v1/messages with the oauth beta header, and which
+		// onboarding has relied on all along.
+		//
+		// The cost of that claim was not academic: this function backs
+		// /credentials/test, /credentials/{id}/test, the "Test now" button and
+		// `crewship credential test-stored`. For the one credential type
+		// onboarding accepts, every one of them answered "valid" having dialled
+		// nothing. A key pasted anywhere but the wizard was never verified.
 		if ctype == "AI_CLI_TOKEN" || isAnthropicOAuthToken(value) {
-			return testResult{Valid: true, Error: "OAuth token accepted (cannot validate via API, will be verified at runtime)"}
+			r := probeAnthropicCredential(ctx, value, "")
+			switch {
+			case r.OK():
+				return testResult{Valid: true, Status: r.Status}
+			case r.ModelUnavailable():
+				// /credentials/test answers one question: did Anthropic
+				// authenticate this credential? A 404 model response is only
+				// reachable after auth has succeeded, and the model used by
+				// this cheap direct-API probe is not the Claude Code CLI alias
+				// the agent will ultimately run. Treating that response as an
+				// invalid token trapped valid setup-token users in onboarding.
+				return testResult{
+					Valid:  true,
+					Status: r.Status,
+					Error:  "Anthropic authenticated the token; model availability will be checked by Claude Code at runtime",
+				}
+			case r.Reached && r.Status == http.StatusTooManyRequests:
+				return testResult{
+					Valid:  true,
+					Status: r.Status,
+					Error:  "Rate limited (token authenticated but temporarily throttled)",
+				}
+			case r.Reached:
+				// Reached and refused, or reached and answered something we
+				// do not treat as success — either way an answer, not a guess.
+				return testResult{Status: r.Status, Error: anthropicProbeMessage(r)}
+			default:
+				// Could not ask. Not valid, not invalid — and explicitly not
+				// reported as either.
+				return testResult{Error: anthropicProbeMessage(r)}
+			}
 		}
 		req, err := http.NewRequestWithContext(ctx, "GET", "https://api.anthropic.com/v1/models", nil)
 		if err != nil {

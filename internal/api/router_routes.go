@@ -56,6 +56,10 @@ func (r *Router) registerRoutes() {
 	// onboarding.
 	r.registerAuthRoutes()
 
+	// Onboarding proposal store (§5.6, §8.2) — workspace-scoped, so it lives
+	// in its own registrar rather than registerAuthRoutes above.
+	r.registerOnboardingProposalRoutes()
+
 	// Admin stats, audit, keeper admin log, backups.
 	r.registerAdminRoutes()
 

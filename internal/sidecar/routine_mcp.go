@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
+
+	"github.com/crewship-ai/crewship/internal/manifest"
 )
 
 // RoutinesMCPServerName is the server identity the in-container CLI sees in
@@ -84,6 +87,22 @@ var routineMCPDiscoverSchema = json.RawMessage(`{
 	"additionalProperties": false
 }`)
 
+// manifestMCPValidateSchema accepts the exact YAML stream a human would pass
+// to `crewship apply --file`. The tool is validation-only: keeping mutation
+// out of this surface means an agent-authored document cannot bypass the
+// browser/session confirmation an eventual manifest proposal card requires.
+var manifestMCPValidateSchema = json.RawMessage(`{
+	"type": "object",
+	"properties": {
+		"yaml": {
+			"type": "string",
+			"description": "One or more --- separated crewship/v1 YAML documents to parse and validate."
+		}
+	},
+	"required": ["yaml"],
+	"additionalProperties": false
+}`)
+
 // routineMCPTools is the stable, ordered tool catalog tools/list returns.
 // Order is fixed so adapters that snapshot the catalog see a deterministic
 // payload (map iteration order is unspecified in Go).
@@ -122,6 +141,15 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"interpreters). Call this FIRST when authoring a routine so save_routine passes on the first " +
 			"try — do not guess agent slugs, tool names, or runtimes.",
 		InputSchema: routineMCPDiscoverSchema,
+	},
+	{
+		Name: "validate_manifest",
+		Description: "Validate an authored Crewship YAML manifest with the same parser and offline schemas used by " +
+			"`crewship apply`. Supports every current crewship/v1 kind, including Crew, Agent, Routine and Page, " +
+			"and accepts multiple `---` separated documents. This tool NEVER writes workspace state. Fix every " +
+			"returned error before presenting YAML as ready. A successful validation is not an apply; references " +
+			"to state that already exists in the workspace are rechecked when an apply plan is built.",
+		InputSchema: manifestMCPValidateSchema,
 	},
 }
 
@@ -270,6 +298,35 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		status, bodyBytes = s.runPipeline(r.Context(), run, actingAgentID)
+	case "validate_manifest":
+		var input struct {
+			YAML string `json:"yaml"`
+		}
+		if len(params.Arguments) > 0 {
+			if err := json.Unmarshal(params.Arguments, &input); err != nil {
+				s.writeRoutinesMCPToolResult(w, req, http.StatusBadRequest,
+					mustJSON(map[string]string{"error": "invalid arguments: " + err.Error()}))
+				return
+			}
+		}
+		if strings.TrimSpace(input.YAML) == "" {
+			status, bodyBytes = http.StatusBadRequest, mustJSON(map[string]string{"error": "yaml is required"})
+			break
+		}
+		bundle, err := manifest.Load([]byte(input.YAML))
+		if err == nil {
+			err = manifest.ValidateBundle(bundle)
+		}
+		if err != nil {
+			status, bodyBytes = http.StatusBadRequest, mustJSON(map[string]string{
+				"error": "manifest validation failed: " + err.Error(),
+			})
+			break
+		}
+		status, bodyBytes = http.StatusOK, mustJSON(map[string]any{
+			"valid":   true,
+			"message": "Manifest is structurally valid. No workspace state was changed.",
+		})
 	default:
 		// Unknown tool — surface as a recoverable MCP tool error (isError)
 		// so the model can correct the name and retry, matching the memory

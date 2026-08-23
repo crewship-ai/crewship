@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -112,8 +114,10 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var completed bool
+	var skippedAt sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT onboarding_completed FROM users WHERE id = ?", user.ID).Scan(&completed)
+		"SELECT onboarding_completed, onboarding_skipped_at FROM users WHERE id = ?", user.ID).
+		Scan(&completed, &skippedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "User not found")
 		return
@@ -123,15 +127,32 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Smart detect: if user already has agents (e.g. provisioned via CLI), treat as completed
+	// Count real agents regardless of the stored flag. Besides smart-detecting
+	// CLI provisioning, this lets Status repair installations where an older
+	// onboarding build marked the user complete after the setup-agent chat but
+	// before it actually created a usable crew. Explicit Skip is tracked
+	// separately so users who deliberately chose an empty workspace are not
+	// forced back into the wizard forever.
+	var agentCount int
+	err = h.db.QueryRowContext(r.Context(), `
+		SELECT COUNT(*) FROM agents a
+		JOIN workspace_members wm ON wm.workspace_id = a.workspace_id
+		LEFT JOIN crews c ON c.id = a.crew_id
+		WHERE wm.user_id = ? AND a.deleted_at IS NULL
+		  AND (c.id IS NULL OR c.kind != ?)
+	`, user.ID, setupCrewKindSetup).Scan(&agentCount)
+	if err != nil {
+		replyInternalError(w, h.logger, "count onboarding agents", err)
+		return
+	}
+
+	// Smart detect: if user already has a real agent (e.g. provisioned via
+	// CLI), treat onboarding as completed. The temporary setup agent must not
+	// satisfy this test: Status itself creates that agent below, so counting it
+	// would make the next poll finish onboarding before the user confirmed or
+	// deployed anything.
 	if !completed {
-		var agentCount int
-		err = h.db.QueryRowContext(r.Context(), `
-			SELECT COUNT(*) FROM agents a
-			JOIN workspace_members wm ON wm.workspace_id = a.workspace_id
-			WHERE wm.user_id = ? AND a.deleted_at IS NULL
-		`, user.ID).Scan(&agentCount)
-		if err == nil && agentCount > 0 {
+		if agentCount > 0 {
 			completed = true
 			// Persist the flag so we don't re-query next time
 			if _, err := h.db.ExecContext(r.Context(),
@@ -140,11 +161,74 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 				h.logger.Warn("persist onboarding flag", "error", err, "user_id", user.ID)
 			}
 		}
+	} else if agentCount == 0 && !skippedAt.Valid {
+		// A completion with no deliverable and no explicit Skip marker is an
+		// interrupted/legacy onboarding, not success. Reopen it at the durable
+		// checkpoint (workspace + encrypted credential) instead of redirecting
+		// the user to an empty fleet with no way back to the setup conversation.
+		completed = false
+		if _, err := h.db.ExecContext(r.Context(),
+			"UPDATE users SET onboarding_completed = 0, updated_at = ? WHERE id = ?",
+			time.Now().UTC().Format(time.RFC3339), user.ID); err != nil {
+			replyInternalError(w, h.logger, "reopen interrupted onboarding", err)
+			return
+		}
+	}
+
+	// The Crewship Guide starts during onboarding and remains a first-class
+	// conversation partner afterwards. The reserved crew stays hidden from the
+	// user's fleet, while its agent and chat remain reachable from Chat.
+	// is "the start of onboarding" reading of that trigger — the wizard
+	// polls Status while it is mid-flow, and by the time the workspace
+	// holds a credential the user is past the workspace/language/credential
+	// steps and ready for a conversation. Best-effort and silent on
+	// failure: Status answering "am I done yet" must never break because a
+	// side conversation partner could not be created.
+	if wsID, ok := h.firstWorkspaceID(r.Context(), user.ID); ok {
+		if h.workspaceHasCredential(r.Context(), wsID) {
+			if _, err := ensureOnboardingSetupCrew(r.Context(), h.db, h.logger, wsID, user.ID); err != nil {
+				h.logger.Warn("onboarding status: ensure Crewship Guide", "error", err, "workspace_id", wsID)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"completed": completed,
 	})
+}
+
+// firstWorkspaceID mirrors the workspace lookup Setup() already does
+// (oldest membership wins), factored out so Status can make the same
+// best-effort check without duplicating the query text.
+func (h *OnboardingHandler) firstWorkspaceID(ctx context.Context, userID string) (string, bool) {
+	var workspaceID string
+	err := h.db.QueryRowContext(ctx, `
+		SELECT wm.workspace_id FROM workspace_members wm
+		WHERE wm.user_id = ? ORDER BY wm.created_at ASC LIMIT 1
+	`, userID).Scan(&workspaceID)
+	if err != nil {
+		return "", false
+	}
+	return workspaceID, true
+}
+
+// workspaceHasCredential reports whether the workspace holds at least one
+// active model credential the setup agent can actually be assigned. A stale,
+// revoked or unrelated credential (GitHub, SSH, webhook, …) must not open a
+// chat that can only fail later. Errors are treated as "no credential yet"
+// rather than surfaced: this only gates a best-effort convenience object,
+// never the onboarding flow itself.
+func (h *OnboardingHandler) workspaceHasCredential(ctx context.Context, workspaceID string) bool {
+	var n int
+	if err := h.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM credentials
+		WHERE workspace_id = ? AND deleted_at IS NULL AND status = 'ACTIVE'
+		  AND type IN ('API_KEY', 'AI_CLI_TOKEN')
+		  AND provider IN ('ANTHROPIC', 'OPENAI', 'GOOGLE', 'CURSOR', 'FACTORY', 'OLLAMA')`,
+		workspaceID).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
 }
 
 // Complete marks onboarding as finished for the current user.
@@ -156,9 +240,22 @@ func (h *OnboardingHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var body struct {
+		Skipped bool `json:"skipped"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			replyError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+	}
+	var skippedAt any
+	if body.Skipped {
+		skippedAt = time.Now().UTC().Format(time.RFC3339)
+	}
 	res, err := h.db.ExecContext(r.Context(),
-		"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ?",
-		time.Now().UTC().Format(time.RFC3339), user.ID)
+		"UPDATE users SET onboarding_completed = 1, onboarding_skipped_at = ?, updated_at = ? WHERE id = ?",
+		skippedAt, time.Now().UTC().Format(time.RFC3339), user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "complete onboarding", err)
 		return
@@ -213,6 +310,142 @@ type onboardingSetupRequest struct {
 	// untouched, while true/false is persisted exactly like
 	// `crewship telemetry on|off` would write it.
 	TelemetryOptIn *bool `json:"telemetry_opt_in"`
+	// AppliedProposalID, when set, names an onboarding proposal
+	// (onboarding_proposals.id) that POST
+	// /onboarding/proposals/{id}/apply has ALREADY turned into a real
+	// crew (docs/prd/conversational-onboarding.md §4's chat path). The
+	// wizard's Launch button sends this instead of crew_template_slug /
+	// crew_name / agent_name once the setup agent's proposal card has
+	// been applied — see setupFromAppliedProposal. Setup still persists
+	// workspace_name / preferred_language / telemetry_opt_in and marks
+	// onboarding complete exactly as the other two branches do, but it
+	// does NOT deploy anything: doing so would create a SECOND crew
+	// alongside the one Apply already made real, which is the bug this
+	// field exists to close (see the former comment atop handleLaunch in
+	// app/(onboarding)/onboarding/page.tsx).
+	AppliedProposalID string `json:"applied_proposal_id"`
+}
+
+// errAppliedProposalInvalid is the sentinel wrapped by every reason
+// verifyAppliedProposal refuses an applied_proposal_id — errors.Is lets
+// Setup tell "this id is bad" apart from a genuine DB/decode failure
+// without string-matching messages.
+var errAppliedProposalInvalid = errors.New("invalid applied_proposal_id")
+
+// verifyAppliedProposal loads proposalID scoped to workspaceID and
+// confirms it is actually APPLIED before Setup trusts it to mean "a crew
+// already exists" — the id is caller-supplied, so it must never be
+// trusted blindly (an unverified id would let a stale or foreign
+// proposal skip crew creation entirely, leaving onboarding "complete"
+// with no crew at all).
+//
+// The lookup is scoped by workspace_id in the same query (mirrors
+// loadProposalRow in onboarding_proposal.go) rather than checked
+// separately after an unscoped lookup: an unknown id and a real id that
+// belongs to another workspace both land on sql.ErrNoRows and get the
+// same refusal message, so this endpoint can't be used to probe which
+// proposal ids exist in other workspaces.
+func (h *OnboardingHandler) verifyAppliedProposal(ctx context.Context, workspaceID, proposalID string) (*deployCrewResult, error) {
+	var (
+		status    string
+		resultRaw sql.NullString
+	)
+	err := h.db.QueryRowContext(ctx, `
+		SELECT status, applied_result_json
+		FROM onboarding_proposals
+		WHERE id = ? AND workspace_id = ?`, proposalID, workspaceID).Scan(&status, &resultRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("unknown or inaccessible applied_proposal_id: %w", errAppliedProposalInvalid)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if status != onboardingProposalStatusApplied {
+		return nil, fmt.Errorf("proposal has not been applied yet: %w", errAppliedProposalInvalid)
+	}
+	if !resultRaw.Valid || resultRaw.String == "" {
+		return nil, fmt.Errorf("applied proposal has no stored result: %w", errAppliedProposalInvalid)
+	}
+	var result deployCrewResult
+	if err := json.Unmarshal([]byte(resultRaw.String), &result); err != nil {
+		return nil, fmt.Errorf("parse applied proposal result: %w", err)
+	}
+	return &result, nil
+}
+
+// setupFromAppliedProposal completes onboarding when the wizard already
+// created the crew via POST /onboarding/proposals/{id}/apply — the chat
+// path (docs/prd/conversational-onboarding.md §4). Launch's job here is
+// ONLY to persist the prefs the other two Setup branches persist
+// (workspace name, preferred_language, telemetry_opt_in) and mark
+// onboarding complete; it must NOT deploy a crew, because one already
+// exists. This is the fix for the "Launch deploys a second crew" bug:
+// previously Setup had no way to know a proposal had already been
+// applied, so it always ran the blank/single-agent deploy path.
+func (h *OnboardingHandler) setupFromAppliedProposal(w http.ResponseWriter, r *http.Request, userID, workspaceID, proposalID string, req onboardingSetupRequest) {
+	result, err := h.verifyAppliedProposal(r.Context(), workspaceID, proposalID)
+	if err != nil {
+		if errors.Is(err, errAppliedProposalInvalid) {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		replyInternalError(w, h.logger, "onboarding setup: verify applied proposal", err)
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Same atomic CAS guard as the other two branches: claim onboarding
+	// before persisting anything so a racing second call (another tab,
+	// a double-click) can't re-persist prefs after the first call
+	// already completed onboarding (#1203's guard applies here too).
+	guardRes, err := h.db.ExecContext(r.Context(),
+		"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ? AND onboarding_completed = 0",
+		now, userID)
+	if err != nil {
+		replyInternalError(w, h.logger, "onboarding setup: lock (applied proposal)", err)
+		return
+	}
+	rows, err := guardRes.RowsAffected()
+	if err != nil {
+		replyInternalError(w, h.logger, "onboarding setup: lock rows affected (applied proposal)", err)
+		return
+	}
+	if rows == 0 {
+		replyError(w, http.StatusConflict, "Onboarding already completed")
+		return
+	}
+
+	// #1203: only persist once the CAS guard above has actually claimed
+	// onboarding for this call.
+	h.persistOnboardingPrefs(r.Context(), workspaceID, req)
+
+	if strings.TrimSpace(req.WorkspaceName) != "" {
+		if _, err := h.db.ExecContext(r.Context(),
+			"UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?",
+			req.WorkspaceName, now, workspaceID); err != nil {
+			h.logger.Error("onboarding setup: update workspace name (applied proposal)", "error", err)
+			// Soft failure, same as setupFromTemplate: don't abort
+			// completion over a failed rename.
+		}
+	}
+
+	// Name the crew the proposal already created so the frontend can
+	// route the user straight to it — same response shape as
+	// setupFromTemplate returns, so the frontend's existing
+	// agent-id/agent-slug routing logic needs no branch for this path.
+	var firstAgentID string
+	if len(result.AgentIDs) > 0 {
+		firstAgentID = result.AgentIDs[0]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"workspace_id":        workspaceID,
+		"crew_id":             result.CrewID,
+		"agent_id":            firstAgentID,
+		"agent_ids":           result.AgentIDs,
+		"agent_count":         result.AgentCount,
+		"applied_proposal_id": proposalID,
+	})
 }
 
 var slugRegex = regexp.MustCompile(`[^a-z0-9-]`)
@@ -255,6 +488,17 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		replyInternalError(w, h.logger, "find workspace", err)
+		return
+	}
+
+	// Applied-proposal branch: the chat path's proposal card was already
+	// applied (a real crew exists), so Launch's only job left is prefs +
+	// completion — never a deploy. Checked before anything else in this
+	// handler so an applied_proposal_id short-circuits ahead of the
+	// credential validation and crew_template_slug/blank branching below,
+	// none of which this path needs.
+	if pid := strings.TrimSpace(req.AppliedProposalID); pid != "" {
+		h.setupFromAppliedProposal(w, r, user.ID, workspaceID, pid, req)
 		return
 	}
 
@@ -619,11 +863,11 @@ func stringPtr(s string) *string {
 //  1. Shape check: cheap regex / prefix gate that catches the
 //     "pasted the wrong thing from the wrong page" case before we
 //     even bother the upstream API.
-//  2. Live probe: a real authenticated request to the provider's
-//     API with the token. Catches "right shape, wrong / expired
-//     token" — the case that was leaving users with broken chat
-//     and silent empty bubbles. Optional via the `probe` flag so
-//     tests can skip it.
+//  2. Live auth probe: a real authenticated request to the provider's
+//     API with the token. It catches "right shape, wrong / expired token".
+//     It deliberately does not validate the selected model: onboarding
+//     stores Claude Code CLI aliases, while the probe talks to Anthropic's
+//     direct API, so conflating those two namespaces rejects valid tokens.
 //
 // Per-provider checks are intentionally narrow: we only reject shapes
 // we know will fail downstream, never anything ambiguous. A future
@@ -662,7 +906,23 @@ func validateOnboardingCredential(ctx context.Context, provider, value string) e
 					"Run `claude setup-token` on your machine and paste the resulting value.",
 			)
 		}
-		return probeAnthropicOAuthToken(ctx, v)
+		if skipTokenProbe {
+			return nil
+		}
+		// This is a credential gate, not a model-compatibility gate. The
+		// selected model may be a Claude Code CLI alias (for example
+		// claude-sonnet-5), which is not guaranteed to be accepted by the
+		// direct Messages API used by the probe. A model 404 proves auth got
+		// past the credential check and must not send the user back to
+		// regenerate the token.
+		r := probeAnthropicCredential(ctx, v, "")
+		if r.Rejected() {
+			return errors.New(anthropicProbeMessage(r)) //nolint:staticcheck // ST1005: user-facing onboarding message, rendered verbatim in UI
+		}
+		// Anything else — reached and odd, or never reached — is soft. It is
+		// logged as "not confirmed" rather than counted as a pass, but it does
+		// not block a submit on Anthropic having a bad minute.
+		return nil
 	}
 	return nil
 }

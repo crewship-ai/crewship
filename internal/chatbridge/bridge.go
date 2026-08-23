@@ -176,6 +176,24 @@ type ProvisioningEnqueueResult struct {
 	Status         string
 }
 
+// PendingChatMessage is a chat send that HandleChatMessage deferred because
+// its crew's devcontainer needed a build (the needsProvision branch below).
+// It is handed to AttachPendingMessage so the provisioning job itself can
+// resume (or fail) it once the build reaches a terminal state — the server
+// owns the resume, instead of leaving a client to notice the build finished
+// and resend on its own (which is the race this type exists to close: the
+// completion frame on the workspace realtime channel is easy to miss, but
+// nothing can miss a callback made from inside the job's own goroutine).
+type PendingChatMessage struct {
+	UserID  string
+	ChatID  string
+	Content string
+	// Opts mirrors the variadic ws.ChatMessageOption HandleChatMessage
+	// received on the original send, so the resumed run honours the same
+	// MaxTurns / Metadata the deferred message carried.
+	Opts ws.ChatMessageOption
+}
+
 // ProvisioningEnqueuer kicks off an asynchronous provisioning job for a crew
 // whose devcontainer image hasn't been built yet. Wired in by the server so
 // the bridge can auto-trigger a build when a user's first message lands on
@@ -183,6 +201,15 @@ type ProvisioningEnqueueResult struct {
 // provision …` first" — the GUI has no terminal context for that hint.
 type ProvisioningEnqueuer interface {
 	EnqueueForCrew(ctx context.Context, crewID, workspaceID string) (ProvisioningEnqueueResult, error)
+	// AttachPendingMessage attaches a deferred send to crewID's tracked
+	// provisioning job so the job resumes or fails it exactly once when it
+	// reaches a terminal state — see PendingChatMessage and
+	// api.ProvisioningHandler.AttachPendingMessage for the at-most-once
+	// mechanics (keyed by ChatID, drained atomically with the status
+	// transition). Returns false only when no job is tracked for crewID at
+	// all, which is not treated as fatal by the caller: the
+	// crew_provisioning event already told the user to resend manually.
+	AttachPendingMessage(crewID string, msg PendingChatMessage) bool
 }
 
 // imagePresenceChecker is the optional capability the bridge uses to detect
@@ -557,7 +584,15 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			evtMeta["error"] = enqErr.Error()
 			evtContent = fmt.Sprintf("Could not start build for %s: %s", info.CrewSlug, enqErr.Error())
 		} else {
-			evtContent = fmt.Sprintf("Building %s — your message will run once the image is ready.", info.CrewSlug)
+			// Actionable, not alarming: this is the first time (or the first
+			// time since its cached image was pruned) that %s needs a build
+			// before it can run at all — say what's happening, rather than
+			// leaving the user to guess from a bare "building…" line why
+			// nothing happened. Does NOT ask the user to resend: the message
+			// is attached to the job below and the server runs it
+			// automatically once the build finishes (or reports a real error
+			// if it doesn't) — see AttachPendingMessage.
+			evtContent = fmt.Sprintf("%s's environment is being built — this is a one-time setup step. Your message will run automatically once the build finishes.", info.CrewSlug)
 		}
 		streamFn(ws.ChatEvent{
 			Type:     "crew_provisioning",
@@ -575,7 +610,42 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			return fmt.Errorf("auto-provision enqueue failed for crew %q: %w", info.CrewSlug, enqErr)
 		}
 		_ = alreadyJob
-		return fmt.Errorf("crew %q provisioning kicked off; resend after build completes", info.CrewSlug)
+
+		// Attach the deferred message to the job so the SERVER resumes it —
+		// exactly once — when the build finishes, instead of relying on a
+		// client to notice completion (the workspace realtime broadcast a
+		// client might miss entirely, see docs/prd/conversational-onboarding.md)
+		// or on the user to remember to resend. AttachPendingMessage's
+		// at-most-once contract (keyed by chat id, drained atomically with the
+		// job's terminal-state transition) means a second deferred send on the
+		// same chat — e.g. an impatient manual resend while the build is still
+		// running — coalesces onto this one rather than queuing a duplicate
+		// run. A false return (no job tracked for this crew at all) is not
+		// fatal: the crew_provisioning event above already told the user what
+		// is happening, and it's only reachable if the job vanished between
+		// the enqueue call above and here.
+		if b.provisioning != nil {
+			if !b.provisioning.AttachPendingMessage(info.CrewID, PendingChatMessage{
+				UserID:  userID,
+				ChatID:  chatID,
+				Content: content,
+				Opts:    msgOpt,
+			}) {
+				b.logger.Warn("could not attach deferred message to provisioning job",
+					"crew_id", info.CrewID, "chat_id", chatID)
+			}
+		}
+
+		// NOT a failure — the build just started (or was already running) and
+		// the crew_provisioning event above already told the user what's
+		// happening; the message itself is now attached to the job (above)
+		// and will run automatically. This return exists only to stop this
+		// function from falling through to persist/broadcast the message and
+		// run the agent a second time; wrapping ws.ErrCrewProvisioning (rather
+		// than a bare fmt.Errorf) lets the ws layer recognize this specific
+		// control-flow case and route it away from the generic error path —
+		// see ErrCrewProvisioning's doc comment for the governing rule.
+		return fmt.Errorf("crew %q provisioning kicked off: %w", info.CrewSlug, ws.ErrCrewProvisioning)
 	}
 
 	// Cross-sender exclusivity: at most one live agent run per chat, no
@@ -947,7 +1017,23 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) {
 			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), errMsg)
 		}
-		streamFn(ws.ChatEvent{Type: "error", Content: runErr.Error()})
+		// Classify adapter-exec failures (the CLI process itself exiting
+		// non-zero inside the container) the same way container-start
+		// failures already are above: a stable code, an actionable message,
+		// and — new here — the container's own captured output attached as
+		// metadata instead of only reaching the journal. Any runErr that
+		// isn't an *orchestrator.AdapterExecError (in-band failure, MCP
+		// injection, oversized prompt, …) falls through to its own
+		// unmodified .Error() text with no metadata, unchanged from before.
+		code, msg, meta := classifyAdapterExecError(runErr)
+		if msg == "" {
+			msg = runErr.Error()
+		}
+		if meta != nil {
+			meta["code"] = code
+			b.logger.Warn("agent exec failed", "chat_id", chatID, "code", code, "error", runErr)
+		}
+		streamFn(ws.ChatEvent{Type: "error", Content: msg, Metadata: meta})
 		return fmt.Errorf("run agent: %w", runErr)
 	}
 
@@ -1013,6 +1099,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	repliedAt := time.Now().UTC()
+	// The setup agent has no write tools. Its only structured output is a
+	// hidden, narrowly validated template suggestion in its final text. Put
+	// that suggestion on both durable message metadata (reload/history) and
+	// the terminal done event (the live chat) so the proposal card is not
+	// timing-dependent. Ordinary agents can never emit this metadata: the
+	// extractor is additionally pinned to the reserved setup-agent slug.
+	assistantMetadata := onboardingProposalMetadata(info.AgentSlug, acc.Text())
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:          generateMsgID(),
 		AgentID:     info.AgentID,
@@ -1020,6 +1113,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		Content:     acc.Text(),
 		Parts:       partAcc.Parts(),
 		ToolSummary: toolSummary,
+		Metadata:    assistantMetadata,
 		Timestamp:   repliedAt,
 	}); err != nil {
 		b.logger.Error("failed to persist assistant message", "error", err, "chat_id", chatID)
@@ -1048,6 +1142,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// ResolveTrace returns ok=false; we just omit the field in that
 	// case so the frontend's optional read stays clean.
 	doneMeta := map[string]any{}
+	for key, value := range assistantMetadata {
+		doneMeta[key] = value
+	}
 	if traceID, _, ok := telemetry.ResolveTrace(ctx); ok {
 		doneMeta["trace_id"] = traceID
 	}
@@ -1177,6 +1274,113 @@ func classifyCrewRuntimeError(err error) (code, message string) {
 	default:
 		return "internal", "The agent container could not be started." + hint
 	}
+}
+
+// classifyAdapterExecError maps a RunAgent failure that comes from the agent
+// CLI process itself — as opposed to classifyCrewRuntimeError's job, the
+// container never starting — to a stable code + actionable message, and to
+// metadata the chat client can render alongside it (the container's own
+// diagnostic text, which used to reach nowhere the operator could see it).
+//
+// THE RULE THIS CODEBASE HAS BROKEN REPEATEDLY, restated here because it is
+// this function's entire job: a check that could not RUN must never be
+// reported as a check that FAILED, and a failure whose cause is known must
+// not be reported generically. Exit 127 with a shell "No such file or
+// directory" naming the CLI binary is not "the agent failed" — the agent
+// never ran — and reporting it as "agent exited with code 127 — check the
+// journal" sends the operator to grep a journal for a fact this function
+// already had in hand: the crew's image does not have the adapter's binary.
+// The same rule cuts the other way too — a non-zero exit with no captured
+// output at all is NOT known to be a missing binary, and must not be
+// upgraded to that specific a claim just because 127 usually means that in a
+// shell; see the exit-127-without-confirming-text case below.
+//
+// Structural check before substring, same as classifyCrewRuntimeError:
+// errors.As on the typed *orchestrator.AdapterExecError comes first, and
+// only its fields (ExitCode, Output) are pattern-matched — never runErr's
+// rendered .Error() string, which for every other error class this function
+// might be handed (cancellation, in-band failure, MCP injection) has nothing
+// to do with an adapter exec and would make substring matches coincidental
+// at best.
+func classifyAdapterExecError(err error) (code, message string, meta map[string]any) {
+	var execErr *orchestrator.AdapterExecError
+	if !errors.As(err, &execErr) {
+		// Not an adapter-exec failure at all (a caller that reaches this
+		// function is expected to have already routed cancellation/in-band
+		// failures elsewhere) — fall back to the raw message rather than
+		// guess. This branch is what keeps this function safe to call
+		// defensively: it never fabricates a code for an error shape it
+		// does not recognise.
+		if err == nil {
+			return "internal", "", nil
+		}
+		return "internal", err.Error(), nil
+	}
+
+	meta = map[string]any{
+		"exit_code": execErr.ExitCode,
+		"adapter":   execErr.Adapter,
+	}
+	if execErr.Binary != "" {
+		meta["binary"] = execErr.Binary
+	}
+	if execErr.Output != "" {
+		meta["container_output"] = execErr.Output
+	}
+
+	// Exit code 0 reaching this function would mean something upstream
+	// mislabeled a successful run as a failure — the exact "could-not-check
+	// reported as failed" bug this function exists to prevent elsewhere.
+	// Refuse to invent a failure story for it.
+	if execErr.ExitCode == 0 {
+		return "internal", "The agent run was reported as failed but the process exited 0 — this should not happen; check the journal for what actually went wrong.", meta
+	}
+
+	lowerOut := strings.ToLower(execErr.Output)
+	const hint = " Details are in the run journal / server logs."
+	switch {
+	case execErr.ExitCode == 127 &&
+		(strings.Contains(lowerOut, "no such file or directory") || strings.Contains(lowerOut, "command not found")):
+		// The shell tried to exec the adapter's binary and it was not on
+		// PATH — the crew's image was built without it (or from before the
+		// adapter was added). Not a crash: the agent never started.
+		bin := execErr.Binary
+		if bin == "" {
+			bin = execErr.Adapter
+		}
+		return "adapter_missing", fmt.Sprintf(
+			"The %q binary is not installed in this crew's container image, so the %s adapter could not run at all — "+
+				"this is a missing binary, not a crash. Reprovision the crew with an image that includes %q, "+
+				"or move the crew to an adapter its image supports.",
+			bin, execErr.Adapter, bin), meta
+	case strings.TrimSpace(execErr.Output) != "":
+		// Non-zero exit with the CLI's own output captured: the process ran
+		// and told us something on its way out, so pass that on instead of
+		// reducing a known cause to a generic sentence.
+		return "adapter_crashed", fmt.Sprintf(
+			"The %s agent process exited with code %d. Container output: %s",
+			execErr.Adapter, execErr.ExitCode, truncateForChatMeta(execErr.Output)) + hint, meta
+	default:
+		// Non-zero exit, nothing captured — genuinely unknown cause. Say so
+		// rather than guess at "missing binary" or paraphrase the CLI's own
+		// (absent) words.
+		return "internal", fmt.Sprintf(
+			"The %s agent process exited with code %d and produced no output that explains why.",
+			execErr.Adapter, execErr.ExitCode) + hint, meta
+	}
+}
+
+// truncateForChatMeta bounds how much container output rides in the chat
+// error message body itself (the untruncated text still goes into
+// meta["container_output"] for anything that wants the whole thing) — a
+// crash that dumped a stack trace should not turn the chat bubble into a
+// wall of text.
+func truncateForChatMeta(s string) string {
+	const maxLen = 500
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "…"
 }
 
 // capacityHoldMessage turns an expired capacity hold into the sentence the

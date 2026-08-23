@@ -93,7 +93,11 @@ func TestResolveCrewResources_EmptyAndMalformed(t *testing.T) {
 	uid := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, uid)
 
-	// Crew with all configs NULL → empty, no error.
+	// Crew with all configs NULL → no datastores, but NOT no tools: a NULL
+	// devcontainer_config now resolves to database.DefaultCrewDevcontainerConfig
+	// (the chokepoint fix), which installs common-utils (git) and the
+	// claude-code feature. Reporting zero tools here would tell an agent it
+	// has none of what it actually has.
 	if _, err := db.Exec(
 		`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?,?,?,?)`,
 		"crew-empty", wsID, "Empty", "empty"); err != nil {
@@ -103,8 +107,21 @@ func TestResolveCrewResources_EmptyAndMalformed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveCrewResources(empty): %v", err)
 	}
-	if len(res.Datastores) != 0 || len(res.Tools) != 0 {
-		t.Errorf("expected empty resources, got %+v", res)
+	if len(res.Datastores) != 0 {
+		t.Errorf("expected no datastores, got %+v", res.Datastores)
+	}
+	wantTools := map[string]bool{"git": false, "claude-code": false}
+	for _, tool := range res.Tools {
+		if _, ok := wantTools[tool.Type]; !ok {
+			t.Errorf("unexpected tool from default devcontainer config: %+v", tool)
+			continue
+		}
+		wantTools[tool.Type] = true
+	}
+	for name, found := range wantTools {
+		if !found {
+			t.Errorf("expected default devcontainer config to surface tool %q, got %+v", name, res.Tools)
+		}
 	}
 
 	// Crew with malformed JSON in every column → empty, no error.

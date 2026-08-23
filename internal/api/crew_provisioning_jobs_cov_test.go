@@ -241,11 +241,22 @@ func TestEnqueueForCrew_SentinelErrors(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
-	t.Run("no devcontainer config", func(t *testing.T) {
-		h, wsID, crewID := covProvRig(t, &covCommitClient{}, "")
-		_, err := h.EnqueueForCrew(context.Background(), crewID, wsID)
-		if !errors.Is(err, ErrCrewNoDevcontainer) {
-			t.Errorf("err = %v", err)
+	t.Run("no devcontainer config resolves to the default instead of refusing", func(t *testing.T) {
+		h, wsID, crewID := covProvRig(t, &covCommitClient{}, "") // NULL devcontainer_config
+		// Pre-seed an in-flight job so EnqueueForCrew fast-paths to
+		// AlreadyRunning instead of spawning a real build goroutine against
+		// database.DefaultCrewDevcontainerConfig — this subtest is only
+		// about whether the empty-config gate still refuses the crew (it
+		// used to, with ErrCrewNoDevcontainer, before EnqueueForCrew reached
+		// the jobs-map check at all), not about exercising the build
+		// pipeline.
+		h.jobs[crewID] = &ProvisionJob{CrewID: crewID, Status: "running", StartedAt: time.Now()}
+		res, err := h.EnqueueForCrew(context.Background(), crewID, wsID)
+		if err != nil {
+			t.Fatalf("err = %v, want nil — empty config now resolves to the default", err)
+		}
+		if !res.AlreadyRunning {
+			t.Errorf("res = %+v, want AlreadyRunning (proves the empty-config check no longer short-circuits before it)", res)
 		}
 	})
 }

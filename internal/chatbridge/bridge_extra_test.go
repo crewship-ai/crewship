@@ -156,6 +156,16 @@ type stubEnqueuer struct {
 	resRunning  bool
 	resStatus   string
 	returnError error
+
+	// attachCalled/attachCrewID/attachMsg capture the AttachPendingMessage
+	// call so tests can assert the bridge handed the job the deferred send.
+	// attachNoJob flips the return to false (the "no job tracked" branch);
+	// zero-value (false) keeps the common case — job found, attached — for
+	// every test that never touches this field.
+	attachCalled bool
+	attachCrewID string
+	attachMsg    PendingChatMessage
+	attachNoJob  bool
 }
 
 func (s *stubEnqueuer) EnqueueForCrew(_ context.Context, crewID, workspaceID string) (ProvisioningEnqueueResult, error) {
@@ -170,6 +180,13 @@ func (s *stubEnqueuer) EnqueueForCrew(_ context.Context, crewID, workspaceID str
 		AlreadyRunning: s.resRunning,
 		Status:         s.resStatus,
 	}, nil
+}
+
+func (s *stubEnqueuer) AttachPendingMessage(crewID string, msg PendingChatMessage) bool {
+	s.attachCalled = true
+	s.attachCrewID = crewID
+	s.attachMsg = msg
+	return !s.attachNoJob
 }
 
 // When a provisioner is wired, sending a message at an unprovisioned crew
@@ -212,6 +229,20 @@ func TestHandleChatMessageAutoTriggersProvisioning(t *testing.T) {
 	}
 	if enq.gotCrewID != "crew-1" || enq.gotWsID != "ws-1" {
 		t.Errorf("enqueue called with wrong args: crew=%q ws=%q", enq.gotCrewID, enq.gotWsID)
+	}
+
+	// The message must be handed to the job (AttachPendingMessage) so the
+	// SERVER can resume it once the build finishes — this is the whole fix:
+	// without this call, nothing but the client's own (removed) auto-resend
+	// would ever run this message again, which is exactly the silence bug.
+	if !enq.attachCalled {
+		t.Fatal("expected AttachPendingMessage to be called so the job can resume this message")
+	}
+	if enq.attachCrewID != "crew-1" {
+		t.Errorf("attached to crew %q, want crew-1", enq.attachCrewID)
+	}
+	if enq.attachMsg.UserID != "user-1" || enq.attachMsg.ChatID != "sess-1" || enq.attachMsg.Content != "hello" {
+		t.Errorf("attached message = %+v, want {user-1 sess-1 hello ...}", enq.attachMsg)
 	}
 
 	var sawProvisioning bool

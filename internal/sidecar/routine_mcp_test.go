@@ -70,7 +70,7 @@ func TestRoutinesMCP_ToolsList_ValidSchema(t *testing.T) {
 			t.Errorf("tool %q inputSchema.type = %v, want object", tl.Name, schema["type"])
 		}
 	}
-	want := []string{"save_routine", "list_routines", "run_routine", "discover_capabilities"}
+	want := []string{"save_routine", "list_routines", "run_routine", "discover_capabilities", "validate_manifest"}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
@@ -97,6 +97,69 @@ func TestRoutinesMCP_ToolsList_ValidSchema(t *testing.T) {
 		if _, ok := saveSchema.Properties[p]; !ok {
 			t.Errorf("save_routine schema missing property %q", p)
 		}
+	}
+}
+
+func TestRoutinesMCP_ValidateManifest_UsesShippingSchemaWithoutWriting(t *testing.T) {
+	s := newRoutineMCPTestServer(t, &IPCConfig{BaseURL: "http://must-not-be-called", Token: "t", WorkspaceID: "ws"})
+	yaml := `apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Operations
+  slug: operations
+spec:
+  panels:
+    - id: services
+      schema: status.v1
+      owner: crew/ops
+      producer: script/watch.sh
+      sla: 1m`
+	args, _ := json.Marshal(map[string]string{"yaml": yaml})
+	body := `{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"validate_manifest","arguments":` + string(args) + `}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp/routines", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+
+	var resp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Result.IsError || len(resp.Result.Content) != 1 || !strings.Contains(resp.Result.Content[0].Text, `"valid":true`) {
+		t.Fatalf("valid Page manifest was refused: %s", w.Body.String())
+	}
+	if !strings.Contains(resp.Result.Content[0].Text, "No workspace state was changed") {
+		t.Fatalf("validation result does not distinguish validate from apply: %s", resp.Result.Content[0].Text)
+	}
+}
+
+func TestRoutinesMCP_ValidateManifest_ReturnsParserError(t *testing.T) {
+	s := newRoutineMCPTestServer(t, &IPCConfig{BaseURL: "http://must-not-be-called", Token: "t", WorkspaceID: "ws"})
+	args, _ := json.Marshal(map[string]string{"yaml": "apiVersion: crewship/v1\nkind: Page\nmetadata: {name: Broken, slug: broken}\nspec: {panels: []}"})
+	body := `{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"validate_manifest","arguments":` + string(args) + `}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp/routines", strings.NewReader(body))
+	req.Host = "127.0.0.1:9119"
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+
+	var resp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.Result.IsError || len(resp.Result.Content) != 1 || !strings.Contains(resp.Result.Content[0].Text, "at least one panel") {
+		t.Fatalf("invalid Page manifest did not carry the schema error: %s", w.Body.String())
 	}
 }
 

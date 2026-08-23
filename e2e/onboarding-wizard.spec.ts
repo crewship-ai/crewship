@@ -153,26 +153,60 @@ test.describe("onboarding wizard — first-run flow", () => {
     await expect(page.getByRole("button", { name: /continue/i })).toBeEnabled()
     await page.getByRole("button", { name: /continue/i }).click()
 
-    // Step 2: pick crew template. AnimatePresence mounts only the
-    // active step, so visible aria-pressed buttons are all crew
-    // cards — assert the exact count so adding *or* removing a
-    // template trips the test.
-    await page.waitForSelector("button[aria-pressed]", { timeout: 10_000 })
-    await expect(page.locator("button[aria-pressed]")).toHaveCount(5)
-    await page.getByRole("button", { name: /software development/i }).click()
-    await page.waitForSelector('img[width="32"]', { timeout: 10_000 })
-    expect(await page.locator('img[width="32"]').count()).toBe(4)
-    await expect(page.getByRole("button", { name: /continue/i })).toBeEnabled()
-    await page.getByRole("button", { name: /continue/i }).click()
+    // Step 1 is durable too: its Continue PATCHes the workspace name and
+    // language, and preferred_language acts as the server-side checkpoint.
+    // Reloading here must resume at Adapter, not ask for the workspace again.
+    await page.waitForSelector('button:has-text("Pair my CLI")', { timeout: 10_000 })
+    await page.reload({ waitUntil: "networkidle" })
+    await expect(page.locator("#workspace_name")).toHaveCount(0)
 
-    // Step 3: switch to browser mode so Launch gates on the API key
-    // field instead of the pair countdown (which never completes in CI).
+    // Step 2: adapter + token. Switch to browser mode so Continue gates on
+    // the API key field instead of the pair countdown (which never
+    // completes in CI).
     await page.waitForSelector('button:has-text("Pair my CLI")', { timeout: 10_000 })
     await page.getByRole("button", { name: /chat in browser/i }).click()
     // Wait for the pair snippet to actually leave the DOM rather than
     // sleeping for a magic motion duration.
     await expect(page.locator('code:has-text("crewship login --pair")')).toBeHidden()
     await page.fill("#api_key", FAKE_API_KEY)
+
+    const continueFromAdapter = page.getByRole("button", { name: /continue/i })
+    await expect(continueFromAdapter).toBeEnabled()
+    // Continuing off this step persists the token via POST /api/v1/credentials
+    // (page.tsx's persistAdapterCredential) so step 3's default chat with the
+    // setup agent doesn't 428 credential_required — wait for that write to
+    // land before asserting on the next step.
+    const credentialRespPromise = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/credentials" &&
+        r.request().method() === "POST",
+      { timeout: 15_000 },
+    )
+    await continueFromAdapter.click()
+    expect((await credentialRespPromise).status()).toBe(201)
+
+    // This is the resume boundary that failed in production: after the
+    // credential had been encrypted successfully, a reload/re-login rebuilt
+    // React state at step 1 and demanded both the workspace and token again.
+    // Durable state must take us straight back to Crew without ever revealing
+    // the saved secret to the browser.
+    await page.reload({ waitUntil: "networkidle" })
+    await expect(page.locator("#workspace_name")).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /prefer to pick a template instead/i })).toBeVisible({
+      timeout: 20_000,
+    })
+
+    // Step 3: pick crew template — the escape hatch, not the chat default,
+    // since the chat would need a real setup-agent conversation this suite
+    // doesn't drive. AnimatePresence mounts only the active step, so visible
+    // aria-pressed buttons are all crew cards — assert the exact count so
+    // adding *or* removing a template trips the test.
+    await page.getByRole("button", { name: /prefer to pick a template instead/i }).click()
+    await page.waitForSelector("button[aria-pressed]", { timeout: 10_000 })
+    await expect(page.locator("button[aria-pressed]")).toHaveCount(5)
+    await page.getByRole("button", { name: /software development/i }).click()
+    await page.waitForSelector('img[width="32"]', { timeout: 10_000 })
+    expect(await page.locator('img[width="32"]').count()).toBe(4)
 
     const launch = page.getByRole("button", { name: /launch/i })
     await expect(launch).toBeEnabled()

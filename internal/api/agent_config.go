@@ -11,6 +11,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/composio"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/policy"
@@ -414,14 +415,20 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		"runtime_image":           data.crewRuntimeImage.String,
 		"cached_image":            data.crewCachedImage.String,
 		"cached_requirements":     data.crewCachedRequirements.String,
-		"devcontainer_config":     data.crewDevcontainerConfig.String,
-		"mise_config":             data.crewMiseConfig.String,
-		"services_json":           data.crewServicesJSON.String,
-		"crew_mcp_config_json":    data.crewMCPConfigJSON.String,
-		"agent_mcp_config_json":   data.agentMCPConfigJSON.String,
-		"installed_skills":        installedSkills,
-		"crew_resources":          crewResources,
-		"approval_mode":           approvalMode,
+		// Effective, not raw column: this is what internal/chatbridge (via
+		// resolver.go's chatResolveResponse.DevcontainerConfig) uses to
+		// decide whether the crew needs provisioning before the chat path
+		// starts a container. A NULL column reported as "" here made a
+		// defaulted crew look like it declared no features, so it launched
+		// straight from the bare runtime image with no agent CLI.
+		"devcontainer_config":   data.effectiveDevcontainerConfig(),
+		"mise_config":           data.crewMiseConfig.String,
+		"services_json":         data.crewServicesJSON.String,
+		"crew_mcp_config_json":  data.crewMCPConfigJSON.String,
+		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
+		"installed_skills":      installedSkills,
+		"crew_resources":        crewResources,
+		"approval_mode":         approvalMode,
 	}
 	// Only when there is something to explain — mirrors the omitempty on the
 	// crew response so an enforcing instance's payload is unchanged.
@@ -619,6 +626,15 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 	return d, err
 }
 
+// effectiveDevcontainerConfig is the config the crew's container actually
+// runs with: its own, or database.DefaultCrewDevcontainerConfig when the
+// column is NULL/empty. Every reader of crewDevcontainerConfig in this file
+// goes through it rather than testing Valid/"" itself, so a defaulted crew is
+// treated the same as a crew that explicitly chose the default.
+func (d *agentConfigData) effectiveDevcontainerConfig() string {
+	return database.EffectiveCrewDevcontainerConfig(d.crewDevcontainerConfig.String, d.crewDevcontainerConfig.Valid)
+}
+
 // crewIsPrivileged reports whether data's crew has a cached "privileged"
 // devcontainer requirement (#1032) — parsed defensively; a malformed or
 // absent cached_requirements blob is treated as non-privileged rather than
@@ -636,10 +652,11 @@ func (d *agentConfigData) crewIsPrivileged() bool {
 	// devcontainer_config is also honoured by the runtime, so the #1032
 	// credential-fail-closed gate must see it too — otherwise a UI-privileged
 	// crew would run privileged while still being handed vault credentials.
-	if d.crewDevcontainerConfig.Valid && d.crewDevcontainerConfig.String != "" {
-		if devcontainer.ParseConfigSecurity(d.crewDevcontainerConfig.String).Privileged {
-			return true
-		}
+	// Effective rather than raw: database.DefaultCrewDevcontainerConfig sets
+	// no "privileged" key today, but this must track whatever a defaulted
+	// crew is ACTUALLY running, not the NULL column, if that ever changes.
+	if devcontainer.ParseConfigSecurity(d.effectiveDevcontainerConfig()).Privileged {
+		return true
 	}
 	return false
 }

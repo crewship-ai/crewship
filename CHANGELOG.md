@@ -9,7 +9,122 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Fixed
+
+- **A crew's first message could be answered by total silence when its
+  devcontainer needed a build.** The server deferred the message (streamed a
+  `crew_provisioning` build card, returned the `ws.ErrCrewProvisioning`
+  control-flow sentinel) and relied on the CLIENT to notice the build
+  finished and resend — but completion was only broadcast on the workspace
+  realtime channel, fanned out to whoever happened to be subscribed at that
+  instant. A client that hadn't yet opened its second WebSocket connection,
+  hadn't resolved `workspaceId`, or had simply closed the tab never saw the
+  frame, and the HTTP poll backstop only sped up once it observed the very
+  signal it had just missed. On a cache-hit build (~90ms) the completion
+  frame was routinely gone before anything was listening.
+
+  The server now owns the resume. `chatbridge.Bridge.HandleChatMessage`
+  attaches the deferred send to the crew's provisioning job
+  (`api.ProvisioningHandler.AttachPendingMessage`); the job's own completion
+  point runs — or fails — it directly, streaming the outcome on the chat's
+  own session channel (`hub.BeginSessionRun`), the one channel a client is
+  always reliably subscribed to. At-most-once is structural, not a flag: the
+  job tracks at most one pending message per chat (a manual resend or a
+  second deferred send on the same chat while the build is still running
+  *coalesces* onto the latest content instead of queuing a duplicate), that
+  slot is drained atomically with the job's terminal-state transition, and
+  the bridge's existing per-chat run exclusivity (`tryMarkRunStart`) means a
+  resumed run racing a live manual send never persists twice — whichever
+  loses gets `ws.ErrAgentBusy` and stays silent rather than double-answering.
+  A failed build now surfaces a real `error` chat event instead of silence or
+  a false success.
+
+  The client-side auto-resume (a `useProvisioningStatus` poll that called
+  `sendMessage` again once a crew's status flipped to `completed`) is
+  removed — it was the unreliable mechanism this fix replaces, and the test
+  that shipped it (`onboarding-setup-chat.test.tsx`, stubbing
+  `useProvisioningStatus`/`useWorkspace`/`RealtimeProvider`) proved the
+  client's wiring against a working feed and never exercised the race at
+  all. The "Resend now" button survives as a manual fallback only, safe even
+  mid-build because of the coalescing above.
+
+- **A crew created by onboarding could not run an agent at all, and had not
+  been able to since 2026-04-15.** Four `INSERT INTO crews` statements omit
+  `devcontainer_config` — the two onboarding paths, recipe install, and the
+  agent-facing `CreateCrew`. A crew with no config was refused by the
+  provisioning gate, never had an image built, and fell through to bare
+  `debian:bookworm-slim`. The agent then died with `exit 127`,
+  `stdbuf: failed to run command 'claude': No such file or directory`.
+
+  Commit `8780f3c4` (PR #154) deleted the pre-provisioned agent-runtime image
+  and switched the platform default to bare Debian, adding these columns with
+  no backfill. Seed data got its own config six weeks later; the templates
+  never did — which is why `./dev.sh seed` produced working crews and the
+  wizard did not, and why four months passed before anyone noticed.
+
+  The default is applied where the config is **read**, not at the four write
+  sites. Adding it to the INSERTs is the obvious fix and the wrong one: this
+  repo has already paid for that lesson twice (`internal/crewstart` exists
+  because thirteen callers each assembled their own config and three forgot
+  `CachedImage`), and a read-time default cannot be missed by a creation path
+  that does not exist yet.
+
+  Three readers are deliberately NOT defaulted: the crew editor (a GET-merge-
+  PATCH would silently freeze the default into every crew the first time an
+  operator toggled a security flag), backup collection (a restore must
+  reproduce what was stored), and the manifest export that reads them. A crew
+  running on the default reports `devcontainer_config_defaulted` so it is
+  visible rather than silent.
+
+- **The chat said "an error occurred processing your message" while the server
+  was building the crew's image.** The provisioning handshake returned an error
+  purely as a control-flow sentinel; it was logged at ERROR and rendered as a
+  generic failure stacked under the informative build card. It is now a typed
+  sentinel (`ErrCrewProvisioning`), logged at Info, and the user is told the
+  environment is being built once and to resend.
+
+- **An agent whose container lacks its CLI now says so.** Adapter-exec failures
+  had no classifier: `exit 127` reached the user as "agent exited with code 127
+  — check the journal for details", while the one fact that resolves it — the
+  binary is not installed — sat in the container's stderr and was discarded.
+  Failures are now typed, the container output rides the error event as
+  metadata, and a missing binary is distinguished from a crash.
+
+- **A credential could not be checked, and was reported as valid.**
+  `probeProviderInner` short-circuited every `sk-ant-oat` token with "OAuth
+  token accepted (cannot validate via API)" having contacted nothing — and that
+  claim was disproven by `probeAnthropicOAuthToken` forty lines away in the
+  same package. It backs `/credentials/test`, the "Test now" button and
+  `crewship credential test-stored`, so for the one credential type onboarding
+  accepts, every tool anyone had answered "fine" without asking. The CLI
+  carried its own copy of the same wrong assumption and skipped before it even
+  reached the server.
+
+  Probing is now shared, and it has three outcomes rather than two: accepted,
+  refused, and **could not ask** — which is rendered as neither. The probe also
+  uses the model the user actually chose; it hardcoded a cheap Haiku, so a
+  token with no entitlement to the chosen model passed onboarding and failed on
+  the first message.
+
+- **"I could not determine whether the image is present" no longer reads as
+  "the image is missing."** `ensureImage` collapsed an errored `ImageInspect`
+  into "absent" and told the operator to reprovision a crew whose image was
+  never gone. The error-distinguishing variant already existed one function
+  below and was unused.
+
 ### Added
+
+- **A container-boot conformance test that needs no API key.** The sidecar's
+  `/health` is served from in-memory state, so a real container, a real sidecar
+  and a real health probe cost nothing to run. It asserts uid 1001 resolves,
+  `claude --version` succeeds inside the container, and `/health` answers 200 —
+  the exact facts the four-month regression broke. ~9 s warm; it belongs on
+  every PR, because a nightly cannot protect a branch that has already merged.
+
+  Deliberately not modelled on the existing runtime-conformance harness's
+  four-byte ELF stub: that shortcut is right there, where nothing execs the
+  sidecar, and exactly wrong here, where the sidecar booting is the point.
+
 
 - **Tabs on a page (#1935).** A panel may declare `tab: Odezva`, and the page
   grows a bar under the breadcrumb — several screens instead of one long

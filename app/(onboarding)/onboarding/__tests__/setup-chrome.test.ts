@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { stripComments } from "./dead-agent-routes.test"
 
 // Source-level, for the same reason app/(auth)/__tests__/auth-branding.test.ts
 // is: these are layout properties of one 1100-line client component with a
@@ -117,10 +118,12 @@ describe("the preview's empty state is a promise, not a gap", () => {
     // other, so this one has none.
     expect(PREVIEW).toMatch(/Your crew lands here/)
     // Comments stripped first: the note explaining this rule quotes the very
-    // words it forbids, which is the third time that has bitten this file.
-    const empty = PREVIEW.slice(PREVIEW.indexOf('key="empty"'), PREVIEW.indexOf('key="empty"') + 1400)
-      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-      .replace(/\/\/.*$/gm, "")
+    // words it forbids, which is the third time that has bitten this file —
+    // hence the shared character-scanner (dead-agent-routes.test.ts's
+    // stripComments) rather than another inline `.replace` chain.
+    const empty = stripComments(
+      PREVIEW.slice(PREVIEW.indexOf('key="empty"'), PREVIEW.indexOf('key="empty"') + 1400),
+    )
     expect(empty).not.toMatch(/on the left|on the right/)
   })
 })
@@ -154,10 +157,15 @@ describe("the unauthenticated forms are usable with a thumb", () => {
 })
 
 describe("the model token is the agents' requirement, not the human's", () => {
-  /** The step-3 arm of canContinue. */
-  function stepThreeGate(): string {
+  /**
+   * The step-2 arm of canContinue — the Adapter step, which now comes
+   * before Crew. Sliced between the step 2 and step 3 lines so a stray
+   * substring in the step-3 arm (`crewMode`, `appliedProposal`) can't drift
+   * into this assertion by accident.
+   */
+  function tokenGate(): string {
     const gate = PAGE.slice(PAGE.indexOf("const canContinue"))
-    return gate.slice(gate.indexOf("step === 3"), gate.indexOf("return false"))
+    return gate.slice(gate.indexOf("step === 2"), gate.indexOf("step === 3"))
   }
 
   it("requires a token in every mode, with only the local-model exception", () => {
@@ -165,7 +173,7 @@ describe("the model token is the agents' requirement, not the human's", () => {
     // pinned by property rather than by shape.
     //
     // It first required `keyOK && pairStatus === "consumed"` — right about
-    // the token, but it disabled Launch with no explanation and read as a
+    // the token, but it disabled Continue with no explanation and read as a
     // dead end. The fix for that should have been to say WHY. Instead the
     // token requirement was dropped, and that produced a crew of four agents
     // with zero credentials that could not be repaired afterwards:
@@ -175,44 +183,61 @@ describe("the model token is the agents' requirement, not the human's", () => {
     //
     // Agents run in containers and always need their own credential. The
     // only exemption is a local model on the operator's own endpoint (#944).
-    const step3 = stepThreeGate()
-    expect(step3).toMatch(/apiKey\.trim\(\)\.length >= 8/)
-    expect(step3).toMatch(/isLocalModel\(model\)/)
+    const gate = tokenGate()
+    expect(gate).toMatch(/apiKey\.trim\(\)\.length >= 8/)
+    expect(gate).toMatch(/isLocalModel\(model\)/)
   })
 
   it("does not let the handoff mode change whether a token is needed", () => {
     // Pairing signs the operator's TERMINAL in. It gives the agents nothing,
     // so it must not appear in this gate at all — in either direction.
-    const step3 = stepThreeGate()
-    expect(step3, "mode must not gate the token").not.toMatch(/mode === "(cli|browser)"/)
-    expect(step3, "pairing must not gate Launch").not.toMatch(/pairStatus/)
+    const gate = tokenGate()
+    expect(gate, "mode must not gate the token").not.toMatch(/mode === "(cli|browser)"/)
+    expect(gate, "pairing must not gate Continue").not.toMatch(/pairStatus/)
   })
 })
 
-describe("step 3 asks one question, then its consequence", () => {
-  /** The JSX of step 3, from its guard to the telemetry block. */
-  function stepThree(): string {
-    const from = PAGE.indexOf("{step === 3 && (")
+describe("onboarding resume never invents a fresh account", () => {
+  it("uses the refresh-aware API gate and restores durable workspace state", () => {
+    expect(PAGE).toMatch(/apiFetch\("\/api\/v1\/onboarding\/status"\)/)
+    expect(PAGE).toMatch(/loadOnboardingResumeState\(\)/)
+    expect(PAGE).toMatch(/snapshot\.preferredLanguage[\s\S]*setStep\(2\)/)
+    expect(PAGE).toMatch(/setStep\(3\)/)
+  })
+
+  it("reuses an encrypted credential without putting its plaintext in React", () => {
+    expect(PAGE).toMatch(/apiKey: null/)
+    expect(PAGE).toMatch(/savedCredentialSelected/)
+    expect(PAGE).toMatch(/Saved token — leave blank to reuse/)
+  })
+})
+
+describe("step 2 asks one question, then its consequence", () => {
+  /** The JSX of step 2 (Adapter + token), from its guard to the telemetry
+   *  block. Adapter moved from step 3 to step 2 in the Workspace → Adapter
+   *  → Crew reorder (the setup agent's chat, now step 3's default, needs a
+   *  credential in place before it opens — see page.tsx's own doc comment
+   *  and persistAdapterCredential). */
+  function stepTwo(): string {
+    const from = PAGE.indexOf("{step === 2 && (")
     const to = PAGE.indexOf("TELEMETRY CONSENT")
-    expect(from, "step 3 guard moved").toBeGreaterThan(-1)
+    expect(from, "step 2 guard moved").toBeGreaterThan(-1)
     expect(to).toBeGreaterThan(from)
     return PAGE.slice(from, to)
   }
 
   /**
-   * step 3 with every comment removed.
+   * step 2 with every comment removed.
    *
    * Needed by any assertion phrased as "this string must NOT appear": the
    * comments next to a correction quote the wording being corrected, so a
    * raw scan matches the explanation and reports the bug it documents. This
-   * is the third time that has bitten in this file — hence a helper rather
+   * is the third time that has bitten in this file — hence the shared
+   * character-scanner (`stripComments`, dead-agent-routes.test.ts) rather
    * than another inline `.replace` chain.
    */
-  function stepThreeCode(): string {
-    return stepThree()
-      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/\/\/.*$/gm, "")
+  function stepTwoCode(): string {
+    return stripComments(stepTwo())
   }
 
   it("never hides the model picker behind the handoff choice", () => {
@@ -221,14 +246,14 @@ describe("step 3 asks one question, then its consequence", () => {
     // inside it — so choosing "Pair my CLI" silently removed the choice of
     // which model the agents run. Backwards: the model is a fact about the
     // agents, the handoff is about where the human works.
-    const step3 = stepThreeCode()
-    expect(step3, "credential block must not be mode-gated").not.toMatch(
+    const step2 = stepTwoCode()
+    expect(step2, "credential block must not be mode-gated").not.toMatch(
       /mode === "browser" \|\| showCredential/,
     )
-    expect(step3, "the collapse state is gone entirely").not.toMatch(/showCredential/)
+    expect(step2, "the collapse state is gone entirely").not.toMatch(/showCredential/)
     // Both controls present unconditionally.
-    expect(step3).toMatch(/htmlFor="model"/)
-    expect(step3).toMatch(/Agent toolchain/)
+    expect(step2).toMatch(/htmlFor="model"/)
+    expect(step2).toMatch(/Agent toolchain/)
   })
 
   it("does not make a first-run user install the CLI to finish", () => {
@@ -237,9 +262,9 @@ describe("step 3 asks one question, then its consequence", () => {
     // recommended path sent them to a GitHub release page to download a
     // binary before they could finish signing up.
     expect(PAGE).toMatch(/useState<HandoffMode>\("browser"\)/)
-    const step3 = stepThree()
-    const browserCard = step3.indexOf('title="Chat in browser"')
-    const cliCard = step3.indexOf('title="Also pair my CLI"')
+    const step2 = stepTwo()
+    const browserCard = step2.indexOf('title="Chat in browser"')
+    const cliCard = step2.indexOf('title="Also pair my CLI"')
     expect(browserCard).toBeGreaterThan(-1)
     expect(cliCard).toBeGreaterThan(-1)
     expect(browserCard, "the no-install path comes first").toBeLessThan(cliCard)
@@ -256,7 +281,7 @@ describe("step 3 asks one question, then its consequence", () => {
     //
     // Comments are stripped first so this cannot trip over the explanation
     // sitting next to the code it guards.
-    expect(stepThreeCode()).not.toMatch(/crewship setup/)
+    expect(stepTwoCode()).not.toMatch(/crewship setup/)
   })
 
   it("leads with what the crew needs, not with how the human works", () => {
@@ -264,13 +289,13 @@ describe("step 3 asks one question, then its consequence", () => {
     // the step's actual requirement belongs to the agents. That framing is
     // how the token came to look optional once you had answered about
     // yourself, and it is what let the mode picker swallow the model choice.
-    const step3 = stepThreeCode()
-    expect(step3).not.toMatch(/How will you work\?/)
-    expect(step3).toMatch(/Give your agents a model/)
+    const step2 = stepTwoCode()
+    expect(step2).not.toMatch(/How will you work\?/)
+    expect(step2).toMatch(/Give your agents a model/)
   })
 
   it("says plainly that pairing does not credential the agents", () => {
     // The single sentence that would have saved this whole round trip.
-    expect(stepThree()).toMatch(/does not give them one/)
+    expect(stepTwo()).toMatch(/does not give them one/)
   })
 })

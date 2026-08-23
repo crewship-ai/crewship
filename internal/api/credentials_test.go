@@ -495,8 +495,18 @@ func TestCredTest_BadRequest(t *testing.T) {
 }
 
 func TestCredTest_AnthropicOAuthToken(t *testing.T) {
-	t.Parallel()
+	// No t.Parallel: withAnthropicStub swaps a package-level endpoint var,
+	// which cannot be done safely alongside parallel siblings.
 	h, _ := newCredHandler(t)
+	// Was: assert the response mentions "OAuth token", which it did because
+	// the handler answered "OAuth token accepted (cannot validate via API)"
+	// without dialling anything. The endpoint really probes now, so this
+	// pins the answer instead of the excuse — through a stub, so the unit
+	// suite never depends on api.anthropic.com being up.
+	withAnthropicStub(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"type":"authentication_error"}}`))
+	})
 	body := `{"provider":"ANTHROPIC","type":"AI_CLI_TOKEN","value":"sk-ant-oat01-xxxx"}`
 	req := httptest.NewRequest("POST", "/api/v1/credentials/test", strings.NewReader(body))
 	rr := httptest.NewRecorder()
@@ -504,8 +514,8 @@ func TestCredTest_AnthropicOAuthToken(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "OAuth token") {
-		t.Errorf("expected OAuth token mention: %s", rr.Body.String())
+	if strings.Contains(rr.Body.String(), `"valid":true`) {
+		t.Errorf("a rejected token reported valid: %s", rr.Body.String())
 	}
 }
 

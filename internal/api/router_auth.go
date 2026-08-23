@@ -23,6 +23,12 @@ func (r *Router) registerAuthRoutes() {
 	r.mux.Handle("GET /api/v1/onboarding/status", authed(http.HandlerFunc(onboarding.Status)))
 	r.authedSelfMut("POST", "/api/v1/onboarding/complete", onboarding.Complete)
 	r.authedSelfMut("POST", "/api/v1/onboarding/setup", onboarding.Setup)
+	// Session-scoped like the three routes above, not workspace-scoped like
+	// the proposal routes below: the workspace it acts on is the caller's
+	// own first workspace, resolved inside the handler exactly the way
+	// Status/Complete/Setup already do, never a workspace_id the request
+	// supplies (see onboarding_setup_agent.go's own doc comment).
+	r.authedSelfMut("POST", "/api/v1/onboarding/setup-agent/start", onboarding.StartSetupAgent)
 
 	// Auth (no auth required)
 	// Stash the handler on the Router so server.New can arm the bootstrap

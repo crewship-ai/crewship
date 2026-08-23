@@ -445,8 +445,24 @@ func TestVerifyAccess_MemberRoleAllowed(t *testing.T) {
 
 func TestValidSlugRegex(t *testing.T) {
 	t.Parallel()
-	good := []string{"agent-1", "alpha", "x_y_z", "Z9", "a-b-c"}
-	bad := []string{"", "-leading", "_leading", "../etc", "with space", "x.y", "x/y"}
+	// `_leading` moved from bad to good, and the setup agent's real slug is
+	// pinned explicitly. It used to be refused here, which meant a terminal
+	// opened against the onboarding setup agent was rejected before any
+	// container work — the same defect that made every CHAT message to it
+	// fail, on a second door. The underscore is deliberate: api's own
+	// validSlugFormat refuses it on anything a user can type, so the setup
+	// crew cannot collide with a real one by construction.
+	//
+	// Everything in `bad` is still refused. This regex guards a value that
+	// lands in container paths and exec argv, so traversal and shell
+	// metacharacters must stay out; a leading underscore is neither, and was
+	// already legal mid-slug (see `x_y_z`, which this test always accepted).
+	good := []string{"agent-1", "alpha", "x_y_z", "Z9", "a-b-c",
+		"_leading", "_crewship-setup-guide", "_crewship-setup"}
+	bad := []string{"", "-leading", "../etc", "with space", "x.y", "x/y",
+		// Shell metacharacters, spelled out rather than implied: this list is
+		// the whole reason the regex exists.
+		"a;b", "a|b", "a&b", "a$(b)", "a`b`", "a\nb"}
 	for _, s := range good {
 		if !validSlugRe.MatchString(s) {
 			t.Errorf("expected %q to match", s)
