@@ -156,6 +156,14 @@ export function CreateProjectModal({
   const [startOpen, setStartOpen] = useState(false)
   const [targetOpen, setTargetOpen] = useState(false)
 
+  // A ref, not the `saving` state, and it is the difference between one create
+  // and two. The footer's primary is disabled while `saving` is true, but ⌘↵
+  // does not go through the footer — the shell calls `onSubmit` on the
+  // keystroke and does not know this surface is busy. State also does not flip
+  // until React re-renders, so two fast presses both read the old value. The
+  // ref flips synchronously, before any await.
+  const submittingRef = useRef(false)
+
   const nameRef = useRef<HTMLInputElement>(null)
 
   // Icon search results
@@ -251,8 +259,10 @@ export function CreateProjectModal({
     targetDate !== ""
 
   const handleSubmit = useCallback(async () => {
+    if (submittingRef.current) return
     if (!name.trim()) { toast.error("Project name is required"); return }
 
+    submittingRef.current = true
     setSaving(true)
     setRefusal(null)
     try {
@@ -296,6 +306,7 @@ export function CreateProjectModal({
       toast.error("Failed to create project")
     } finally {
       setSaving(false)
+      submittingRef.current = false
     }
   }, [name, description, icon, color, status, priority, leadType, leadId, startDate, targetDate, workspaceId, onCreated, onOpenChange])
 
@@ -626,10 +637,14 @@ export function CreateProjectModal({
 
       <CreateSurfaceFooter
         onCancel={panel ? () => setPanel(null) : () => onOpenChange(false)}
+        // Inside the icon panel Cancel means "back out of the panel", so
+        // asking about unsaved work there is a false alarm. Everywhere else it
+        // closes the surface and the guard applies.
+        guardCancel={!panel}
         cancelLabel={panel ? "Back" : "Cancel"}
         primaryLabel={panel ? "Use this icon" : "Create project"}
         onPrimary={panel ? () => setPanel(null) : handleSubmit}
-        primaryDisabled={panel ? false : !name.trim()}
+        primaryDisabled={panel ? false : !name.trim() || saving}
         busy={panel ? false : saving}
       />
     </CreateSurface>

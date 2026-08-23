@@ -63,12 +63,18 @@ export function ConnectOAuthDialog({ workspaceId, open, onOpenChange, onSuccess 
   return (
     <CreateSurface
       open={open}
-      onOpenChange={onOpenChange}
       size="sm"
       dirty={dirty}
       discardLabel="this connection"
       onSubmit={() => {
         if (action && !action.disabled) action.authorize()
+      }}
+      // OAuthForm unmounts when the surface closes, so its fields are blank
+      // on the next open — but `dirty` lives out here and survived, which made
+      // the second open ask about work that no longer existed.
+      onOpenChange={(next) => {
+        if (!next) setDirty(false)
+        onOpenChange(next)
       }}
     >
       <CreateSurfaceHeader

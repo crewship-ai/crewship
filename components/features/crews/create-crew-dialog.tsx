@@ -198,14 +198,14 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
         }
       />
 
-      {/* The kit's step strip, inside the landmark it does not draw itself. */}
-      <nav aria-label="Wizard progress" className="shrink-0">
-        <CreateSurfaceSteps
-          steps={CREW_STEPS}
-          current={step - 1}
-          onJump={(i) => setStep((i + 1) as WizardStep)}
-        />
-      </nav>
+      {/* The kit's step strip, which draws its own landmark — this used to
+          wrap it in a second <nav>. */}
+      <CreateSurfaceSteps
+        ariaLabel="Wizard progress"
+        steps={CREW_STEPS}
+        current={step - 1}
+        onJump={(i) => setStep((i + 1) as WizardStep)}
+      />
 
       <CreateSurfaceBody>
         {step === 1 && <StepIdentity state={state} setState={setState} />}

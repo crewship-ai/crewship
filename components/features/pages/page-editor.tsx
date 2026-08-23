@@ -66,8 +66,6 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceHeader,
   CreateSurfaceRefusal,
-  useCreateSurfaceClose,
-  type CreateSurfaceFooterProps,
 } from "@/components/layout/create-surface"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { ApiMutationError, useApiMutation } from "@/hooks/use-api-mutation"
@@ -1112,7 +1110,7 @@ export function PageEditor({
         </div>
       )}
 
-      <GuardedFooter
+      <CreateSurfaceFooter
         onCancel={onClose}
         primaryLabel={
           save.isPending ? (
@@ -1137,16 +1135,4 @@ export function PageEditor({
   )
 }
 
-/**
- * The footer, with Cancel routed through the shell's discard guard.
- *
- * `CreateSurfaceFooter` deliberately does not guard Cancel on the caller's
- * behalf — half the surfaces overload it as "back out of this panel". On this
- * one Cancel really does mean close, and it has always asked first, so it opts
- * in. `useCreateSurfaceClose` reads the guard off the shell's context, which
- * needs a component INSIDE `CreateSurface` to read it from.
- */
-function GuardedFooter({ onCancel, ...rest }: CreateSurfaceFooterProps) {
-  const guard = useCreateSurfaceClose()
-  return <CreateSurfaceFooter {...rest} onCancel={() => guard(onCancel)} />
-}
+

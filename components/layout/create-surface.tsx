@@ -1667,12 +1667,20 @@ export interface CreateSurfaceFooterProps extends Omit<React.ComponentProps<"div
   /**
    * Route the footer's Cancel through the discard guard.
    *
-   * Off by default because half the surfaces overload Cancel as "back out of
-   * this panel", and prompting about unsaved work for closing a colour picker
-   * is worse than not prompting. On for a Cancel that genuinely means close —
-   * three migrations wrote a wrapper component to get this, because
-   * `useCreateSurfaceClose` cannot be read by the component that renders
-   * `CreateSurface`.
+   * ON by default, and that is a reversal.
+   *
+   * It was off, on the reasoning that some surfaces overload Cancel as "back
+   * out of this panel" and prompting there is a false alarm. The reasoning is
+   * sound and the default was still wrong: of the sixteen surfaces that
+   * declare `dirty`, fifteen never opted in — so Esc, an overlay click and the
+   * header × all asked before throwing work away, and the button labelled
+   * Cancel silently did it. Cancel is the exit a user is most likely to take
+   * deliberately, and it was the only unguarded one.
+   *
+   * Forgetting to guard loses work; forgetting to UNguard costs one extra
+   * prompt. The default now fails in the cheaper direction. A surface whose
+   * Cancel really means "back out of a panel" passes `guardCancel={false}` —
+   * `create-project-modal.tsx` does exactly that, for its icon panel only.
    */
   guardCancel?: boolean
   /** Far left, before the hint. Survives to a phone, unlike `hint`. */
@@ -1699,7 +1707,7 @@ export function CreateSurfaceFooter({
   primaryDisabled = false,
   busy = false,
   primaryIcon: PrimaryIcon,
-  guardCancel = false,
+  guardCancel = true,
   lead,
   primaryRef,
   className,

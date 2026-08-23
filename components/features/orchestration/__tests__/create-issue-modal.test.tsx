@@ -700,3 +700,35 @@ describe("CreateIssueModal — the crew control", () => {
     })
   })
 })
+
+// ── One keystroke, one issue ──────────────────────────────────────────────
+//
+// Each migrated modal dropped its own ⌘↵ handler and took the shell's. The
+// shell calls `onSubmit` on the keystroke and cannot know the surface is busy;
+// the footer's primary IS disabled while saving, but the keyboard does not go
+// through the footer. So two fast presses were two POSTs — and `saving` is
+// state, which has not flipped yet when the second one reads it.
+describe("CreateIssueModal — submitting twice", () => {
+  it("issues one create for two fast ⌘↵ presses", async () => {
+    let resolve: (v: unknown) => void = () => {}
+    const inFlight = new Promise((r) => { resolve = r })
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? inFlight.then(() => ({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) }))
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { baseElement } = render(<CreateIssueModal {...defaultProps} />)
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Twice" } })
+
+    const surface = baseElement.querySelector('[data-slot="dialog-content"]')!
+    fireEvent.keyDown(surface, { key: "Enter", metaKey: true })
+    fireEvent.keyDown(surface, { key: "Enter", metaKey: true })
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter((c) => (c[1] as RequestInit | undefined)?.method === "POST")).toHaveLength(1),
+    )
+    resolve(null)
+  })
+})

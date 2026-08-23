@@ -43,11 +43,9 @@ import {
   CreateSurfaceDropzone,
   CreateSurfaceField,
   CreateSurfaceFooter,
-  type CreateSurfaceFooterProps,
   CreateSurfaceHeader,
   CreateSurfaceRefusal,
   CreateSurfaceSection,
-  useCreateSurfaceClose,
 } from "@/components/layout/create-surface"
 import {
   type WireBundleRef,
@@ -268,7 +266,7 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
         }))}
       />
 
-      <ImportFooter
+      <CreateSurfaceFooter
         onCancel={onClose}
         primaryLabel="Install"
         primaryIcon={Wand2}
@@ -280,17 +278,3 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
   )
 }
 
-/**
- * The footer, with its Cancel routed through the discard guard.
- *
- * The shell guards Esc and the overlay click because it owns them, and
- * deliberately does NOT guard the footer's Cancel — on half the surfaces that
- * button means "back out of this panel". Here it means close the import, which
- * is the case `useCreateSurfaceClose` exists for. The hook reads a context the
- * shell provides INSIDE `CreateSurface`, so this has to be a child component
- * rather than three lines in the parent.
- */
-function ImportFooter({ onCancel, ...rest }: CreateSurfaceFooterProps) {
-  const guard = useCreateSurfaceClose()
-  return <CreateSurfaceFooter {...rest} onCancel={() => guard(onCancel)} />
-}

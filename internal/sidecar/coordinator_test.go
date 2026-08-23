@@ -488,9 +488,11 @@ func TestStripCredentialValues_GarbagePassthrough(t *testing.T) {
 // Post-Patch-E both have to agree: Host header parses as localhost AND
 // RemoteAddr is loopback.
 func TestBuildHandler_CrossCrewBypassRejected(t *testing.T) {
-	// The bypass this test pins reaches upstream at
-	// /api/v1/internal/credentials — handleListCredentials proxies exactly
-	// there (coordinator.go:81) — so that path is the regression signal.
+	// The bypass this test pins reaches upstream at exactly
+	// /api/v1/internal/credentials — handleListCredentials proxies there and
+	// nowhere else (coordinator.go:81) — so that path, matched exactly, is the
+	// regression signal. A substring match would also fire on
+	// /api/v1/internal/agent-credentials and on any future sibling.
 	//
 	// It used to be "any request to this mock at all", recorded in a plain
 	// bool. That failed on CI with PATCH-E REGRESSION *and* a data race, and
@@ -509,7 +511,7 @@ func TestBuildHandler_CrossCrewBypassRejected(t *testing.T) {
 	// race the read. The gate itself is unchanged and still asserted below.
 	var credentialsHit atomic.Bool
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/credentials") {
+		if r.URL.Path == "/api/v1/internal/credentials" {
 			credentialsHit.Store(true)
 		}
 		w.WriteHeader(http.StatusOK)

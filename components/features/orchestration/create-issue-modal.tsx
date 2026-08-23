@@ -174,6 +174,14 @@ export function CreateIssueModal({
   const [milestoneOpen, setMilestoneOpen] = useState(false)
   const [parentOpen, setParentOpen] = useState(false)
 
+  // A ref, not the `saving` state, and it is the difference between one create
+  // and two. The footer's primary is disabled while `saving` is true, but ⌘↵
+  // does not go through the footer — the shell calls `onSubmit` on the
+  // keystroke and does not know this surface is busy. State also does not flip
+  // until React re-renders, so two fast presses both read the old value. The
+  // ref flips synchronously, before any await.
+  const submittingRef = useRef(false)
+
   const titleRef = useRef<HTMLInputElement>(null)
 
   // Auto-select a crew when opening.
@@ -351,9 +359,11 @@ export function CreateIssueModal({
   const selectedParent = parentIssueId ? parentCandidates.find((i) => i.id === parentIssueId) ?? null : null
 
   const handleSubmit = useCallback(async () => {
+    if (submittingRef.current) return
     if (!crewId) { toast.error("Please select a crew"); return }
     if (!title.trim()) { toast.error("Title is required"); return }
 
+    submittingRef.current = true
     setSaving(true)
     setRefusal(null)
     try {
@@ -405,6 +415,7 @@ export function CreateIssueModal({
       setRefusal("Failed to create issue")
     } finally {
       setSaving(false)
+      submittingRef.current = false
     }
   }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, dueDate, estimate, parentIssueId, milestoneId, workspaceId, onCreated, createMore, onOpenChange])
 

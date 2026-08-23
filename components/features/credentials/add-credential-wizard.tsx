@@ -438,16 +438,15 @@ export function AddCredentialWizard({
 
   return (
     <>
-      {/* The landmark is here rather than in the shell because
-          CreateSurfaceSteps renders a bare div; this surface had one before
-          the migration and dropping it would be a silent a11y regression. */}
-      <nav aria-label="Add credential steps" className="shrink-0">
-        <CreateSurfaceSteps
-          steps={STEPS}
-          current={stepIndex}
-          onJump={(i) => setStep(STEP_ORDER[i])}
-        />
-      </nav>
+      {/* The landmark is the component's own. This surface wrapped it in a
+          second <nav> back when CreateSurfaceSteps rendered a bare div; it
+          renders the nav itself now, so the wrapper was a nested landmark. */}
+      <CreateSurfaceSteps
+        ariaLabel="Add credential steps"
+        steps={STEPS}
+        current={stepIndex}
+        onJump={(i) => setStep(STEP_ORDER[i])}
+      />
 
       {/* The only scrollport. Everything that has to stay reachable — the step
           bar above, the actions below — lives outside it. */}

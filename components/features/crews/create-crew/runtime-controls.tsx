@@ -153,6 +153,11 @@ export function DomainChips({ value, onChange }: { value: string[]; onChange: (v
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
+            // A CJK input method uses Enter to accept its candidate, and that
+            // keystroke reaches here first — committing on it stores half a
+            // word as a hostname. `isComposing` is the flag the IME sets for
+            // exactly this.
+            if (e.nativeEvent.isComposing) return
             if (e.key === "Enter" || e.key === ",") {
               e.preventDefault()
               commit()
