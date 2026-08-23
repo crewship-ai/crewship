@@ -1113,20 +1113,41 @@ func sidecarConfigFingerprint(key string, creds []Credential) string {
 }
 
 // credentialIsolationFailedOpen reports whether this run hands the sidecar a
-// routed provider credential that it cannot bind to a configuration identity.
+// proxy-servable provider credential that it cannot bind to a configuration
+// identity.
 //
 // sidecarConfigFingerprint returns "" when no internal token is configured, and
 // an empty fingerprint is what makes Proxy.authorizeLLMRoute skip the route-token
-// check entirely — every agent sharing the crew container can then reach whichever
-// credential the CredStore currently holds. That is a real exposure, but only if
-// something is actually loaded: buildSidecarCreds drops everything
-// credTypeToProvider does not route (GitHub PATs, OAuth tokens, an agent's own
-// SECRET), so gating on len(creds) would raise the isolation alarm for runs with
-// nothing to isolate — and an alarm that names a non-existent gap is one operators
-// learn to skip past. The fingerprint test short-circuits, so the filter only runs
-// on the already-degraded path.
+// check entirely — every agent sharing the crew container could then reach
+// whichever credential the proxy currently serves.
+//
+// Defence in depth, not an operational state: config.Load cannot produce an
+// empty internal token (operator value, else derived from ENCRYPTION_KEY, else a
+// per-boot random), so a crewshipd-launched sidecar always carries a fingerprint.
+// This guards the invariant against a future path that reaches the orchestrator
+// without going through Load.
+//
+// The gate asks whether the credential is servable by the LLM proxy, not merely
+// whether the CredStore loads it. Those differ: CURSOR and FACTORY deliberately
+// have no llmroute spec (see credTypeToProvider), so buildSidecarCreds keeps them
+// for their CredStore counts while the proxy's only two Select calls — both
+// spec-keyed — can never hand them out. Gating on CredStore membership would
+// raise the isolation alarm for a run whose sole credential is CURSOR_API_KEY,
+// and an alarm that names an exposure nobody can reach is one operators learn to
+// skip past. The fingerprint test short-circuits, so this scan only runs on the
+// already-degraded path.
 func credentialIsolationFailedOpen(configFingerprint string, creds []Credential) bool {
-	return configFingerprint == "" && len(buildSidecarCreds(creds, nil)) > 0
+	if configFingerprint != "" {
+		return false
+	}
+	for _, sc := range buildSidecarCreds(creds, nil) {
+		// Lookup, not LookupProvider: sc.Provider is the canonical spec ID
+		// credTypeToProvider already resolved, not the free-text column.
+		if _, ok := llmroute.Lookup(sc.Provider); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // buildSidecarCreds maps the delivered credentials onto the sidecar boot

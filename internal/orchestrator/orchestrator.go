@@ -1327,18 +1327,27 @@ func (o *Orchestrator) warnLocalModelEnvFallbackOnce() {
 	})
 }
 
-// warnCredentialIsolationFailOpenOnce logs a one-time warning when a run
-// routes provider credentials through the shared sidecar without an internal
+// warnCredentialIsolationFailOpenOnce logs a one-time warning when a run hands
+// the shared sidecar a proxy-servable provider credential with no internal
 // token configured. sidecarConfigFingerprint then returns "" and
 // authorizeLLMRoute cannot bind requests to a specific credential set, so a
 // concurrent agent sharing the same crew container could reach whichever
-// credential the sidecar currently has loaded. Configure server-side internal
-// auth to restore per-agent isolation.
-func (o *Orchestrator) warnCredentialIsolationFailOpenOnce() {
+// credential the proxy currently serves.
+//
+// This is an invariant tripwire, not an operational state: config.Load always
+// leaves Auth.InternalToken populated (operator value, else derived from
+// ENCRYPTION_KEY, else a per-boot random), so a server started through it
+// cannot reach here. Firing means something built an Orchestrator on a path
+// that bypassed Load — which is a bug to find, not a knob for an operator to
+// turn — so the message says so rather than sending them hunting a setting
+// they never had a way to omit.
+func (o *Orchestrator) warnCredentialIsolationFailOpenOnce(agentID string) {
 	o.credentialIsolationFailOpenWarned.Do(func() {
-		o.logger.Warn("routed provider credentials configured without an internal token; " +
-			"sidecar credential isolation degrades to fail-open — a concurrent agent in the same crew container " +
-			"can reach another agent's currently-loaded provider credential until internal auth is configured")
+		o.logger.Warn("sidecar credential isolation is fail-open: no internal token, so no config fingerprint "+
+			"binds a request to a credential set and a concurrent agent in the same crew container could reach "+
+			"another agent's provider credential. config.Load always populates auth.internal_token "+
+			"(CREWSHIP_INTERNAL_TOKEN), so reaching this means the server was built bypassing it — report it "+
+			"rather than reconfiguring", "agent_id", agentID)
 	})
 }
 

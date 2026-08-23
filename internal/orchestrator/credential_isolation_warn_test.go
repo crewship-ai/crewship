@@ -27,28 +27,39 @@ func TestWarnCredentialIsolationFailOpenOnce_FiresOnce(t *testing.T) {
 	var warns int
 	o := &Orchestrator{logger: slog.New(countingHandler{warns: &warns})}
 
-	o.warnCredentialIsolationFailOpenOnce()
-	o.warnCredentialIsolationFailOpenOnce()
-	o.warnCredentialIsolationFailOpenOnce()
+	o.warnCredentialIsolationFailOpenOnce("agent-a")
+	o.warnCredentialIsolationFailOpenOnce("agent-b")
+	o.warnCredentialIsolationFailOpenOnce("agent-c")
 
 	if warns != 1 {
 		t.Fatalf("warnCredentialIsolationFailOpenOnce logged %d times across 3 calls, want exactly 1", warns)
 	}
 }
 
-func TestConfigFingerprint_TriggersFailOpenWarningOnlyWhenCredentialsRouted(t *testing.T) {
-	creds := []Credential{{ID: "cred-1", Provider: "OPENROUTER", PlainValue: "sk-test"}}
+// The empty master is the ONLY thing that empties the fingerprint — not the
+// shape of the credentials. Pinned because the fail-open gate reads the
+// fingerprint as its "is isolation armed" signal, and a fingerprint that went
+// empty for some second reason would silently widen the alarm.
+func TestSidecarConfigFingerprint_OnlyTheMasterEmptiesIt(t *testing.T) {
+	routed := []Credential{{ID: "cred-1", Provider: "OPENROUTER", PlainValue: "sk-test"}}
+	unroutable := []Credential{{ID: "gh", EnvVarName: "GITHUB_TOKEN", Type: "CLI_TOKEN", Provider: "GITHUB", PlainValue: "ghp_x"}}
 
-	// No internal token configured: sidecarConfigFingerprint must return "" so
-	// the caller in orchestrator_run.go knows to warn (see startSidecar).
-	if fp := sidecarConfigFingerprint("", creds); fp != "" {
-		t.Fatalf("sidecarConfigFingerprint with empty master = %q, want empty", fp)
-	}
-
-	// With an internal token configured, isolation is intact and no warning
-	// condition should be signaled.
-	if fp := sidecarConfigFingerprint("internal-master", creds); fp == "" {
-		t.Fatalf("sidecarConfigFingerprint with a configured master returned empty; fail-open warning would fire even though isolation is intact")
+	for _, tc := range []struct {
+		name  string
+		creds []Credential
+	}{
+		{"routed credential", routed},
+		{"unroutable credential", unroutable},
+		{"no credentials", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if fp := sidecarConfigFingerprint("", tc.creds); fp != "" {
+				t.Errorf("empty master produced a fingerprint %q", fp)
+			}
+			if fp := sidecarConfigFingerprint("internal-master", tc.creds); fp == "" {
+				t.Error("a configured master produced no fingerprint; the fail-open gate would read isolation as absent")
+			}
+		})
 	}
 }
 
@@ -64,6 +75,7 @@ func TestCredentialIsolationFailedOpen(t *testing.T) {
 	routed := Credential{ID: "or", EnvVarName: "OPENROUTER_API_KEY", Type: "API_KEY", Provider: "OPENROUTER", PlainValue: "sk-or-example"}
 	ghPAT := Credential{ID: "gh", EnvVarName: "GITHUB_TOKEN", Type: "CLI_TOKEN", Provider: "GITHUB", PlainValue: "ghp_example"}
 	secret := Credential{ID: "sec", EnvVarName: "MY_SECRET", Type: "SECRET", Provider: "NONE", PlainValue: "s3cret-value"}
+	cursor := Credential{ID: "cur", EnvVarName: "CURSOR_API_KEY", Type: "AI_CLI_TOKEN", Provider: "CURSOR", PlainValue: "cur-example"}
 
 	tests := []struct {
 		name        string
@@ -81,6 +93,21 @@ func TestCredentialIsolationFailedOpen(t *testing.T) {
 			name:  "unroutable credentials alone must stay quiet",
 			creds: []Credential{ghPAT, secret}, want: false,
 			why: "nothing reaches the CredStore, so there is no credential to confuse between agents",
+		},
+		{
+			// CURSOR and FACTORY are the gap between "the CredStore loads it"
+			// and "the proxy can serve it": buildSidecarCreds keeps them for
+			// their counts, but they have no llmroute spec, and the proxy's
+			// only two Select calls are spec-keyed. Nothing can reach them
+			// over the LLM route, so the alarm must not claim otherwise.
+			name:  "CredStore-resident but not proxy-servable stays quiet",
+			creds: []Credential{cursor}, want: false,
+			why: "CURSOR has no llmroute spec, so no agent can reach it through the proxy",
+		},
+		{
+			name:  "a servable credential beside a non-servable one still warns",
+			creds: []Credential{cursor, routed}, want: true,
+			why: "the tighter gate must not silence a genuinely reachable key",
 		},
 		{
 			name:  "a routed credential among unroutable ones still warns",
