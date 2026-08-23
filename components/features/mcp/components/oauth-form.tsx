@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { cn } from "@/lib/utils"
+import { CREATE_SURFACE_INPUT } from "@/components/layout/create-surface"
 import type { Credential, OAuthProvider } from "../types"
 import { deriveCredentialName } from "../lib/credential-helpers"
 
@@ -386,7 +388,11 @@ export function OAuthForm({
     <div className="p-3 space-y-3">
       <div className="text-xs font-medium">Connect with OAuth</div>
 
-      {/* Provider shortcuts */}
+      {/* Provider shortcuts. `max-sm:h-12`: this form is also used un-migrated
+          inline in the MCP credential picker, so unlike the rest of the
+          create surfaces these pills never picked up a phone size — measured
+          at 24.15px tall (`h-6`) on an iPhone 13, well short of the 44px
+          floor either place this renders. */}
       <div className="flex items-center gap-1.5 flex-wrap">
         {OAUTH_PROVIDER_SHORTCUTS.map((p) => (
           <Button
@@ -394,7 +400,7 @@ export function OAuthForm({
             type="button"
             variant={selectedProvider === p.key ? "default" : "outline"}
             size="sm"
-            className="h-6 text-[10px] px-2"
+            className="h-6 text-[10px] px-2 max-sm:h-12 max-sm:px-3 max-sm:text-sm"
             onClick={() => handleProviderSelect(p.key)}
             disabled={!providersFetched || authorizing || (providersFetched && !providers[p.key])}
           >
@@ -405,7 +411,7 @@ export function OAuthForm({
           type="button"
           variant={selectedProvider === "custom" ? "default" : "outline"}
           size="sm"
-          className="h-6 text-[10px] px-2"
+          className="h-6 text-[10px] px-2 max-sm:h-12 max-sm:px-3 max-sm:text-sm"
           onClick={handleCustom}
           disabled={authorizing}
         >
@@ -422,7 +428,7 @@ export function OAuthForm({
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
               placeholder="your-client-id"
-              className="h-7 text-xs"
+              className={CREATE_SURFACE_INPUT}
               disabled={authorizing}
             />
           </div>
@@ -434,7 +440,7 @@ export function OAuthForm({
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
               placeholder="your-client-secret"
-              className="h-7 text-xs font-mono"
+              className={cn(CREATE_SURFACE_INPUT, "font-mono")}
               disabled={authorizing}
             />
           </div>
@@ -447,7 +453,7 @@ export function OAuthForm({
                   value={authUrl}
                   onChange={(e) => setAuthUrl(e.target.value)}
                   placeholder="https://accounts.google.com/o/oauth2/v2/auth"
-                  className="h-7 text-xs font-mono"
+                  className={cn(CREATE_SURFACE_INPUT, "font-mono")}
                   disabled={authorizing}
                 />
               </div>
@@ -458,7 +464,7 @@ export function OAuthForm({
                   value={tokenUrl}
                   onChange={(e) => setTokenUrl(e.target.value)}
                   placeholder="https://oauth2.googleapis.com/token"
-                  className="h-7 text-xs font-mono"
+                  className={cn(CREATE_SURFACE_INPUT, "font-mono")}
                   disabled={authorizing}
                 />
               </div>
@@ -471,7 +477,7 @@ export function OAuthForm({
               value={scopes}
               onChange={(e) => setScopes(e.target.value)}
               placeholder="space-separated scopes"
-              className="h-7 text-xs font-mono"
+              className={cn(CREATE_SURFACE_INPUT, "font-mono")}
               disabled={authorizing}
             />
             {scopes && selectedProvider !== "custom" && (
@@ -486,7 +492,7 @@ export function OAuthForm({
               <Button
                 type="button"
                 size="sm"
-                className="h-7 text-xs gap-1.5 flex-1"
+                className="h-7 text-xs gap-1.5 flex-1 max-sm:h-12 max-sm:text-sm"
                 disabled={!canAuthorize}
                 onClick={handleAuthorize}
               >
@@ -501,7 +507,7 @@ export function OAuthForm({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-7 text-xs"
+                className="h-7 text-xs max-sm:h-12 max-sm:text-sm"
                 onClick={onCancel}
                 disabled={authorizing}
               >
@@ -523,12 +529,12 @@ export function OAuthForm({
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
                   placeholder="Paste redirect URL or authorization code"
-                  className="h-7 text-xs font-mono flex-1"
+                  className={cn(CREATE_SURFACE_INPUT, "font-mono flex-1")}
                 />
                 <Button
                   type="button"
                   size="sm"
-                  className="h-7 text-xs"
+                  className="h-7 text-xs max-sm:h-12 max-sm:text-sm"
                   disabled={!manualCode.trim() || !pendingCredId}
                   onClick={handleManualCodeExchange}
                 >

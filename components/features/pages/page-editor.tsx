@@ -969,6 +969,18 @@ export function PageEditor({
       // the four; a YAML buffer with line numbers is the widest thing the shell
       // has a size for.
       size="xl"
+      // The shell caps this surface with `max-height` only (`sm:max-h-[min(85vh,720px)]`,
+      // `max-sm:max-h-[92dvh]`) and never gives it a definite `height`. That is fine for
+      // every other door — their content sizes itself and the dialog shrinks to fit — but
+      // this is the one door whose body is `flex-1` around an `absolute inset-0` CodeMirror
+      // mount (see the comment on that div below). An absolutely positioned child has no
+      // intrinsic size, so with no definite height anywhere in the chain the flex column's
+      // auto height resolves to header + 0 + footer and the editor renders at 0px — on
+      // every viewport, not just the phone one. Matching `height` to the shell's own
+      // `max-height` here (through the sanctioned `className` escape hatch, not by editing
+      // the shell) gives the column a definite size to grow into, without touching any
+      // other surface.
+      className="h-[min(85vh,720px)] max-sm:h-[92dvh]"
       onSubmit={handleSave}
       ariaLabel={title}
     >

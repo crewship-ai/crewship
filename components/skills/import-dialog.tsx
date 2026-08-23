@@ -325,37 +325,66 @@ export function ImportSkillDialog({
                   slot: CreateSurfaceToggleRow renders its label as plain text,
                   so without this the checkbox has no accessible name and the
                   text is not a tap target — both of which the pair of
-                  `<label><Checkbox/>…</label>` rows here had before. */}
+                  `<label><Checkbox/>…</label>` rows here had before.
+
+                  `max-sm:min-h-12` on both: `CreateSurfaceToggleRow` is a
+                  plain flex row with no click handler of its own — measured,
+                  the "44px row" a thumb sees is really an 18px label sliver
+                  and a 14.7px `size-4` checkbox floating inside it, and a tap
+                  anywhere else in that row (the icon column, the row's own
+                  padding) hits neither. `label[for]` already forwards a click
+                  to the checkbox by id regardless of DOM position (verified:
+                  clicking the text toggles it), so growing each slot's own
+                  box to `min-h-12` — text via the label wrapper, checkbox via
+                  a second label around it — extends both real targets to the
+                  full row height without touching the checkbox's own visible
+                  size or `create-surface.tsx`. */}
               <CreateSurfaceToggleRow
                 icon={Eye}
                 accent="teal"
                 label={
-                  <label htmlFor="repo-dry-run" className="cursor-pointer">
+                  <label
+                    htmlFor="repo-dry-run"
+                    className="flex cursor-pointer items-center max-sm:min-h-12"
+                  >
                     Dry run (preview only)
                   </label>
                 }
                 control={
-                  <Checkbox
-                    id="repo-dry-run"
-                    checked={dryRun}
-                    onCheckedChange={(v) => setDryRun(v === true)}
-                  />
+                  <label
+                    htmlFor="repo-dry-run"
+                    className="flex cursor-pointer items-center justify-center max-sm:min-h-12 max-sm:min-w-12"
+                  >
+                    <Checkbox
+                      id="repo-dry-run"
+                      checked={dryRun}
+                      onCheckedChange={(v) => setDryRun(v === true)}
+                    />
+                  </label>
                 }
               />
               <CreateSurfaceToggleRow
                 icon={AlertTriangle}
                 accent="red"
                 label={
-                  <label htmlFor="repo-unsafe-license" className="cursor-pointer text-warn">
+                  <label
+                    htmlFor="repo-unsafe-license"
+                    className="flex cursor-pointer items-center text-warn max-sm:min-h-12"
+                  >
                     Skip license gate
                   </label>
                 }
                 control={
-                  <Checkbox
-                    id="repo-unsafe-license"
-                    checked={unsafeLicense}
-                    onCheckedChange={(v) => setUnsafeLicense(v === true)}
-                  />
+                  <label
+                    htmlFor="repo-unsafe-license"
+                    className="flex cursor-pointer items-center justify-center max-sm:min-h-12 max-sm:min-w-12"
+                  >
+                    <Checkbox
+                      id="repo-unsafe-license"
+                      checked={unsafeLicense}
+                      onCheckedChange={(v) => setUnsafeLicense(v === true)}
+                    />
+                  </label>
                 }
               />
 

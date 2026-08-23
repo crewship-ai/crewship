@@ -926,7 +926,12 @@ export function CreateSurfaceDisclosure({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] max-sm:py-3 group-data-[mobile=true]/surface:py-3"
+        // min-h-12, not py-3. The padding put this at 41.6px on a phone —
+        // 2.4 under the floor, and invisible as a bug because it LOOKS
+        // generous. `--spacing: 0.23rem` is why: py-3 is 11px a side, not 12,
+        // and it is added to a 19px line rather than to 44. Callers cannot
+        // patch it either; this component takes no className.
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] max-sm:min-h-12 max-sm:py-3 group-data-[mobile=true]/surface:min-h-12 group-data-[mobile=true]/surface:py-3"
       >
         {(concept || icon) && <ConceptIcon concept={concept} icon={icon} accent={accent} size="sm" />}
         <span className="shrink-0 text-[13px] font-medium text-foreground">{label}</span>

@@ -219,13 +219,17 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await page.getByPlaceholder("Engineering", { exact: true }).fill(name)
     await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
     await page.getByPlaceholder(/What does this crew do/).fill("End-to-end smoke crew")
-    // Open icon picker; verify it opens; close with Cancel (don't change icon
-    // because picker dialog mounts heavy lucide grid — opening + closing is
-    // enough to prove the wiring works).
-    await page.getByLabel("Pick icon and color").click()
-    await expect(page.getByText(/^Icon —/)).toBeVisible({ timeout: TIMEOUT })
-    await page.getByRole("button", { name: "Cancel" }).first().click()
-    await expect(page.getByText(/^Icon —/)).not.toBeVisible({ timeout: TIMEOUT })
+    // Open the icon picker and close it again. It used to be a second Radix
+    // Dialog titled "Icon — <crew>" stacked on this one; it is the kit's
+    // in-body picker now, so the thing to assert is its search box appearing
+    // inside this surface, and the tile toggling it back shut.
+    const iconTile = page.getByLabel("Pick icon and color")
+    await iconTile.click()
+    await expect(page.getByPlaceholder(/search icons/i)).toBeVisible({ timeout: TIMEOUT })
+    // Still exactly one dialog — that was the whole point of the change.
+    await expect(page.getByRole("dialog")).toHaveCount(1)
+    await iconTile.click()
+    await expect(page.getByPlaceholder(/search icons/i)).not.toBeVisible({ timeout: TIMEOUT })
 
     await page.getByRole("button", { name: /Continue/ }).click()
 

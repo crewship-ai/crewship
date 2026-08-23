@@ -25,7 +25,13 @@ export function PersonaChip({ persona, active, onClick }: PersonaChipProps) {
       aria-pressed={active}
       aria-label={`${persona.name} — ${persona.roleTitle}${active ? ", selected" : ""}`}
       className={cn(
-        "shrink-0 inline-flex items-center gap-2 rounded-full pl-1 pr-3 py-1 border text-[12px] transition-colors",
+        // `max-sm:min-h-12`: unpadded, this pill's own content (a 22px avatar
+        // plus one line of 12px text) tops out around 31px tall — comfortably
+        // clickable with a mouse, short of the 44px floor with a thumb. A
+        // `min-h` rather than more padding keeps the pill's visual size
+        // (avatar, text) untouched and just grows the box the row's
+        // `items-center` already centers it in.
+        "shrink-0 inline-flex items-center gap-2 rounded-full pl-1 pr-3 py-1 border text-[12px] transition-colors max-sm:min-h-12",
         active
           ? "bg-primary/15 border-primary/45 text-primary"
           : "bg-card-2 border-white/[0.08] text-foreground/85 hover:border-white/[0.15] hover:bg-white/[0.03]",
@@ -56,7 +62,7 @@ export function BlankChip({ active, onClick }: { active: boolean; onClick: () =>
       aria-pressed={active}
       aria-label={`Start blank — no template${active ? ", selected" : ""}`}
       className={cn(
-        "shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-[12px] transition-colors",
+        "shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-[12px] transition-colors max-sm:min-h-12",
         active
           ? "bg-primary/15 border-primary/45 text-primary"
           : "bg-transparent border-white/[0.10] border-dashed text-muted-foreground hover:border-white/[0.20] hover:text-foreground/80",

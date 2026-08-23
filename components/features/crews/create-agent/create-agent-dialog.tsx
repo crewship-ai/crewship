@@ -343,7 +343,7 @@ export function CreateAgentDialog({
                 <PopoverTrigger asChild>
                   <button
                     type="button"
-                    className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-dashed border-white/[0.10] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-white/[0.20] hover:text-foreground/80"
+                    className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-dashed border-white/[0.10] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-white/[0.20] hover:text-foreground/80 max-sm:min-h-12"
                   >
                     <Layers className="h-3 w-3" />
                     All {BUILTIN_PERSONAS.length} templates
@@ -592,7 +592,22 @@ WORK STYLE: …`}
 
           {/* ─── Advanced ───
               The lid carries the CURRENT values, not the field names: the
-              point of a disclosure is that you can decide not to open it. */}
+              point of a disclosure is that you can decide not to open it.
+              Wrapped in its own `shrink-0`: the body is a flex column that is
+              shorter than its content on any viewport (twenty fields do not
+              fit in 92dvh), so every child is a shrinkable flex item — and
+              `CreateSurfaceDisclosure`'s own root carries `overflow-hidden`.
+              Per the flex sizing spec, a flex item's automatic minimum size
+              collapses to 0 the moment its overflow is not `visible`, so this
+              was the one section with nothing stopping flex-shrink from
+              eating it down to ~2px while its siblings (no overflow-hidden of
+              their own, so a real min-content floor) kept their full size —
+              measured: the whole "Advanced" row rendered under 2px tall,
+              button included, on a phone viewport. `shrink-0` on a plain
+              wrapper div moves the flex item one level up, off the
+              overflow-hidden element, so IT keeps its content-based min size
+              and the disclosure inside renders at its real height again. */}
+          <div className="shrink-0">
           <CreateSurfaceDisclosure
             icon={Wrench}
             accent="amber"
@@ -697,6 +712,7 @@ WORK STYLE: …`}
               — set on the agent canvas after create.
             </p>
           </CreateSurfaceDisclosure>
+          </div>
         </CreateSurfaceBody>
 
         <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
