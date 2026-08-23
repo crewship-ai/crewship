@@ -12,22 +12,26 @@ import {
   Search,
   Check,
   ChevronsUpDown,
-  ChevronRight,
   Users,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
   CREATE_SURFACE_INPUT,
   CreateSurface,
   CreateSurfaceBody,
+  CreateSurfaceChoice,
+  CreateSurfaceDescriptionInput,
   CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceHeader,
   CreateSurfaceLoading,
+  CreateSurfaceNotice,
   CreateSurfaceRefusal,
   CreateSurfaceSecondaryAction,
+  CreateSurfaceSection,
   CreateSurfaceTile,
 } from "@/components/layout/create-surface"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -718,16 +722,18 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
               </div>
             </div>
 
-            <CreateSurfaceField label="What should the routine do?" htmlFor="describe-goal">
-              <textarea
-                id="describe-goal"
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                rows={4}
-                placeholder="Describe it in your own words. e.g. Every weekday morning, fetch the top 5 Hacker News stories, summarize each in one sentence, and post the digest to Slack #standup."
-                className="w-full resize-y rounded-md border border-hairline bg-background p-2.5 text-[13px] leading-relaxed text-foreground outline-none focus:border-primary"
-              />
-            </CreateSurfaceField>
+            <CreateSurfaceSection title="Goal" icon={Sparkles} accent="gold">
+              <CreateSurfaceField label="What should the routine do?" htmlFor="describe-goal">
+                <CreateSurfaceDescriptionInput
+                  id="describe-goal"
+                  value={goal}
+                  onChange={(e) => setGoal(e.target.value)}
+                  rows={4}
+                  placeholder="Describe it in your own words. e.g. Every weekday morning, fetch the top 5 Hacker News stories, summarize each in one sentence, and post the digest to Slack #standup."
+                  className="rounded-md border border-hairline bg-background p-2.5 leading-relaxed"
+                />
+              </CreateSurfaceField>
+            </CreateSurfaceSection>
 
             <p className="text-[11px] leading-relaxed text-muted-foreground">
               {describeLead?.name ?? "The Lead"} will draft it and ask a couple of questions, then show a
@@ -776,45 +782,43 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                 : "No routines match your search."}
             </div>
           ) : (
-            <div className="space-y-1">
+            <div className="flex flex-col gap-1.5">
               {filteredRoutines.map((r) => (
-                <button
+                <CreateSurfaceTile
                   key={r.id}
-                  type="button"
                   disabled={forking}
                   onClick={() => handleForkPick(r)}
-                  className="group flex w-full items-center gap-3 rounded-md border border-hairline bg-foreground/[0.02] px-3 py-2 text-left transition-colors hover:border-border hover:bg-foreground/[0.05] disabled:opacity-50"
-                >
-                  <span className="relative shrink-0">
-                    <CrewIcon
-                      icon={resolveRoutineIcon(r)}
-                      color={resolveRoutineColor(r)}
-                      size="sm"
-                      className="!h-6 !w-6 !rounded-md"
-                    />
-                    <span
-                      aria-hidden
-                      title={r.last_invocation_status ?? "never invoked"}
-                      className={cn(
-                        "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
-                        forkStatusDot(r),
-                      )}
-                    />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-medium">{r.name || r.slug}</div>
-                    <div className="truncate font-mono text-[10px] text-muted-foreground-soft">
-                      {r.slug}
-                    </div>
-                    {r.description && (
-                      <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{r.description}</p>
-                    )}
-                  </div>
-                  <span className="shrink-0 text-[10px] text-muted-foreground-soft">
-                    {r.invocation_count > 0 ? `ran ${r.invocation_count}×` : "never run"}
-                  </span>
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                </button>
+                  // The routine's own icon and colour, with the last run's
+                  // verdict on it. Same identity the sidebar and the detail
+                  // header derive — you are choosing something to copy, and a
+                  // column of slugs is not a thing you can recognise.
+                  leading={
+                    <span className="relative shrink-0">
+                      <CrewIcon
+                        icon={resolveRoutineIcon(r)}
+                        color={resolveRoutineColor(r)}
+                        size="sm"
+                        className="!h-6 !w-6 !rounded-md"
+                      />
+                      <span
+                        aria-hidden
+                        title={r.last_invocation_status ?? "never invoked"}
+                        className={cn(
+                          "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                          forkStatusDot(r),
+                        )}
+                      />
+                    </span>
+                  }
+                  title={r.name || r.slug}
+                  description={
+                    <>
+                      <span className="block truncate font-mono text-[10px] text-muted-foreground-soft">{r.slug}</span>
+                      {r.description && <span className="mt-0.5 block line-clamp-1">{r.description}</span>}
+                    </>
+                  }
+                  meta={r.invocation_count > 0 ? `ran ${r.invocation_count}×` : "never run"}
+                />
               ))}
             </div>
           )}
@@ -832,74 +836,64 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
               two-pane frame, because a code editor that scrolls the dialog
               instead of itself is not a code editor. */}
           <CreateSurfaceBody className="flex overflow-y-hidden p-0 sm:p-0">
-            <aside className="w-56 shrink-0 overflow-y-auto border-r border-hairline p-3">
-              <div className="mb-3">
-                <label htmlFor="routine-name" className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Name
-                </label>
-                <Input
-                  id="routine-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Friendly name"
-                  className="h-7 text-xs"
-                />
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  Slug is derived from the DSL <code className="font-mono">name</code> field.
-                </p>
-              </div>
-              <div className="mb-3">
-                <label htmlFor="routine-description" className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Description
-                </label>
-                <textarea
-                  id="routine-description"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
-                  placeholder="One-line summary"
-                  className="w-full resize-none rounded-md border border-hairline bg-background p-1.5 text-xs text-foreground outline-none focus:border-primary"
-                />
-              </div>
-              <div className="mb-3">
-                <label htmlFor="routine-author-crew" className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Author crew
-                </label>
-                <CrewPicker
-                  id="routine-author-crew"
-                  ariaLabel="Select author crew"
-                  crews={crews}
-                  value={authorCrewId}
-                  onChange={setAuthorCrewId}
-                  placeholder="— choose at runtime —"
-                  clearLabel="— choose at runtime —"
-                  className="mt-1"
-                />
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  Crew whose agents + credentials run this routine.
-                </p>
-              </div>
+            {/* The kit's Section and Field, not a column of bespoke
+                `text-[10px] uppercase` labels over `h-7` inputs. Two of those
+                were 28px tall, which is not a tap target on a phone — and
+                every other surface says its field labels the same way. */}
+            <aside className="flex w-56 shrink-0 flex-col gap-4 overflow-y-auto border-r border-hairline p-3">
+              <CreateSurfaceSection title="Identity" concept="routines">
+                <CreateSurfaceField
+                  label="Name"
+                  htmlFor="routine-name"
+                  hint={<>Slug is derived from the DSL <code className="font-mono">name</code> field.</>}
+                >
+                  <Input
+                    id="routine-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Friendly name"
+                    className={CREATE_SURFACE_INPUT}
+                  />
+                </CreateSurfaceField>
 
-              <div className="my-3 border-t border-hairline" />
+                <CreateSurfaceField label="Description" htmlFor="routine-description">
+                  <CreateSurfaceDescriptionInput
+                    id="routine-description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={3}
+                    placeholder="One-line summary"
+                    className="resize-none rounded-md border border-hairline bg-background p-1.5"
+                  />
+                </CreateSurfaceField>
 
-              <div>
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Starter templates
-                </label>
-                <div className="mt-1 space-y-1">
-                  {STARTER_TEMPLATES.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => applyTemplate(t.id)}
-                      className="w-full rounded-md border border-hairline bg-foreground/[0.02] px-2 py-1.5 text-left text-xs transition-colors hover:border-border hover:bg-foreground/[0.05]"
-                    >
-                      <div className="font-medium">{t.label}</div>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2">{t.description}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
+                <CreateSurfaceField
+                  label="Author crew"
+                  htmlFor="routine-author-crew"
+                  hint="Crew whose agents and credentials run this routine."
+                >
+                  <CrewPicker
+                    id="routine-author-crew"
+                    ariaLabel="Select author crew"
+                    crews={crews}
+                    value={authorCrewId}
+                    onChange={setAuthorCrewId}
+                    placeholder="— choose at runtime —"
+                    clearLabel="— choose at runtime —"
+                  />
+                </CreateSurfaceField>
+              </CreateSurfaceSection>
+
+              <CreateSurfaceSection title="Starter templates" icon={Wrench} accent="slate">
+                {STARTER_TEMPLATES.map((t) => (
+                  <CreateSurfaceTile
+                    key={t.id}
+                    onClick={() => applyTemplate(t.id)}
+                    title={t.label}
+                    description={t.description}
+                  />
+                ))}
+              </CreateSurfaceSection>
             </aside>
 
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -909,24 +903,19 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                   strip said "invalid JSON" and left you to find it. */}
               <div className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline px-3 py-1.5">
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                  <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-                    {(["yaml", "json"] as const).map((f) => (
-                      <button
-                        key={f}
-                        type="button"
-                        onClick={() => switchDslFormat(f)}
-                        aria-pressed={dslFormat === f}
-                        className={cn(
-                          "rounded px-1.5 py-0.5 font-mono text-[10px] uppercase transition-colors",
-                          dslFormat === f
-                            ? "bg-primary/15 text-primary"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {f}
-                      </button>
-                    ))}
-                  </div>
+                  {/* The kit's segmented control. It was a pair of 10px
+                      buttons in a hand-rolled group — the same choice the
+                      other surfaces make with CreateSurfaceChoice, drawn
+                      differently and, at that size, barely tappable. */}
+                  <CreateSurfaceChoice
+                    ariaLabel="DSL format"
+                    value={dslFormat}
+                    onChange={switchDslFormat}
+                    options={[
+                      { value: "yaml" as DslFormat, label: "YAML" },
+                      { value: "json" as DslFormat, label: "JSON" },
+                    ]}
+                  />
                   <span className="font-mono">slug: {slug}</span>
                 </div>
                 {parseError ? (
@@ -970,6 +959,17 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
             </div>
           </CreateSurfaceBody>
 
+          {/* Said before the click, not after. Skipping the gate is the one
+              choice on this surface that cannot be undone by looking at the
+              result — there is no result. */}
+          {skipTestGate && (
+            <div className="shrink-0 px-4 pb-2 sm:px-5">
+              <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
+                Saving without a dry run means the first real trigger is the first execution.
+              </CreateSurfaceNotice>
+            </div>
+          )}
+
           {/* Both verdicts sit outside the scrollport, next to the button that
               produced them. */}
           {testResult && (
@@ -1001,15 +1001,20 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                product rather than a limit on the person. */
             aside={
               canSkipGate ? (
-                <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <input
-                    type="checkbox"
+                // A Switch, not an 11px checkbox with a 10px glyph beside it.
+                // `--spacing: 0.23rem` makes `h-3 w-3` about eleven pixels
+                // square, which is not a target anyone can hit on a phone —
+                // and this particular one turns off the dry run.
+                <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
+                  <Switch
                     checked={skipTestGate}
-                    onChange={(e) => setSkipTestGate(e.target.checked)}
-                    className="h-3 w-3 cursor-pointer"
+                    onCheckedChange={setSkipTestGate}
+                    aria-label="Skip the test-run gate"
                   />
-                  Skip test-run gate
-                  <AlertTriangle className="h-2.5 w-2.5" />
+                  <span className="inline-flex items-center gap-1">
+                    Skip test-run gate
+                    <AlertTriangle className="h-3 w-3 text-warn" />
+                  </span>
                 </label>
               ) : undefined
             }

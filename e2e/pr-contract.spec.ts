@@ -28,7 +28,8 @@ test("PR browser contract subset", async ({ page }) => {
     await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
     await page.getByRole("button", { name: /Continue/ }).click()
     await page.getByRole("button", { name: /Empty crew/ }).click()
-    await page.getByRole("button", { name: /Continue/ }).click()
+    // Two Continues, not three. Lineup lands on Container now — the Runtime
+    // step it used to pass through folded into it.
     await page.getByRole("button", { name: /Continue/ }).click()
     await page.getByRole("button", { name: /Skip to defaults/ }).click()
     await page.getByRole("button", { name: /Create crew/ }).click()
