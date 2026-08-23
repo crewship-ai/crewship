@@ -5,7 +5,7 @@ import { Boxes } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
 import { CreateSurfaceField, CreateSurfacePicker } from "@/components/layout/create-surface"
-import { getBrandColor } from "../runtime-config-brands"
+import { getBrandColor, getBrandIcon } from "../runtime-config-brands"
 import { BASE_IMAGES, DEFAULT_BASE_IMAGE, isCustomBaseImage } from "../runtime-config-data"
 import type { WizardState } from "./types"
 
@@ -58,7 +58,13 @@ export function patchImage(state: WizardState, image: string): Partial<WizardSta
 export function BaseImageRow({ state, onChange }: { state: WizardState; onChange: () => void }) {
   const image = effectiveBaseImage(state)
   const def = baseImageDef(image)
-  const brand = def?.colorKey ? getBrandColor(def.colorKey) : null
+  // The catalogue entries carry an explicit colorKey; the default and any
+  // registry reference do not, so fall back to reading a brand out of the
+  // image name — "debian:bookworm-slim" is a Debian image whether or not it
+  // is one of the nine curated rows.
+  const fallbackKey = image.split(/[/:@]/).filter(Boolean).pop() ?? image
+  const brand = getBrandColor(def?.colorKey ?? "") ?? getBrandColor(fallbackKey) ?? getBrandColor(image.split(":")[0])
+  const FallbackIcon = def ? null : getBrandIcon(fallbackKey) ?? getBrandIcon(image.split(":")[0])
   // DEFAULT_BASE_IMAGE is not one of BASE_IMAGES' full registry paths, so the
   // catalogue lookup above misses it — and calling the shipped default a
   // "Custom image" says an operator typed it. isCustomBaseImage() has always
@@ -77,6 +83,8 @@ export function BaseImageRow({ state, onChange }: { state: WizardState; onChange
     >
       {def ? (
         <def.icon className="h-6 w-6 shrink-0" style={brand ? { color: brand } : undefined} />
+      ) : FallbackIcon ? (
+        <FallbackIcon className="h-6 w-6 shrink-0" style={brand ? { color: brand } : undefined} />
       ) : (
         <Boxes className="h-6 w-6 shrink-0 text-muted-foreground" />
       )}

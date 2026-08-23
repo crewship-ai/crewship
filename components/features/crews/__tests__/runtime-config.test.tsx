@@ -306,6 +306,19 @@ describe("RuntimeConfig — tooling under sections", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull())
   })
 
+  // The runtimes catalogue arrives in the server's order, which puts Agebox
+  // and Mkcert above node and python — six rows of generic package glyphs
+  // before anything recognisable. Branded entries sort first so the first
+  // screen is the tools people came for.
+  it("puts entries that have a brand mark first", async () => {
+    renderSections()
+    await screen.findByText("Preinstalled tooling")
+
+    const rows = await screen.findAllByRole("button", { name: /Anaconda|Oddity/ })
+    // Anaconda resolves to a brand mark; Oddity does not.
+    expect(rows[0].textContent).toMatch(/Anaconda/)
+  })
+
   it("flags a feature nobody official published, and says nothing when official", async () => {
     renderSections()
     await screen.findByText("Preinstalled tooling")

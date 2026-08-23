@@ -155,6 +155,102 @@ function ImageDescription({ children }: { children: ReactNode }) {
 }
 
 
+/**
+ * A tool's brand mark, in a tinted tile.
+ *
+ * The catalogue rows used to draw a bare 16px glyph in muted grey, which for a
+ * list of 1241 near-identical rows is the same as no icon at all: the thing
+ * that tells Ubuntu from Anaconda at a glance is the brand's own colour, and
+ * it was being thrown away. The tile is what makes it read as a mark rather
+ * than as punctuation before the name.
+ */
+/**
+ * Branded first.
+ *
+ * Both catalogues arrive in the server's order, which for the runtimes list
+ * puts Agebox, Mkcert and Kubectl-Rolesum at the top — six rows of generic
+ * package glyphs before anything anyone recognises. Sorting the entries that
+ * have a brand mark ahead of the ones that do not turns the first screen into
+ * the tools people are actually looking for, and it is the difference between
+ * a list with icons and a list with one icon column of grey boxes.
+ *
+ * Stable within each group, so the server's own ordering still decides ties.
+ */
+function brandedFirst<T>(items: T[], keyOf: (item: T) => string, fallbackOf?: (item: T) => string): T[] {
+  return items
+    .map((item, i) => ({ item, i, branded: !!(getBrandIcon(keyOf(item)) || getBrandIcon(fallbackOf?.(item) ?? "")) }))
+    .sort((a, b) => (a.branded === b.branded ? a.i - b.i : a.branded ? -1 : 1))
+    .map((x) => x.item)
+}
+
+
+function ToolMark({ tool, fallbackIcon, size = "md" }: {
+  tool: string
+  fallbackIcon?: string
+  size?: "sm" | "md"
+}) {
+  const BrandIcon = getBrandIcon(tool) || getBrandIcon(fallbackIcon || "")
+  const color = getBrandColor(tool) || getBrandColor(fallbackIcon || "")
+  const box = size === "sm" ? "h-6 w-6" : "h-7 w-7"
+  const glyph = size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4"
+  return (
+    <span
+      className={cn(
+        "flex shrink-0 items-center justify-center rounded-md border",
+        box,
+        color ? "border-transparent" : "border-hairline bg-foreground/[0.04]",
+      )}
+      style={color ? { backgroundColor: `${color}1F`, borderColor: `${color}40` } : undefined}
+      aria-hidden
+    >
+      {BrandIcon ? (
+        <BrandIcon className={glyph} style={color ? { color } : undefined} />
+      ) : (
+        <Package className={cn(glyph, "text-muted-foreground-soft")} />
+      )}
+    </span>
+  )
+}
+
+
+/** One generated file: what it is called, how big it is, and its own copy. */
+function FileCard({ name, hint, body, copied, onCopy, onEdit }: {
+  name: string
+  hint?: string
+  body: string
+  copied?: boolean
+  onCopy?: () => void
+  onEdit?: () => void
+}) {
+  const lines = body ? body.split("\n").length : 0
+  return (
+    <div className="overflow-hidden rounded-lg border border-hairline bg-foreground/[0.02]">
+      <div className="flex items-center gap-2 border-b border-hairline px-3 py-2">
+        <FileJson className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="truncate font-mono text-[11px] text-foreground">{name}</span>
+        {hint && <span className="truncate text-[11px] text-muted-foreground-soft">— {hint}</span>}
+        <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground-soft">
+          {lines} {lines === 1 ? "line" : "lines"}
+        </span>
+        {onCopy && (
+          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onCopy} aria-label={`Copy ${name}`}>
+            {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+          </Button>
+        )}
+        {onEdit && (
+          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={onEdit} aria-label={`Edit ${name}`}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      <pre className="max-h-[280px] overflow-auto whitespace-pre p-3 font-mono text-[11px] leading-relaxed text-foreground/85">
+        {body}
+      </pre>
+    </div>
+  )
+}
+
+
 export function RuntimeConfig({ value, onChange, canEditPrivileged = false, browserHeight = "420px", layout = "tabs", hideBaseImage = false }: RuntimeConfigProps) {
   // Parse initial state from value
   const initialDC = useMemo(() => parseDevcontainerConfig(value.devcontainerConfig), [value.devcontainerConfig])
@@ -680,9 +776,6 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
               {filteredCatalog.map((feature) => {
                 const isSelected = feature.ref in selectedFeatures
                 const toolName = featureRefToTool(feature.ref)
-                const BrandIcon = getBrandIcon(toolName) || getBrandIcon(feature.icon || "")
-                const brandColor = getBrandColor(toolName) || getBrandColor(feature.icon || "")
-                const isCloud = feature.category === "cloud"
                 return (
                   <div
                     key={feature.ref}
@@ -691,18 +784,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
                       isSelected && "bg-accent/20"
                     )}
                   >
-                    <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
-                      {BrandIcon ? (
-                        <BrandIcon
-                          className="w-4 h-4"
-                          style={brandColor ? { color: brandColor } : undefined}
-                        />
-                      ) : isCloud ? (
-                        <Cloud className="w-4 h-4" />
-                      ) : (
-                        <Package className="w-4 h-4" />
-                      )}
-                    </div>
+                    <ToolMark tool={toolName} fallbackIcon={feature.icon} size="sm" />
 
                     <div className="flex-1 min-w-0 flex items-center gap-2">
                       <span className="font-medium text-foreground truncate">{feature.name}</span>
@@ -866,11 +948,9 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           style={{ maxHeight: browserHeight }}
           className="space-y-1 overflow-y-auto overscroll-contain rounded-lg border border-hairline bg-foreground/[0.02] p-1.5"
         >
-          {filteredCatalog.map((feature) => {
+          {brandedFirst(filteredCatalog, (f) => featureRefToTool(f.ref), (f) => f.icon || "").map((feature) => {
             const picked = feature.ref in selectedFeatures
             const tool = featureRefToTool(feature.ref)
-            const BrandIcon = getBrandIcon(tool) || getBrandIcon(feature.icon || "")
-            const brandColor = getBrandColor(tool) || getBrandColor(feature.icon || "")
             return (
               <button
                 key={feature.ref}
@@ -882,11 +962,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
                   picked ? "bg-primary/[0.12]" : "hover:bg-foreground/[0.06]",
                 )}
               >
-                {BrandIcon ? (
-                  <BrandIcon className="h-4 w-4 shrink-0" style={brandColor ? { color: brandColor } : undefined} />
-                ) : (
-                  <Package className="h-4 w-4 shrink-0 text-muted-foreground-soft" />
-                )}
+                <ToolMark tool={tool} fallbackIcon={feature.icon} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs text-foreground">{feature.name}</span>
                   {feature.description && (
@@ -988,11 +1064,8 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
                   miseTools[entry.tool] ||
                   entry.default_version ||
                   (entry.versions?.[0] ?? "latest")
-                const BrandIcon = getBrandIcon(entry.tool) || getBrandIcon(entry.icon || "")
-                const brandColor = getBrandColor(entry.tool) || getBrandColor(entry.icon || "")
                 const hasVersions = Array.isArray(entry.versions) && entry.versions.length > 0
                 const defaultVersion = entry.default_version || (hasVersions ? entry.versions![0] : "latest")
-                const isCloud = entry.category === "cloud"
                 return (
                   <div
                     key={entry.tool}
@@ -1001,18 +1074,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
                       isEnabled && "bg-accent/20"
                     )}
                   >
-                    <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
-                      {BrandIcon ? (
-                        <BrandIcon
-                          className="w-4 h-4"
-                          style={brandColor ? { color: brandColor } : undefined}
-                        />
-                      ) : isCloud ? (
-                        <Cloud className="w-4 h-4" />
-                      ) : (
-                        <Package className="w-4 h-4" />
-                      )}
-                    </div>
+                    <ToolMark tool={entry.tool} fallbackIcon={entry.icon} size="sm" />
 
                     <div className="flex-1 min-w-0 flex items-center gap-2">
                       <span className="font-medium text-foreground truncate">{entry.name}</span>
@@ -1090,6 +1152,138 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
     </div>
   )
 
+  /**
+   * Language runtimes, as marks rather than a table.
+   *
+   * Same reasoning as the tooling browser above: on a create step the
+   * question is which toolchains this crew needs, and the answer is easier to
+   * see as a row of brand marks than as a grid of names with a version
+   * dropdown per line. Pinned versions stay editable — they move onto the
+   * picked chip, which is where the version actually belongs.
+   */
+  const runtimesPaneSections = (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-1.5">
+        {CATEGORY_FILTERS.filter((c) => c !== "all").map((cat) => {
+          const active = runtimeCategoryFilter === cat
+          return (
+            <button
+              key={cat}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setRuntimeCategoryFilter(active ? "all" : cat)}
+              className={cn(
+                "h-8 rounded-full border px-3 text-xs transition-colors max-sm:h-12 group-data-[mobile=true]/surface:h-12",
+                active
+                  ? "border-primary/40 bg-primary/15 text-primary-hover"
+                  : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {CATEGORY_LABELS[cat] ?? cat}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground-soft" />
+        <Input
+          value={runtimeSearchQuery}
+          onChange={(e) => setRuntimeSearchQuery(e.target.value)}
+          placeholder="Search runtimes — node, python, go, terraform, kubectl…"
+          aria-label="Search runtimes"
+          className="h-8 pl-8 text-xs max-sm:h-12 max-sm:text-sm"
+        />
+      </div>
+
+      {/* Pinned versions live on the chip, not in a column of dropdowns. */}
+      {selectedRuntimeCount > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(miseTools).map(([tool, version]) => (
+            <span
+              key={tool}
+              className="flex h-8 items-center gap-1.5 rounded-md border border-primary/40 bg-primary/[0.12] pl-1.5 pr-1 text-xs text-primary-hover"
+            >
+              <ToolMark tool={tool} size="sm" />
+              {tool}
+              <Input
+                value={version}
+                onChange={(e) => updateRuntimeVersion(tool, e.target.value)}
+                aria-label={`${tool} version`}
+                className="h-6 w-16 border-transparent bg-black/20 px-1 text-center font-mono text-[11px]"
+              />
+              <button
+                type="button"
+                onClick={() => toggleRuntimeTool(tool, "")}
+                aria-label={`Remove ${tool}`}
+                className="px-0.5 opacity-60 transition-opacity hover:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {runtimeCatalogLoading ? (
+        <div className="space-y-1">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-7 rounded-md" />
+          ))}
+        </div>
+      ) : runtimeCatalogError ? (
+        <div className="flex flex-col items-center gap-2 py-6">
+          <AlertCircle className="h-5 w-5 text-destructive" />
+          <p className="text-xs text-muted-foreground">The runtime catalogue did not load.</p>
+          <Button size="sm" variant="outline" onClick={fetchRuntimeCatalog}>Try again</Button>
+        </div>
+      ) : filteredRuntimes.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-xs text-muted-foreground">
+          {runtimeSearchQuery.trim()
+            ? `Nothing matches “${runtimeSearchQuery}”.`
+            : "No runtimes in this category."}
+        </p>
+      ) : (
+        <div
+          style={{ maxHeight: browserHeight }}
+          className="space-y-1 overflow-y-auto overscroll-contain rounded-lg border border-hairline bg-foreground/[0.02] p-1.5"
+        >
+          {brandedFirst(filteredRuntimes, (e) => e.tool, (e) => e.icon || "").map((entry) => {
+            const picked = entry.tool in miseTools
+            return (
+              <button
+                key={entry.tool}
+                type="button"
+                aria-pressed={picked}
+                onClick={() => toggleRuntimeTool(entry.tool, entry.default_version ?? "")}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
+                  picked ? "bg-primary/[0.12]" : "hover:bg-foreground/[0.06]",
+                )}
+              >
+                <ToolMark tool={entry.tool} fallbackIcon={entry.icon} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs text-foreground">{entry.name}</span>
+                  {entry.description && (
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {entry.description}
+                    </span>
+                  )}
+                </span>
+                {entry.default_version && !picked && (
+                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground-soft">
+                    {entry.default_version}
+                  </span>
+                )}
+                {picked && <Check className="h-3.5 w-3.5 shrink-0 text-primary-hover" />}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+
   const securityPane = (
         <RuntimeSecurityConfig
           value={security}
@@ -1098,35 +1292,30 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
         />
   )
 
+  /**
+   * The generated files, as files.
+   *
+   * It was a label, a <pre>, another label and another <pre> — two documents
+   * run together with no boundary and no way to tell which numbers belong to
+   * which. A file card says what the file is called, how big it is, and gives
+   * the copy button for THAT file rather than one button standing over both.
+   */
   const previewPane = (
-    <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs font-medium">Generated devcontainer.json</Label>
-          <div className="flex gap-1.5">
-            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleCopy} aria-label="Copy to clipboard">
-              {copied ? (
-                <Check className="h-3.5 w-3.5 text-success" />
-              ) : (
-                <Copy className="h-3.5 w-3.5" />
-              )}
-            </Button>
-            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={enterRawEdit} aria-label="Edit raw configuration">
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-        <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-          {devcontainerJSON}
-        </pre>
-
-        {miseJSON && (
-          <>
-            <Label className="text-xs font-medium">Language Runtimes Config</Label>
-            <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-              {miseJSON}
-            </pre>
-          </>
-        )}
+    <div className="space-y-3">
+      <FileCard
+        name=".devcontainer/devcontainer.json"
+        body={devcontainerJSON}
+        copied={copied}
+        onCopy={handleCopy}
+        onEdit={enterRawEdit}
+      />
+      {miseJSON && (
+        <FileCard
+          name="mise.toml"
+          hint="language runtimes, as JSON"
+          body={miseJSON}
+        />
+      )}
     </div>
   )
 
@@ -1160,7 +1349,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           label="Language runtimes"
           summary={selectedRuntimeCount > 0 ? `${selectedRuntimeCount} pinned` : "none pinned"}
         >
-          {runtimesPane}
+          {runtimesPaneSections}
         </CreateSurfaceDisclosure>
 
         <CreateSurfaceDisclosure

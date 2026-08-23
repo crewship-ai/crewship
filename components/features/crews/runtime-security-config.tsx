@@ -1,8 +1,10 @@
 "use client"
 
 import { useMemo } from "react"
-import { AlertTriangle, Plus, ShieldAlert, Trash2 } from "lucide-react"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  AlertTriangle, FolderCog, HeartPulse, KeyRound, Plus, ShieldAlert, ShieldCheck,
+  Terminal, Trash2,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -10,6 +12,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  CreateSurfaceNotice,
+  CreateSurfaceSection,
+  CreateSurfaceToggleRow,
+} from "@/components/layout/create-surface"
 import { cn } from "@/lib/utils"
 import {
   KNOWN_CAPS,
@@ -89,6 +96,18 @@ export function RuntimeSecurityConfig({
 
   const envRows = useMemo(() => Object.entries(value.containerEnv), [value.containerEnv])
 
+  // What the grid shows: the capabilities the server will actually accept,
+  // plus anything already stored on this crew — a legacy cap saved before the
+  // gate landed has to stay on screen or it cannot be unchecked.
+  const shownCaps = useMemo(
+    () => KNOWN_CAPS.filter((c) => isServerGrantableCap(c.name) || capSet.has(c.name)),
+    [capSet],
+  )
+  const hiddenCaps = useMemo(
+    () => KNOWN_CAPS.filter((c) => !isServerGrantableCap(c.name) && !capSet.has(c.name)),
+    [capSet],
+  )
+
   function updateEnv(oldKey: string, key: string, val: string) {
     const next: Record<string, string> = {}
     for (const [k, v] of Object.entries(value.containerEnv)) {
@@ -114,69 +133,107 @@ export function RuntimeSecurityConfig({
   }
 
   return (
-    <div className="space-y-5">
-      {/* ---- Privileged ---- */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <Label htmlFor="rc-privileged" className="text-xs font-medium">
+    <div className="flex flex-col gap-4">
+      {/* Isolation.
+       *
+       * The danger notice used to render permanently, in destructive red,
+       * above a switch that was OFF — five lines of warning about something
+       * not happening. A warning that is always on screen is furniture, and
+       * furniture is what people stop reading. It appears when the thing it
+       * warns about is actually switched on. */}
+      <CreateSurfaceSection
+        title="Isolation"
+        icon={value.privileged ? ShieldAlert : ShieldCheck}
+        accent={value.privileged ? "red" : "green"}
+      >
+        <CreateSurfaceToggleRow
+          icon={ShieldAlert}
+          accent="red"
+          label={
+            <label htmlFor="rc-privileged" className="flex cursor-pointer flex-wrap items-center gap-2 max-sm:min-h-12">
               Privileged mode
-            </Label>
-            <p className="text-[11px] text-muted-foreground">
-              Runs the container with full host device access.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {value.privileged && (
-              <Badge variant="destructive" className="gap-1 text-[10px]">
-                <ShieldAlert className="h-3 w-3" />
-                Isolation reduced
-              </Badge>
-            )}
-            <Switch
-              id="rc-privileged"
-              aria-label="Privileged mode"
-              checked={value.privileged}
-              disabled={!canEditPrivileged}
-              onCheckedChange={(v) => patch({ privileged: v })}
-            />
-          </div>
-        </div>
+              {value.privileged && (
+                <Badge variant="destructive" className="gap-1 text-[10px]">
+                  <ShieldAlert className="h-3 w-3" />
+                  Isolation reduced
+                </Badge>
+              )}
+            </label>
+          }
+          hint="Full host device access. An agent in a privileged container can reach the host."
+          control={
+            <label
+              htmlFor="rc-privileged"
+              className="flex cursor-pointer items-center justify-center max-sm:min-h-12 max-sm:min-w-12"
+            >
+              <Switch
+                id="rc-privileged"
+                aria-label="Privileged mode"
+                checked={value.privileged}
+                disabled={!canEditPrivileged}
+                onCheckedChange={(v) => patch({ privileged: v })}
+              />
+            </label>
+          }
+        />
 
-        <Alert variant="destructive" className="py-2">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle className="text-xs">Danger — this removes container isolation</AlertTitle>
-          <AlertDescription className="text-[11px]">
-            Privileged mode nulls <code>no-new-privileges</code>, drops the read-only
-            rootfs, and grants essentially all Linux capabilities and host device
-            access. An agent in a privileged container can escape to the host. Only
-            enable it for a crew you fully trust (e.g. Docker-in-Docker), and prefer
-            adding a single capability below instead.
-          </AlertDescription>
-        </Alert>
+        {value.privileged && (
+          <CreateSurfaceNotice tone="error" icon={AlertTriangle}>
+            <span className="block font-medium">This removes container isolation.</span>
+            Privileged mode nulls <code className="font-mono">no-new-privileges</code>, drops the
+            read-only rootfs, and grants essentially all Linux capabilities and host device access.
+            Only for a crew you fully trust (e.g. Docker-in-Docker) — a single added capability
+            below is almost always the smaller answer.
+          </CreateSurfaceNotice>
+        )}
 
         {!canEditPrivileged && (
           <p className="text-[11px] text-muted-foreground">
             Requires an admin and the workspace{" "}
-            <code>allow_privileged_credentials</code> flag to change.
+            <code className="font-mono">allow_privileged_credentials</code> flag to change.
           </p>
         )}
-      </div>
 
-      {/* ---- Capabilities ---- */}
-      <div className="space-y-2">
-        <div>
-          <Label className="text-xs font-medium">Added Linux capabilities</Label>
-          <p className="text-[11px] text-muted-foreground">
-            Re-add a single capability instead of going privileged. Only{" "}
-            <code>NET_BIND_SERVICE</code> can be granted directly — the save path
-            rejects anything broader (<code>ValidateSecurity</code>), because a
-            per-cap grant of e.g. <code>SYS_ADMIN</code> is a bigger escalation than
-            the privileged flag it would bypass. Use privileged mode for those.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 rounded-md border border-border/40 p-2">
-          {KNOWN_CAPS.map((cap) => {
+        <CreateSurfaceToggleRow
+          icon={HeartPulse}
+          accent="slate"
+          label={
+            <label htmlFor="rc-init" className="flex cursor-pointer items-center max-sm:min-h-12">
+              Init process (PID 1)
+            </label>
+          }
+          hint="Runs a tiny init as PID 1 so orphaned processes get reaped (docker --init)."
+          control={
+            <label
+              htmlFor="rc-init"
+              className="flex cursor-pointer items-center justify-center max-sm:min-h-12 max-sm:min-w-12"
+            >
+              <Switch
+                id="rc-init"
+                aria-label="Init process"
+                checked={value.init}
+                onCheckedChange={(v) => patch({ init: v })}
+              />
+            </label>
+          }
+        />
+      </CreateSurfaceSection>
+
+      {/* Capabilities. */}
+      <CreateSurfaceSection
+        title="Linux capabilities"
+        icon={KeyRound}
+        accent="amber"
+        hint="one permission instead of all of them"
+      >
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          Only <code className="font-mono">NET_BIND_SERVICE</code> can be granted directly. The
+          save path refuses anything broader, because a per-capability grant of e.g.{" "}
+          <code className="font-mono">SYS_ADMIN</code> is a bigger escalation than the privileged
+          flag it would be bypassing — use privileged mode for those.
+        </p>
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          {shownCaps.map((cap) => {
             const checked = capSet.has(cap.name)
             const grantable = isServerGrantableCap(cap.name)
             // A non-grantable cap stays interactive only while it's already set:
@@ -228,20 +285,47 @@ export function RuntimeSecurityConfig({
             )
           })}
         </div>
-      </div>
 
-      {/* ---- Mounts ---- */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <Label className="text-xs font-medium">Extra mounts</Label>
-            <p className="text-[11px] text-muted-foreground">
-              Only <code>/dev/fuse</code> and named volumes are allowed. The Docker
-              socket and host paths are rejected — they are a container-escape
-              primitive.
-            </p>
-          </div>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addMount}>
+        {/* The other thirteen.
+         *
+         * Every capability except NET_BIND_SERVICE is refused by the save
+         * path, so listing them all inline made this section thirteen rows of
+         * greyed-out things you cannot do and one you can. They stay
+         * reachable — knowing WHY SYS_ADMIN is not on offer is the point —
+         * but folded, and any capability already stored on the crew is shown
+         * above regardless, because it has to be possible to remove it. */}
+        {hiddenCaps.length > 0 && (
+          <details className="rounded-lg border border-hairline bg-foreground/[0.02]">
+            <summary className="cursor-pointer px-3 py-2 text-[11px] text-muted-foreground marker:text-muted-foreground-soft">
+              {hiddenCaps.length} more the save path refuses — privileged mode only
+            </summary>
+            <ul className="space-y-1 px-3 pb-2.5 text-[11px] text-muted-foreground">
+              {hiddenCaps.map((cap) => (
+                <li key={cap.name} className="flex flex-wrap items-baseline gap-x-1.5">
+                  <span className="font-mono text-foreground/70">{cap.name}</span>
+                  {cap.danger && (
+                    <span className="rounded bg-destructive/15 px-1 text-[9px] text-destructive">high-risk</span>
+                  )}
+                  <span>{cap.description}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </CreateSurfaceSection>
+
+      {/* Mounts. */}
+      <CreateSurfaceSection
+        title="Extra mounts"
+        icon={FolderCog}
+        accent="blue"
+        hint="/dev/fuse and named volumes only"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            The Docker socket and host paths are rejected — they are a container-escape primitive.
+          </p>
+          <Button size="sm" variant="outline" className="h-7 shrink-0 text-xs" onClick={addMount}>
             <Plus className="mr-1 h-3 w-3" />
             Add mount
           </Button>
@@ -300,37 +384,22 @@ export function RuntimeSecurityConfig({
             })}
           </div>
         )}
-      </div>
+      </CreateSurfaceSection>
 
-      {/* ---- Init (PID 1) ---- */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <Label htmlFor="rc-init" className="text-xs font-medium">
-            Init process (PID 1)
-          </Label>
-          <p className="text-[11px] text-muted-foreground">
-            Run a tiny init as PID 1 to reap zombie processes (docker <code>--init</code>).
+      {/* Container env. The init toggle that used to sit here moved up into
+          Isolation, beside the other switch that changes how the container
+          runs rather than what is in it. */}
+      <CreateSurfaceSection
+        title="Container environment"
+        icon={Terminal}
+        accent="slate"
+        hint="CREWSHIP_* keys are reserved"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Extra environment variables injected at container start.
           </p>
-        </div>
-        <Switch
-          id="rc-init"
-          aria-label="Init process"
-          checked={value.init}
-          onCheckedChange={(v) => patch({ init: v })}
-        />
-      </div>
-
-      {/* ---- Container env ---- */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <Label className="text-xs font-medium">Container environment</Label>
-            <p className="text-[11px] text-muted-foreground">
-              Extra env vars injected at container start. <code>CREWSHIP_*</code> keys
-              are reserved and ignored.
-            </p>
-          </div>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addEnv}>
+          <Button size="sm" variant="outline" className="h-7 shrink-0 text-xs" onClick={addEnv}>
             <Plus className="mr-1 h-3 w-3" />
             Add var
           </Button>
@@ -369,14 +438,12 @@ export function RuntimeSecurityConfig({
             ))}
           </div>
         )}
-      </div>
+      </CreateSurfaceSection>
 
-      {/* ---- Start hook (init script) ---- */}
-      <div className="space-y-2">
-        <Label htmlFor="rc-start-hook" className="text-xs font-medium">
-          Start hook (init script)
-        </Label>
-        <p className="text-[11px] text-muted-foreground">
+      {/* Start hook. */}
+      <CreateSurfaceSection title="Start hook" icon={Terminal} accent="purple" hint="runs on every start">
+        <Label htmlFor="rc-start-hook" className="sr-only">Start hook (init script)</Label>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
           Shell commands run on every container start as the agent user. Note the
           crew&apos;s <code>/crew</code> directory is an agent-writable host bind that
           survives container removal — treat anything auto-executed there as code you
@@ -390,7 +457,7 @@ export function RuntimeSecurityConfig({
           placeholder={"npm ci\n./scripts/warm-cache.sh"}
           className="font-mono text-xs min-h-[80px] resize-y"
         />
-      </div>
+      </CreateSurfaceSection>
     </div>
   )
 }
