@@ -65,8 +65,14 @@ describe("auth pages wear the product mark", () => {
       join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
       "utf8"
     )
-    if (shell.includes("<CrewshipLogo ")) {
-      expect(shell).toMatch(/<CrewshipLogo\s+tight\b/)
+    // Matched as a whole element rather than as the literal "<CrewshipLogo ".
+    // A prop moving to its own line — a formatter's decision, not an author's
+    // — turned the guard off silently: the substring stopped matching, the
+    // `if` never entered, and an un-cropped mark would have sailed through a
+    // green test. A guard that a line break can disable is not a guard.
+    const usages = shell.match(/<CrewshipLogo\b[\s\S]*?\/?>/g) ?? []
+    for (const usage of usages) {
+      expect(usage).toMatch(/\btight\b/)
     }
   })
 
