@@ -36,68 +36,64 @@ func TestEnsureOnboardingSetupCrew_NewCrewGetsCurrentAutonomyLevel(t *testing.T)
 	}
 }
 
-// TestEnsureOnboardingSetupCrew_HealsStaleStrictAutonomy pins the narrow,
-// one-time heal: a setup crew left over from before this constant was
-// raised (still 'strict', the old default) picks up the current value on
-// the next call — the whole point of the guard, since a workspace created
-// under an older build must not carry a stale autonomy level forever.
-func TestEnsureOnboardingSetupCrew_HealsStaleStrictAutonomy(t *testing.T) {
-	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	if _, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID); err != nil {
-		t.Fatalf("ensureOnboardingSetupCrew (create): %v", err)
-	}
-	if _, err := db.Exec("UPDATE crews SET autonomy_level = 'strict' WHERE workspace_id = ? AND slug = ?",
-		wsID, setupCrewSlug); err != nil {
-		t.Fatalf("force stale autonomy_level: %v", err)
-	}
-
-	info, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID)
-	if err != nil {
-		t.Fatalf("ensureOnboardingSetupCrew (heal): %v", err)
-	}
-	var autonomy string
-	if err := db.QueryRow("SELECT autonomy_level FROM crews WHERE id = ?", info.CrewID).Scan(&autonomy); err != nil {
-		t.Fatalf("read autonomy_level: %v", err)
-	}
-	if autonomy != setupCrewAutonomyLevel {
-		t.Errorf("autonomy_level = %q after heal, want %q", autonomy, setupCrewAutonomyLevel)
-	}
-}
-
-// TestEnsureOnboardingSetupCrew_PreservesOperatorChosenAutonomy is the other
-// half of the same guard: a crew an operator has explicitly moved to some
-// OTHER level (guided here — deliberately not 'strict', so the heal's WHERE
-// clause cannot match it) must never be silently overwritten back to the
-// constant on a later call. Self-healing a stale default must not double as
-// "always sync to the constant".
+// TestEnsureOnboardingSetupCrew_PreservesOperatorChosenAutonomy: a crew an
+// operator has explicitly moved must never be silently moved back on a later
+// call.
+//
+// Table-driven over the levels for one reason. The previous version of this
+// test used 'guided' and said so in a comment — "deliberately not 'strict', so
+// the heal's WHERE clause cannot match it". Stepping around the one input that
+// fails is how a hole gets pinned open instead of closed: 'strict' was the
+// case that mattered, because the request-path heal matched exactly it.
+//
+// crew_policy.go writes this same column, so `crewship policy set --crew
+// _crewship-setup --level strict` and the old default are indistinguishable —
+// no WHERE clause can tell an operator's choice from a stale value. And
+// Status calls this function on every poll for any workspace holding a
+// credential, so the "one-time" heal re-fired forever: an operator lowering
+// the workspace's only full-autonomy crew had it raised back within seconds,
+// silently. The heal is now
+// migrations/20260824073500_heal_setup_crew_autonomy.sql, which runs once per
+// database and cannot outlive the upgrade it exists for.
 func TestEnsureOnboardingSetupCrew_PreservesOperatorChosenAutonomy(t *testing.T) {
-	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
+	for _, level := range []string{"strict", "guided", "trusted"} {
+		t.Run(level, func(t *testing.T) {
+			db := setupTestDB(t)
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
 
-	if _, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID); err != nil {
-		t.Fatalf("ensureOnboardingSetupCrew (create): %v", err)
-	}
-	if _, err := db.Exec("UPDATE crews SET autonomy_level = 'guided' WHERE workspace_id = ? AND slug = ?",
-		wsID, setupCrewSlug); err != nil {
-		t.Fatalf("simulate operator override: %v", err)
-	}
+			if _, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID); err != nil {
+				t.Fatalf("ensureOnboardingSetupCrew (create): %v", err)
+			}
+			if _, err := db.Exec("UPDATE crews SET autonomy_level = ? WHERE workspace_id = ? AND slug = ?",
+				level, wsID, setupCrewSlug); err != nil {
+				t.Fatalf("simulate operator override: %v", err)
+			}
 
-	info, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID)
-	if err != nil {
-		t.Fatalf("ensureOnboardingSetupCrew (second call): %v", err)
-	}
-	var autonomy string
-	if err := db.QueryRow("SELECT autonomy_level FROM crews WHERE id = ?", info.CrewID).Scan(&autonomy); err != nil {
-		t.Fatalf("read autonomy_level: %v", err)
-	}
-	if autonomy != "guided" {
-		t.Errorf("autonomy_level = %q, want operator's own 'guided' preserved", autonomy)
+			// Twice: Status polls this on every request, so a heal that only
+			// re-fires on the second call would still be a standing override.
+			for i := 0; i < 2; i++ {
+				if _, err := ensureOnboardingSetupCrew(context.Background(), db, testLogger(), wsID, userID); err != nil {
+					t.Fatalf("ensureOnboardingSetupCrew (call %d): %v", i+2, err)
+				}
+			}
+
+			var autonomy string
+			if err := db.QueryRow("SELECT autonomy_level FROM crews WHERE workspace_id = ? AND slug = ?",
+				wsID, setupCrewSlug).Scan(&autonomy); err != nil {
+				t.Fatalf("read autonomy_level: %v", err)
+			}
+			if autonomy != level {
+				t.Errorf("autonomy_level = %q, want operator's own %q preserved", autonomy, level)
+			}
+		})
 	}
 }
+
+// The other half — that the upgrade path the old heal existed for still
+// works — is TestMigrateHealsStaleSetupCrewAutonomy in internal/database,
+// which drives the real migration against the real schema rather than
+// restating its SQL here.
 
 // TestSetupAgentModelOutranksCreatedCrewDefault pins the split between the
 // two model constants, which is the whole reason they are separate names.

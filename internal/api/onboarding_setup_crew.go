@@ -184,23 +184,24 @@ func ensureOnboardingSetupCrew(ctx context.Context, db *sql.DB, logger *slog.Log
 		now, workspaceID, setupCrewSlug, setupCrewKindSetup); err != nil {
 		return nil, fmt.Errorf("revive setup crew: %w", err)
 	}
-	// One-time heal, scoped narrowly on purpose: a workspace whose setup crew
-	// was created under the OLD 'strict' default (before this file's own
-	// autonomy revisit — see setupCrewAutonomyLevel's docstring) would
-	// otherwise carry that stale value forever, since INSERT OR IGNORE only
-	// ever applies the constant to a brand-new row. The `AND autonomy_level =
-	// 'strict'` guard is what keeps this from being a standing "always sync to
-	// the constant" behavior: an operator who has since moved this crew to
-	// any OTHER level (guided/trusted/full, or deliberately back to strict
-	// via `crewship policy set`) is never overwritten by this — only the
-	// specific old-default value this file itself used to write is healed,
-	// and only once per row (it stops matching after the first heal).
-	if _, err := db.ExecContext(ctx, `
-		UPDATE crews SET autonomy_level = ?, updated_at = ?
-		WHERE workspace_id = ? AND slug = ? AND kind = ? AND autonomy_level = 'strict'`,
-		setupCrewAutonomyLevel, now, workspaceID, setupCrewSlug, setupCrewKindSetup); err != nil {
-		return nil, fmt.Errorf("heal setup crew autonomy level: %w", err)
-	}
+	// The heal that used to live here — raising a setup crew created under the
+	// old 'strict' default to setupCrewAutonomyLevel — is now the migration
+	// 20260824073500_heal_setup_crew_autonomy.sql, and deliberately NOT on
+	// this path.
+	//
+	// Its `AND autonomy_level = 'strict'` guard was written to mean "only the
+	// stale default, never an operator's choice", and it cannot: crew_policy.go
+	// writes this same column, so `crewship policy set --crew _crewship-setup
+	// --level strict` is indistinguishable from the old default. Since Status
+	// calls this function on every poll for any workspace holding a credential
+	// — onboarding finished or not — the "one-time" heal was a standing
+	// re-escalation of the workspace's only full-autonomy crew, undoing an
+	// operator's deliberate lowering within seconds and logging nothing.
+	//
+	// A migration runs once per database, which is what the old comment
+	// claimed and the old code could not deliver. New rows still get the
+	// constant from the INSERT above; anything set afterwards is the
+	// operator's and stays theirs.
 	var crewID string
 	if err := db.QueryRowContext(ctx,
 		"SELECT id FROM crews WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL",
