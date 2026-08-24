@@ -40,8 +40,28 @@ const (
 	DefaultSpan = 12
 )
 
-// slugRE is the shape the rest of Crewship uses for anything addressable.
+// slugRE is the shape the rest of Crewship uses for anything addressable —
+// a page's own slug, a panel id, an action id, a routine reference. None of
+// these have a reserved leading-underscore form, so this stays the strict
+// public shape.
 var slugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// crewSlugRE is slugRE plus the one form the crews table actually contains
+// that slugRE alone refuses: a leading underscore, reserved workspace-wide
+// for built-in system crews specifically so they can never collide with a
+// user-created one (a user-supplied slug is normalised through
+// validSlugFormat / makeSlug, neither of which can ever emit a leading
+// underscore — see onboarding_setup_crew.go's setupCrewSlug docstring).
+// Used only where a reference resolves to an actual crews row (OwnerCrewSlug,
+// crewRefSlug in wake.go) — never for a page's own slug, a panel id, or an
+// action id, none of which name a crew.
+//
+// Without this, the one crew every workspace starts with (_crewship-setup,
+// the Crewship Guide's own crew) could never own — or be granted a wake gate
+// on — any page, because its own agent has no OTHER crew to reference: it
+// has no crew-creation tool, so `crew/_crewship-setup` is the only owner
+// reference it could ever author.
+var crewSlugRE = regexp.MustCompile(`^_?[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // Document is a page as authored.
 type Document struct {
@@ -292,7 +312,7 @@ func (p PanelSpec) OwnerCrewSlug() (string, error) {
 	if !ok || kind != "crew" {
 		return "", fmt.Errorf("owner %q must be crew/<slug>: a panel's permission anchor is a crew", p.Owner)
 	}
-	if !slugRE.MatchString(ref) {
+	if !crewSlugRE.MatchString(ref) {
 		return "", fmt.Errorf("owner %q: %q is not a crew slug", p.Owner, ref)
 	}
 	return ref, nil

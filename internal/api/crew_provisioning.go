@@ -70,6 +70,25 @@ type ProvisioningHandler struct {
 	// noopEmitter so tests + early bring-up keep working without
 	// requiring journal wiring. Set via SetJournal at router setup.
 	journal journal.Emitter
+
+	// chatResumer runs a chat message that chatbridge.Bridge.HandleChatMessage
+	// deferred because its crew needed a devcontainer build (see
+	// AttachPendingMessage). Set via SetChatResumer once the bridge exists in
+	// the server boot sequence — nil until then, and a nil resumer just means
+	// a completed/failed build can't replay its attached message (logged, not
+	// panicked). In production this is always the same *chatbridge.Bridge
+	// wired as the WS hub's ChatHandler, so a resumed message runs through the
+	// identical path — persistence, cross-run exclusivity, error
+	// classification — as a live send.
+	chatResumer ws.ChatHandler
+}
+
+// SetChatResumer wires the chat handler used to resume a deferred message once
+// its crew's provisioning job completes. Done as a setter (not a constructor
+// argument) for the same reason as SetJournal: the chatbridge.Bridge is built
+// after this handler in the server boot sequence (cmd/crewship/cmd_start.go).
+func (h *ProvisioningHandler) SetChatResumer(resumer ws.ChatHandler) {
+	h.chatResumer = resumer
 }
 
 func NewProvisioningHandler(

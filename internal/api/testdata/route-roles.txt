@@ -240,7 +240,10 @@ POST /api/v1/oauth/exchange roleInline
 POST /api/v1/oauth/initiate roleInline
 POST /api/v1/oauth/loopback roleInline
 POST /api/v1/onboarding/complete roleSelf
+POST /api/v1/onboarding/proposals roleCreate
+POST /api/v1/onboarding/proposals/{id}/apply roleCreate
 POST /api/v1/onboarding/setup roleSelf
+POST /api/v1/onboarding/setup-agent/start roleSelf
 POST /api/v1/pages roleInline
 POST /api/v1/pages/import roleInline
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate

@@ -526,6 +526,10 @@ type internalSaveRequest struct {
 	AuthorAgentID string          `json:"author_agent_id"`
 	AuthorChatID  string          `json:"author_chat_id"`
 	AuthorRunID   string          `json:"author_run_id"`
+	// TargetCrewSlug re-points ownership at the crew this routine is being
+	// built FOR. Accepted only from the onboarding setup crew, which in
+	// exchange may own nothing itself — see internal_delegated_crew.go.
+	TargetCrewSlug string `json:"target_crew_slug,omitempty"`
 	// SaveToken is the HMAC-signed proof minted by the internal
 	// /pipelines/test_run that THIS authoring crew just dry-run-validated
 	// THIS definition_hash. It is the ONLY thing that clears the store
@@ -898,6 +902,24 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	// saved pipeline is never left author-less.
 	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.AuthorCrewID) {
 		return
+	}
+	// Delegated authorship, for the onboarding Guide only: re-point the write
+	// from the crew that CALLED to the crew it is building for. Runs after the
+	// assert above, which is what proves AuthorCrewID is the caller's own crew
+	// — this is allowed to move that value, and nothing else is. See
+	// internal_delegated_crew.go for why the Guide owning its own output was
+	// not a cosmetic problem.
+	if !resolveDelegatedAuthorCrew(w, r, h.db, h.logger, body.WorkspaceID, body.TargetCrewSlug, &body.AuthorCrewID) {
+		return
+	}
+	// The acting agent belongs to the CALLER's crew, not the target's, so it
+	// cannot survive delegation: assertAuthorAgentInCrew below would refuse
+	// it, and rightly — a routine owned by the new crew must not dispatch
+	// crewship verbs under the Guide's identity long after onboarding ended.
+	// A DSL that needs an acting agent gets a clean 422 from
+	// ValidateCrewshipActingAgent instead.
+	if body.TargetCrewSlug != "" {
+		body.AuthorAgentID = ""
 	}
 
 	// Parse + validate before save so the agent gets a clean error

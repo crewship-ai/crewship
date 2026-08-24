@@ -2,9 +2,8 @@
 
 import { useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { AuthSplitShell } from "@/components/branding/auth-split-shell"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { serverFetch } from "@/lib/server-base"
@@ -58,17 +57,22 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <CrewshipLogoTile />
-          </div>
-          <CardTitle className="text-xl">Create your account</CardTitle>
-          <CardDescription>Get started with Crewship</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+    <AuthSplitShell
+      eyebrow="Self-hosted"
+      headline="Bring your own hardware."
+      blurb="Every agent runs in its own container, on machines you own."
+    >
+      <div>
+        <p className="font-mono text-[11px] uppercase tracking-[0.11em] text-muted-foreground">
+          Join
+        </p>
+        <h1 className="mt-3 text-balance text-[clamp(24px,2.2vw,30px)] font-extrabold leading-[1.14] tracking-[-0.028em]">
+          Create your account
+        </h1>
+        <p className="mt-2 max-w-[44ch] text-sm text-muted-foreground">
+          One account, then pick the crew you want running.
+        </p>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             {error && (
               <p className="text-sm text-destructive text-center">{error}</p>
             )}
@@ -126,9 +130,8 @@ export default function SignupPage() {
                 Sign in
               </a>
             </p>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+        </form>
+      </div>
+    </AuthSplitShell>
   )
 }

@@ -555,6 +555,13 @@ func (h *PipelineHandler) InternalTestRun(w http.ResponseWriter, r *http.Request
 		Definition   json.RawMessage `json:"definition"`
 		AuthorCrewID string          `json:"author_crew_id"`
 		SampleInputs map[string]any  `json:"sample_inputs"`
+		// Same delegation as InternalSave, and it has to be here too: the
+		// save_token this endpoint mints is signed over the AUTHORING crew,
+		// and InternalSave re-derives it over the crew the routine actually
+		// lands on. Dry-running as the caller and saving as the target would
+		// mint a token that never verifies — and the dry run would evaluate
+		// the wrong crew's egress policy and integrations besides.
+		TargetCrewSlug string `json:"target_crew_slug,omitempty"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid request body")
@@ -583,6 +590,9 @@ func (h *PipelineHandler) InternalTestRun(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.AuthorCrewID) {
+		return
+	}
+	if !resolveDelegatedAuthorCrew(w, r, h.db, h.logger, body.WorkspaceID, body.TargetCrewSlug, &body.AuthorCrewID) {
 		return
 	}
 	dsl, err := pipeline.Parse(body.Definition)

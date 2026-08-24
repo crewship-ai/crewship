@@ -89,7 +89,7 @@ curl -X POST https://crewship.example.com/api/v1/bootstrap \
   -d '{"email":"admin@example.com","password":"<strong>","full_name":"Admin"}'
 ```
 
-The endpoint is idempotent — a second call against a database that already has any user returns 403 (`Already initialized — bootstrap is only available on an empty database`), so re-running provisioning is safe.
+The endpoint is idempotent — a second call against a database that already has any user returns 410 (`Already initialized — please log in at /login instead`), so re-running provisioning is safe.
 
 ### 5. Sign in (day-to-day)
 
@@ -344,7 +344,7 @@ Every endpoint below lives in `internal/api/router_auth.go`. There's no dedicate
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/bootstrap` | Create the first `OWNER` on a fresh database. Idempotent — 403 if any user exists. |
+| `POST` | `/api/v1/bootstrap` | Create the first `OWNER` on a fresh database. Idempotent — 410 if any user exists. |
 | `POST` | `/api/v1/auth/signup` | Create a new user account. Gated by the `CREWSHIP_ALLOW_SIGNUP` server flag; disabled by default for self-hosted installs (returns **403** when off). **Always answers 202** with the same generic body, registered address or not (non-enumeration), and sets **no** session cookie — the client signs in afterwards. |
 | `GET`  | `/api/v1/ws-token` | Mint a short-lived WebSocket auth token for the current session. **Auth required.** |
 

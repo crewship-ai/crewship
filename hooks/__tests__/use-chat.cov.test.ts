@@ -430,13 +430,18 @@ describe("done event edge cases", () => {
     expect(result.current.isStreaming).toBe(false)
   })
 
-  it("lifts trace_id from done metadata onto the finalized turn", () => {
+  it("lifts all done metadata onto the finalized turn", () => {
     const { result } = setup()
     dispatch(chatEvent("text", "answer"))
     flushFrames()
-    dispatch(chatEvent("done", "", { trace_id: "tr-123" }))
+    const suggestion = { crew_name: "Web Crew", template_slug: "software-development" }
+    dispatch(chatEvent("done", "", {
+      trace_id: "tr-123",
+      onboarding_proposal_suggestion: suggestion,
+    }))
     expect(result.current.turns[0].isStreaming).toBe(false)
     expect(result.current.turns[0].metadata?.trace_id).toBe("tr-123")
+    expect(result.current.turns[0].metadata?.onboarding_proposal_suggestion).toEqual(suggestion)
   })
 
   it("is a no-op on turn content when nothing is streaming", () => {

@@ -1,0 +1,211 @@
+---
+title: "Onboarding"
+description: "The conversational first-run: a setup agent proposes a crew, and only a human's apply creates it."
+icon: "compass"
+stability: experimental
+tag: Experimental
+---
+
+Crewship's first-run flow is a conversation, not a form. The **Crewship Guide** — a
+built-in agent the workspace creates for itself — asks what work you want handled,
+then proposes a concrete crew: its name, its agents, each agent's role and model.
+
+Nothing is created by that conversation. The proposal is stored server-side and
+rendered as a card, and only an explicit **apply** writes a crew. The integrity
+property that makes the card trustworthy is that apply reads *only* the stored
+payload: the roster you approved and the roster that gets built are the same
+struct, so the card cannot describe one crew while the mutation creates another.
+
+<Note>
+Every route below requires authentication and workspace context. The Guide runs
+in a reserved system crew (`_crewship-setup`) that is hidden from the fleet and
+may not own any resources it builds — see the routine and page surfaces for how
+authorship is delegated to the crew a person actually created.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `POST` | [`/api/v1/onboarding/setup-agent/start`](#start-the-setup-agent) | Ensure the Guide exists and open its chat |
+| `POST` | [`/api/v1/onboarding/proposals`](#create-a-proposal) | Store a proposed crew — writes no crew |
+| `GET` | [`/api/v1/onboarding/proposals/{id}`](#get-a-proposal) | Read a stored proposal |
+| `POST` | [`/api/v1/onboarding/proposals/{id}/apply`](#apply-a-proposal) | Create the crew — the only write here |
+
+## Endpoint contract
+
+Each endpoint identifies **Auth**, **Request**, **Response**, and **Status**.
+Requests and responses are JSON. The shared failures are `401` unauthenticated,
+`403` unauthorized or cross-workspace, `400` invalid input, `404` missing or
+invisible proposal, `409` a crew slug already in use, and `500` an unexpected
+handler or database failure.
+
+**Auth:** A session or CLI token plus workspace membership. Apply runs under the
+calling human's own session — that is what makes it the approval step rather
+than a continuation of the agent's turn.
+
+**Request:** JSON. Agent-supplied fields are limited to names and roles;
+system prompts, tool profiles, adapters and permissions are always derived
+server-side and can never be set through these routes.
+
+**Response:** The stored proposal, including its resolved roster, or the apply
+result naming the crew that was created.
+
+**Status:** `201` for create and apply, `200` for reads, `400` invalid input,
+`403` cross-workspace, `404` unknown proposal, `409` slug conflict.
+
+## Start the setup agent
+
+```
+POST /api/v1/onboarding/setup-agent/start
+```
+
+Ensures the reserved Guide crew, its agent, and its chat exist, and returns the
+identifiers needed to open the conversation. Idempotent: calling it repeatedly
+returns the same agent and the same chat, so history survives a reload.
+
+**Auth:** Session or CLI token + workspace membership.
+
+**Request body:** none.
+
+**Response:** `201 Created`
+
+```json
+{
+  "agent_id": "agt_01hx…",
+  "agent_slug": "_crewship-setup-guide",
+  "chat_id": "cht_01hx…",
+  "crew_id": "crw_01hx…",
+  "workspace_id": "wsp_01hx…"
+}
+```
+
+**Status:** `201` created or already present, `401` unauthenticated, `403` no
+workspace membership, `500` the Guide could not be provisioned.
+
+## Create a proposal
+
+```
+POST /api/v1/onboarding/proposals
+```
+
+Resolves a proposed crew into a full roster and stores it. **No crew, agent or
+credential is created.** The response is what the approval card renders.
+
+**Auth:** Session or CLI token + workspace membership.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `crew_name` | string | yes | Display name for the crew. |
+| `agents` | array | see note | The roster, 1–6 entries of `{name, role}`. |
+| `template_slug` | string | see note | A builtin crew template to derive the roster from. |
+| `crew_slug` | string | no | Slug override; derived from `crew_name` otherwise. |
+| `llm_provider` | string | no | Provider for the model override. |
+| `llm_model` | string | no | Model id, validated against the provider's curated catalogue. An id outside it is replaced with the workspace default rather than creating an unrunnable crew. |
+| `tools` | array | no | Up to five runtime tool names from the curated catalogue. |
+
+<Note>
+Supply `agents`, `template_slug`, or both. A bespoke crew with no matching
+builtin is a first-class case, not a malformed request. When both are given the
+named roster wins and the template supplies the remaining crew metadata.
+</Note>
+
+Only `name` and `role` are trusted from an agent-authored roster. Each agent's
+system prompt is composed by the server from those two fields; agent-authored
+prompt text never reaches a container.
+
+**Response:** `201 Created` — the stored proposal, with `status: "PENDING"` and
+the resolved roster under `payload.agents`.
+
+```json
+{
+  "id": "prp_01hx…",
+  "workspace_id": "wsp_01hx…",
+  "status": "PENDING",
+  "created_at": "2026-08-23T20:34:05Z",
+  "applied_at": null,
+  "payload": {
+    "crew_name": "Hlídač dostupnosti",
+    "crew_slug": "hlidac-dostupnosti",
+    "template_slug": "",
+    "agents": [
+      {
+        "name": "Strážce dostupnosti",
+        "slug": "strazce-dostupnosti",
+        "role_title": "Kontroluje dostupnost webu a hlásí výpadky",
+        "llm_provider": "ANTHROPIC",
+        "llm_model": "claude-sonnet-5",
+        "system_prompt": "…"
+      }
+    ]
+  }
+}
+```
+
+**Status:** `201` stored, `400` missing `crew_name` or neither roster source,
+`401` unauthenticated, `403` no membership, `500` storage failure.
+
+## Get a proposal
+
+```
+GET /api/v1/onboarding/proposals/{id}
+```
+
+Reads a stored proposal, including whether it has been applied.
+
+**Auth:** Session or CLI token + membership of the proposal's workspace. A
+proposal belonging to another workspace is `404`, not `403` — its existence is
+not disclosed.
+
+**Request:** no body. `id` is the path parameter.
+
+**Response:** `200 OK` — the same shape as create, with `status` one of
+`PENDING` or `APPLIED` and `applied_crew_id` set once applied.
+
+**Status:** `200` found, `401` unauthenticated, `404` unknown or invisible.
+
+## Apply a proposal
+
+```
+POST /api/v1/onboarding/proposals/{id}/apply
+```
+
+Creates the crew and its agents from the **stored payload**. Nothing in this
+request can change what gets built — that is the point: the card a person
+approved and the rows that appear are the same object.
+
+Idempotent. A second apply returns the original result with
+`already_applied: true` rather than creating a second crew, so a double-click
+or a retried request is harmless.
+
+**Auth:** Session or CLI token + membership. Runs under the caller's identity;
+the crew is owned by the human who approved it, never by the Guide.
+
+**Request body:** none.
+
+**Response:** `201 Created`
+
+```json
+{
+  "proposal_id": "prp_01hx…",
+  "status": "APPLIED",
+  "already_applied": false,
+  "crew": {
+    "crew_id": "crw_01hx…",
+    "crew_name": "Hlídač dostupnosti",
+    "crew_slug": "hlidac-dostupnosti",
+    "agent_count": 1,
+    "agent_ids": ["agt_01hx…"]
+  }
+}
+```
+
+**Status:** `201` applied (or already applied), `401` unauthenticated, `403`
+cross-workspace, `404` unknown proposal, `409` the crew slug is already taken,
+`500` the crew could not be created.
+
+## CLI
+
+Every route here has a CLI counterpart — see [`crewship onboarding`](/cli/onboarding).

@@ -9,7 +9,217 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Fixed
+
+- **Upgrading threw finished users back into the setup wizard.**
+  `onboarding_skipped_at` was added without a backfill, and
+  `OnboardingHandler.Status` reads a NULL there as "this completion was
+  interrupted, reopen it". Sound on a fresh install; on an upgrade every
+  pre-existing completion is NULL by construction, so anyone whose workspace
+  happened to hold no agents — they pressed Skip, or they finished properly
+  and later deleted their crews — was sent back to step one, and Status
+  *persisted* the downgrade rather than merely rendering it. Backfilled: a
+  completion recorded by a build that had no such column is, by definition,
+  not one this build may reopen.
+
+- **An OpenAI or Google workspace got a Claude model id.** The marker template
+  the Guide is told to emit interpolated its suggested model from
+  `providerRuntimeDefaults` (`gpt-5.5`, `gemini-2.5-pro`) while
+  `validateCrewModel` checked against `llm.CuratedModels`, which contains
+  neither. The Guide emitted the id it was handed, the validator missed it and
+  substituted the Anthropic default, and the crew was created as
+  OPENAI + CODEX_CLI + `claude-sonnet-5` — every field valid, the combination
+  unrunnable at the adapter on every run. Both now read the same catalogue.
+  A provider whose models live on the operator's own daemon (Ollama and
+  anything self-hosted) is told to omit the field instead of being handed a
+  Claude id to copy.
+
+- **A crew name in Czech, Greek or Japanese could discard the whole
+  proposal.** `crew_name` was still length-checked with `len()`, which counts
+  bytes — the same fault fixed for `role`, one field over. 120 bytes is about
+  60 accented characters, so an ordinary non-ASCII crew name silently dropped
+  the entire marker and no card ever appeared. Counted in runes now.
+
+- **`GET /system/runtime` reported `in_use` only to unprivileged callers.**
+  The onboarding wizard gates its Crew step on that field and blocks Continue
+  unless it is exactly `true`. It worked only because the probe sends no
+  workspace context and so never resolves a role; an owner who did would read
+  `undefined` and be stuck permanently behind a re-check button that could
+  never clear. Present on both branches now.
+
+- **The token landed after CLI pairing went to the wrong workspace.**
+  `GET /api/v1/workspaces` sorts `created_at DESC` while every onboarding
+  handler resolves the user's membership `ASC`, so taking the first row wrote
+  the freshly paired credential to the *newest* workspace for anyone who
+  belongs to more than one — and `autoAssignCredentials` links workspace
+  credentials to agents at deploy time, so the crew launched with none and
+  could not be repaired afterwards. The frontend already sorted for this
+  reason; the CLI now does too.
+
+- Wake automations compiled from an agent-authored page recorded the agent's
+  id in `automations.created_by`, a user-attribution column with no foreign
+  key to catch it.
+
 ### Added
+
+- `crewship onboarding proposal create --agent "Name:Role"` (repeatable)
+  names a bespoke roster, so the CLI can finally reach the branch the Guide
+  actually takes. `--template-slug` is no longer required — give one or the
+  other. The role is split on the first colon only, because a role is a
+  sentence and routinely contains more.
+
+- **Everything the onboarding Guide built belonged to the Guide.** A routine
+  or page authored during setup was attributed to `_crewship-setup`, the
+  server-created crew the Crewship Guide itself runs in, because the sidecar
+  injects `author_crew_id` from its own IPC config — the gate that stops
+  Crew B claiming to be Crew A, correct for every crew except the one whose
+  entire job is building for others.
+
+  `author_crew_id` is not a label. `internal/pipeline/egress_gate.go` checks
+  a routine's HTTP steps against the AUTHOR crew's allowlist, so a routine
+  written to poll `seznam.cz` was gated on the Guide's network policy and
+  could only be unblocked by widening the Guide; `internal/pipeline/executor.go`
+  runs agent steps in the author crew's container, so the work ran as the
+  Guide rather than as the crew meant to do it; and the Guide's own
+  `autonomy_level` is `full` (it must be — it creates Pages), so a person's
+  routines took up permanent residence in the most privileged crew in the
+  workspace, outliving onboarding by months. Pages had a fourth version of
+  the same fault: a panel names its producer as `agent/<slug>`, and
+  `discover_capabilities` could only see the Guide's own roster, so pages
+  built at setup pointed their panels at the Guide.
+
+  A `kind='setup'` crew may now name the crew it is authoring FOR
+  (`target_crew_slug` on `/internal/pipelines/save`, `/internal/pipelines/test_run`
+  and `/internal/pages/save`; `crew` on the `save_routine`, `save_page` and
+  `discover_capabilities` MCP tools) and, in exchange, may own nothing at
+  all. Both halves are load-bearing: without the second, naming a crew is
+  an option the model forgets to take and the orphans come back. The
+  exception stays narrow — an ordinary crew naming another crew is still
+  403, the same cross-crew escalation the original gate exists to stop, and
+  the target must be a non-setup crew inside the workspace the caller's
+  token is already bound to. Ownership ordering (crew first, then its work)
+  is now enforced by the slug simply not resolving rather than by the
+  prompt remembering, and the refusal lists the workspace's real crew slugs
+  because a slug is derived server-side and the Guide never sees what its
+  proposed name became. The autonomy gate continues to ask about the ACTOR,
+  not the owner — a brand-new crew defaults to `guided`, and holding a page
+  the Guide is plainly permitted to create would leave setup unable to
+  finish its own job.
+
+- **A crew's first message could be answered by total silence when its
+  devcontainer needed a build.** The server deferred the message (streamed a
+  `crew_provisioning` build card, returned the `ws.ErrCrewProvisioning`
+  control-flow sentinel) and relied on the CLIENT to notice the build
+  finished and resend — but completion was only broadcast on the workspace
+  realtime channel, fanned out to whoever happened to be subscribed at that
+  instant. A client that hadn't yet opened its second WebSocket connection,
+  hadn't resolved `workspaceId`, or had simply closed the tab never saw the
+  frame, and the HTTP poll backstop only sped up once it observed the very
+  signal it had just missed. On a cache-hit build (~90ms) the completion
+  frame was routinely gone before anything was listening.
+
+  The server now owns the resume. `chatbridge.Bridge.HandleChatMessage`
+  attaches the deferred send to the crew's provisioning job
+  (`api.ProvisioningHandler.AttachPendingMessage`); the job's own completion
+  point runs — or fails — it directly, streaming the outcome on the chat's
+  own session channel (`hub.BeginSessionRun`), the one channel a client is
+  always reliably subscribed to. At-most-once is structural, not a flag: the
+  job tracks at most one pending message per chat (a manual resend or a
+  second deferred send on the same chat while the build is still running
+  *coalesces* onto the latest content instead of queuing a duplicate), that
+  slot is drained atomically with the job's terminal-state transition, and
+  the bridge's existing per-chat run exclusivity (`tryMarkRunStart`) means a
+  resumed run racing a live manual send never persists twice — whichever
+  loses gets `ws.ErrAgentBusy` and stays silent rather than double-answering.
+  A failed build now surfaces a real `error` chat event instead of silence or
+  a false success.
+
+  The client-side auto-resume (a `useProvisioningStatus` poll that called
+  `sendMessage` again once a crew's status flipped to `completed`) is
+  removed — it was the unreliable mechanism this fix replaces, and the test
+  that shipped it (`onboarding-setup-chat.test.tsx`, stubbing
+  `useProvisioningStatus`/`useWorkspace`/`RealtimeProvider`) proved the
+  client's wiring against a working feed and never exercised the race at
+  all. The "Resend now" button survives as a manual fallback only, safe even
+  mid-build because of the coalescing above.
+
+- **A crew created by onboarding could not run an agent at all, and had not
+  been able to since 2026-04-15.** Four `INSERT INTO crews` statements omit
+  `devcontainer_config` — the two onboarding paths, recipe install, and the
+  agent-facing `CreateCrew`. A crew with no config was refused by the
+  provisioning gate, never had an image built, and fell through to bare
+  `debian:bookworm-slim`. The agent then died with `exit 127`,
+  `stdbuf: failed to run command 'claude': No such file or directory`.
+
+  Commit `8780f3c4` (PR #154) deleted the pre-provisioned agent-runtime image
+  and switched the platform default to bare Debian, adding these columns with
+  no backfill. Seed data got its own config six weeks later; the templates
+  never did — which is why `./dev.sh seed` produced working crews and the
+  wizard did not, and why four months passed before anyone noticed.
+
+  The default is applied where the config is **read**, not at the four write
+  sites. Adding it to the INSERTs is the obvious fix and the wrong one: this
+  repo has already paid for that lesson twice (`internal/crewstart` exists
+  because thirteen callers each assembled their own config and three forgot
+  `CachedImage`), and a read-time default cannot be missed by a creation path
+  that does not exist yet.
+
+  Three readers are deliberately NOT defaulted: the crew editor (a GET-merge-
+  PATCH would silently freeze the default into every crew the first time an
+  operator toggled a security flag), backup collection (a restore must
+  reproduce what was stored), and the manifest export that reads them. A crew
+  running on the default reports `devcontainer_config_defaulted` so it is
+  visible rather than silent.
+
+- **The chat said "an error occurred processing your message" while the server
+  was building the crew's image.** The provisioning handshake returned an error
+  purely as a control-flow sentinel; it was logged at ERROR and rendered as a
+  generic failure stacked under the informative build card. It is now a typed
+  sentinel (`ErrCrewProvisioning`), logged at Info, and the user is told the
+  environment is being built once and to resend.
+
+- **An agent whose container lacks its CLI now says so.** Adapter-exec failures
+  had no classifier: `exit 127` reached the user as "agent exited with code 127
+  — check the journal for details", while the one fact that resolves it — the
+  binary is not installed — sat in the container's stderr and was discarded.
+  Failures are now typed, the container output rides the error event as
+  metadata, and a missing binary is distinguished from a crash.
+
+- **A credential could not be checked, and was reported as valid.**
+  `probeProviderInner` short-circuited every `sk-ant-oat` token with "OAuth
+  token accepted (cannot validate via API)" having contacted nothing — and that
+  claim was disproven by `probeAnthropicOAuthToken` forty lines away in the
+  same package. It backs `/credentials/test`, the "Test now" button and
+  `crewship credential test-stored`, so for the one credential type onboarding
+  accepts, every tool anyone had answered "fine" without asking. The CLI
+  carried its own copy of the same wrong assumption and skipped before it even
+  reached the server.
+
+  Probing is now shared, and it has three outcomes rather than two: accepted,
+  refused, and **could not ask** — which is rendered as neither. The probe also
+  uses the model the user actually chose; it hardcoded a cheap Haiku, so a
+  token with no entitlement to the chosen model passed onboarding and failed on
+  the first message.
+
+- **"I could not determine whether the image is present" no longer reads as
+  "the image is missing."** `ensureImage` collapsed an errored `ImageInspect`
+  into "absent" and told the operator to reprovision a crew whose image was
+  never gone. The error-distinguishing variant already existed one function
+  below and was unused.
+
+### Added
+
+- **A container-boot conformance test that needs no API key.** The sidecar's
+  `/health` is served from in-memory state, so a real container, a real sidecar
+  and a real health probe cost nothing to run. It asserts uid 1001 resolves,
+  `claude --version` succeeds inside the container, and `/health` answers 200 —
+  the exact facts the four-month regression broke. ~9 s warm; it belongs on
+  every PR, because a nightly cannot protect a branch that has already merged.
+
+  Deliberately not modelled on the existing runtime-conformance harness's
+  four-byte ELF stub: that shortcut is right there, where nothing execs the
+  sidecar, and exactly wrong here, where the sidecar booting is the point.
+
 
 - **Tabs on a page (#1935).** A panel may declare `tab: Odezva`, and the page
   grows a bar under the breadcrumb — several screens instead of one long
@@ -87,6 +297,137 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **The builtin crew templates ship models that are not being retired.** All
+  twelve template files pinned dated snapshots — `claude-sonnet-4-20250514` on
+  43 agents, `claude-opus-4-20250514` on one, `claude-haiku-4-20250514` on
+  three — and those ids retire on 2026-06-15. Every crew the onboarding wizard
+  can deploy was seeded against a model with an end date, on the first screen a
+  new install ever shows.
+
+  The bump is per tier, not a blanket replace: the threat modeller keeps its
+  Opus, the secrets sweeper and the documentation writers keep their Haiku, and
+  everything else moves to Sonnet. A template's model choice is a cost decision
+  someone made deliberately, and flattening 47 pins onto one model would have
+  quietly repriced twelve crews.
+
+  A test walks the YAML exactly as the seeder does and holds two lines for
+  every agent in every template: no dated suffix, and the id must appear in
+  `llm.CuratedModels("anthropic")`. Bare aliases are the convention here —
+  a dated id pins a snapshot that will be withdrawn, and the alias will not.
+
+- **The onboarding preview no longer names a model of its own.** Five
+  hardcoded `"Claude Sonnet 4.6"` strings sat in the preview component, so the
+  same screen could show the picker's model, the template's model and the
+  preview's model and have all three disagree. It resolves one id through
+  `getModelLabel` now — the same function the rest of the UI labels with.
+
+- **First-run now asks for the password twice.** `/bootstrap` creates the one
+  account that owns the workspace, before any session exists, and a typo was
+  only discoverable at the next sign-in — by which point the way back in is a
+  password reset a fresh install may not be able to send. `/signup` already
+  confirmed; this brings the more consequential form in line.
+
+- **Pairing the CLI is no longer a dead end.** Step 3's green line reads "CLI
+  paired. You can finish below or jump to `crewship setup` in the terminal",
+  and Launch stayed disabled until a token was pasted into the browser — so
+  the terminal route it offers was unreachable. The client gate was stricter
+  than the server: `validateOnboardingCredential` returns nil on an empty
+  value, so launching without one is a supported path and the CLI lands the
+  credential afterwards. Browser mode still requires it, because there is no
+  terminal there to add it from later.
+
+- **Step 3 asks one question, then its consequence.** "How will you work?" was
+  asking two unrelated things on one screen — how the human drives Crewship,
+  and which credential the agents use — and ran off the bottom of the viewport
+  doing it, while the two steps before it fit in a third of it. The server says
+  as much in its own comment: `pairing_mode` "drives how the human works, not
+  the agents".
+
+  With a CLI in the picture the second question has a second answer, so in CLI
+  mode the credential block collapses to one line — "Add the token in the
+  terminal", with "Or add it now" to expand it — and the toolchain picker moves
+  inside, because choosing a toolchain only means something once a key is being
+  pasted. Browser mode has no terminal to fall back to, so there it stays open
+  and required, with no terminal instructions at all. The whole step now fits
+  above the fold.
+
+  An empty token is a valid answer once paired; a half-typed one is not, and is
+  rejected rather than stored as a credential that loads but never works.
+
+- **The Claude Code model picker offers only what has been verified with the
+  adapter, and is pinned to the backend's curated list.** It was a third independent copy of "which models
+  exist", alongside `internal/llm/models_curated.go` (which the backend already
+  serves at `GET /api/v1/models`) and the CLI's own adapter defaults — three
+  lists, three different contents. The Go list is the source of truth now, and
+  a test parses it to enforce that the picker never offers an id it does not
+  carry.
+
+  What the picker offers is deliberately narrower than curated: Claude Code
+  lists Sonnet 5 and nothing else, because that is what has actually been run
+  end to end with the adapter. An earlier version of this list was populated
+  from Anthropic's published catalogue, which offered five models of which one
+  was tested — publishing a model is not the same as having verified it.
+  Widening the list means verifying the adapter first.
+
+  Superseded aliases still answer at the API and can be set through the CLI
+  or the API — they are just not offered as a starting point. They keep their
+  display names through a label-only table: `getModelLabel` resolves by
+  scanning adapters, so without it an existing workspace on
+  `claude-sonnet-4-6` would have silently relabelled to "Claude Sonnet 4.6
+  (Cursor)" — the only other adapter that registers it.
+
+  `crewship setup`'s adapter defaults had drifted to Sonnet 4.6 while the web
+  picker moved on, so the two setup paths for the same adapter handed out
+  different models. They match again — which matters more now that the wizard
+  points paired users at the terminal path.
+
+- **Sign-up and the first-run admin screen join the split shell, and the setup
+  wizard stops moving underneath you.** `/signup` and `/bootstrap` were centred
+  cards next to a split `/login` they link to directly; both now mount
+  `AuthSplitShell` with the animated mark and their own panel copy.
+
+  Onboarding deliberately does **not** get the brand panel. It already has a
+  live preview of the workspace and crew you are building, which is worth more
+  than a logo, so it gets the same visual language applied to what is already
+  there: the cropped mark in the lockup, and the preview on a surface of its
+  own — tinted toward the brand with the mark as a watermark — where it used to
+  be `bg-muted/20`, within a hair of the form column, so the split read as one
+  page with a hairline down it.
+
+  The pane is lit rather than decorated: an inset highlight on the edge the
+  two panes share, and the ground falling away beneath it. The first attempt
+  reached for a large soft brand-blue radial glow, which is what every AI
+  product has shipped since 2024 and read as unserious next to a form people
+  have to fill in carefully. Depth is what makes a split read as two panes.
+  Stacked below `lg` the highlight moves to the bottom edge, because that is
+  where the seam actually is.
+
+  **The unauthenticated forms are usable with a thumb.** The shared `Input` is
+  `h-9` and `Button`'s default size is `h-9` — 36px, under every touch
+  guideline there is — and sign-in, sign-up, first-run and setup are the
+  screens most likely to be met on a phone. A `.touch-form` scope raises them
+  to 44px, keyed on `pointer: coarse` rather than on viewport width: width
+  missed the iPad, which is over any phone breakpoint you would pick and still
+  a finger. `components/ui` is untouched, because the same controls sit in
+  dense authenticated tables where 44px would wreck the row rhythm.
+
+  Two more phone fixes: the crew empty state reserved a full card's height on
+  a screen where the preview is below the form and off-screen while you type,
+  and it told you to pick a crew "on the left" when stacked there is no left.
+  The adapter step's token label and its help link stacked into a run-on at
+  390px; they sit on separate lines there now.
+
+  Two fixes found by walking the wizard on a nuked instance rather than by
+  reading it. **The lockup drifted between steps** — the form column was
+  centred as a whole, so the logo and stepper slid as the step content changed
+  height, measured at y=101 on Workspace, y=137 on Crew and y=66 on Adapter.
+  Both columns are top-anchored now; measured steady at y=71 across all three.
+  And **the preview's empty state was a thin strip**, leaving the pane looking
+  ~85% empty on step one — which reads as a failed render, not an empty state —
+  and making the layout jump when the real crew card arrived. It now reserves
+  that card's height and says what will land there instead of pointing at a
+  control.
+
 - **The sign-in screen is now a split, with the brand mark animated on the
   right.** `/login` was a centred card on a flat gradient. It is now a
   two-pane shell: the form in a readable column on the left, and on the right
@@ -130,6 +471,57 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   re-exported, so importers are unaffected.
 
 ### Fixed
+
+- **Deploying a crew template links credentials for the agent's own provider.**
+  `autoAssignCredentials` filtered the workspace's credentials with a hardcoded
+  `provider = 'ANTHROPIC'` while the agents it links them to carry whatever
+  provider their template pinned. For an Anthropic crew the two agreed by
+  accident and nothing looked wrong. For any other provider the query matched
+  nothing and every agent in the crew deployed with **zero credentials** — no
+  error, no failed request, just a crew that does not work; and a workspace
+  holding an Anthropic key handed that key to a Google agent, which is worse,
+  because it loads and then fails at call time.
+
+  It reads the agent's own `llm_provider` now and falls back to `ANTHROPIC`
+  only when the column is empty, matching the default the write side applies.
+  A lookup that errors leaves the agent unlinked rather than guessing. The
+  onboarding wizard reaches this path for every builtin template, so it was one
+  adapter choice away on the most common flow in the product, and nothing
+  covered it.
+
+- **The wizard's model choice reaches the crew it deploys.** Picking a model on
+  step 3 did nothing for four of the five crew options: `req.LlmModel` was read
+  only by the branch that builds a blank or single-agent crew, so every builtin
+  template deployed with the model its YAML pinned and the select was
+  decoration. `deployCrewTemplate` takes the override now.
+
+  It applies **only when the chosen provider matches the agent's** — writing a
+  Gemini id onto a `CLAUDE_CODE` agent breaks it outright, which is worse than
+  the template's default. An override with no resolvable provider is ignored
+  for the same reason, and the zero value deploys the template verbatim, which
+  is what every other caller passes.
+
+- **The first-run window is documented as it behaves.** Three source comments
+  and the changelog stated bootstrap closes five minutes after `crewship
+  start`. It does not: it stays open until an admin account exists, and the
+  finite window is opt-in through `CREWSHIP_BOOTSTRAP_WINDOW` for instances
+  reachable from the internet before anyone claims them. One of the comments
+  named a symbol that is not in the tree. Four docs pages also said the closed
+  endpoint answers 403 where the server answers 410, as did an assertion in
+  `e2e/onboarding-fresh.mjs` — the code was right in every case and only the
+  prose and one stale check were wrong, which is the kind of drift that gets
+  believed because it is checked in.
+
+- **`e2e/onboarding-fresh.mjs` runs past its 24th check.** A module-scope
+  `const URL` shadowed the global constructor, so `new URL(...)` threw partway
+  through and the eleven checks after it had never executed — in a script that
+  reports its own pass count, which made a truncated run look like a short one.
+  Nothing in CI runs this script, so it went unnoticed; it completes now, 37
+  checks against a fresh database. Two of the newly-reachable checks were
+  themselves stale: the 410 above, and a `console.anthropic.com` link no
+  onboarding component renders any more (the step deep-links into the adapter's
+  own CLI-auth docs, deliberately not to the API-key page, because onboarding
+  rejects raw API keys).
 
 - **A failed `crewship apply` no longer reports success.** Apply is fail-fast,
   so on an error the counters describe a *prefix* of the plan — but they were

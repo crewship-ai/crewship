@@ -30,6 +30,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // DatastoreCap describes one datastore the crew container can reach.
@@ -78,9 +80,14 @@ func ResolveCrewResources(ctx context.Context, db *sql.DB, crewID string) (*Crew
 		return nil, fmt.Errorf("query crew resources for %s: %w", crewID, err)
 	}
 
+	// Effective, not raw: a crew with no devcontainer_config of its own is
+	// provisioned from database.DefaultCrewDevcontainerConfig (which installs
+	// the Claude Code CLI via a feature), so the tool list an agent sees here
+	// must come from what actually got built, not from a NULL column that
+	// would otherwise report zero tools for a crew that has the CLI.
 	res := &CrewResources{
 		Datastores: parseDatastores(servicesJSON.String),
-		Tools:      parseTools(devcontainerConfig.String, miseConfig.String),
+		Tools:      parseTools(database.EffectiveCrewDevcontainerConfig(devcontainerConfig.String, devcontainerConfig.Valid), miseConfig.String),
 	}
 	return res, nil
 }

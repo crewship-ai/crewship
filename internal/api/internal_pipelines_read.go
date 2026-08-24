@@ -25,6 +25,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 )
 
 // PipelineReadInternalAdapter delegates the internal read routes into
@@ -90,6 +91,21 @@ func (h *PipelineReadInternalAdapter) CrewCapabilities(w http.ResponseWriter, r 
 	crewID := r.PathValue("crewId")
 	if !assertBoundCrewWorkspaceDB(w, r, h.pipes.db, h.pipes.logger, &crewID) {
 		return
+	}
+	// ...with the one exception the write handlers now also make. The
+	// onboarding Guide authors FOR another crew, and this is the tool whose
+	// entire promise is "do not guess agent slugs". Answering it with the
+	// Guide's own roster would make a page's `producer: agent/<slug>` refs
+	// name the Guide — the same misattribution as owning the page outright,
+	// only harder to see. Same gate as the save paths: setup callers only,
+	// same workspace, non-setup target (internal_delegated_crew.go).
+	if target := strings.TrimSpace(r.URL.Query().Get("target_crew_slug")); target != "" {
+		wsID := WorkspaceIDFromContext(r.Context())
+		if !resolveDelegatedAuthorCrew(w, r, h.pipes.db, h.pipes.logger, wsID, target, &crewID) {
+			return
+		}
+		// The downstream handler reads crewId off the path, not from here.
+		r.SetPathValue("crewId", crewID)
 	}
 	ctx := context.WithValue(r.Context(), ctxRole, "VIEWER")
 	h.crews.Capabilities(w, r.WithContext(ctx))

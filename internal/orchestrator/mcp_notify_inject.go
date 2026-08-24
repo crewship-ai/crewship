@@ -23,8 +23,16 @@ const notifyMCPSidecarAddr = "127.0.0.1:9119"
 // driving the container.
 func notifyMCPSpec() mcpSpec {
 	return mcpSpec{
-		Name:      NotifyMCPServerName,
-		URL:       "http://" + notifyMCPSidecarAddr + "/mcp/notify",
+		Name: NotifyMCPServerName,
+		URL:  "http://" + notifyMCPSidecarAddr + "/mcp/notify",
+		// #812: required, not optional — respondNotifyMCPToolsCall
+		// (internal/sidecar/notify_mcp.go) resolves actingAgentID before it
+		// dispatches either tool and 403s "unrecognized agent token" without
+		// this header. Same omission the routines server had; both are fixed
+		// together because both fail the same silent way — the tool is
+		// advertised, the model calls it, and the only thing coming back is an
+		// auth error the model cannot act on.
+		Headers:   map[string]string{"Authorization": "Bearer ${CREWSHIP_AGENT_TOKEN}"},
 		Transport: "http",
 	}
 }
@@ -65,6 +73,8 @@ func injectNotifyMCPIntoClaudeJSON(in string) (string, error) {
 	entry := map[string]any{
 		"type": "http",
 		"url":  notifyMCPSpec().URL,
+		// Per-agent bearer token — see notifyMCPSpec for why it is required.
+		"headers": notifyMCPSpec().Headers,
 		// alwaysLoad presents this server's tools (notify_send /
 		// list_notification_channels) to the model EAGERLY at session start instead of
 		// deferring them behind a ToolSearch discovery hop. Mirrors the memory

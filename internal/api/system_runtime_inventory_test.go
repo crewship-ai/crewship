@@ -385,3 +385,62 @@ func TestSystemRuntime_InUseSurvivesTheTwoSpellingsOfOneSocket(t *testing.T) {
 type fakeDetectedProvider struct{ d docker.DetectResult }
 
 func (f fakeDetectedProvider) Detected() docker.DetectResult { return f.d }
+
+// Top-level `in_use` has to be on the ADMIN response too, not only the
+// redacted one.
+//
+// The onboarding wizard gates its Crew step on this field and blocks Continue
+// unless it is exactly true. It was added only to the non-`manage` arm, and
+// that passed review because the probe goes out through serverFetch, which
+// sends no workspace context — so OptionalWorkspaceRole assigns no role and
+// every caller lands on the redacted branch. The day a workspace header is
+// added, or the probe moves to apiFetch, an owner reads `undefined` and is
+// permanently stuck on "Docker is running, but this Crewship server isn't
+// using it", with a re-check button that can never clear it. A field the
+// wizard gates on must not depend on the caller's privilege level.
+func TestSystemRuntime_InUseIsPresentForPrivilegedCallersToo(t *testing.T) {
+	t.Parallel()
+	h := stubbedRuntimeHandler(t, []docker.DetectResult{
+		{Runtime: "orbstack", Version: "29.4.0", Socket: "/var/run/docker.sock"},
+	}, "")
+	h.activeRuntime = usingDocker(docker.DetectResult{
+		Runtime: "orbstack", Version: "29.4.0", Socket: "/var/run/docker.sock",
+	})
+
+	body := runtimeBody(t, h) // adminRuntimeRequest -> the manage branch
+	got, ok := body["in_use"]
+	if !ok {
+		t.Fatalf("admin response has no top-level in_use; keys=%v", mapKeys(body))
+	}
+	if got != true {
+		t.Errorf("in_use = %v, want true (a runtime is actively held)", got)
+	}
+}
+
+// And it is false, not absent, when nothing is actually being driven — the
+// distinction the whole gate rests on. `available` means a runtime exists;
+// `in_use` means this server is using one. dev.sh runs --no-docker, where the
+// first is true and the second is not.
+func TestSystemRuntime_InUseIsFalseWhenNoRuntimeIsHeld(t *testing.T) {
+	t.Parallel()
+	h := stubbedRuntimeHandler(t, []docker.DetectResult{
+		{Runtime: "orbstack", Version: "29.4.0", Socket: "/var/run/docker.sock"},
+	}, "")
+
+	body := runtimeBody(t, h)
+	got, ok := body["in_use"]
+	if !ok {
+		t.Fatalf("admin response has no top-level in_use; keys=%v", mapKeys(body))
+	}
+	if got != false {
+		t.Errorf("in_use = %v, want false (Docker present, this server drives none)", got)
+	}
+}
+
+func mapKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

@@ -3,7 +3,8 @@ package api
 // Second coverage pass for crew_provisioning_jobs.go:
 //
 //   - ProvisionStatus / ProvisionTrigger / ProvisionRebuild DB-error 500s
-//   - ProvisionTrigger's no-devcontainer 400
+//   - ProvisionTrigger no longer refusing a crew with no devcontainer_config
+//     of its own (it now resolves to the default)
 //   - EnqueueForCrew's "query crew" error wrap
 //   - runProvisioning's panic recovery (nil job → recovered, job map entry
 //     marked failed) and the missing-base-image failure
@@ -19,6 +20,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
@@ -58,20 +60,30 @@ func TestProv2_ProvisionTrigger_DBError500(t *testing.T) {
 	}
 }
 
-func TestProv2_ProvisionTrigger_NoDevcontainer400(t *testing.T) {
-	h, _, crewID := covProvRig(t, &covCommitClient{}, "") // no devcontainer_config
+// A crew with no devcontainer_config of its own used to be refused with 400
+// ErrCrewNoDevcontainer here. It now resolves to
+// database.DefaultCrewDevcontainerConfig via EnqueueForCrew, so ProvisionTrigger
+// no longer refuses it. Pre-seed an in-flight job so the request fast-paths to
+// 409 AlreadyRunning instead of spawning a real build goroutine against the
+// default config — this test rig's Provisioner has a nil FeatureDownloader
+// (covProvRig / covProv2ClosedRig pass nil, nil), and the default config's
+// features would panic a real download attempt. The build pipeline itself is
+// exercised elsewhere (TestRunProvisioning_* with explicit configs).
+func TestProv2_ProvisionTrigger_NoDevcontainerConfigNoLongerRefused(t *testing.T) {
+	h, _, crewID := covProvRig(t, &covCommitClient{}, "") // NULL devcontainer_config
 	userID := "test-user-id"
 	wsID := "test-workspace-id"
+	h.jobs[crewID] = &ProvisionJob{CrewID: crewID, Status: "running", StartedAt: time.Now()}
 	req := httptest.NewRequest("POST", "/x", nil)
 	req.SetPathValue("crewId", crewID)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.ProvisionTrigger(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (already running, not refused as no-devcontainer); body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "devcontainer_config") {
-		t.Errorf("body = %q", rr.Body.String())
+	if strings.Contains(rr.Body.String(), "no devcontainer_config") {
+		t.Errorf("body still refuses on no-devcontainer: %q", rr.Body.String())
 	}
 }
 

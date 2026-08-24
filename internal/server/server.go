@@ -1046,12 +1046,14 @@ func (s *Server) mountAPIRouter(
 		if authH := apiRouter.AuthHandler(); authH != nil {
 			// Open the deploy-race bootstrap window. When the users
 			// table is empty at startup the Bootstrap handler stays
-			// open for the default duration (5 min — see
-			// defaultBootstrapWindow in auth.go) — a fixed first-
-			// run window pattern. After the window elapses the
-			// handler refuses with 410 until the server is
-			// restarted. Operator-driven flow: open /bootstrap,
-			// submit name + email + password, Continue.
+			// open until the first admin exists — no deadline, the
+			// empty users table is the gate (cfg.Auth.BootstrapWindow
+			// is zero unless CREWSHIP_BOOTSTRAP_WINDOW is set; see
+			// ArmDeployRaceWindow in auth.go). A positive value opts
+			// into a finite window, after which the handler refuses
+			// with 410 until the server is restarted.
+			// Operator-driven flow: open /bootstrap, submit name +
+			// email + password, Continue.
 			//
 			// 5s budget for the empty-DB probe so a wedged SQLite
 			// can't block server boot. A failure here is logged

@@ -76,11 +76,32 @@ func TestTestCredentialValue(t *testing.T) {
 			}
 		}
 	})
-	t.Run("skips OAuth tokens", func(t *testing.T) {
-		covStub(t)
-		valid, _ := testCredentialValue(newAPIClient(), "ANTHROPIC", "API_KEY", "sk-ant-oat-xyz")
-		if !valid {
-			t.Error("sk-ant-oat* should skip validation")
+	t.Run("OAuth tokens are probed, not skipped", func(t *testing.T) {
+		// testCredentialValue used to short-circuit any sk-ant-oat value to
+		// (true, "") without contacting the server, on the false claim that
+		// OAuth tokens cannot be validated. probeAnthropicCredential
+		// authenticates exactly this token shape against /v1/messages, so
+		// that short-circuit hid a real check from the CLI operator. This
+		// pins the opposite property, against a stub so no unit test reaches
+		// the real api.anthropic.com — see
+		// internal/api/credentials_test_endpoint_cov_test.go's
+		// TestProbeProvider_AnthropicOAuthAndDefault for the same pattern on
+		// the server side.
+		stub := covStub(t)
+		stub.OnPost("/api/v1/credentials/test",
+			clitest.JSONResponse(200, map[string]any{"valid": false, "error": "401 from provider"}))
+		valid, msg := testCredentialValue(newAPIClient(), "ANTHROPIC", "API_KEY", "sk-ant-oat-xyz")
+		if valid || msg != "401 from provider" {
+			t.Errorf("got valid=%v msg=%q, want the stubbed server response to be honored", valid, msg)
+		}
+		calls := stub.CallsFor("POST", "/api/v1/credentials/test")
+		if len(calls) != 1 {
+			t.Fatalf("expected sk-ant-oat* to be posted to the test endpoint, got %d calls", len(calls))
+		}
+		var body map[string]any
+		clitest.MustDecodeJSONBody(calls[0].Body, &body)
+		if body["provider"] != "ANTHROPIC" || body["type"] != "API_KEY" || body["value"] != "sk-ant-oat-xyz" {
+			t.Errorf("test body wrong: %v", body)
 		}
 	})
 	t.Run("posts to test endpoint and decodes", func(t *testing.T) {

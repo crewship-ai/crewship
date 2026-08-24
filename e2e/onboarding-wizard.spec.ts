@@ -15,8 +15,10 @@ import { test, expect, type Page } from "@playwright/test"
  *     accepts a fake Claude Code CLI token instead of live-calling
  *     api.anthropic.com.
  *
- * Bootstrap is a one-shot (POST /api/v1/bootstrap returns 403 after
- * the first user), so the whole describe block runs serially with the
+ * Bootstrap is a one-shot (POST /api/v1/bootstrap returns 410 once a
+ * user exists — the header said 403, the test at the bottom of this
+ * file has always asserted 410), so the whole describe block runs
+ * serially with the
  * validation tests first — they fail submission so they don't consume
  * the shot.
  */
@@ -75,12 +77,17 @@ test.describe("onboarding wizard — first-run flow", () => {
     expect(page.url()).toContain("/bootstrap")
   })
 
+  // #confirm_password is `required`, so leaving it empty makes the browser
+  // block submit and the handler never runs — no alert, and the assertion
+  // below fails on "element(s) not found" rather than on the wrong text.
+  // Every test that expects to reach a validation message must fill it.
   test("bootstrap form rejects short name", async ({ page }) => {
     await page.goto("/bootstrap")
     await page.waitForSelector("#full_name")
     await page.fill("#full_name", "A")
     await page.fill("#email", `pre-${email}`)
     await page.fill("#password", "long-enough-pw")
+    await page.fill("#confirm_password", "long-enough-pw")
     await page.click("button[type=submit]")
     await expect(formAlert(page)).toContainText(/at least 2 characters/i)
     expect(page.url()).toContain("/bootstrap")
@@ -92,8 +99,27 @@ test.describe("onboarding wizard — first-run flow", () => {
     await page.fill("#full_name", fullName)
     await page.fill("#email", `pre-${email}`)
     await page.fill("#password", "short")
+    await page.fill("#confirm_password", "short")
     await page.click("button[type=submit]")
     await expect(formAlert(page)).toContainText(/at least 8 characters/i)
+    expect(page.url()).toContain("/bootstrap")
+  })
+
+  // The confirmation field is the reason this form has four inputs: /bootstrap
+  // creates the account that owns the workspace before any session exists, so
+  // a typo is only discoverable at the next sign-in. Mismatch must be caught
+  // client-side and must NOT burn the one bootstrap the empty DB allows.
+  test("bootstrap form rejects a password that does not match its confirmation", async ({
+    page,
+  }) => {
+    await page.goto("/bootstrap")
+    await page.waitForSelector("#full_name")
+    await page.fill("#full_name", fullName)
+    await page.fill("#email", `pre-${email}`)
+    await page.fill("#password", "long-enough-pw")
+    await page.fill("#confirm_password", "long-enough-px")
+    await page.click("button[type=submit]")
+    await expect(formAlert(page)).toContainText(/don't match/i)
     expect(page.url()).toContain("/bootstrap")
   })
 
@@ -103,6 +129,47 @@ test.describe("onboarding wizard — first-run flow", () => {
   test("bootstrap → wizard (3 steps) → launch → DB rows present", async ({ page, request }) => {
     test.setTimeout(90_000)
 
+    // Step 2 now refuses to advance unless THIS server is driving a container
+    // runtime — step 3 opens a chat with an agent that runs in one, and
+    // letting the user through without it produced two stacked errors on their
+    // first message instead. Stub the probe so this spec keeps measuring the
+    // WIZARD rather than whether the box running it happens to have Docker
+    // wired: dev slots routinely run `crewship start --no-docker`, where the
+    // real endpoint honestly answers in_use=false.
+    await page.route("**/api/v1/system/runtime", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ available: true, in_use: true }),
+      }),
+    )
+
+    // Step 2 now PROVES the token before it stores it: persistAdapterCredential
+    // calls POST /api/v1/credentials/test, and a key that does not work is not
+    // written at all. That is the right product behaviour — it is what stops a
+    // crew launching around a dead token — and it is fatal to this spec, which
+    // types FAKE_API_KEY. Without the stub the real endpoint asks Anthropic
+    // about a key that was never real, the answer is no, POST /credentials
+    // never fires, and the spec times out waiting for it.
+    //
+    // Stubbed for the same reason as the runtime probe above: what is under
+    // test is the WIZARD, not whether the CI runner can reach a model provider.
+    // The endpoint's own behaviour is covered by internal/api's
+    // credentials_test_endpoint tests, against a stubbed provider, where it
+    // belongs.
+    await page.route("**/api/v1/credentials/test", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        // The real shape (internal/api/credentials_test_endpoint.go):
+        // `supported` says the server can check this credential type at all,
+        // `valid` is the provider's verdict. Both are read, and a stub that
+        // returns only `valid` is refused with "This credential type cannot
+        // be verified before setup."
+        body: JSON.stringify({ supported: true, valid: true, status: 200 }),
+      }),
+    )
+
     // Bootstrap form
     await page.goto("/bootstrap")
     await page.waitForSelector("#full_name")
@@ -110,6 +177,7 @@ test.describe("onboarding wizard — first-run flow", () => {
     await page.fill("#full_name", fullName)
     await page.fill("#email", email)
     await page.fill("#password", password)
+    await page.fill("#confirm_password", password)
     await page.click("button[type=submit]")
     await page.waitForURL(/\/onboarding/, { timeout: 20_000 })
 
@@ -126,26 +194,60 @@ test.describe("onboarding wizard — first-run flow", () => {
     await expect(page.getByRole("button", { name: /continue/i })).toBeEnabled()
     await page.getByRole("button", { name: /continue/i }).click()
 
-    // Step 2: pick crew template. AnimatePresence mounts only the
-    // active step, so visible aria-pressed buttons are all crew
-    // cards — assert the exact count so adding *or* removing a
-    // template trips the test.
-    await page.waitForSelector("button[aria-pressed]", { timeout: 10_000 })
-    await expect(page.locator("button[aria-pressed]")).toHaveCount(5)
-    await page.getByRole("button", { name: /software development/i }).click()
-    await page.waitForSelector('img[width="32"]', { timeout: 10_000 })
-    expect(await page.locator('img[width="32"]').count()).toBe(4)
-    await expect(page.getByRole("button", { name: /continue/i })).toBeEnabled()
-    await page.getByRole("button", { name: /continue/i }).click()
+    // Step 1 is durable too: its Continue PATCHes the workspace name and
+    // language, and preferred_language acts as the server-side checkpoint.
+    // Reloading here must resume at Adapter, not ask for the workspace again.
+    await page.waitForSelector('button:has-text("Pair my CLI")', { timeout: 10_000 })
+    await page.reload({ waitUntil: "networkidle" })
+    await expect(page.locator("#workspace_name")).toHaveCount(0)
 
-    // Step 3: switch to browser mode so Launch gates on the API key
-    // field instead of the pair countdown (which never completes in CI).
+    // Step 2: adapter + token. Switch to browser mode so Continue gates on
+    // the API key field instead of the pair countdown (which never
+    // completes in CI).
     await page.waitForSelector('button:has-text("Pair my CLI")', { timeout: 10_000 })
     await page.getByRole("button", { name: /chat in browser/i }).click()
     // Wait for the pair snippet to actually leave the DOM rather than
     // sleeping for a magic motion duration.
     await expect(page.locator('code:has-text("crewship login --pair")')).toBeHidden()
     await page.fill("#api_key", FAKE_API_KEY)
+
+    const continueFromAdapter = page.getByRole("button", { name: /continue/i })
+    await expect(continueFromAdapter).toBeEnabled()
+    // Continuing off this step persists the token via POST /api/v1/credentials
+    // (page.tsx's persistAdapterCredential) so step 3's default chat with the
+    // setup agent doesn't 428 credential_required — wait for that write to
+    // land before asserting on the next step.
+    const credentialRespPromise = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/credentials" &&
+        r.request().method() === "POST",
+      { timeout: 15_000 },
+    )
+    await continueFromAdapter.click()
+    expect((await credentialRespPromise).status()).toBe(201)
+
+    // This is the resume boundary that failed in production: after the
+    // credential had been encrypted successfully, a reload/re-login rebuilt
+    // React state at step 1 and demanded both the workspace and token again.
+    // Durable state must take us straight back to Crew without ever revealing
+    // the saved secret to the browser.
+    await page.reload({ waitUntil: "networkidle" })
+    await expect(page.locator("#workspace_name")).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /prefer to pick a template instead/i })).toBeVisible({
+      timeout: 20_000,
+    })
+
+    // Step 3: pick crew template — the escape hatch, not the chat default,
+    // since the chat would need a real setup-agent conversation this suite
+    // doesn't drive. AnimatePresence mounts only the active step, so visible
+    // aria-pressed buttons are all crew cards — assert the exact count so
+    // adding *or* removing a template trips the test.
+    await page.getByRole("button", { name: /prefer to pick a template instead/i }).click()
+    await page.waitForSelector("button[aria-pressed]", { timeout: 10_000 })
+    await expect(page.locator("button[aria-pressed]")).toHaveCount(5)
+    await page.getByRole("button", { name: /software development/i }).click()
+    await page.waitForSelector('img[width="32"]', { timeout: 10_000 })
+    expect(await page.locator('img[width="32"]').count()).toBe(4)
 
     const launch = page.getByRole("button", { name: /launch/i })
     await expect(launch).toBeEnabled()
@@ -157,15 +259,21 @@ test.describe("onboarding wizard — first-run flow", () => {
     await launch.click()
     expect((await setupRespPromise).status()).toBe(201)
 
-    // The wizard's last click. It used to land on /crews/agents/<id>/chat,
-    // a route the /crews redesign deleted — so this assertion passed only
-    // while a brand-new user's first click 404'd. Chat is /chat/<slug>.
-    //
-    // handleLaunch (app/(onboarding)/onboarding/page.tsx) resolves the slug
-    // with one GET /agents/<id> and falls back to the dashboard when that
-    // lookup returns nothing, so BOTH landing pages are reachable by
-    // design. Wait for either and then assert the good one: a fallback is
-    // then a one-line failure naming its cause instead of a 15s timeout.
+    // Launch no longer redirects. It holds on a receipt — the last thing a
+    // person saw of their own setup used to be a chat composer, which never
+    // told them what had been built, and with more than one crew there is no
+    // single chat that represents the work. So the navigation is now a click,
+    // and this spec has to make it.
+    await expect(page.getByRole("heading", { name: /your crew is ready|your \d+ crews are ready/i }))
+      .toBeVisible({ timeout: 15_000 })
+
+    // "Start chatting" when the agent slug resolved, "Go to dashboard" when it
+    // did not — handleLaunch resolves it with one GET /agents/<id> and falls
+    // back deliberately, so both buttons are legitimate. Take whichever is
+    // offered, then assert below that it was the good one: a fallback becomes
+    // a one-line failure naming its cause instead of a 15s timeout.
+    await page.getByRole("button", { name: /start chatting|go to dashboard/i }).first().click()
+
     await page.waitForURL((url) => /^\/chat\/[^/]+$/.test(url.pathname) || url.pathname === "/", {
       timeout: 15_000,
     })

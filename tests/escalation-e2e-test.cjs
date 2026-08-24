@@ -86,7 +86,7 @@ async function run() {
   const agent = await req('POST', `/api/v1/agents?workspace_id=${workspaceId}`, {
     name: 'Nela', slug: 'nela', crew_id: crewId,
     role_title: 'Tester', cli_adapter: 'CLAUDE_CODE',
-    provider: 'ANTHROPIC', model: 'claude-sonnet-4-20250514',
+    provider: 'ANTHROPIC', model: 'claude-sonnet-5',
   }, auth);
   ok('Agent created', agent.status === 201, `status=${agent.status} body=${agent.raw}`);
   const agentId = agent.body && agent.body.id;

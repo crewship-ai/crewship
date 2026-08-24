@@ -47,7 +47,7 @@ func newRoutineFakeClient(t *testing.T) *routineFakeClient {
 		pipelines: map[string]*RoutineRemote{},
 		schedules: map[string]*ScheduleRemote{},
 		webhooks:  map[string]*WebhookRemote{},
-		crews:     map[string]string{},
+		crews:     map[string]string{"crew_outlands": "uo-outlands"},
 	}
 }
 
@@ -123,13 +123,14 @@ func (f *routineFakeClient) Post(_ context.Context, path string, body any) (*int
 		desc, _ := b["description"].(string)
 		defAny := b["definition"]
 		defBytes, _ := json.Marshal(defAny)
+		authorCrewID, _ := b["author_crew_id"].(string)
 		f.pipelines[slug] = &RoutineRemote{
 			ID:             "pipe_" + slug,
 			Slug:           slug,
 			Name:           name,
 			Description:    desc,
 			DefinitionJSON: defBytes,
-			AuthorCrewID:   "crew_default",
+			AuthorCrewID:   authorCrewID,
 		}
 		return f.respond(201, f.pipelines[slug]), nil
 	case strings.HasSuffix(path, "/pipeline-schedules"):
@@ -479,6 +480,9 @@ func TestRoutine_Plan_Create(t *testing.T) {
 	if savedBody["slug"] != "discord-sync" || savedBody["name"] != "Discord hourly sync" {
 		t.Errorf("save body bad: %+v", savedBody)
 	}
+	if savedBody["author_crew_id"] != "crew_outlands" {
+		t.Errorf("save body author_crew_id = %v, want crew_outlands", savedBody["author_crew_id"])
+	}
 	def, ok := savedBody["definition"].(map[string]any)
 	if !ok {
 		t.Fatalf("definition missing or wrong type: %T", savedBody["definition"])
@@ -549,6 +553,7 @@ func TestRoutine_Plan_Unchanged(t *testing.T) {
 		Name:           doc.Metadata.Name,
 		Description:    doc.Spec.Description,
 		DefinitionJSON: defBytes,
+		AuthorCrewID:   "crew_outlands",
 	}
 	fake.schedules["sched_0001"] = &ScheduleRemote{
 		ID:                 "sched_0001",

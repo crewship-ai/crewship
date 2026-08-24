@@ -30,3 +30,11 @@ func (a provisioningAdapter) EnqueueForCrew(ctx context.Context, crewID, workspa
 		Status:         res.Status,
 	}, nil
 }
+
+// AttachPendingMessage passes straight through: unlike EnqueueResult,
+// chatbridge.PendingChatMessage is already the exact type
+// api.ProvisioningHandler.AttachPendingMessage takes (the api package imports
+// chatbridge, not the other way round), so there is no shape to translate.
+func (a provisioningAdapter) AttachPendingMessage(crewID string, msg chatbridge.PendingChatMessage) bool {
+	return a.h.AttachPendingMessage(crewID, msg)
+}

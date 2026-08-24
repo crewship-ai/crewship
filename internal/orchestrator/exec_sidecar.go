@@ -116,10 +116,31 @@ func sidecarLaunchScript(credsB64 string) string {
 			`done </dev/null >/dev/null 2>&1 &`+"\n"+
 			// Health check: verify the sidecar answers, exit 1 on failure so the
 			// orchestrator hears about it.
+			//
+			// The probe is the sidecar binary itself. It used to be `wget`,
+			// falling back to `curl` — and debian:bookworm-slim, which is
+			// Crewship's own compiled-in default runtime image
+			// (internal/config/config.go) and what the docs and the
+			// devcontainer e2e both name, ships NEITHER. Both branches exited
+			// 127 "command not found", the `else` fired, and a sidecar that
+			// was up and serving was reported as
+			// "sidecar health check failed". On the default image, out of the
+			// box, no agent could answer a message; nothing in CI noticed
+			// because every path that could start a sidecar either sets
+			// CREWSHIP_SKIP_SIDECAR=1 or is gated behind an unset API-key
+			// secret.
+			//
+			// crewship-sidecar is bind-mounted read-only at
+			// /usr/local/bin/crewship-sidecar by the container provider, so
+			// unlike wget/curl it is present by construction. wget/curl stay
+			// as fallbacks: a container may still be running an older
+			// bind-mounted sidecar that predates --health-check, and on that
+			// binary the flag exits non-zero as an unknown flag.
 			`sleep 0.5`+"\n"+
-			`if wget -q -O /dev/null http://127.0.0.1:9119/health 2>/dev/null; then exit 0; `+
+			`if crewship-sidecar --health-check --addr 127.0.0.1:9119 2>/dev/null; then exit 0; `+
+			`elif wget -q -O /dev/null http://127.0.0.1:9119/health 2>/dev/null; then exit 0; `+
 			`elif curl -sf http://127.0.0.1:9119/health >/dev/null 2>&1; then exit 0; `+
-			`else echo "sidecar health check failed" >&2; exit 1; fi`,
+			`else echo "sidecar health check failed (no probe succeeded; sidecar log: %[2]s)" >&2; exit 1; fi`,
 		credsB64,
 		sidecarLogPath,
 		"  "+strings.ReplaceAll(sidecarLogTrimOnce(sidecarLogPath), "\n", "\n  "),

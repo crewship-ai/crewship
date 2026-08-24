@@ -441,6 +441,18 @@ func (d *RoutineDocument) Plan(ctx context.Context, c internalapi.Client, remote
 		return nil, fmt.Errorf("routine %q: workspace_id not set on client", d.Metadata.Slug)
 	}
 	var items []internalapi.PlanItem
+	crewSlug := strings.TrimSpace(d.Metadata.Labels["crew"])
+	crewSlugsByID, err := buildCrewSlugMap(ctx, c)
+	if err != nil {
+		return nil, fmt.Errorf("routine %q: resolve author crew: %w", d.Metadata.Slug, err)
+	}
+	declaredCrewID := ""
+	for id, slug := range crewSlugsByID {
+		if slug == crewSlug {
+			declaredCrewID = id
+			break
+		}
+	}
 
 	// --- 1. routine row itself ---
 	routineBody := d.buildSaveBody()
@@ -451,17 +463,18 @@ func (d *RoutineDocument) Plan(ctx context.Context, c internalapi.Client, remote
 			Action:      internalapi.ActionCreate,
 			Description: fmt.Sprintf("create routine %s (crew=%s, %d steps)", d.Metadata.Slug, d.Metadata.Labels["crew"], len(d.Spec.Steps)),
 			Exec: func(ctx context.Context, c internalapi.Client) error {
-				return saveRoutine(ctx, c, wsID, routineBody)
+				return saveRoutine(ctx, c, wsID, crewSlug, routineBody)
 			},
 		})
-	} else if routineDiffers(d, remote) {
+	} else if routineDiffers(d, remote) || remote.AuthorCrewID == "" ||
+		(declaredCrewID != "" && remote.AuthorCrewID != declaredCrewID) {
 		items = append(items, internalapi.PlanItem{
 			Kind:        "routine",
 			Slug:        d.Metadata.Slug,
 			Action:      internalapi.ActionUpdate,
 			Description: fmt.Sprintf("update routine %s", d.Metadata.Slug),
 			Exec: func(ctx context.Context, c internalapi.Client) error {
-				return saveRoutine(ctx, c, wsID, routineBody)
+				return saveRoutine(ctx, c, wsID, crewSlug, routineBody)
 			},
 		})
 	} else {
@@ -779,8 +792,30 @@ func buildWebhookBody(pipelineSlug string, w *RoutineWebhook) map[string]any {
 
 // ---------- REST helpers ----------
 
-func saveRoutine(ctx context.Context, c internalapi.Client, wsID string, body map[string]any) error {
-	_, err := jsonPost(ctx, c, fmt.Sprintf("/api/v1/workspaces/%s/pipelines/save", wsID), body)
+func saveRoutine(ctx context.Context, c internalapi.Client, wsID, crewSlug string, body map[string]any) error {
+	crewSlugsByID, err := buildCrewSlugMap(ctx, c)
+	if err != nil {
+		return fmt.Errorf("resolve author crew %q: %w", crewSlug, err)
+	}
+	crewID := ""
+	for id, slug := range crewSlugsByID {
+		if slug == crewSlug {
+			crewID = id
+			break
+		}
+	}
+	if crewID == "" {
+		return fmt.Errorf("resolve author crew: crew with slug %q not found", crewSlug)
+	}
+	// Plan closures may share the authored body, so clone before adding the
+	// execution-time CUID. The slug is declarative and stable; the id only
+	// exists after a sibling Crew create has executed.
+	saveBody := make(map[string]any, len(body)+1)
+	for k, v := range body {
+		saveBody[k] = v
+	}
+	saveBody["author_crew_id"] = crewID
+	_, err = jsonPost(ctx, c, fmt.Sprintf("/api/v1/workspaces/%s/pipelines/save", wsID), saveBody)
 	return err
 }
 

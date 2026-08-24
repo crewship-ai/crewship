@@ -353,24 +353,155 @@ func TestRunAgentExitCodeError(t *testing.T) {
 	}
 }
 
+// TestRunAgentInvalidSlug is table-driven: every case is a slug that MUST
+// still be refused after validSlugRe grew to admit a leading underscore
+// (#see orchestrator.go). Each comment names the concrete attack or malformed
+// input the case stands in for.
 func TestRunAgentInvalidSlug(t *testing.T) {
+	cases := []struct {
+		name string
+		slug string
+	}{
+		{"empty", ""},
+		{"parent-dir traversal", "../escape"},
+		{"nested path separator", "a/b"},
+		{"bare parent-dir", ".."},
+		{"embedded space (breaks unquoted shell tokens)", "bad slug"},
+		{"semicolon command chaining", "agent;rm -rf /"},
+		{"command substitution $()", "agent$(whoami)"},
+		{"command substitution backticks", "agent`id`"},
+		{"pipe", "agent|cat /etc/passwd"},
+		{"double ampersand chaining", "agent&&ls"},
+		{"leading hyphen (could be parsed as a CLI flag)", "-x"},
+		{"leading dot (hidden-file/traversal-adjacent)", ".hidden"},
+	}
+
 	mc := &mockContainer{}
 	o := New(mc, newMemState(), slog.Default())
 
-	for _, slug := range []string{"", "../escape", "a/b", "..", "bad slug"} {
-		err := o.RunAgent(context.Background(), AgentRunRequest{
-			AgentID:     "a1",
-			AgentSlug:   slug,
-			ChatID:      "s1",
-			ContainerID: "c1",
-			TimeoutSecs: 5,
-		}, nil)
-		if err == nil {
-			t.Errorf("expected error for invalid slug %q", slug)
-		}
-		if !strings.Contains(err.Error(), "invalid agent slug") {
-			t.Errorf("expected 'invalid agent slug' error for %q, got: %v", slug, err)
-		}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := o.RunAgent(context.Background(), AgentRunRequest{
+				AgentID:     "a1",
+				AgentSlug:   c.slug,
+				ChatID:      "s1",
+				ContainerID: "c1",
+				TimeoutSecs: 5,
+			}, nil)
+			if err == nil {
+				t.Fatalf("expected error for invalid slug %q", c.slug)
+			}
+			if !strings.Contains(err.Error(), "invalid agent slug") {
+				t.Errorf("expected 'invalid agent slug' error for %q, got: %v", c.slug, err)
+			}
+		})
+	}
+}
+
+// TestValidSlugRe_AcceptsRealSlugsRejectsDangerousOnes exercises validSlugRe
+// directly (no container, no RunAgent plumbing) so the charset decision is
+// pinned independent of anything else RunAgent does. It is the fast
+// complement to TestRunAgentInvalidSlug and TestRunAgent_SetupGuideSlugReachesRunAgent.
+func TestValidSlugRe_AcceptsRealSlugsRejectsDangerousOnes(t *testing.T) {
+	accept := []struct {
+		name string
+		slug string
+	}{
+		// The onboarding setup crew/agent slugs (internal/api/onboarding_setup_crew.go
+		// setupCrewSlug / setupAgentSlug) — a leading underscore is how they stay
+		// collision-proof against anything a user can type (see orchestrator.go's
+		// validSlugRe comment). This is the exact slug the reported bug rejected.
+		{"setup agent slug", "_crewship-setup-guide"},
+		{"setup crew slug", "_crewship-setup"},
+		{"ordinary hyphenated slug", "test-agent"},
+		{"single character", "a"},
+		{"mixed alnum, underscore, hyphen", "a_b-c9"},
+	}
+	for _, c := range accept {
+		t.Run("accept/"+c.name, func(t *testing.T) {
+			if !validSlugRe.MatchString(c.slug) {
+				t.Errorf("expected validSlugRe to accept %q", c.slug)
+			}
+		})
+	}
+
+	reject := []struct {
+		name string
+		slug string
+	}{
+		{"empty", ""},
+		{"parent-dir traversal", "../escape"},
+		{"nested path separator", "a/b"},
+		{"bare parent-dir", ".."},
+		{"embedded space", "bad slug"},
+		{"semicolon command chaining", "agent;rm -rf /"},
+		{"command substitution $()", "agent$(whoami)"},
+		{"command substitution backticks", "agent`id`"},
+		{"pipe", "agent|cat /etc/passwd"},
+		{"leading hyphen", "-x"},
+	}
+	for _, c := range reject {
+		t.Run("reject/"+c.name, func(t *testing.T) {
+			if validSlugRe.MatchString(c.slug) {
+				t.Errorf("expected validSlugRe to reject %q", c.slug)
+			}
+		})
+	}
+}
+
+// TestRunAgent_SetupGuideSlugReachesRunAgent is the regression test for the
+// reported bug: every chat send to the onboarding setup agent failed with
+// `run agent: invalid agent slug: "_crewship-setup-guide"` because
+// validSlugRe's first-character class did not admit '_', even though the
+// slug is otherwise perfectly safe (no path separators, no shell
+// metacharacters). This drives RunAgent with that exact slug end-to-end
+// through the mock container and asserts the run actually executes the
+// agent CLI (tmux session "agent-_crewship-setup-guide") instead of being
+// turned away by assembleSystemPrompt before any container work happens.
+func TestRunAgent_SetupGuideSlugReachesRunAgent(t *testing.T) {
+	const setupAgentSlug = "_crewship-setup-guide" // must match internal/api/onboarding_setup_crew.go setupAgentSlug
+
+	reachedAgentExec := false
+	mc := &mockContainer{
+		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+			joined := strings.Join(cfg.Cmd, " ")
+			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, TmuxSessionName(setupAgentSlug)) {
+				reachedAgentExec = true
+				return &provider.ExecResult{ExecID: "exec-1", Reader: io.NopCloser(strings.NewReader("hello from setup guide\n"))}, nil
+			}
+			return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
+		},
+		inspectResult: struct {
+			running  bool
+			exitCode int
+		}{false, 0},
+	}
+
+	state := newMemState()
+	o := New(mc, state, slog.Default())
+
+	err := o.RunAgent(context.Background(), AgentRunRequest{
+		AgentID:     "setup-agent-id",
+		AgentSlug:   setupAgentSlug,
+		ChatID:      "s1",
+		ContainerID: "c1",
+		CLIAdapter:  "CLAUDE_CODE",
+		UserMessage: "hello",
+		TimeoutSecs: 30,
+	}, nil)
+
+	if err != nil {
+		t.Fatalf("RunAgent should not reject the setup agent's own slug, got: %v", err)
+	}
+	if !reachedAgentExec {
+		t.Fatal("expected RunAgent to reach the agent CLI exec (tmux session for the setup slug), but it never did")
+	}
+
+	data, _ := state.Get(context.Background(), "agent_runs", "s1")
+	var run RunState
+	json.Unmarshal(data, &run)
+	if run.Status != "completed" {
+		t.Errorf("expected completed status, got %q", run.Status)
 	}
 }
 

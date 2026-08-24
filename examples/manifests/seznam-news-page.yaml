@@ -1,0 +1,207 @@
+# A complete Crewship example: an hourly news routine publishes its own
+# payload onto a typed Page. No secrets live here; the agents bind the
+# workspace's existing ANTHROPIC_API_KEY credential slot.
+
+apiVersion: crewship/v1
+kind: Crew
+metadata:
+  name: Zpravodajský tým
+  slug: news-crew
+  description: Hodinový přehled hlavních zpráv ze Seznam Zpráv pro Crewship Pages.
+  icon: newspaper
+  color: blue
+spec:
+  credentials:
+    # Slot declaration only. Re-apply binds the active workspace credential;
+    # the OAuth/CLI token value never enters this file.
+    - env: ANTHROPIC_API_KEY
+      provider: ANTHROPIC
+      type: AI_CLI_TOKEN
+      label: Anthropic Claude Code CLI token
+  files:
+    - src: scripts/seznam_rss_extract.py
+      dest: shared/scripts/seznam_rss_extract.py
+    - src: scripts/limit_page_text.py
+      dest: shared/scripts/limit_page_text.py
+  devcontainer:
+    # Keep this explicit because network policy lives in the same block. A
+    # plain Ubuntu image has no Claude Code binary and fails every agent_run
+    # with exit 127; these are the product's verified default runtime pieces.
+    image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+    env:
+      PATH: /home/agent/.local/bin:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    features:
+      "ghcr.io/devcontainers/features/common-utils:2":
+        username: agent
+        uid: "1001"
+        gid: "1001"
+        installZsh: false
+        upgradePackages: false
+      "ghcr.io/devcontainers-extra/features/claude-code:2": {}
+    memory_mb: 4096
+    cpus: 2
+    network_mode: restricted
+    allowed_domains:
+      - www.seznamzpravy.cz
+  agents:
+    - slug: news-research-lead
+      name: Research Lead
+      role_title: Vedoucí zpravodajského týmu
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm: { provider: ANTHROPIC, model: claude-sonnet-5 }
+      tool_profile: MINIMAL
+      memory_enabled: true
+      env_refs: [ANTHROPIC_API_KEY]
+      prompt: |
+        Jsi vedoucí Crewship crew pro zpravodajský přehled. Hlídáš přesnost,
+        původ informací a kvalitu výstupu. Nevymýšlej fakta mimo dodaný zdroj,
+        vždy rozlišuj titulek od interpretace a pracuj výhradně v češtině.
+
+    - slug: news-data-collector
+      name: Data Collector
+      role_title: Sběrač zpráv
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm: { provider: ANTHROPIC, model: claude-sonnet-5 }
+      tool_profile: MINIMAL
+      memory_enabled: true
+      env_refs: [ANTHROPIC_API_KEY]
+      prompt: |
+        Jsi specialista na přesný výběr z RSS/XML zdrojů. Vypisuj pouze položky,
+        které jsou skutečně v dodaném feedu. Zachovej přesný titulek a URL,
+        odstraň technická XML pole a duplicity. Odpovídej česky.
+
+    - slug: news-analyst
+      name: Analyst
+      role_title: Analytik hlavních zpráv
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm: { provider: ANTHROPIC, model: claude-haiku-4-5 }
+      tool_profile: MINIMAL
+      memory_enabled: true
+      env_refs: [ANTHROPIC_API_KEY]
+      prompt: |
+        Jsi editor hlavních zpráv. Z dodaného seznamu vyber nejvýše deset
+        nejdůležitějších a různorodých témat. Nepřidávej fakta, která ve vstupu
+        nejsou, a transparentně zachovej odkazy na zdroj. Odpovídej česky.
+
+    - slug: news-report-writer
+      name: Report Writer
+      role_title: Autor přehledu
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm: { provider: ANTHROPIC, model: claude-haiku-4-5 }
+      tool_profile: MINIMAL
+      memory_enabled: true
+      env_refs: [ANTHROPIC_API_KEY]
+      prompt: |
+        Převádíš ověřený výběr zpráv do stručného českého přehledu pro Crewship
+        Page. Každá položka musí mít titulek a jednu větu. URL ve výstupu
+        neuváděj: narrative.v1 je z bezpečnostních důvodů nepovoluje. Nepiš
+        úvodní konverzační fráze ani závěrečné nabídky další pomoci.
+
+---
+apiVersion: crewship/v1
+kind: Routine
+metadata:
+  name: Hlavní zprávy ze Seznamu
+  slug: seznam-hlavni-zpravy
+  labels:
+    crew: news-crew
+spec:
+  dsl_version: "1.0"
+  description: Každou hodinu načte RSS Seznam Zpráv a publikuje český přehled na Page.
+  estimated_cost_usd: 0.06
+  estimated_duration_seconds: 240
+  max_cost_usd: 0.25
+  egress_targets:
+    - www.seznamzpravy.cz
+  steps:
+    - id: fetch-rss
+      type: http
+      http:
+        method: GET
+        url: https://www.seznamzpravy.cz/rss
+        headers:
+          User-Agent: Crewship-News-Monitor/1.0
+          Accept: application/rss+xml, application/xml, text/xml
+        max_response_bytes: 60000
+
+    - id: collect
+      type: script
+      needs: [fetch-rss]
+      script:
+        path: scripts/seznam_rss_extract.py
+        interpreter: python3
+        args: ["{{ steps.fetch-rss.output }}"]
+
+    - id: select
+      type: agent_run
+      agent_slug: news-analyst
+      needs: [collect]
+      prompt: |
+        Vyber z následujících položek nejvýše šest hlavních zpráv. Omez
+        duplicity stejného tématu a zachovej titulek i URL každé vybrané
+        položky. Výstup bude podkladem pro hodinový přehled.
+
+        Kandidáti:
+        {{ steps.collect.output }}
+
+    - id: write
+      type: agent_run
+      agent_slug: news-report-writer
+      needs: [select]
+      prompt: |
+        Vytvoř stručný český přehled pro Page. Začni řádkem
+        "Aktualizováno: právě teď". Potom pro každou zprávu napiš číslovanou
+        položku s titulkem a jednou stručnou větou. URL do výstupu neuváděj.
+        Použij pouze dodaný výběr. Celý výstup musí mít nejvýše 1800 znaků.
+
+        Výběr:
+        {{ steps.select.output }}
+
+    - id: limit
+      type: script
+      needs: [write]
+      script:
+        path: scripts/limit_page_text.py
+        interpreter: python3
+        args: ["{{ steps.write.output }}"]
+
+    - id: publish
+      type: crewship
+      action: page.write
+      needs: [limit]
+      args:
+        page: seznam-hlavni-zpravy
+        panel: prehled
+        data:
+          verdict: Hlavní zprávy ze Seznamu
+          blocks:
+            - kind: paragraph
+              text: "{{ steps.limit.output }}"
+
+  schedules:
+    - name: Každou hodinu
+      cron: "0 * * * *"
+      timezone: Europe/Prague
+      enabled: true
+
+---
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Hlavní zprávy ze Seznamu
+  slug: seznam-hlavni-zpravy
+  description: Automaticky aktualizovaný hodinový přehled hlavních zpráv.
+spec:
+  panels:
+    - id: prehled
+      schema: narrative.v1
+      title: Aktuální hlavní zprávy
+      icon: alert
+      owner: crew/news-crew
+      producer: routine/seznam-hlavni-zpravy
+      sla: 2h
+      span: 12

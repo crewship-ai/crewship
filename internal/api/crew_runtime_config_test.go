@@ -220,9 +220,57 @@ func TestEnsureProvisioned_NoProvisionNeeded(t *testing.T) {
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	crewID := seedCrewRow(t, h.db, "crew-ep-noop", wsID, "N", "ep-noop")
-	// No features, no mise → crewNeedsProvision=false → returns immediately.
+	// An EXPLICIT no-op config (image only, no features/postCreate/mise) still
+	// short-circuits. A crew with NO config no longer does — see
+	// TestEnsureProvisioned_NoConfigNeedsProvisioning below: it now resolves
+	// to database.DefaultCrewDevcontainerConfig, which DOES declare features,
+	// so it must go through EnqueueForCrew rather than skip straight to nil.
+	if _, err := h.db.Exec(`UPDATE crews SET devcontainer_config = ? WHERE id = ?`,
+		`{"image":"debian:bookworm"}`, crewID); err != nil {
+		t.Fatalf("set devcontainer_config: %v", err)
+	}
 	if err := h.EnsureProvisioned(context.Background(), crewID, wsID, time.Second); err != nil {
 		t.Fatalf("want nil when no provisioning needed, got %v", err)
+	}
+}
+
+// TestEnsureProvisioned_NoConfigNeedsProvisioning is the regression test for
+// the bug database.EffectiveCrewDevcontainerConfig exists to fix: a crew with
+// NO devcontainer_config (the four INSERT INTO crews sites that omit it) used
+// to short-circuit here as "nothing to provision" and launch straight from
+// bare debian:bookworm-slim — no agent CLI, exit 127. It must now be
+// recognized as needing the default build and go through EnqueueForCrew like
+// any other crew that declares features.
+//
+// A pre-seeded "running" job (flipped to "completed" by a background
+// goroutine, mirroring TestEnsureProvisioned_WaitsForCompletion) makes
+// EnqueueForCrew fast-path to AlreadyRunning instead of spawning a REAL build
+// goroutine against the default config: testProvisioner() has a nil
+// *devcontainer.FeatureDownloader, and the default declares two features
+// (common-utils, claude-code), so an actual resolve would panic rather than
+// fail cleanly.
+func TestEnsureProvisioned_NoConfigNeedsProvisioning(t *testing.T) {
+	h := newTestProvisioningHandler(t)
+	h.provisioner = testProvisioner()
+	h.provisionPollInterval = 5 * time.Millisecond
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+	crewID := seedCrewRow(t, h.db, "crew-ep-noconfig", wsID, "N", "ep-noconfig")
+	// seedCrewRow leaves devcontainer_config NULL — no UPDATE here.
+
+	h.mu.Lock()
+	h.jobs[crewID] = &ProvisionJob{CrewID: crewID, Status: "running", StartedAt: time.Now()}
+	h.mu.Unlock()
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		h.mu.Lock()
+		h.jobs[crewID].Status = "completed"
+		h.mu.Unlock()
+	}()
+
+	if err := h.EnsureProvisioned(context.Background(), crewID, wsID, 5*time.Second); err != nil {
+		t.Fatalf("want nil once the default's build completes, got %v", err)
 	}
 }
 

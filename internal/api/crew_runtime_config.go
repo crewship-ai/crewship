@@ -37,6 +37,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/crewship-ai/crewship/internal/crewstart"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -105,6 +106,13 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 		return provider.CrewConfig{}, fmt.Errorf("load crew runtime config: %w", err)
 	}
 
+	// This is the config that actually starts the container: a NULL/empty
+	// column (the four INSERT sites that omit devcontainer_config, plus any
+	// crew explicitly cleared) must resolve to the same default that
+	// EnsureProvisioned below provisions against, or a "defaulted" crew would
+	// build the right image but run a container assembled as if it had none.
+	effectiveDevcontainerCfg := database.EffectiveCrewDevcontainerConfig(devcontainerCfg.String, devcontainerCfg.Valid)
+
 	cfg := provider.CrewConfig{
 		ID:   crewID,
 		Slug: slug,
@@ -153,11 +161,11 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 			}
 		}
 	}
-	if devcontainerCfg.Valid && devcontainerCfg.String != "" {
+	if effectiveDevcontainerCfg != "" {
 		var dc struct {
 			ContainerEnv map[string]string `json:"containerEnv"`
 		}
-		if json.Unmarshal([]byte(devcontainerCfg.String), &dc) == nil {
+		if json.Unmarshal([]byte(effectiveDevcontainerCfg), &dc) == nil {
 			for k, v := range dc.ContainerEnv {
 				merged[k] = v
 			}
@@ -349,7 +357,14 @@ func (h *ProvisioningHandler) EnsureProvisioned(ctx context.Context, crewID, wor
 		return fmt.Errorf("load crew for provisioning check: %w", err)
 	}
 
-	if !crewNeedsProvision(devcontainerCfg.String, miseCfg.String) {
+	// A NULL/empty column here is the exact defect this chokepoint exists
+	// for: crewNeedsProvision on the raw value said "nothing to build" for a
+	// crew that was about to fall through to bare debian:bookworm-slim with
+	// no agent CLI. Gate on the EFFECTIVE config so a defaulted crew is
+	// recognized as needing the build EnqueueForCrew below now knows how to
+	// do for it.
+	effectiveDevcontainerCfg := database.EffectiveCrewDevcontainerConfig(devcontainerCfg.String, devcontainerCfg.Valid)
+	if !crewNeedsProvision(effectiveDevcontainerCfg, miseCfg.String) {
 		return nil
 	}
 	if cachedImage.Valid && cachedImage.String != "" && h.imagePresentLocally(ctx, cachedImage.String) {

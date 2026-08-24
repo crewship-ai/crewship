@@ -88,6 +88,42 @@ func TestParseDocument_AcceptsThePRDExample(t *testing.T) {
 	}
 }
 
+// TestPanelSpec_OwnerCrewSlug_AllowsReservedSystemCrewPrefix pins the one
+// exception crewSlugRE carves out of slugRE: a leading underscore, the shape
+// every built-in system crew's fixed slug uses (setupCrewSlug =
+// "_crewship-setup"). Without it, that crew's own agent — which has no
+// crew-creation tool and so no OTHER crew to ever reference — could never
+// author a page it owns at all.
+func TestPanelSpec_OwnerCrewSlug_AllowsReservedSystemCrewPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		owner   string
+		wantOK  bool
+		wantRef string
+	}{
+		{"reserved system crew", "crew/_crewship-setup", true, "_crewship-setup"},
+		{"ordinary crew unaffected", "crew/engineering", true, "engineering"},
+		{"bare underscore alone is still refused", "crew/_", false, ""},
+		{"double leading underscore is still refused", "crew/__crewship", false, ""},
+		{"underscore not first char is already legal", "crew/eng_ops", true, "eng_ops"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := PanelSpec{Owner: tc.owner}
+			ref, err := p.OwnerCrewSlug()
+			if tc.wantOK && err != nil {
+				t.Fatalf("OwnerCrewSlug(%q): unexpected error: %v", tc.owner, err)
+			}
+			if !tc.wantOK && err == nil {
+				t.Fatalf("OwnerCrewSlug(%q): expected an error, got ref %q", tc.owner, ref)
+			}
+			if tc.wantOK && ref != tc.wantRef {
+				t.Errorf("OwnerCrewSlug(%q) = %q, want %q", tc.owner, ref, tc.wantRef)
+			}
+		})
+	}
+}
+
 // A panel that declares no span gets the full width of the grid, not zero.
 //
 // Zero is the field's zero value and would render a panel with no width at

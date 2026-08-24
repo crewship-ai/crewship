@@ -32,7 +32,7 @@ func TestCrewCapabilities_ProxiesToOwnCrew(t *testing.T) {
 	defer mock.Close()
 
 	s := newPipelineTestServer(t, &IPCConfig{BaseURL: mock.URL, Token: "sekret", WorkspaceID: "ws-1", CrewID: "crew-9", AgentID: "a"})
-	status, body := s.crewCapabilities(context.Background())
+	status, body := s.crewCapabilities(context.Background(), "")
 
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", status, body)
@@ -52,7 +52,7 @@ func TestCrewCapabilities_ProxiesToOwnCrew(t *testing.T) {
 
 func TestCrewCapabilities_NoIPC(t *testing.T) {
 	s := newPipelineTestServer(t, nil)
-	status, _ := s.crewCapabilities(context.Background())
+	status, _ := s.crewCapabilities(context.Background(), "")
 	if status != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503 without IPC", status)
 	}

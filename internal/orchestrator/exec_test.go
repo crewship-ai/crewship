@@ -186,7 +186,7 @@ func TestHandleStreamJSONLine_Result(t *testing.T) {
 
 func TestHandleStreamJSONLine_SystemInit(t *testing.T) {
 	o := New(nil, nil, slog.Default())
-	line := `{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514","tools":["Read","Write","Bash"],"cwd":"/home/user"}`
+	line := `{"type":"system","subtype":"init","model":"claude-sonnet-5","tools":["Read","Write","Bash"],"cwd":"/home/user"}`
 
 	var events []AgentEvent
 	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
@@ -204,8 +204,8 @@ func TestHandleStreamJSONLine_SystemInit(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected metadata map, got %T", events[0].Metadata)
 	}
-	if meta["model"] != "claude-sonnet-4-20250514" {
-		t.Errorf("expected model claude-sonnet-4-20250514, got %v", meta["model"])
+	if meta["model"] != "claude-sonnet-5" {
+		t.Errorf("expected model claude-sonnet-5, got %v", meta["model"])
 	}
 	tools, ok := meta["tools"].([]string)
 	if !ok {

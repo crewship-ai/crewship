@@ -449,6 +449,14 @@ var startCmd = &cobra.Command{
 			apiRouter.SetBuild(version, commit, date)
 			if ph := apiRouter.Provisioning(); ph != nil {
 				bridge.SetProvisioningEnqueuer(provisioningAdapter{h: ph})
+				// Symmetric wiring for the resume direction: once a
+				// provisioning job this bridge kicked off reaches a terminal
+				// state, it runs (or fails) the message that was deferred
+				// for it by calling straight back into the bridge — the same
+				// ws.ChatHandler already wired as the WS hub's chat handler
+				// above, so a resumed message takes the identical
+				// persist/run/error-classify path a live send does.
+				ph.SetChatResumer(bridge)
 			}
 		}
 

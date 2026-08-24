@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -102,6 +103,17 @@ func TestValidateOnboardingCredential_ValidOAuthShape_PassesProbeGate(t *testing
 	err := validateOnboardingCredential(context.Background(), "ANTHROPIC", "sk-ant-oat01-real-shape-fake-value")
 	if err != nil {
 		t.Errorf("err = %v, want nil for valid OAuth shape", err)
+	}
+}
+
+func TestValidateOnboardingCredential_ModelUnavailableDoesNotRejectToken(t *testing.T) {
+	withAnthropicStub(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"type":"not_found_error"}}`))
+	})
+	err := validateOnboardingCredential(context.Background(), "ANTHROPIC", "sk-ant-oat01-valid-shape")
+	if err != nil {
+		t.Fatalf("valid credential rejected because a CLI model alias was unavailable to the API probe: %v", err)
 	}
 }
 

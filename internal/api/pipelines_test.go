@@ -30,8 +30,21 @@ CREATE TABLE workspaces (
 INSERT INTO workspaces (id) VALUES ('ws_smoke');
 
 CREATE TABLE users (id TEXT PRIMARY KEY);
-CREATE TABLE crews (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL);
-INSERT INTO crews (id, workspace_id) VALUES ('crew_a', 'ws_smoke'), ('crew_b', 'ws_smoke');
+-- kind + deleted_at are not decoration here: the internal save/test_run
+-- handlers read them to decide whether the caller is the onboarding setup
+-- crew, which may author for another crew and may own nothing itself
+-- (internal_delegated_crew.go). A crews table missing them makes every
+-- agent-authored routine 500 — which is how this fixture failed when the
+-- gate landed, and the reason the columns are spelled out rather than
+-- left to the default.
+CREATE TABLE crews (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    slug         TEXT,
+    kind         TEXT NOT NULL DEFAULT 'standard',
+    deleted_at   TEXT
+);
+INSERT INTO crews (id, workspace_id, slug) VALUES ('crew_a', 'ws_smoke', 'crew-a'), ('crew_b', 'ws_smoke', 'crew-b');
 CREATE TABLE agents (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL);
 INSERT INTO agents (id, crew_id) VALUES ('agent_lead', 'crew_a');
 

@@ -34,10 +34,33 @@ export interface OnboardingSetupInput {
    * clients) as "keep the version-based default".
    */
   telemetryOptIn: boolean
+  /**
+   * Set once the setup agent's proposal card has actually been applied
+   * (POST /onboarding/proposals/{id}/apply succeeded) — a real crew
+   * already exists. When present, the server's applied_proposal_id
+   * branch persists prefs/telemetry/completion and returns the crew the
+   * proposal made real WITHOUT deploying anything else. Sending
+   * crew_template_slug / crew_name / agent_name alongside it would make
+   * the server deploy a SECOND crew, so this field and those three are
+   * mutually exclusive by construction below.
+   */
+  appliedProposalId?: string
 }
 
 export function buildOnboardingSetupBody(input: OnboardingSetupInput): Record<string, unknown> {
-  const { crewSlug } = input
+  const { crewSlug, appliedProposalId } = input
+  if (appliedProposalId) {
+    // The crew already exists — Setup's job here is ONLY prefs +
+    // telemetry + completion. No crew_template_slug, crew_name,
+    // agent_name, or credential fields: those all feed the deploy path,
+    // and this call must not deploy.
+    return {
+      workspace_name: input.workspaceName,
+      preferred_language: input.language,
+      applied_proposal_id: appliedProposalId,
+      telemetry_opt_in: input.telemetryOptIn,
+    }
+  }
   const blank = crewSlug === "blank"
   return {
     workspace_name: input.workspaceName,

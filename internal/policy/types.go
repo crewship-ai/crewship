@@ -240,6 +240,22 @@ const (
 	// on purpose, and one Action covering both would be where they quietly
 	// rejoined.
 	ActionPageWrite Action = "page_write"
+
+	// ActionPageCreate — an agent creating a page's STRUCTURE (metadata +
+	// panels: `save_page`), never its content. Deliberately not folded into
+	// ActionPageWrite: creating a page and pushing a payload onto one of its
+	// panels are different authorities in Pages' own model (§7.1b rule 2 vs
+	// the page_write verb, ActionPageWrite's own doc comment above), and
+	// nothing here changes that split — it just closes the gap where page
+	// STRUCTURE had no Action at all and so no gate.
+	//
+	// The shape is ActionSkillCreate's, not ActionCrewCreate's: a page is a
+	// durable, operator-facing artefact — other humans see it and trust
+	// what it shows — but it is not a PRINCIPAL. It cannot act again
+	// tomorrow on its own, cannot be delegated to, cannot hire. That is the
+	// same distinction ActionRoutineScheduleCreate draws to leave the
+	// crew/agent principal row, applied here to leave it from the start.
+	ActionPageCreate Action = "page_create"
 )
 
 // Decision is the resolved instruction for the caller. Closed set;
@@ -678,6 +694,19 @@ func (p Policy) DecideAction(a Action) Decision {
 		case AutonomyFull:
 			return DecisionAutoJournal
 		}
+	case ActionPageCreate:
+		// Same numbers as ActionSkillCreate, reached by its own argument
+		// rather than by inheritance: a page is a durable artefact other
+		// humans will look at and trust, but not a principal — see the
+		// constant's own doc comment. Strict/guided/trusted all hold for an
+		// operator's explicit Approve; full stays non-blocking but still
+		// worth a glance, same as a new skill.
+		switch p.AutonomyLevel {
+		case AutonomyStrict, AutonomyGuided, AutonomyTrusted:
+			return DecisionInboxApprove
+		case AutonomyFull:
+			return DecisionAutoLogInbox
+		}
 	}
 	// Defensive default: any (action, level) pair we haven't mapped
 	// gets the safest treatment — inbox approval. Adding a new
@@ -741,6 +770,7 @@ var knownActions = map[Action]struct{}{
 	ActionAssignmentCreate:      {},
 	ActionEscalationCreate:      {},
 	ActionPageWrite:             {},
+	ActionPageCreate:            {},
 }
 
 // IsKnownAction reports whether a is an Action this package declares.

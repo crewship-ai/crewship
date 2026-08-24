@@ -86,6 +86,19 @@ const knownKindList = KindCrew + ", " + KindAgent + ", " + KindIntegration + ", 
 	KindRecipe + ", " + KindCrewTemplate + ", " + KindConnector + ", " + KindHook + ", " +
 	KindSkill + ", " + KindIssue + ", " + KindPage
 
+// KnownKinds returns the manifest kind catalogue in parser/display order.
+// Product surfaces such as Crewship Guide use this instead of maintaining a
+// second hand-written roster that silently falls behind schema.go.
+func KnownKinds() []string {
+	return []string{
+		KindCrew, KindAgent, KindIntegration, KindWorkspace, KindProject,
+		KindLabel, KindMilestone, KindWorkflowTemplate, KindTriageRule,
+		KindRecurringIssue, KindSavedView, KindRoutine, KindFeatureFlag,
+		KindInstanceSetting, KindRecipe, KindCrewTemplate, KindConnector,
+		KindHook, KindSkill, KindIssue, KindPage,
+	}
+}
+
 // Document is the discriminated top-level shape. apiVersion + kind
 // drive which branch of Spec is populated. The raw YAML may have one
 // or many Document blocks separated by `---`; Load returns the list.

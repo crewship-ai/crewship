@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check, ExternalLink, Sparkles, AlertTriangle, ChevronsUpDown } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,18 +24,39 @@ import { LANGUAGES } from "@/lib/languages"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { serverFetch } from "@/lib/server-base"
+import { apiFetch } from "@/lib/api-fetch"
 import {
   OnboardingPreview,
   TEMPLATES,
   type CrewTemplateSlug,
   type HandoffMode,
 } from "@/components/features/onboarding/onboarding-preview"
+import { OnboardingSetupChat } from "@/components/features/onboarding/onboarding-setup-chat"
+import { OnboardingCreatedPanel } from "@/components/features/onboarding/onboarding-created-panel"
+import { OnboardingProposalSummary } from "@/components/features/onboarding/onboarding-proposal-summary"
+import {
+  createWorkspaceModelCredential,
+  loadOnboardingResumeState,
+  resolveOnboardingWorkspaceId,
+  updateOnboardingWorkspace,
+  validateWorkspaceModelCredential,
+  updateWorkspaceModelCredential,
+} from "@/components/features/onboarding/setup-agent-api"
+import type { ApplyProposalResult, OnboardingProposal } from "@/components/features/onboarding/setup-agent-api"
 
 /**
  * Variant D — split-screen onboarding. Left pane: form with vertical
- * stepper (Workspace → Crew → Adapter). Right pane: live preview that
+ * stepper (Workspace → Adapter → Crew). Right pane: live preview that
  * animates as the user makes choices. On <lg breakpoints the preview
  * collapses below the form into a single column.
+ *
+ * Step order matters here in a way it wouldn't for an ordinary form: the
+ * Crew step's default is a chat with a setup agent that runs in a
+ * container and needs a model credential to answer at all (see
+ * onboarding-setup-chat.tsx and internal/api/onboarding_setup_agent.go).
+ * Adapter must come before Crew so that credential exists by the time the
+ * chat opens — see `persistAdapterCredential` below for how the token
+ * actually lands in the database before step 3 renders.
  *
  * Visual language tracks crewship-web — Apple-tight easing on all
  * motion (cubic-bezier 0.16, 1, 0.3, 1, ~400ms), Geist sans, brand
@@ -149,19 +170,82 @@ export default function OnboardingPage() {
   const reduce = useReducedMotion()
   const [step, setStep] = useState<Step>(1)
   const [checking, setChecking] = useState(true)
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [workspaceName, setWorkspaceName] = useState("")
+  const [onboardingWorkspaceId, setOnboardingWorkspaceId] = useState<string | null>(null)
+  const [persistingWorkspace, setPersistingWorkspace] = useState(false)
   const [language, setLanguage] = useState<string>("English")
   const [crewSlug, setCrewSlug] = useState<CrewTemplateSlug | null>(null)
-  // Default to "cli" — Claude Code users (our primary persona) almost
-  // always have a local CLI already; flagging it as the recommended
-  // path matters more than the browser-chat fallback.
-  const [mode, setMode] = useState<HandoffMode>("cli")
+  // Step 3's two paths. "chat" is the new default — a conversation with the
+  // setup agent that ends in a proposal (docs/prd/conversational-onboarding.md
+  // §4). "template" is the escape hatch (§4.3): a user who already knows what
+  // they want can still pick a template directly and move on, and it is also
+  // the automatic landing spot when the setup agent turns out to be
+  // unavailable (see chatUnavailable below).
+  const [crewMode, setCrewMode] = useState<"chat" | "template">("chat")
+  const [chatUnavailable, setChatUnavailable] = useState(false)
+  // Set only for the "credential_required" flavour of unavailability — the
+  // workspace has no model token yet. In the ordinary first-run path this
+  // cannot happen any more: step 2 (Adapter) persists the token via
+  // persistAdapterCredential before step 3 ever opens. It stays possible for
+  // a workspace that reaches step 3 some other way (a resumed session, a
+  // failed persist the user clicked past, a local-model pick that later
+  // switches). Unlike a genuine outage this is expected and recoverable, so
+  // — unlike chatUnavailable — it does NOT hide the "talk to the setup agent
+  // instead" link; the user can go back to step 2, fix the token, and retry.
+  const [chatNeedsCredential, setChatNeedsCredential] = useState(false)
+  // Set once a proposal from the setup agent has actually been applied
+  // (POST /onboarding/proposals/{id}/apply succeeded) — the crew is real at
+  // that point, same as picking a template, just not through crewSlug (which
+  // only names a *builtin* template). Carries only what the card already
+  // showed the user, never anything re-derived after the click.
+  // A LIST, not a slot. The Guide can propose a second crew in the same
+  // conversation — people really do ask for "and another one that watches X"
+  // — and each Create applies its own proposal, so more than one crew is
+  // genuinely created. This used to be a single `appliedProposal`, so crew #2
+  // overwrote crew #1 the moment its suggestion arrived: both crews existed
+  // in the database, but the panel only ever named the newest, and the person
+  // reasonably concluded the product could not create more than one.
+  const [createdCrews, setCreatedCrews] = useState<
+    Array<{ id: string; proposal: OnboardingProposal; result: ApplyProposalResult }>
+  >([])
+  // The proposal currently on the card and NOT yet created. Still a single
+  // slot, and correctly so: the Guide revises one proposal at a time, and a
+  // revision should replace its predecessor rather than stack up.
+  const [preparedProposal, setPreparedProposal] = useState<OnboardingProposal | null>(null)
+  // Set when Launch has succeeded. The wizard used to redirect straight into
+  // the first agent's chat, so the last thing a person saw of their own setup
+  // was a text box — nothing ever told them what had actually been built, and
+  // with more than one crew there is no single chat that represents the work.
+  // Holding here and showing the receipt is the difference between "something
+  // happened" and "here is what you now have".
+  const [launchSummary, setLaunchSummary] = useState<{ agentSlug: string | null } | null>(null)
+  // Browser, not CLI. The old default was "cli", reasoning that Claude Code
+  // users almost always have a local CLI already — true of people who
+  // already run Crewship, not of the person this screen exists for, who is
+  // installing it for the first time and may have no CLI at all.
+  const [mode, setMode] = useState<HandoffMode>("browser")
   const [adapter, setAdapter] = useState<string>("CLAUDE_CODE")
   const [model, setModel] = useState<string>("")
   const [apiKey, setApiKey] = useState("")
+  // Tracks the credential row persistAdapterCredential has already written
+  // for THIS token, so leaving step 2 a second time (Back, edit, Continue
+  // again) updates that row instead of colliding with the
+  // UNIQUE(workspace_id, name) index a second Create would hit, and so
+  // handleLaunch knows not to send the same value again — see
+  // persistAdapterCredential's own comment below.
+  const [persistedCredential, setPersistedCredential] = useState<{
+    id: string
+    provider: string
+    // null means the encrypted row came from the server after a reload. The
+    // plaintext is intentionally unrecoverable and an empty input means
+    // "reuse it", not "delete it".
+    apiKey: string | null
+  } | null>(null)
+  const [persistingCredential, setPersistingCredential] = useState(false)
   // Crash-reporting consent. Seeded from the server's current state (see
   // the /api/v1/system/telemetry effect below) so the checkbox reflects
   // the build's default — prerelease/dev servers boot default-on, stable
@@ -178,50 +262,117 @@ export default function OnboardingPage() {
   // any await. Without this, clicking Retry after an expiry could
   // mint two codes — UI keeps the second one but the first stays
   // valid server-side until its 10-min TTL elapses.
+  // Whether the credential block is expanded. CLI mode collapses it behind
+  // "Or add it now"; browser mode ignores this and always shows it.
+  // (showCredential is gone: the credential block is no longer collapsible.
+  // Hiding it was what took the model picker away in CLI mode.)
   const [pairStatus, setPairStatus] = useState<"idle" | "starting" | "pending" | "consumed" | "expired" | "failed">("idle")
+  // Whether the workspace holds a model token for the agents yet — a
+  // different credential from the CLI token pairing mints. See the poll below.
+  const [tokenDelivered, setTokenDelivered] = useState(false)
   const [pairCopied, setPairCopied] = useState(false)
+  // Whether a container runtime is INSTALLED (advisory, step 1 copy).
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null)
+  // Whether THIS SERVER is actually driving one. The distinction decides
+  // whether step 3 can work at all: step 3 opens a chat with an agent that
+  // runs in a container, and a host with Docker installed but a crewshipd
+  // started with --no-docker reports available=true and can start nothing.
+  // null = the probe has not answered yet.
+  const [runtimeInUse, setRuntimeInUse] = useState<boolean | null>(null)
+  const [runtimeChecking, setRuntimeChecking] = useState(false)
 
-  // Already-onboarded gate
-  useEffect(() => {
-     
-    serverFetch("/api/v1/onboarding/status")
-      .then((r) => (r.ok ? r.json() : { completed: false }))
-      .then((d) => {
-        if (d.completed) {
-          router.push("/")
-          return
-        }
+  // Status and resume are one fail-closed bootstrap. The old gate translated
+  // every 401/500/network failure into {completed:false}; a stale login thus
+  // looked exactly like a brand-new account and asked the user to recreate a
+  // workspace and credential that still existed. apiFetch refreshes auth,
+  // and any remaining failure gets an explicit Retry screen instead of a
+  // destructive-looking fresh wizard.
+  const bootstrapOnboarding = useCallback(async () => {
+    setChecking(true)
+    setBootstrapError(null)
+    try {
+      const statusRes = await apiFetch("/api/v1/onboarding/status")
+      if (!statusRes.ok) {
+        setBootstrapError(`Could not verify onboarding status (HTTP ${statusRes.status}).`)
         setChecking(false)
-      })
-      .catch(() => setChecking(false))
+        return
+      }
+      const status = await statusRes.json().catch(() => null)
+      if (status && typeof status === "object" && (status as { completed?: unknown }).completed === true) {
+        router.replace("/")
+        return
+      }
+
+      const resumed = await loadOnboardingResumeState()
+      if (!resumed.ok) {
+        setBootstrapError(resumed.error)
+        setChecking(false)
+        return
+      }
+      const snapshot = resumed.state
+      setOnboardingWorkspaceId(snapshot.workspaceId)
+      setWorkspaceName(snapshot.workspaceName)
+      if (snapshot.preferredLanguage) {
+        setLanguage(snapshot.preferredLanguage)
+        // preferred_language is written only when step 1 successfully
+        // Continues. It doubles as a durable checkpoint without another
+        // migration or browser storage, so a re-login resumes at Adapter.
+        setStep(2)
+      }
+
+      if (snapshot.savedCredential) {
+        const provider = snapshot.savedCredential.provider.toUpperCase()
+        const matchingAdapter = CLI_ADAPTER_KEYS.find(
+          (key) =>
+            CLI_ADAPTERS[key].provider.toUpperCase() === provider &&
+            CLI_ADAPTERS[key].status === "production",
+        )
+        if (matchingAdapter) {
+          setAdapter(matchingAdapter)
+          setModel(CLI_ADAPTERS[matchingAdapter].defaultModel)
+          setPersistedCredential({
+            id: snapshot.savedCredential.id,
+            provider,
+            apiKey: null,
+          })
+          setTokenDelivered(true)
+          // Workspace and credential are already durable. Resume at the
+          // first unfinished decision instead of demanding both again.
+          setStep(3)
+        }
+      }
+      setChecking(false)
+    } catch {
+      setBootstrapError("Couldn't restore onboarding from the server. Check your connection and retry.")
+      setChecking(false)
+    }
   }, [router])
 
   useEffect(() => {
-    // Prefill workspace name from the signed-in user's display name as
-    // a starting suggestion. Functional setter pattern lets the user
-    // type into the input before /api/auth/session resolves without
-    // having their typing overwritten — the setter sees the latest
-    // committed value and only applies the prefill when it's empty.
-     
-    serverFetch("/api/auth/session")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        const name = d?.user?.name || d?.user?.email
-        if (!name) return
-        const base = String(name).split("@")[0]
-        setWorkspaceName((current) => (current ? current : `${base}'s Workspace`))
-      })
-      .catch(() => undefined)
+    void bootstrapOnboarding()
+  }, [bootstrapOnboarding])
+
+  // Extracted so the step-2 gate can offer a re-check: the probe used to run
+  // once on mount, which left anyone who started Docker mid-wizard stuck
+  // behind a hard block until they reloaded the page.
+  const checkRuntime = useCallback(async () => {
+    setRuntimeChecking(true)
+    try {
+      const r = await serverFetch("/api/v1/system/runtime")
+      const d = r.ok ? await r.json() : { available: false, in_use: false }
+      setRuntimeReady(Boolean(d.available))
+      setRuntimeInUse(Boolean(d.in_use))
+    } catch {
+      setRuntimeReady(false)
+      setRuntimeInUse(false)
+    } finally {
+      setRuntimeChecking(false)
+    }
   }, [])
 
   useEffect(() => {
-     
-    serverFetch("/api/v1/system/runtime")
-      .then((r) => (r.ok ? r.json() : { available: false }))
-      .then((d) => setRuntimeReady(Boolean(d.available)))
-      .catch(() => setRuntimeReady(false))
-  }, [])
+    void checkRuntime()
+  }, [checkRuntime])
 
   // Seed the telemetry consent checkbox from the server's current state:
   // prerelease/dev builds boot with crash reporting defaulted on, stable
@@ -250,7 +401,7 @@ export default function OnboardingPage() {
 
   // Pairing poll loop
   useEffect(() => {
-    if (mode !== "cli" || step !== 3 || !pairCode || pairStatus !== "pending") return
+    if (mode !== "cli" || step !== 2 || !pairCode || pairStatus !== "pending") return
     const interval = setInterval(async () => {
       try {
         // eslint-disable-next-line no-restricted-syntax -- CLI pairing poll during onboarding; auth endpoint, raw fetch by design
@@ -265,6 +416,45 @@ export default function OnboardingPage() {
     }, 2000)
     return () => clearInterval(interval)
   }, [mode, step, pairCode, pairStatus])
+
+  // Model-token poll. Pairing signs the TERMINAL in; it does not give the
+  // agents a key, and those are two different credentials that both get
+  // called "token". `crewship login --pair` offers to land the model token
+  // right after it pairs, so once the pair is consumed this watches for it to
+  // show up and the step can state what is actually true instead of promising
+  // a repair that does not exist.
+  //
+  // The order is the whole reason this matters: autoAssignCredentials links
+  // workspace credentials to agents when the crew is DEPLOYED. A token that
+  // arrives after Launch reaches none of them, and `crewship setup` answers
+  // 409 once onboarding is complete — so "you can add it later" was false.
+  useEffect(() => {
+    if (mode !== "cli" || step !== 2 || pairStatus !== "consumed" || tokenDelivered) return
+    let cancelled = false
+    const check = async () => {
+      try {
+        // eslint-disable-next-line no-restricted-syntax -- onboarding-time credential probe; mirrors the pairing poll above
+        const res = await fetch("/api/v1/credentials")
+        if (!res.ok) return
+        const data = await res.json()
+        const list = Array.isArray(data) ? data : (data?.credentials ?? [])
+        const found = list.some(
+          (c: { provider?: string; status?: string }) =>
+            (c.provider ?? "").toUpperCase() === "ANTHROPIC" &&
+            (!c.status || c.status.toUpperCase() === "ACTIVE"),
+        )
+        if (found && !cancelled) setTokenDelivered(true)
+      } catch {
+        // network blip — the next tick retries
+      }
+    }
+    void check()
+    const interval = setInterval(check, 2500)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [mode, step, pairStatus, tokenDelivered])
 
   // Live countdown for the pair-code expiry. Updates every second
   // while the code is pending so the user can see at a glance how
@@ -317,11 +507,11 @@ export default function OnboardingPage() {
   }, [adapter])
 
   useEffect(() => {
-    // Auto-start pairing on first arrival at step 3 (CLI mode). Don't
+    // Auto-start pairing on first arrival at step 2 (CLI mode). Don't
     // retry on failure — the "failed" status surfaces a manual retry
     // button instead, so we don't hammer the server in a hot loop if
     // /pair/start is consistently rejecting.
-    if (mode === "cli" && step === 3 && !pairCode && pairStatus === "idle") {
+    if (mode === "cli" && step === 2 && !pairCode && pairStatus === "idle") {
       void startPairing()
     }
   }, [mode, step, pairCode, pairStatus, startPairing])
@@ -371,47 +561,268 @@ export default function OnboardingPage() {
     legacyCopy(pairCommand, succeed)
   }, [pairCommand])
 
+  const selectedProvider = (CLI_ADAPTERS[adapter]?.provider || "ANTHROPIC").toUpperCase()
+  const savedCredentialSelected = Boolean(
+    persistedCredential &&
+      persistedCredential.provider === selectedProvider &&
+      persistedCredential.apiKey === null &&
+      apiKey.trim() === "",
+  )
+
   /**
-   * Step 3 validation — API key is required in BOTH modes because the
-   * agents in containers always need a provider credential to call
-   * Claude (the CLI token is for the user's terminal, not the agents).
-   * In CLI mode we ALSO require the pair to be consumed so the local
-   * CLI is ready to drive the workspace.
+   * Step 2 validation — the model token is required in BOTH handoff modes,
+   * because it is a fact about the AGENTS, not about how the human drives
+   * Crewship. Agents run in containers and need a provider credential to
+   * call their model. Pairing mints a CLI token for the operator's
+   * terminal; the two are unrelated and only share the word "token".
+   *
+   * This gate has been wrong in both directions. It first required
+   * `keyOK && pairStatus === "consumed"` — correct about the key, but it
+   * blocked Continue with no explanation, which read as a dead end. The fix
+   * for that was to say WHY; instead the key requirement was dropped, and
+   * that produced something worse: a crew of four agents with zero
+   * credentials, unable to answer and unrepairable — `crewship setup`
+   * answers 409 once a crew exists, and a credential created afterwards is
+   * never linked, because autoAssignCredentials runs at deploy time.
+   *
+   * So: the key is required, and pairing is NOT. Pairing is an optional
+   * convenience — a person installing Crewship for the first time does not
+   * have the CLI yet, and must not be sent to a GitHub release page to
+   * finish signing up. They can pair whenever they like, afterwards.
    *
    * Exception (#944): local (ollama/…) models talk to the operator's own
    * endpoint and need no provider credential, so the key becomes optional.
    */
   const canContinue = () => {
     if (step === 1) return workspaceName.trim().length >= 2
-    if (step === 2) return crewSlug !== null
-    if (step === 3) {
-      const keyOK = apiKey.trim().length >= 8 || isLocalModel(model)
-      if (mode === "browser") return keyOK
-      if (mode === "cli") return keyOK && pairStatus === "consumed"
+    if (step === 2) {
+      // The onboarding image is conformance-tested with Claude Code only.
+      // Other adapters remain available in the product as explicitly
+      // experimental choices, but letting a first-run user continue would
+      // create a crew whose default image may not contain the selected CLI.
+      // Fail at the choice, with an explanation, rather than much later as
+      // an exit-127 chat that looks like the app ignored them.
+      const adapterReady = CLI_ADAPTERS[adapter]?.status === "production"
+      // Step 3 opens a chat with an agent that runs inside a container. With
+      // no runtime driving that, the wizard used to let the user through and
+      // then answer their first message with two stacked errors naming an
+      // internal component — after they had already committed to the step.
+      // Same rule as the adapter check above: fail at the choice, with an
+      // explanation, not later as something that looks like the app ignoring
+      // them. `null` (probe still in flight) blocks too, and the panel says
+      // "Checking…" so it never reads as a silent refusal.
+      const runtimeOk = runtimeInUse === true
+      return runtimeOk && adapterReady && (savedCredentialSelected || apiKey.trim().length >= 8 || isLocalModel(model))
     }
+    if (step === 3) return crewMode === "template" ? crewSlug !== null : createdCrews.length > 0
     return false
   }
+
+  /**
+   * Land the Adapter step's model token in the database BEFORE step 3
+   * (Crew) opens, so its default chat with the setup agent doesn't 428 —
+   * see this file's own doc comment above and setup-agent-api.ts's for the
+   * full sequencing argument. Called from the Continue button when leaving
+   * step 2; returns false (and sets `error`) when the caller should NOT
+   * advance, true otherwise (including the no-op cases: a local model
+   * needs no credential, and an unchanged already-persisted token needs no
+   * second write).
+   *
+   * Idempotent across repeat visits to step 2: `persistedCredential` tracks
+   * the (provider, value) pair this session has already written, so
+   * editing the token and Continuing again PATCHes that same row instead
+   * of colliding with the UNIQUE(workspace_id, name) index a second Create
+   * would hit. Switching adapter/provider after a persist leaves the old
+   * row alone and creates a new one for the new provider — deploy-time
+   * autoAssignCredentials matches per-agent provider, so an unused leftover
+   * row for an abandoned provider is harmless.
+   */
+  const persistAdapterCredential = useCallback(async (): Promise<boolean> => {
+    if (isLocalModel(model)) return true
+    const trimmed = apiKey.trim()
+    if (trimmed.length < 8) return savedCredentialSelected
+    const adapterCfg = CLI_ADAPTERS[adapter]
+    const provider = (adapterCfg?.provider || "ANTHROPIC").toUpperCase()
+    if (persistedCredential && persistedCredential.provider === provider && persistedCredential.apiKey === apiKey) {
+      return true // nothing changed since the last successful persist
+    }
+    setPersistingCredential(true)
+    setError(null)
+    try {
+      const workspaceId = onboardingWorkspaceId ?? await resolveOnboardingWorkspaceId()
+      if (!workspaceId) {
+        setError("Could not find your workspace. Refresh the page and try again.")
+        return false
+      }
+      const validation = await validateWorkspaceModelCredential({ provider, value: apiKey })
+      if (!validation.ok) {
+        setError(validation.error ?? "The provider could not verify your token. Check it and try again.")
+        return false
+      }
+      const outcome =
+        persistedCredential && persistedCredential.provider === provider
+          ? await updateWorkspaceModelCredential({
+              workspaceId,
+              credentialId: persistedCredential.id,
+              value: apiKey,
+            })
+          : await createWorkspaceModelCredential({
+              workspaceId,
+              name: adapterCfg?.envVar || "API Key",
+              provider,
+              value: apiKey,
+            })
+      if (!outcome.ok || !outcome.credentialId) {
+        setError(outcome.error ?? "Could not save your token. Try again.")
+        return false
+      }
+      setPersistedCredential({ id: outcome.credentialId, provider, apiKey })
+      return true
+    } finally {
+      setPersistingCredential(false)
+    }
+  }, [model, apiKey, adapter, persistedCredential, onboardingWorkspaceId, savedCredentialSelected])
+
+  /** Continue persists each completed choice before advancing. A reload can
+   * therefore reconstruct the real workspace and reuse its encrypted token
+   * instead of replaying a blank in-memory wizard. */
+  const handleContinue = useCallback(async () => {
+    if (step === 1) {
+      setPersistingWorkspace(true)
+      setError(null)
+      try {
+        const workspaceId = onboardingWorkspaceId ?? await resolveOnboardingWorkspaceId()
+        if (!workspaceId) {
+          setError("Could not find your workspace. Refresh the page and try again.")
+          return
+        }
+        const saved = await updateOnboardingWorkspace({
+          workspaceId,
+          name: workspaceName,
+          preferredLanguage: language,
+        })
+        if (!saved.ok) {
+          setError(saved.error ?? "Could not save your workspace. Try again.")
+          return
+        }
+        setOnboardingWorkspaceId(workspaceId)
+      } finally {
+        setPersistingWorkspace(false)
+      }
+    }
+    if (step === 2) {
+      const ok = await persistAdapterCredential()
+      if (!ok) return
+    }
+    setStep((s) => (s < 3 ? ((s + 1) as Step) : s))
+  }, [step, persistAdapterCredential, onboardingWorkspaceId, workspaceName, language])
+
+  /**
+   * The setup agent couldn't be reached. Fall back to the template grid
+   * automatically rather than leave the pane stuck on a spinner (PRD §4.3's
+   * fallback) — but WHY matters, per setup-agent-api.ts's
+   * SetupAgentUnavailableReason doc comment:
+   *
+   *   - "credential_required": expected, not a failure, though in the
+   *     ordinary first-run path it should no longer happen — step 2
+   *     already persisted the token before step 3 opened. Still handled
+   *     the same way for a workspace that reaches step 3 some other way
+   *     (a resumed session, a failed persist the user clicked past). This
+   *     is NOT treated as `chatUnavailable` — that flag hides the "talk to
+   *     the setup agent instead" link, and here it should stay: nothing
+   *     about the setup agent is actually broken, so a user who switches
+   *     to chat again later gets a fresh, identical attempt, not a link
+   *     back to something known to be dead.
+   *   - "unavailable": a real failure (outage, malformed response, network).
+   *     `chatUnavailable` hides the return link so the template pane
+   *     doesn't offer a way back to something that will just fail again.
+   */
+  const handleSetupAgentUnavailable = useCallback((reason: "credential_required" | "unavailable") => {
+    setCrewMode("template")
+    if (reason === "credential_required") {
+      setChatNeedsCredential(true)
+      return
+    }
+    setChatUnavailable(true)
+  }, [])
+
+  /**
+   * A proposal was actually applied (PRD §5.6: the card and the mutation
+   * come from the same server-stored object, and this is the ONLY place that
+   * result reaches page state). `result` is deliberately not trusted beyond
+   * what it is — an id-bearing acknowledgement — and `crewName` comes from
+   * the proposal the human actually read, not from anything re-derived
+   * after the click.
+   */
+  const handleProposalApplied = useCallback((result: ApplyProposalResult, proposal: OnboardingProposal) => {
+    const named = { ...proposal, crewName: result.crewName ?? proposal.crewName }
+    setCreatedCrews((prev) =>
+      // Idempotent on proposal id: Apply itself replays rather than creating a
+      // second crew, so a double-click must not add a second row here either.
+      prev.some((c) => c.id === proposal.id)
+        ? prev
+        : [...prev, { id: proposal.id, proposal: named, result }],
+    )
+    // The card for this proposal is done; clear the pending slot so the panel
+    // shows it under "created" instead of leaving it queued for a Create that
+    // already happened.
+    setPreparedProposal(null)
+  }, [])
 
   async function handleLaunch() {
     setSubmitting(true)
     setError(null)
     try {
       const adapterCfg = CLI_ADAPTERS[adapter]
-      const body = buildOnboardingSetupBody({
+      // A crew from the setup agent's conversation isn't a builtin template,
+      // so crewSlug (which only ever names one) has nothing to pass here.
+      //
+      // Reordering the wizard to Workspace → Adapter → Crew made this branch
+      // common instead of rare: the chat now opens with a credential already
+      // in place (persistAdapterCredential, step 2), so most first-run users
+      // reach Launch via an applied proposal, not a picked template.
+      //
+      // When a proposal was applied, send its id via applied_proposal_id and
+      // nothing else crew-shaped — the server's applied_proposal_id branch
+      // persists prefs/telemetry/completion and returns the crew the
+      // proposal already created, WITHOUT deploying a second one. This
+      // replaces the "blank" signal that used to be sent here, which made
+      // POST /onboarding/setup run the single-agent deploy path a second
+      // time and left the user with two crews from one onboarding.
+      const body: Record<string, unknown> = buildOnboardingSetupBody({
         workspaceName,
         language,
         crewSlug,
+        // One id, though several crews may exist: the server uses it only
+        // to resolve which crew the post-launch redirect lands on (see
+        // setupFromAppliedProposal — it deploys nothing, every crew was
+        // already created by its own Create click). The most recent is the
+        // one the person was last looking at.
+        appliedProposalId: createdCrews.at(-1)?.id,
         adapter,
         adapterLabel: adapterCfg?.label,
         provider: adapterCfg?.provider,
         envVar: adapterCfg?.envVar,
         model,
-        apiKey,
+        // Already persisted at step 2 (persistAdapterCredential) when the
+        // provider/value haven't changed since — sending it again here
+        // would insert a second credential row for the same value
+        // (insertOnboardingCredential has no idempotency of its own). Only
+        // fall back to sending it fresh when something about the adapter
+        // choice changed after the early persist (see canContinue/
+        // persistAdapterCredential above).
+        apiKey:
+          persistedCredential &&
+          persistedCredential.provider === selectedProvider &&
+          ((persistedCredential.apiKey === null && apiKey.trim() === "") ||
+            persistedCredential.apiKey === apiKey)
+            ? ""
+            : apiKey,
         pairingMode: mode === "cli",
         telemetryOptIn,
       })
-       
-      const res = await serverFetch("/api/v1/onboarding/setup", {
+
+      const res = await apiFetch("/api/v1/onboarding/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -480,11 +891,7 @@ export default function OnboardingPage() {
       // If the slug could not be resolved we send them to the dashboard,
       // which carries the welcome checklist and a working "Browse agents":
       // a generic page that works beats a specific one that doesn't.
-      if (firstAgentSlug) {
-        router.push(`/chat/${encodeURIComponent(firstAgentSlug)}`)
-      } else {
-        router.push("/")
-      }
+      setLaunchSummary({ agentSlug: firstAgentSlug || null })
     } catch (e) {
       // Real network failure (no response). Differentiate from the
       // "server returned 5xx" case above so users can tell whether
@@ -499,13 +906,25 @@ export default function OnboardingPage() {
   }
 
   async function handleSkip() {
+    setSubmitting(true)
+    setError(null)
     try {
-       
-      await serverFetch("/api/v1/onboarding/complete", { method: "POST" })
+      const res = await apiFetch("/api/v1/onboarding/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skipped: true }),
+      })
+      if (!res.ok && res.status !== 409) {
+        const data = await res.json().catch(() => ({}))
+        setError(data.error ?? `Could not skip setup (HTTP ${res.status}). Try again.`)
+        return
+      }
+      router.push("/")
     } catch {
-      // ignore
+      setError("Couldn't reach the server. Setup was not skipped; check your connection and retry.")
+    } finally {
+      setSubmitting(false)
     }
-    router.push("/")
   }
 
   if (checking) {
@@ -516,30 +935,57 @@ export default function OnboardingPage() {
     )
   }
 
+  if (bootstrapError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+          <AlertTriangle className="mx-auto h-7 w-7 text-warn" />
+          <h1 className="mt-3 text-lg font-semibold">We couldn&apos;t restore your setup</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{bootstrapError}</p>
+          <Button className="mt-5" onClick={() => void bootstrapOnboarding()}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   const adapterCfg = CLI_ADAPTERS[adapter]
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background lg:h-screen lg:overflow-hidden">
       {/* Subtle hero glow — same radial gradient idea from
           crewship-web's .hero-glow but anchored to the top of the
           form column so the form has a sense of stage lighting
           without distracting from the live preview. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[360px] bg-[radial-gradient(ellipse_60%_50%_at_30%_0%,rgba(30,123,254,0.10),transparent_60%)]" />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 min-h-screen relative">
-        {/* LEFT: form */}
-        <div className="border-b lg:border-b-0 lg:border-r border-border p-6 lg:p-12 flex items-center">
-          <div className="w-full max-w-md mx-auto space-y-7">
+      <div className="relative grid min-h-screen grid-cols-1 lg:h-screen lg:min-h-0 lg:grid-cols-2">
+        {/* LEFT: form.
+            Anchored to the top, not centred. Centring the whole column meant
+            the lockup and the stepper slid up and down as the step content
+            changed height — measured at y=101 on Workspace, y=137 on Crew and
+            y=66 on Adapter, so the logo visibly jumped on every Continue. The
+            fixed things stay fixed; only the form below them moves. */}
+        {/* pb-0, and the nav row below carries the bottom inset instead. The
+            nav is `sticky bottom-0`, so any padding left on THIS box would be
+            a transparent strip under the pinned bar with crew cards sliding
+            through it. */}
+        <div className="flex items-start border-b border-border p-6 pb-0 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-12 lg:pb-0">
+          <div className="touch-form w-full max-w-md mx-auto space-y-7 lg:pt-6">
             <motion.div
               initial={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, ease }}
               className="flex items-center gap-3"
             >
-              <CrewshipLogoTile size="h-10 w-10" iconSize="h-5 w-5" rounded="rounded-xl" />
+              {/* The bare cropped mark, matching the sign-in lockup. Inside
+                  the tile's padding AND the viewBox's, the sails stopped
+                  being legible at this size. */}
+              <CrewshipLogo tight className="h-9 w-auto text-foreground" />
               <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Crewship</div>
-                <h1 className="text-lg font-semibold tracking-tight">Setup</h1>
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Setup</div>
+                <h1 className="text-lg font-bold tracking-tight">Crewship</h1>
               </div>
             </motion.div>
 
@@ -554,7 +1000,7 @@ export default function OnboardingPage() {
                 transition={{ duration: 0.4, ease }}
                 className="space-y-5"
               >
-                {step === 1 && (
+                {!launchSummary && step === 1 && (
                   <div className="space-y-4">
                     <div>
                       <h2 className="text-2xl font-semibold tracking-tight">What&apos;s your workspace called?</h2>
@@ -564,14 +1010,14 @@ export default function OnboardingPage() {
                     </div>
 
                     {/* Upfront warning so users get the CLI token ready BEFORE
-                        step 3 instead of bouncing back and forth. Copy-paste
+                        step 2 instead of bouncing back and forth. Copy-paste
                         cmd inline for the most common (Claude Code) case. */}
                     <div className="rounded-xl border border-warn/30 bg-warn/5 p-3 text-xs leading-relaxed">
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="h-4 w-4 text-warn shrink-0 mt-0.5" />
                         <div className="space-y-1.5 min-w-0">
                           <div className="text-foreground/90 font-medium">
-                            Heads up — you&apos;ll need a CLI token in step 3
+                            Heads up — you&apos;ll need a CLI token in step 2
                           </div>
                           <div className="text-muted-foreground">
                             Crewship uses your provider&apos;s <strong className="text-foreground/80">CLI token</strong>,{" "}
@@ -582,8 +1028,7 @@ export default function OnboardingPage() {
                             <span className="text-success select-all">$ claude setup-token</span>
                           </div>
                           <div className="text-[10px] text-muted-foreground">
-                            Other adapters (Gemini, Codex, Cursor, OpenCode, Factory) have their own
-                            <code className="mx-1 font-mono">setup-token</code> equivalents — links in step 3.
+                            Additional adapters remain experimental and can be configured after onboarding.
                           </div>
                         </div>
                       </div>
@@ -619,19 +1064,97 @@ export default function OnboardingPage() {
                     )}
                     {runtimeReady === false && (
                       <div className="rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-warn">
-                        Docker isn&apos;t reachable. You can still finish setup now and start a runtime later from
-                        Settings.
+                        Docker isn&apos;t reachable. Your agents run in containers, so you&apos;ll need it running
+                        before the last step — start it now and we&apos;ll pick it up.
                       </div>
                     )}
                   </div>
                 )}
 
-                {step === 2 && (
+                {!launchSummary && step === 3 && crewMode === "chat" && (
+                  <div className="space-y-4">
+                    <div>
+                      <h2 className="text-2xl font-semibold tracking-tight">
+                        {createdCrews.length > 0
+                          ? createdCrews.length === 1
+                            ? createdCrews[0].proposal.crewName
+                            : `${createdCrews.length} crews ready`
+                          : preparedProposal
+                            ? preparedProposal.crewName
+                            : "Tell Crewship Guide what you need"}
+                      </h2>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {createdCrews.length > 0
+                          ? preparedProposal
+                            ? "Created so far — and one more waiting for you to press Create in the chat."
+                            : "Created. Ask for another crew in the chat, or launch what you have."
+                          : preparedProposal
+                            ? "Review the crew below. Create it from the proposal card in the chat when it looks right."
+                            : "Chat with it on the right — it asks a couple of questions, then proposes a crew. Nothing is created until you click Create."}
+                      </p>
+                    </div>
+                    {/* Every crew that really exists, then the one still
+                        awaiting Create. `created` is per-proposal — it used to
+                        be `appliedProposal !== null`, i.e. "has ANY crew been
+                        created", so a freshly proposed second crew rendered
+                        with a green "Created" badge while nothing had been
+                        written for it yet. The panel was lying at exactly the
+                        moment the user was deciding whether to click. */}
+                    {createdCrews.map((c) => (
+                      <OnboardingProposalSummary key={c.id} proposal={c.proposal} created />
+                    ))}
+                    {preparedProposal && (
+                      <OnboardingProposalSummary proposal={preparedProposal} created={false} />
+                    )}
+                    {/* Everything the Guide has ACTUALLY created, read back
+                        from the workspace rather than from the transcript.
+                        Routines and pages are made by the agent calling its
+                        own tools inside a container, so the wizard never
+                        hears about them — without this the person is told in
+                        prose that a routine exists and shown a panel that
+                        says nothing. */}
+                    <OnboardingCreatedPanel workspaceId={onboardingWorkspaceId} />
+                    {/* Escape hatch (PRD §4.3): a user who already knows what
+                        they want must still be able to skip straight to a
+                        template. Hidden once a proposal is actually applied —
+                        switching away at that point would abandon a crew that
+                        already exists, not merely a choice. */}
+                    {createdCrews.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setCrewMode("template")}
+                        className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        Prefer to pick a template instead? →
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {!launchSummary && step === 3 && crewMode === "template" && (
                   <div className="space-y-4">
                     <div>
                       <h2 className="text-2xl font-semibold tracking-tight">Pick your first crew</h2>
                       <p className="text-sm text-muted-foreground mt-1">Watch the preview build itself on the right.</p>
                     </div>
+                    {/* Explains WHY the chat pane isn't showing rather than
+                        landing here with no context — the one outcome this
+                        whole feature must avoid is a chat box that silently
+                        never answers. See handleSetupAgentUnavailable's own
+                        comment: this is expected/recoverable, not a failure,
+                        so it stays visually distinct from chatUnavailable's
+                        "the setup agent is broken" framing below.
+
+                        Unlike the old step order, there is no LATER step
+                        that still collects a token — step 2 already asked.
+                        So the recovery this banner offers is Back, not
+                        Continue. */}
+                    {chatNeedsCredential && !chatUnavailable && (
+                      <div className="rounded-xl border border-warn/30 bg-warn/5 p-3 text-xs leading-relaxed text-muted-foreground">
+                        Crewship Guide needs a model token before it can chat. Pick a template for
+                        now, or go back to step 2 to add one and come back to talk it through.
+                      </div>
+                    )}
                     <div className="space-y-2">
                       {CREW_OPTIONS.map((opt, i) => {
                         const tpl = TEMPLATES[opt.slug]
@@ -670,39 +1193,76 @@ export default function OnboardingPage() {
                         )
                       })}
                     </div>
+                    {/* Not shown once the setup agent has already been ruled
+                        out for this session (PRD §4.3's fallback-with-reason)
+                        — offering a way back to a pane that will just fail
+                        again is worse than not offering it. */}
+                    {!chatUnavailable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Clear the credential banner so a retry starts
+                          // clean — OnboardingSetupChat remounts fresh on
+                          // this switch and will re-evaluate the precondition
+                          // itself; this only resets the PARENT's leftover
+                          // "why we left" note from the last attempt.
+                          setChatNeedsCredential(false)
+                          setCrewMode("chat")
+                        }}
+                        className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        ← Talk to Crewship Guide instead
+                      </button>
+                    )}
                   </div>
                 )}
 
-                {step === 3 && (
+                {!launchSummary && step === 2 && (
                   <div className="space-y-5">
                     <div>
-                      <h2 className="text-2xl font-semibold tracking-tight">How will you work?</h2>
+                      {/* The heading asked "How will you work?" — the human's
+                          question — while the step's actual requirement is
+                          the agents' one. That framing is why the token could
+                          look optional once you had answered about yourself.
+                          It leads with what the crew needs now. */}
+                      <h2 className="text-2xl font-semibold tracking-tight">
+                        Give your agents a model
+                      </h2>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Drive Crewship from your terminal or stay in the browser.{" "}
                         {isLocalModel(model)
-                          ? "Your local model runs without an API key — just confirm the setup below."
-                          : "Either way the agents need an API key below to call their model."}
+                          ? "Your local model runs on your own endpoint, so no token is needed — just confirm the setup below."
+                          : "Agents run in containers and need their own token to call a model. Pairing your CLI signs your terminal in; it does not give them one."}
                       </p>
                     </div>
 
-                    {/* MODE PICKER — CLI first with Recommended badge,
-                        because Claude Code users are our primary
-                        persona and they already have a terminal open. */}
+                    {/* MODE PICKER. Browser first and Recommended, which is a
+                        reversal: CLI led, on the reasoning that Claude Code
+                        users already have a terminal open. That holds for
+                        people who already run Crewship — not for the person
+                        this screen is actually for, who is installing it for
+                        the first time and does not have the CLI yet. Leading
+                        with "Pair my CLI" sent them to a GitHub release page
+                        to download a binary before they could finish signing
+                        up, and the block underneath still says so.
+
+                        Neither card changes what the agents need. The model
+                        and its token are asked for below in both cases; this
+                        choice is only about where the human works. */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <ModeCard
-                        icon={Terminal}
-                        title="Pair my CLI"
-                        description="Claude Code, Gemini, Codex, OpenCode…"
-                        active={mode === "cli"}
-                        recommended
-                        onClick={() => setMode("cli")}
-                      />
                       <ModeCard
                         icon={Globe}
                         title="Chat in browser"
-                        description="No terminal required."
+                        description="Nothing to install."
                         active={mode === "browser"}
+                        recommended
                         onClick={() => setMode("browser")}
+                      />
+                      <ModeCard
+                        icon={Terminal}
+                        title="Also pair my CLI"
+                        description="Optional — signs your terminal in too."
+                        active={mode === "cli"}
+                        onClick={() => setMode("cli")}
                       />
                     </div>
 
@@ -795,10 +1355,28 @@ export default function OnboardingPage() {
                                   initial={{ opacity: 0, scale: 0.96 }}
                                   animate={{ opacity: 1, scale: 1 }}
                                   transition={{ duration: 0.35, ease }}
-                                  className="flex items-center gap-2 text-xs text-success"
+                                  // items-start + a single <span> for the
+                                  // sentence: with items-center and bare text
+                                  // nodes, flex made each fragment around the
+                                  // inline <code> its own column and the line
+                                  // wrapped into an unreadable three-column
+                                  // jumble at this width.
+                                  className="flex items-start gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2 text-xs text-success"
                                 >
-                                  <Check className="h-3.5 w-3.5" /> CLI paired. You can finish below or jump
-                                  to <code className="font-mono">crewship setup</code> in the terminal.
+                                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                  <span className="leading-relaxed">
+                                    {tokenDelivered ? (
+                                      <>
+                                        <strong className="font-semibold">CLI paired and model token received.</strong>{" "}
+                                        Your crew is ready to launch.
+                                      </>
+                                    ) : (
+                                      <>
+                                        <strong className="font-semibold">CLI paired.</strong> Your terminal is
+                                        signed in — the agents still need their own model token.
+                                      </>
+                                    )}
+                                  </span>
                                 </motion.div>
                               )}
                               {pairStatus === "expired" && (
@@ -848,8 +1426,45 @@ export default function OnboardingPage() {
                       )}
                     </AnimatePresence>
 
-                    {/* ADAPTER + API KEY — always visible because agents
-                        need a credential regardless of mode. */}
+                    {/* The credential block below is NOT collapsed in CLI
+                        mode any more, and this is the correction that matters
+                        most on this screen.
+
+                        Collapsing it hid the model picker, because the picker
+                        lives inside it — so choosing "Pair my CLI" silently
+                        took away the choice of which model the agents run.
+                        That is backwards: the model and its token are facts
+                        about the AGENTS. How the human drives Crewship is a
+                        separate question, and the server says so in its own
+                        comment — pairing_mode "drives how the human works,
+                        not the agents".
+
+                        Nothing here is optional-by-mode. A person installing
+                        Crewship for the first time may not have the CLI at
+                        all, and must be able to finish in the browser without
+                        being sent to a release page to download one. */}
+                    {(savedCredentialSelected || tokenDelivered) && (
+                      <div className="flex items-start gap-2 rounded-xl border border-success/30 bg-success/5 p-3">
+                        <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          <span className="font-medium text-foreground">
+                            {savedCredentialSelected
+                              ? "Your saved Anthropic credential will be reused."
+                              : "Your CLI already handed over a token."}
+                          </span>{" "}
+                          {savedCredentialSelected
+                            ? "The secret stays encrypted and is not sent back to this page. Enter a new token only to replace it."
+                            : "Change it only if you want the agents on a different credential."}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* ADAPTER + MODEL + TOKEN. Always rendered, in both
+                        modes: this is the question about the agents, and it
+                        has the same answer however the human drives Crewship.
+                        It used to be gated on `mode === "browser" ||
+                        showCredential`, which is what hid the model picker
+                        behind the CLI choice. */}
                     <div className="space-y-2">
                       <Label>Agent toolchain</Label>
                       <div className="grid grid-cols-2 gap-2">
@@ -887,6 +1502,49 @@ export default function OnboardingPage() {
                           )
                         })}
                       </div>
+                      {CLI_ADAPTERS[adapter]?.status !== "production" && (
+                        <div role="alert" className="rounded-lg border border-warn/30 bg-warn/5 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                          {CLI_ADAPTERS[adapter]?.label} is still experimental and its CLI is not guaranteed to be present in the onboarding image. Choose Claude Code to finish setup; you can add experimental adapters from the dashboard afterwards.
+                        </div>
+                      )}
+                      {/* The container-runtime precondition. Mirrors the
+                          experimental-adapter alert above deliberately: same
+                          shape, same rule — fail at the choice with an
+                          explanation, rather than two steps later as an error
+                          naming an internal component. */}
+                      {runtimeInUse !== true && (
+                        <div
+                          role="alert"
+                          data-testid="onboarding-runtime-blocker"
+                          className="space-y-2 rounded-lg border border-warn/30 bg-warn/5 p-2.5 text-[11px] leading-relaxed text-muted-foreground"
+                        >
+                          {runtimeInUse === null || runtimeChecking ? (
+                            <span>Checking for a container runtime…</span>
+                          ) : (
+                            <>
+                              <div>
+                                {/* Two different failures, and the fix differs, so
+                                    they must not share a sentence. Docker absent:
+                                    install/start it. Docker present but this server
+                                    not driving it: crewshipd was started without a
+                                    runtime and restarting it is the fix, which
+                                    "start Docker" would never lead anyone to. */}
+                                {runtimeReady
+                                  ? "Docker is running, but this Crewship server isn't using it — it was started without a container runtime. Restart the server so it picks Docker up."
+                                  : "Your agents run in Docker containers, and no container runtime is reachable. Install or start Docker, then re-check."}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void checkRuntime()}
+                                disabled={runtimeChecking}
+                                className="font-medium text-primary underline-offset-2 hover:underline disabled:opacity-60"
+                              >
+                                Re-check
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="model">Model</Label>
@@ -904,7 +1562,11 @@ export default function OnboardingPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
+                      {/* Stacks on a phone: "Claude Code CLI token" beside
+                          "How to generate a Claude Code CLI token ↗" squeezes
+                          both into two and three wrapped lines at 390px and
+                          they read as one run-on. */}
+                      <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                         <Label htmlFor="api_key">{adapterCfg?.label ?? "Adapter"} CLI token</Label>
                         {ADAPTER_TOKEN_GUIDE[adapter] && (
                           <a
@@ -923,7 +1585,7 @@ export default function OnboardingPage() {
                         type="password"
                         value={apiKey}
                         onChange={(e) => setApiKey(e.target.value)}
-                        placeholder="CLI token (not your account API key)"
+                        placeholder={savedCredentialSelected ? "Saved token — leave blank to reuse" : "CLI token (not your account API key)"}
                         className="font-mono text-xs h-10"
                       />
                       {isLocalModel(model) && (
@@ -1015,17 +1677,28 @@ export default function OnboardingPage() {
               </motion.div>
             )}
 
-            <div className="flex items-center justify-between pt-1">
+            {!launchSummary && (
+            /* Pinned to the foot of the column. Step 3 has no ceiling on its
+               height — one card per crew the Guide creates, plus a row per
+               crew/routine/page in "Built so far" — and Launch used to be
+               pushed below the fold by the second crew, with nothing on
+               screen hinting that the button finishing setup was down there.
+               `sticky` rather than `fixed`: under lg the panes stack, and a
+               fixed bar would stay welded to the viewport while the user
+               scrolled on into the preview pane, offering controls for a
+               screen they had already left. */
+            <div className="sticky bottom-0 z-10 flex items-center justify-between border-t border-border bg-background pb-6 pt-3 lg:pb-8">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={() => setStep((s) => (s > 1 ? ((s - 1) as Step) : s))}
-                // Lock Back/Skip while Launch is in flight — otherwise
-                // the user can step back mid-submit or fire /complete
-                // while /setup is still running, which races the two
+                // Lock Back/Skip while Launch or the Adapter step's
+                // credential persist is in flight — otherwise the user can
+                // step back mid-submit or fire /complete while /setup or
+                // POST /credentials is still running, which races those
                 // endpoints against each other.
-                disabled={step === 1 || submitting}
+                disabled={step === 1 || submitting || persistingCredential || persistingWorkspace}
                 className={step === 1 ? "invisible" : ""}
               >
                 <ArrowLeft className="mr-2 h-4 w-4" />
@@ -1037,13 +1710,14 @@ export default function OnboardingPage() {
                   variant="ghost"
                   size="sm"
                   onClick={handleSkip}
-                  disabled={submitting}
+                  disabled={submitting || persistingCredential || persistingWorkspace}
                   className="text-muted-foreground"
                 >
                   Skip setup
                 </Button>
                 {step < 3 ? (
-                  <Button onClick={() => setStep((s) => (s + 1) as Step)} disabled={!canContinue() || submitting}>
+                  <Button onClick={() => void handleContinue()} disabled={!canContinue() || submitting || persistingCredential || persistingWorkspace}>
+                    {persistingCredential || persistingWorkspace ? <Spinner className="mr-2 h-4 w-4" /> : null}
                     Continue
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
@@ -1059,18 +1733,115 @@ export default function OnboardingPage() {
                 )}
               </div>
             </div>
+            )}
+
+            {launchSummary && (
+              /* pb-6 because the column no longer pads its own bottom — the
+                 nav row owns that inset, and the nav row is gone on this
+                 screen. Without it the receipt's last button sits flush
+                 against the edge of the pane. */
+              <div className="space-y-5 pb-6 lg:pb-8">
+                <div>
+                  <h2 className="text-2xl font-semibold tracking-tight">
+                    {/* Zero is a real case, not a guard against one. Only
+                        proposals the Guide made land in createdCrews; the
+                        template path creates its crew inside POST
+                        /onboarding/setup and never reports a roster back, so
+                        this screen used to greet those users with
+                        "Your 0 crews are ready" over an empty list. */}
+                    {createdCrews.length <= 1 ? "Your crew is ready" : `Your ${createdCrews.length} crews are ready`}
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {createdCrews.length === 0
+                      ? "Setup is complete — your crew is deployed and ready to talk to."
+                      : "Here is what Crewship just built for you."}
+                  </p>
+                </div>
+
+                <ul className="space-y-3">
+                  {createdCrews.map((c) => (
+                    <li key={c.id} className="rounded-xl border border-border bg-card/60 p-3">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="font-medium">{c.proposal.crewName}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {c.proposal.agents.length}{" "}
+                          {c.proposal.agents.length === 1 ? "agent" : "agents"}
+                        </span>
+                      </div>
+                      <ul className="mt-2 space-y-1">
+                        {c.proposal.agents.map((a) => (
+                          <li key={a.name} className="flex items-baseline justify-between gap-3 text-xs">
+                            <span className="text-muted-foreground">
+                              <span className="text-foreground">{a.name}</span>
+                              {a.role ? ` — ${a.role}` : ""}
+                            </span>
+                            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{a.model}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <Button
+                    onClick={() =>
+                      router.push(
+                        launchSummary.agentSlug
+                          ? `/chat/${encodeURIComponent(launchSummary.agentSlug)}`
+                          : "/",
+                      )
+                    }
+                  >
+                    {launchSummary.agentSlug ? "Start chatting" : "Go to dashboard"}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                  {launchSummary.agentSlug && (
+                    <Button variant="ghost" onClick={() => router.push("/")}>
+                      Go to dashboard
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* RIGHT: live preview */}
-        <div className="bg-muted/20 p-6 lg:p-12 flex items-center">
-          <OnboardingPreview
-            workspaceName={workspaceName}
-            crewSlug={crewSlug}
-            mode={step === 3 ? mode : null}
-            pairingPending={mode === "cli" && pairStatus !== "consumed"}
-            adapterKey={adapter}
-          />
+        {/* RIGHT: live preview.
+            A surface of its own, lit rather than decorated. `bg-muted/20` was
+            within a hair of the left column's background, so the split read as
+            one page with a hairline down it rather than as two panes.
+
+            No mark here on purpose: it already sits in the lockup a few
+            centimetres to the left, and a second copy at watermark opacity
+            earns nothing except somewhere else for the eye to go. The cards
+            are the only figure on this surface.
+
+            Top-aligned for the same reason the left column is: the preview
+            grows downward as you fill things in, and centring made the
+            workspace card drift while it did. */}
+        <div className="onboarding-pane relative flex items-start min-h-0 overflow-hidden p-6 lg:h-screen lg:p-12">
+          {/* Step 3 in chat mode: the right panel becomes a chat with the
+              setup agent (PRD §4.1/§1) instead of the static preview.
+              Every other step, and step 3's template escape hatch, keep the
+              live preview exactly as before — zero regression on the path
+              that already works. */}
+          {step === 3 && crewMode === "chat" ? (
+            <OnboardingSetupChat
+              onUnavailable={handleSetupAgentUnavailable}
+              onProposalApplied={handleProposalApplied}
+              onProposalPrepared={setPreparedProposal}
+              language={language}
+            />
+          ) : (
+            <OnboardingPreview
+              workspaceName={workspaceName}
+              crewSlug={crewSlug}
+              mode={step === 2 ? mode : null}
+              pairingPending={mode === "cli" && pairStatus !== "consumed"}
+              adapterKey={adapter}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -1080,8 +1851,8 @@ export default function OnboardingPage() {
 function VerticalStepper({ step }: { step: Step }) {
   const items = [
     { n: 1, label: "Workspace" },
-    { n: 2, label: "Crew" },
-    { n: 3, label: "Adapter" },
+    { n: 2, label: "Adapter" },
+    { n: 3, label: "Crew" },
   ] as const
   return (
     <div className="space-y-0">
