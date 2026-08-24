@@ -111,6 +111,16 @@ describe("<StepContainer> — network", () => {
     expect(screen.queryByText(/Allowed hosts/)).toBeNull()
   })
 
+  // "The container reaches any host" undersold it and made Open egress read
+  // like a middle setting. free mode is the maximum: the sidecar's dial guard
+  // is `p.allowPrivate || p.freeMode`, so it also permits RFC1918 + loopback.
+  // Saying so is what makes it clear there is no third, wilder mode missing.
+  it("admits that open includes the private network, and what it still does not", () => {
+    renderStep()
+    expect(screen.getByText(/private network and localhost/i)).toBeInTheDocument()
+    expect(screen.getByText(/metadata stays blocked/i)).toBeInTheDocument()
+  })
+
   it("switching on the allowlist patches networkMode and reveals the editor", () => {
     const { setState, rerender } = renderStep()
     fireEvent.click(screen.getByRole("switch", { name: /allowlist/i }))

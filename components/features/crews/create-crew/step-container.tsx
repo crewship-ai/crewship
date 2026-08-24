@@ -127,11 +127,28 @@ export function StepContainer({ state, setState, onPickImage }: StepProps) {
 // Egress
 // =============================================================================
 
+/**
+ * Two modes, because there is no third one to offer.
+ *
+ * "Open egress" reads like a middle setting with a wilder one behind it. It
+ * is not: `free` is already the maximum this platform can hand out. The
+ * sidecar's dial guard is `p.allowPrivate || p.freeMode` (sidecar/proxy.go),
+ * so free mode skips the domain allowlist AND permits RFC1918 and loopback —
+ * your LAN, and anything listening on the host.
+ *
+ * What stays blocked in free mode is link-local and cloud metadata:
+ * 169.254.169.254 is the AWS/GCP instance-metadata endpoint, and reaching it
+ * hands an agent the host's IAM role. That is not a strictness dial we are
+ * declining to turn up; it is the one address that must never be reachable,
+ * and a "YOLO" switch that unblocked it would be a credential-exfiltration
+ * feature. So the honest UI is two modes with the open one saying plainly how
+ * far it already goes — not three with a third that cannot mean anything new.
+ */
 function NetworkSection({ state, setState }: Props) {
   const restricted = state.networkMode === "restricted"
 
   return (
-    <CreateSurfaceSection title="Network" icon={Network} accent="purple" hint="Outbound HTTP from the container.">
+    <CreateSurfaceSection title="Network" icon={Network} accent="purple" hint="Where the container may connect.">
       <CreateSurfaceToggleRow
         icon={restricted ? ShieldCheck : Globe}
         accent={restricted ? "green" : "amber"}
@@ -139,7 +156,7 @@ function NetworkSection({ state, setState }: Props) {
         hint={
           restricted
             ? "Only the listed hosts, plus the provider APIs the sidecar always permits."
-            : "The container reaches any host."
+            : "Any host, plus your private network and localhost. Cloud metadata stays blocked."
         }
         control={
           <Switch

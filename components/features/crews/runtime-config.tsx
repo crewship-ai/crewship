@@ -1382,11 +1382,29 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           </CreateSurfaceSection>
         )}
 
+        {/* The hints below are the whole difference between these two
+         *  sections, in words that do not require knowing what a devcontainer
+         *  feature or mise is.
+         *
+         *  They ARE two mechanisms and the split is real: a feature is an OCI
+         *  artifact whose install.sh runs as root at image build time and can
+         *  do anything (add a package, start a Postgres server, hang a
+         *  postCreateCommand), and the result is cached as an image layer.
+         *  mise runs after the build, as the agent user, into
+         *  ~/.local/share/mise, and can express exactly one thing: this tool
+         *  at this version. Capped at 20 tools (ErrMiseTooManyTools).
+         *
+         *  But 247 names appear in BOTH catalogues, and they are precisely the
+         *  ones anybody types — node, python, go, rust, terraform, kubectl,
+         *  aws-cli. For those the choice is real to us and meaningless to the
+         *  person making a crew. So the hints name the only two situations
+         *  where it actually decides something: "a specific version" and
+         *  "anything else". */}
         <CreateSurfaceSection
           title="Preinstalled tooling"
           icon={Wrench}
           accent="amber"
-          hint="devcontainer features"
+          hint="things the container comes with — whatever version ships"
         >
           {toolingPaneSections}
         </CreateSurfaceSection>
@@ -1401,8 +1419,29 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           icon={Boxes}
           accent="blue"
           label="Language runtimes"
-          summary={selectedRuntimeCount > 0 ? `${selectedRuntimeCount} pinned` : "none pinned"}
+          // Says what is inside AND why you would open it. The count alone
+          // ("none pinned") answered the first and left the section looking
+          // like a duplicate of the tooling list above it.
+          summary={
+            selectedRuntimeCount > 0
+              ? `${selectedRuntimeCount} pinned to an exact version`
+              : "none pinned — only needed for an exact version"
+          }
         >
+          {/* No claim here about what happens if the same tool is picked in
+              BOTH sections. Features contribute their bin dirs to PATH via
+              the Dockerfile's merged `ENV PATH` and /etc/profile.d; mise
+              installs to ~/.local/share/mise and reshims, but nothing found
+              in this repo puts that shims directory on PATH —
+              scripts/entrypoint.sh prepends /opt/crew-tools/bin and
+              /home/agent/.local/bin only. Until that is settled in a
+              container, the honest copy is the one that does not say. */}
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Use this when a version matters — <span className="text-foreground/85">Node 22.11.0</span>,
+            not just &ldquo;Node&rdquo;. Anything you only need <em>present</em> belongs in Preinstalled
+            tooling above, which also installs faster: its result is cached with the image, this runs
+            on every build. Capped at 20.
+          </p>
           {runtimesPaneSections}
         </CreateSurfaceDisclosure>
 
