@@ -35,6 +35,87 @@ const TILE = "CrewshipLogoTile"
 // branding module, which is the thing being pinned.
 const SHARED_MARK = /Crewship(Logo|LogoTile)\b/
 
+// Reading JSX with a regex is what made the two previous versions of the
+// `tight` guard unreliable, each in its own way: a substring on one line that
+// a formatter could disable, then `[\s\S]*?\/?>` which stops at the first `>`
+// — including the one in `onClick={() => …}` — and `\btight\b`, which is just
+// as happy inside `className="tight-logo"`. Neither is a parse.
+//
+// This is: it walks the source tracking quotes and brace depth, so an element
+// ends at the `>` that actually closes it and an attribute is a token in the
+// attribute list rather than a substring anywhere inside it. Small enough to
+// read, which matters more here than generality — a guard nobody can verify is
+// the thing being guarded against.
+
+// crewshipLogoUsages returns each `<CrewshipLogo …>` element as written.
+// `<CrewshipLogoTile>` is a different component and is deliberately not one:
+// the tile supplies its own padding, and `tight` would be wrong on it.
+function crewshipLogoUsages(source: string): string[] {
+  const usages: string[] = []
+  const TAG = "<CrewshipLogo"
+  for (let i = source.indexOf(TAG); i !== -1; i = source.indexOf(TAG, i + 1)) {
+    // The tag name ends here, so `<CrewshipLogoTile` is not a match.
+    if (/[A-Za-z0-9_$]/.test(source[i + TAG.length] ?? "")) continue
+    const end = elementEnd(source, i + TAG.length)
+    if (end === -1) continue
+    usages.push(source.slice(i, end + 1))
+  }
+  return usages
+}
+
+// elementEnd finds the `>` closing the tag opened before `from`, skipping any
+// that sit inside a string literal or a `{…}` expression.
+function elementEnd(source: string, from: number): number {
+  let depth = 0
+  let quote: string | null = null
+  for (let i = from; i < source.length; i++) {
+    const ch = source[i]
+    if (quote) {
+      if (ch === "\\") i++
+      else if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'" || ch === "`") quote = ch
+    else if (ch === "{") depth++
+    else if (ch === "}") depth--
+    else if (ch === ">" && depth === 0) return i
+  }
+  return -1
+}
+
+// hasAttribute reports whether `name` appears as an attribute of the element,
+// not merely as text somewhere inside it. Quoted values and brace expressions
+// are blanked first, so `className="tight-logo"` and `title={tight}` do not
+// count as the `tight` prop.
+function hasAttribute(element: string, name: string): boolean {
+  let out = ""
+  let depth = 0
+  let quote: string | null = null
+  for (let i = 0; i < element.length; i++) {
+    const ch = element[i]
+    if (quote) {
+      if (ch === "\\") i++
+      else if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch
+      continue
+    }
+    if (ch === "{") {
+      depth++
+      continue
+    }
+    if (ch === "}") {
+      depth--
+      continue
+    }
+    // A blank keeps token boundaries intact where an expression was removed.
+    out += depth > 0 ? " " : ch
+  }
+  return new RegExp(`(^|\\s)${name}(\\s|=|/|>|$)`).test(out)
+}
+
 describe("auth pages wear the product mark", () => {
   const pages = authPages()
 
@@ -65,14 +146,17 @@ describe("auth pages wear the product mark", () => {
       join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
       "utf8"
     )
-    // Matched as a whole element rather than as the literal "<CrewshipLogo ".
-    // A prop moving to its own line — a formatter's decision, not an author's
-    // — turned the guard off silently: the substring stopped matching, the
-    // `if` never entered, and an un-cropped mark would have sailed through a
-    // green test. A guard that a line break can disable is not a guard.
-    const usages = shell.match(/<CrewshipLogo\b[\s\S]*?\/?>/g) ?? []
+    const usages = crewshipLogoUsages(shell)
+    // A guard that finds nothing must fail, not pass vacuously — the third
+    // version of the same lesson this test keeps learning. An empty match list
+    // means the component was renamed or the file restructured, which is
+    // exactly when the property stops being checked.
+    expect(usages.length).toBeGreaterThan(0)
     for (const usage of usages) {
-      expect(usage).toMatch(/\btight\b/)
+      expect(
+        hasAttribute(usage, "tight"),
+        `<CrewshipLogo> without \`tight\`: ${usage}`
+      ).toBe(true)
     }
   })
 

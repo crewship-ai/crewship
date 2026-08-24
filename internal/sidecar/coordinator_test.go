@@ -540,8 +540,15 @@ func TestBuildHandler_CrossCrewBypassRejected(t *testing.T) {
 	mu.Lock()
 	seen := append([]string(nil), upstreamPaths...)
 	mu.Unlock()
+	// Exact, not Contains. The mock records r.URL.Path, so the control-plane
+	// call (coordinator.go asks for /api/v1/internal/credentials?workspace_id=…)
+	// arrives here with its query already stripped and compares equal. Contains
+	// additionally matched every path BELOW it — /credentials/{id}/rotate, and
+	// the /credentials/metadata a future route could add — none of which is the
+	// control plane this guard is about, each of which would have failed the
+	// test for something that is not a Patch-E regression.
 	for _, p := range seen {
-		if strings.Contains(p, "/api/v1/internal/credentials") {
+		if p == "/api/v1/internal/credentials" {
 			t.Fatalf("PATCH-E REGRESSION: peer-crew curl --resolve reached the /credentials control plane (upstream saw %q)", p)
 		}
 	}
