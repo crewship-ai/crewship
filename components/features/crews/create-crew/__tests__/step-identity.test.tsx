@@ -89,6 +89,26 @@ describe("<StepIdentity>", () => {
     expect(namePatch).toEqual({ name: "Foo Bar" }) // slug NOT included
   })
 
+  it("normalises what is typed into Slug instead of describing the rule", () => {
+    // Before: the field took e.target.value verbatim, the hint said
+    // "Lowercase, no spaces", and the server answered 400 on Create — three
+    // steps later. Now the field cannot hold a value POST /crews rejects.
+    const { setState } = harness({ slugTouched: true })
+
+    fireEvent.change(screen.getByPlaceholderText("engineering"), {
+      target: { value: "Engineering Team!" },
+    })
+
+    expect(setState).toHaveBeenCalledWith({ slug: "engineering-team-", slugTouched: true })
+  })
+
+  it("no longer tells the user about a rule the field enforces", () => {
+    harness({ slug: "engineering" })
+    expect(screen.queryByText(/lowercase, no spaces/i)).toBeNull()
+    // What the field cannot enforce is still said.
+    expect(screen.getByText(/permanent/i)).toBeInTheDocument()
+  })
+
   it("description input writes through to setState", () => {
     const { setState } = harness()
 

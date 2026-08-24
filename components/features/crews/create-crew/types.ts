@@ -20,6 +20,56 @@ const CREW_COLORS: readonly CrewColor[] = [
   "rose", "cyan", "lime", "fuchsia",
 ] as const
 
+/** Longest slug POST /api/v1/crews accepts (crews_create.go). */
+export const SLUG_MAX = 50
+
+/**
+ * Coerce anything typed into a slug the server will accept.
+ *
+ * The rule is `^[a-z0-9][a-z0-9_-]*$` at 2–50 characters
+ * (internal/api/helpers.go → validSlugRe, crews_create.go → the length
+ * check). The field used to accept any string and only describe the rule in
+ * a hint, so `Engineering Team!` typed fine, survived three more steps and
+ * came back as a 400 on Create — the worst place to learn a format.
+ *
+ * Two deliberate omissions, both because this runs on every keystroke:
+ *
+ *  · **A trailing hyphen is left alone.** This runs on the field the user is
+ *    typing INTO, so its own output is the next keystroke's input. Trimming
+ *    would eat the space in "my crew": "my " normalises to "my-", trimming
+ *    gives back "my", and the next character lands as "myc". The server
+ *    accepts a trailing hyphen anyway — only the FIRST character is fenced.
+ *    `slugFromName` does trim, because deriving re-reads the whole name.
+ *  · **Length is capped, not floored.** Two characters is the minimum, but
+ *    enforcing it mid-word would block you from ever typing the first one.
+ *    The step's own validation already gates Continue on it.
+ */
+export function normalizeSlug(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    // Collapse runs of separators. This second pass is what the old
+    // `[^a-z0-9]+ → "-"` got for free by treating hyphens as invalid too;
+    // keeping "_" valid means "Foo   ---   Bar" arrives here as
+    // "foo-----bar" and has to be folded explicitly. The run's first
+    // character wins, so "a__b" stays an underscore.
+    .replace(/[-_]{2,}/g, (run) => run[0])
+    // Leading -/_ is the one thing validSlugRe rejects outright.
+    .replace(/^[-_]+/, "")
+    .slice(0, SLUG_MAX)
+}
+
+/**
+ * The slug a crew name implies, for the auto-fill while Slug is untouched.
+ *
+ * Same rule as `normalizeSlug` plus a trailing trim, which is safe here and
+ * only here: the field being edited is Name, so each keystroke re-derives
+ * from the full name and no separator the user typed is ever lost.
+ */
+export function slugFromName(name: string): string {
+  return normalizeSlug(name).replace(/[-_]+$/, "")
+}
+
 /** Narrow an arbitrary string (e.g. from a picker callback or template DB row)
  *  into the strict CrewColor union. Falls back to "blue" for legacy hex codes
  *  or unknown values so wizard state stays well-typed end-to-end. */

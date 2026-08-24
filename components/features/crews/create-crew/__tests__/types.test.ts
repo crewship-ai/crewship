@@ -4,7 +4,86 @@ import {
   MEMORY_PRESETS,
   CPU_PRESETS,
   TTL_PRESETS,
+  SLUG_MAX,
+  normalizeSlug,
+  slugFromName,
 } from "../types"
+
+/**
+ * The server's rule, transcribed rather than approximated:
+ * internal/api/helpers.go → `validSlugRe = ^[a-z0-9][a-z0-9_-]*$`, with the
+ * 2–50 length check in crews_create.go. Anything normalizeSlug emits has to
+ * satisfy it, because the field no longer offers the user a way to type
+ * something that does not.
+ */
+const VALID_SLUG = /^[a-z0-9][a-z0-9_-]*$/
+
+describe("create-crew/types — slug normalisation", () => {
+  it("makes the 400 the server used to send unreachable", () => {
+    // The literal string that reproduced it: POST /api/v1/crews with
+    // slug "Engineering Team!" answers 400 "slug must contain only
+    // lowercase letters, numbers, hyphens, and underscores".
+    expect(normalizeSlug("Engineering Team!")).toBe("engineering-team-")
+    expect(normalizeSlug("Engineering Team!")).toMatch(VALID_SLUG)
+  })
+
+  it("lowercases, and folds every run of rejects into one hyphen", () => {
+    expect(normalizeSlug("Sales & Ops / Q1")).toBe("sales-ops-q1")
+    expect(normalizeSlug("Foo   ---   Bar")).toBe("foo-bar")
+  })
+
+  it("keeps the underscore the server accepts", () => {
+    // The old inline deriver used [^a-z0-9]+ and threw underscores away
+    // even though validSlugRe allows them.
+    expect(normalizeSlug("crew_two")).toBe("crew_two")
+  })
+
+  it("drops a leading separator, which is the one thing validSlugRe rejects", () => {
+    expect(normalizeSlug("-lead")).toBe("lead")
+    expect(normalizeSlug("__lead")).toBe("lead")
+    expect(normalizeSlug("!!!lead")).toBe("lead")
+  })
+
+  it("leaves a trailing hyphen so typing a space does not eat it", () => {
+    // Typing "my crew" one character at a time: the field's own output is
+    // the next keystroke's input, so trimming here would turn "my " back
+    // into "my" and land the next character as "myc".
+    expect(normalizeSlug("my ")).toBe("my-")
+    expect(normalizeSlug(normalizeSlug("my ") + "c")).toBe("my-c")
+  })
+
+  it("caps at the length the server accepts", () => {
+    expect(normalizeSlug("a".repeat(200))).toHaveLength(SLUG_MAX)
+    expect(normalizeSlug("a".repeat(200))).toMatch(VALID_SLUG)
+  })
+
+  it("emits a server-valid slug for anything typeable", () => {
+    for (const raw of [
+      "Engineering", "ENGINEERING", "Ops 2024", "účetnictví", "  spaced  ",
+      "a", "9lives", "-", "___", "!@#$%", "Tab\tSep", "emoji 🚀 crew",
+    ]) {
+      const out = normalizeSlug(raw)
+      // "-", "___" and "!@#$%" normalise to empty — that is the empty field,
+      // which the step's required-check catches, not an invalid slug.
+      if (out !== "") expect(out, `input: ${JSON.stringify(raw)}`).toMatch(VALID_SLUG)
+    }
+  })
+
+  describe("slugFromName — the auto-fill while Slug is untouched", () => {
+    it("trims the trailing separator, unlike the field itself", () => {
+      // Safe here because the edited field is Name: each keystroke
+      // re-derives from the whole name, so no separator is ever lost.
+      expect(slugFromName("Engineering Team!")).toBe("engineering-team")
+      expect(slugFromName("my ")).toBe("my")
+    })
+
+    it("agrees with normalizeSlug on everything else", () => {
+      for (const name of ["Customer Support", "Sales & Ops", "crew_two", "9lives"]) {
+        expect(slugFromName(name)).toBe(normalizeSlug(name).replace(/[-_]+$/, ""))
+      }
+    })
+  })
+})
 
 describe("create-crew/types", () => {
   describe("INITIAL_STATE", () => {

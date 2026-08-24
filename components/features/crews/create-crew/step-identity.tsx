@@ -9,7 +9,7 @@ import {
   CreateSurfaceTitleInput,
 } from "@/components/layout/create-surface"
 import { getCrewIconDef } from "@/lib/entities"
-import { type WizardState } from "./types"
+import { normalizeSlug, slugFromName, type WizardState } from "./types"
 
 interface Props {
   state: WizardState
@@ -24,8 +24,10 @@ export function StepIdentity({ state, setState, onPickIcon }: Props) {
       setState({ name: val })
       return
     }
-    const auto = val.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
-    setState({ name: val, slug: auto })
+    // Derive through the same rule the field itself enforces, so the
+    // auto-filled slug and a hand-typed one cannot disagree. The old inline
+    // version dropped underscores, which the server accepts.
+    setState({ name: val, slug: slugFromName(val) })
   }
 
   return (
@@ -84,13 +86,12 @@ export function StepIdentity({ state, setState, onPickIcon }: Props) {
           label="Slug"
           htmlFor="crew-wizard-slug"
           required
-          // The permanence warning was a TIP notice taking four lines under
-          // the fields. It is one fact about one field, so it belongs on that
-          // field: same words, no box.
+          // "Lowercase, no spaces" is gone because the field now enforces it
+          // rather than asking. What is left is the one fact the input cannot
+          // make true by itself: you do not get to change this later.
           hint={
             <>
-              Lowercase, no spaces — how agents address this crew. <strong>Permanent</strong>: it is the
-              URL and the CLI argument, as in{" "}
+              <strong>Permanent</strong> — the URL and the CLI argument, as in{" "}
               <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-[11px]">
                 crewship agent create --crew {state.slug || "engineering"}
               </code>
@@ -101,7 +102,7 @@ export function StepIdentity({ state, setState, onPickIcon }: Props) {
           <input
             id="crew-wizard-slug"
             value={state.slug}
-            onChange={(e) => setState({ slug: e.target.value, slugTouched: true })}
+            onChange={(e) => setState({ slug: normalizeSlug(e.target.value), slugTouched: true })}
             placeholder="engineering"
             className="h-8 w-full rounded-md border border-hairline bg-background px-3 font-mono text-xs outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 max-sm:h-12 max-sm:text-sm"
           />
