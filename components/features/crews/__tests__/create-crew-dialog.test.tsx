@@ -140,9 +140,9 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
     // Step 2 — switch to Empty
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Empty crew/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Start empty/ })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Start empty/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     // Step 3 — Runtime defaults are valid → continue
@@ -295,8 +295,8 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "OverCap" } })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
-    fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Start empty/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Start empty/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
     await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
@@ -445,8 +445,8 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       renderDialog()
       fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
       fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-      await waitFor(() => screen.getByRole("button", { name: /^Empty crew/ }))
-      fireEvent.click(screen.getByRole("button", { name: /^Empty crew/ }))
+      await waitFor(() => screen.getByRole("button", { name: /^Start empty/ }))
+      fireEvent.click(screen.getByRole("button", { name: /^Start empty/ }))
       fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
       await waitFor(() => screen.getByText("Base image"))
     }

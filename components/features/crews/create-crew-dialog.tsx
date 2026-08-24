@@ -20,6 +20,7 @@ import { StepIdentity } from "./create-crew/step-identity"
 import { StepLineup } from "./create-crew/step-lineup"
 import { StepContainer } from "./create-crew/step-container"
 import { BaseImagePanel, effectiveBaseImage, patchImage } from "./create-crew/base-image"
+import { ImportCrewPanel } from "./create-crew/import-panel"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { CREW_ICON_CATEGORIES, GRADIENT_PALETTES, getCrewIconDef, searchCrewIcons } from "@/lib/entities"
 import { asCrewColor } from "./create-crew/types"
@@ -172,7 +173,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   // to its primary, hence the query: the primary is its last button.
   // The base-image picker, as a panel this surface swaps to rather than a
   // second dialog over it.
-  const [panel, setPanel] = useState<null | "image" | "icon">(null)
+  const [panel, setPanel] = useState<null | "image" | "icon" | "import">(null)
   const [iconQuery, setIconQuery] = useState("")
   const [iconCategory, setIconCategory] = useState<string | null>(null)
   const iconResults = useMemo(
@@ -215,14 +216,18 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
             ? "Base image — new crew"
             : panel === "icon"
               ? "Icon — new crew"
-              : "New crew"
+              : panel === "import"
+                ? "Import — new crew"
+                : "New crew"
         }
         description={
           panel === "image"
             ? "What the container starts from. Node 22 is the recommendation for most agent work; the rest are there for a crew that needs a toolchain preinstalled."
             : panel === "icon"
               ? "Pick a colour, then an icon. Browse by category, or search."
-              : STEP_DESCRIPTION[step]
+              : panel === "import"
+                ? "Read a crew manifest into this form. It fills in what the wizard asks about and tells you what it leaves behind."
+                : STEP_DESCRIPTION[step]
         }
         onBack={panel ? () => setPanel(null) : step > 1 ? back : undefined}
         onClose={() => onOpenChange(false)}
@@ -283,10 +288,31 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
             columns={8}
           />
         )}
+        {panel === "import" && (
+          <ImportCrewPanel
+            onApply={(patch) => {
+              setState(patch)
+              setPanel(null)
+              // Back to Identity, not on to Container. The import rewrote the
+              // name, slug, icon and colour, and the step that shows those is
+              // step 1 — landing anywhere else means the one thing the user
+              // most needs to check is the one thing they walked past.
+              setStep(1)
+              toast.success("Form filled from the manifest")
+            }}
+          />
+        )}
         {!panel && step === 1 && (
           <StepIdentity state={state} setState={setState} onPickIcon={() => setPanel("icon")} />
         )}
-        {!panel && step === 2 && <StepLineup state={state} setState={setState} workspaceId={workspaceId} />}
+        {!panel && step === 2 && (
+          <StepLineup
+            state={state}
+            setState={setState}
+            workspaceId={workspaceId}
+            onImport={() => setPanel("import")}
+          />
+        )}
         {!panel && step === 3 && (
           <StepContainer state={state} setState={setState} onPickImage={() => setPanel("image")} />
         )}

@@ -66,14 +66,16 @@ function harness(initial: Partial<WizardState> = {}, templates: CrewTemplate[] =
   })
   vi.stubGlobal("fetch", fetchMock)
 
-  const r = render(<StepLineup state={state} setState={setState} workspaceId="ws_probe" />)
+  const onImport = vi.fn()
+  const r = render(<StepLineup state={state} setState={setState} workspaceId="ws_probe" onImport={onImport} />)
   return {
     ...r,
     setState,
+    onImport,
     getState: () => state,
     rerenderWith: (patch: Partial<WizardState>) => {
       state = { ...state, ...patch }
-      r.rerender(<StepLineup state={state} setState={setState} workspaceId="ws_probe" />)
+      r.rerender(<StepLineup state={state} setState={setState} workspaceId="ws_probe" onImport={onImport} />)
     },
   }
 }
@@ -110,12 +112,12 @@ describe("<StepLineup> — the request", () => {
   it("says the catalogue failed, and still offers the empty crew", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) } as Response)))
     let state: WizardState = { ...INITIAL_STATE }
-    render(<StepLineup state={state} setState={(p) => { state = { ...state, ...p } }} workspaceId="ws_probe" />)
+    render(<StepLineup state={state} setState={(p) => { state = { ...state, ...p } }} workspaceId="ws_probe" onImport={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/did not load/i))
     // A failed catalogue must not be a dead end: this is the one option that
     // needs no server data at all.
-    expect(tile(/^Empty crew/)).toBeInTheDocument()
+    expect(tile(/^Start empty/)).toBeInTheDocument()
   })
 })
 
@@ -193,7 +195,7 @@ describe("<StepLineup> — the identity a template lends", () => {
 describe("<StepLineup> — empty crew", () => {
   it("is a tile beside the templates, not a separate mode of the screen", async () => {
     harness({}, [TPL_BUILTIN_ENG])
-    const empty = await screen.findByRole("button", { name: /^Empty crew/ })
+    const empty = await screen.findByRole("button", { name: /^Start empty/ })
     expect(empty).toHaveTextContent(/hire into it/i)
     // The tab strip it replaces.
     expect(screen.queryByRole("button", { name: /Browse templates/ })).toBeNull()
@@ -201,13 +203,47 @@ describe("<StepLineup> — empty crew", () => {
 
   it("clears any template pick when chosen", async () => {
     const { setState } = harness({ pickedTemplateSlug: "software-development" }, [TPL_BUILTIN_ENG])
-    fireEvent.click(await screen.findByRole("button", { name: /^Empty crew/ }))
+    fireEvent.click(await screen.findByRole("button", { name: /^Start empty/ }))
 
     expect(setState).toHaveBeenCalledWith({
       mode: "empty",
       pickedTemplateSlug: null,
       pickedTemplateMeta: null,
     })
+  })
+})
+
+describe("<StepLineup> — the two ways in that are not a template", () => {
+  it("puts Start empty and Import above the grid, not inside it", async () => {
+    harness({}, [TPL_BUILTIN_ENG])
+    await screen.findByRole("button", { name: /^Software Development/ })
+
+    // Both actions precede every template in DOM order, which is what makes
+    // them a row above the grid rather than two more tiles to scan past.
+    const buttons = screen.getAllByRole("button").map((b) => b.textContent ?? "")
+    const empty = buttons.findIndex((t) => t.startsWith("Start empty"))
+    const importIdx = buttons.findIndex((t) => t.startsWith("Import YAML"))
+    const template = buttons.findIndex((t) => t.startsWith("Software Development"))
+
+    expect(empty).toBeGreaterThanOrEqual(0)
+    expect(importIdx).toBeGreaterThan(empty)
+    expect(template).toBeGreaterThan(importIdx)
+  })
+
+  it("hands importing to the wizard rather than opening anything here", async () => {
+    // Same contract the icon and base-image pickers follow: the step asks for
+    // the panel, the surface owns it.
+    const { onImport, setState } = harness({}, [TPL_BUILTIN_ENG])
+    fireEvent.click(await screen.findByRole("button", { name: /^Import YAML/ }))
+
+    expect(onImport).toHaveBeenCalledTimes(1)
+    // Import is not a lineup choice — clicking it must not select anything.
+    expect(setState).not.toHaveBeenCalled()
+  })
+
+  it("still labels the templates as the other option", async () => {
+    harness({}, [TPL_BUILTIN_ENG])
+    expect(await screen.findByText(/or start from a template/i)).toBeInTheDocument()
   })
 })
 
@@ -221,7 +257,7 @@ describe("<StepLineup> — search", () => {
     expect(screen.getByRole("button", { name: /^Research & Analysis/ })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^Software Development/ })).toBeNull()
     // The empty option is not a search result and must not be filtered away.
-    expect(screen.getByRole("button", { name: /^Empty crew/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^Start empty/ })).toBeInTheDocument()
   })
 
   it("drops a pick the search has hidden, rather than deploying it unseen", async () => {

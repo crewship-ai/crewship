@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Search, FileX2 } from "lucide-react"
+import { Search, FileCode2, FileX2 } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import {
   CreateSurfaceLoading,
@@ -28,6 +28,11 @@ import { asCrewColor, type WizardState } from "./types"
  * still matches name, description and category, each tile still says whether
  * it is built-in or this workspace's, and twelve rows do not need faceting.
  * What is NOT gone: every template the server returns, and the empty option.
+ *
+ * Above the grid sit the two ways in that are not a template — "Start empty"
+ * and "Import YAML" — because neither is a point on the "which team is
+ * closest" axis the templates live on. See the comment at the row itself for
+ * why empty is an action up there rather than the loudest thing on screen.
  */
 
 interface Props {
@@ -36,9 +41,11 @@ interface Props {
   /** The dialog's workspace. GET /api/v1/crew-templates is wsCtx-wrapped and
    *  400s without it — see the fetch below. */
   workspaceId: string
+  /** Opens the wizard's YAML import panel. Not a step; see import-panel.tsx. */
+  onImport: () => void
 }
 
-export function StepLineup({ state, setState, workspaceId }: Props) {
+export function StepLineup({ state, setState, workspaceId, onImport }: Props) {
   const [templates, setTemplates] = useState<CrewTemplate[] | null>(null)
   const [query, setQuery] = useState("")
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -112,6 +119,47 @@ export function StepLineup({ state, setState, workspaceId }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* The two ways in that are not a template, lifted out of the grid.
+       *
+       * "Empty crew" was one tile among thirteen, which put "start with
+       * nobody" behind the same scan as "which of these twelve teams is
+       * closest". It is not that kind of choice — it is the other axis — so
+       * it sits above them as an action, one click away without being
+       * searched for.
+       *
+       * It stays an action rather than becoming the visually dominant
+       * option, deliberately. These twelve templates are the only thing on
+       * the whole surface that shows a first-time user what a crew IS — four
+       * agents with roles, not one bot. Make "empty" the loudest thing here
+       * and most people take it and then have no idea what to do with what
+       * they got. */}
+      <div className="grid gap-2 sm:grid-cols-2 group-data-[mobile=true]/surface:grid-cols-1">
+        <CreateSurfaceTile
+          icon={FileX2}
+          accent="slate"
+          title="Start empty"
+          description="No agents to begin with. Hire into it whenever — from the roster, or crewship agent create --crew <slug>."
+          meta="0 agents"
+          selected={state.mode === "empty"}
+          onClick={() => setState({ mode: "empty", pickedTemplateSlug: null, pickedTemplateMeta: null })}
+        />
+        <CreateSurfaceTile
+          icon={FileCode2}
+          accent="sky"
+          title="Import YAML"
+          description="Fill this form from a kind: Crew manifest — the same file crewship apply takes."
+          meta="from a file"
+          onClick={onImport}
+        />
+      </div>
+
+      <div className="flex items-center gap-2 pt-1">
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground-soft">
+          Or start from a template
+        </span>
+        <span className="h-px flex-1 bg-hairline" aria-hidden="true" />
+      </div>
+
       <div className="relative">
         <label htmlFor="crew-template-search" className="sr-only">Search crew templates</label>
         <Search
@@ -158,19 +206,6 @@ export function StepLineup({ state, setState, workspaceId }: Props) {
             onClick={() => choose(t)}
           />
         ))}
-
-        {/* One of the options, not a mode. Starting with nobody was a tab
-            beside "Browse templates", which made it a different screen rather
-            than a choice on this one. */}
-        <CreateSurfaceTile
-          icon={FileX2}
-          accent="slate"
-          title="Empty crew"
-          description="No agents to begin with. Hire into it whenever — from the roster, or crewship agent create --crew <slug>."
-          meta="0 agents"
-          selected={state.mode === "empty"}
-          onClick={() => setState({ mode: "empty", pickedTemplateSlug: null, pickedTemplateMeta: null })}
-        />
       </div>
     </div>
   )

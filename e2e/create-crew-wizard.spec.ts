@@ -6,7 +6,7 @@ import { storageFilePath } from "./global-setup"
 //
 // Drives the actual UI in Chromium against a live backend (dev server).
 // Covers:
-//   1. Empty crew flow (Identity → Lineup=Empty → Container=Skip → Review → Create)
+//   1. Empty crew flow (Identity → Lineup=Start empty → Container=Skip → Review → Create)
 //   2. Browse template flow (Identity → Lineup=Template → Container → Review → Create)
 //   3. Step strip jump-back navigation
 //   4. Container step: image and tooling up front, sizing folded, no MCP
@@ -77,9 +77,9 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Step 2 — Lineup → Empty crew
+    // Step 2 — Lineup → Start empty
     await expect(page.getByText(/step 2 of 4/i).first()).toBeVisible()
-    await page.getByRole("button", { name: /Empty crew/ }).click()
+    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
     // Step 3 — Container
@@ -134,7 +134,7 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
 
     await page.getByPlaceholder("Engineering", { exact: true }).fill("Container Vis")
     await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Empty crew/ }).click()
+    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
     // Base image is the first thing on the step, mounted rather than
@@ -186,7 +186,7 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
 
     await page.getByPlaceholder("Engineering", { exact: true }).fill("Reachable")
     await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Empty crew/ }).click()
+    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
     await expect(page.getByText(/step 3 of 4/i).first()).toBeVisible()
@@ -236,7 +236,7 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
 
     // Step 2 — Lineup → Empty (template flow has its own seed-race issues)
     await expect(page.getByText(/step 2 of 4/i).first()).toBeVisible()
-    await page.getByRole("button", { name: /Empty crew/ }).click()
+    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
     // Step 3 — Container: turn on the allowlist, list a host, and open the
