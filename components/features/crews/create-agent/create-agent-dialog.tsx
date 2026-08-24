@@ -1,11 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
   ArrowRight,
   Brain,
+  ChevronDown,
   Cpu,
   Image as ImageIcon,
   Layers,
@@ -37,12 +38,17 @@ import {
 import { cn } from "@/lib/utils"
 import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { apiFetch } from "@/lib/api-fetch"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
-import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
+import { AvatarPickerBody } from "@/components/features/crews/avatar-picker-dialog"
 import { TemplateBrowser } from "./template-browser"
-import { PersonaChip, BlankChip } from "./persona-chip"
+import {
+  AgentAccessSection,
+  applyAgentAccess,
+  useAgentAccessCatalog,
+  type AgentAccessSelection,
+} from "./agent-access"
 import { MODELS_BY_PROVIDER, defaultModelForProvider, isKnownModel } from "./llm-models"
 import {
   applyPersonaDefaults,
@@ -79,11 +85,6 @@ const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
 const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"] as const
 const LLM_PROVIDERS = ["ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"] as const
 
-/** Slim selection of personas shown as chips at the top. The full list lives
- *  behind the "All templates" popover. Built-ins were ordered to mix Lead +
- *  Agent roles + the most distinct categories so the row is visually varied. */
-const FEATURED_IDS = ["b_filip", "b_tomas", "b_viktor", "b_eva", "b_lucie", "b_radek"]
-
 /** Single-screen Create Agent dialog. Replaces the 3-step wizard with one
  *  surface that mirrors the field set of POST /api/v1/agents 1:1.
  *
@@ -94,7 +95,7 @@ const FEATURED_IDS = ["b_filip", "b_tomas", "b_viktor", "b_eva", "b_lucie", "b_r
  *  form and the submit.
  *
  *  Layout (top → bottom):
- *    - Template chips (6 featured + "All templates" popover + "Blank")
+ *    - Template: one row stating the current pick, opening the catalogue
  *    - Identity: avatar (picker) | name | crew | slug | role | role title |
  *      description
  *    - Persona textarea (always visible, pre-filled from chosen template)
@@ -123,6 +124,11 @@ export function CreateAgentDialog({
   const submittingRef = useRef(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [browserOpen, setBrowserOpen] = useState(false)
+  // Held beside the draft rather than inside it: these are not fields of
+  // POST /api/v1/agents, they are two follow-up calls the draft has no shape
+  // for, and the submit-body test asserts the draft maps 1:1 to the Go struct.
+  const [access, setAccess] = useState<AgentAccessSelection>({ integrationIds: [], channelIds: [] })
+  const accessCatalog = useAgentAccessCatalog(workspaceId, open)
   // What the server said when it said no. Rendered in the shell's refusal
   // band between the body and the footer — the toast alone had already
   // faded by the time anyone looked up from the form.
@@ -143,6 +149,7 @@ export function CreateAgentDialog({
       setBaselineCrewSlug(defaultCrewSlugRef.current)
       setSubmitting(false)
       setBrowserOpen(false)
+      setAccess({ integrationIds: [], channelIds: [] })
       setRefusal(null)
     }
     wasOpenRef.current = open
@@ -157,14 +164,6 @@ export function CreateAgentDialog({
       .replace(/^-|-$/g, "")
     if (derived !== draft.slug) setDraft((d) => ({ ...d, slug: derived }))
   }, [draft.name, draft.slug, draft.slugTouched])
-
-  const featured = useMemo(
-    () =>
-      FEATURED_IDS.map((id) => BUILTIN_PERSONAS.find((p) => p.id === id)).filter(
-        (p): p is AgentPersona => !!p,
-      ),
-    [],
-  )
 
   const seed = draft.avatarSeed || draft.slug || draft.name || "agent"
   const avatarUrl = getAgentAvatarUrl(seed, draft.avatarStyle)
@@ -271,7 +270,23 @@ export function CreateAgentDialog({
         throw new Error(text || `HTTP ${res.status}`)
       }
       const created = await res.json()
-      toast.success(`Agent "${created.name}" created`)
+
+      // Bindings are keyed on an agent that exists, so they are spent here
+      // rather than in the body above. Failures are reported, not thrown: the
+      // agent is created either way, and an agent quietly missing the tool it
+      // was created for is worse than being told where to add it.
+      const failed =
+        access.integrationIds.length || access.channelIds.length
+          ? await applyAgentAccess(workspaceId, created.id, access, accessCatalog)
+          : []
+
+      if (failed.length) {
+        toast.warning(`Agent "${created.name}" created, but ${failed.length} grant${failed.length === 1 ? "" : "s"} did not apply`, {
+          description: `${failed.join(", ")} — add them from the agent's canvas.`,
+        })
+      } else {
+        toast.success(`Agent "${created.name}" created`)
+      }
       onOpenChange(false)
       onCreated(created.slug)
       router.replace(`/crews?agent=${encodeURIComponent(created.slug)}`)
@@ -283,7 +298,7 @@ export function CreateAgentDialog({
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [draft, crews, requiresCrew, workspaceId, finalPrompt, onOpenChange, onCreated, router])
+  }, [draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
 
   // ⌘↵ / Ctrl↵ is wired by the shell — this is only the "is it submittable"
   // guard the shell asks callers to keep inside their own handler.
@@ -293,26 +308,63 @@ export function CreateAgentDialog({
   }, [valid, submitting, submit])
 
   return (
-    <>
       <CreateSurface
         open={open}
         onOpenChange={onOpenChange}
         size="lg"
         dirty={isDraftDirty(draft, baselineCrewSlug)}
         discardLabel="this agent"
-        onSubmit={handleShortcutSubmit}
+        onSubmit={() => {
+          // ⌘↵ inside the picker closes the picker; it must not also create
+          // the agent underneath it. Same rule the crew wizard applies to
+          // its base-image and icon panels.
+          if (pickerOpen) { setPickerOpen(false); return }
+          handleShortcutSubmit()
+        }}
       >
         <CreateSurfaceHeader
           concept="crews"
           accent="purple"
           context={crewName}
-          title="New agent"
-          description="Pick a template to start fast, or fill in the basics."
+          title={pickerOpen ? "Avatar — new agent" : "New agent"}
+          description={
+            pickerOpen
+              ? "Pick a style and a seed. The same seed always produces the same face."
+              : "Pick a template to start fast, or fill in the basics."
+          }
+          onBack={pickerOpen ? () => setPickerOpen(false) : undefined}
           onClose={() => onOpenChange(false)}
         />
 
         <CreateSurfaceBody className="flex flex-col gap-5">
-          {hasNoCrews && (
+          {/* The avatar picker is a PANEL: the surface swaps its body for it
+              and the back arrow returns. It used to be a second Radix dialog
+              stacked on this one — two focus traps, two Escape handlers, and
+              a discard guard on the outer surface that could not see the
+              inner. New crew's icon picker was moved off that pattern for the
+              same reasons; this is the last create surface still on it. */}
+          {pickerOpen && (
+            <AvatarPickerBody
+              agentName={draft.name || "agent"}
+              seed={draft.avatarSeed}
+              style={draft.avatarStyle}
+              crewStyle={null}
+              onChange={({ seed: nextSeed, style: nextStyle }) =>
+                setDraft((d) => ({
+                  ...d,
+                  avatarSeed: nextSeed,
+                  // The draft's avatarStyle is a plain string, so "follow the
+                  // crew" (null) resolves to the default here rather than
+                  // being stored as an inherit marker — the agent has no crew
+                  // row to inherit from until it exists.
+                  avatarStyle: nextStyle ?? DEFAULT_AVATAR_STYLE,
+                  avatarTouched: true,
+                }))
+              }
+            />
+          )}
+
+          {!pickerOpen && hasNoCrews && (
             <CreateSurfaceNotice tone="warn" icon={TriangleAlert}>
               This workspace has <strong className="text-foreground">no crews yet</strong>. Agents (and
               Leads) live inside a crew — create one first, or set this agent as a{" "}
@@ -321,33 +373,65 @@ export function CreateAgentDialog({
             </CreateSurfaceNotice>
           )}
 
-          {/* ─── Templates row ─── */}
+          {/* Everything below is the form. Hidden wholesale while the panel
+              is up: the panel replaces the body, it does not sit beside it. */}
+          {!pickerOpen && (
+            <>
+          {/* ─── Template ───
+              One line, not a wall of pills.
+              
+              This was six featured PersonaChips (avatar + name + role title
+              each) plus "All 30 templates" plus "Blank" — eight pills that
+              wrap to two rows at the surface's 800px and take the top of the
+              form before a single field is reached. Template is OPTIONAL and
+              most people either take the first thing that looks right or skip
+              it, so it does not deserve more vertical space than Identity.
+              
+              What replaces it is the shape a single-choice control normally
+              has: a row that states the current answer and opens the full
+              catalogue. The six featured are not lost — they were an
+              arbitrary slice of the same thirty, and the catalogue behind
+              this row has all of them with search and categories. */}
           <CreateSurfaceSection
             title="Template"
             icon={Sparkles}
             accent="gold"
             hint="optional · pre-fills prompt + LLM + avatar"
           >
-            <div className="flex gap-1.5 flex-wrap">
-              {featured.map((p) => (
-                <PersonaChip
-                  key={p.id}
-                  persona={p}
-                  active={draft.selectedPersona?.id === p.id}
-                  onClick={() => handlePickPersona(p)}
-                />
-              ))}
-              {/* CreateSurfaceSection has no right-hand slot, so the door to
-                  the full catalogue is a chip in the row it belongs to —
-                  which is also where the /design specimen puts it. */}
+            <div className="flex items-center gap-2">
               <Popover open={browserOpen} onOpenChange={setBrowserOpen}>
                 <PopoverTrigger asChild>
                   <button
                     type="button"
-                    className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-dashed border-white/[0.10] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-white/[0.20] hover:text-foreground/80 max-sm:min-h-12"
+                    aria-label="Choose a template"
+                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md border border-white/[0.15] bg-background px-2 py-1.5 text-left text-[13px] transition-colors hover:border-white/[0.28] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 max-sm:min-h-12"
                   >
-                    <Layers className="h-3 w-3" />
-                    All {BUILTIN_PERSONAS.length} templates
+                    {draft.selectedPersona ? (
+                      <>
+                        <span className="h-6 w-6 shrink-0 overflow-hidden rounded-full border border-white/10 bg-muted">
+                          <img
+                            src={getAgentAvatarUrl(
+                              draft.selectedPersona.suggestedSlug,
+                              draft.selectedPersona.avatarStyle,
+                            )}
+                            alt=""
+                            className="h-full w-full"
+                          />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="font-medium">{draft.selectedPersona.name}</span>
+                          <span className="text-muted-foreground"> · {draft.selectedPersona.roleTitle}</span>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                          Blank — browse {BUILTIN_PERSONAS.length} templates
+                        </span>
+                      </>
+                    )}
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent
@@ -367,10 +451,19 @@ export function CreateAgentDialog({
                   />
                 </PopoverContent>
               </Popover>
-              <BlankChip
-                active={draft.selectedPersona === null && !draft.customPrompt}
-                onClick={handleBlank}
-              />
+
+              {/* Only when there is something to clear. As a permanent
+                  "Blank" pill it was a second control competing with the
+                  picker for the same decision even when nothing was picked. */}
+              {draft.selectedPersona !== null && (
+                <button
+                  type="button"
+                  onClick={handleBlank}
+                  className="shrink-0 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground max-sm:min-h-12"
+                >
+                  Clear
+                </button>
+              )}
             </div>
           </CreateSurfaceSection>
 
@@ -580,10 +673,20 @@ WORK STYLE: …`}
               />
             </CreateSurfaceField>
 
+            {/* "on" / "off" restated the switch beside it and said nothing
+                about what is being switched. The agent canvas already words
+                this properly ("Memory between sessions — without it every
+                session starts from nothing", config-tab.tsx); the create form
+                was the one place that only had the state. Same sentence, so
+                the two surfaces cannot drift into describing it differently. */}
             <CreateSurfaceToggleRow
               concept="memory"
-              label="Memory"
-              hint={draft.memoryEnabled ? "on" : "off"}
+              label="Memory between sessions"
+              hint={
+                draft.memoryEnabled
+                  ? "Notes it keeps and can search later — AGENT.md, a daily journal, lessons."
+                  : "Without it every session starts from nothing."
+              }
               control={
                 <Switch
                   aria-label="Memory"
@@ -593,6 +696,21 @@ WORK STYLE: …`}
               }
             />
           </CreateSurfaceSection>
+
+          {/* ─── Tools & notifications ───
+              Between Runtime and Advanced on purpose. It is not advanced —
+              "which tools may this one call" is a question people have while
+              filling the form, and the answer differs from its crew's more
+              often than not: a Security Analyst and a Copywriter in the same
+              container should not hold the same integrations. The crew's
+              Container step decides what is INSTALLED; this decides what this
+              agent may CALL and where it may post. */}
+          <AgentAccessSection
+            catalog={accessCatalog}
+            selection={access}
+            onChange={setAccess}
+          />
+
 
           {/* ─── Advanced ───
               The lid carries the CURRENT values, not the field names: the
@@ -717,6 +835,8 @@ WORK STYLE: …`}
             </p>
           </CreateSurfaceDisclosure>
           </div>
+            </>
+          )}
         </CreateSurfaceBody>
 
         <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
@@ -731,24 +851,6 @@ WORK STYLE: …`}
           onPrimary={() => void submit()}
         />
       </CreateSurface>
-
-      <AvatarPickerDialog
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        agentName={draft.name || "agent"}
-        seed={draft.avatarSeed || null}
-        style={draft.avatarStyle}
-        crewStyle={null}
-        onSave={({ avatar_seed, avatar_style }) => {
-          setDraft({
-            ...draft,
-            avatarSeed: avatar_seed,
-            avatarStyle: avatar_style ?? "bottts-neutral",
-            avatarTouched: true,
-          })
-        }}
-      />
-    </>
   )
 }
 

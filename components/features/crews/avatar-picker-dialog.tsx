@@ -43,55 +43,61 @@ export interface AvatarPickerDialogProps {
  *
  * Persists via PATCH /api/v1/agents/{id} with avatar_seed + avatar_style.
  */
-export function AvatarPickerDialog({
-  open,
-  onOpenChange,
+export interface AvatarPickerBodyProps {
+  /** Fallback seed when `seed` is empty — normally the agent's name. */
+  agentName: string
+  /** Current seed. Empty means "use agentName". */
+  seed: string
+  /** Current style; null means follow the crew. */
+  style: string | null
+  /** Crew's style, for the follow-the-crew preview. */
+  crewStyle: string | null
+  onChange: (next: { seed: string; style: string | null }) => void
+}
+
+/**
+ * The picker itself — preview, style grid, quick seeds, manual seed.
+ *
+ * Split out of the dialog so the create-agent surface can render it as a
+ * PANEL instead of stacking a second Radix dialog on top of the first. That
+ * pattern was already removed from New crew's icon picker for the same
+ * reasons: two overlays means two focus traps and two Escape handlers
+ * fighting over one keystroke, the discard guard on the outer surface never
+ * sees the inner one, and on a phone the inner dialog renders inside the
+ * outer's bottom sheet at whatever width is left.
+ *
+ * Controlled, with no Save of its own. The dialog wraps it in draft state
+ * and a footer; the panel writes straight through to the form's draft, the
+ * way the crew icon picker does — there is nothing to commit because the
+ * agent does not exist yet.
+ */
+export function AvatarPickerBody({
   agentName,
   seed,
   style,
   crewStyle,
-  onSave,
-}: AvatarPickerDialogProps) {
+  onChange,
+}: AvatarPickerBodyProps) {
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
   useAvatarStylesVersion()
-  const [draftSeed, setDraftSeed] = useState(seed ?? agentName)
-  const [draftStyle, setDraftStyle] = useState<string | null>(style)
-  const [quickSeeds, setQuickSeeds] = useState<string[]>([])
-  const [busy, setBusy] = useState(false)
+  const draftSeed = seed || agentName
+  const draftStyle = style
 
-  // Re-seed dialog state on open and pre-generate the quick-pick row.
-  useEffect(() => {
-    if (!open) return
-    setDraftSeed(seed ?? agentName)
-    setDraftStyle(style)
-    setQuickSeeds(
-      Array.from({ length: 8 }, () => Math.random().toString(36).slice(2, 12)),
-    )
-  }, [open, seed, style, agentName])
+  // Generated once per mount rather than per open: both callers unmount this
+  // when they close (Radix drops dialog content, the panel is conditional),
+  // so a fresh row arrives each time without an effect watching `open`.
+  const [quickSeeds] = useState(() =>
+    Array.from({ length: 8 }, () => Math.random().toString(36).slice(2, 12)),
+  )
+
+  const setDraftSeed = (next: string) => onChange({ seed: next, style: draftStyle })
+  const setDraftStyle = (next: string | null) => onChange({ seed: draftSeed, style: next })
 
   const effectiveStyle = draftStyle ?? crewStyle ?? DEFAULT_AVATAR_STYLE
   const previewUrl = getAgentAvatarUrl(draftSeed, effectiveStyle)
 
-  const submit = async () => {
-    setBusy(true)
-    try {
-      await onSave({ avatar_seed: draftSeed, avatar_style: draftStyle })
-      onOpenChange(false)
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Avatar — {agentName}</DialogTitle>
-          <DialogDescription>
-            Pick a style and a seed. Same seed always produces the same face.
-          </DialogDescription>
-        </DialogHeader>
-
+    <>
         {/* Big preview */}
         <div className="flex items-center justify-center py-2">
           <img
@@ -230,6 +236,69 @@ export function AvatarPickerDialog({
             seed for a deterministic default.
           </div>
         </div>
+
+    </>
+  )
+}
+
+/**
+ * The picker as a standalone dialog — the canvas header and the crew member
+ * grid open it over a page, where a dialog is the right shape.
+ *
+ * Holds the draft so Cancel means something: nothing is written until Save
+ * calls onSave, which PATCHes /api/v1/agents/{id}. The create-agent surface
+ * does NOT use this — it renders AvatarPickerBody as a panel, because there
+ * is no agent to PATCH yet and a dialog inside a dialog is the thing that
+ * was wrong with it.
+ */
+export function AvatarPickerDialog({
+  open,
+  onOpenChange,
+  agentName,
+  seed,
+  style,
+  crewStyle,
+  onSave,
+}: AvatarPickerDialogProps) {
+  const [draftSeed, setDraftSeed] = useState(seed ?? agentName)
+  const [draftStyle, setDraftStyle] = useState<string | null>(style)
+  const [busy, setBusy] = useState(false)
+
+  // Re-seed from props on open: the dialog outlives any one agent in the
+  // crew member grid, where clicking a second portrait reuses this instance.
+  useEffect(() => {
+    if (!open) return
+    setDraftSeed(seed ?? agentName)
+    setDraftStyle(style)
+  }, [open, seed, style, agentName])
+
+  const submit = async () => {
+    setBusy(true)
+    try {
+      await onSave({ avatar_seed: draftSeed, avatar_style: draftStyle })
+      onOpenChange(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Avatar — {agentName}</DialogTitle>
+          <DialogDescription>
+            Pick a style and a seed. Same seed always produces the same face.
+          </DialogDescription>
+        </DialogHeader>
+
+        <AvatarPickerBody
+          agentName={agentName}
+          seed={draftSeed}
+          style={draftStyle}
+          crewStyle={crewStyle}
+          onChange={(next) => { setDraftSeed(next.seed); setDraftStyle(next.style) }}
+        />
 
         <DialogFooter>
           <button
