@@ -85,6 +85,50 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   never reach that refcount, so `crewship issue delete` runs a reclaim pass
   derived purely from the table.
 
+### Changed
+
+- **The sign-in screen is now a split, with the brand mark animated on the
+  right.** `/login` was a centred card on a flat gradient. It is now a
+  two-pane shell: the form in a readable column on the left, and on the right
+  the Crewship mark blown up until the panel is its tile.
+
+  The mark moves because it is **taken apart, not redrawn**. The logo is one
+  `<path>`, but that path is three subpaths — three sails. `lib/brand-mark.ts`
+  splits them so each carries its own motion, and the geometry on screen stays
+  byte-identical to the logo we already ship. Two of the three subpaths begin
+  with a *relative* `m`, chained to wherever the previous sail ended, so the
+  split walks the path tracking the current point and rewrites those movetos
+  as absolute; lifting them out verbatim would silently pile the sails at the
+  origin. The split runs at module load rather than into a checked-in
+  generated file, so a redrawn logo cannot leave a stale copy behind.
+
+  Each sail runs three independent sines — bob, swell about its foot, heel
+  about its foot — on periods that do not divide into each other, so the loop
+  never visibly repeats and the sails never sync into a pulse. A specular
+  sweep is clipped to the live union of the moving sails, built from the same
+  matrices that fill them, so it cannot drift off the mark.
+
+  `prefers-reduced-motion` settles the canvas to one composed frame and
+  schedules nothing; a hidden tab cancels the loop; and where there is no 2D
+  context the panel falls back to the shell's CSS gradient rather than to a
+  blank rectangle. Below `lg` the panel becomes a short brand banner above the
+  form — the headline is hidden there, because over a 12 rem banner it ran
+  straight through the sails.
+
+  `<CrewshipLogo tight />` crops the viewBox to the mark's own bounds. The
+  default 1024 box is the *tile's* box — the silhouette fills about 62% of its
+  width and 58% of its height, and the rest is padding the squircle needs.
+  Shown without a tile that padding is most of the element, which is why the
+  sign-in lockup's 28px mark read as a few grey pixels with no legible sails.
+  The lockup now uses the bare cropped mark at 36px. The tight mark is not
+  square (about 1.07:1), so size it on one axis and let the other follow.
+
+  None of the auth logic moved: `safeRedirectPath`, the
+  `/system/setup-status` first-run gate, the four banner states and the
+  signup-allowed flag are untouched. `SAIL_PATH` moved from
+  `components/branding/crewship-logo.tsx` to `lib/brand-mark.ts` and is
+  re-exported, so importers are unaffected.
+
 ### Fixed
 
 - **A failed `crewship apply` no longer reports success.** Apply is fail-fast,

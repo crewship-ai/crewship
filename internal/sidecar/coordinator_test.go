@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -487,10 +488,28 @@ func TestStripCredentialValues_GarbagePassthrough(t *testing.T) {
 // Post-Patch-E both have to agree: Host header parses as localhost AND
 // RemoteAddr is loopback.
 func TestBuildHandler_CrossCrewBypassRejected(t *testing.T) {
-	// Mock upstream that should NEVER be called (test fails if it is).
-	mockHit := false
+	// What the upstream was ASKED FOR, not merely whether it was touched.
+	//
+	// This was a bare `mockHit = true` written by the httptest goroutine and
+	// read by the test goroutine with no synchronisation — a data race the
+	// detector caught on CI, and one that made a SECURITY assertion
+	// unreliable in the dangerous direction: an unsynchronised read can
+	// observe the stale `false` and pass while the bypass it guards is
+	// happening.
+	//
+	// The flag was also the wrong question. The control-plane handler asks
+	// upstream for /api/v1/internal/credentials (handleListCredentials);
+	// the forward proxy, which this request is SUPPOSED to fall through to,
+	// asks for whatever the original URL was. Both arrive at the same mock,
+	// because the mock is also the configured upstream — so "was the mock
+	// contacted" cannot tell a bypass from the expected fall-through, and it
+	// reported a PATCH-E regression for the latter.
+	var mu sync.Mutex
+	var upstreamPaths []string
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mockHit = true
+		mu.Lock()
+		upstreamPaths = append(upstreamPaths, r.URL.Path)
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`[]`))
 	}))
@@ -518,8 +537,20 @@ func TestBuildHandler_CrossCrewBypassRejected(t *testing.T) {
 	// non-allowed domain (or 502s trying to reach it) — either way the
 	// /credentials handler never ran and upstream crewshipd was not
 	// contacted.
-	if mockHit {
-		t.Fatalf("PATCH-E REGRESSION: peer-crew curl --resolve reached /credentials handler")
+	mu.Lock()
+	seen := append([]string(nil), upstreamPaths...)
+	mu.Unlock()
+	// Exact, not Contains. The mock records r.URL.Path, so the control-plane
+	// call (coordinator.go asks for /api/v1/internal/credentials?workspace_id=…)
+	// arrives here with its query already stripped and compares equal. Contains
+	// additionally matched every path BELOW it — /credentials/{id}/rotate, and
+	// the /credentials/metadata a future route could add — none of which is the
+	// control plane this guard is about, each of which would have failed the
+	// test for something that is not a Patch-E regression.
+	for _, p := range seen {
+		if p == "/api/v1/internal/credentials" {
+			t.Fatalf("PATCH-E REGRESSION: peer-crew curl --resolve reached the /credentials control plane (upstream saw %q)", p)
+		}
 	}
 	if w.Code == http.StatusOK {
 		t.Errorf("expected refusal status, got 200")
