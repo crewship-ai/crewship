@@ -20,9 +20,46 @@ const CREWS = [
   { id: "c2", slug: "research", name: "Research" },
 ]
 
+/**
+ * The dialog reads two catalogues on mount — GET /api/v1/integrations and
+ * GET /api/v1/notification-channels — for the Tools & notifications section.
+ * vitest.setup.ts fails any unmocked network call, so every test needs an
+ * answer for them whether or not it cares about the section.
+ *
+ * Answering them here rather than per-test also keeps the submit assertions
+ * honest: they are about the POST /api/v1/agents call, not about the dialog
+ * happening to make exactly one request in its whole life.
+ */
+function catalogueResponse(url: string): Response | null {
+  if (url.includes("/api/v1/integrations")) {
+    return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } })
+  }
+  if (url.includes("/api/v1/notification-channels")) {
+    return new Response('{"channels":[]}', { status: 200, headers: { "Content-Type": "application/json" } })
+  }
+  return null
+}
+
+/** Stub fetch: catalogues answered, everything else served by `rest`. */
+function stubFetch(rest: () => Response | Promise<Response>) {
+  return vi.spyOn(global, "fetch").mockImplementation(async (url) => {
+    return catalogueResponse(String(url)) ?? (await rest())
+  })
+}
+
+/** The POST the dialog exists to make, picked out of the catalogue traffic. */
+function agentsPost(spy: ReturnType<typeof vi.spyOn>) {
+  return spy.mock.calls.find(
+    ([url, init]) => String(url).includes("/api/v1/agents") && (init as RequestInit | undefined)?.method === "POST",
+  )
+}
+
 describe("CreateAgentDialog", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    // Default: catalogues answered, anything else is a test that forgot to
+    // say what it expects.
+    stubFetch(() => new Response("{}", { status: 200 }))
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -81,8 +118,8 @@ describe("CreateAgentDialog", () => {
   })
 
   it("still issues the same POST from inside the shell", async () => {
-    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ name: "Filip", slug: "filip" }), {
+    const fetchSpy = stubFetch(() =>
+      new Response(JSON.stringify({ id: "a1", name: "Filip", slug: "filip" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -96,16 +133,14 @@ describe("CreateAgentDialog", () => {
     expect(content.contains(createBtn)).toBe(true)
     fireEvent.click(createBtn)
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
-    const [url, init] = fetchSpy.mock.calls[0]
+    await waitFor(() => expect(agentsPost(fetchSpy)).toBeDefined())
+    const [url, init] = agentsPost(fetchSpy)!
     expect(String(url)).toContain("/api/v1/agents")
-    expect(init?.method).toBe("POST")
+    expect((init as RequestInit).method).toBe("POST")
   })
 
   it("shows a refusal band — not just a toast — when the server says no", async () => {
-    vi.spyOn(global, "fetch").mockResolvedValueOnce(
-      new Response("slug taken", { status: 409 }),
-    )
+    stubFetch(() => new Response("slug taken", { status: 409 }))
     renderDialog()
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }))
@@ -153,8 +188,8 @@ describe("CreateAgentDialog", () => {
   })
 
   it("submits the right body shape and signals onCreated on success", async () => {
-    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ name: "Filip", slug: "filip" }), {
+    const fetchSpy = stubFetch(() =>
+      new Response(JSON.stringify({ id: "a1", name: "Filip", slug: "filip" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -171,16 +206,15 @@ describe("CreateAgentDialog", () => {
     expect(createBtn).not.toBeDisabled()
     fireEvent.click(createBtn)
 
-    await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledTimes(1)
-    })
+    await waitFor(() => expect(agentsPost(fetchSpy)).toBeDefined())
 
-    const [url, init] = fetchSpy.mock.calls[0]
+    const [url, rawInit] = agentsPost(fetchSpy)!
+    const init = rawInit as RequestInit
     expect(String(url)).toContain("/api/v1/agents")
     expect(String(url)).toContain("workspace_id=ws-1")
-    expect(init?.method).toBe("POST")
+    expect(init.method).toBe("POST")
 
-    const body = JSON.parse(init?.body as string)
+    const body = JSON.parse(init.body as string)
     // The drift-detector list — must exactly match agents_create.go's JSON
     // tags. Same set as in agent-draft.test.ts but verified at the
     // component layer through a real submit.
@@ -212,20 +246,20 @@ describe("CreateAgentDialog", () => {
   })
 
   it("does NOT submit when validation fails (name too short)", () => {
-    const fetchSpy = vi.spyOn(global, "fetch")
+    const fetchSpy = stubFetch(() => new Response("{}", { status: 200 }))
     renderDialog()
     const nameInput = screen.getByPlaceholderText("Filip") as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: "X" } })
     const createBtn = screen.getByRole("button", { name: /create agent/i })
     expect(createBtn).toBeDisabled()
     fireEvent.click(createBtn)
-    expect(fetchSpy).not.toHaveBeenCalled()
+    // The catalogue reads fire on mount regardless; what must not happen is
+    // the create.
+    expect(agentsPost(fetchSpy)).toBeUndefined()
   })
 
   it("does NOT close on backend 4xx — keeps the form so the user can retry", async () => {
-    vi.spyOn(global, "fetch").mockResolvedValueOnce(
-      new Response("slug taken", { status: 409 }),
-    )
+    stubFetch(() => new Response("slug taken", { status: 409 }))
     const { props } = renderDialog()
     const nameInput = screen.getByPlaceholderText("Filip") as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: "Filip" } })
