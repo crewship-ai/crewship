@@ -291,7 +291,8 @@ Two things worth knowing:
   share set. Crewship copies them into `<data-dir>/output/.runtime/` at
   startup and binds the copies, so the only host subtree the daemon has to
   see is the one it already needed for `/workspace`, `/output` and `/crew`.
-  Nothing to configure.
+  Nothing to configure. The Apple Containers provider does the same, for the
+  same reason — every Apple container is its own VM.
 - **The remaining case is a data dir outside the share set.** If you point
   `--data-dir` / `CREWSHIP_DATA_DIR` at, say, `/tmp` on macOS (which is
   `/private/tmp`, and is *not* the VM's own `/tmp`) or a path on an external
