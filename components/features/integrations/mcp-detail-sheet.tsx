@@ -44,6 +44,7 @@ interface ServerSummary {
   created_at: string
   updated_at: string
   agent_binding_count: number
+  default_access?: "all" | "bound-only"
   auth_status: "connected" | "missing" | "expired" | "none"
   trust_tier?: TrustTier
 }
@@ -210,6 +211,14 @@ export function MCPDetailSheet({
                 <Field label="Transport">{server.transport}</Field>
                 {server.endpoint && <Field label="Endpoint">{server.endpoint}</Field>}
                 {server.command && <Field label="Command">{server.command}</Field>}
+                {/* The audience, on the integration's own page. It used to be
+                    inferred from the binding count below, so it could change
+                    without anyone touching this integration (#2072). */}
+                <Field label="Available to">
+                  {server.default_access === "bound-only"
+                    ? "Bound agents only"
+                    : "Every agent in the workspace"}
+                </Field>
                 <Field label="Agent bindings">{server.agent_binding_count}</Field>
                 <Field label="Updated">{formatRelativeTime(server.updated_at)}</Field>
               </TabsContent>

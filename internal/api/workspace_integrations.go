@@ -46,6 +46,7 @@ type workspaceMCPServerResponse struct {
 	ConfigJSON      *string `json:"config_json"`
 	Icon            *string `json:"icon"`
 	Enabled         bool    `json:"enabled"`
+	DefaultAccess   string  `json:"default_access"`
 	CreatedAt       string  `json:"created_at"`
 	UpdatedAt       string  `json:"updated_at"`
 	AgentBindCount  int     `json:"agent_binding_count"`
@@ -64,6 +65,11 @@ type createWorkspaceIntegrationRequest struct {
 	EnvJSON     *string `json:"env_json"`
 	ConfigJSON  *string `json:"config_json"`
 	Icon        *string `json:"icon"`
+	// DefaultAccess is optional on create and defaults to "all" — a new
+	// integration is available to every agent in scope until someone says
+	// otherwise, which is what the old row-counting resolution meant to
+	// express and never stored.
+	DefaultAccess *string `json:"default_access"`
 }
 
 type updateIntegrationRequest struct {
@@ -76,6 +82,10 @@ type updateIntegrationRequest struct {
 	ConfigJSON  *string `json:"config_json"`
 	Icon        *string `json:"icon"`
 	Enabled     *bool   `json:"enabled"`
+	// DefaultAccess narrows or widens the server's audience. Changing it is
+	// the deliberate, auditable act that binding an agent used to perform by
+	// accident (#2072).
+	DefaultAccess *string `json:"default_access"`
 }
 
 // ==========================================
@@ -90,7 +100,7 @@ func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT ws.id, ws.workspace_id, ws.name, ws.display_name, ws.transport,
 			ws.endpoint, ws.command, ws.args_json, ws.env_json, ws.config_json,
-			ws.icon, ws.enabled, ws.created_at, ws.updated_at,
+			ws.icon, ws.enabled, ws.default_access, ws.created_at, ws.updated_at,
 			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = ws.id AND mcp_server_scope = 'workspace') AS bind_count,
 			(SELECT COUNT(*) FROM crew_mcp_servers WHERE workspace_mcp_server_id = ws.id) AS crew_count
 		FROM workspace_mcp_servers ws
@@ -108,7 +118,7 @@ func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r 
 		var enabled int
 		if err := rows.Scan(&s.ID, &s.WorkspaceID, &s.Name, &s.DisplayName, &s.Transport,
 			&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-			&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt,
+			&s.Icon, &enabled, &s.DefaultAccess, &s.CreatedAt, &s.UpdatedAt,
 			&s.AgentBindCount, &s.CrewServerCount); err != nil {
 			h.logger.Error("scan workspace integration", "error", err)
 			continue
@@ -171,15 +181,25 @@ func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r
 		}
 	}
 
+	access := accessAll
+	if req.DefaultAccess != nil && *req.DefaultAccess != "" {
+		normalized, ok := normalizeDefaultAccess(*req.DefaultAccess)
+		if !ok {
+			replyError(w, http.StatusBadRequest, errDefaultAccessVocabulary)
+			return
+		}
+		access = normalized
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
 
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO workspace_mcp_servers (id, workspace_id, name, display_name, transport,
-			endpoint, command, args_json, env_json, config_json, icon, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+			endpoint, command, args_json, env_json, config_json, icon, enabled, default_access, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
 		id, workspaceID, req.Name, req.DisplayName, req.Transport,
-		req.Endpoint, req.Command, req.ArgsJSON, req.EnvJSON, req.ConfigJSON, req.Icon, now, now)
+		req.Endpoint, req.Command, req.ArgsJSON, req.EnvJSON, req.ConfigJSON, req.Icon, access, now, now)
 	if err != nil {
 		h.logger.Error("create workspace integration", "error", err)
 		replyError(w, http.StatusConflict, "Integration with this name already exists")
@@ -194,7 +214,7 @@ func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r
 		ID: id, WorkspaceID: workspaceID, Name: req.Name, DisplayName: req.DisplayName,
 		Transport: req.Transport, Endpoint: req.Endpoint, Command: req.Command,
 		ArgsJSON: req.ArgsJSON, EnvJSON: req.EnvJSON, ConfigJSON: req.ConfigJSON,
-		Icon: req.Icon, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		Icon: req.Icon, Enabled: true, DefaultAccess: access, CreatedAt: now, UpdatedAt: now,
 	})
 }
 
@@ -209,14 +229,14 @@ func (h *IntegrationHandler) GetWorkspaceIntegration(w http.ResponseWriter, r *h
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT ws.id, ws.workspace_id, ws.name, ws.display_name, ws.transport,
 			ws.endpoint, ws.command, ws.args_json, ws.env_json, ws.config_json,
-			ws.icon, ws.enabled, ws.created_at, ws.updated_at,
+			ws.icon, ws.enabled, ws.default_access, ws.created_at, ws.updated_at,
 			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = ws.id AND mcp_server_scope = 'workspace') AS bind_count,
 			(SELECT COUNT(*) FROM crew_mcp_servers WHERE workspace_mcp_server_id = ws.id) AS crew_count
 		FROM workspace_mcp_servers ws
 		WHERE ws.id = ? AND ws.workspace_id = ?`, id, workspaceID).Scan(
 		&s.ID, &s.WorkspaceID, &s.Name, &s.DisplayName, &s.Transport,
 		&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-		&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt,
+		&s.Icon, &enabled, &s.DefaultAccess, &s.CreatedAt, &s.UpdatedAt,
 		&s.AgentBindCount, &s.CrewServerCount)
 	if err != nil {
 		replyError(w, http.StatusNotFound, "Integration not found")
@@ -294,6 +314,14 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 			enabled = 1
 		}
 		u.Set("enabled", enabled)
+	}
+	if req.DefaultAccess != nil {
+		normalized, ok := normalizeDefaultAccess(*req.DefaultAccess)
+		if !ok {
+			replyError(w, http.StatusBadRequest, errDefaultAccessVocabulary)
+			return
+		}
+		u.Set("default_access", normalized)
 	}
 
 	// Validate transport/field combination against merged final state

@@ -3406,13 +3406,28 @@ func TestResolveAgentMCPServers_BindingsAndOptOut(t *testing.T) {
 		t.Errorf("agent-off servers = %d, want 0 (opted out)", len(srvOff))
 	}
 
-	// Add a third agent with no binding — server has bindings for others, so
-	// this third agent should NOT see it (opt-in semantics).
+	// Add a third agent with no binding. The server is default_access='all',
+	// so it gets it — the other two agents' bindings are their own business.
+	// This assertion used to read "want 0" and was the #2072 bug itself: the
+	// server was open to everyone until somebody bound it, and then it was
+	// open to nobody but them.
 	seedAgentRow(t, db, "agent-third", wsID, "crew-bd", "Third", "third", "AGENT")
 	dataT, _ := h.loadAgentData(req, "agent-third")
 	srvT := h.resolveAgentMCPServers(req, dataT, "agent-third")
-	if len(srvT) != 0 {
-		t.Errorf("agent-third servers = %d, want 0", len(srvT))
+	if len(srvT) != 1 {
+		t.Errorf("agent-third servers = %d, want 1 — an open server stays open when other agents are bound", len(srvT))
+	}
+
+	// Narrow the server deliberately and the third agent loses it, while
+	// agent-on keeps it on the strength of its binding.
+	if _, err := db.Exec(`UPDATE workspace_mcp_servers SET default_access = 'bound-only' WHERE id = 'ws-1'`); err != nil {
+		t.Fatalf("narrow server: %v", err)
+	}
+	if got := h.resolveAgentMCPServers(req, dataT, "agent-third"); len(got) != 0 {
+		t.Errorf("agent-third servers = %d after bound-only, want 0", len(got))
+	}
+	if got := h.resolveAgentMCPServers(req, dataOn, "agent-on"); len(got) != 1 {
+		t.Errorf("agent-on servers = %d after bound-only, want 1 (it holds the binding)", len(got))
 	}
 }
 

@@ -31,18 +31,19 @@ var intgCrewListCmd = &cobra.Command{
 			return err
 		}
 		var items []struct {
-			ID          string  `json:"id"`
-			Name        string  `json:"name"`
-			DisplayName string  `json:"display_name"`
-			Transport   string  `json:"transport"`
-			Endpoint    *string `json:"endpoint"`
-			Enabled     bool    `json:"enabled"`
+			ID            string  `json:"id"`
+			Name          string  `json:"name"`
+			DisplayName   string  `json:"display_name"`
+			Transport     string  `json:"transport"`
+			Endpoint      *string `json:"endpoint"`
+			Enabled       bool    `json:"enabled"`
+			DefaultAccess string  `json:"default_access"`
 		}
 		if err := cli.ReadJSON(resp, &items); err != nil {
 			return err
 		}
 		f := newFormatter()
-		headers := []string{"ID", "NAME", "DISPLAY", "TRANSPORT", "ENDPOINT", "ENABLED"}
+		headers := []string{"ID", "NAME", "DISPLAY", "TRANSPORT", "ENDPOINT", "ENABLED", "ACCESS"}
 		var rows [][]string
 		for _, s := range items {
 			ep := "-"
@@ -52,7 +53,11 @@ var intgCrewListCmd = &cobra.Command{
 			if len(ep) > 40 {
 				ep = ep[:37] + "..."
 			}
-			rows = append(rows, []string{s.ID, s.Name, s.DisplayName, s.Transport, ep, yesNo(s.Enabled)})
+			access := s.DefaultAccess
+			if access == "" {
+				access = "all"
+			}
+			rows = append(rows, []string{s.ID, s.Name, s.DisplayName, s.Transport, ep, yesNo(s.Enabled), access})
 		}
 		return f.Auto(items, headers, rows)
 	},
@@ -79,6 +84,7 @@ var intgCrewCreateCmd = &cobra.Command{
 		command, _ := flags.GetString("command")
 		icon, _ := flags.GetString("icon")
 		linkWorkspaceID, _ := flags.GetString("link-workspace-server")
+		access, _ := flags.GetString("access")
 
 		if name == "" {
 			return fmt.Errorf("--name is required")
@@ -116,6 +122,13 @@ var intgCrewCreateCmd = &cobra.Command{
 		}
 		if linkWorkspaceID != "" {
 			body["workspace_mcp_server_id"] = linkWorkspaceID
+		}
+		if access != "" {
+			normalized, err := normalizeAccessFlag(access)
+			if err != nil {
+				return err
+			}
+			body["default_access"] = normalized
 		}
 
 		resp, err := client.Post("/api/v1/crews/"+crewID+"/integrations", body)
@@ -183,6 +196,14 @@ var intgCrewUpdateCmd = &cobra.Command{
 		if flags.Changed("enabled") {
 			v, _ := flags.GetBool("enabled")
 			body["enabled"] = v
+		}
+		if flags.Changed("access") {
+			v, _ := flags.GetString("access")
+			normalized, err := normalizeAccessFlag(v)
+			if err != nil {
+				return err
+			}
+			body["default_access"] = normalized
 		}
 		if len(body) == 0 {
 			return fmt.Errorf("no fields to update")
@@ -278,6 +299,7 @@ func registerIntegrationCrewFlags() {
 	intgCrewCreateCmd.Flags().String("command", "", "MCP server command (stdio)")
 	intgCrewCreateCmd.Flags().String("icon", "", "Lucide icon name")
 	intgCrewCreateCmd.Flags().String("link-workspace-server", "", "Link to a workspace-level integration by ID")
+	intgCrewCreateCmd.Flags().String("access", "", "Who may use it: all (default) or bound-only")
 
 	intgCrewUpdateCmd.Flags().String("display", "", "New display name")
 	intgCrewUpdateCmd.Flags().String("transport", "", "New transport: streamable-http or stdio")
@@ -285,6 +307,7 @@ func registerIntegrationCrewFlags() {
 	intgCrewUpdateCmd.Flags().String("command", "", "New stdio command")
 	intgCrewUpdateCmd.Flags().String("icon", "", "New Lucide icon name")
 	intgCrewUpdateCmd.Flags().Bool("enabled", true, "Set enabled state")
+	intgCrewUpdateCmd.Flags().String("access", "", "Who may use it: all or bound-only")
 
 	intgCrewDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 }

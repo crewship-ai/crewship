@@ -640,9 +640,12 @@ func TestCovCfgResolveAgentMCPServers(t *testing.T) {
 	covCfgSeedWSServer(t, db, "ws2", wsID, "optout", "streamable-http", "https://o.example.com", "", "", "")
 	covCfgBindServer(t, db, "b2", agentID, "ws2", "workspace", "", "bearer", "", 0)
 
-	// ws3: workspace server bound to ANOTHER agent only → opt-in filter skips it.
+	// ws3: bound-only server bound to ANOTHER agent → not for this one.
+	// Since #2072 it is the server's default_access that hides it, not the
+	// existence of somebody else's binding.
 	other := seedAgentRow(t, db, "agOther", wsID, crewID, "Other", "other", "AGENT")
 	covCfgSeedWSServer(t, db, "ws3", wsID, "others-only", "streamable-http", "https://x.example.com", "", "", "")
+	execOrFatal(t, db, `UPDATE workspace_mcp_servers SET default_access = 'bound-only' WHERE id = 'ws3'`)
 	covCfgBindServer(t, db, "b3", other, "ws3", "workspace", "", "bearer", "", 1)
 
 	// cs1: crew server with NO binding for anyone → included (open).
@@ -661,7 +664,7 @@ func TestCovCfgResolveAgentMCPServers(t *testing.T) {
 		t.Errorf("opted-out server should be skipped")
 	}
 	if _, ok := byName["others-only"]; ok {
-		t.Errorf("other-agent-only server should be filtered by opt-in")
+		t.Errorf("bound-only server resolved for an agent with no binding")
 	}
 	if _, ok := byName["crewopen"]; !ok {
 		t.Errorf("open crew server should be included")

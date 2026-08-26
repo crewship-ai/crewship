@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 )
 
 // ==========================================
@@ -26,7 +27,44 @@ type ResolvedIntegration struct {
 	Enabled      bool    `json:"enabled"`
 	CredentialID *string `json:"credential_id"`
 	CredName     *string `json:"credential_name"`
+	// DefaultAccess is the server's stored audience — "all" (every agent in
+	// scope) or "bound-only" (agents with an explicit binding). It is echoed
+	// so a caller can tell WHY a server resolved without a second lookup.
+	DefaultAccess string `json:"default_access"`
 }
+
+// accessAll is the one default_access value that lets an agent with no
+// binding use a server. Anything else — including a value some future writer
+// invents — resolves closed, so a typo cannot silently widen an audience.
+const accessAll = "all"
+
+// accessBoundOnly restricts a server to agents holding an explicit binding.
+const accessBoundOnly = "bound-only"
+
+// openToUnboundAgents reports whether a server whose default_access column
+// holds v is available to agents that have no binding for it.
+func openToUnboundAgents(v string) bool { return v == accessAll }
+
+// normalizeDefaultAccess validates an incoming default_access value. The
+// vocabulary is closed and enforced here rather than by a CHECK constraint —
+// SQLite cannot alter one in place, and the integration handlers are the only
+// writers. Returns the canonical value and whether it was recognised; callers
+// treat the empty string as "not supplied", never as a value.
+func normalizeDefaultAccess(v string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case accessAll:
+		return accessAll, true
+	case accessBoundOnly:
+		return accessBoundOnly, true
+	default:
+		return "", false
+	}
+}
+
+// errDefaultAccessVocabulary is the 400 body for a default_access the server
+// does not recognise. Naming both values matters: resolution fails closed, so
+// silently accepting "All" would revoke the server from every unbound agent.
+const errDefaultAccessVocabulary = "default_access must be 'all' or 'bound-only'"
 
 // ResolveAgentIntegrations returns the effective MCP server configuration for an agent
 // by cascading workspace-level and crew-level integrations.
@@ -52,7 +90,7 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 	wsServers := make(map[string]*ResolvedIntegration)
 	wsRows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, name, display_name, transport, endpoint, command,
-			args_json, env_json, config_json, icon, enabled
+			args_json, env_json, config_json, icon, enabled, default_access
 		FROM workspace_mcp_servers
 		WHERE workspace_id = ? AND enabled = 1 AND deleted_at IS NULL`, workspaceID)
 	if err != nil {
@@ -64,7 +102,7 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 		var enabled int
 		if err := wsRows.Scan(&s.ServerID, &s.Name, &s.DisplayName, &s.Transport,
 			&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-			&s.Icon, &enabled); err != nil {
+			&s.Icon, &enabled, &s.DefaultAccess); err != nil {
 			h.logger.Error("scan workspace MCP server", "error", err)
 			continue
 		}
@@ -86,7 +124,8 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 	if crewID.Valid {
 		crewRows, err := h.db.QueryContext(r.Context(), `
 			SELECT id, workspace_mcp_server_id, name, display_name, transport,
-				endpoint, command, args_json, env_json, config_json, icon, enabled
+				endpoint, command, args_json, env_json, config_json, icon, enabled,
+				default_access
 			FROM crew_mcp_servers
 			WHERE crew_id = ? AND enabled = 1 AND deleted_at IS NULL`, crewID.String)
 		if err != nil {
@@ -99,7 +138,7 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 			var enabled int
 			if err := crewRows.Scan(&s.ServerID, &wsServerID, &s.Name, &s.DisplayName, &s.Transport,
 				&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-				&s.Icon, &enabled); err != nil {
+				&s.Icon, &enabled, &s.DefaultAccess); err != nil {
 				h.logger.Error("scan crew MCP server", "error", err)
 				continue
 			}
@@ -165,36 +204,21 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 		}
 	}
 
-	// Check which servers have ANY bindings (for opt-in filtering), scoped to this workspace.
-	serversWithBindings := make(map[string]bool)
-	bcRows, err := h.db.QueryContext(r.Context(), `
-		SELECT b.mcp_server_id FROM agent_mcp_bindings b
-		JOIN agents a ON a.id = b.agent_id AND a.workspace_id = ?
-		GROUP BY b.mcp_server_id HAVING COUNT(*) > 0`, workspaceID)
-	if err != nil {
-		replyInternalError(w, h.logger, "query servers with bindings", err)
-		return
-	}
-	for bcRows.Next() {
-		var sid string
-		if bcRows.Scan(&sid) == nil {
-			serversWithBindings[sid] = true
-		}
-	}
-	if err := bcRows.Err(); err != nil {
-		h.logger.Error("iterate servers with bindings", "error", err)
-	}
-	bcRows.Close()
-
-	// Build result (only enabled, respecting opt-in bindings)
+	// Build result: enabled servers this agent is entitled to.
+	//
+	// Entitlement is the server's own default_access column (#2072). It used
+	// to be inferred from whether ANY agent in the workspace held a binding,
+	// which made the first binding a workspace-wide revocation: the state
+	// "available to everyone" was never stored, so it disappeared as soon as
+	// the count it was derived from stopped being zero.
 	var result []ResolvedIntegration
 	for _, s := range merged {
 		if !s.Enabled {
 			continue
 		}
 		_, hasBind := bindings[s.ServerID]
-		if !hasBind && serversWithBindings[s.ServerID] {
-			// Server has bindings for other agents but not this one → skip
+		if !hasBind && !openToUnboundAgents(s.DefaultAccess) {
+			// bound-only, and this agent has no binding → not for them.
 			continue
 		}
 		result = append(result, *s)
