@@ -17,7 +17,7 @@ CLI flag quality: 385 commands define flags; 385 document all of their flags and
 
 Environment variables: 102 discovered, 0 missing documentation. Manifest kinds: 21 discovered, 0 missing documentation.
 
-Docs → code references: 4453 commands, 2168 API paths, 434 environment variables, 230 manifest kinds, and 2107 flags; missing symbols: 0, 0, 0, 0, and 0 respectively.
+Docs → code references: 4455 commands, 2168 API paths, 434 environment variables, 230 manifest kinds, and 2109 flags; missing symbols: 0, 0, 0, 0, and 0 respectively.
 
 ## API operations needing attention
 

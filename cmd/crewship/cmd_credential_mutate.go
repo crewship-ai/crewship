@@ -222,6 +222,15 @@ var credCreateCmd = &cobra.Command{
 		if oauthErr != nil {
 			return oauthErr
 		}
+		if oauthApp != nil {
+			// readOAuthAppFlags matches the type case-insensitively; the server
+			// compares req.Type == "OAUTH2" exactly (credentials_mutate.go:248).
+			// Without this, `--type oauth2` skipped the server's OAUTH2 branch
+			// and came back `400 value is required` — an error naming a flag the
+			// operator deliberately omitted rather than the spelling that
+			// actually caused it.
+			credType = "OAUTH2"
+		}
 
 		if valueStdin {
 			scanner := bufio.NewScanner(os.Stdin)
@@ -316,6 +325,15 @@ var credCreateCmd = &cobra.Command{
 		if value == "" && oauthApp == nil {
 			return cli.WithExitCode(
 				fmt.Errorf("--value or --value-stdin is required"), cli.ExitValidation)
+		}
+		// An OAuth app and a value are two different ways to fill the same
+		// column, and only one of them can win. Rather than pick — and silently
+		// discard a token the operator explicitly passed — refuse the pair.
+		if value != "" && oauthApp != nil {
+			return cli.WithExitCode(fmt.Errorf(
+				"--value/--value-stdin cannot be combined with the --oauth-* flags: an OAuth credential's "+
+					"value is the access token the flow fetches, and the row is created empty so "+
+					"`crewship oauth connect` can fill it. Drop one of the two"), cli.ExitValidation)
 		}
 
 		// Normalize the provider to the registry's spelling before it is

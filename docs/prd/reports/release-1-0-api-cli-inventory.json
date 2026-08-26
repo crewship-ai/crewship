@@ -39271,12 +39271,10 @@
         "cmd/crewship/cmd_oauth_test.go"
       ],
       "flags": [
-        "name",
-        "provider"
+        "name"
       ],
       "documented_flags": [
-        "name",
-        "provider"
+        "name"
       ]
     },
     {
@@ -49289,11 +49287,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4453,
+    "command_references": 4455,
     "api_path_references": 2168,
     "environment_references": 434,
     "manifest_kind_references": 230,
-    "flag_references": 2107,
+    "flag_references": 2109,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

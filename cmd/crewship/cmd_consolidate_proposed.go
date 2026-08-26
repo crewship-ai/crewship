@@ -228,15 +228,26 @@ Examples:
 		}
 
 		id := args[0]
+		f := newFormatter()
+		// The same set Formatter.AutoHuman routes to its human closure.
+		human := f.Format != "json" && f.Format != "yaml" && f.Format != "ndjson"
 
 		// The preview has to happen before the prompt, or it previews nothing.
+		var preview *proposalDiff
 		if showDiff, _ := cmd.Flags().GetBool("diff"); showDiff {
 			var d proposalDiff
 			if err := getProposalJSON(proposedPath(id, "diff"), &d); err != nil {
 				return err
 			}
-			printProposalDiff(d)
-			fmt.Println()
+			preview = &d
+			// Under a machine format the diff travels inside the result
+			// document instead of being printed beside it: two documents on one
+			// stdout is not JSON, and a script piping this to jq is the entire
+			// audience for --format json.
+			if human {
+				printProposalDiff(d)
+				fmt.Println()
+			}
 		}
 
 		if err := confirmAction(cmd,
@@ -262,12 +273,16 @@ Examples:
 			CrewID        string `json:"crew_id"`
 			DecidedBy     string `json:"decided_by"`
 			VersionSHA    string `json:"version_sha"`
+			// Preview carries what --diff showed, so a machine consumer that
+			// asked for it gets it without a second round trip and without a
+			// second document on stdout. Absent when --diff was not passed.
+			Preview *proposalDiff `json:"preview,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
+		out.Preview = preview
 
-		f := newFormatter()
 		return f.AutoHuman(out, func() {
 			cli.PrintSuccess(fmt.Sprintf("Merged %d rule(s) into %s", out.RulesMerged, out.CanonicalPath))
 			if out.VersionSHA != "" {

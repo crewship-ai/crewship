@@ -127,6 +127,10 @@ Approving merges the staged rules into the canonical file and records a new
 memory version, so it prompts first. With `--diff` the preview is fetched
 **before** the prompt — a preview shown after the decision would not be one.
 
+Under `--format json`/`yaml`/`ndjson` the preview is not printed alongside the
+result — it travels **inside** it, on a `preview` key, so stdout stays a single
+parseable document.
+
 <Note>
 `--reason` is sent and echoed back, but the server does not persist it:
 `memory_proposals` has no reason column yet. The command says so rather than

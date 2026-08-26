@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/pflag"
 
@@ -83,7 +84,16 @@ func TestReadOAuthAppFlags(t *testing.T) {
 			},
 		},
 		{
-			name:     "OAUTH2 with no client id has nothing to authorize as",
+			// The older, still-legal form: a token obtained elsewhere, filed by
+			// hand as OAUTH2. Nobody reached for an --oauth-* flag, so nobody is
+			// configuring an app, and the value-required path downstream owns it.
+			name:     "OAUTH2 with no oauth flags at all is not an app config",
+			credType: "OAUTH2",
+			flags:    map[string]string{},
+			wantNil:  true,
+		},
+		{
+			name:     "OAUTH2 with endpoints but no client id has nothing to authorize as",
 			credType: "OAUTH2",
 			flags: map[string]string{
 				"oauth-auth-url":  "https://idp.example/authorize",
@@ -200,6 +210,70 @@ func TestOAuthAppSpecApplyOmitsEmptyOptionalFields(t *testing.T) {
 	// and readOAuthAppFlags has already refused that case.
 	if body["oauth_auth_url"] == "" || body["oauth_token_url"] == "" {
 		t.Errorf("endpoints missing from body: %v", body)
+	}
+}
+
+// nextPollDelay is the deadline arithmetic behind `oauth connect --timeout`,
+// split out precisely so it can be checked without a clock: the original
+// inline form gave up when now+interval reached the deadline, which throws
+// away up to a full interval of the budget the operator asked for. With the
+// default 2s interval that is a connect abandoning a flow ~2s before the
+// server's loopback window actually closes.
+func TestNextPollDelay(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name      string
+		now       time.Time
+		deadline  time.Time
+		interval  time.Duration
+		wantDelay time.Duration
+		wantDone  bool
+	}{
+		{
+			name:      "plenty of budget left",
+			now:       base,
+			deadline:  base.Add(10 * time.Second),
+			interval:  2 * time.Second,
+			wantDelay: 2 * time.Second,
+		},
+		{
+			// THE REGRESSION. Less than one interval remains, but it is not
+			// zero — the budget must be spent, not abandoned.
+			name:      "less than one interval left is still time",
+			now:       base.Add(9 * time.Second),
+			deadline:  base.Add(10 * time.Second),
+			interval:  2 * time.Second,
+			wantDelay: 1 * time.Second,
+		},
+		{
+			name:     "exactly at the deadline is done",
+			now:      base.Add(10 * time.Second),
+			deadline: base.Add(10 * time.Second),
+			interval: 2 * time.Second,
+			wantDone: true,
+		},
+		{
+			name:     "past the deadline is done",
+			now:      base.Add(11 * time.Second),
+			deadline: base.Add(10 * time.Second),
+			interval: 2 * time.Second,
+			wantDone: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			delay, done := nextPollDelay(tc.now, tc.deadline, tc.interval)
+			if done != tc.wantDone {
+				t.Fatalf("done = %v, want %v", done, tc.wantDone)
+			}
+			if !done && delay != tc.wantDelay {
+				t.Errorf("delay = %v, want %v", delay, tc.wantDelay)
+			}
+		})
 	}
 }
 

@@ -377,7 +377,11 @@ Examples:
 		}
 
 		f := newFormatter()
-		human := f.Format == "table"
+		// The same set Formatter.AutoHuman treats as human — `quiet` included.
+		// Classifying quiet as machine-readable suppressed the authorize URL,
+		// without which the flow cannot be completed at all, while still
+		// printing the success line afterwards.
+		human := f.Format != "json" && f.Format != "yaml" && f.Format != "ndjson"
 
 		if human {
 			fmt.Println("Open this URL to authorize (must be a browser on the API host):")
@@ -445,30 +449,68 @@ func fetchCredentialStatus(client *cli.Client, credID string) (string, error) {
 	return cred.Status, nil
 }
 
+// nextPollDelay decides how long to wait before the next status poll, and
+// whether the budget is spent.
+//
+// Split out of the loop so the arithmetic is testable without a clock. It used
+// to be inline as `if !now.Add(interval).Before(deadline) { give up }`, which
+// abandons up to a full interval of the operator's budget: with the default 2s
+// interval that is a connect declaring failure ~2s before the server's loopback
+// window actually closes, on a flow that may be one redirect away from landing.
+func nextPollDelay(now, deadline time.Time, interval time.Duration) (time.Duration, bool) {
+	if !now.Before(deadline) {
+		return 0, true
+	}
+	if remaining := deadline.Sub(now); remaining < interval {
+		return remaining, false
+	}
+	return interval, false
+}
+
 // waitForCredentialActive polls until the credential reports ACTIVE, the
 // deadline passes, or the credential lands in a terminal non-ACTIVE state.
 //
 // It returns the last status it saw alongside the error, because "we gave up"
 // and "the provider refused" are different operator problems and the status is
 // the only thing that tells them apart.
+//
+// A read that fails is not automatically fatal. The loopback listener is
+// one-shot and its PKCE verifier lives only in the server goroutine's closure,
+// so abandoning the wait costs the operator the entire flow — including consent
+// they may already have granted. A dropped keep-alive or a proxy 502 is
+// therefore retried until the deadline, and only reported if nothing better
+// ever arrives. A 401/403/404 is a different thing entirely: the credential is
+// gone or we may not read it, and no amount of waiting changes that.
 func waitForCredentialActive(client *cli.Client, credID string, timeout, interval time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	last := ""
+	var lastErr error
 	for {
 		status, err := fetchCredentialStatus(client, credID)
-		if err != nil {
+		switch {
+		case err == nil:
+			lastErr = nil
+			last = status
+			switch status {
+			case "ACTIVE":
+				return status, nil
+			case "REVOKED", "ERROR":
+				return status, cli.WithExitCode(
+					fmt.Errorf("credential %s is %s — the OAuth flow did not complete", credID, status),
+					cli.ExitGeneric)
+			}
+		case isFatalPollError(err):
 			return last, err
+		default:
+			lastErr = err
 		}
-		last = status
-		switch status {
-		case "ACTIVE":
-			return status, nil
-		case "REVOKED", "ERROR":
-			return status, cli.WithExitCode(
-				fmt.Errorf("credential %s is %s — the OAuth flow did not complete", credID, status),
-				cli.ExitGeneric)
-		}
-		if !time.Now().Add(interval).Before(deadline) {
+
+		delay, done := nextPollDelay(time.Now(), deadline, interval)
+		if done {
+			if lastErr != nil {
+				return last, fmt.Errorf(
+					"gave up after %s: the credential's status could not be read: %w", timeout, lastErr)
+			}
 			return last, cli.WithExitCode(
 				fmt.Errorf("timed out after %s waiting for credential %s to connect; it is still %s. "+
 					"The authorization was never completed in a browser, or the browser could not reach "+
@@ -476,7 +518,18 @@ func waitForCredentialActive(client *cli.Client, credID string, timeout, interva
 					timeout, credID, last),
 				cli.ExitGeneric)
 		}
-		time.Sleep(interval)
+		time.Sleep(delay)
+	}
+}
+
+// isFatalPollError reports whether a failed status read is worth retrying.
+// Auth and not-found are answers, not hiccups.
+func isFatalPollError(err error) bool {
+	switch cli.ExitCodeFor(err) {
+	case cli.ExitAuth, cli.ExitNotFound, cli.ExitValidation:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -553,7 +606,7 @@ Finish the flow afterwards with:
 
 Examples:
   crewship oauth auto-connect https://mcp.example/sse --name example-mcp
-  crewship oauth auto-connect https://mcp.linear.app/sse --name linear --provider linear`,
+  crewship oauth auto-connect https://mcp.linear.app/sse --name linear`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -567,9 +620,7 @@ Examples:
 		if name, _ := cmd.Flags().GetString("name"); name != "" {
 			body["server_name"] = name
 		}
-		if hint, _ := cmd.Flags().GetString("provider"); hint != "" {
-			body["provider_hint"] = hint
-		}
+		// provider_hint is never sent — see the note in init().
 
 		client := newAPIClient()
 		resp, err := client.Post("/api/v1/oauth/auto-connect", body)
@@ -685,6 +736,14 @@ func readOAuthAppFlags(flags *pflag.FlagSet, credType string) (*oauthAppSpec, er
 		return nil, nil
 	}
 
+	// An OAUTH2 credential created with a value and no app flags is the older,
+	// still-legal form — a token obtained elsewhere, filed by hand. Only an
+	// operator who actually reached for an --oauth-* flag is configuring an
+	// app, so only they are held to the app's requirements.
+	if !anySet {
+		return nil, nil
+	}
+
 	if clientID == "" {
 		return nil, cli.WithExitCode(fmt.Errorf(
 			"--oauth-client-id is required for --type OAUTH2: without it there is no client to authorize as. "+
@@ -776,10 +835,11 @@ func init() {
 	oauthExchangeCmd.Flags().String("redirect-uri", "",
 		"Redirect URI the code was issued for, when it differs from the stored one")
 
-	// 2m rather than the server's 120s loopback window: the listener is torn
-	// down at 120s, so a slightly longer wait is what surfaces "the window
-	// closed" instead of racing it.
-	oauthConnectCmd.Flags().Duration("timeout", 2*time.Minute,
+	// 3m against the server's 120s loopback window. The listener is torn down
+	// at 120s (internal/api/oauth_flow.go:461), so the wait has to outlast it
+	// to report "the window closed" rather than race it — 2m is exactly equal
+	// and loses that race on any scheduling jitter.
+	oauthConnectCmd.Flags().Duration("timeout", 3*time.Minute,
 		"How long to wait for the credential to reach ACTIVE")
 	oauthConnectCmd.Flags().Duration("poll-interval", 2*time.Second,
 		"How often to re-check the credential status while waiting")
@@ -788,8 +848,12 @@ func init() {
 	oauthConnectCmd.Flags().Bool("open", false, "Open the authorize URL in a browser")
 
 	oauthAutoConnectCmd.Flags().String("name", "", "Name for the MCP server (default: mcp-server)")
-	oauthAutoConnectCmd.Flags().String("provider", "",
-		"Skip discovery and use a catalogue provider's endpoints (see `crewship oauth providers`)")
+	// Deliberately no --provider. The endpoint takes a provider_hint, but
+	// sending one fills authURL from the catalogue, which makes AutoConnect
+	// skip discovery (internal/api/oauth_creds.go:185-192), which leaves
+	// registrationEndpoint empty, which makes DCR impossible — so every
+	// hinted call returns needs_client_id and no credential is ever created.
+	// A flag that can only fail is worse than no flag.
 
 	oauthCmd.AddCommand(oauthProvidersCmd)
 	oauthCmd.AddCommand(oauthAuthorizeCmd)

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
@@ -59,6 +60,12 @@ type oauthStubServer struct {
 	autoConnectBody string
 	// discoverBody is the canned /discover response.
 	discoverBody string
+	// failNextCredGets makes that many status polls answer 502, simulating a
+	// dropped keep-alive or a proxy hiccup mid-wait.
+	failNextCredGets int
+	// credGone makes every status poll answer 404 — the credential was deleted
+	// or revoked while the flow was open.
+	credGone bool
 }
 
 func (s *oauthStubServer) start(t *testing.T) *httptest.Server {
@@ -121,8 +128,22 @@ func (s *oauthStubServer) start(t *testing.T) *httptest.Server {
 			s.mu.Lock()
 			s.credGets++
 			status := s.credStatus
+			gone := s.credGone
+			transient := s.failNextCredGets > 0
+			if transient {
+				s.failNextCredGets--
+			}
 			s.mu.Unlock()
-			_, _ = w.Write([]byte(`{"id":"cred_stub_1","name":"linear-oauth","type":"OAUTH2","provider":"LINEAR","status":"` + status + `"}`))
+			switch {
+			case gone:
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"credential not found"}`))
+			case transient:
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte(`{"error":"upstream hiccup"}`))
+			default:
+				_, _ = w.Write([]byte(`{"id":"cred_stub_1","name":"linear-oauth","type":"OAUTH2","provider":"LINEAR","status":"` + status + `"}`))
+			}
 
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/credentials":
 			_, _ = w.Write([]byte(`[{"id":"cred_stub_1","name":"linear-oauth","type":"OAUTH2","provider":"LINEAR","status":"PENDING"}]`))
@@ -349,8 +370,12 @@ func TestAcceptance_OAuthConnectWaitsForCredentialToGoActive(t *testing.T) {
 	cfg := oauthStubConfig(t, srv.URL)
 
 	// The browser leg "completes" shortly after the command starts polling.
+	// The sleep matters: a bare spin here pegs a core and contends with the
+	// httptest handler for the same mutex for as long as the binary takes to
+	// start, which is seconds.
 	go func() {
 		for stub.pollCount() < 1 {
+			time.Sleep(20 * time.Millisecond)
 		}
 		stub.setCredStatus("ACTIVE")
 	}()
@@ -387,6 +412,71 @@ func TestAcceptance_OAuthConnectTimeoutIsNotSuccess(t *testing.T) {
 	}
 	if !strings.Contains(out, "PENDING") {
 		t.Errorf("timeout message does not name the status the credential is stuck in:\n%s", out)
+	}
+}
+
+// `--format quiet` still has to print the authorize URL. Formatter.AutoHuman
+// routes quiet to the human closure, so treating it as a machine format here
+// would suppress the one piece of output without which the flow cannot be
+// completed at all — while still printing the success line afterwards.
+func TestAcceptance_OAuthConnectQuietStillPrintsTheAuthURL(t *testing.T) {
+	stub := &oauthStubServer{}
+	srv := stub.start(t)
+	cfg := oauthStubConfig(t, srv.URL)
+
+	out, err := runOAuthCLI(t, cfg, "oauth", "connect", "linear-oauth",
+		"--no-wait", "--format", "quiet")
+	if err != nil {
+		t.Fatalf("connect --format quiet: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "https://provider.example/authorize") {
+		t.Errorf("--format quiet swallowed the authorize URL, so the flow cannot be completed:\n%s", out)
+	}
+}
+
+// A single transient failure mid-poll must not abandon the flow. The loopback
+// listener is one-shot and its PKCE state lives only in the server goroutine's
+// closure, so giving up here costs the operator the whole flow — including any
+// consent they already granted — over one dropped connection.
+func TestAcceptance_OAuthConnectSurvivesATransientPollFailure(t *testing.T) {
+	stub := &oauthStubServer{failNextCredGets: 1}
+	srv := stub.start(t)
+	cfg := oauthStubConfig(t, srv.URL)
+
+	go func() {
+		for stub.pollCount() < 2 {
+			time.Sleep(20 * time.Millisecond)
+		}
+		stub.setCredStatus("ACTIVE")
+	}()
+
+	out, err := runOAuthCLI(t, cfg, "oauth", "connect", "linear-oauth",
+		"--timeout", "20s", "--poll-interval", "100ms")
+	if err != nil {
+		t.Fatalf("one 502 mid-poll aborted the connect: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(strings.ToLower(out), "connected") {
+		t.Errorf("connect did not report success after recovering:\n%s", out)
+	}
+}
+
+// A credential that has been deleted or revoked mid-flow is not transient, and
+// polling a 404 for the rest of the timeout helps nobody.
+func TestAcceptance_OAuthConnectFailsFastOnAGoneCredential(t *testing.T) {
+	stub := &oauthStubServer{credGone: true}
+	srv := stub.start(t)
+	cfg := oauthStubConfig(t, srv.URL)
+
+	out, err := runOAuthCLI(t, cfg, "oauth", "connect", "linear-oauth",
+		"--timeout", "30s", "--poll-interval", "100ms")
+	if err == nil {
+		t.Fatalf("connect succeeded against a credential the server 404s\noutput: %s", out)
+	}
+	if got := exitCodeOf(t, err); got != cli.ExitNotFound {
+		t.Errorf("exit code = %d, want ExitNotFound (%d)\noutput: %s", got, cli.ExitNotFound, out)
+	}
+	if n := stub.pollCount(); n > 3 {
+		t.Errorf("polled a 404 %d times; a gone credential is not a transient failure", n)
 	}
 }
 
@@ -427,7 +517,7 @@ func TestAcceptance_OAuthAutoConnectReportsCredentialID(t *testing.T) {
 	cfg := oauthStubConfig(t, srv.URL)
 
 	out, err := runOAuthCLI(t, cfg, "oauth", "auto-connect", "https://mcp.example/sse",
-		"--name", "example-mcp", "--provider", "linear")
+		"--name", "example-mcp")
 	if err != nil {
 		t.Fatalf("auto-connect: %v\noutput: %s", err, out)
 	}
@@ -439,11 +529,36 @@ func TestAcceptance_OAuthAutoConnectReportsCredentialID(t *testing.T) {
 	if body["server_name"] != "example-mcp" {
 		t.Errorf("server_name = %v, want example-mcp", body["server_name"])
 	}
-	if body["provider_hint"] != "linear" {
-		t.Errorf("provider_hint = %v, want linear", body["provider_hint"])
+	// provider_hint is deliberately never sent — see the note on the command.
+	// Setting it makes the server skip discovery, which leaves it with no
+	// registration endpoint, which makes DCR impossible, which makes the call
+	// return needs_client_id every single time.
+	if _, ok := body["provider_hint"]; ok {
+		t.Errorf("provider_hint was sent; it can only make auto-connect fail: %v", body)
 	}
 	if !strings.Contains(out, "cred_auto_1") {
 		t.Errorf("auto-connect output does not name the credential it created:\n%s", out)
+	}
+}
+
+// --provider on auto-connect is a trap, not a feature, and must not exist.
+// AutoConnect fills authURL from the catalogue when provider_hint matches
+// (internal/api/oauth_creds.go:185-191), which makes the `if authURL == ""`
+// discovery branch fall through, which leaves registrationEndpoint empty,
+// which lands every such call in the no-DCR branch returning
+// needs_client_id (:246). The flag could never produce a credential.
+func TestAcceptance_OAuthAutoConnectHasNoProviderFlag(t *testing.T) {
+	stub := &oauthStubServer{}
+	srv := stub.start(t)
+	cfg := oauthStubConfig(t, srv.URL)
+
+	out, err := runOAuthCLI(t, cfg, "oauth", "auto-connect", "https://mcp.example/sse",
+		"--name", "example-mcp", "--provider", "linear")
+	if err == nil {
+		t.Fatalf("--provider was accepted on auto-connect, where it can only fail\noutput: %s", out)
+	}
+	if !strings.Contains(out, "unknown flag") {
+		t.Errorf("expected cobra to reject the flag:\n%s", out)
 	}
 }
 
@@ -501,6 +616,55 @@ func TestAcceptance_CredentialCreateOAuth2FromProviderCatalogue(t *testing.T) {
 	}
 }
 
+// REGRESSION GUARD. `--type OAUTH2 --value <token>` with no OAuth app flags
+// was already legal before the flags below existed — the server takes an
+// OAUTH2 row with a value like any other. Demanding an --oauth-client-id from
+// every OAUTH2 create would break it.
+func TestAcceptance_CredentialCreateOAuth2WithValueAndNoAppFlags(t *testing.T) {
+	stub := &oauthStubServer{}
+	srv := stub.start(t)
+	cfg := oauthStubConfig(t, srv.URL)
+
+	out, err := runOAuthCLI(t, cfg, "credential", "create",
+		"--name", "preseeded-oauth", "--type", "OAUTH2", "--value", "already-a-token")
+	if err != nil {
+		t.Fatalf("OAUTH2 create with a bare value was refused: %v\noutput: %s", err, out)
+	}
+
+	body := stub.body(t, "/api/v1/credentials")
+	if body["value"] != "already-a-token" {
+		t.Errorf("value = %v, want the token verbatim", body["value"])
+	}
+	if _, ok := body["oauth_client_id"]; ok {
+		t.Errorf("an oauth app was invented for a credential that asked for none: %v", body)
+	}
+}
+
+// …and the two forms may not be mixed. Silently dropping the value — which is
+// what folding an app onto a value-carrying create would do — would discard a
+// token the operator explicitly passed.
+func TestAcceptance_CredentialCreateOAuth2ValueAndAppFlagsConflict(t *testing.T) {
+	stub := &oauthStubServer{}
+	srv := stub.start(t)
+	cfg := oauthStubConfig(t, srv.URL)
+
+	out, err := runOAuthCLI(t, cfg, "credential", "create",
+		"--name", "both", "--type", "OAUTH2",
+		"--oauth-client-id", "cid",
+		"--oauth-auth-url", "https://idp.example/authorize",
+		"--oauth-token-url", "https://idp.example/token",
+		"--value", "a-token-that-would-be-dropped")
+	if err == nil {
+		t.Fatalf("--value alongside the OAuth app flags was accepted\noutput: %s", out)
+	}
+	if got := exitCodeOf(t, err); got != cli.ExitValidation {
+		t.Errorf("exit code = %d, want ExitValidation (%d)\noutput: %s", got, cli.ExitValidation, out)
+	}
+	if stub.hit("/api/v1/credentials") {
+		t.Error("the conflicting create reached the server")
+	}
+}
+
 // A provider slug the catalogue does not carry is caught locally: forwarding it
 // would create a credential with no authorize URL, which `oauth connect` then
 // 400s on with a message about the credential rather than the typo.
@@ -524,6 +688,27 @@ func TestAcceptance_CredentialCreateOAuth2UnknownProviderIsRejected(t *testing.T
 	// The message has to name what IS available, or the operator is guessing.
 	if !strings.Contains(out, "linear") {
 		t.Errorf("error does not list the known providers:\n%s", out)
+	}
+}
+
+// The CLI accepts --type oauth2 case-insensitively, so it must normalise before
+// sending: the server compares req.Type == "OAUTH2" exactly
+// (credentials_mutate.go:248), so a lower-case type skipped the OAUTH2 branch
+// and came back `400 value is required` — an error naming a flag the operator
+// deliberately omitted rather than the spelling that actually caused it.
+func TestAcceptance_CredentialCreateOAuth2NormalizesTheTypeSpelling(t *testing.T) {
+	stub := &oauthStubServer{}
+	srv := stub.start(t)
+	cfg := oauthStubConfig(t, srv.URL)
+
+	out, err := runOAuthCLI(t, cfg, "credential", "create",
+		"--name", "lower-oauth", "--type", "oauth2",
+		"--oauth-provider", "linear", "--oauth-client-id", "cid")
+	if err != nil {
+		t.Fatalf("create with --type oauth2: %v\noutput: %s", err, out)
+	}
+	if got := stub.body(t, "/api/v1/credentials")["type"]; got != "OAUTH2" {
+		t.Errorf("type = %v, want the normalized OAUTH2 the server matches on", got)
 	}
 }
 

@@ -304,6 +304,65 @@ func TestAcceptance_ConsolidateProposedApproveDiffFetchesPreviewFirst(t *testing
 	}
 }
 
+// …and under a machine format the preview must not be printed as prose next to
+// the JSON. Two documents on one stdout is not JSON, and `| jq .` on it fails —
+// which is the whole audience for --format json.
+func TestAcceptance_ConsolidateProposedApproveDiffJSONStaysParseable(t *testing.T) {
+	stub := &proposedStubServer{}
+	srv := stub.start(t)
+	cfg := proposedStubConfig(t, srv.URL)
+
+	out, err := runProposedCLI(t, cfg, "consolidate", "proposed", "approve", proposedStubID,
+		"--diff", "--yes", "--format", "json")
+	if err != nil {
+		t.Fatalf("approve --diff --format json: %v\noutput: %s", err, out)
+	}
+
+	var got struct {
+		ProposalID    string `json:"proposal_id"`
+		CanonicalPath string `json:"canonical_path"`
+		RulesMerged   int    `json:"rules_merged"`
+		Preview       *struct {
+			Diff  string `json:"diff"`
+			Stats struct {
+				Additions int `json:"additions"`
+			} `json:"stats"`
+		} `json:"preview"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("approve --diff --format json did not emit one JSON document: %v\noutput: %s", err, out)
+	}
+	if got.RulesMerged != 3 {
+		t.Errorf("rules_merged = %d", got.RulesMerged)
+	}
+	// The flag was asked for, so it must produce something rather than being
+	// silently dropped: the preview travels inside the document.
+	if got.Preview == nil {
+		t.Fatalf("--diff produced no preview under --format json:\n%s", out)
+	}
+	if !strings.Contains(got.Preview.Diff, "Always run migrations") {
+		t.Errorf("preview diff = %q", got.Preview.Diff)
+	}
+	if got.Preview.Stats.Additions != 3 {
+		t.Errorf("preview stats.additions = %d", got.Preview.Stats.Additions)
+	}
+	// The preview must still have been fetched first — the ordering guarantee
+	// does not weaken just because the output is machine-readable.
+	order := stub.callOrder()
+	diffAt, approveAt := -1, -1
+	for i, p := range order {
+		if strings.HasSuffix(p, "/diff") && diffAt < 0 {
+			diffAt = i
+		}
+		if strings.HasSuffix(p, "/approve") && approveAt < 0 {
+			approveAt = i
+		}
+	}
+	if diffAt < 0 || approveAt < 0 || diffAt > approveAt {
+		t.Errorf("preview was not fetched before the approve; calls were %v", order)
+	}
+}
+
 // reject sends the reason, and is honest that the server does not keep it.
 func TestAcceptance_ConsolidateProposedRejectSendsReason(t *testing.T) {
 	stub := &proposedStubServer{}

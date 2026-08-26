@@ -872,7 +872,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   catalogue does not carry. The row is created empty and `PENDING`, no value is
   invented for it, and nothing is probed — there is no token yet to probe. The
   flags are refused on any other `--type`, where the server would have dropped
-  them silently.
+  them silently, and refused alongside `--value`/`--value-stdin`, which would
+  otherwise fill the same column twice and discard one of the two. Filing a
+  token obtained elsewhere as `--type OAUTH2 --value <token>` is untouched.
 
 - **`crewship consolidate proposed` — the human half of memory consolidation.**
   `consolidate run` triggered the extraction; the four review endpoints

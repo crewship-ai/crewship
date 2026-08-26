@@ -113,7 +113,17 @@ and fails every agent run that resolves it, until the flow below completes.
 | `--oauth-scopes` | `string` | Space-separated scopes. Defaults to the catalogue's. |
 
 The `--oauth-*` flags are rejected on any type other than `OAUTH2` (exit `2`) —
-the server would silently drop them, which is worse than refusing them.
+the server would silently drop them, which is worse than refusing them. They
+are also rejected alongside `--value`/`--value-stdin`: an OAuth credential's
+value *is* the token the flow fetches, so passing both is asking for the row to
+be filled two ways and one of them to be discarded.
+
+Filing a token you obtained elsewhere is still the older, flag-free form, and
+still works — it just does not involve an app:
+
+```bash
+crewship credential create --name preseeded --type OAUTH2 --value <token>
+```
 
 ---
 
@@ -151,7 +161,7 @@ crewship oauth connect my-linear-cred --timeout 3m --poll-interval 5s
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--timeout` | `duration` | `2m` | How long to wait for the credential to reach `ACTIVE`. |
+| `--timeout` | `duration` | `3m` | How long to wait for the credential to reach `ACTIVE`. |
 | `--poll-interval` | `duration` | `2s` | How often to re-check while waiting. |
 | `--no-wait` | `bool` | `false` | Print the URL and exit immediately. |
 | `--open` | `bool` | `false` | Open the authorize URL in a browser. |
@@ -165,7 +175,7 @@ the tokens are stored — that is what the command polls.
 the status the credential is stuck in:
 
 ```
-timed out after 2m waiting for credential cmt…c1a to connect; it is still
+timed out after 3m waiting for credential cmt…c1a to connect; it is still
 PENDING. The authorization was never completed in a browser, or the browser
 could not reach the loopback listener on the API host
 ```
@@ -174,9 +184,15 @@ Reporting success there would leave the tokens absent and the next agent run
 would be the thing that found out.
 </Note>
 
-The server's listener tears itself down after 120 s, so a `--timeout` shorter
-than that gives up while the window is still open, and one longer than it
-reports the window closing rather than racing it.
+The server's listener tears itself down after 120 s. The default `3m` outlasts
+that on purpose: a `--timeout` shorter than the window gives up while the flow
+is still live, and one merely *equal* to it loses on any scheduling jitter.
+
+A failed status read mid-wait is retried until the deadline rather than
+abandoning the flow — the loopback listener is one-shot, so giving up on a
+dropped connection would cost you the consent you already granted. A `401`,
+`403` or `404` is not retried: the credential is gone or unreadable, and
+waiting does not change that.
 
 ---
 
@@ -238,13 +254,22 @@ the built-in catalogue instead.
 
 ```bash
 crewship oauth auto-connect https://mcp.linear.app/sse --name linear-mcp
-crewship oauth auto-connect https://mcp.example/sse --name example --provider linear
+crewship oauth auto-connect https://mcp.linear.app/sse --name linear
 ```
 
 | Flag | Type | Description |
 |---|---|---|
 | `--name` | `string` | Name for the MCP server. Server default: `mcp-server`. |
-| `--provider` | `string` | Skip discovery and use a catalogue provider's endpoints. |
+
+<Note>
+The endpoint accepts a `provider_hint`, and this command deliberately never
+sends one. Supplying it makes the server fill the authorize URL from the static
+catalogue and **skip discovery entirely**, which leaves it with no registration
+endpoint, which makes Dynamic Client Registration impossible — so every hinted
+call returns `needs_client_id` and no credential is ever created. A flag that
+can only fail is worse than no flag; use `crewship oauth providers` if what you
+wanted was the endpoints.
+</Note>
 
 Discovers the endpoints, performs RFC 7591 Dynamic Client Registration, creates
 an `OAUTH2` credential in `PENDING`, and prints the URL to authorize. Finish
