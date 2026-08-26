@@ -156,6 +156,33 @@ expect "GOTOOLCHAIN as a version literal -> red" 1 "want local" \
 expect "GOTOOLCHAIN=auto -> red" 1 "want local" \
   "$(tree gotc-auto 1.27.0 1.27.0 auto 1.27.0 1.27.0)"
 
+# `ENV` is per-stage. A GOTOOLCHAIN line in the `node` stage does nothing to
+# `go build`, so a whole-file grep would call this green while the Go stage ran
+# with the default. The pin has to be found where it actually applies.
+GOTC_WRONG_STAGE="$TMPROOT/gotc-wrong-stage"
+make_tree "$GOTC_WRONG_STAGE" 1.27.0 1.27.0 - 1.27.0 1.27.0
+{
+  echo "FROM node:22-alpine AS frontend"
+  echo "ENV GOTOOLCHAIN=local"
+  echo "FROM golang:1.27.0-alpine AS backend"
+  echo "WORKDIR /app"
+} > "$GOTC_WRONG_STAGE/Dockerfile"
+expect "GOTOOLCHAIN set in the wrong stage -> red" 1 "no 'ENV GOTOOLCHAIN=local'" \
+  "$GOTC_WRONG_STAGE"
+
+# The mirror, so the scoping cannot be satisfied by simply never finding
+# anything: a pin AFTER the Go stage (in the runner) is equally inert.
+GOTC_AFTER="$TMPROOT/gotc-after-stage"
+make_tree "$GOTC_AFTER" 1.27.0 1.27.0 - 1.27.0 1.27.0
+{
+  echo "FROM golang:1.27.0-alpine AS backend"
+  echo "WORKDIR /app"
+  echo "FROM alpine:3.24"
+  echo "ENV GOTOOLCHAIN=local"
+} > "$GOTC_AFTER/Dockerfile"
+expect "GOTOOLCHAIN set in the runner stage -> red" 1 "no 'ENV GOTOOLCHAIN=local'" \
+  "$GOTC_AFTER"
+
 echo
 echo "the guard must not pass vacuously:"
 

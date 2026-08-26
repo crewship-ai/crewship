@@ -208,7 +208,21 @@ check_pins "workflow literal go-version"    "$LITERAL_PINS"
 # ---------------------------------------------------------------------------
 # Checked by value, not against $WANT: the whole argument for `local` is that
 # it does not name a version. See the header.
-GOTOOLCHAIN_VAL="$(sed -nE 's|^[[:space:]]*ENV[[:space:]]+GOTOOLCHAIN=([^[:space:]]+).*$|\1|p' "$DOCKERFILE" | head -1)"
+#
+# Scoped to the golang stage rather than grepped from the whole file. `ENV` is
+# per-stage in a multi-stage build, so a GOTOOLCHAIN line sitting in the `node`
+# stage — moved there by a careless refactor, or by someone reordering stages —
+# has no effect whatsoever on `go build`, while a whole-file grep would report
+# it as present and green. That is the same "the value under test is not the
+# value production uses" bypass scripts/security-yml-test.sh is built around.
+GO_STAGE="$(awk '
+  /^FROM[[:space:]]+golang:/ { inside = 1; next }
+  inside && /^FROM[[:space:]]/ { inside = 0 }
+  inside { print }
+' "$DOCKERFILE")"
+
+GOTOOLCHAIN_VAL="$(printf '%s\n' "$GO_STAGE" \
+  | sed -nE 's|^[[:space:]]*ENV[[:space:]]+GOTOOLCHAIN=([^[:space:]]+).*$|\1|p' | head -1)"
 if [ -z "$GOTOOLCHAIN_VAL" ]; then
   fail "Dockerfile has no 'ENV GOTOOLCHAIN=local' in the Go build stage (see this script's header for why)"
 elif [ "$GOTOOLCHAIN_VAL" != "local" ]; then
