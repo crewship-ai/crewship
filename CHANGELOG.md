@@ -297,6 +297,26 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Go toolchain moved 1.26.6 → 1.27.0, and every place that names it now
+  agrees (#2060).** Dependabot bumps the root `Dockerfile` alone, which is the
+  one Go version no PR ever exercises — the image is built only by `release.yml`
+  and `nightly.yml`. Taken by itself that bump would have shipped release
+  binaries compiled by 1.27.0 while all eleven CI pins, `go.mod`'s `toolchain`
+  directive and the `Go Vuln Scan` gate stayed on 1.26.6, so the published
+  artefact would have been the only thing built by a toolchain nothing had
+  verified. The pins move together instead: `GO_VERSION` in ten workflows,
+  the literal in `codeql.yml`, and `toolchain go1.27.0` in `go.mod`. The `go`
+  directive stays at 1.26 — the language floor is a separate promise to
+  consumers and nothing here needs 1.27 semantics.
+
+  No advisories are cleared or introduced by the move; govulncheck reports zero
+  either side of it. This is a build-toolchain change, not a security fix.
+
+  `golangci-lint` had to move with it, v2.1.6 → v2.13.1: v2.1.6 answers a 1.27
+  target with 908 phantom `typecheck` errors on valid code, and v2.12.2 panics
+  inside `honnef.co/go/tools` against the 1.27 standard library. The pin is now
+  documented as coupled to `GO_VERSION`.
+
 - **The builtin crew templates ship models that are not being retired.** All
   twelve template files pinned dated snapshots — `claude-sonnet-4-20250514` on
   43 agents, `claude-opus-4-20250514` on one, `claude-haiku-4-20250514` on
