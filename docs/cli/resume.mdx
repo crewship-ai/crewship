@@ -17,10 +17,10 @@ tag: Experimental
 | `r_…` / `run_…` | Looked up via `client.GetRun`; the run's `chat_id` is followed. |
 | `https://github.com/owner/repo/pull/<n>` | Searches the journal for the PR identifier and reuses the chat that produced it (best-effort — only works if an agent journaled the PR creation). |
 
-If the agent slug isn't part of the resolved object, `resume` finds the agent that owns the chat by walking `GET /api/v1/agents` and reading each agent's `GET /api/v1/agents/{agentId}/chats`. A chat is only addressable under its agent — there is no flat `GET /api/v1/chats/{chatId}` — so this walk is the lookup.
+If the agent slug isn't part of the resolved object, `resume` finds the agent that owns the chat by walking `GET /api/v1/agents` and reading each agent's `GET /api/v1/agents/{agentId}/chats`. A chat is addressable only under its agent — the API registers no flat chat-detail route — so this walk *is* the lookup.
 
 <Note>
-Before [#2086](https://github.com/crewship-ai/crewship/issues/2086), both resolution paths called routes that do not exist (`GET /api/v1/chats` for the picker, `GET /api/v1/chats/{chatId}` for the agent lookup). The picker silently fell through to its `/runs` fallback; the agent lookup just failed, so `crewship resume <chat-id>` always reported `could not determine agent`.
+Before [#2086](https://github.com/crewship-ai/crewship/issues/2086), both resolution paths asked for flat chat routes the router does not register: a workspace-wide chat list for the picker, a chat-detail fetch for the agent lookup. The picker silently fell through to its `/runs` fallback; the agent lookup just failed, so `crewship resume <chat-id>` always reported `could not determine agent`.
 </Note>
 
 ## `crewship resume [chat-id | run-id | pr-url]`

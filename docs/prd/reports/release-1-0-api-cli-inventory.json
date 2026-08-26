@@ -828,6 +828,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_contract_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
         "internal/api/admin_keeper_aux_credential_test.go",
@@ -851,6 +852,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_keeper_aux.go",
           "test_signals": [
+            "cmd/crewship/cli_route_contract_test.go",
             "cmd/crewship/cmd_keeper_aux_credential_test.go",
             "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
             "internal/api/admin_keeper_aux_credential_test.go",
@@ -874,6 +876,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_contract_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
         "internal/api/admin_keeper_aux_credential_test.go",
@@ -897,6 +900,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_keeper_aux.go",
           "test_signals": [
+            "cmd/crewship/cli_route_contract_test.go",
             "cmd/crewship/cmd_keeper_aux_credential_test.go",
             "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
             "internal/api/admin_keeper_aux_credential_test.go",
@@ -3495,7 +3499,6 @@
         "docs/api-reference/agents.mdx",
         "docs/api-reference/conversations.mdx",
         "docs/cli/chat.mdx",
-        "docs/cli/resume.mdx",
         "docs/guides/chat-sessions.mdx",
         "docs/prd/CHAT-SURFACE-CONTRACT-SWEEP.md",
         "docs/prd/CODEX-WORK-ORDER-CHAT-1-0.md",
@@ -3556,7 +3559,6 @@
         "docs/api-reference/agents.mdx",
         "docs/api-reference/conversations.mdx",
         "docs/cli/chat.mdx",
-        "docs/cli/resume.mdx",
         "docs/guides/chat-sessions.mdx",
         "docs/prd/CHAT-SURFACE-CONTRACT-SWEEP.md",
         "docs/prd/CODEX-WORK-ORDER-CHAT-1-0.md",
@@ -12912,6 +12914,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_contract_test.go",
         "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
@@ -12919,7 +12922,6 @@
         "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
-        "cmd/crewship/cmd_routine_webhooks_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -12939,6 +12941,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_hooks.go",
           "test_signals": [
+            "cmd/crewship/cli_route_contract_test.go",
             "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
             "cmd/crewship/cmd_format_sweep_batch2_test.go",
             "cmd/crewship/cmd_format_sweep_batch4_test.go",
@@ -12946,7 +12949,6 @@
             "cmd/crewship/cmd_hooks_test.go",
             "cmd/crewship/cmd_hooks_write_test.go",
             "cmd/crewship/cmd_notifychannel_cov_test.go",
-            "cmd/crewship/cmd_routine_webhooks_cov_test.go",
             "…"
           ]
         }
@@ -12968,6 +12970,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_contract_test.go",
         "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
@@ -12975,7 +12978,6 @@
         "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
-        "cmd/crewship/cmd_routine_webhooks_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -12995,6 +12997,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_hooks.go",
           "test_signals": [
+            "cmd/crewship/cli_route_contract_test.go",
             "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
             "cmd/crewship/cmd_format_sweep_batch2_test.go",
             "cmd/crewship/cmd_format_sweep_batch4_test.go",
@@ -13002,7 +13005,6 @@
             "cmd/crewship/cmd_hooks_test.go",
             "cmd/crewship/cmd_hooks_write_test.go",
             "cmd/crewship/cmd_notifychannel_cov_test.go",
-            "cmd/crewship/cmd_routine_webhooks_cov_test.go",
             "…"
           ]
         }
@@ -13024,6 +13026,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_contract_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
         "internal/hooks/store_write_test.go",
         "internal/manifest/kinds/hook_test.go"
@@ -13045,6 +13048,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/crewship/cli_route_contract_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
             "internal/hooks/store_write_test.go",
             "internal/manifest/kinds/hook_test.go"
@@ -13068,6 +13072,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_contract_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
         "internal/hooks/store_write_test.go",
         "internal/manifest/kinds/hook_test.go"
@@ -13089,6 +13094,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/crewship/cli_route_contract_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
             "internal/hooks/store_write_test.go",
             "internal/manifest/kinds/hook_test.go"
@@ -13481,6 +13487,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_contract_test.go",
         "cmd/crewship/cmd_instance_cov_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_admin_platform_test.go",
@@ -13488,7 +13495,6 @@
         "internal/api/instance_settings_handler_test.go",
         "internal/api/unauth_reachability_test.go",
         "internal/manifest/apply_kinds_cov2_test.go",
-        "internal/manifest/kinds/instance_setting_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -13508,6 +13514,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_instance.go",
           "test_signals": [
+            "cmd/crewship/cli_route_contract_test.go",
             "cmd/crewship/cmd_instance_cov_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_admin_platform_test.go",
@@ -13515,7 +13522,6 @@
             "internal/api/instance_settings_handler_test.go",
             "internal/api/unauth_reachability_test.go",
             "internal/manifest/apply_kinds_cov2_test.go",
-            "internal/manifest/kinds/instance_setting_cov_test.go",
             "…"
           ]
         }
@@ -19708,6 +19714,7 @@
         "docs/cli/explain.mdx",
         "docs/cli/history.mdx",
         "docs/cli/me.mdx",
+        "docs/cli/resume.mdx",
         "docs/cli/retry.mdx",
         "docs/cli/run.mdx",
         "docs/guides/activity.mdx",
@@ -49190,8 +49197,8 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4451,
-    "api_path_references": 2183,
+    "command_references": 4452,
+    "api_path_references": 2185,
     "environment_references": 432,
     "manifest_kind_references": 231,
     "flag_references": 2095,
