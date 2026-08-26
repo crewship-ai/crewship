@@ -790,6 +790,13 @@ func callSitesInBody(fset *token.FileSet, resolver *pathResolver, body *ast.Bloc
 			if !strings.HasPrefix(s.Path, "/api/") {
 				continue
 			}
+			// A hole survives only inside a forwarder TEMPLATE, never at a
+			// real call site (every index is filled, out-of-range ones with
+			// `{}`). Belt and braces: reporting one would be an unreadable
+			// path with a NUL in it rather than an honest finding.
+			if holeRE.MatchString(s.Path) {
+				continue
+			}
 			out = append(out, cliCallSite{
 				Method:          s.Method,
 				Path:            normalisePath(s.Path),
@@ -957,7 +964,7 @@ func TestCLICallsHitRegisteredRoutes(t *testing.T) {
 		if len(others) > 0 {
 			hint = "the path exists under a different method: " + strings.Join(others, ", ")
 		}
-		t.Errorf("%s calls %s %s (source expression %q) but the router does not register it — %s",
+		t.Errorf("%s calls %s %s (path expression resolves to %q) but the router does not register it — %s",
 			s.Pos, s.Method, s.Path, s.Raw, hint)
 	}
 }
