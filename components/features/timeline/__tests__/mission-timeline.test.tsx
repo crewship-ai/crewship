@@ -94,3 +94,71 @@ describe("MissionTimeline fork target", () => {
     expect(apiFetch).not.toHaveBeenCalled()
   })
 })
+
+// ── Restore says what the endpoint actually does ─────────────────────────
+//
+// POST /checkpoints/{id}/restore restores nothing. cartographer.Restore says
+// so in its own doc comment — "no DB rows are mutated, no containers are torn
+// down, no memory is rewound" — and journals the attempt as "restore preview
+// for checkpoint …". The rewind is deferred to a handler that does not exist.
+//
+// The UI reported "Mission restored to checkpoint", and threw away the one
+// thing the call does produce: warn_divergence, the events a real restore
+// would have to abandon. Claiming success AND discarding the useful half was
+// the worst available combination.
+describe("<MissionTimeline> — restoring a checkpoint", () => {
+  async function openMenu() {
+    const trigger = screen.getByRole("button", { name: /actions/i })
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerId: 1 })
+    fireEvent.pointerUp(trigger, { button: 0, pointerId: 1 })
+    fireEvent.click(trigger)
+  }
+
+  it("calls it a preview, in the menu and in the result", async () => {
+    apiFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ warn_divergence: ["jrn_a", "jrn_b", "jrn_c"] }),
+    })
+    renderTimeline([checkpointEntry()])
+    await openMenu()
+
+    // Not "Restore" — it does not.
+    const item = await screen.findByText(/preview restore/i)
+    expect(screen.queryByText(/^Restore$/)).toBeNull()
+    fireEvent.click(item)
+
+    const { toast } = await import("sonner")
+    await waitFor(() => expect(toast.info).toHaveBeenCalled())
+    const [headline, opts] = (toast.info as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(headline).toMatch(/nothing has been rewound/i)
+    // The divergence count is the payload's whole point.
+    expect(opts.description).toMatch(/abandon 3 later events/i)
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it("says so even when there is nothing to abandon", async () => {
+    apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ warn_divergence: [] }) })
+    renderTimeline([checkpointEntry()])
+    await openMenu()
+    fireEvent.click(await screen.findByText(/preview restore/i))
+
+    const { toast } = await import("sonner")
+    await waitFor(() => expect(toast.info).toHaveBeenCalled())
+    const [, opts] = (toast.info as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(opts.description).toMatch(/no later events/i)
+    expect(opts.description).toMatch(/not implemented/i)
+  })
+
+  it("still reports a refusal as a refusal", async () => {
+    apiFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) })
+    renderTimeline([checkpointEntry()])
+    await openMenu()
+    fireEvent.click(await screen.findByText(/preview restore/i))
+
+    const { toast } = await import("sonner")
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(toast.info).not.toHaveBeenCalled()
+  })
+})
+

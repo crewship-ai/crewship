@@ -11,9 +11,6 @@ import {
   Braces,
   Wrench,
   Search,
-  Check,
-  ChevronsUpDown,
-  Users,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -35,19 +32,15 @@ import {
   CreateSurfaceSection,
   CreateSurfaceTile,
 } from "@/components/layout/create-surface"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
+// The shared picker, not a second copy of it. The local one was a verbatim
+// fork that had already drifted: it never got the `modal` prop that fixes
+// scrolling inside a dialog, so its list clipped and would not move — the
+// exact cost of the duplication.
+import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
@@ -1083,124 +1076,6 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   )
 }
 
-/**
- * The crew picker — a crew, drawn the way the rest of the product draws it.
- *
- * This was a native <select> in both places it appears, so the one screen that
- * asks "whose crew is this?" answered with a column of names while the roster
- * two clicks away shows Engineering as a blue terminal and Ops as a red
- * server. The data was never missing: `icon` and `color` come back on the same
- * `/api/v1/crews` response the <select> was already reading.
- *
- * The shape is the New-issue crew popover's — a Command list in a Popover —
- * rather than a tile per crew, because this sits inline beside another field
- * and a workspace with twenty crews would push the goal box off the screen.
- * The one thing added to that idiom is the <CrewIcon>, which handles the
- * hex/palette-id split on its own.
- */
-function CrewPicker({
-  id,
-  crews,
-  value,
-  onChange,
-  placeholder,
-  clearLabel,
-  ariaLabel,
-  className,
-}: {
-  id: string
-  crews: Crew[]
-  value: string
-  onChange: (id: string) => void
-  /** Shown when nothing is chosen — the old select's first <option>. */
-  placeholder: string
-  /** Present where "no crew" is a real answer, absent where it is not. */
-  clearLabel?: string
-  ariaLabel: string
-  className?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const selected = crews.find((c) => c.id === value) ?? null
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          id={id}
-          type="button"
-          role="combobox"
-          aria-expanded={open}
-          aria-label={ariaLabel}
-          className={cn(
-            "flex w-full items-center gap-2 rounded-md border border-hairline bg-background px-2 text-left text-foreground outline-none transition-colors hover:border-border focus:border-primary",
-            CREATE_SURFACE_INPUT,
-            className,
-          )}
-        >
-          {selected ? (
-            <CrewIcon
-              icon={selected.icon || "users"}
-              color={selected.color}
-              size="sm"
-              className="!h-5 !w-5 !rounded"
-            />
-          ) : (
-            <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
-          )}
-          <span className={cn("min-w-0 flex-1 truncate", !selected && "text-muted-foreground")}>
-            {selected?.name ?? placeholder}
-          </span>
-          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[240px] p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Search crews…" className="h-8 text-xs" />
-          <CommandList>
-            <CommandEmpty>No crews found.</CommandEmpty>
-            <CommandGroup>
-              {clearLabel && (
-                <CommandItem
-                  value={clearLabel}
-                  onSelect={() => {
-                    onChange("")
-                    setOpen(false)
-                  }}
-                >
-                  <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
-                  <span className="truncate text-xs text-muted-foreground">{clearLabel}</span>
-                  {value === "" && <Check className="ml-auto h-3.5 w-3.5" />}
-                </CommandItem>
-              )}
-              {crews.map((crew) => (
-                <CommandItem
-                  key={crew.id}
-                  // The id rides along so two crews sharing a name still filter
-                  // and select independently; it is not rendered, so the row's
-                  // accessible name is still just the crew's.
-                  value={`${crew.name} ${crew.id}`}
-                  onSelect={() => {
-                    onChange(crew.id)
-                    setOpen(false)
-                  }}
-                >
-                  <CrewIcon
-                    icon={crew.icon || "users"}
-                    color={crew.color}
-                    size="sm"
-                    className="!h-5 !w-5 !rounded"
-                  />
-                  <span className="truncate text-xs">{crew.name}</span>
-                  {value === crew.id && <Check className="ml-auto h-3.5 w-3.5" />}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  )
-}
 
 /** Status dot for a fork candidate — same vocabulary as the sidebar. */
 function forkStatusDot(r: RoutineListItem): string {
