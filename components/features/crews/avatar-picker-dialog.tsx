@@ -98,58 +98,115 @@ export function AvatarPickerBody({
 
   return (
     <>
-        {/* Big preview */}
-        <div className="flex items-center justify-center py-2">
+        {/* Four stacked full-width blocks — a 96px preview, a 25-tile grid of
+            40px faces with labels, eight quick picks each a full grid column
+            wide, and a seed field with its own heading — ran past 650px and
+            pushed the quick picks off the bottom of the surface. Nothing is
+            removed here; the same four things are laid out at a size that
+            fits, because every one of them is a thumbnail and none needed to
+            be the biggest thing on screen.
+
+            The seed and its quick picks now sit WITH the preview: all three
+            answer "which face", and splitting them across the panel with the
+            style grid in between was what made the panel tall. */}
+        <div className="flex items-center gap-3">
           <img
             src={previewUrl}
             alt=""
-            className="w-24 h-24 rounded-2xl border border-white/10 bg-muted"
+            data-testid="avatar-preview"
+            className="h-14 w-14 shrink-0 rounded-xl border border-white/10 bg-muted"
           />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={draftSeed}
+                onChange={(e) => setDraftSeed(e.target.value)}
+                aria-label="Avatar seed"
+                className="min-w-0 flex-1 rounded border border-white/15 bg-background px-2 py-1.5 font-mono text-sm outline-none focus:border-primary"
+              />
+              <button
+                type="button"
+                onClick={() => setDraftSeed(Math.random().toString(36).slice(2, 12))}
+                className="flex shrink-0 items-center gap-1 text-[11px] text-primary hover:text-primary"
+              >
+                <RefreshCw className="h-3 w-3" />
+                Regenerate
+              </button>
+            </div>
+
+            {/* Fixed-size thumbnails rather than a grid of eight equal
+                columns: at panel width each column was ~90px, so the quick
+                picks rendered larger than the preview they feed. */}
+            <div className="flex flex-wrap gap-1.5" data-testid="avatar-quick-pick">
+              {quickSeeds.map((qs) => (
+                <button
+                  key={qs}
+                  type="button"
+                  onClick={() => setDraftSeed(qs)}
+                  aria-label={`Use avatar seed ${qs}`}
+                  className={cn(
+                    "h-8 w-8 shrink-0 overflow-hidden rounded-md border transition-colors",
+                    draftSeed === qs ? "border-primary" : "border-white/10 hover:border-white/25",
+                  )}
+                >
+                  <img src={getAgentAvatarUrl(qs, effectiveStyle)} alt="" className="h-full w-full" />
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {/* Style switcher — small previews so the user can compare faces. */}
+        <p className="type-meta text-muted-foreground">
+          The same seed always produces the same face — leave the agent&apos;s name for a
+          deterministic default.
+        </p>
+
         {/* Inherit is not a style, so it does not sit in the grid of styles.
             It used to, as a twelfth tile whose preview renders
             crewStyle ?? DEFAULT_AVATAR_STYLE — and the default is
             bottts-neutral, labelled "Robots" one tile over. For any agent
             whose crew has no style set, that was two adjacent tiles with the
             identical face and nothing saying why. It is a REFERENCE, so it
-            says out loud what it currently resolves to. */}
-        <div>
-          <button
-            type="button"
-            onClick={() => setDraftStyle(null)}
-            className={cn(
-              "flex w-full items-center gap-2.5 rounded-lg border p-2 text-left transition-colors",
-              draftStyle === null
-                ? "border-primary bg-primary/10"
-                : "border-white/10 hover:bg-white/5",
-            )}
-          >
-            <img
-              src={getAgentAvatarUrl(draftSeed, crewStyle ?? DEFAULT_AVATAR_STYLE)}
-              alt=""
-              className="h-8 w-8 rounded"
-            />
-            <span className="min-w-0 flex-1">
-              <span className={cn("type-row block font-medium", draftStyle === null && "text-primary")}>
-                Follow the crew
-              </span>
-              <span className="type-meta block truncate text-muted-foreground">
-                {crewStyle
-                  ? `currently ${AVATAR_STYLES[crewStyle]?.label ?? crewStyle}`
-                  : `the crew has none set, so: ${AVATAR_STYLES[DEFAULT_AVATAR_STYLE].label} (the default)`}
-              </span>
-            </span>
-          </button>
-        </div>
+            says out loud what it currently resolves to — now on one line
+            rather than a stacked pair, which is the same sentence in half the
+            height. */}
+        <button
+          type="button"
+          onClick={() => setDraftStyle(null)}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-colors",
+            draftStyle === null
+              ? "border-primary bg-primary/10"
+              : "border-white/10 hover:bg-white/5",
+          )}
+        >
+          <img
+            src={getAgentAvatarUrl(draftSeed, crewStyle ?? DEFAULT_AVATAR_STYLE)}
+            alt=""
+            className="h-6 w-6 shrink-0 rounded"
+          />
+          <span className={cn("type-row shrink-0 font-medium", draftStyle === null && "text-primary")}>
+            Follow the crew
+          </span>
+          <span className="type-meta min-w-0 flex-1 truncate text-muted-foreground">
+            {crewStyle
+              ? `currently ${AVATAR_STYLES[crewStyle]?.label ?? crewStyle}`
+              // Keeps naming the resolved style AND the word "default". Both
+              // matter: with no crew style set this control draws the same
+              // face as a tile in the grid below, and saying "the default" is
+              // what stops that reading as a duplicate.
+              : `none set — the default, ${AVATAR_STYLES[DEFAULT_AVATAR_STYLE].label}`}
+          </span>
+        </button>
 
         {/* The catalogue is 25 styles. As a three-column list of
             icon-beside-label tiles that was nine rows of mostly whitespace, and
             the labels won the eye over the faces — which are the thing being
-            chosen. Face on top, name under it, five across: the grid becomes
-            something you scan rather than read, and it fits without the dialog
-            turning into a page. */}
+            chosen. Face on top, name under it: the grid became something you
+            scan rather than read. It is denser again here — the faces are the
+            content, the labels are the caption, and at 32px five rows fit
+            where three did. */}
         <div>
           <div className="type-meta mb-1.5 flex items-baseline gap-2 text-muted-foreground">
             <span>Or pick one for this agent</span>
@@ -157,7 +214,7 @@ export function AvatarPickerBody({
           </div>
           <div
             data-testid="avatar-style-grid"
-            className="grid max-h-[280px] grid-cols-4 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-5"
+            className="grid max-h-[210px] grid-cols-5 gap-1 overflow-y-auto pr-1 sm:grid-cols-7"
           >
             {STYLE_OPTIONS.map((s) => (
               <button
@@ -166,7 +223,7 @@ export function AvatarPickerBody({
                 onClick={() => setDraftStyle(s.value)}
                 title={s.label}
                 className={cn(
-                  "flex flex-col items-center gap-1 rounded-lg border p-1.5 transition-colors",
+                  "flex flex-col items-center gap-0.5 rounded-md border p-1 transition-colors",
                   draftStyle === s.value
                     ? "border-primary bg-primary/10"
                     : "border-white/10 hover:bg-white/5",
@@ -175,11 +232,11 @@ export function AvatarPickerBody({
                 <img
                   src={getAgentAvatarUrl(draftSeed, s.value)}
                   alt=""
-                  className="h-10 w-10 rounded-md"
+                  className="h-8 w-8 rounded"
                 />
                 <span
                   className={cn(
-                    "type-meta w-full truncate text-center leading-tight",
+                    "w-full truncate text-center text-[9.5px] leading-tight",
                     draftStyle === s.value ? "text-primary" : "text-muted-foreground",
                   )}
                 >
@@ -187,53 +244,6 @@ export function AvatarPickerBody({
                 </span>
               </button>
             ))}
-          </div>
-        </div>
-
-        {/* Quick-pick seeds */}
-        <div>
-          <div className="text-xs text-muted-foreground mb-1.5">Quick pick</div>
-          <div className="grid grid-cols-8 gap-1.5">
-            {quickSeeds.map((qs) => (
-              <button
-                key={qs}
-                type="button"
-                onClick={() => setDraftSeed(qs)}
-                aria-label={`Use avatar seed ${qs}`}
-                className={cn(
-                  "rounded-lg overflow-hidden border transition-colors",
-                  draftSeed === qs ? "border-primary" : "border-white/10 hover:border-white/25",
-                )}
-              >
-                <img src={getAgentAvatarUrl(qs, effectiveStyle)} alt="" className="w-full h-auto" />
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Manual seed entry */}
-        <div>
-          <div className="text-xs text-muted-foreground mb-1.5 flex items-center justify-between">
-            <span>Seed</span>
-            <button
-              type="button"
-              onClick={() => setDraftSeed(Math.random().toString(36).slice(2, 12))}
-              className="text-[11px] flex items-center gap-1 text-primary hover:text-primary"
-            >
-              <RefreshCw className="h-3 w-3" />
-              Regenerate
-            </button>
-          </div>
-          <input
-            type="text"
-            value={draftSeed}
-            onChange={(e) => setDraftSeed(e.target.value)}
-            aria-label="Avatar seed"
-            className="w-full bg-background border border-white/15 rounded px-2 py-1.5 text-sm font-mono outline-none focus:border-primary"
-          />
-          <div className="text-[11px] text-muted-foreground mt-1">
-            Identical seeds across agents produce identical faces. Leave the agent name as the
-            seed for a deterministic default.
           </div>
         </div>
 
