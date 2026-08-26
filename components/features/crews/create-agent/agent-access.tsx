@@ -211,16 +211,6 @@ interface SectionProps {
 export function AgentAccessSection({ catalog, selection, onChange }: SectionProps) {
   const { integrations, channels, loading, error } = catalog
 
-  /**
-   * Picked integrations that no agent is bound to yet.
-   *
-   * Those are exactly the ones whose first binding flips the server from
-   * "everyone gets it" to "only the bound agents get it".
-   */
-  const willFlipToOptIn = integrations
-    .filter((i) => selection.integrationIds.includes(i.id) && (i.agent_binding_count ?? 0) === 0)
-    .map((i) => i.display_name || i.name)
-
   const toggle = useCallback(
     (key: keyof AgentAccessSelection, id: string) => {
       const current = selection[key]
@@ -256,45 +246,17 @@ export function AgentAccessSection({ catalog, selection, onChange }: SectionProp
         </p>
       )}
 
-      {/* The flip nobody is told about.
+      {/* No "granting this revokes it from everyone else" warning here any
+       * more, and that is the point of #2072 rather than an omission.
        *
-       * integration_resolve.go builds the effective server list and then:
-       *
-       *   if !hasBind && serversWithBindings[s.ServerID] { continue }
-       *
-       * A workspace server with ZERO bindings resolves for every agent. The
-       * moment ANY agent gets one, it becomes opt-in and every other agent
-       * loses it — no warning, no audit line, nothing on the integration's
-       * own page. Before this form existed the only way to trigger it was
-       * `crewship integration bind`; now a switch on the create surface does
-       * it, which is a trap of our own making.
-       *
-       * Warned rather than prevented: making the first grant is a legitimate
-       * thing to want, and `agent_binding_count` is already on the wire from
-       * GET /api/v1/integrations, so this costs no request. The deeper fix is
-       * to stop inferring "available to all" from a COUNT — tracked
-       * separately. */}
-      {/* A live region, because this notice APPEARS in response to flipping a
-          switch rather than being on screen already. CreateSurfaceNotice gives
-          role="alert" only to tone="error", and warn is the right tone here —
-          it does not block anything. Without this a screen-reader user flips
-          the switch and is told nothing about what it just cost. */}
-      <div role="status" aria-live="polite">
-      {willFlipToOptIn.length > 0 && (
-        <CreateSurfaceNotice tone="warn" icon={TriangleAlert}>
-          {willFlipToOptIn.length === 1 ? (
-            <><strong>{willFlipToOptIn[0]}</strong> is currently available to every agent in this
-            workspace.</>
-          ) : (
-            <>{willFlipToOptIn.length} of these are currently available to every agent in this
-            workspace.</>
-          )}{" "}
-          Granting {willFlipToOptIn.length === 1 ? "it" : "them"} here makes{" "}
-          {willFlipToOptIn.length === 1 ? "it" : "them"} opt-in, so every OTHER agent loses access
-          until granted too.
-        </CreateSurfaceNotice>
-      )}
-      </div>
+       * A workspace server used to resolve for every agent exactly while
+       * NOBODY was bound to it — "available to all" was inferred from
+       * `COUNT(bindings) == 0` — so the first grant made on this form flipped
+       * the server to opt-in and revoked it from the whole roster. #2070
+       * warned about that here because the resolver could not be trusted;
+       * the audience is now a stored column (`default_access`) that only an
+       * explicit change touches, so a grant made here costs no other agent
+       * anything and there is nothing to warn about. */}
 
       {integrations.length > 0 && (
         <div className="flex flex-col gap-1.5">

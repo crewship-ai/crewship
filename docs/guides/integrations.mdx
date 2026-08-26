@@ -242,6 +242,35 @@ MCP Server (stdio or HTTP transport)
 External Service (GitHub, Slack, etc.)
 ```
 
+### Who gets which server
+
+Every workspace- and crew-scoped MCP server stores its audience in a
+`default_access` column:
+
+| Value | Who resolves the server |
+| --- | --- |
+| `all` (default for new servers) | every agent in the server's scope |
+| `bound-only` | only agents with an explicit agent binding |
+
+An agent binding attaches a credential, a config override or an opt-out to
+**one** agent's use of a server. It never changes the audience, so granting one
+agent an integration cannot take it away from anyone else.
+
+```bash
+crewship integration access github bound-only        # workspace scope
+crewship integration crew update eng <id> --access bound-only   # crew scope
+crewship integration resolve pepa                    # what one agent actually gets
+```
+
+<Warning>
+Before Crewship 2026.08 the audience was inferred from the number of bindings:
+a server nobody was bound to resolved for everyone, and the first binding
+anywhere in the workspace silently revoked it from every other agent. Upgrading
+freezes each existing server at the audience it effectively had — servers that
+already had a binding become `bound-only`, the rest become `all` — so nothing
+changes at the moment of the upgrade.
+</Warning>
+
 ### Transport Types
 
 | Transport | Description | Use Case |

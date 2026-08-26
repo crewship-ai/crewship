@@ -116,6 +116,10 @@ type mcpServerRow struct {
 	id, name, displayName, transport     string
 	endpoint, command, argsJSON, envJSON *string
 	icon                                 *string
+	// defaultAccess is the stored audience — "all" or "bound-only" (#2072).
+	// Read here so the runtime cascade and the resolve endpoint answer the
+	// same question from the same fact.
+	defaultAccess string
 }
 
 // installedSkillResponse is the per-skill payload that ships in the
@@ -1271,11 +1275,11 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 	// Step 1: Workspace MCP servers (keyed by name)
 	merged := make(map[string]*mcpServerRow)
 	if wsRows, err := h.db.QueryContext(r.Context(), `
-		SELECT id, name, display_name, transport, endpoint, command, args_json, env_json, icon
+		SELECT id, name, display_name, transport, endpoint, command, args_json, env_json, icon, default_access
 		FROM workspace_mcp_servers WHERE workspace_id = ? AND enabled = 1 AND deleted_at IS NULL`, data.wsID); err == nil {
 		for wsRows.Next() {
 			var s mcpServerRow
-			if err := wsRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON, &s.icon); err != nil {
+			if err := wsRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON, &s.icon, &s.defaultAccess); err != nil {
 				continue
 			}
 			merged[s.name] = &s
@@ -1286,13 +1290,13 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 	// Step 2: Crew MCP servers override workspace by name
 	if data.crewID.Valid {
 		if crewRows, err := h.db.QueryContext(r.Context(), `
-			SELECT cs.id, cs.name, cs.display_name, cs.transport, cs.endpoint, cs.command, cs.args_json, cs.env_json, cs.icon
+			SELECT cs.id, cs.name, cs.display_name, cs.transport, cs.endpoint, cs.command, cs.args_json, cs.env_json, cs.icon, cs.default_access
 			FROM crew_mcp_servers cs
 			JOIN crews c ON c.id = cs.crew_id AND c.deleted_at IS NULL
 			WHERE cs.crew_id = ? AND cs.enabled = 1 AND cs.deleted_at IS NULL`, data.crewID.String); err == nil {
 			for crewRows.Next() {
 				var s mcpServerRow
-				if err := crewRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON, &s.icon); err != nil {
+				if err := crewRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON, &s.icon, &s.defaultAccess); err != nil {
 					continue
 				}
 				merged[s.name] = &s
@@ -1385,20 +1389,6 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 		}
 	}
 
-	// Step 4b: Check which servers have ANY bindings (for opt-in filtering).
-	serversWithBindings := make(map[string]bool)
-	if bindCountRows, err := h.db.QueryContext(r.Context(), `
-		SELECT mcp_server_id FROM agent_mcp_bindings
-		GROUP BY mcp_server_id HAVING COUNT(*) > 0`); err == nil {
-		for bindCountRows.Next() {
-			var sid string
-			if bindCountRows.Scan(&sid) == nil {
-				serversWithBindings[sid] = true
-			}
-		}
-		bindCountRows.Close()
-	}
-
 	// Step 5: Build result entries
 	for _, srv := range merged {
 		// Legacy gate: with the default connector active, turn OFF any
@@ -1442,8 +1432,12 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 					}
 				}
 			}
-		} else if serversWithBindings[srv.id] {
-			// Server has bindings for other agents but NOT this one -> skip
+		} else if !openToUnboundAgents(srv.defaultAccess) {
+			// Server is bound-only and this agent has no binding -> skip.
+			// This used to ask whether ANY agent held a binding, which meant
+			// one agent's grant revoked the server for everyone else (#2072)
+			// — and the query was not even workspace-scoped, so a binding in
+			// a different workspace could do it.
 			continue
 		}
 		mcpServers = append(mcpServers, entry)
