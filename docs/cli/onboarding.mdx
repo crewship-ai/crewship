@@ -1,0 +1,105 @@
+---
+title: "Onboarding"
+description: "Propose a crew, inspect the proposal, and apply it under your own session."
+icon: "compass"
+stability: experimental
+tag: Experimental
+---
+
+# crewship onboarding
+
+The CLI half of Crewship's first-run flow. The web wizard runs a conversation
+with the **Crewship Guide**, which proposes a crew; these commands are the same
+surface without the chat, and the counterpart to the
+[Onboarding API](/api-reference/onboarding).
+
+The split matters more than it looks. Proposing writes **nothing** — it stores a
+roster server-side and hands you an id. Applying is a separate command that
+reads only that stored payload, so what you inspected and what gets built are
+the same object. A proposal you never apply leaves no trace but a row.
+
+```bash
+crewship onboarding proposal create --crew-name "…" [--agent "Name:Role" …]
+crewship onboarding proposal get <proposal-id>
+crewship onboarding proposal apply <proposal-id>
+crewship onboarding setup-agent start
+```
+
+## crewship onboarding proposal create
+
+Resolve a crew into a full roster and store it. Creates no crew, no agent and no
+credential.
+
+```bash
+crewship onboarding proposal create --crew-name "Uptime Watch" \
+  --agent "Watcher:Polls the status page and reports outages"
+```
+
+### Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--crew-name <name>` | (required) | Display name for the crew. |
+| `--agent "<Name>:<Role>"` | — | Name one roster agent. Repeatable, 1–6 total. Split on the **first** colon only, so a role may contain more. |
+| `--template-slug <slug>` | `""` | Derive the roster from a builtin crew template instead. |
+| `--crew-slug <slug>` | derived | Slug override. Derived from `--crew-name` when omitted; diacritics are folded, so "Hlídač dostupnosti" becomes `hlidac-dostupnosti`. |
+| `--llm-provider <id>` | `ANTHROPIC` | Provider for the model override. |
+| `--llm-model <id>` | provider default | Model id. Validated against the provider's curated catalogue — an id outside it is replaced with the workspace default rather than creating a crew that fails at the adapter on every run. |
+
+Give the roster **either way**: `--template-slug` to derive it, or `--agent` to
+name it. A bespoke crew with no matching builtin is a first-class case, and it
+is the one the Guide actually uses. Supplying both is allowed: the named roster
+wins and the template supplies the rest of the crew metadata.
+
+Only the name and the role are taken from what you type. Each agent's system
+prompt, tool profile and adapter are composed server-side.
+
+Prints the proposal id, its status (`PENDING`) and the resolved roster. Add
+`--output json` for the full payload.
+
+## crewship onboarding proposal get
+
+Read a stored proposal, including whether it has already been applied.
+
+```bash
+crewship onboarding proposal get prp_01hx…
+```
+
+Takes the proposal id as its only argument. A proposal in another workspace
+reports as not found rather than forbidden — its existence is not disclosed.
+
+## crewship onboarding proposal apply
+
+Create the crew from the stored payload. **The only write in this surface.**
+
+```bash
+crewship onboarding proposal apply prp_01hx…
+```
+
+Runs under your own session, so the crew belongs to you rather than to the agent
+that proposed it. Nothing you pass here can change what is built — the payload
+was fixed when the proposal was stored.
+
+Idempotent: applying twice returns the original crew with `already_applied: true`
+instead of creating a second one, so a retried command is harmless.
+
+Prints the crew id, slug and the agents created.
+
+## crewship onboarding setup-agent start
+
+Ensure the Crewship Guide exists in this workspace and print its agent, crew and
+chat ids.
+
+```bash
+crewship onboarding setup-agent start
+```
+
+Idempotent — repeated calls return the same agent and the same chat, so the
+conversation history survives. Useful for opening the Guide's chat from the CLI,
+or for confirming the reserved crew was provisioned on a fresh install.
+
+## See also
+
+- [Onboarding API](/api-reference/onboarding) — the routes these commands drive.
+- [`crewship setup`](/cli/setup) — the non-conversational first-run path.
+- [`crewship crew`](/cli/crew) — managing the crews once they exist.

@@ -42,6 +42,7 @@ func TestOpenAIReverseProxy_InjectsKeyStripsPrefixRewritesHost(t *testing.T) {
 	req := httptest.NewRequest("POST", "http://127.0.0.1:9119/openai/v1/responses",
 		strings.NewReader(`{"model":"gpt-test"}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("Authorization", "Bearer sk-dummy-crewship-sidecar")
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
@@ -73,6 +74,7 @@ func TestOpenAIReverseProxy_ChatCompletionsPath(t *testing.T) {
 	req := httptest.NewRequest("POST", "http://127.0.0.1:9119/openai/v1/chat/completions",
 		strings.NewReader(`{}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 	if upstream == nil || upstream.URL.Path != "/v1/chat/completions" {
@@ -89,6 +91,7 @@ func TestOpenAIReverseProxy_NoCredPassesThrough(t *testing.T) {
 	req := httptest.NewRequest("POST", "http://127.0.0.1:9119/openai/v1/responses",
 		strings.NewReader(`{}`))
 	req.Host = "127.0.0.1:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("Authorization", "Bearer caller-supplied")
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
@@ -122,6 +125,7 @@ func TestHandleLocal_RoutesOpenAIAndAnthropicDistinctly(t *testing.T) {
 				[]Credential{{ID: "c", Provider: tc.provider, Token: tc.token}}, &upstream)
 			req := httptest.NewRequest("POST", "http://127.0.0.1:9119"+tc.path, strings.NewReader(`{}`))
 			req.Host = "127.0.0.1:9119"
+			req.RemoteAddr = "127.0.0.1:54321"
 			w := httptest.NewRecorder()
 			proxy.ServeHTTP(w, req)
 			if upstream == nil {

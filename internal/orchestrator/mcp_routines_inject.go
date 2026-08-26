@@ -22,8 +22,19 @@ const routinesMCPSidecarAddr = "127.0.0.1:9119"
 // as native tool calls regardless of which CLI is driving the container.
 func routinesMCPSpec() mcpSpec {
 	return mcpSpec{
-		Name:      RoutinesMCPServerName,
-		URL:       "http://" + routinesMCPSidecarAddr + "/mcp/routines",
+		Name: RoutinesMCPServerName,
+		URL:  "http://" + routinesMCPSidecarAddr + "/mcp/routines",
+		// #812: the per-agent bearer token, exactly as crewship-memory sends
+		// it. NOT optional and NOT defence-in-depth: respondRoutinesMCPToolsCall
+		// (internal/sidecar/routine_mcp.go) opens by resolving actingAgentID and
+		// answers 403 {"error":"unrecognized agent token"} when the header is
+		// absent, because tokensProvisioned() is true for every real container.
+		// Omitting it made EVERY routine/page tool call fail — save_routine,
+		// save_page, discover_capabilities, list_routines, run_routine — while
+		// the tools still advertised themselves in tools/list, so the model saw
+		// the capability, called it, and got a bare auth error it could only
+		// report as a token problem it had no way to fix.
+		Headers:   map[string]string{"Authorization": "Bearer ${CREWSHIP_AGENT_TOKEN}"},
 		Transport: "http",
 	}
 }
@@ -64,6 +75,10 @@ func injectRoutinesMCPIntoClaudeJSON(in string) (string, error) {
 	entry := map[string]any{
 		"type": "http",
 		"url":  routinesMCPSpec().URL,
+		// Same per-agent bearer token the memory server sends, and required
+		// for the same reason — see routinesMCPSpec. Claude Code expands
+		// ${VAR} in headers from the agent's env (CREWSHIP_AGENT_TOKEN).
+		"headers": routinesMCPSpec().Headers,
 		// alwaysLoad presents this server's tools (save_routine / list_routines
 		// / run_routine) to the model EAGERLY at session start instead of
 		// deferring them behind a ToolSearch discovery hop. Mirrors the memory

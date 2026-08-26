@@ -6,55 +6,79 @@ import (
 	"testing"
 )
 
-// #961 Feature A — an authenticated local endpoint: the resolved auth token and
-// custom headers must land in OPENCODE_CONFIG_CONTENT (options.apiKey /
-// options.headers) and NEVER in the agent environment.
+// #961 Feature A / #974 S2 — an authenticated local endpoint. Which of the two
+// shapes the generated config takes depends on whether there is a sidecar to
+// route through, and the difference IS the isolation guarantee:
+//
+//   - sidecar run: the block points at 127.0.0.1:9119, carries a dummy key and
+//     no headers, and the real token appears NOWHERE in the env — not even
+//     inside OPENCODE_CONFIG_CONTENT. The sidecar holds it.
+//   - no-sidecar run: there is nothing between the driver and the endpoint, so
+//     the token and headers go in the config, as they always have.
 
-func TestOpencodeLocalConfigEnv_InjectsAuth(t *testing.T) {
+func TestOpencodeLocalConfigEnv_SidecarRunIsolatesEndpointAuth(t *testing.T) {
+	req := localModelReq()
+	req.LocalModelAPIKey = "sk-tenant-secret"
+	req.LocalModelHeaders = map[string]string{"X-Tenant": "acme"}
+	// The run is routed only when the credential is on its way to the CredStore.
+	// Carrying it here also sharpens the leak assertion below: the secret is now
+	// present in req.Credentials, so "not in the env" is a real result rather
+	// than a value that was never in scope.
+	req = withDeliveredEndpointCred(req)
+
+	env := BuildEnvVarsSidecar(req, false)
+	raw, ok := envValue(env, "OPENCODE_CONFIG_CONTENT")
+	if !ok {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT missing: %v", env)
+	}
+	opts := parseOpencodeOptions(t, raw, "ollama")
+	if opts.BaseURL != "http://127.0.0.1:9119/llm/openai-compat" {
+		t.Errorf("options.baseURL = %q, want the sidecar route", opts.BaseURL)
+	}
+	if opts.APIKey != "dummy-crewship-sidecar" {
+		t.Errorf("options.apiKey = %q, want the dummy placeholder", opts.APIKey)
+	}
+	if len(opts.Headers) != 0 {
+		t.Errorf("options.headers = %v, want omitted — a custom header on an authenticated endpoint is credential material too", opts.Headers)
+	}
+	// The whole point: no env entry anywhere carries the real secret, and this
+	// time the config JSON gets no exemption.
+	for _, e := range env {
+		if strings.Contains(e, "sk-tenant-secret") || strings.Contains(e, "acme") {
+			t.Errorf("endpoint auth leaked into the agent env: %q", e)
+		}
+	}
+}
+
+func TestOpencodeLocalConfigEnv_NoSidecarRunStillCarriesAuth(t *testing.T) {
 	req := localModelReq()
 	req.LocalModelAPIKey = "sk-tenant-secret"
 	req.LocalModelHeaders = map[string]string{"X-Tenant": "acme"}
 
-	for name, build := range map[string]func(AgentRunRequest) []string{
-		"sidecar": func(r AgentRunRequest) []string { return BuildEnvVarsSidecar(r, false) },
-		"direct":  func(r AgentRunRequest) []string { return BuildEnvVars(r, nil) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			env := build(req)
-			raw, ok := envValue(env, "OPENCODE_CONFIG_CONTENT")
-			if !ok {
-				t.Fatalf("OPENCODE_CONFIG_CONTENT missing: %v", env)
-			}
-			var cfg struct {
-				Provider map[string]struct {
-					Options struct {
-						BaseURL string            `json:"baseURL"`
-						APIKey  string            `json:"apiKey"`
-						Headers map[string]string `json:"headers"`
-					} `json:"options"`
-				} `json:"provider"`
-			}
-			if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-				t.Fatalf("not valid JSON: %v\n%s", err, raw)
-			}
-			opts := cfg.Provider["ollama"].Options
-			if opts.APIKey != "sk-tenant-secret" {
-				t.Errorf("options.apiKey = %q, want the token", opts.APIKey)
-			}
-			if opts.Headers["X-Tenant"] != "acme" {
-				t.Errorf("options.headers = %v", opts.Headers)
-			}
+	env := BuildEnvVars(req, nil)
+	raw, ok := envValue(env, "OPENCODE_CONFIG_CONTENT")
+	if !ok {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT missing: %v", env)
+	}
+	opts := parseOpencodeOptions(t, raw, "ollama")
+	if opts.BaseURL != "http://host.docker.internal:11434/v1" {
+		t.Errorf("options.baseURL = %q, want the endpoint itself", opts.BaseURL)
+	}
+	if opts.APIKey != "sk-tenant-secret" {
+		t.Errorf("options.apiKey = %q, want the token", opts.APIKey)
+	}
+	if opts.Headers["X-Tenant"] != "acme" {
+		t.Errorf("options.headers = %v", opts.Headers)
+	}
 
-			// The token must NOT appear as a bare env var anywhere.
-			for _, e := range env {
-				if strings.HasPrefix(e, "OPENCODE_CONFIG_CONTENT=") {
-					continue // the config JSON legitimately contains it
-				}
-				if strings.Contains(e, "sk-tenant-secret") {
-					t.Errorf("auth token leaked into env var: %q", e)
-				}
-			}
-		})
+	// Even here the token must not become a bare env var of its own.
+	for _, e := range env {
+		if strings.HasPrefix(e, "OPENCODE_CONFIG_CONTENT=") {
+			continue // the config JSON legitimately contains it on this path
+		}
+		if strings.Contains(e, "sk-tenant-secret") {
+			t.Errorf("auth token leaked into env var: %q", e)
+		}
 	}
 }
 
@@ -71,28 +95,50 @@ func TestOpencodeLocalConfigEnv_NoAuthOmitsFields(t *testing.T) {
 	}
 }
 
-// The auth token must never be added to the credential-exposure surface —
-// it lives only in the generated config JSON, not the container env.
-// #974 S2: the local-model endpoint token IS an env exposure — it is embedded
-// in OPENCODE_CONFIG_CONTENT, which is an agent env var, and the openai-
-// compatible driver dials the endpoint directly so the sidecar proxy cannot
-// isolate it. It must therefore be reported by AgentEnvCredentialExposures so
-// the isolation gap is observable rather than silently mislabeled as isolated.
-func TestLocalModelToken_ReportedAsEnvExposure(t *testing.T) {
-	req := localModelReq()
-	req.LocalModelAPIKey = "sk-should-not-be-exposed"
-	exposures := AgentEnvCredentialExposures(req, true)
-	found := false
-	for _, ex := range exposures {
-		if ex.EnvVarName == "OPENCODE_CONFIG_CONTENT" && ex.Type == "ENDPOINT_URL" {
-			found = true
+// AgentEnvCredentialExposures mirrors BuildEnvVarsSidecar, so once the endpoint
+// auth is routed through the sidecar there is nothing left to report for it —
+// #974 S2 is closed on that path. The branch that reports it survives because it
+// mirrors localModelConfigEnv's unrouted arm, which is still what a no-sidecar
+// run gets; the assertions below pin both halves so neither can drift into a
+// claim the other contradicts.
+func TestLocalModelToken_NotExposedOnceRouted(t *testing.T) {
+	req := withDeliveredEndpointCred(func() AgentRunRequest {
+		r := localModelReq()
+		r.LocalModelAPIKey = "sk-should-not-be-exposed"
+		return r
+	}())
+	for _, ex := range AgentEnvCredentialExposures(req, true) {
+		if ex.EnvVarName == "OPENCODE_CONFIG_CONTENT" {
+			t.Errorf("routed endpoint auth must not be reported as an env exposure, got %+v", ex)
 		}
 	}
-	if !found {
-		t.Errorf("local-model endpoint token must be reported as an OPENCODE_CONFIG_CONTENT exposure, got %+v", exposures)
+
+	// Headers-only auth is NOT routed, and must still be reported.
+	//
+	// llmroute.ApplyAuth is a no-op on an empty token, so the sidecar would
+	// forward the request without the custom headers and the endpoint would
+	// reject it. The API tier therefore withholds the credential and the run
+	// stays direct, with the headers in the OpenCode config — which is an env
+	// exposure and has to be named as one. Reporting it as isolated here would
+	// tell an operator their header secret is in the sidecar's heap when it is
+	// in the container's environment.
+	headersOnly := localModelReq()
+	headersOnly.LocalModelHeaders = map[string]string{"X-Api-Key": "v"}
+	if _, routed := resolveRoutedProvider(headersOnly, true); routed {
+		t.Error("a headers-only endpoint was routed; the proxy cannot write its headers")
+	}
+	reported := false
+	for _, ex := range AgentEnvCredentialExposures(headersOnly, true) {
+		if ex.EnvVarName == "OPENCODE_CONFIG_CONTENT" {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Error("headers-only endpoint auth rides in the agent env but was not reported as an exposure")
 	}
 
-	// With no auth material, there is nothing to expose.
+	// With no auth material there was never anything to expose, and the block
+	// still points straight at the endpoint.
 	noAuth := localModelReq()
 	for _, ex := range AgentEnvCredentialExposures(noAuth, true) {
 		if ex.EnvVarName == "OPENCODE_CONFIG_CONTENT" {
@@ -113,16 +159,38 @@ func TestLocalModelToken_ReportedAsEnvExposure(t *testing.T) {
 		}
 	}
 
-	// Headers-only auth (no apiKey) on the active path still exposes.
-	headersOnly := localModelReq()
-	headersOnly.LocalModelHeaders = map[string]string{"X-Api-Key": "v"}
-	foundHeaders := false
-	for _, ex := range AgentEnvCredentialExposures(headersOnly, true) {
-		if ex.EnvVarName == "OPENCODE_CONFIG_CONTENT" {
-			foundHeaders = true
-		}
+	// The arm the surviving exposure branch mirrors: unrouted, the token really
+	// is in the config env var. If this ever stops being true the branch is dead
+	// and should go with it.
+	raw, ok := localModelConfigEnv(req, false)
+	if !ok || !strings.Contains(raw, "sk-should-not-be-exposed") {
+		t.Fatalf("unrouted config must still carry the token, got ok=%v %s", ok, raw)
 	}
-	if !foundHeaders {
-		t.Error("headers-only endpoint auth on the OpenCode path must be reported as an exposure")
+}
+
+// parseOpencodeOptions decodes one provider block's options out of an
+// OPENCODE_CONFIG_CONTENT value.
+func parseOpencodeOptions(t *testing.T, raw, providerID string) struct {
+	BaseURL string            `json:"baseURL"`
+	APIKey  string            `json:"apiKey"`
+	Headers map[string]string `json:"headers"`
+} {
+	t.Helper()
+	var cfg struct {
+		Provider map[string]struct {
+			Options struct {
+				BaseURL string            `json:"baseURL"`
+				APIKey  string            `json:"apiKey"`
+				Headers map[string]string `json:"headers"`
+			} `json:"options"`
+		} `json:"provider"`
 	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, raw)
+	}
+	p, ok := cfg.Provider[providerID]
+	if !ok {
+		t.Fatalf("provider block missing %q: %s", providerID, raw)
+	}
+	return p.Options
 }

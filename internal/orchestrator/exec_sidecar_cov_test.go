@@ -324,6 +324,7 @@ func TestStartSidecar_SuccessPayloadShape(t *testing.T) {
 		AgentSlug: "bob", AgentRole: "lead", CrewMemoryPath: "/crew/shared/.memory",
 	}
 	ipcCfg := &SidecarIPCConfig{BaseURL: "http://host:9000", Token: "tok", AgentID: "a1", WorkspaceID: "ws1"}
+	routeAuth := &SidecarRouteAuth{Key: "crew-route-key"}
 	members := []SidecarCrewMember{{ID: "m1", Slug: "eva", Name: "Eva"}}
 	policy := &SidecarNetworkPolicy{Mode: "restricted", AllowedDomains: []string{"api.github.com"}}
 	servers := []MCPServerConfig{
@@ -331,7 +332,7 @@ func TestStartSidecar_SuccessPayloadShape(t *testing.T) {
 		{Name: "local", Transport: "stdio", Command: "npx"},
 	}
 
-	err := startSidecar(context.Background(), c, "container-abcdef123456", creds, memCfg, ipcCfg, members, policy, servers, covQuietLogger())
+	err := startSidecar(context.Background(), c, "container-abcdef123456", creds, memCfg, ipcCfg, routeAuth, members, policy, servers, "config-fp", covQuietLogger())
 	if err != nil {
 		t.Fatalf("startSidecar: %v", err)
 	}
@@ -392,6 +393,13 @@ func TestStartSidecar_SuccessPayloadShape(t *testing.T) {
 	if ipc["base_url"] != "http://host:9000" {
 		t.Errorf("ipc config not forwarded: %v", input["ipc"])
 	}
+	if input["config_fingerprint"] != "config-fp" {
+		t.Errorf("config fingerprint not forwarded: %v", input["config_fingerprint"])
+	}
+	route, _ := input["route_auth"].(map[string]any)
+	if route["key"] != "crew-route-key" {
+		t.Errorf("route auth not forwarded: %v", input["route_auth"])
+	}
 }
 
 func TestStartSidecar_MemoryPrepFailuresAreNonFatal(t *testing.T) {
@@ -404,7 +412,7 @@ func TestStartSidecar_MemoryPrepFailuresAreNonFatal(t *testing.T) {
 		return covResult("sidecar-start", ""), nil
 	}}
 	mem := &SidecarMemoryConfig{Enabled: true, BasePath: "/crew/agents/x/.memory"}
-	if err := startSidecar(context.Background(), c1, "ctr-123456789012", nil, mem, nil, nil, nil, nil, covQuietLogger()); err != nil {
+	if err := startSidecar(context.Background(), c1, "ctr-123456789012", nil, mem, nil, nil, nil, nil, nil, "", covQuietLogger()); err != nil {
 		t.Fatalf("prep exec error must not fail startSidecar: %v", err)
 	}
 
@@ -423,7 +431,7 @@ func TestStartSidecar_MemoryPrepFailuresAreNonFatal(t *testing.T) {
 			return false, 0, nil
 		},
 	}
-	if err := startSidecar(context.Background(), c2, "ctr-123456789012", nil, mem, nil, nil, nil, nil, covQuietLogger()); err != nil {
+	if err := startSidecar(context.Background(), c2, "ctr-123456789012", nil, mem, nil, nil, nil, nil, nil, "", covQuietLogger()); err != nil {
 		t.Fatalf("prep non-zero exit must not fail startSidecar: %v", err)
 	}
 }
@@ -433,7 +441,7 @@ func TestStartSidecar_ExecError(t *testing.T) {
 	c := &covContainer{route: func(_ provider.ExecConfig) (*provider.ExecResult, error) {
 		return nil, errors.New("no such container")
 	}}
-	err := startSidecar(context.Background(), c, "ctr1", nil, nil, nil, nil, nil, nil, covQuietLogger())
+	err := startSidecar(context.Background(), c, "ctr1", nil, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
 	if err == nil || !strings.Contains(err.Error(), "start sidecar") {
 		t.Fatalf("expected start sidecar error, got %v", err)
 	}
@@ -444,7 +452,7 @@ func TestStartSidecar_InspectError(t *testing.T) {
 	c := &covContainer{
 		inspect: func(_ string) (bool, int, error) { return false, 0, errors.New("inspect broken") },
 	}
-	err := startSidecar(context.Background(), c, "ctr1", nil, nil, nil, nil, nil, nil, covQuietLogger())
+	err := startSidecar(context.Background(), c, "ctr1", nil, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
 	if err == nil || !strings.Contains(err.Error(), "inspect sidecar exec") {
 		t.Fatalf("expected inspect error, got %v", err)
 	}
@@ -458,7 +466,7 @@ func TestStartSidecar_HealthCheckFailure(t *testing.T) {
 		},
 		inspect: func(_ string) (bool, int, error) { return false, 1, nil },
 	}
-	err := startSidecar(context.Background(), c, "ctr-123456789012", nil, nil, nil, nil, nil, nil, covQuietLogger())
+	err := startSidecar(context.Background(), c, "ctr-123456789012", nil, nil, nil, nil, nil, nil, nil, "", covQuietLogger())
 	if err == nil || !strings.Contains(err.Error(), "sidecar health check failed (exit 1)") {
 		t.Fatalf("expected health check failure, got %v", err)
 	}

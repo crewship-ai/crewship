@@ -11,7 +11,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       system_prompt: You are the Content Strategy Lead. You plan content calendars, coordinate research and writing tasks, ensure brand consistency, and review all published content for quality.
     - name: Researcher
@@ -20,7 +20,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: MINIMAL
       system_prompt: You are a Market Researcher. You gather competitive intelligence, analyze market trends, collect data for content briefs, and provide insights to guide content strategy.
     - name: Copywriter
@@ -29,7 +29,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Senior Copywriter. You write blog posts, landing pages, email sequences, and social media content. Follow the brand voice guide and optimize for readability.
     - name: SEO Specialist
@@ -38,6 +38,6 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: MINIMAL
       system_prompt: You are an SEO Analyst. You perform keyword research, optimize content for search engines, analyze rankings, and recommend technical SEO improvements.

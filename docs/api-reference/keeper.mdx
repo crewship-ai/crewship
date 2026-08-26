@@ -206,7 +206,7 @@ as a 5xx. Invalid JSON is `400`; probe exhaustion is `429`.
 Tests an unsaved hosted judge configuration using a workspace credential:
 
 ```json
-{"provider":"anthropic","model":"claude-sonnet-4-20250514","credential_id":"cred_..."}
+{"provider":"anthropic","model":"claude-sonnet-5","credential_id":"cred_..."}
 ```
 
 The `200` response uses the same `judgeTestResponse` shape, with stages for key
@@ -229,7 +229,7 @@ provenance, and the available provider vocabulary:
 ```json
 {"slots":[{"slot":"curator","label":"Skill review",
  "provider":{"value":"anthropic","source":"env","editable":true},
- "model":{"value":"claude-sonnet-4-20250514","source":"default","editable":true},
+ "model":{"value":"claude-sonnet-5","source":"default","editable":true},
  "timeout_ms":{"value":30000,"source":"default","editable":true},
  "credential_id":{"value":"cred_...","source":"instance","editable":true},
  "overridden":true}], "providers":["anthropic","openai","ollama"],

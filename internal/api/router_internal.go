@@ -334,6 +334,10 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// panel's declared producer or an explicit produce grant on the way in.
 	// Registered in pages_internal.go, which owns the handler and the fences.
 	r.registerInternalPageRoutes(internalAuth)
+	// Pages — agent-authored CREATE (the structure gap save_page closes).
+	// Gated on policy.ActionPageCreate, not page_write's autonomy row — see
+	// pages_internal_save.go's own header for why the two are separate.
+	r.registerInternalPageSaveRoute(internalAuth)
 
 	// Sidecar IPC — the agent-initiated port-expose request flow.
 	// PortExposeHandler instance comes from registerOrchestrationRoutes

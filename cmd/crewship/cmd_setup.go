@@ -120,15 +120,19 @@ var supportedCrewTemplates = []struct {
 	{"blank", "Blank (single agent, name yourself)"},
 }
 
+// Defaults must track the web wizard's model picker (lib/cli-adapters.ts).
+// They drifted to Sonnet 4.6 while the picker moved to Sonnet 5, so the two
+// setup paths for the same adapter handed out different models — and the
+// terminal path is the one the wizard now points people at after pairing.
 var supportedAdapters = []struct {
 	key, label, envVar, provider, defaultModel string
 }{
-	{"CLAUDE_CODE", "Claude Code (Anthropic)", "ANTHROPIC_API_KEY", "ANTHROPIC", "claude-sonnet-4-6"},
+	{"CLAUDE_CODE", "Claude Code (Anthropic)", "ANTHROPIC_API_KEY", "ANTHROPIC", "claude-sonnet-5"},
 	{"GEMINI_CLI", "Gemini CLI (Google)", "GOOGLE_API_KEY", "GOOGLE", "gemini-2.5-pro"},
 	{"CODEX_CLI", "Codex CLI (OpenAI)", "OPENAI_API_KEY", "OPENAI", "gpt-5.5"},
-	{"OPENCODE", "OpenCode", "ANTHROPIC_API_KEY", "ANTHROPIC", "anthropic/claude-sonnet-4-6"},
+	{"OPENCODE", "OpenCode", "ANTHROPIC_API_KEY", "ANTHROPIC", "anthropic/claude-sonnet-5"},
 	{"CURSOR_CLI", "Cursor CLI", "CURSOR_API_KEY", "CURSOR", "composer"},
-	{"FACTORY_DROID", "Factory Droid", "FACTORY_API_KEY", "FACTORY", "claude-sonnet-4-6"},
+	{"FACTORY_DROID", "Factory Droid", "FACTORY_API_KEY", "FACTORY", "claude-sonnet-5"},
 }
 
 func runSetup(cmd *cobra.Command, _ []string) error {

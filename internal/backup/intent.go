@@ -313,9 +313,16 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"inbox_items":      IntentInclude,
 	"issue_counters":   IntentInclude,
 	"memory_proposals": IntentInclude,
-	"memory_versions":  IntentInclude,
-	"message_feedback": IntentInclude,
-	"mission_activity": IntentInclude,
+	// onboarding_proposals is the crew a setup agent proposed and a human
+	// approved. Included rather than denied because the row IS the audit
+	// record of that decision: the whole design turns on the card the human
+	// read being byte-identical to what executed, and a restore that dropped
+	// the proposals would keep the crews while losing the only evidence of
+	// who agreed to them and on what terms.
+	"onboarding_proposals": IntentInclude,
+	"memory_versions":      IntentInclude,
+	"message_feedback":     IntentInclude,
+	"mission_activity":     IntentInclude,
 	// mission_code_links is the issue → pull-request/merge-request link
 	// (link-first Git integration). It round-trips: the link is a fact the
 	// user asserted, the same class as mission_relations, and the fetched

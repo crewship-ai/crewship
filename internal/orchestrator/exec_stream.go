@@ -373,7 +373,15 @@ type eventDelta struct {
 	Thinking string `json:"thinking,omitempty"`
 }
 
-func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecResult, req AgentRunRequest, handler EventHandler) {
+// streamOutput drains the exec's combined stdout+stderr, dispatching parsed
+// events to handler as it goes. It returns that same raw capture (capped to
+// captureCap, unscrubbed) so a caller that sees a failing exit code afterward
+// — RunAgent, once ExecInspect reports the exit status — can attach the
+// container's own diagnostic text to the error instead of only the exit
+// code. The 16 KB cap and the capture buffer itself already existed for the
+// Crow's Nest end-of-stream journal entry below; this just stops throwing
+// the same bytes away a second time.
+func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecResult, req AgentRunRequest, handler EventHandler) string {
 	var closeOnce sync.Once
 	closeReader := func() {
 		closeOnce.Do(func() {
@@ -568,6 +576,8 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		Payload:     payload,
 		Refs:        map[string]any{"chat_id": req.ChatID},
 	})
+
+	return string(captureBuf)
 }
 
 // emitToolResultBlock sends a tool_result event for the given content block.

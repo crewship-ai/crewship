@@ -93,6 +93,26 @@ func seedCredential(t *testing.T, db *sql.DB, id, wsID, crewID, credType, status
 	}
 }
 
+// seedCredentialWithProvider is seedCredential plus the provider column, which
+// stopped being decorative when a provider began deciding how the stored value
+// is SHAPED rather than just which brand icon renders next to it.
+func seedCredentialWithProvider(t *testing.T, db *sql.DB, id, wsID, crewID, credType, provider, status, plainValue, createdAt string) {
+	t.Helper()
+	enc, err := encryption.Encrypt(plainValue)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	var crew any
+	if crewID != "" {
+		crew = crewID
+	}
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO credentials (id, workspace_id, crew_id, name, encrypted_value, type, provider, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, wsID, crew, id, enc, credType, provider, status, createdAt); err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+}
+
 // wiredHTTPExecutor builds an executor exactly the way production does
 // (NewWiredExecutor with a DB) and opens the private-HTTP test hatch so
 // httptest servers on 127.0.0.1 are reachable. The hatch bypasses ONLY
@@ -246,6 +266,65 @@ func TestVaultCredentialResolver_Semantics(t *testing.T) {
 			t.Error("expected error for empty workspace scope")
 		}
 	})
+}
+
+// An endpoint-backed credential is stored with type API_KEY, but its value is a
+// {baseURL, apiKey, headers} object rather than a bare token. This resolver
+// selects by type alone and hands what it finds straight to runHTTPStep's
+// Authorization header, so the newest such row would have had the operator's
+// gateway URL, custom headers and key posted to whatever third-party endpoint
+// the routine dials — a credential the routine author never asked for, leaking
+// through a field they cannot see.
+//
+// The correct answer is the next-newest row that IS a bare token, not the
+// apiKey prised out of an object. Both are asserted, plus the probe: the
+// resolver's own doc comment promises "declared credential resolves" means
+// exactly "the runtime would inject it", and a probe still counting the skipped
+// row would satisfy a credentials_required gate with a credential the step
+// never receives.
+func TestVaultCredentialResolver_SkipsEndpointBackedCredentials(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", testEncryptionKey)
+	db := openPolicyTestDB(t)
+	defer db.Close()
+
+	const endpointObject = `{"baseURL":"https://gateway.acme.example/v1","apiKey":"gw-secret","headers":{"X-Org":"acme"}}`
+	seedCredentialWithProvider(t, db, "cred_bare", "ws_test", "", "API_KEY", "OPENAI", "ACTIVE", "real-bare-token", "2026-01-01T00:00:00Z")
+	// Newer, so ORDER BY created_at DESC would pick it.
+	seedCredentialWithProvider(t, db, "cred_endpoint", "ws_test", "", "API_KEY", "OPENAI_COMPAT", "ACTIVE", endpointObject, "2026-02-01T00:00:00Z")
+
+	resolve := NewVaultCredentialResolver(db)
+	probe := NewVaultCredentialProbe(db)
+	ctx := context.Background()
+	wsScope := RunScope{WorkspaceID: "ws_test"}
+
+	got, err := resolve(ctx, wsScope, "API_KEY")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if strings.Contains(got, "gateway.acme.example") || strings.Contains(got, "gw-secret") || strings.Contains(got, "X-Org") {
+		t.Fatalf("the endpoint object was injected as a bearer token: %q", got)
+	}
+	if got != "real-bare-token" {
+		t.Errorf("resolved %q, want real-bare-token — the newest row that actually is a bare token", got)
+	}
+
+	// A workspace whose ONLY API_KEY row is endpoint-backed has no bare token,
+	// and both halves must agree on that.
+	db2 := openPolicyTestDB(t)
+	defer db2.Close()
+	seedCredentialWithProvider(t, db2, "cred_only", "ws_test", "", "API_KEY", "OPENAI_COMPAT", "ACTIVE", endpointObject, "2026-02-01T00:00:00Z")
+	if got, err := NewVaultCredentialResolver(db2)(ctx, wsScope, "API_KEY"); err == nil {
+		t.Errorf("resolved %q from an endpoint-only workspace, want an error", got)
+	}
+	if avail, err := NewVaultCredentialProbe(db2)(ctx, wsScope, "API_KEY"); err != nil || avail {
+		t.Errorf("probe = (%v, %v), want (false, nil) — the probe must not promise what the resolver skips", avail, err)
+	}
+
+	// And the ordinary case still reports available, so the filter has not
+	// simply switched the probe off.
+	if avail, err := probe(ctx, wsScope, "API_KEY"); err != nil || !avail {
+		t.Errorf("probe = (%v, %v), want (true, nil)", avail, err)
+	}
 }
 
 // ---------------------------------------------------------------------------

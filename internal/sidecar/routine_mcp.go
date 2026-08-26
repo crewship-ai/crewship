@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
+
+	"github.com/crewship-ai/crewship/internal/manifest"
 )
 
 // RoutinesMCPServerName is the server identity the in-container CLI sees in
@@ -38,6 +41,10 @@ var routineMCPSaveSchema = json.RawMessage(`{
 			"type": "object",
 			"description": "Example inputs supplied to the mandatory test_run. Pick values that exercise the routine end-to-end so the gate passes.",
 			"additionalProperties": true
+		},
+		"crew": {
+			"type": "string",
+			"description": "Slug of the crew this routine is FOR. Onboarding only: the setup guide builds routines that belong to the crew the person just created, and must name it here. That crew must already exist. Ordinary crews leave this unset — a routine belongs to the crew that writes it."
 		}
 	},
 	"required": ["name", "definition"],
@@ -80,7 +87,57 @@ var routineMCPListSchema = json.RawMessage(`{
 // own crew, derived from IPC, never the caller.
 var routineMCPDiscoverSchema = json.RawMessage(`{
 	"type": "object",
-	"properties": {},
+	"properties": {
+		"crew": {
+			"type": "string",
+			"description": "Slug of the crew to describe. Onboarding only: pass the crew you are authoring FOR, so the agent slugs you get back are the ones your routine or page must name. Omit to describe your own crew."
+		}
+	},
+	"additionalProperties": false
+}`)
+
+// pagesMCPSaveSchema is the JSON Schema for save_page. Panels stays a bare
+// array of objects rather than a fully-specified schema: the server is the
+// real validator (documentFrom/resolveReferences), and duplicating its
+// rules here would only give this schema a second copy to drift from.
+var pagesMCPSaveSchema = json.RawMessage(`{
+	"type": "object",
+	"properties": {
+		"name": {
+			"type": "string",
+			"description": "Human-readable page name. The url slug is derived from this server-side."
+		},
+		"description": {
+			"type": "string",
+			"description": "One-line summary of what the page shows."
+		},
+		"panels": {
+			"type": "array",
+			"description": "The page's panels. Each needs id, schema (one of status.v1, metric.v1, series.v1, table.v1, narrative.v1, embed.v1), owner (\"crew/<slug>\"), producer (\"<kind>/<ref>\", e.g. \"agent/<slug>\" or \"routine/<slug>\"), sla_seconds, and span (1-12). Call discover_capabilities first to see this crew's real agent/routine slugs before naming a producer.",
+			"items": {"type": "object"}
+		},
+		"crew": {
+			"type": "string",
+			"description": "Slug of the crew this page is FOR. Onboarding only: the setup guide builds pages that belong to the crew the person just created, and must name it here — its panels' owner and producer refs must name that crew and ITS agents, which discover_capabilities will list if you pass the same slug. Ordinary crews leave this unset."
+		}
+	},
+	"required": ["name", "panels"],
+	"additionalProperties": false
+}`)
+
+// manifestMCPValidateSchema accepts the exact YAML stream a human would pass
+// to `crewship apply --file`. The tool is validation-only: keeping mutation
+// out of this surface means an agent-authored document cannot bypass the
+// browser/session confirmation an eventual manifest proposal card requires.
+var manifestMCPValidateSchema = json.RawMessage(`{
+	"type": "object",
+	"properties": {
+		"yaml": {
+			"type": "string",
+			"description": "One or more --- separated crewship/v1 YAML documents to parse and validate."
+		}
+	},
+	"required": ["yaml"],
 	"additionalProperties": false
 }`)
 
@@ -95,6 +152,9 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"`sample_inputs` for the mandatory test_run. The routine is test-run inline before " +
 			"saving: on success the saved routine is returned; on a DSL or validation error the " +
 			"exact failure is returned so you can fix the definition and call save_routine again. " +
+			"A routine belongs to the crew that runs it: if you are building for a DIFFERENT crew " +
+			"(the onboarding guide always is), pass its slug as `crew` — the routine's network " +
+			"policy, credentials and container all follow that ownership. " +
 			"Do NOT shell out to curl — call this tool directly.",
 		InputSchema: routineMCPSaveSchema,
 	},
@@ -114,6 +174,18 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 		InputSchema: routineMCPRunSchema,
 	},
 	{
+		Name: "save_page",
+		Description: "Create a Crewship page (a typed operational dashboard: status/metric/series/table/narrative/embed " +
+			"panels). Supply the page name, a short description, and the `panels` array. If this crew's autonomy level " +
+			"allows it the page is created immediately and its document is returned; otherwise the request is HELD for " +
+			"operator approval (no page is created) and you must tell the user that plainly rather than claiming the " +
+			"page exists. On a validation error the exact failure is returned so you can fix the panels and call " +
+			"save_page again. If you are building for a DIFFERENT crew (the onboarding guide always is), pass its " +
+			"slug as `crew`, and give discover_capabilities the same slug so the producer refs you write name that " +
+			"crew's real agents. Do NOT shell out to curl — call this tool directly.",
+		InputSchema: pagesMCPSaveSchema,
+	},
+	{
 		Name: "discover_capabilities",
 		Description: "Return, in ONE bundle, everything needed to author a valid routine for THIS crew: " +
 			"the routine DSL JSON schema, the crew's container capabilities (datastores + installed CLIs), " +
@@ -123,6 +195,15 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"try — do not guess agent slugs, tool names, or runtimes.",
 		InputSchema: routineMCPDiscoverSchema,
 	},
+	{
+		Name: "validate_manifest",
+		Description: "Validate an authored Crewship YAML manifest with the same parser and offline schemas used by " +
+			"`crewship apply`. Supports every current crewship/v1 kind, including Crew, Agent, Routine and Page, " +
+			"and accepts multiple `---` separated documents. This tool NEVER writes workspace state. Fix every " +
+			"returned error before presenting YAML as ready. A successful validation is not an apply; references " +
+			"to state that already exists in the workspace are rechecked when an apply plan is built.",
+		InputSchema: manifestMCPValidateSchema,
+	},
 }
 
 // handleRoutinesMCP is the JSON-RPC 2.0 entry point in-container CLIs hit at
@@ -131,10 +212,11 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 // authoring tools instead of the memory tools. Methods:
 //
 //   - initialize  → handshake; returns protocolVersion + serverInfo
-//   - tools/list  → returns save_routine + list_routines + run_routine descriptors
-//   - tools/call  → dispatches save_routine / list_routines / run_routine to the
-//     shared savePipeline / listPipelines / runPipeline helpers (author +
-//     invoker identity injected from IPC)
+//   - tools/list  → returns save_routine + list_routines + run_routine + save_page
+//     (+ discover_capabilities + validate_manifest) descriptors
+//   - tools/call  → dispatches save_routine / list_routines / run_routine /
+//     save_page to the shared savePipeline / listPipelines / runPipeline /
+//     savePage helpers (author + invoker identity injected from IPC)
 //
 // Unknown methods return JSON-RPC -32601 (method not found).
 func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
@@ -256,10 +338,30 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		status, bodyBytes = s.savePipeline(r.Context(), save, actingAgentID)
+	case "save_page":
+		var save pagesSaveRequest
+		if len(params.Arguments) > 0 {
+			if err := json.Unmarshal(params.Arguments, &save); err != nil {
+				s.writeRoutinesMCPToolResult(w, req, http.StatusBadRequest,
+					mustJSON(map[string]string{"error": "invalid arguments: " + err.Error()}))
+				return
+			}
+		}
+		status, bodyBytes = s.savePage(r.Context(), save, actingAgentID)
 	case "list_routines":
 		status, bodyBytes = s.listPipelines(r.Context(), "")
 	case "discover_capabilities":
-		status, bodyBytes = s.crewCapabilities(r.Context())
+		var disco struct {
+			Crew string `json:"crew"`
+		}
+		if len(params.Arguments) > 0 {
+			if err := json.Unmarshal(params.Arguments, &disco); err != nil {
+				s.writeRoutinesMCPToolResult(w, req, http.StatusBadRequest,
+					mustJSON(map[string]string{"error": "invalid arguments: " + err.Error()}))
+				return
+			}
+		}
+		status, bodyBytes = s.crewCapabilities(r.Context(), disco.Crew)
 	case "run_routine":
 		var run routineRunRequest
 		if len(params.Arguments) > 0 {
@@ -270,6 +372,35 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		status, bodyBytes = s.runPipeline(r.Context(), run, actingAgentID)
+	case "validate_manifest":
+		var input struct {
+			YAML string `json:"yaml"`
+		}
+		if len(params.Arguments) > 0 {
+			if err := json.Unmarshal(params.Arguments, &input); err != nil {
+				s.writeRoutinesMCPToolResult(w, req, http.StatusBadRequest,
+					mustJSON(map[string]string{"error": "invalid arguments: " + err.Error()}))
+				return
+			}
+		}
+		if strings.TrimSpace(input.YAML) == "" {
+			status, bodyBytes = http.StatusBadRequest, mustJSON(map[string]string{"error": "yaml is required"})
+			break
+		}
+		bundle, err := manifest.Load([]byte(input.YAML))
+		if err == nil {
+			err = manifest.ValidateBundle(bundle)
+		}
+		if err != nil {
+			status, bodyBytes = http.StatusBadRequest, mustJSON(map[string]string{
+				"error": "manifest validation failed: " + err.Error(),
+			})
+			break
+		}
+		status, bodyBytes = http.StatusOK, mustJSON(map[string]any{
+			"valid":   true,
+			"message": "Manifest is structurally valid. No workspace state was changed.",
+		})
 	default:
 		// Unknown tool — surface as a recoverable MCP tool error (isError)
 		// so the model can correct the name and retry, matching the memory

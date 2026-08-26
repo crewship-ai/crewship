@@ -61,4 +61,35 @@ describe("buildOnboardingSetupBody", () => {
     const body = buildOnboardingSetupBody({ ...base, model: "" })
     expect(body.llm_model).toBeUndefined()
   })
+
+  it("sends applied_proposal_id and nothing crew-shaped when a proposal was applied", () => {
+    // Symptom prevented: previously this path sent crewSlug: "blank",
+    // which made the server run the single-agent deploy path a SECOND
+    // time — the applied proposal's crew plus a redundant blank crew.
+    // With applied_proposal_id set, none of the deploy-triggering fields
+    // may be present.
+    const body = buildOnboardingSetupBody({ ...base, appliedProposalId: "prop-123" })
+    expect(body).toMatchObject({
+      applied_proposal_id: "prop-123",
+      workspace_name: "Acme Engineering",
+      preferred_language: "Czech",
+      telemetry_opt_in: true,
+    })
+    expect(body.crew_template_slug).toBeUndefined()
+    expect(body.crew_name).toBeUndefined()
+    expect(body.agent_name).toBeUndefined()
+    expect(body.credential_value).toBeUndefined()
+    expect(body.credential_name).toBeUndefined()
+    expect(body.cli_adapter).toBeUndefined()
+    expect(body.llm_provider).toBeUndefined()
+    expect(body.llm_model).toBeUndefined()
+    expect(body.pairing_mode).toBeUndefined()
+  })
+
+  it("falls back to the ordinary crewSlug routing when no proposal was applied", () => {
+    // Without the field: today's behaviour is unchanged.
+    const body = buildOnboardingSetupBody({ ...base, appliedProposalId: undefined })
+    expect(body.applied_proposal_id).toBeUndefined()
+    expect(body.crew_template_slug).toBe("software-development")
+  })
 })

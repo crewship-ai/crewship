@@ -138,7 +138,7 @@ function walk(dir: string, out: string[] = []): string[] {
  * hunting live inside them, and mis-tracking a quote can only ever make the
  * check *stricter* (an unstripped comment gets reported), never blind.
  */
-function stripComments(src: string): string {
+export function stripComments(src: string): string {
   let out = ""
   let i = 0
   const n = src.length

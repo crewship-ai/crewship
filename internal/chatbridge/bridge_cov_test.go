@@ -639,6 +639,11 @@ func TestHandleChatMessageEnqueueFailureSurfacesFailedEvent(t *testing.T) {
 	if !strings.Contains(evt.Content, "Could not start build") {
 		t.Errorf("event content = %q, want failure copy", evt.Content)
 	}
+	// No job ever started, so there is nothing to attach the message to —
+	// AttachPendingMessage must not be called on this path.
+	if enq.attachCalled {
+		t.Errorf("AttachPendingMessage must not be called when enqueue itself failed")
+	}
 }
 
 func TestHandleChatMessageEnqueueAlreadyRunning(t *testing.T) {
@@ -647,12 +652,19 @@ func TestHandleChatMessageEnqueueAlreadyRunning(t *testing.T) {
 	info.CachedImage = ""
 	resolver := &capResolver{info: info}
 	b, _ := testBridge(t, resolver)
-	b.SetProvisioningEnqueuer(&stubEnqueuer{resRunning: true})
+	enq := &stubEnqueuer{resRunning: true}
+	b.SetProvisioningEnqueuer(enq)
 
 	var events []ws.ChatEvent
 	err := b.HandleChatMessage(context.Background(), "u", "sess-enqrun", "hi", func(e ws.ChatEvent) { events = append(events, e) })
 	if err == nil || !strings.Contains(err.Error(), "provisioning kicked off") {
 		t.Fatalf("error = %v, want kicked-off sentinel", err)
+	}
+	// A job IS already running (AlreadyRunning), so the message must still be
+	// attached to it — this is the "second message while building" case that
+	// coalescing (api.ProvisionJob.Pending) exists to handle.
+	if !enq.attachCalled || enq.attachMsg.Content != "hi" || enq.attachMsg.ChatID != "sess-enqrun" {
+		t.Errorf("expected the message attached to the already-running job, got called=%v msg=%+v", enq.attachCalled, enq.attachMsg)
 	}
 	var saw bool
 	for _, e := range events {

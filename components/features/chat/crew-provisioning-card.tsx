@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import { Loader2, Package, AlertTriangle, Check, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -43,7 +44,13 @@ export function CrewProvisioningCard({
   enqueueError,
 }: CrewProvisioningCardProps) {
   const { workspaceId } = useWorkspace()
-  const provisioning = useProvisioningStatus(workspaceId)
+  // Track the crew this card is ABOUT, even when the crews list excludes it.
+  // The onboarding setup crew is kind='setup' and never appears in that list,
+  // so `find()` below returned undefined forever and this card sat on the
+  // warm-up spinner for the whole session — while the real build progress sat
+  // one unreachable row away.
+  const extraCrewIds = useMemo(() => (crewId ? [crewId] : []), [crewId])
+  const provisioning = useProvisioningStatus(workspaceId, extraCrewIds)
   const { acknowledge } = provisioning
 
   const crew = crewId

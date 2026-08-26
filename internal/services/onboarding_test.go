@@ -77,7 +77,7 @@ func TestOnboardingSetup_Happy(t *testing.T) {
 	svc := newTestSvc(t, db)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	llmModel := "claude-sonnet-4-20250514"
+	llmModel := "claude-sonnet-5"
 	res, err := svc.Setup(context.Background(), SetupParams{
 		UserID:          uid,
 		WorkspaceID:     wid,

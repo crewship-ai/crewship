@@ -186,3 +186,86 @@ func TestCredStoreConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestCredStoreCountsByProvider is the replacement for /health's N× Count
+// calls: one pass, one lock acquisition, one count per provider actually held.
+// Table-driven over the shapes /health can encounter, including the two the
+// old per-provider loop could not express — a provider with no descriptor, and
+// an empty store.
+func TestCredStoreCountsByProvider(t *testing.T) {
+	tests := []struct {
+		name  string
+		creds []Credential
+		want  map[string]int
+	}{
+		{
+			name: "empty store reports nothing",
+			want: map[string]int{},
+		},
+		{
+			name: "multiple providers, multiple credentials each",
+			creds: []Credential{
+				{ID: "a1", Provider: ProviderAnthropic, Token: "sk-ant-1"},
+				{ID: "a2", Provider: ProviderAnthropic, Token: "sk-ant-2"},
+				{ID: "o1", Provider: ProviderOpenAI, Token: "sk-oai-1"},
+				{ID: "r1", Provider: ProviderOpenRouter, Token: "sk-or-1"},
+				{ID: "c1", Provider: ProviderOpenAICompat, Token: "sk-c-1", BaseURL: "https://llm.example/v1"},
+			},
+			want: map[string]int{"ANTHROPIC": 2, "OPENAI": 1, "OPENROUTER": 1, "OPENAI_COMPAT": 1},
+		},
+		{
+			// CURSOR/FACTORY are env-injected and have no route descriptor, but
+			// the store still holds them. CountsByProvider reports what the
+			// STORE holds; deciding which of those to publish is /health's job.
+			name: "descriptor-less providers are still counted",
+			creds: []Credential{
+				{ID: "x1", Provider: ProviderCursor, Token: "cur_1"},
+				{ID: "y1", Provider: ProviderFactory, Token: "fact_1"},
+			},
+			want: map[string]int{"CURSOR": 1, "FACTORY": 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs := NewCredStore()
+			cs.Load(tt.creds)
+
+			got := cs.CountsByProvider()
+			if len(got) != len(tt.want) {
+				t.Fatalf("CountsByProvider() = %v, want %v", got, tt.want)
+			}
+			for provider, want := range tt.want {
+				if got[provider] != want {
+					t.Errorf("count for %s = %d, want %d (full map %v)", provider, got[provider], want, got)
+				}
+				// The one-pass form must agree with the per-provider form it
+				// replaced, or /health starts reporting a different number
+				// from the startup log.
+				if n := cs.Count(ProviderType(provider)); n != want {
+					t.Errorf("Count(%s) = %d but CountsByProvider says %d", provider, n, got[provider])
+				}
+			}
+		})
+	}
+}
+
+// A returned map must not be a live view of the store: a caller that ranges
+// over it while a reap runs would otherwise race, and one that mutates it
+// would corrupt the counts.
+func TestCredStoreCountsByProviderReturnsADetachedMap(t *testing.T) {
+	cs := NewCredStore()
+	cs.Load([]Credential{{ID: "a1", Provider: ProviderAnthropic, Token: "sk-ant-1"}})
+
+	got := cs.CountsByProvider()
+	got["ANTHROPIC"] = 99
+	got["INVENTED"] = 1
+
+	again := cs.CountsByProvider()
+	if again["ANTHROPIC"] != 1 {
+		t.Errorf("mutating the returned map changed the store's answer: %v", again)
+	}
+	if _, ok := again["INVENTED"]; ok {
+		t.Errorf("mutating the returned map added a provider: %v", again)
+	}
+}

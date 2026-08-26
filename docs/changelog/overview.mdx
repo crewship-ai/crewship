@@ -13,6 +13,16 @@ tag: Experimental
 
 The three-arm provider switch is now a registry: one row per provider, read by the aux-slot builder, the Keeper validator, the console picker and the error message that tells an operator what they may type. The two hand-written HTTP clients behind it became configurable codecs, so any OpenAI-compatible backend (DeepSeek, vLLM, llama.cpp, Ollama's `/v1` shim, OpenRouter) is a config value rather than a new file. Evaluator slots now default to the first provider whose key you actually have, so an instance holding only an `OPENAI_API_KEY` stops demanding an Anthropic one. A trimmed [models.dev](https://models.dev) snapshot ships embedded and prices 621 models across eight providers offline, as a third step in the rate lookup below the hand-verified table. Two new local commands read those tables with no server: `crewship provider list` and `crewship model price`. See [Multi-provider LLM configuration](/guides/multi-provider-llm) and [Paymaster](/guides/paymaster).
 
+## Proxied agent calls start billing for real
+
+<Warning>
+  **Read this before deploying if you use budget limits.** Every LLM call an agent made through the sidecar proxy has been recording **zero tokens and \$0** since the proxy was built. The usage parser switched on a lowercase provider name (`"anthropic"`) while the proxy handed it an uppercase one (`"ANTHROPIC"`), so it never matched and every response body went unparsed.
+
+  It is fixed, and the consequence lands on the first deploy: crews whose agent traffic goes through the proxy will begin posting real token counts to `cost_ledger`. **Budget warnings and hard stops that have never fired on those crews can now fire immediately** — not because anything got more expensive, but because the spend was always there and was being recorded as nothing.
+
+  Before deploying, check `budget_limits` for any crew that runs proxied agents and confirm the ceilings were set against real usage rather than against the \$0 these rows have been reporting. A limit that looked generous against zero may be below a normal day.
+</Warning>
+
 ## Fixes
 
 - **OpenAI cached tokens were billed twice.** OpenAI's `prompt_tokens` includes the prompt-cache read, and the codec stored it verbatim alongside the cached count — so an 80%-cached 1500-token prompt billed 2.67× the invoice. The codec now records fresh input only, matching what the sidecar proxy path has always done. `cost_ledger.input_tokens` changes meaning for OpenAI-family rows and historic rows are not migrated, so a rollup spanning the change is not comparable across it. See [Paymaster](/guides/paymaster#prompt-cache-token-flow).
@@ -36,7 +46,7 @@ End users now get a server-driven slash palette in chat and CLI for `/routine`, 
 
 ## Streamlined first-run bootstrap
 
-The setup-token gate is gone. The `/bootstrap` form now takes name, email, and password — submit and you're in. Bootstrap stays open for a 5-minute window after `crewship start`, then returns 410 until the server is restarted. Both browser and headless (`crewship init`) paths use the same window. See [Quickstart](/quickstart).
+The setup-token gate is gone. The `/bootstrap` form now takes name, email, and password — submit and you're in. Bootstrap stays open until the first admin account exists, then returns 410; set `CREWSHIP_BOOTSTRAP_WINDOW` (any Go duration, e.g. `5m`) to opt into a finite deploy-race window that closes that long after `crewship start` — for instances reachable from the internet before anyone bootstraps them. Both browser and headless (`crewship init`) paths hit the same endpoint and share the same gates. See [Quickstart](/quickstart).
 
 ## Disaster-recovery backup rewrite
 

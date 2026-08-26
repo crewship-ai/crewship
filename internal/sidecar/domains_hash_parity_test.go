@@ -76,6 +76,7 @@ func healthReportedState(t *testing.T, policy *orchestrator.SidecarNetworkPolicy
 
 	req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 	req.Host = "localhost:9119"
+	req.RemoteAddr = "127.0.0.1:54321"
 	w := httptest.NewRecorder()
 	srv.proxy.ServeHTTP(w, req)
 

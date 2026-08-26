@@ -31,7 +31,7 @@
 import pkg from "playwright"
 const { chromium } = pkg
 
-const URL = (process.env.ONBOARDING_URL ?? "http://localhost:3011").replace(/\/$/, "")
+const TARGET = (process.env.ONBOARDING_URL ?? "http://localhost:3011").replace(/\/$/, "")
 const EMAIL = process.env.BOOTSTRAP_EMAIL ?? `qa-${Date.now()}@example.com`
 const PASSWORD = process.env.BOOTSTRAP_PASSWORD ?? "playwright-onboarding-pw"
 const NAME = process.env.BOOTSTRAP_NAME ?? "QA Tester"
@@ -67,7 +67,7 @@ async function expect(name, cond, details = "") {
   step(name, !!cond, details)
 }
 
-console.log(`Onboarding suite target: ${URL}`)
+console.log(`Onboarding suite target: ${TARGET}`)
 console.log(`Test user: ${EMAIL}\n`)
 
 const browser = await chromium.launch({ headless: true })
@@ -87,7 +87,7 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T1 — setup-status reports needs_bootstrap=true on empty DB
   // ────────────────────────────────────────────────────────────────
-  const statusRes = await page.request.get(`${URL}/api/v1/system/setup-status`)
+  const statusRes = await page.request.get(`${TARGET}/api/v1/system/setup-status`)
   const status = await statusRes.json()
   await expect(
     "T1 setup-status: needs_bootstrap=true on empty DB",
@@ -98,7 +98,7 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T2 — root URL routes to /bootstrap on empty DB
   // ────────────────────────────────────────────────────────────────
-  await page.goto(`${URL}/login`, { waitUntil: "networkidle" })
+  await page.goto(`${TARGET}/login`, { waitUntil: "networkidle" })
   await page.waitForURL(/\/bootstrap/, { timeout: 5000 }).catch(() => {})
   await expect(
     "T2 /login redirects to /bootstrap when no users exist",
@@ -112,10 +112,15 @@ try {
   const hasName = await page.locator("#full_name").count()
   const hasEmail = await page.locator("#email").count()
   const hasPwd = await page.locator("#password").count()
+  // The confirmation field is asserted here, not just filled in T5,
+  // because it is `required`: if it ever disappears T5 still passes
+  // (a missing required field blocks nothing) and the typo protection
+  // this form exists to give would be gone with no test noticing.
+  const hasConfirm = await page.locator("#confirm_password").count()
   await expect(
-    "T3 bootstrap form has name/email/password",
-    hasName === 1 && hasEmail === 1 && hasPwd === 1,
-    `name=${hasName} email=${hasEmail} pwd=${hasPwd}`,
+    "T3 bootstrap form has name/email/password/confirmation",
+    hasName === 1 && hasEmail === 1 && hasPwd === 1 && hasConfirm === 1,
+    `name=${hasName} email=${hasEmail} pwd=${hasPwd} confirm=${hasConfirm}`,
   )
 
   // Initial-setup chip visible. Copy was reworded from "First-run
@@ -126,11 +131,33 @@ try {
   await expect("T4 bootstrap shows 'Initial setup' chip", chipVisible >= 1)
 
   // ────────────────────────────────────────────────────────────────
+  // T4b — a mismatched confirmation is refused, and does not burn the
+  //       one bootstrap an empty DB allows. Mirrors the spec's
+  //       "rejects a password that does not match its confirmation",
+  //       per this file's own coverage-alignment note.
+  // ────────────────────────────────────────────────────────────────
+  await page.fill("#full_name", NAME)
+  await page.fill("#email", EMAIL)
+  await page.fill("#password", PASSWORD)
+  await page.fill("#confirm_password", `${PASSWORD}-typo`)
+  await page.click("button[type=submit]")
+  const mismatchAlert = await page
+    .locator('[role="alert"]:not(#__next-route-announcer__)')
+    .filter({ hasText: /don't match/i })
+    .count()
+  await expect(
+    "T4b mismatched confirmation refused, still on /bootstrap",
+    mismatchAlert >= 1 && page.url().includes("/bootstrap"),
+    `alert=${mismatchAlert} url=${page.url()}`,
+  )
+
+  // ────────────────────────────────────────────────────────────────
   // T5 — bootstrap success creates session and redirects to /onboarding
   // ────────────────────────────────────────────────────────────────
   await page.fill("#full_name", NAME)
   await page.fill("#email", EMAIL)
   await page.fill("#password", PASSWORD)
+  await page.fill("#confirm_password", PASSWORD)
   await page.click("button[type=submit]")
   await page.waitForURL(/\/onboarding/, { timeout: 15000 }).catch(() => {})
   await expect(
@@ -189,72 +216,33 @@ try {
   await cont1.click()
 
   // ────────────────────────────────────────────────────────────────
-  // T9 — step 2: all 5 crew cards visible
+  // T9 — step 2 (Adapter): CLI mode is default, "Recommended" badge present
   // ────────────────────────────────────────────────────────────────
-  await page.waitForSelector("button[aria-pressed]", { timeout: 5000 })
-  const crewCardCount = await page.locator('button[aria-pressed]:has-text("Software Development"), button[aria-pressed]:has-text("DevOps"), button[aria-pressed]:has-text("Marketing"), button[aria-pressed]:has-text("Accounting"), button[aria-pressed]:has-text("blank")').count()
-  // Require all 5 templates — the looser `>= 4` would let one quietly
-  // disappear without failing the suite, which is exactly the kind of
-  // regression a crew-templates seed bug would produce.
-  await expect(
-    "T9 step 2 has 5 crew templates listed",
-    crewCardCount === 5,
-    `found ${crewCardCount}`,
-  )
-
-  // No emoji in crew rows — lucide SVG icons instead
-  const emojiCount = await page.locator('text=/💻|🔧|📢|🧮/').count()
-  await expect(
-    "T10 step 2 crew icons are lucide SVGs, not emoji",
-    emojiCount === 0,
-    `${emojiCount} emoji found (should be 0)`,
-  )
-
-  // Pick Software Development
-  await page.getByRole("button", { name: /software development/i }).click()
-  await page.waitForTimeout(500) // let animation settle
-
-  // ────────────────────────────────────────────────────────────────
-  // T11 — preview pane renders 4 agent avatars (micah style)
-  // ────────────────────────────────────────────────────────────────
-  // Avatar alts are now first names (Alex, Sam, Thomas, etc.) instead
-  // of role titles. Wait for the preview card to mount then count
-  // images that live inside it.
-  await page.waitForSelector('img[width="32"]', { timeout: 5000 }).catch(() => {})
-  const avatarCount = await page.locator('img[width="32"]').count()
-  await expect(
-    "T11 step 2 preview shows 4 agent avatars",
-    avatarCount === 4,
-    `${avatarCount} matching avatars rendered`,
-  )
-
-  // Continue to step 3
-  await page.getByRole("button", { name: /continue/i }).click()
-
-  // ────────────────────────────────────────────────────────────────
-  // T12 — step 3: CLI mode is default, "Recommended" badge present
-  // ────────────────────────────────────────────────────────────────
+  // Workspace → Adapter → Crew: the token step moved from 3 to 2 so the
+  // Crew step's default chat with the setup agent has a credential to
+  // authenticate with before it ever opens (see page.tsx's
+  // persistAdapterCredential and internal/api/onboarding_setup_agent.go).
   await page.waitForSelector('button:has-text("Pair my CLI")', { timeout: 5000 })
   const recommendedBadge = await page.getByText(/recommended/i).count()
   await expect(
-    "T12 step 3 'Pair my CLI' has Recommended badge",
+    "T9 step 2 'Pair my CLI' has Recommended badge",
     recommendedBadge >= 1,
   )
   const pairCard = page.getByRole("button", { name: /pair my cli/i })
   const pairPressed = await pairCard.getAttribute("aria-pressed")
   await expect(
-    "T13 step 3 CLI mode is default (aria-pressed=true)",
+    "T10 step 2 CLI mode is default (aria-pressed=true)",
     pairPressed === "true",
     `aria-pressed="${pairPressed}"`,
   )
 
   // ────────────────────────────────────────────────────────────────
-  // T14 — pair code snippet includes --server and is non-empty
+  // T11 — pair code snippet includes --server and is non-empty
   // ────────────────────────────────────────────────────────────────
   await page.waitForSelector('code:has-text("crewship login --pair")', { timeout: 10000 })
   const snippet = await page.locator('code:has-text("crewship login --pair")').first().textContent()
   await expect(
-    "T14 pair snippet contains --server flag",
+    "T11 pair snippet contains --server flag",
     (snippet ?? "").includes("--server="),
     // Don't dump the snippet itself — it carries the live pair code,
     // which is the credential for /pair/redeem. Just signal presence
@@ -263,38 +251,38 @@ try {
     `snippet_present=${Boolean(snippet)}`,
   )
   await expect(
-    "T15 pair snippet contains --code with 8-char value",
+    "T12 pair snippet contains --code with 8-char value",
     /--code=[A-Z2-9]{4}-[A-Z2-9]{4}/.test(snippet ?? ""),
     `snippet_has_code=${/--code=[A-Z2-9]{4}-[A-Z2-9]{4}/.test(snippet ?? "")}`,
   )
 
   // ────────────────────────────────────────────────────────────────
-  // T16 — pair countdown is visible in m:ss format
+  // T13 — pair countdown is visible in m:ss format
   // ────────────────────────────────────────────────────────────────
   await page.waitForTimeout(1500)
   const countdownText = await page.locator('div:has-text("Waiting for your CLI")').first().textContent().catch(() => "")
   const hasCountdown = /\d+:\d{2}/.test(countdownText ?? "") ||
     (await page.locator('text=/^\\d+:\\d{2}$/').count()) >= 1
   await expect(
-    "T16 pair countdown displayed in m:ss",
+    "T13 pair countdown displayed in m:ss",
     hasCountdown,
     `countdownText="${countdownText}"`,
   )
 
   // ────────────────────────────────────────────────────────────────
-  // T17 — switch to browser mode (verify CLI block hides)
+  // T14 — switch to browser mode (verify CLI block hides)
   // ────────────────────────────────────────────────────────────────
   await page.getByRole("button", { name: /chat in browser/i }).click()
   await page.waitForTimeout(400)
   const cliVisibleAfterSwitch = await page.locator('code:has-text("crewship login --pair")').count()
   await expect(
-    "T17 browser mode hides pair snippet",
+    "T14 browser mode hides pair snippet",
     cliVisibleAfterSwitch === 0,
     `${cliVisibleAfterSwitch} snippets visible`,
   )
 
   // ────────────────────────────────────────────────────────────────
-  // T18 — adapter toolchain + API key + per-provider link always visible
+  // T15 — adapter toolchain + API key + per-provider link always visible
   // ────────────────────────────────────────────────────────────────
   // Scope to the "Agent toolchain" label so the Mode card descriptions
   // (which also contain "Claude Code, Gemini, Codex…" as plain text)
@@ -312,39 +300,116 @@ try {
         .count()
     })
   await expect(
-    "T18 step 3 has 6 adapter chips",
+    "T15 step 2 has 6 adapter chips",
     adapterChipsCount === 6,
     `found ${adapterChipsCount}`,
   )
 
   const apiKeyInput = await page.locator("#api_key").count()
-  await expect("T19 step 3 API key input present", apiKeyInput === 1)
+  await expect("T16 step 2 API key input present", apiKeyInput === 1)
 
-  // Per-provider console link
-  const anthropicLink = await page.locator('a[href*="console.anthropic.com"]').count()
+  // Per-adapter token-guide link. This asserted a console.anthropic.com
+  // href, which no onboarding component has rendered for some time — the
+  // step deep-links into the adapter's own CLI-auth docs now
+  // (ADAPTER_TOKEN_GUIDE in lib/cli-adapter-brand.ts), and deliberately
+  // NOT to the API-key page, because onboarding rejects raw API keys.
+  // The assertion had been failing on main; nothing runs this script in
+  // CI, so it went unnoticed. Repointed at the link that exists rather
+  // than deleted, because the property is still worth holding: step 2
+  // must offer a way to get a token, or a user without one is stuck.
+  const tokenGuideLink = await page
+    .locator('a[href*="docs.claude.com/en/docs/claude-code"]')
+    .count()
   await expect(
-    "T20 'Get an Anthropic key' console link visible",
-    anthropicLink >= 1,
+    "T17 adapter token-guide link visible",
+    tokenGuideLink >= 1,
+    `found ${tokenGuideLink} — expected the ADAPTER_TOKEN_GUIDE link for CLAUDE_CODE`,
   )
 
   // ────────────────────────────────────────────────────────────────
-  // T21 — Launch button disabled until API key is filled
+  // T18 — Continue button disabled until API key is filled
   // ────────────────────────────────────────────────────────────────
-  const launch = page.getByRole("button", { name: /launch/i })
+  const continueFromAdapter = page.getByRole("button", { name: /continue/i })
   await expect(
-    "T21 Launch disabled when API key empty",
-    !(await launch.isEnabled()),
+    "T18 Continue disabled when API key empty",
+    !(await continueFromAdapter.isEnabled()),
   )
   await page.fill("#api_key", API_KEY)
   await page.waitForTimeout(200)
   await expect(
-    "T22 Launch enabled after API key filled",
-    await launch.isEnabled(),
+    "T19 Continue enabled after API key filled",
+    await continueFromAdapter.isEnabled(),
   )
 
   // ────────────────────────────────────────────────────────────────
-  // T23 — clicking Launch (browser mode) calls onboarding/setup and routes to chat
+  // T20 — leaving step 2 persists the model credential (POST
+  // /api/v1/credentials) BEFORE step 3 opens, so step 3's default chat
+  // with the setup agent doesn't 428 credential_required. This is the
+  // fix for the flow-order bug this reorder exists to close — see
+  // page.tsx's persistAdapterCredential.
   // ────────────────────────────────────────────────────────────────
+  const credentialPromise = page.waitForResponse(
+    (resp) => resp.url().includes("/api/v1/credentials") && resp.request().method() === "POST",
+    { timeout: 15000 },
+  )
+  await continueFromAdapter.click()
+  const credentialResp = await credentialPromise
+  await expect(
+    "T20 Continue (step 2 → 3) persists the model credential",
+    credentialResp.status() === 201,
+    `status=${credentialResp.status()}`,
+  )
+
+  // ────────────────────────────────────────────────────────────────
+  // T21 — step 3 (Crew): escape hatch to the template grid, all 5 cards visible
+  // ────────────────────────────────────────────────────────────────
+  // The chat with the setup agent is the default here now that a
+  // credential exists, but driving a real conversation isn't this
+  // script's job — take the escape hatch straight to the template grid,
+  // same as it always tested.
+  await page.getByRole("button", { name: /prefer to pick a template instead/i }).click()
+  await page.waitForSelector("button[aria-pressed]", { timeout: 5000 })
+  const crewCardCount = await page.locator('button[aria-pressed]:has-text("Software Development"), button[aria-pressed]:has-text("DevOps"), button[aria-pressed]:has-text("Marketing"), button[aria-pressed]:has-text("Accounting"), button[aria-pressed]:has-text("blank")').count()
+  // Require all 5 templates — the looser `>= 4` would let one quietly
+  // disappear without failing the suite, which is exactly the kind of
+  // regression a crew-templates seed bug would produce.
+  await expect(
+    "T21 step 3 has 5 crew templates listed",
+    crewCardCount === 5,
+    `found ${crewCardCount}`,
+  )
+
+  // No emoji in crew rows — lucide SVG icons instead
+  const emojiCount = await page.locator('text=/💻|🔧|📢|🧮/').count()
+  await expect(
+    "T22 step 3 crew icons are lucide SVGs, not emoji",
+    emojiCount === 0,
+    `${emojiCount} emoji found (should be 0)`,
+  )
+
+  // Pick Software Development
+  await page.getByRole("button", { name: /software development/i }).click()
+  await page.waitForTimeout(500) // let animation settle
+
+  // ────────────────────────────────────────────────────────────────
+  // T23 — preview pane renders 4 agent avatars (micah style)
+  // ────────────────────────────────────────────────────────────────
+  // Avatar alts are now first names (Alex, Sam, Thomas, etc.) instead
+  // of role titles. Wait for the preview card to mount then count
+  // images that live inside it.
+  await page.waitForSelector('img[width="32"]', { timeout: 5000 }).catch(() => {})
+  const avatarCount = await page.locator('img[width="32"]').count()
+  await expect(
+    "T23 step 3 preview shows 4 agent avatars",
+    avatarCount === 4,
+    `${avatarCount} matching avatars rendered`,
+  )
+
+  // ────────────────────────────────────────────────────────────────
+  // T24 — clicking Launch calls onboarding/setup and routes to chat
+  // ────────────────────────────────────────────────────────────────
+  const launch = page.getByRole("button", { name: /launch/i })
+  await expect("T24 Launch enabled once a template is picked", await launch.isEnabled())
   const setupPromise = page.waitForResponse(
     (resp) => resp.url().includes("/api/v1/onboarding/setup") && resp.request().method() === "POST",
     { timeout: 15000 },
@@ -354,10 +419,10 @@ try {
   // Reading the body races the navigation that the same handler
   // triggers (router.push redirects, the response goroutine may have
   // already finished). Try-and-fallback so a flaky read doesn't fail
-  // the assertion — T24 below verifies the same thing via the DB.
+  // the assertion — T25 below verifies the same thing via the DB.
   const setupBody = await setupResp.json().catch(() => ({}))
   await expect(
-    "T23 Launch → /onboarding/setup returns 201",
+    "T24b Launch → /onboarding/setup returns 201",
     setupResp.status() === 201,
     `status=${setupResp.status()} body=${JSON.stringify(setupBody).slice(0, 200)}`,
   )
@@ -372,30 +437,33 @@ try {
     .catch(() => {})
   const landedOnChat = /^\/chat\/[^/]+$/.test(new URL(page.url()).pathname)
   await expect(
-    "T24 redirected to the new agent's chat after launch",
+    "T25 redirected to the new agent's chat after launch",
     landedOnChat,
-    `landed on ${page.url()} — "/" means the agent-slug lookup came back empty`,
+    // step() prints details on pass as well as fail, so this reads as a
+    // plain observation rather than as a diagnosis of a failure that may
+    // not have happened.
+    `landed on ${page.url()} ("/" would mean the agent-slug lookup came back empty)`,
   )
 
-  // T24b — the chat that loaded is usable, not an empty shell. Placeholder
+  // T25b — the chat that loaded is usable, not an empty shell. Placeholder
   // is `Message <agent>...` (chat-composer.tsx), or the nameless variant
   // while the agent is still resolving.
   const composer = page.locator('textarea[placeholder^="Message "], textarea[placeholder="Send a message..."]')
   await composer.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {})
   await expect(
-    "T24b composer is on screen in the new agent's chat",
+    "T25b composer is on screen in the new agent's chat",
     await composer.first().isVisible().catch(() => false),
-    `no composer textarea at ${page.url()}`,
+    `at ${page.url()}`,
   )
 
-  // T25 — confirm the deployed crew has 4 agents (verified via the
-  // Launch response body captured in T23). The body may be empty on
-  // a race with page navigation; in that case T24's redirect target
+  // T25c — confirm the deployed crew has 4 agents (verified via the
+  // Launch response body captured in T24). The body may be empty on
+  // a race with page navigation; in that case T25's redirect target
   // already proves the deploy worked, since the wizard only builds a
   // /chat/<slug> URL from an agent_id the template actually created.
   const observedAgentCount = setupBody.agent_count ?? (landedOnChat ? 1 : 0)
   await expect(
-    "T25 deployed crew has 4 agents (or at least one valid agent_id)",
+    "T25c deployed crew has 4 agents (or at least one valid agent_id)",
     observedAgentCount === 4 || landedOnChat,
     `agent_count=${observedAgentCount}, url=${page.url()}`,
   )
@@ -404,7 +472,7 @@ try {
   // T26 — workspace has preferred_language set on backend
   // ────────────────────────────────────────────────────────────────
   // Light verification: fetch /api/v1/workspaces and check the lang
-  const wsRes = await page.request.get(`${URL}/api/v1/workspaces`)
+  const wsRes = await page.request.get(`${TARGET}/api/v1/workspaces`)
   const workspaces = await wsRes.json()
   const firstWs = Array.isArray(workspaces) ? workspaces[0] : null
   await expect(
@@ -416,7 +484,7 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T27 — setup-status now reports needs_bootstrap=false
   // ────────────────────────────────────────────────────────────────
-  const status2 = await (await page.request.get(`${URL}/api/v1/system/setup-status`)).json()
+  const status2 = await (await page.request.get(`${TARGET}/api/v1/system/setup-status`)).json()
   await expect(
     "T27 setup-status flips to needs_bootstrap=false after bootstrap",
     status2.needs_bootstrap === false,
@@ -427,7 +495,7 @@ try {
   // T28 — /login no longer redirects to /bootstrap (DB has users)
   // ────────────────────────────────────────────────────────────────
   await ctx.clearCookies()
-  await page.goto(`${URL}/login`, { waitUntil: "networkidle" })
+  await page.goto(`${TARGET}/login`, { waitUntil: "networkidle" })
   await page.waitForTimeout(1500)
   await expect(
     "T28 /login stays on /login after bootstrap (no longer redirects)",
@@ -438,7 +506,7 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T29 — Forgot password returns 200 silently (no enumeration)
   // ────────────────────────────────────────────────────────────────
-  const forgotRes = await page.request.post(`${URL}/api/v1/auth/forgot`, {
+  const forgotRes = await page.request.post(`${TARGET}/api/v1/auth/forgot`, {
     data: { email: "nobody-exists@example.com" },
     headers: { "Content-Type": "application/json" },
   })
@@ -451,7 +519,7 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T30 — Forgot password for real email also 200
   // ────────────────────────────────────────────────────────────────
-  const forgotReal = await page.request.post(`${URL}/api/v1/auth/forgot`, {
+  const forgotReal = await page.request.post(`${TARGET}/api/v1/auth/forgot`, {
     data: { email: EMAIL },
     headers: { "Content-Type": "application/json" },
   })
@@ -465,13 +533,13 @@ try {
   // T31 — Pair flow: /start, /poll, /redeem work end-to-end
   // ────────────────────────────────────────────────────────────────
   // Re-login first to grab a session cookie.
-  await page.goto(`${URL}/login`, { waitUntil: "networkidle" })
+  await page.goto(`${TARGET}/login`, { waitUntil: "networkidle" })
   await page.fill("#email", EMAIL)
   await page.fill("#password", PASSWORD)
   await page.click("button[type=submit]")
   await page.waitForTimeout(2000)
 
-  const startResp = await page.request.post(`${URL}/api/v1/auth/pair/start`, {
+  const startResp = await page.request.post(`${TARGET}/api/v1/auth/pair/start`, {
     data: { adapter_hint: "CLAUDE_CODE" },
     headers: { "Content-Type": "application/json" },
   })
@@ -492,7 +560,7 @@ try {
     // line 62 doesn't carry over. Pass it explicitly or T32/T33 will
     // false-fail on staging/self-signed HTTPS targets.
     const cleanCtx = await browser.newContext({ ignoreHTTPSErrors: true })
-    const redeemResp = await cleanCtx.request.post(`${URL}/api/v1/auth/pair/redeem`, {
+    const redeemResp = await cleanCtx.request.post(`${TARGET}/api/v1/auth/pair/redeem`, {
       data: { code: startBody.code },
       headers: { "Content-Type": "application/json" },
     })
@@ -506,7 +574,7 @@ try {
     )
 
     // Second redeem should fail (single-use)
-    const redeem2 = await cleanCtx.request.post(`${URL}/api/v1/auth/pair/redeem`, {
+    const redeem2 = await cleanCtx.request.post(`${TARGET}/api/v1/auth/pair/redeem`, {
       data: { code: startBody.code },
       headers: { "Content-Type": "application/json" },
     })
@@ -521,13 +589,19 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T34 — second bootstrap attempt is rejected (DB already initialized)
   // ────────────────────────────────────────────────────────────────
-  const secondBootstrap = await page.request.post(`${URL}/api/v1/bootstrap`, {
+  const secondBootstrap = await page.request.post(`${TARGET}/api/v1/bootstrap`, {
     data: { full_name: "Second Admin", email: "second@example.com", password: "another-pw-1234" },
     headers: { "Content-Type": "application/json" },
   })
+  // 410, not 403. The endpoint is gone once an admin exists rather than
+  // forbidden to this caller, and the handler has answered 410 for some
+  // time — four docs pages carried the same stale 403 and were corrected
+  // alongside this. The assertion never caught up because nothing in CI
+  // runs this script, and everything from T24 on was unreachable anyway
+  // (see the URL-shadowing note above).
   await expect(
-    "T34 second bootstrap rejected with 403",
-    secondBootstrap.status() === 403,
+    "T34 second bootstrap rejected with 410 (bootstrap is gone, not forbidden)",
+    secondBootstrap.status() === 410,
     `status=${secondBootstrap.status()}`,
   )
 } catch (err) {

@@ -33,6 +33,13 @@ type pipelinesSaveRequest struct {
 	Description  string          `json:"description"`
 	Definition   json.RawMessage `json:"definition"`
 	SampleInputs map[string]any  `json:"sample_inputs"`
+	// Crew is the ONE identity field an agent may supply, and it is not a
+	// claim about who the caller is — it names the crew the routine is being
+	// built FOR. The API accepts it only from the onboarding setup crew (see
+	// internal/api/internal_delegated_crew.go); every other caller gets a 403,
+	// so forwarding it verbatim cannot widen anything. author_crew_id below
+	// still carries the unforgeable caller identity from IPC.
+	Crew string `json:"crew"`
 }
 
 // pipelinesRunRequest is the agent-facing body for /pipelines/{slug}/run.
@@ -115,11 +122,16 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 	// endpoint runs the DSL against the workspace's execution tier
 	// using the wired AgentRunner. Passing test_run is mandatory for
 	// step 2 to succeed (the store enforces the gate).
+	// target_crew_slug rides on test_run too, and must: the save_token minted
+	// here is signed over the AUTHORING crew, and the save step re-derives it
+	// over the crew the routine actually lands on. Dry-running as the caller
+	// and saving as the target would mint a token that never verifies.
 	testRunBody, err := json.Marshal(map[string]any{
-		"workspace_id":   s.ipc.WorkspaceID,
-		"definition":     body.Definition,
-		"author_crew_id": s.ipc.CrewID,
-		"sample_inputs":  body.SampleInputs,
+		"workspace_id":     s.ipc.WorkspaceID,
+		"definition":       body.Definition,
+		"author_crew_id":   s.ipc.CrewID,
+		"sample_inputs":    body.SampleInputs,
+		"target_crew_slug": body.Crew,
 	})
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal test_run body"})
@@ -164,15 +176,16 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 	// last_test_run_passed flag (#1371). If the test_run minted no token
 	// (secret unwired), the save fails the gate closed, which is correct.
 	saveBody, err := json.Marshal(map[string]any{
-		"workspace_id":    s.ipc.WorkspaceID,
-		"slug":            slug,
-		"name":            body.Name,
-		"description":     body.Description,
-		"definition":      body.Definition,
-		"author_crew_id":  s.ipc.CrewID,
-		"author_agent_id": authorAgentID,
-		"author_chat_id":  s.ipc.ChatID,
-		"save_token":      testRunResult.SaveToken,
+		"workspace_id":     s.ipc.WorkspaceID,
+		"slug":             slug,
+		"name":             body.Name,
+		"description":      body.Description,
+		"definition":       body.Definition,
+		"author_crew_id":   s.ipc.CrewID,
+		"author_agent_id":  authorAgentID,
+		"author_chat_id":   s.ipc.ChatID,
+		"save_token":       testRunResult.SaveToken,
+		"target_crew_slug": body.Crew,
 	})
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal save body"})
@@ -215,7 +228,13 @@ func (s *Server) listPipelines(ctx context.Context, rawQuery string) (int, []byt
 // crew so an in-container agent has the same discovery surface as `crewship
 // routine capabilities`. Crew + workspace come from IPC, never the caller —
 // an agent can only introspect its own crew's capabilities.
-func (s *Server) crewCapabilities(ctx context.Context) (int, []byte) {
+// targetCrew, when set, asks about the crew this agent is authoring FOR
+// rather than its own — the read counterpart of save_routine's `crew`, and
+// necessary for the same reason: a page's producer refs have to name the
+// target crew's agents, so answering with the caller's roster would send the
+// model straight into an unresolvable reference. Only the onboarding setup
+// crew is allowed to ask; the API refuses everyone else.
+func (s *Server) crewCapabilities(ctx context.Context, targetCrew string) (int, []byte) {
 	if s.ipc == nil {
 		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
 	}
@@ -228,6 +247,9 @@ func (s *Server) crewCapabilities(ctx context.Context) (int, []byte) {
 	// authored blind (#1763).
 	path := "/api/v1/internal/crews/" + url.PathEscape(s.ipc.CrewID) +
 		"/capabilities?workspace_id=" + url.QueryEscape(s.ipc.WorkspaceID)
+	if targetCrew != "" {
+		path += "&target_crew_slug=" + url.QueryEscape(targetCrew)
+	}
 	res, err := s.ipcRequestJSON(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return http.StatusBadGateway, mustJSON(map[string]string{"error": "capabilities request failed: " + err.Error()})

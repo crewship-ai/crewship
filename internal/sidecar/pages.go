@@ -253,3 +253,76 @@ func splitPagePanelPath(p string) (page, panel string, ok bool) {
 	}
 	return page, panel, true
 }
+
+// ---------------------------------------------------------------------------
+// save_page — agent-authored page CREATION, distinct from everything above
+// this line. handlePagePush and the /pages/{page}/{panel} route push a
+// PAYLOAD onto a panel that already exists on a page a human already built.
+// savePage below creates the page's STRUCTURE (metadata + panels) in the
+// first place — the gap the setup-agent's own system prompt used to name
+// ("a Page YAML is a reviewable draft unless a dedicated Crewship apply
+// tool is visibly available"). It wraps
+// POST /api/v1/internal/pages/save (internal/api/pages_internal_save.go),
+// mirroring savePipeline's shape in pipelines.go: the agent only knows
+// about a tool call, and the sidecar is what forwards it to crewshipd with
+// the crew/workspace identity that call cannot forge.
+//
+// Trust model, same as savePipeline's own header: crew + workspace IDs come
+// from s.ipc.{WorkspaceID, CrewID}, never from the agent's request. There is
+// no test-run step here — a page is a spec, not code with side effects, and
+// its own validation (documentFrom, resolveReferences, resolveGates) runs
+// server-side on save, same as the human-facing POST /api/v1/pages does.
+// ---------------------------------------------------------------------------
+
+// pagesSaveRequest is the agent-facing body for save_page. Panels stays raw
+// JSON — the sidecar has no reason to know the shape of a page panel, it
+// only has to relay what the agent authored to the endpoint that validates
+// it. Client supplies name/description/panels; identity is injected below.
+type pagesSaveRequest struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Panels      json.RawMessage `json:"panels"`
+	// Crew names the crew this page is built FOR — see pipelinesSaveRequest.Crew
+	// for why an agent-supplied crew name is safe here and is not an identity
+	// claim.
+	Crew string `json:"crew"`
+}
+
+// savePage forwards an agent-authored page to the internal save route,
+// returning the upstream HTTP status + raw JSON body — a validation failure
+// (bad panel schema, unresolved producer, held-by-policy) reaches the
+// agent's own retry loop verbatim, exactly like savePipeline's return
+// contract.
+//
+// authorAgentID is the ACTING agent resolved from the per-agent bearer
+// token by the calling handler (respondRoutinesMCPToolsCall), matching
+// savePipeline's own authorAgentID parameter.
+func (s *Server) savePage(ctx context.Context, body pagesSaveRequest, authorAgentID string) (int, []byte) {
+	if s.ipc == nil {
+		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
+	}
+	if body.Name == "" || len(body.Panels) == 0 {
+		return http.StatusBadRequest, mustJSON(map[string]string{"error": "name and panels required"})
+	}
+
+	// crew_id stays the unforgeable caller identity from IPC;
+	// target_crew_slug is the crew the page is being built FOR, which the API
+	// accepts only from the onboarding setup crew (internal_delegated_crew.go).
+	saveBody, err := json.Marshal(map[string]any{
+		"workspace_id":     s.ipc.WorkspaceID,
+		"crew_id":          s.ipc.CrewID,
+		"agent_id":         authorAgentID,
+		"name":             body.Name,
+		"description":      body.Description,
+		"panels":           body.Panels,
+		"target_crew_slug": body.Crew,
+	})
+	if err != nil {
+		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal save body"})
+	}
+	saveRes, err := s.ipcRequestJSON(ctx, http.MethodPost, "/api/v1/internal/pages/save", saveBody)
+	if err != nil {
+		return http.StatusBadGateway, mustJSON(map[string]string{"error": "page-save request failed: " + err.Error()})
+	}
+	return saveRes.status, saveRes.body
+}

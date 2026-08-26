@@ -184,7 +184,20 @@ func (o *Orchestrator) cleanupAgentSecrets(containerID, agentSlug string) {
 		_ = res.Reader.Close()
 	}
 	if res != nil {
-		if running, code, ierr := o.container.ExecInspect(ctx, res.ExecID); ierr == nil && !running && code != 0 {
+		running, code, ierr := o.container.ExecInspect(ctx, res.ExecID)
+		switch {
+		case ierr != nil:
+			// The rm's own exit code is unknowable here — daemon hiccup,
+			// exec id already reaped, whatever. Falling through to the
+			// "done" log below would report a cleanup that may never have
+			// happened as a verdict of success, in a path whose entire job
+			// is making sure agent credential files do not outlive the run.
+			// Say plainly that this is unknown rather than silently
+			// upgrading it to "done".
+			o.logger.Warn("post-run secrets cleanup outcome unknown: inspect failed",
+				"agent_slug", agentSlug, "error", ierr)
+			return
+		case !running && code != 0:
 			o.logger.Warn("post-run secrets cleanup exited non-zero",
 				"agent_slug", agentSlug, "exit_code", code)
 			return

@@ -297,5 +297,27 @@ func (o *Orchestrator) ApplyBrief(ctx context.Context, agentSlug, containerID st
 	// dangling.
 	_, _ = io.Copy(io.Discard, res.Reader)
 	_ = res.Reader.Close()
+
+	// The doc comment above promises "an invalid brief fails loudly here
+	// rather than producing a malformed file on disk" — but until this
+	// check existed, that promise only covered brief.Validate(). A brief
+	// that PASSED validation could still fail to land: a full disk, a
+	// missing base64 or mkdir binary on a BYOI image, a permissions
+	// problem on .memory. o.container.Exec only reports whether the exec
+	// was started, not whether the script inside it succeeded, so
+	// returning nil right after it would assert "the brief was written"
+	// on nothing but "the shell was launched" — the same default-stands-in
+	// -for-a-real-answer shape as an unchecked ExecInspect. WaitExecExit
+	// is the same #1779 idiom orchestrator_exec_env.go's tmux check and
+	// preflight_batch.go's runOrBatch already use for exactly this: get
+	// the REAL exit code, and treat "could not determine it" as failure
+	// rather than silently keeping the zero-value success.
+	code, inspectErr := provider.WaitExecExit(ctx, o.container, res.ExecID, execProbeTimeout)
+	if inspectErr != nil {
+		return fmt.Errorf("apply_brief: inspect: %w", inspectErr)
+	}
+	if code != 0 {
+		return fmt.Errorf("apply_brief: write exited %d", code)
+	}
 	return nil
 }

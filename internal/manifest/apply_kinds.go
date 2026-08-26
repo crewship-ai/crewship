@@ -488,6 +488,28 @@ func validateAllKinds(b *Bundle, wsCtx internalapi.WorkspaceContext) error {
 	return fmt.Errorf("kind validation failed:\n%s", joinLines(errs))
 }
 
+// ValidateBundle performs the complete, read-only validation pass for a
+// parsed manifest bundle. Bundle.Validate predates the SPEC-2 top-level kinds
+// and owns the legacy Crew / Workspace checks; validateAllKinds owns the
+// newer Crew, Agent, Routine, Page, and related documents. Callers that do
+// not build an apply plan (for example the in-container manifest validation
+// tool) need both passes or a malformed Page can appear valid simply because
+// no server-side plan was requested.
+//
+// Cross-resource references are resolved against resources declared in the
+// same bundle. Kind validators that explicitly support an empty workspace
+// context (notably Page) defer references to already-existing remote objects
+// until apply, while still enforcing their complete structural schema.
+func ValidateBundle(b *Bundle) error {
+	if b == nil {
+		return fmt.Errorf("manifest: nil bundle")
+	}
+	if err := b.Validate(); err != nil {
+		return err
+	}
+	return validateAllKinds(b, buildKindWorkspaceContext(b))
+}
+
 // buildKindWorkspaceContext extracts slugs from every declared kind so
 // FK validators can verify "the project this milestone references is
 // somewhere in the same manifest" without round-tripping to the
@@ -528,6 +550,23 @@ func buildKindWorkspaceContext(b *Bundle) internalapi.WorkspaceContext {
 				})
 			}
 		}
+	}
+	// Standalone kind:Crew and kind:Agent documents use different bundle
+	// slices from the legacy nested Crew/Workspace shapes above. They are
+	// equally real declarations and must participate in cross-kind FK
+	// validation: a Routine + Page authored beside standalone resources must
+	// not be rejected as if its crew and producers did not exist.
+	for i := range b.Crews {
+		ctx.DeclaredCrews = append(ctx.DeclaredCrews, internalapi.SlugLookup{
+			Slug: b.Crews[i].Metadata.Slug,
+			Name: b.Crews[i].Metadata.Name,
+		})
+	}
+	for i := range b.Agents {
+		ctx.DeclaredAgents = append(ctx.DeclaredAgents, internalapi.SlugLookup{
+			Slug: b.Agents[i].Metadata.Slug,
+			Name: b.Agents[i].Metadata.Name,
+		})
 	}
 
 	// New-kind slug lookups.

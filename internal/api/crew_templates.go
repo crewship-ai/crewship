@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -79,7 +84,34 @@ type deployCrewResult struct {
 // Pass a journal.Emitter (callers' h.journal — already defaulted to noopEmitter
 // when nothing is wired up) so the template/Captain auto-assign trail lands in
 // the canonical event stream alongside server logs.
-func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j journal.Emitter, wsID, templateSlug, crewName, crewSlugInput string) (*deployCrewResult, error) {
+// deployOverrides carries explicit user choices that replace a template's
+// per-agent defaults. The zero value deploys the template verbatim, which is
+// what every caller that has nothing to override passes.
+type deployOverrides struct {
+	// LLMModel replaces CrewTemplateAgent.LLMModel — but only on agents whose
+	// llm_provider matches Provider. Writing a Gemini model id onto a
+	// CLAUDE_CODE agent breaks it outright, which is strictly worse than the
+	// template's own default, so a mismatch falls back rather than applying.
+	LLMModel string
+	// Provider is the user's chosen provider, already normalised by
+	// resolveLLMProvider. Empty disables the override entirely.
+	Provider string
+}
+
+// modelFor returns the model an agent should be created with: the override
+// when it applies, otherwise the template's own pin.
+func (o deployOverrides) modelFor(agentProvider, templateModel string) string {
+	m := strings.TrimSpace(o.LLMModel)
+	if m == "" || strings.TrimSpace(o.Provider) == "" {
+		return templateModel
+	}
+	if !strings.EqualFold(strings.TrimSpace(o.Provider), strings.TrimSpace(agentProvider)) {
+		return templateModel
+	}
+	return m
+}
+
+func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j journal.Emitter, wsID, templateSlug, crewName, crewSlugInput string, overrides deployOverrides) (*deployCrewResult, error) {
 	crewSlug := crewSlugInput
 	if crewSlug == "" {
 		crewSlug = slugify(crewName)
@@ -153,7 +185,7 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 				timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			agentID, wsID, crewID, a.Name, agentSlug, a.RoleTitle, a.AgentRole,
-			a.CLIAdapter, a.LLMProvider, a.LLMModel, a.ToolProfile, a.SystemPrompt,
+			a.CLIAdapter, a.LLMProvider, overrides.modelFor(a.LLMProvider, a.LLMModel), a.ToolProfile, a.SystemPrompt,
 			1800, true, webhookSecret, now, now); err != nil {
 			return nil, fmt.Errorf("create agent %s: %w", a.Name, err)
 		}
@@ -213,11 +245,43 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 		}
 	}
 
+	// Match the credential to the agent's OWN provider, read from the row
+	// that was just written.
+	//
+	// This used to be hardcoded to ANTHROPIC, and the failure was silent
+	// and total: a workspace set up with Gemini, Codex, Cursor or Factory
+	// stored its credential under that provider, this query matched
+	// nothing, and every agent in the crew came up with zero credentials.
+	// No error surfaced anywhere the user could see it — the crew simply
+	// did not work. The onboarding wizard reaches this path for all four
+	// builtin templates, so it was one adapter choice away on the most
+	// common flow in the product.
+	//
+	// An agent whose provider is unset falls back to ANTHROPIC, which is
+	// the same default resolveLLMProvider applies on the write side; the
+	// two have to agree or a credential stored under the default would
+	// stop matching the agent that shares it.
+	var agentProvider string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(llm_provider, '') FROM agents WHERE id = ?`, agentID,
+	).Scan(&agentProvider); err != nil {
+		if logger != nil {
+			logger.Warn("autoAssignCredentials: agent provider lookup failed",
+				"workspace_id", wsID, "agent_id", agentID, "error", err)
+		}
+		emitFailure("provider_lookup", "", err)
+		return
+	}
+	agentProvider = strings.ToUpper(strings.TrimSpace(agentProvider))
+	if agentProvider == "" {
+		agentProvider = "ANTHROPIC"
+	}
+
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, name FROM credentials
 		WHERE workspace_id = ? AND type IN ('API_KEY', 'AI_CLI_TOKEN')
-		  AND provider = 'ANTHROPIC' AND deleted_at IS NULL AND status = 'ACTIVE'
-		ORDER BY created_at ASC`, wsID)
+		  AND provider = ? AND deleted_at IS NULL AND status = 'ACTIVE'
+		ORDER BY created_at ASC`, wsID, agentProvider)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("autoAssignCredentials: list query failed",
@@ -448,7 +512,7 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, h.journal, wsID, slug, body.CrewName, body.CrewSlug)
+	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, h.journal, wsID, slug, body.CrewName, body.CrewSlug, deployOverrides{})
 	if err != nil {
 		if errors.Is(err, errTemplateNotFound) {
 			writeProblem(w, r, http.StatusNotFound, "Template not found")
@@ -473,21 +537,83 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, result)
 }
 
+// slugLatinFolds are the letters Unicode decomposition cannot help with.
+//
+// NFD splits "á" into "a" + a combining accent, so dropping combining marks
+// recovers the base letter. But "ł", "ø", "đ" and "ß" are atomic code points
+// with no decomposition at all — NFD leaves them exactly as they were, and the
+// ASCII filter then deletes them. They need naming.
+var slugLatinFolds = map[rune]string{
+	'ß': "ss", 'æ': "ae", 'œ': "oe",
+	'ø': "o", 'ł': "l", 'đ': "d", 'ð': "d", 'þ': "th", 'ħ': "h", 'ı': "i",
+}
+
+// slugify turns a display name into a url-safe slug.
+//
+// RUNE-aware, and it folds diacritics rather than discarding them. It used to
+// iterate []byte and keep only ASCII, which deleted every multi-byte character
+// outright: "Hlídač dostupnosti" came out as "hlda-dostupnosti", and a name
+// carrying no ASCII at all — "Дозорный" — came out empty, which the crew
+// endpoint reported as "crew slug already exists: crew_slug must contain only
+// lowercase letters, numbers, and hyphens". Both halves of that message were
+// wrong, and the person's name was fine; the slugifier was not.
+//
+// It also collapsed distinct names together, since "Hlídač" and "Hldac" mapped
+// to the same output — a slug collision produced by the slugifier itself.
+//
+// The empty-input contract is unchanged: a name with nothing nameable in it
+// still returns "", because callers rely on that to reject it. What no longer
+// returns "" is a name that IS nameable, merely not in a Latin script — those
+// fall back to a stable digest so the crew remains addressable. The display
+// name, which is the thing a person actually reads, is untouched either way.
 func slugify(name string) string {
-	s := strings.ToLower(strings.TrimSpace(name))
-	s = strings.ReplaceAll(s, " ", "-")
-	var out []byte
-	for _, c := range []byte(s) {
-		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
-			out = append(out, c)
+	trimmed := strings.TrimSpace(name)
+	s := strings.ToLower(trimmed)
+
+	// Did the name contain anything that is a letter or a digit in ANY script?
+	// This is what separates "Дозорный" — a real name written in a script this
+	// cannot transliterate — from "!!!", which names nothing at all. Only the
+	// former earns the digest fallback; the latter must keep returning "" so
+	// callers go on rejecting it.
+	hadAlnum := false
+
+	var b strings.Builder
+	for _, r := range norm.NFD.String(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			hadAlnum = true
+		}
+		switch {
+		case unicode.Is(unicode.Mn, r):
+			// A combining mark left over from NFD — the accent itself, now
+			// that its base letter has been emitted.
+			continue
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == ' ' || r == '-' || r == '_':
+			b.WriteByte('-')
+		default:
+			if fold, ok := slugLatinFolds[r]; ok {
+				b.WriteString(fold)
+			}
+			// Anything else (Cyrillic, CJK, punctuation) is dropped here and
+			// recovered by the digest fallback below if nothing survived.
 		}
 	}
-	// Collapse consecutive hyphens and trim leading/trailing hyphens (matches frontend)
-	result := string(out)
+
+	result := b.String()
 	for strings.Contains(result, "--") {
 		result = strings.ReplaceAll(result, "--", "-")
 	}
-	return strings.Trim(result, "-")
+	result = strings.Trim(result, "-")
+	if result != "" || !hadAlnum {
+		return result
+	}
+	// A real name in a script this cannot transliterate. Returning "" would
+	// tell the caller the name was unusable, which is not true — so give it a
+	// stable, legal handle derived from the name itself. Same name, same slug,
+	// every time; different names never collide.
+	sum := sha256.Sum256([]byte(trimmed))
+	return "crew-" + hex.EncodeToString(sum[:4])
 }
 
 func generateWebhookSecret() string {

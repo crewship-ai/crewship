@@ -26,6 +26,7 @@ func TestAgentEnvCredentialExposures(t *testing.T) {
 	tests := []struct {
 		name    string
 		adapter string
+		model   string // only matters for the OPENCODE rows, where it decides routing
 		keeper  bool
 		creds   []Credential
 		want    []exp // in the helper's deterministic append order: oauth, apikey, cli, secret
@@ -116,6 +117,32 @@ func TestAgentEnvCredentialExposures(t *testing.T) {
 			},
 		},
 		{
+			// OpenCode is BYOK across 75+ providers and had no coverage here at
+			// all before phase 2, so the file described an isolation story that
+			// left out the one adapter with the most keys in its env.
+			name:    "opencode byo key stays exposed when the run is not routed",
+			adapter: "OPENCODE", model: "deepseek/deepseek-v3.2", keeper: true,
+			creds: []Credential{{EnvVarName: "OPENROUTER_API_KEY", PlainValue: "sk-or-v1-real", Type: "API_KEY", Provider: "OPENROUTER"}},
+			want:  []exp{{"OPENROUTER_API_KEY", "API_KEY", false}},
+		},
+		{
+			name:    "opencode openrouter key is isolated once the run routes through the sidecar",
+			adapter: "OPENCODE", model: "openrouter/anthropic/claude-sonnet-4-6", keeper: true,
+			creds: []Credential{{EnvVarName: "OPENROUTER_API_KEY", PlainValue: "sk-or-v1-real", Type: "API_KEY", Provider: "OPENROUTER"}},
+			want:  nil,
+		},
+		{
+			// Only the routed provider is isolated. Everything else OpenCode can
+			// reach still goes out over a CONNECT tunnel with its key in env.
+			name:    "opencode routed run isolates one provider, not the rest",
+			adapter: "OPENCODE", model: "openrouter/anthropic/claude-sonnet-4-6", keeper: true,
+			creds: []Credential{
+				{EnvVarName: "OPENROUTER_API_KEY", PlainValue: "sk-or-v1-real", Type: "API_KEY", Provider: "OPENROUTER"},
+				{EnvVarName: "GROQ_API_KEY", PlainValue: "gsk_real", Type: "API_KEY", Provider: "GROQ"},
+			},
+			want: []exp{{"GROQ_API_KEY", "API_KEY", false}},
+		},
+		{
 			name:    "codex mixed bag: openai key isolated (#1030), cli + secret exposed",
 			adapter: "CODEX_CLI", keeper: false,
 			creds: []Credential{apiKey("OPENAI_API_KEY"), cli, secret},
@@ -129,7 +156,7 @@ func TestAgentEnvCredentialExposures(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := AgentEnvCredentialExposures(
-				AgentRunRequest{AgentID: "a1", CLIAdapter: tc.adapter, Credentials: tc.creds},
+				AgentRunRequest{AgentID: "a1", CLIAdapter: tc.adapter, LLMModel: tc.model, Credentials: tc.creds},
 				tc.keeper,
 			)
 			if len(got) != len(tc.want) {

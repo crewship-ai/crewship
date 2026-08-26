@@ -264,6 +264,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 			EnvVarName:     d.EnvVar,
 			Priority:       d.Priority,
 			Type:           d.Type,
+			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 		}
 		dec, err := encryption.Decrypt(d.EncryptedValue)
@@ -277,6 +278,21 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 			continue
 		}
 		c.PlainValue = dec
+		// A provider whose upstream lives in the credential (OPENAI_COMPAT)
+		// stores {baseURL,apiKey,headers} as one object. PlainValue becomes the
+		// sidecar's bearer token, so the object has to be split here too — this
+		// loader carries the provider column exactly like the boot path, and
+		// without the split the base URL and every custom header would be sent
+		// upstream AS the secret.
+		if providerNeedsEndpointValue(d.Provider) {
+			token, baseURL, headers, perr := providerEndpointFromValue(d.Provider, dec)
+			if perr != nil {
+				h.logger.Error("endpoint credential rejected at delivery",
+					"id", c.ID, "provider", d.Provider, "error", perr)
+				continue
+			}
+			c.PlainValue, c.BaseURL, c.Headers = token, baseURL, headers
+		}
 		// The credential's parts (PRD §2.2), opened with the same helper the
 		// value was. A failure drops the whole credential — a sub-agent handed
 		// an AWS key with no secret fails at the point of use, blaming the

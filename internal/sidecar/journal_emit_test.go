@@ -472,6 +472,32 @@ func TestSidecar_BuildLLMCallObserver_CacheOnlyEvent_NotSkipped(t *testing.T) {
 	}
 }
 
+func TestSidecar_BuildLLMCallObserver_UsesActingAgentAttribution(t *testing.T) {
+	hit := make(chan sidecarCostRecord, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var rec sidecarCostRecord
+		_ = json.NewDecoder(r.Body).Decode(&rec)
+		w.WriteHeader(http.StatusOK)
+		hit <- rec
+	}))
+	defer backend.Close()
+
+	s := newJournalTestServer(backend.URL)
+	s.ipc.AgentID = "boot-agent"
+	s.buildLLMCallObserver()(LLMUsage{
+		AgentID: "acting-agent", Provider: "openai", InputTokens: 1,
+	}, QuotaInfo{}, "metered", "")
+
+	select {
+	case rec := <-hit:
+		if rec.AgentID != "acting-agent" {
+			t.Fatalf("agent_id = %q, want acting-agent (not boot-agent)", rec.AgentID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cost record was not posted")
+	}
+}
+
 // TestSidecar_BuildLLMCallObserver_NilIPC_Noop mirrors the egress
 // counterpart: the closure must be safe to call before IPC is wired
 // (e.g. unit tests, or the early-boot window before the orchestrator

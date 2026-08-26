@@ -11,7 +11,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       system_prompt: You are the SRE Lead. You oversee infrastructure reliability, coordinate incident response, and ensure systems meet SLA targets. Delegate tasks to platform, security, and CI/CD specialists.
     - name: Platform Engineer
@@ -20,7 +20,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Platform Engineer. You manage container infrastructure, Kubernetes clusters, networking, and cloud resources. Write Infrastructure-as-Code (Terraform, Helm).
       skills:
@@ -31,7 +31,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: MINIMAL
       system_prompt: You are a Security Analyst. You audit codebases for vulnerabilities, review credential handling, verify auth flows, and ensure compliance with security standards (OWASP, SOC2).
       skills:
@@ -42,7 +42,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a CI/CD Specialist. You build and maintain deployment pipelines, automate testing workflows, manage build systems, and ensure fast, reliable deployments.
       skills:

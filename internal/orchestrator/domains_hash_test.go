@@ -58,31 +58,31 @@ func TestSidecarNeedsRestart(t *testing.T) {
 	}{
 		{
 			name:        "free mode, matches → no restart",
-			health:      &sidecarHealth{NetworkMode: "free"},
+			health:      &sidecarHealth{NetworkMode: "free", ConfigFingerprint: "same"},
 			desiredMode: "free",
 			want:        false,
 		},
 		{
 			name:        "mode changed free→restricted → restart",
-			health:      &sidecarHealth{NetworkMode: "free"},
+			health:      &sidecarHealth{NetworkMode: "free", ConfigFingerprint: "same"},
 			desiredMode: "restricted",
 			want:        true,
 		},
 		{
 			name:        "restricted, same domains → no restart (the #1160 fix)",
-			health:      &sidecarHealth{NetworkMode: "restricted", DomainsHash: matchingHash},
+			health:      &sidecarHealth{NetworkMode: "restricted", DomainsHash: matchingHash, ConfigFingerprint: "same"},
 			desiredMode: "restricted",
 			want:        false,
 		},
 		{
 			name:        "restricted, domains changed → restart",
-			health:      &sidecarHealth{NetworkMode: "restricted", DomainsHash: "deadbeefcafe"},
+			health:      &sidecarHealth{NetworkMode: "restricted", DomainsHash: "deadbeefcafe", ConfigFingerprint: "same"},
 			desiredMode: "restricted",
 			want:        true,
 		},
 		{
 			name:        "restricted, pre-#1160 sidecar (no domains_hash) → fail toward restart",
-			health:      &sidecarHealth{NetworkMode: "restricted", DomainsHash: ""},
+			health:      &sidecarHealth{NetworkMode: "restricted", DomainsHash: "", ConfigFingerprint: "same"},
 			desiredMode: "restricted",
 			want:        true,
 		},
@@ -90,7 +90,7 @@ func TestSidecarNeedsRestart(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := sidecarNeedsRestart(tc.health, tc.desiredMode, desiredDomains); got != tc.want {
+			if got := sidecarNeedsRestart(tc.health, tc.desiredMode, desiredDomains, "same"); got != tc.want {
 				t.Errorf("sidecarNeedsRestart() = %v, want %v", got, tc.want)
 			}
 		})

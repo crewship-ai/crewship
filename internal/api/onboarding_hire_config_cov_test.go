@@ -39,6 +39,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/policy"
@@ -167,7 +168,14 @@ func TestCovOHCOnboardingStatus_SmartDetectViaAgents(t *testing.T) {
 func TestCovOHCOnboardingStatus_AlreadyCompleted(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
-	if _, err := db.Exec(`UPDATE users SET onboarding_completed = 1 WHERE id = ?`, userID); err != nil {
+	// A completed user with neither a real agent nor an explicit skip is an
+	// interrupted legacy onboarding and Status deliberately reopens it. Pin
+	// the explicit-skip form here so this test still covers the stable
+	// already-completed branch instead of contradicting that recovery rule.
+	if _, err := db.Exec(`
+		UPDATE users
+		SET onboarding_completed = 1, onboarding_skipped_at = ?
+		WHERE id = ?`, time.Now().UTC().Format(time.RFC3339), userID); err != nil {
 		t.Fatalf("exec: %v", err)
 	}
 	h := covOHCOnboardingHandler(db)
@@ -231,6 +239,26 @@ func TestCovOHCOnboardingComplete_Happy(t *testing.T) {
 	}
 	if flag != 1 {
 		t.Errorf("onboarding_completed = %d, want 1", flag)
+	}
+}
+
+func TestCovOHCOnboardingComplete_RecordsExplicitSkip(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	h := covOHCOnboardingHandler(db)
+	req := httptest.NewRequest("POST", "/api/v1/onboarding/complete", strings.NewReader(`{"skipped":true}`))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	rr := httptest.NewRecorder()
+	h.Complete(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var skippedAt sql.NullString
+	if err := db.QueryRow(`SELECT onboarding_skipped_at FROM users WHERE id = ?`, userID).Scan(&skippedAt); err != nil {
+		t.Fatalf("read skip marker: %v", err)
+	}
+	if !skippedAt.Valid || skippedAt.String == "" {
+		t.Fatal("explicit Skip did not persist onboarding_skipped_at")
 	}
 }
 

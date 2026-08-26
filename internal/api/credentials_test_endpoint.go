@@ -48,18 +48,43 @@ type testResult struct {
 // button was hidden for three providers the server could validate. Same drift
 // class as #1083 (provider→env-var), same remedy: decide in Go, tell the client.
 //
-// Keep in lockstep with the switch in probeProvider; TestProbeSupported_GoldenSet
-// fails if they part ways.
+// Keep in lockstep with the switch in probeProvider;
+// TestProbeSupported_ProbelessRegistrationFails fails if they part ways — it
+// drives every id below through probeProviderInner and rejects any that lands
+// in the default branch.
+//
+// OPENAI_COMPAT is here (#2043) on the same terms ENDPOINT_URL already had, and
+// the terms are what make it safe. Its endpoint is operator-supplied, so it is
+// dialled only from the role-gated stored path (dialEndpoint), through
+// probeLocalModelEndpoint's dialer: endpointDialControl runs after DNS with the
+// concrete IP and refuses link-local/metadata, and redirects are never followed,
+// so a 3xx cannot walk the probe onto a host the guard already refused.
+//
+// The probe asks for a model list and offers NO credential — not the stored
+// apiKey, not the custom headers. Reachability is what an operator cannot
+// otherwise find out; authentication is not worth making the Test button into a
+// way to post the stored secret to a baseURL that whoever holds "update" on the
+// credential can repoint at will.
 var probeSupportedProviders = map[string]struct{}{
-	"ANTHROPIC": {},
-	"OPENAI":    {},
-	"GOOGLE":    {},
-	"CURSOR":    {},
-	"FACTORY":   {},
-	"GITHUB":    {},
-	"GITLAB":    {},
-	"VERCEL":    {},
+	"ANTHROPIC":     {},
+	"OPENAI":        {},
+	"OPENAI_COMPAT": {},
+	"GOOGLE":        {},
+	"OPENROUTER":    {},
+	"CURSOR":        {},
+	"FACTORY":       {},
+	"GITHUB":        {},
+	"GITLAB":        {},
+	"VERCEL":        {},
 }
+
+// probeNoValidationMsg is the default branch's answer: honest text wrapped in
+// Valid:true (kept for backward compatibility — `supported` is the field a
+// caller should read). Named because it is the exact signal
+// TestProbeSupported_ProbelessRegistrationFails keys off: a provider listed in
+// probeSupportedProviders that still produces this string has been advertised
+// as probeable without a probe, which renders a green tick over a non-check.
+const probeNoValidationMsg = "No validation available for this provider"
 
 // probeSupported reports whether (provider, credType) has a real upstream check.
 // Support is a function of both: an ENDPOINT_URL is probeable whatever the
@@ -96,10 +121,50 @@ func probeProvider(ctx context.Context, provider, ctype, value string, dialEndpo
 func probeProviderInner(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
 	switch provider {
 	case "ANTHROPIC":
-		// OAuth setup tokens (sk-ant-oat*) cannot be validated via standard API.
-		// They only work inside Claude Code's authenticated tunnel.
+		// OAuth CLI tokens ARE checkable, and used to be reported as valid
+		// without anyone asking. The comment that stood here claimed they
+		// "cannot be validated via standard API" — disproven by
+		// probeAnthropicCredential, which authenticates exactly this token
+		// shape against /v1/messages with the oauth beta header, and which
+		// onboarding has relied on all along.
+		//
+		// The cost of that claim was not academic: this function backs
+		// /credentials/test, /credentials/{id}/test, the "Test now" button and
+		// `crewship credential test-stored`. For the one credential type
+		// onboarding accepts, every one of them answered "valid" having dialled
+		// nothing. A key pasted anywhere but the wizard was never verified.
 		if ctype == "AI_CLI_TOKEN" || isAnthropicOAuthToken(value) {
-			return testResult{Valid: true, Error: "OAuth token accepted (cannot validate via API, will be verified at runtime)"}
+			r := probeAnthropicCredential(ctx, value, "")
+			switch {
+			case r.OK():
+				return testResult{Valid: true, Status: r.Status}
+			case r.ModelUnavailable():
+				// /credentials/test answers one question: did Anthropic
+				// authenticate this credential? A 404 model response is only
+				// reachable after auth has succeeded, and the model used by
+				// this cheap direct-API probe is not the Claude Code CLI alias
+				// the agent will ultimately run. Treating that response as an
+				// invalid token trapped valid setup-token users in onboarding.
+				return testResult{
+					Valid:  true,
+					Status: r.Status,
+					Error:  "Anthropic authenticated the token; model availability will be checked by Claude Code at runtime",
+				}
+			case r.Reached && r.Status == http.StatusTooManyRequests:
+				return testResult{
+					Valid:  true,
+					Status: r.Status,
+					Error:  "Rate limited (token authenticated but temporarily throttled)",
+				}
+			case r.Reached:
+				// Reached and refused, or reached and answered something we
+				// do not treat as success — either way an answer, not a guess.
+				return testResult{Status: r.Status, Error: anthropicProbeMessage(r)}
+			default:
+				// Could not ask. Not valid, not invalid — and explicitly not
+				// reported as either.
+				return testResult{Error: anthropicProbeMessage(r)}
+			}
 		}
 		req, err := http.NewRequestWithContext(ctx, "GET", "https://api.anthropic.com/v1/models", nil)
 		if err != nil {
@@ -162,6 +227,47 @@ func probeProviderInner(ctx context.Context, provider, ctype, value string, dial
 			return testResult{Valid: true, Status: resp.StatusCode}
 		}
 		return testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)}
+
+	case "OPENROUTER":
+		// OpenRouter exposes the key's own metadata (label, usage, limit) at
+		// /api/v1/key — the cheapest endpoint that authenticates: no model
+		// list, no credits spent.
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://openrouter.ai/api/v1/key", nil)
+		if err != nil {
+			return testResult{Error: "Failed to create request"}
+		}
+		req.Header.Set("Authorization", "Bearer "+value)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return testResult{Error: "Connection failed: " + err.Error()}
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+		return openRouterProbeResult(resp.StatusCode)
+
+	case "OPENAI_COMPAT":
+		// #2043: the credential most in need of a connectivity test was the only
+		// LLM provider that could not get one. A hosted vendor's key is wrong in
+		// exactly one way; a bring-your-own endpoint is unreachable from the
+		// server, or fails TLS, or has the wrong path prefix, or serves no model
+		// list — and every one of those used to arrive as a green
+		// "No validation available".
+		//
+		// Only the base URL is used. The stored apiKey and custom headers are
+		// deliberately not offered: see probeSupportedProviders.
+		_, baseURL, _, err := providerEndpointFromValue(provider, value)
+		if err != nil {
+			return testResult{Error: err.Error()}
+		}
+		if baseURL == "" {
+			return testResult{Error: "credential value carries no endpoint URL — expected {\"baseURL\":…} (e.g. https://gateway.internal/v1)"}
+		}
+		if !dialEndpoint {
+			// Body path is RequireAuth-only, with no workspace or role floor.
+			// Same line the ENDPOINT_URL branch holds below.
+			return testResult{Valid: true, Error: "endpoint URL is well-formed (reachability is checked by testing the saved credential)"}
+		}
+		return probeLocalModelEndpoint(ctx, baseURL)
 
 	case "CURSOR":
 		// Cursor token validation: ping the auth endpoint with the token.
@@ -294,7 +400,31 @@ func probeProviderInner(ctx context.Context, provider, ctype, value string, dial
 			}
 			return probeLocalModelEndpoint(ctx, value)
 		}
-		return testResult{Valid: true, Error: "No validation available for this provider"}
+		return testResult{Valid: true, Error: probeNoValidationMsg}
+	}
+}
+
+// openRouterProbeResult maps an /api/v1/key response status onto the result the
+// UI renders. Split out of the arm above — rather than inlined the way the older
+// arms are — because it is the half worth testing and the only half that can be
+// tested without dialling openrouter.ai: the arms that inline their switch are
+// exercised only against the live vendor, which is to say not at all in CI.
+//
+// 429 is Valid deliberately. A throttled key is a working key, and reporting it
+// as invalid sends the operator off to rotate a credential that was fine — the
+// same distinction the ANTHROPIC arm draws.
+func openRouterProbeResult(status int) testResult {
+	switch status {
+	case http.StatusOK:
+		return testResult{Valid: true, Status: status}
+	case http.StatusUnauthorized:
+		return testResult{Status: status, Error: "Invalid OpenRouter API key"}
+	case http.StatusForbidden:
+		return testResult{Status: status, Error: "Key is disabled or lacks access"}
+	case http.StatusTooManyRequests:
+		return testResult{Valid: true, Status: status, Error: "Rate limited (key is valid but temporarily throttled)"}
+	default:
+		return testResult{Status: status, Error: fmt.Sprintf("Unexpected response: %d", status)}
 	}
 }
 

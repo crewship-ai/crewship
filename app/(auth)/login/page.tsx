@@ -3,10 +3,9 @@
 import { Suspense, useState, useEffect, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { AuthSplitShell } from "@/components/branding/auth-split-shell"
 import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { serverFetch } from "@/lib/server-base"
@@ -126,17 +125,22 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-background to-muted/30 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <CrewshipLogoTile />
-          </div>
-          <CardTitle className="text-2xl">Welcome to Crewship</CardTitle>
-          <CardDescription>Sign in to manage your AI workforce</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+    <AuthSplitShell
+      eyebrow="Self-hosted"
+      headline="Command the whole fleet."
+      blurb="Every agent in its own container, on hardware you own."
+    >
+      <div>
+        <p className="font-mono text-[11px] uppercase tracking-[0.11em] text-muted-foreground">
+          Welcome back
+        </p>
+        <h1 className="mt-3 text-balance text-[clamp(26px,2.4vw,32px)] font-extrabold leading-[1.12] tracking-[-0.028em]">
+          Sign in to Crewship
+        </h1>
+        <p className="mt-2 max-w-[34ch] text-sm text-muted-foreground">
+          Sign in to manage your AI workforce.
+        </p>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             {registered && (
               <div
                 className="rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success"
@@ -218,9 +222,8 @@ function LoginForm() {
                 </a>
               </p>
             )}
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+        </form>
+      </div>
+    </AuthSplitShell>
   )
 }

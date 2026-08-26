@@ -902,7 +902,6 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     // turn ties back to the routine run that produced it. Lifted onto
     // ChatTurn.metadata.trace_id so feedback POSTs from this turn can
     // include the trace id for eval-mining correlation.
-    const traceID = metadata && typeof metadata.trace_id === "string" ? (metadata.trace_id as string) : undefined
     // A done marked no_reply legitimately carries no assistant turn (group
     // chat where the agent wasn't @mentioned) — never synthesize an error
     // for it.
@@ -926,8 +925,13 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
           parts: finalParts,
           isStreaming: false,
         }
-        if (traceID) {
-          finalTurn.metadata = { ...(last.metadata ?? {}), trace_id: traceID }
+        // `done` is the durable boundary for metadata that describes the
+        // completed assistant turn. Trace correlation was the first reader,
+        // but onboarding proposal suggestions use the same transport. Keep
+        // the map open-ended as ChatTurn.metadata's type promises instead of
+        // silently retaining only trace_id.
+        if (metadata && Object.keys(metadata).length > 0) {
+          finalTurn.metadata = { ...(last.metadata ?? {}), ...metadata }
         }
         return [...cleaned.slice(0, -1), finalTurn]
       }

@@ -195,6 +195,10 @@ var BackupTables = []string{
 	"memory_relations",
 	"memory_proposals",
 	"memory_versions",
+	// Onboarding proposals carry an FK to crews (applied_crew_id), so they
+	// must be restored after "crews" above — placing them earlier would fail
+	// the restore on a dangling reference rather than at review time.
+	"onboarding_proposals",
 	"mission_tasks",
 	"mission_activity",
 	"mission_comments",

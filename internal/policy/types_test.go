@@ -147,6 +147,16 @@ func TestPolicy_DecideAction_Matrix(t *testing.T) {
 		{AutonomyGuided, ActionPageWrite, DecisionAutoLogJournal},
 		{AutonomyTrusted, ActionPageWrite, DecisionAutoLogJournal},
 		{AutonomyFull, ActionPageWrite, DecisionAutoJournal},
+
+		// Page creation: a page's STRUCTURE (metadata + panels), not a
+		// panel's content — the skill_create shape, not page_write's. It
+		// creates a durable, operator-facing artefact (other humans see and
+		// trust the page) but no principal, so it lands where skill_create
+		// does rather than where crew_create does.
+		{AutonomyStrict, ActionPageCreate, DecisionInboxApprove},
+		{AutonomyGuided, ActionPageCreate, DecisionInboxApprove},
+		{AutonomyTrusted, ActionPageCreate, DecisionInboxApprove},
+		{AutonomyFull, ActionPageCreate, DecisionAutoLogInbox},
 	}
 
 	for _, tc := range cases {

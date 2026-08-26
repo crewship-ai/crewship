@@ -291,13 +291,21 @@ func resolveCredentialID(client *cli.Client, nameOrID string) (string, error) {
 }
 
 // testCredentialValue validates a credential value against the provider API.
-// Returns (valid, errorMessage). Skips test for SECRET type, NONE provider,
-// and OAuth tokens (sk-ant-oat*) which cannot be validated via API.
+// Returns (valid, errorMessage). Skips the test only where there is genuinely
+// nothing to ask: an opaque SECRET, or no provider to ask.
+//
+// It used to short-circuit sk-ant-oat tokens here too, on the claim that OAuth
+// tokens "cannot be validated via API". That claim was wrong on the server
+// (probeAnthropicCredential authenticates exactly this shape against
+// /v1/messages) and the server side has been fixed — but this branch made the
+// fix invisible from the CLI, which is where `crewship credential create`
+// reports to the operator. Creating a credential with a fabricated
+// sk-ant-oat value printed "Key validated successfully" having contacted
+// nothing.
+//
+// A check that cannot run must not report success. Here it can run, so it does.
 func testCredentialValue(client *cli.Client, provider, credType, value string) (bool, string) {
 	if credType == "SECRET" || provider == "" || provider == "NONE" {
-		return true, ""
-	}
-	if strings.HasPrefix(value, "sk-ant-oat") {
 		return true, ""
 	}
 
@@ -645,8 +653,10 @@ func init() {
 	credCreateCmd.Flags().String("provider", "", "Provider: "+credprovider.ProvidersHelp())
 	credCreateCmd.Flags().String("value", "", "Credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
-	credCreateCmd.Flags().String("auth-token", "", "ENDPOINT_URL only: bearer token sent to the endpoint (Authorization: Bearer …); stored encrypted, never displayed")
-	credCreateCmd.Flags().StringArray("header", nil, "ENDPOINT_URL only: extra request header KEY=VALUE (repeatable; use for Basic/custom-header endpoints)")
+	credCreateCmd.Flags().String("base-url", "", "Endpoint this provider is reached at — required for a provider whose upstream comes from the credential (OPENAI_COMPAT), rejected for every other. Stored with the key as one object and delivered to the sidecar, never to the agent's environment")
+	credCreateCmd.Flags().String("auth-token", "", "Bearer token sent to the endpoint (Authorization: Bearer …); stored encrypted, never displayed. For --type ENDPOINT_URL, or with --base-url. Prefer --auth-token-stdin: an argument is visible to anything that can read the process table")
+	credCreateCmd.Flags().Bool("auth-token-stdin", false, "Read the endpoint bearer token from stdin instead of --auth-token, so it never appears in argv")
+	credCreateCmd.Flags().StringArray("header", nil, "Extra request header KEY=VALUE (repeatable; use for Basic/custom-header endpoints). For --type ENDPOINT_URL, or with --base-url")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
 	credCreateCmd.Flags().String("account-label", "", "Which account/instance this credential is for (e.g. \"work\", or a forge host like \"ghe.acme.internal\" — git links match a credential by host)")
 	credCreateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+" (0 = leave at the server default). L4 requires a human to approve every read.")
@@ -677,8 +687,9 @@ func init() {
 
 	credRotateCmd.Flags().String("value", "", "New credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
 	credRotateCmd.Flags().Bool("value-stdin", false, "Read new value from stdin (secure)")
-	credRotateCmd.Flags().String("auth-token", "", "ENDPOINT_URL only: new bearer token for the endpoint; without this a rotate would drop the stored token")
-	credRotateCmd.Flags().StringArray("header", nil, "ENDPOINT_URL only: extra request header KEY=VALUE (repeatable)")
+	credRotateCmd.Flags().String("auth-token", "", "Endpoint-storing credentials only (type ENDPOINT_URL, or a provider whose endpoint comes from the credential): new bearer token, merged over the stored value so the endpoint and headers survive. Prefer --auth-token-stdin: an argument is visible to anything that can read the process table")
+	credRotateCmd.Flags().Bool("auth-token-stdin", false, "Read the new bearer token from stdin instead of --auth-token, so it never appears in argv")
+	credRotateCmd.Flags().StringArray("header", nil, "Endpoint-storing credentials only: replace the extra request headers, KEY=VALUE (repeatable)")
 	credRotateCmd.Flags().Int("grace-seconds", 0, "Grace overlap in seconds (default 24h server-side, max 7d)")
 	credRotateCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 

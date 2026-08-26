@@ -17,9 +17,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // provisionLogTailCap bounds the in-memory ring buffer of progress messages
@@ -49,6 +52,25 @@ type ProvisionJob struct {
 	// goroutine seeds it; remains populated through completed/failed for
 	// reload-replay via the GET endpoint.
 	Steps []string
+
+	// Pending holds at most one deferred chat message per chat, attached via
+	// AttachPendingMessage while chatbridge.Bridge.HandleChatMessage's
+	// auto-provision branch is waiting on this build. Keyed by ChatID so a
+	// second deferred send on the SAME chat — a manual resend while the build
+	// is still running, or a retried frame — coalesces onto the latest
+	// content instead of queuing a duplicate: only the most recent message
+	// for a given chat is worth replaying once the environment exists.
+	//
+	// Drained (read, then set to nil) in the SAME h.mu critical section that
+	// flips Status to a terminal value ("completed"/"failed") — see
+	// runProvisioning's success path, markJobFailed, and the panic-recovery
+	// defer. That atomicity is the whole at-most-once guarantee: a message
+	// attached before the flip is captured by the drain and resumed by the
+	// completion goroutine; a message attached after the flip finds Status
+	// already terminal and AttachPendingMessage resumes it immediately
+	// instead of adding to a map nobody will ever drain again. There is no
+	// interleaving where both the drain and a late attach see the same entry.
+	Pending map[string]chatbridge.PendingChatMessage
 }
 
 // orphanGCClient is the minimal slice of the Docker API used by the orphan-GC
@@ -205,9 +227,19 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 	h.mu.RUnlock()
 
 	resp := map[string]any{
-		"devcontainer_config": nullStringPtr(devcontainerConfig),
-		"cached_image":        nullStringPtr(cachedImage),
-		"config_hash":         nullStringPtr(cfgHash),
+		// The EFFECTIVE config, not the raw column: a crew with no config of
+		// its own is about to be (or already was) provisioned from
+		// database.DefaultCrewDevcontainerConfig, not refused, so reporting
+		// the raw NULL here would tell an operator (and the CLI doctor check
+		// that reads this field) "Claude Code CLI may not be available" for a
+		// crew that provisions and runs it just fine.
+		"devcontainer_config": database.EffectiveCrewDevcontainerConfig(devcontainerConfig.String, devcontainerConfig.Valid),
+		// Surfaced separately so a crew running on a default it never chose
+		// is visible rather than silently indistinguishable from one an
+		// operator explicitly configured (database.CrewDevcontainerIsDefaulted).
+		"devcontainer_config_defaulted": database.CrewDevcontainerIsDefaulted(devcontainerConfig.String, devcontainerConfig.Valid),
+		"cached_image":                  nullStringPtr(cachedImage),
+		"config_hash":                   nullStringPtr(cfgHash),
 	}
 
 	// What the image is actually made of. Null (rather than []) when the crew
@@ -376,11 +408,21 @@ type EnqueueResult struct {
 }
 
 // ErrProvisionerUnavailable is returned by EnqueueForCrew when the handler
-// has no Docker client wired up. ErrCrewNotFound and ErrCrewNoDevcontainer
-// signal load-time issues; ErrRateLimited surfaces the per-workspace cap;
-// ErrInvalidCrewID covers caller-side argument validation. Callers MUST
-// use errors.Is for matching — the rate-limit case wraps the sentinel with
-// fmt.Errorf("%w: ...", ...) so the message can carry the actual counts.
+// has no Docker client wired up. ErrCrewNotFound signals a load-time issue;
+// ErrRateLimited surfaces the per-workspace cap; ErrInvalidCrewID covers
+// caller-side argument validation. Callers MUST use errors.Is for matching —
+// the rate-limit case wraps the sentinel with fmt.Errorf("%w: ...", ...) so
+// the message can carry the actual counts.
+//
+// ErrCrewNoDevcontainer is kept but is now unreachable from EnqueueForCrew:
+// database.EffectiveCrewDevcontainerConfig means every crew resolves to a
+// usable config (its own, or the default), so there is no longer a "no
+// devcontainer" case to refuse. It is not deleted because ProvisionTrigger's
+// error-to-HTTP-status switch still names it (dead but harmless — matching an
+// error that provably cannot occur is not a bug), and deleting a public
+// sentinel is a breaking change for any external caller matching on it. If a
+// future caller finds a real path that can still hit "there is truly nothing
+// to provision", it has a name to return.
 var (
 	ErrProvisionerUnavailable = fmt.Errorf("provisioner not available (Docker client not configured)")
 	ErrCrewNotFound           = fmt.Errorf("crew not found")
@@ -415,9 +457,16 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 	if err != nil {
 		return EnqueueResult{}, fmt.Errorf("query crew: %w", err)
 	}
-	if !devcontainerCfg.Valid || devcontainerCfg.String == "" {
-		return EnqueueResult{}, ErrCrewNoDevcontainer
-	}
+	// A crew with no config of its own provisions from
+	// database.DefaultCrewDevcontainerConfig rather than being refused — this
+	// used to be `if !devcontainerCfg.Valid || devcontainerCfg.String == ""
+	// { return ErrCrewNoDevcontainer }`, which is exactly the bug: it left
+	// crew_templates.go / onboarding.go / recipes.go / internal_status.go
+	// crews (all four omit devcontainer_config on INSERT) permanently
+	// unprovisionable, so they ran on bare debian:bookworm-slim and the agent
+	// died with exit 127. effectiveCfg is never empty, so ErrCrewNoDevcontainer
+	// can no longer be returned from here.
+	effectiveCfg := database.EffectiveCrewDevcontainerConfig(devcontainerCfg.String, devcontainerCfg.Valid)
 
 	// First lock-and-check: if a job is already pending/running, fast-path
 	// out without touching the rate limiter — no slot needed for a request
@@ -464,10 +513,190 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 	finish := beginBackgroundWork()
 	go func() {
 		defer finish()
-		h.runProvisioning(crewID, workspaceID, devcontainerCfg.String, miseCfg.String, runtimeImage.String, job)
+		h.runProvisioning(crewID, workspaceID, effectiveCfg, miseCfg.String, runtimeImage.String, job)
 	}()
 	h.logger.Info("provisioning triggered", "crew_id", crewID)
 	return EnqueueResult{Started: true}, nil
+}
+
+// resumeMessageTimeout bounds a resumed message's own run — same ballpark as
+// a live chat send would get from its adapter/orchestrator layer. This is a
+// ceiling on the RESUME call itself, not on the provisioning job (which has
+// its own 30-minute budget in runProvisioning); by the time resumeMessage
+// runs, the build already finished.
+const resumeMessageTimeout = 10 * time.Minute
+
+// AttachPendingMessage attaches a chat send that chatbridge.Bridge deferred
+// (HandleChatMessage's auto-provision branch) to crewID's tracked
+// provisioning job, so the job resumes or fails the message exactly once when
+// it reaches a terminal state. See ProvisionJob.Pending for the at-most-once
+// mechanics this relies on: Pending is keyed by ChatID (a second attach for
+// the same chat coalesces rather than queuing a duplicate) and is drained
+// atomically with the job's Status transition, so a late attach — the job
+// already went terminal by the time this call takes the lock — resumes or
+// fails the message immediately instead of writing into a map nobody will
+// ever drain again.
+//
+// Returns false only when no job is tracked for crewID at all. That should
+// not happen immediately after EnqueueForCrew (which is always the caller's
+// preceding step), but is not treated as fatal: the crew_provisioning event
+// HandleChatMessage already streamed told the user what is happening.
+func (h *ProvisioningHandler) AttachPendingMessage(crewID string, msg chatbridge.PendingChatMessage) bool {
+	h.mu.Lock()
+	job, ok := h.jobs[crewID]
+	if !ok {
+		h.mu.Unlock()
+		return false
+	}
+	switch job.Status {
+	case "pending", "running":
+		if job.Pending == nil {
+			job.Pending = make(map[string]chatbridge.PendingChatMessage)
+		}
+		// Coalesce: the latest send for this chat is the only one worth
+		// replaying, and the map shape makes "replace" and "insert" the same
+		// operation.
+		job.Pending[msg.ChatID] = msg
+		h.mu.Unlock()
+		return true
+	case "completed":
+		h.mu.Unlock()
+		h.spawnResumeMessage(msg, nil)
+		return true
+	case "failed":
+		buildErr := fmt.Errorf("build failed: %s", job.Error)
+		h.mu.Unlock()
+		h.spawnResumeMessage(msg, buildErr)
+		return true
+	default:
+		// Unknown/unreachable status — fail closed rather than silently drop.
+		h.mu.Unlock()
+		return false
+	}
+}
+
+// spawnResumeMessage runs resumeMessage on its own goroutine, registered with
+// beginBackgroundWork so a test's teardown can drain it rather than race it
+// (#1596) — a detached resumeMessage call outliving the request/test that
+// triggered it is exactly the shape that guard exists to catch, since it goes
+// on to touch the DB, the WS hub and the chat resolver well after the
+// triggering handler has returned.
+func (h *ProvisioningHandler) spawnResumeMessage(msg chatbridge.PendingChatMessage, buildErr error) {
+	finish := beginBackgroundWork()
+	go func() {
+		defer finish()
+		h.resumeMessage(msg, buildErr)
+	}()
+}
+
+// resumePending fires the success path of resumeMessage for every message a
+// terminal-transition drained off a job. Each runs on its own goroutine: the
+// messages target independent chats (a crew can have several agents/chats)
+// and none should block another or the caller (runProvisioning /
+// markJobFailed), which still has its own DB/journal/broadcast work to do.
+func (h *ProvisioningHandler) resumePending(pending map[string]chatbridge.PendingChatMessage) {
+	for _, msg := range pending {
+		h.spawnResumeMessage(msg, nil)
+	}
+}
+
+// failPending fires the failure path of resumeMessage for every message a
+// terminal-transition drained off a job whose build did NOT succeed.
+func (h *ProvisioningHandler) failPending(pending map[string]chatbridge.PendingChatMessage, buildErr error) {
+	for _, msg := range pending {
+		h.spawnResumeMessage(msg, buildErr)
+	}
+}
+
+// resumeMessage runs (buildErr == nil) or fails (buildErr != nil) exactly one
+// deferred chat message, once. It is always called either from inside the
+// h.mu critical section that just drained the message off ProvisionJob.Pending
+// (runProvisioning's success path, markJobFailed, the panic-recovery defer),
+// or from AttachPendingMessage's late-attach branches when the job was
+// already terminal — either way, by construction, exactly one call is made
+// per drained/late-attached message (see ProvisionJob.Pending's doc comment).
+//
+// Both paths stream on msg.ChatID's session channel via BeginSessionRun — the
+// SAME channel a live send uses and the client is already reliably
+// subscribed to for ordinary chat traffic. There is no dependency on the
+// workspace realtime socket, on workspaceId having resolved client-side, or
+// on the tab having stayed open since the message was sent.
+func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, buildErr error) {
+	if h.wsHub == nil {
+		// No live channel to publish on (headless boot / most unit tests).
+		// Nothing to resume into — logged so a real deployment missing this
+		// wiring is visible rather than silently dropping every deferred send.
+		h.logger.Warn("cannot resume deferred chat message: no WS hub wired",
+			"chat_id", msg.ChatID, "user_id", msg.UserID)
+		return
+	}
+	run := h.wsHub.BeginSessionRun(msg.ChatID)
+	defer run.End()
+
+	if buildErr != nil {
+		// The build itself failed: say so plainly and point at the fix,
+		// rather than leaving the user's original message answered with
+		// silence (the bug this whole mechanism exists to close) or, worse,
+		// a false "done" with nothing having run.
+		run.Emit(ws.ChatEvent{
+			Type: "error",
+			Content: fmt.Sprintf(
+				"Your message could not run: the environment build failed (%s). Fix the devcontainer configuration and send your message again.",
+				buildErr.Error(),
+			),
+			Metadata: map[string]any{"reason": "provisioning_failed"},
+		})
+		run.Emit(ws.ChatEvent{Type: "done", Content: ""})
+		return
+	}
+
+	if h.chatResumer == nil {
+		// Should not happen in production boot (cmd_start.go wires this
+		// alongside SetProvisioningEnqueuer) but surface rather than silently
+		// swallow the user's message if it ever does.
+		h.logger.Error("cannot resume deferred chat message: no chat resumer wired", "chat_id", msg.ChatID)
+		run.Emit(ws.ChatEvent{Type: "error", Content: "internal error: could not resume your message — please send it again"})
+		run.Emit(ws.ChatEvent{Type: "done", Content: ""})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), resumeMessageTimeout)
+	defer cancel()
+
+	// Replays the ORIGINAL send through the exact path a live one takes:
+	// same persistence, same cross-chat run exclusivity (tryMarkRunStart), same
+	// error classification. devcontainerNeedsProvision now resolves false
+	// (cached_image is set), so this runs the agent instead of deferring
+	// again — except in the pathological case where the image was pruned
+	// again in the seconds since this job finished, which re-enters the same
+	// defer-and-attach path and is handled identically to the first time.
+	err := h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, run.Emit, msg.Opts)
+	if err == nil {
+		return
+	}
+	switch {
+	case errors.Is(err, ws.ErrAgentBusy):
+		// Another run (most plausibly the user's own manual resend, racing
+		// this one) already owns the chat's run slot. That run is the one
+		// that will complete and settle the UI; nothing further to do here,
+		// and nothing to stream — ws.ErrAgentBusy's contract is that the
+		// handler emitted NOTHING, and staying silent is what keeps this
+		// from being a second, redundant execution of the same message.
+		h.logger.Info("deferred message not resumed: a run was already in progress for this chat",
+			"chat_id", msg.ChatID)
+	case errors.Is(err, ws.ErrCrewProvisioning):
+		// The crew needed re-provisioning again (e.g. its cached image was
+		// pruned in the moments since this job completed). HandleChatMessage
+		// already streamed its own crew_provisioning card and re-attached the
+		// message to the new job — this call's job is done.
+		h.logger.Info("deferred message deferred again: crew needs re-provisioning", "chat_id", msg.ChatID)
+	default:
+		// Everything else: HandleChatMessage already streams a classified
+		// error event for every other failure mode before returning
+		// non-nil, so there's nothing further to emit here — just log for
+		// operator visibility, matching ws/client.go's handleSendMessage.
+		h.logger.Warn("resuming deferred chat message returned an error", "chat_id", msg.ChatID, "error", err)
+	}
 }
 
 // ProvisionTrigger starts an asynchronous provisioning job for the given crew.
@@ -668,12 +897,14 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	defer func() {
 		if r := recover(); r != nil {
 			panicErr := fmt.Sprintf("internal error: %v", r)
+			var pending map[string]chatbridge.PendingChatMessage
 			h.mu.Lock()
 			if j, ok := h.jobs[crewID]; ok {
 				j.Status = "failed"
 				j.Error = panicErr
 				now := time.Now()
 				j.CompletedAt = &now
+				pending, j.Pending = j.Pending, nil
 			}
 			h.mu.Unlock()
 			h.logger.Error("provisioning panicked",
@@ -686,6 +917,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 				"crew_id": crewID,
 				"error":   panicErr,
 			})
+			h.failPending(pending, fmt.Errorf("%s", panicErr))
 		}
 	}()
 
@@ -892,7 +1124,10 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	job.CompletedAt = &now
 	job.CachedImage = result.CachedImage
 	job.ConfigHash = result.ConfigHash
+	pending := job.Pending
+	job.Pending = nil
 	h.mu.Unlock()
+	h.resumePending(pending)
 
 	h.logger.Info("provisioning completed",
 		"crew_id", crewID,
@@ -932,7 +1167,10 @@ func (h *ProvisioningHandler) markJobFailed(job *ProvisionJob, workspaceID strin
 	job.Status = "failed"
 	job.CompletedAt = &now
 	job.Error = err.Error()
+	pending := job.Pending
+	job.Pending = nil
 	h.mu.Unlock()
+	h.failPending(pending, err)
 
 	h.wsHub.BroadcastWorkspace(workspaceID, "provision.failed", map[string]any{
 		"crew_id": job.CrewID,

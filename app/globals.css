@@ -843,6 +843,78 @@ body {
   }
 }
 
+/*
+ * Onboarding preview pane.
+ *
+ * A raised surface, not a hole: one pixel of light along the top edge and
+ * the ground falling away beneath it. That is the entire treatment — no
+ * colour, no texture, nothing that moves.
+ *
+ * It replaced a pair of drifting blue radial glows, which is worth saying
+ * out loud because the glow is the default reach here and it was wrong:
+ * a large soft brand-coloured blob is what every AI product has shipped
+ * since 2024, and it read as unserious next to a form people are meant to
+ * fill in carefully. What makes a split read as two panes is depth, and
+ * depth is an inset highlight plus a falloff.
+ *
+ * The bottom inset is deliberately huge and heavily negative-spread so it
+ * is a gradient falloff rather than a visible shadow edge.
+ */
+.onboarding-pane {
+  background: linear-gradient(180deg, #12141b 0%, #0b0c11 58%, #090a0e 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    inset 0 -80px 90px -70px rgb(0 0 0 / 0.9);
+}
+
+/*
+ * Stacked under lg the pane sits ABOVE the form rather than beside it, so
+ * the light belongs on the edge the two share — otherwise the highlight
+ * runs along the top of the viewport where there is no seam to describe.
+ */
+@media (max-width: 1023px) {
+  .onboarding-pane {
+    background: linear-gradient(180deg, #0b0c11 0%, #12141b 100%);
+    box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.07);
+  }
+}
+
+/*
+ * Touch targets in the unauthenticated forms.
+ *
+ * The shared Input is h-9 and Button's default size is h-9 — 36px, which is
+ * fine with a mouse and under every touch guideline there is (44pt on iOS,
+ * 48dp on Android). Sign-in, sign-up, first-run and setup are the screens
+ * most likely to be met on a phone, and they are the ones where a mis-tap
+ * costs you the user.
+ *
+ * Scoped to these forms rather than fixed in components/ui: the shared
+ * controls are used in dense authenticated tables where 44px would wreck the
+ * row rhythm, so raising them globally trades one problem for a worse one.
+ * Width is left alone — these controls are full-width here anyway.
+ *
+ * Keyed on `pointer: coarse`, not on width. Width was the first attempt and
+ * it missed the iPad: at 820px it is over any phone breakpoint you would
+ * pick, and it is still a finger. The thing that decides whether 36px is too
+ * small is the pointer, so ask about the pointer.
+ */
+@media (pointer: coarse) {
+  .touch-form input:not([type="checkbox"]):not([type="radio"]),
+  .touch-form select,
+  .touch-form textarea,
+  .touch-form button {
+    min-height: 44px;
+  }
+
+  /* Inline text links inside the form still need a tappable box without
+     turning into buttons — padding, not min-height, so the line box is
+     unaffected. */
+  .touch-form a {
+    display: inline-block;
+    padding-block: 6px;
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
  * Print (PRD §10b.8) — "send the monthly close to the accountant" via the
  * browser's own Print-to-PDF. Server-side PDF generation is explicitly out

@@ -9,14 +9,17 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/tokenutil"
 )
@@ -432,11 +435,52 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// stream scrubber the run's loaded credential values so split/encoded
 	// secrets are caught across streamed deltas, and flush the buffered tail
 	// once the stream ends.
+	//
+	// HEADER values count as credential values. A bring-your-own endpoint can
+	// authenticate entirely through a custom header — `X-Api-Key: <secret>` —
+	// and those headers are written into OPENCODE_CONFIG_CONTENT, which an agent
+	// can simply print. Registering only PlainValue left an opaque header secret
+	// matching no built-in pattern and surviving Scrub into the chat UI and the
+	// journal. Same omission as the sidecar's registerCredentialLiterals had,
+	// one package away, which is how it was missed here.
 	var secretValues []string
-	for _, c := range req.Credentials {
-		if c.PlainValue != "" {
-			secretValues = append(secretValues, c.PlainValue)
+	addSecret := func(v string) {
+		if strings.TrimSpace(v) != "" {
+			secretValues = append(secretValues, v)
 		}
+	}
+	// A header value is registered only when it is long enough to plausibly BE
+	// a secret. Custom headers are not always secret — the field's own contract
+	// calls them "an org / route selector some gateways require" — and a global
+	// redaction literal is not free: registering "acme-production" turns every
+	// occurrence of that string in agent output, chat and the journal into
+	// REDACTED, which reads as a bug and hides the text an operator is trying
+	// to debug. The scrubber's own floor is 5 characters, calibrated for values
+	// that are secrets by construction; header values need a higher one because
+	// most of them are not.
+	//
+	// The trade-off is named rather than hidden: a genuine header secret shorter
+	// than this is NOT scrubbed. That is the losing case, and it is chosen
+	// because the scrubber is defence in depth here — a routed endpoint's headers
+	// live only in the sidecar and never enter agent output at all, so this path
+	// matters only for an UNROUTED run, where the headers are in the OpenCode
+	// config and already reported as an env exposure.
+	addHeaderSecret := func(v string) {
+		if len(strings.TrimSpace(v)) >= minHeaderSecretLen {
+			addSecret(v)
+		}
+	}
+	for _, c := range req.Credentials {
+		addSecret(c.PlainValue)
+		for _, k := range sortedKeys(c.Headers) {
+			addHeaderSecret(c.Headers[k])
+		}
+	}
+	// The resolved local-model endpoint travels outside req.Credentials. Its
+	// APIKey is a token by construction, so it is unconditional.
+	addSecret(req.LocalModelAPIKey)
+	for _, k := range sortedKeys(req.LocalModelHeaders) {
+		addHeaderSecret(req.LocalModelHeaders[k])
 	}
 	// Journal tap: accumulate the agent's reply for the end-of-run
 	// chat.agent_response journal entry. CRITICAL (CodeRabbit): this tap sits
@@ -581,7 +625,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			scrubHandler(event)
 		}
 	})
-	o.streamOutput(execCtx, result, req, tappedHandler)
+	rawOutput := o.streamOutput(execCtx, result, req, tappedHandler)
 	// Drain the stream scrubber's overlap buffer now the stream has ended,
 	// so any secret straddling the final chunk (or short output held back
 	// entirely) is scrubbed and the redacted tail still reaches the user.
@@ -655,7 +699,45 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("run cancelled: %w", ctx.Err())
 	}
 
-	running, exitCode, _ := o.container.ExecInspect(ctx, result.ExecID)
+	running, exitCode, inspErr := o.container.ExecInspect(ctx, result.ExecID)
+	if inspErr != nil {
+		// ExecInspect itself failed — daemon unreachable, exec id already
+		// reaped, whatever — so `running` and `exitCode` above are their zero
+		// values, NOT a real answer. Letting that stand in for one is exactly
+		// the class of bug this package has shipped twice already: the
+		// sidecar health probe once reported an unreachable daemon as a
+		// failed (healthy) sidecar, and imagePresentLocally once reported it
+		// as a missing image. Here the zero values point the other way and
+		// are worse: exitCode==0 with running==false falls straight into the
+		// "completed" branch below, so an inspection that could not run
+		// would be reported as a run that SUCCEEDED — a failure invisible to
+		// everyone, since nothing about it looks wrong downstream.
+		//
+		// This function's own sibling, execExitStatus (memory.go), already
+		// codifies the doctrine for this exact call: an inspect error is an
+		// UNKNOWN outcome, and UNKNOWN degrades to failure, never to
+		// success, because a false failure costs a retry while a false
+		// success costs never knowing the run failed at all. Failing OPEN
+		// here — guessing `running=true` and coasting the run at "running"
+		// forever — would be a different flavor of the same invisible
+		// failure: nothing would ever re-inspect it, and the agent would
+		// stay marked busy indefinitely. So: fail CLOSED. Mark the run
+		// "error" (there is no third "unknown" terminal state in the
+		// RunState/audit enum — see runAuditActions — and "error" is the
+		// fail-safe member of the two that exist), log the reason, emit a
+		// distinct Crow's Nest entry so the exec.command block does not read
+		// as a clean or even a normal failed run, and return a typed error
+		// so callers can tell "the agent failed" apart from "we don't know
+		// what the agent did".
+		o.logger.Error("exec inspect failed; run outcome unknown, failing closed",
+			"agent_id", req.AgentID, "exec_id", result.ExecID, "error", inspErr)
+		o.failRun(ctx, req, runState.ID, "error")
+		o.emitExecEnd(ctx, req, result.ExecID, cmd, "warn",
+			fmt.Sprintf("%s: outcome UNKNOWN — exec inspect failed: %v", req.AgentSlug, inspErr),
+			execStart, map[string]any{"outcome": "unknown", "inspect_error": inspErr.Error()})
+		o.markAgentOnline(ctx, req, map[string]any{"reason": "exec_inspect_failed"})
+		return fmt.Errorf("exec inspect failed, run outcome unknown: %w", inspErr)
+	}
 	o.logger.Info("exec finished", "agent_id", req.AgentID, "running", running, "exit_code", exitCode)
 
 	// Crow's Nest: closing exec.command entry with exit code + duration
@@ -695,22 +777,27 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if exitCode != 0 {
 		status = "error"
 		o.logger.Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)
-		// Bridge-level error so the chat surfaces a visible message
-		// instead of an empty assistant bubble. exit_code 123 from
-		// Claude Code specifically means startup auth check failed —
-		// almost always a missing or wrong-shape CLAUDE_CODE_OAUTH_TOKEN.
-		// Other CLIs reuse the same code for "generic exec failure"; we
-		// still surface SOMETHING actionable instead of silence.
-		switch exitCode {
-		case 123:
-			execErr = fmt.Errorf( //nolint:staticcheck // ST1005: user-facing error rendered in chat / journal UI
-				"agent exited with code %d — most likely a missing or invalid CLI token. "+
-					"Run `claude setup-token` (or the equivalent for your adapter) and re-paste the value in Settings → Credentials.",
-				exitCode,
-			)
-		default:
-			execErr = fmt.Errorf("agent exited with code %d — check the journal for details", exitCode)
+		// Typed error (not just a rendered sentence) so a caller like
+		// chatbridge's classifyAdapterExecError can tell "the binary is
+		// missing" (exit 127, "No such file or directory") apart from "the
+		// binary ran and crashed" apart from "no diagnostic text at all" —
+		// see AdapterExecError's doc comment. The container's own captured
+		// output goes through the run's secret scrubber first: it is raw
+		// docker-exec stdout+stderr that never passed through
+		// wrapScrubHandler (that wrapper only sees parsed AgentEvents, and a
+		// missing-binary shell error never produces one), so it is the one
+		// piece of container output in this function that reaches a
+		// user-facing surface (chat metadata) unscrubbed otherwise.
+		var binary string
+		if len(cmd) > 0 {
+			binary = cmd[0]
 		}
+		outScrub := scrubber.New()
+		if len(secretValues) > 0 {
+			outScrub.AddSecretValues(secretValues...)
+		}
+		scrubbedOutput := outScrub.Scrub(strings.TrimSpace(rawOutput))
+		execErr = newAdapterExecError(req.CLIAdapter, binary, exitCode, scrubbedOutput)
 	} else if inBandErr := inBand.Err(); inBandErr != nil {
 		// Exit 0, but the CLI's own terminal event said the turn failed. Same
 		// treatment as a non-zero exit: the run is an error and the chat gets a
@@ -947,7 +1034,16 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 	}
 
 	var env []string
+	req.sidecarActive = sidecarEnabled
 	if sidecarEnabled {
+		agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger)
+		internalAPIToken := sidecarIPCToken(ipcToken, req.WorkspaceID, req.CrewID, o.logger)
+		routeKey := internaltoken.DeriveLLMRouteKey(ipcToken, req.WorkspaceID, req.CrewID)
+		llmRouteToken := internaltoken.DeriveLLMRouteToken(routeKey, req.AgentID)
+		configFingerprint := sidecarConfigFingerprint(ipcToken, req.Credentials)
+		if credentialIsolationFailedOpen(configFingerprint, req.Credentials) {
+			o.warnCredentialIsolationFailOpenOnce(req.AgentID)
+		}
 		env = BuildEnvVarsSidecar(*req, keeperEnabled)
 		// #812: hand THIS agent its own per-agent bearer token. The agent
 		// presents it (Authorization: Bearer $CREWSHIP_AGENT_TOKEN) on sidecar
@@ -956,8 +1052,11 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// the token instead of a spoofable `from`/slug. Fail-closed empty when
 		// internal auth is unconfigured; the sidecar then falls back to the
 		// #796 membership-validated behaviour.
-		if agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger); agentTok != "" {
+		if agentTok != "" {
 			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
+		}
+		if llmRouteToken != "" {
+			env = bindLLMRouteToken(env, llmRouteToken, configFingerprint)
 		}
 		// Surface the credential-isolation gap: any plaintext credential that
 		// lands in the agent env (readable by the agent process). Actionable
@@ -1013,7 +1112,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
-				Token:       sidecarIPCToken(ipcToken, req.WorkspaceID, req.CrewID, o.logger),
+				Token:       internalAPIToken,
 				AgentID:     req.AgentID,
 				AgentSlug:   req.AgentSlug,
 				CrewID:      req.CrewID,
@@ -1025,6 +1124,10 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				// missing from the sidecar's token→identity roster.
 				AgentToken: agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger),
 			}
+		}
+		var routeAuth *SidecarRouteAuth
+		if routeKey != "" {
+			routeAuth = &SidecarRouteAuth{Key: routeKey}
 		}
 		// Convert crew members to sidecar format for target validation.
 		// #812: mint each member's per-agent token so the sidecar's roster can
@@ -1054,11 +1157,20 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		case "restricted":
 			// Auto-add API domains for stdio MCP servers so their HTTP
 			// calls can pass through the sidecar proxy.
-			domains := append([]string{}, req.AllowedDomains...)
-			domains = append(domains, mcpStdioDomains(req.MCPServers)...)
-			// #944: allow the operator-configured local-model endpoint —
-			// empty unless this run actually uses an ollama/… model.
-			domains = append(domains, localModelExtraDomains(*req)...)
+			extras := mcpStdioDomains(req.MCPServers)
+			// #944: allow the endpoint this run's model traffic actually
+			// reaches — empty unless the run resolves one. On the routed path
+			// the host is needed for the SIDECAR's allowlist check, not the
+			// agent's: the agent only ever dials 127.0.0.1, which NO_PROXY
+			// covers, but the sidecar dials the real upstream and is fenced by
+			// this list.
+			extras = append(extras, proxiedEndpointDomains(*req)...)
+			// Both of the above are resolved PER AGENT while the sidecar is
+			// shared by the whole crew, so the set is unioned across the
+			// members that have run in this container — otherwise each member's
+			// exec computes a hash the others' sidecar cannot match and
+			// restarts it (see crewDesiredDomains).
+			domains := o.crewDesiredDomains(req.ContainerID, req.AgentID, req.AllowedDomains, extras)
 			desiredDomains = domains
 			networkPolicy = &SidecarNetworkPolicy{
 				Mode:                  "restricted",
@@ -1093,7 +1205,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				// operator-watchable channel (#1160), not just stdout.
 				o.emitStaleSidecarSignal(ctx, *req, health.SidecarHash)
 			}
-			if !sidecarNeedsRestart(health, desiredMode, desiredDomains) {
+			if !sidecarNeedsRestart(health, desiredMode, desiredDomains, configFingerprint) {
 				// #1160: restricted mode used to restart UNCONDITIONALLY here
 				// ("the domain allowlist may differ between agents, so we
 				// always restart to pick up the latest set") — with multiple
@@ -1115,7 +1227,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 						memoryPrepPaths(memoryCfg, nil), o.logger)
 				}
 			} else {
-				o.logger.Warn("sidecar network policy changed, restarting",
+				o.logger.Warn("sidecar runtime configuration changed, restarting",
 					"running_mode", health.NetworkMode, "desired_mode", desiredMode)
 				// Kill the existing sidecar and WAIT for it to actually exit
 				// before startSidecar launches a replacement (#1160): pkill
@@ -1156,7 +1268,7 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 			}
 		}
 		if needStart {
-			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, networkPolicy, req.MCPServers, o.logger); err != nil {
+			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, routeAuth, sidecarMembers, networkPolicy, req.MCPServers, configFingerprint, o.logger); err != nil {
 				o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
 				o.failRun(ctx, *req, runID, "error")
 				return nil, fmt.Errorf("start sidecar: %w", err)
@@ -1602,4 +1714,28 @@ func (o *Orchestrator) emitStaleSidecarSignal(ctx context.Context, req AgentRunR
 		},
 		Refs: map[string]any{"agent_id": req.AgentID, "container_id": req.ContainerID},
 	})
+}
+
+// minHeaderSecretLen is the floor for registering a CUSTOM HEADER value as a
+// scrub literal. Every credential shape the scrubber already knows by pattern is
+// well above it (sk-… 20+, AIza… 39, ghp_… 36+, glpat-… 26+), while the route
+// and org selectors headers usually carry — "acme", "prod", "us-east-1",
+// "team-a" — are well below. Deliberately stricter than the scrubber's own
+// 5-character floor, which exists for values that are secrets by construction.
+const minHeaderSecretLen = 16
+
+// sortedKeys returns a map's keys in a deterministic order. Go randomises map
+// iteration, and the scrubber's registration order decides which pattern name a
+// redaction is reported under — so without this, two runs with identical
+// credentials could attribute the same redaction to different headers.
+func sortedKeys(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

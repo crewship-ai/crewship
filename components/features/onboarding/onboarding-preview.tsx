@@ -14,7 +14,7 @@ import {
   Plus,
   type LucideIcon,
 } from "lucide-react"
-import { CLI_ADAPTERS, getAdapterConfig } from "@/lib/cli-adapters"
+import { CLI_ADAPTERS, getAdapterConfig, getModelLabel } from "@/lib/cli-adapters"
 import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
@@ -51,8 +51,29 @@ interface CrewTemplateMeta {
   iconBorder: string
   Icon: LucideIcon
   agents: { name: string; slug: string; role: string; lead?: boolean }[]
-  defaultModel: string
 }
+
+/**
+ * The model id the builtin crew templates pin for every agent they
+ * deploy — `llm_model` in internal/database/builtin/crew-templates/*.yaml.
+ * The preview card claims "N agents · <model>", so this has to track those
+ * files: change them and change this, or the wizard promises one model and
+ * deploys another.
+ *
+ * It was previously five hand-typed copies of the string "Claude Sonnet 4.6",
+ * which matched neither the templates nor the wizard's own model picker
+ * (ANTHROPIC_MODELS in lib/cli-adapters.ts) — the preview advertised a third
+ * model that nothing in the product would ever run.
+ *
+ * Stored as an id, not a label: getModelLabel is the one place that turns
+ * model ids into display names, so the preview reads the same as every other
+ * surface in the app and cannot drift into its own spelling.
+ */
+const TEMPLATE_MODEL_ID = "claude-sonnet-5"
+
+/** Display name for TEMPLATE_MODEL_ID — the only place this file decides
+ *  what model name the preview shows. */
+const TEMPLATE_MODEL_LABEL = getModelLabel(TEMPLATE_MODEL_ID)
 
 /**
  * Crew template metadata for the preview pane. Agents carry slug
@@ -75,7 +96,6 @@ export const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
       { name: "Frontend Dev", slug: "frontend-dev-software-development", role: "Engineer" },
       { name: "QA Engineer", slug: "qa-engineer-software-development", role: "Quality" },
     ],
-    defaultModel: "Claude Sonnet 4.6",
   },
   "devops-sre": {
     name: "DevOps / SRE",
@@ -89,7 +109,6 @@ export const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
       { name: "Security Analyst", slug: "security-analyst-devops-sre", role: "Security" },
       { name: "CI/CD Specialist", slug: "cicd-specialist-devops-sre", role: "Deploy" },
     ],
-    defaultModel: "Claude Sonnet 4.6",
   },
   "content-marketing": {
     name: "Content Marketing",
@@ -103,7 +122,6 @@ export const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
       { name: "Copywriter", slug: "copywriter-content-marketing", role: "Writing" },
       { name: "SEO Specialist", slug: "seo-specialist-content-marketing", role: "Distribution" },
     ],
-    defaultModel: "Claude Sonnet 4.6",
   },
   "accounting-finance": {
     name: "Accounting & Finance",
@@ -117,7 +135,6 @@ export const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
       { name: "Tax Analyst", slug: "tax-analyst-accounting-finance", role: "Compliance" },
       { name: "Reporting", slug: "reporting-accounting-finance", role: "Analytics" },
     ],
-    defaultModel: "Claude Sonnet 4.6",
   },
   blank: {
     name: "Blank crew",
@@ -126,7 +143,6 @@ export const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
     iconBorder: "rgba(161, 161, 170, 0.40)",
     Icon: Plus,
     agents: [{ name: "Your first agent", slug: "blank-first-agent", role: "(you'll pick)", lead: true }],
-    defaultModel: "Claude Sonnet 4.6",
   },
 }
 
@@ -216,7 +232,7 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
               <div className="min-w-0">
                 <div className="font-semibold truncate tracking-tight">{template.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  {template.agents.length} {template.agents.length === 1 ? "agent" : "agents"} · {template.defaultModel}
+                  {template.agents.length} {template.agents.length === 1 ? "agent" : "agents"} · {TEMPLATE_MODEL_LABEL}
                 </div>
               </div>
             </div>
@@ -267,9 +283,21 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35, ease, delay: 0.25 }}
-            className="bg-card/40 border border-dashed border-border rounded-[20px] p-6 text-center text-sm text-muted-foreground"
+            // Sized to the crew card that lands here — a header plus four
+            // agent rows. As a thin strip it left the pane looking ~85% empty
+            // on step one, which reads as a rendering failure rather than as
+            // an empty state, and the layout jumped when the real card
+            // arrived. An empty state should be a promise at the right scale.
+            //
+            // Only from `sm` up, though: stacked on a phone the preview is
+            // below the form and off-screen while you type, so reserving a
+            // card's worth of height there is pure dead scroll for a landing
+            // nobody watches.
+            className="flex min-h-[120px] items-center justify-center rounded-[20px] border border-dashed border-border bg-card/40 p-6 text-center text-sm text-muted-foreground sm:min-h-[248px]"
           >
-            Pick a crew template ↑
+            {/* Not "on the left" — stacked on a phone there is no left, and
+                the picker is above this, not beside it. */}
+            Your crew lands here once you pick one
           </motion.div>
         )}
       </AnimatePresence>

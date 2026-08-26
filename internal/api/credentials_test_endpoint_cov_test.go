@@ -175,20 +175,36 @@ func TestProbeProvider_ConnectionErrors(t *testing.T) {
 }
 
 func TestProbeProvider_AnthropicOAuthAndDefault(t *testing.T) {
-	// No transport swap on purpose: neither branch may touch the network.
-	t.Run("AI_CLI_TOKEN type accepted without probing", func(t *testing.T) {
-		res := probeProvider(context.Background(), "ANTHROPIC", "AI_CLI_TOKEN", "whatever", false)
-		if !res.Valid {
-			t.Error("AI_CLI_TOKEN should be accepted as valid")
+	// These two subtests used to be named "accepted without probing" and
+	// asserted exactly that: an sk-ant-oat token came back Valid with the
+	// text "OAuth token accepted (cannot validate via API…)" having contacted
+	// nothing. The claim was false — probeAnthropicCredential authenticates
+	// this token shape against /v1/messages, and onboarding relied on it all
+	// along — so the tests were pinning the defect rather than the contract.
+	//
+	// They now assert the opposite property, against a stub so no unit test
+	// reaches the real api.anthropic.com.
+	t.Run("AI_CLI_TOKEN type is actually probed", func(t *testing.T) {
+		withAnthropicStub(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"type":"authentication_error"}}`))
+		})
+		res := probeProvider(context.Background(), "ANTHROPIC", "AI_CLI_TOKEN", "sk-ant-oat01-bad", false)
+		if res.Valid {
+			t.Error("a rejected OAuth token reported Valid — the behaviour this test used to require")
 		}
-		if !strings.Contains(res.Error, "OAuth token accepted") {
-			t.Errorf("error = %q", res.Error)
+		if res.Error == "" {
+			t.Error("no reason given for a rejected token")
 		}
 	})
-	t.Run("sk-ant-oat prefix accepted without probing", func(t *testing.T) {
+	t.Run("sk-ant-oat prefix is probed even when typed API_KEY", func(t *testing.T) {
+		withAnthropicStub(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		})
 		res := probeProvider(context.Background(), "ANTHROPIC", "API_KEY", "sk-ant-oat01-xyz", false)
 		if !res.Valid {
-			t.Error("setup token should be accepted as valid")
+			t.Errorf("a good token reported invalid: %q", res.Error)
 		}
 	})
 	t.Run("unknown provider has no validation", func(t *testing.T) {

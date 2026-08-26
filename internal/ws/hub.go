@@ -58,6 +58,26 @@ type ChatHandler interface {
 // to a private, sender-only agent_busy frame instead.
 var ErrAgentBusy = errors.New("agent is already running for this chat")
 
+// ErrCrewProvisioning is returned (possibly wrapped) by
+// ChatHandler.HandleChatMessage when a message auto-triggered a devcontainer
+// build for a crew that isn't ready yet (chatbridge.Bridge.HandleChatMessage,
+// the needsProvision branch). This is a CONTROL-FLOW SENTINEL, not a failure:
+// the handler already streamed a "crew_provisioning" event on the shared
+// channel describing the build and telling the user to resend once it
+// finishes, and returns this error purely to tell handleSendMessage "the
+// message did not run, don't persist/broadcast it, don't run the agent".
+//
+// Governing rule: an EXPECTED state must not be reported as a FAILURE, and a
+// control-flow sentinel must not reach a user as an error string. This
+// codebase has repeatedly conflated "could not check", "not ready", and
+// "failed" — see handleSendMessage's error switch, which used to log this at
+// ERROR and follow the (already informative) build-card event with a second,
+// contentless "an error occurred processing your message" bubble. A genuine
+// enqueue failure (the build never started) is a DIFFERENT error and must
+// keep going through the normal ERROR path — only "the build started fine,
+// it's just not done yet" is this sentinel.
+var ErrCrewProvisioning = errors.New("crew provisioning in progress; message will run after build completes")
+
 // ChatEvent is a streaming event sent from an agent run back to the client,
 // such as text output, tool calls, thinking steps, or completion signals.
 type ChatEvent struct {

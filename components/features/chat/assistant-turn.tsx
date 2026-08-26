@@ -62,7 +62,37 @@ function ResultCard({ part }: { part: TurnPart }) {
   const outputTokens = usage?.output_tokens ?? 0
   const cacheRead = usage?.cache_read_input_tokens ?? 0
 
-  const modelName = modelUsage ? Object.keys(modelUsage)[0] : undefined
+  // The model this turn actually ran on.
+  //
+  // `meta.model` is the scalar the server stamps from the system/init event —
+  // authoritative, and what the durable run record stores. Prefer it always.
+  //
+  // The fallback exists for events produced before that stamp (an older
+  // server, a replayed transcript). It must NOT be `Object.keys(...)[0]`,
+  // which is how this line read and why the badge was wrong: `model_usage` is
+  // keyed by EVERY model the turn touched, including the small housekeeping
+  // model the CLI uses for its own bookkeeping, and Go's encoding/json emits
+  // map keys sorted, so "claude-haiku-4-5-…" always arrived ahead of
+  // "claude-opus-5". The bug was therefore stable, not flaky.
+  //
+  // Ranking by token volume rather than by name is deliberate: an agent
+  // legitimately configured on the cheap model reports that model as its main
+  // one, so any name-based blacklist would then show nothing. Both camelCase
+  // and snake_case token fields are read — `model_usage`'s inner objects come
+  // through from the CLI camelCase while the sibling `usage` object above is
+  // snake_case, and the adapter passes both through untouched.
+  const modelName =
+    (meta.model as string | undefined) ||
+    (modelUsage
+      ? Object.entries(modelUsage)
+          .map(([id, u]) => {
+            const usageRecord = (u ?? {}) as Record<string, number>
+            const input = usageRecord.inputTokens ?? usageRecord.input_tokens ?? 0
+            const output = usageRecord.outputTokens ?? usageRecord.output_tokens ?? 0
+            return { id, total: input + output }
+          })
+          .sort((a, b) => b.total - a.total)[0]?.id
+      : undefined)
 
   if (isError && errors?.length) {
     return (

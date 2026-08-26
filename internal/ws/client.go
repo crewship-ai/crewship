@@ -514,7 +514,26 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		run := c.hub.beginSessionRun(payload.ChatID, c)
 		defer run.End()
 
-		streamFn := run.Emit
+		// Track whether the handler already told the user what went wrong.
+		//
+		// Every error path inside HandleChatMessage streams its own, specific
+		// error event AND returns a non-nil error. The generic frame below was
+		// emitted unconditionally on that non-nil return, so a well-classified
+		// message ("The agent container failed to start (provisioning error)")
+		// was always followed by a second, contentless red box reading "an
+		// error occurred processing your message". Users saw two failures and
+		// the informative one looked like the less authoritative of the pair.
+		//
+		// Recording it here rather than changing ten return sites keeps the
+		// handler's contract intact: it may stream, or not, and the fallback
+		// fires only when nothing was said.
+		var streamedError bool
+		streamFn := func(ev ChatEvent) {
+			if ev.Type == "error" {
+				streamedError = true
+			}
+			run.Emit(ev)
+		}
 
 		err := c.hub.chatHandler.HandleChatMessage(
 			runCtx,
@@ -560,13 +579,44 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 				}
 				return
 			}
+			// Crew auto-provisioning kicked off (chatbridge's needsProvision
+			// branch): an EXPECTED first-run/rebuild state, not a failure.
+			// HandleChatMessage already streamed a "crew_provisioning" event
+			// on the shared channel — a build card telling the user what's
+			// happening and to resend once it finishes — and returned this
+			// sentinel purely as control flow, to stop itself from persisting
+			// the message and running the agent against a container that
+			// doesn't exist yet.
+			//
+			// Governing rule (see ErrCrewProvisioning's doc comment): an
+			// expected state must not be reported as a failure, and a
+			// control-flow sentinel must not reach a user as an error string.
+			// Before this branch existed, every provisioning-triggered send
+			// fell through to the generic path below: logged at ERROR (an
+			// operator paging on ordinary first-run builds) and followed by a
+			// second, contentless "an error occurred processing your message"
+			// bubble stacked under the informative build card — the two
+			// symptoms this branch prevents. A genuine enqueue failure (the
+			// build never started) does NOT wrap this sentinel and still
+			// falls through to the ERROR path below, unchanged.
+			if errors.Is(err, ErrCrewProvisioning) {
+				c.hub.logger.Info("message deferred: crew provisioning in progress",
+					"session_id", payload.ChatID, "user_id", c.userID)
+				streamFn(ChatEvent{Type: "done", Content: ""})
+				return
+			}
 			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.ChatID)
 			// Route through streamFn (emit) so the error is seq'd, buffered for
 			// replay, and dispatched to EVERY subscriber — not just the still-
 			// connected originator. Follow with a terminal `done` so a second tab
 			// or a client that reconnects after the failure leaves the streaming
 			// state instead of spinning forever.
-			streamFn(ChatEvent{Type: "error", Content: "an error occurred processing your message"})
+			// Only speak if the handler stayed silent. When it already
+			// streamed a classified error, adding this one buried the useful
+			// message under a contentless one.
+			if !streamedError {
+				streamFn(ChatEvent{Type: "error", Content: "an error occurred processing your message"})
+			}
 			streamFn(ChatEvent{Type: "done", Content: ""})
 		}
 	}()

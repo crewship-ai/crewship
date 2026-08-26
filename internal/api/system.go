@@ -260,16 +260,43 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	// detail. A role-less or below-ADMIN caller gets the bare availability flag
 	// instead of a 403 so those non-admin surfaces keep working.
 	if !canRole(RoleFromContext(r.Context()), "manage") {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"available": true})
+		// `in_use` alongside `available`, and the distinction is load-bearing
+		// rather than pedantic: `available` means a runtime is installed and
+		// answering a ping, which says nothing about whether THIS server is
+		// driving one. A host running Docker while crewshipd was started with
+		// --no-docker reports available=true and can still run no container at
+		// all — and that is not a hypothetical, it is what dev.sh falls back to
+		// and what the packaging documents as a supported dashboard-only mode.
+		//
+		// Onboarding gates the Crew step on this, so it has to be the honest
+		// bit. It leaks no host detail — no version, no socket path, no
+		// runtime name — so it stays inside the #865 redaction contract that
+		// the rest of this branch exists to enforce.
+		inUse := false
+		for _, rt := range runtimes {
+			if rt.InUse {
+				inUse = true
+				break
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"available": true, "in_use": inUse})
 		return
 	}
 
 	resp := map[string]interface{}{
 		"available": true,
-		"runtime":   nil,
-		"version":   nil,
-		"socket":    nil,
-		"runtimes":  runtimes,
+		// in_use on BOTH branches. It was added only to the redacted arm
+		// above, which happened to work because the onboarding probe sends no
+		// workspace context and so never resolves a role — meaning an owner
+		// who did send one, or a switch from serverFetch to apiFetch, would
+		// read `undefined` and be stuck forever on "Docker is running, but
+		// this Crewship server isn't using it". A field the wizard gates on
+		// must not depend on the caller's privilege.
+		"in_use":   false,
+		"runtime":  nil,
+		"version":  nil,
+		"socket":   nil,
+		"runtimes": runtimes,
 		// Alongside an available runtime too, not only when none was found: an
 		// operator with one runtime installed still needs to be told what the
 		// others are (#1690).
@@ -277,6 +304,7 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, rt := range runtimes {
 		if rt.InUse {
+			resp["in_use"] = true
 			resp["runtime"], resp["version"], resp["socket"] = rt.Runtime, rt.Version, rt.Socket
 			break
 		}

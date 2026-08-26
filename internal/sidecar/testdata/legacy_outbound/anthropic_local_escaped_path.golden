@@ -1,0 +1,11 @@
+method GET
+scheme https
+url.host api.anthropic.com
+req.host api.anthropic.com
+path /v1/models/claude/sonnet
+rawpath /v1/models/claude%2Fsonnet
+rawquery beta=true
+target /v1/models/claude%2Fsonnet?beta=true
+requesturi ""
+header Anthropic-Version: 2023-06-01
+header X-Api-Key: sk-ant-api03-REALKEY

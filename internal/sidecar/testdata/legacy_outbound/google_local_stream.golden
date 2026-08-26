@@ -1,0 +1,11 @@
+method POST
+scheme https
+url.host generativelanguage.googleapis.com
+req.host generativelanguage.googleapis.com
+path /v1beta/models/gemini-2.5-flash:streamGenerateContent
+rawpath 
+rawquery alt=sse&key=AIzaSyREALGOOGLEKEY
+target /v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=AIzaSyREALGOOGLEKEY
+requesturi ""
+header Content-Type: application/json
+header X-Goog-Api-Key: AIzaSyREALGOOGLEKEY
