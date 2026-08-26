@@ -10,7 +10,6 @@ import {
   Cpu,
   Image as ImageIcon,
   Layers,
-  Pencil,
   Sparkles,
   TriangleAlert,
   Wrench,
@@ -38,7 +37,7 @@ import {
 import { cn } from "@/lib/utils"
 import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { apiFetch } from "@/lib/api-fetch"
-import { DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
 import { AvatarPickerBody } from "@/components/features/crews/avatar-picker-dialog"
@@ -471,8 +470,22 @@ export function CreateAgentDialog({
           <CreateSurfaceSection title="Identity" icon={ImageIcon} accent="purple">
             {/* `items-end` keeps the 56px tile bottom-aligned with the input
                 next to it, the way the old grid did. */}
-            <div className="flex items-end gap-3">
-              {/* Avatar tile — opens the picker dialog, unchanged. */}
+            <div className="flex items-start gap-3">
+              {/* No badge in the corner.
+               *
+               * A pencil in a filled circle at `-bottom-1 -right-1` works on
+               * New crew, where the tile is a flat glyph on a gradient and
+               * the corner is empty. It does not work here: a DiceBear
+               * portrait fills the whole tile, so the badge always lands on
+               * the face — which is why it read as a blob stuck to the
+               * robot's chin rather than as a control.
+               *
+               * The affordance moves to the caption under the name, which is
+               * the pattern New crew's identity step already uses for the
+               * same job ("Rocket · blue — tap to change"). It says what the
+               * avatar currently IS, which the badge never did, it is a
+               * thumb-sized target with the `max-sm:` padding, and it leaves
+               * the portrait alone. */}
               <button
                 type="button"
                 onClick={() => setPickerOpen(true)}
@@ -480,43 +493,31 @@ export function CreateAgentDialog({
                 aria-label="Customize avatar"
                 aria-haspopup="dialog"
                 aria-expanded={pickerOpen}
-                // No `overflow-hidden` here. It used to be on the button, to
-                // clip the portrait to the rounded corner — and it clipped
-                // the badge below with it. The badge is deliberately outside
-                // the box (`-bottom-1 -right-1`), so all that survived was
-                // the sliver falling inside the tile's rounded rect: a blue
-                // arc that reads as a meaningless dot. The clip belongs to
-                // the image, which is the only thing that needs it.
-                className="group relative w-14 h-14 shrink-0 rounded-xl border border-white/10 bg-muted hover:border-primary/50 transition-colors"
+                className="mt-5 h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-muted outline-none transition-colors hover:border-primary/50 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
               >
-                <span className="block h-full w-full overflow-hidden rounded-xl">
-                  <img src={avatarUrl} alt="" aria-hidden="true" className="h-full w-full object-cover" />
-                </span>
-                {/* The badge that says the tile is clickable.
-
-                    Two things were hiding the pencil. The clip above was one.
-                    The other is that `--spacing: 0.23rem` here, so `h-2.5` is
-                    9.2px rather than 10, and a lucide glyph is a 24-unit
-                    viewBox at stroke-width 2 — which at that size draws its
-                    strokes at 2 × 9.2/24 = 0.77px, under a pixel, on a
-                    saturated fill. 11px at stroke-width 2.5 gives 1.15px.
-                    Same values as New crew's icon tile. */}
-                <span className="pointer-events-none absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-primary text-white shadow-md ring-2 ring-card">
-                  <Pencil className="h-3 w-3" strokeWidth={2.5} />
-                </span>
+                <img src={avatarUrl} alt="" aria-hidden="true" className="h-full w-full object-cover" />
               </button>
 
-              <CreateSurfaceField label="Name" htmlFor="agent-name" required className="flex-1">
-                <input
-                  id="agent-name"
-                  type="text"
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                  placeholder="Filip"
-                  autoFocus
-                  className={INPUT_CLASS}
-                />
-              </CreateSurfaceField>
+              <div className="min-w-0 flex-1">
+                <CreateSurfaceField label="Name" htmlFor="agent-name" required>
+                  <input
+                    id="agent-name"
+                    type="text"
+                    value={draft.name}
+                    onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                    placeholder="Filip"
+                    autoFocus
+                    className={INPUT_CLASS}
+                  />
+                </CreateSurfaceField>
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="mt-1 block text-[11px] text-muted-foreground-soft transition-colors hover:text-foreground/80 max-sm:px-2 max-sm:py-4"
+                >
+                  {AVATAR_STYLES[draft.avatarStyle]?.label ?? draft.avatarStyle} — tap to change
+                </button>
+              </div>
             </div>
 
             <CreateSurfaceGrid>

@@ -96,23 +96,30 @@ describe("<CreateAgentDialog> — the template row", () => {
 })
 
 describe("<CreateAgentDialog> — the avatar tile", () => {
-  it("does not clip the badge that says the tile is editable", () => {
-    // The button carried `overflow-hidden` to round the portrait, and the
-    // badge is positioned outside the box (-bottom-1 -right-1), so the clip
-    // ate it: what was left was the arc falling inside the rounded rect,
-    // which reads as a meaningless blue dot. jsdom computes no layout, so
-    // this asserts the structure that caused it — the clip belongs to the
-    // image wrapper, not to the element the badge is a child of.
+  it("puts nothing on top of the portrait", () => {
+    // The tile carried a pencil-in-a-circle badge at its bottom-right. That
+    // works on New crew, where the tile is a flat glyph on a gradient and the
+    // corner is empty. Here a DiceBear portrait fills the whole tile, so the
+    // badge always landed on the face and read as a blob stuck to it —
+    // reported twice as "a weird circle" before it was read as a control.
     renderDialog()
     const tile = screen.getByRole("button", { name: /Customize avatar/i })
 
-    expect(tile.className).not.toContain("overflow-hidden")
-    expect(tile.querySelector(".overflow-hidden")).not.toBeNull()
+    // The portrait is the only thing in the button.
+    expect(tile.children).toHaveLength(1)
+    expect(tile.querySelector("img")).not.toBeNull()
+  })
 
-    const badge = tile.querySelector(".rounded-full")
-    expect(badge).not.toBeNull()
-    // …and the badge is not inside the thing doing the clipping.
-    expect(tile.querySelector(".overflow-hidden")!.contains(badge!)).toBe(false)
+  it("says what the avatar is, and opens the picker from there", () => {
+    // The affordance the badge was carrying, moved to the caption New crew's
+    // identity step already uses for the same job — and it now says what the
+    // avatar currently IS, which the badge never did.
+    renderDialog()
+    const caption = screen.getByRole("button", { name: /tap to change/i })
+    expect(caption).toHaveTextContent(/Bottts Neutral/i)
+
+    fireEvent.click(caption)
+    expect(screen.getByText(/Avatar — new agent/i)).toBeInTheDocument()
   })
 })
 
