@@ -96,6 +96,13 @@ var allowedDeprecatedOccurrences = map[string][]string{
 //     not for the published site.
 //   - `audit-methodology` documents how the audits are run and is linked from
 //     the reports that cite it, not from the sidebar.
+//
+// One category is not here yet because it does not exist yet: Mintlify reads
+// `docs/snippets/` as reusable fragments rather than pages, and a fragment must
+// NOT be declared in navigation. The tree has no such directory today, so
+// adding the entry now would be blessing a path nothing walks. Whoever adds the
+// first snippet adds `snippets/` to unnavigatedPrefixes in the same commit —
+// this note is here so that arrives as a one-line change rather than a puzzle.
 var unnavigatedPages = map[string]bool{
 	"audit-methodology": true,
 }
@@ -160,14 +167,14 @@ func main() {
 	// The other direction. The pass above proves every declared id has a file;
 	// it says nothing about a file nobody declared, which is why the inventory
 	// could report "0 missing" while three published pages were unreachable.
-	orphans, reachable, err := orphanedPages(*root, declared)
+	orphans, required, err := orphanedPages(*root, declared)
 	if err != nil {
 		fail(err)
 	}
 	if len(orphans) > 0 {
 		fail(fmt.Errorf("published pages missing from docs/docs.json navigation — unreachable from the sidebar and absent from llms.txt:\n  %s\nAdd each to docs/docs.json, or to unnavigatedPages/unnavigatedPrefixes in scripts/docs-surface-check if it is unlisted on purpose.", strings.Join(orphans, "\n  ")))
 	}
-	fmt.Printf("docs-surface-check: navigation reachability %d/%d pages declared, 0 orphaned\n", reachable, reachable)
+	fmt.Printf("docs-surface-check: navigation reachability %d pages require an entry, 0 orphaned\n", required)
 
 	// Third pass: the links written inside the pages, not just the ids
 	// docs.json declares. Hermetic like the two above — it reads the same
@@ -305,15 +312,21 @@ func navigationPages(raw json.RawMessage) []string {
 // keeps the llms.txt assertion in checkServed honest: that comparison counts
 // what the navigation declares, so a page outside the navigation is invisible
 // to it by construction — the deployed index can match docs.json exactly while
-// a published page is reachable from neither.
+// a published page is reachable from neither. Measured on the deployed site
+// while the three orphans were live: llms.txt listed 302 pages and docs.json
+// declared 302, so `served < declared` was false and the check passed. An
+// orphan is subtracted from both sides of that comparison, and cancels.
+//
+// Pages are collected into a set before counting, because `foo.md` and
+// `foo.mdx` name ONE page id. Counting the files would report the same orphan
+// twice and inflate the total; Mintlify silently serves one of the two.
 func orphanedPages(root string, declared []string) ([]string, int, error) {
 	inNav := make(map[string]bool, len(declared))
 	for _, page := range declared {
 		inNav[page] = true
 	}
 	docs := filepath.Join(root, "docs")
-	orphans := []string{}
-	reachable := 0
+	required := map[string]bool{}
 	err := filepath.Walk(docs, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -330,17 +343,20 @@ func orphanedPages(root string, declared []string) ([]string, int, error) {
 		if unnavigatedByDesign(page) {
 			return nil
 		}
-		reachable++
-		if !inNav[page] {
-			orphans = append(orphans, page)
-		}
+		required[page] = true
 		return nil
 	})
 	if err != nil {
-		return nil, reachable, err
+		return nil, 0, err
+	}
+	orphans := []string{}
+	for page := range required {
+		if !inNav[page] {
+			orphans = append(orphans, page)
+		}
 	}
 	sort.Strings(orphans)
-	return orphans, reachable, nil
+	return orphans, len(required), nil
 }
 
 // docsClient bounds the deployed-index requests. http.DefaultClient has no

@@ -177,8 +177,8 @@ deterministic layer is the part that is actually enforced:
 | OpenAPI spec freshness | `Go Lint` → *OpenAPI spec is up to date* | yes |
 | Documentation completeness | `Go Lint` → *API and CLI documentation is complete* (`go run ./scripts/docs-inventory -strict`) | yes |
 | Navigation targets and inline links | `Documentation surface` → *Verify the contextual surface and navigation* (`go run ./scripts/docs-surface-check`) | yes |
-| Navigation **reachability** (file→nav) | same job, `orphanedPages` — since #2086 | yes |
-| Published spec statistics | `Go Lint` → `TestOpenAPIReferenceQuotesTheCurrentSpec` in `scripts/docs-inventory` — since #2086 | yes |
+| Navigation **reachability** (file→nav) | `Documentation surface`, same job as the row above — `orphanedPages`, since #2086 | yes |
+| Published spec statistics | `Go` → `go test ./...` → `TestOpenAPIReferenceQuotesTheCurrentSpec` in `scripts/docs-inventory` — since #2086 | yes |
 | Schemathesis live layers | `ci.yml` → *Run deterministic API contract gate*; the same ephemeral seeded server/build as the PR harness | yes |
 | CLI runtime golden smoke | `ci.yml` → Harness PR subset + CLI command breadth smoke | yes |
 
@@ -189,11 +189,12 @@ generic JSON request schemas, CLI commands with no page, and CLI commands with
 undocumented flags. `make docs-inventory` remains the non-failing form for
 regenerating the reports locally; `make docs-inventory:strict` is what CI runs.
 
-`docs-surface-check` runs four hermetic passes over the tree: the contextual
-surface and description quality, the page ids `docs/docs.json` declares, — since
-#1774 — every internal link written *inside* a page body, in both the Markdown
-`](/guides/routines)` and the JSX `href="/guides/routines"` form, and — since
-#2086 — the reverse of the second pass. Links inside fenced blocks are
+`docs-surface-check` runs seven hermetic passes over the tree, in the order it
+prints them: description quality, stability labels, the contextual surface, the
+page ids `docs/docs.json` declares (nav→file), the reverse of that pass
+(file→nav, since #2086), every internal link written *inside* a page body — in
+both the Markdown `](/guides/routines)` and the JSX `href="/guides/routines"`
+form, since #1774 — and deprecated terminology. Links inside fenced blocks are
 transcripts, not navigation, and are skipped. A dead link names the page and the
 target it points at, so the fix does not start with a search.
 
@@ -225,9 +226,16 @@ quoted *"513 of 536 operations … 184 request bodies"* against a spec that had
 reached 588, while the generated report in `docs/prd/reports/` carried the right
 numbers — two answers to one question in one tree, and the published one was the
 wrong one, because it was the one a human had typed. `schemaStats` in
-`scripts/docs-inventory` now derives all eight figures with the same predicates
-the report uses, and `TestOpenAPIReferenceQuotesTheCurrentSpec` re-reads the page
-on every run, failing with the replacement sentence rather than a diff.
+`scripts/docs-inventory` now derives all eight figures, and
+`TestOpenAPIReferenceQuotesTheCurrentSpec` re-reads the page on every run,
+failing with the replacement sentence rather than a diff.
+
+The predicates are **shared, not merely matching**. Both the per-operation rows
+of the report and the published figures go through one `classifySchemas`, so
+"these two agree" is a property of the code rather than a claim in a comment —
+a second implementation that happens to agree today is the same defect one level
+up, and it is what the first draft of this change had. The refactor is verified
+by the report regenerating byte-identically.
 
 The tradeoff is deliberate and worth stating: a PR that adds a route and
 regenerates the spec must now also update that one sentence. That is real

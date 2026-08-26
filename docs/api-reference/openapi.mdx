@@ -75,7 +75,7 @@ This used not to hold. Go's router matches method and path together, so an unlis
 <Note>
   This used to say that bodies were a generic placeholder and that every operation documented only `200`. Neither is true any more: the document enumerates the error statuses each operation can answer (`400`, `401`, `403`, `404`, `409`, `429`, `500`, …) alongside its success status.
 
-  {/* These five numbers are derived from internal/api/openapi.gen.json, not typed. TestOpenAPIReferenceQuotesTheCurrentSpec in scripts/docs-inventory re-derives them on every run and prints the replacement sentence when they drift — they had gone 52 operations stale before that test existed. */}
+  {/* These eight numbers are derived from internal/api/openapi.gen.json, not typed. TestOpenAPIReferenceQuotesTheCurrentSpec in scripts/docs-inventory re-derives them on every run and prints the replacement sentence when they drift — they had gone 52 operations stale before that test existed. */}
 
   573 of 588 operations return a named 2xx schema, 0 fall back to an unconstrained `object`, and 15 have no success body at all. 251 operations carry a request body: 247 with a named JSON schema, 4 with a non-JSON media type, and 0 with a generic JSON fallback.
 

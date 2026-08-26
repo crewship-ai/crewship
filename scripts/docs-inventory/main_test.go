@@ -310,12 +310,23 @@ func TestManifestKindsRefuseToReportAnEmptyRosterAsADocsGap(t *testing.T) {
 // schema-quality figures in prose.
 const openapiReferencePage = "docs/api-reference/openapi.mdx"
 
-// openapiStatsSentence is the exact wording that page carries. Keeping the
-// shape in one regexp is what makes the numbers checkable at all: prose is
-// where they went stale, because nothing read prose.
+// openapiStatsSentence locates the wording that page carries. Keeping the shape
+// in one regexp is what makes the numbers checkable at all: prose is where they
+// went stale, because nothing read prose.
+//
+// No capture groups: the comparison is against the whole rendered sentence, not
+// number by number, and eight unused groups would advertise an extraction that
+// does not happen. `\s+` rather than literal spaces so that hard-wrapping the
+// paragraph — which this tree does elsewhere — reflows the prose without
+// reddening the gate.
 var openapiStatsSentence = regexp.MustCompile(
-	`(\d+) of (\d+) operations return a named 2xx schema, (\d+) fall back to an unconstrained ` + "`object`" +
-		`, and (\d+) have no success body at all\. (\d+) operations carry a request body: (\d+) with a named JSON schema, (\d+) with a non-JSON media type, and (\d+) with a generic JSON fallback\.`)
+	`\d+\s+of\s+\d+\s+operations\s+return\s+a\s+named\s+2xx\s+schema,\s+\d+\s+fall\s+back\s+to\s+an\s+unconstrained\s+` + "`object`" +
+		`,\s+and\s+\d+\s+have\s+no\s+success\s+body\s+at\s+all\.\s+\d+\s+operations\s+carry\s+a\s+request\s+body:\s+\d+\s+with\s+a\s+named\s+JSON\s+schema,\s+\d+\s+with\s+a\s+non-JSON\s+media\s+type,\s+and\s+\d+\s+with\s+a\s+generic\s+JSON\s+fallback\.`)
+
+// whitespaceRun collapses the page's line breaks and indentation before the
+// comparison, so the assertion is about the words and numbers rather than about
+// where the paragraph happens to wrap.
+var whitespaceRun = regexp.MustCompile(`\s+`)
 
 // The figures in docs/api-reference/openapi.mdx were 52 operations out of date
 // — "513 of 536 … 184 request bodies" against a spec that had reached 588 —
@@ -326,7 +337,7 @@ var openapiStatsSentence = regexp.MustCompile(
 // This is that missing reader. When the spec moves, it fails with the sentence
 // to paste, so the fix is mechanical rather than another hand count.
 func TestOpenAPIReferenceQuotesTheCurrentSpec(t *testing.T) {
-	doc, err := readOpenAPI(filepath.Join("..", "..", openAPIPath))
+	doc, err := readOpenAPI(filepath.Join("..", "..", filepath.FromSlash(openAPIPath)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,11 +359,19 @@ func TestOpenAPIReferenceQuotesTheCurrentSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := openapiStatsSentence.FindString(string(body))
-	if got == "" {
+	// Every occurrence, not the first. FindString would let a page carrying a
+	// correct sentence followed by a stale duplicate pass on the strength of the
+	// correct one — the published figure would still be wrong on screen.
+	found := openapiStatsSentence.FindAllString(whitespaceRun.ReplaceAllString(string(body), " "), -1)
+	if len(found) == 0 {
 		t.Fatalf("%s no longer carries the schema-quality sentence in the shape this test reads.\nEither restore it or update openapiStatsSentence. It should read:\n\n  %s", openapiReferencePage, want)
 	}
-	if got != want {
-		t.Errorf("%s quotes figures the generated spec does not support.\n  page: %s\n  spec: %s\nReplace the sentence in the page with the second line.", openapiReferencePage, got, want)
+	if len(found) > 1 {
+		t.Errorf("%s states the schema-quality figures %d times; one page should answer this once.\n  %s", openapiReferencePage, len(found), strings.Join(found, "\n  "))
+	}
+	for _, got := range found {
+		if got != want {
+			t.Errorf("%s quotes figures the generated spec does not support.\n  page: %s\n  spec: %s\nReplace the sentence in the page with the second line.", openapiReferencePage, got, want)
+		}
 	}
 }

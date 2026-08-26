@@ -378,6 +378,27 @@ func TestOrphanedPagesExcusesTheDeliberatelyUnlistedTrees(t *testing.T) {
 	}
 }
 
+// `foo.md` and `foo.mdx` are one page id, not two. Counting files rather than
+// ids reported the same orphan twice and inflated the population it claimed to
+// have checked — a gate that cannot count what it looked at is hard to believe
+// about what it found.
+func TestOrphanedPagesCountsPageIdsNotFiles(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/guides/dual.md", "# Dual\n")
+	writeDocsPage(t, root, "docs/guides/dual.mdx", "---\ntitle: Dual\n---\n")
+
+	orphans, required, err := orphanedPages(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if required != 1 {
+		t.Errorf("required = %d, want 1 — two files, one page id", required)
+	}
+	if !slices.Equal(orphans, []string{"guides/dual"}) {
+		t.Errorf("orphanedPages() = %v, want the id reported exactly once", orphans)
+	}
+}
+
 // The gate has to hold on the tree it ships with, like every other check here.
 // This is the assertion that was red before the three navigation entries were
 // added, and it is what keeps the next orphan from shipping.
