@@ -175,7 +175,7 @@ A pin takes effect because the image puts mise's shim directory on `PATH`
 *ahead* of `/usr/local/bin`, so the shim wins over anything a feature
 installed:
 
-```
+```text
 PATH=…:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:…
 ```
 

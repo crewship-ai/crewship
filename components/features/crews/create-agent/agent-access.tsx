@@ -274,6 +274,12 @@ export function AgentAccessSection({ catalog, selection, onChange }: SectionProp
        * GET /api/v1/integrations, so this costs no request. The deeper fix is
        * to stop inferring "available to all" from a COUNT — tracked
        * separately. */}
+      {/* A live region, because this notice APPEARS in response to flipping a
+          switch rather than being on screen already. CreateSurfaceNotice gives
+          role="alert" only to tone="error", and warn is the right tone here —
+          it does not block anything. Without this a screen-reader user flips
+          the switch and is told nothing about what it just cost. */}
+      <div role="status" aria-live="polite">
       {willFlipToOptIn.length > 0 && (
         <CreateSurfaceNotice tone="warn" icon={TriangleAlert}>
           {willFlipToOptIn.length === 1 ? (
@@ -288,6 +294,7 @@ export function AgentAccessSection({ catalog, selection, onChange }: SectionProp
           until granted too.
         </CreateSurfaceNotice>
       )}
+      </div>
 
       {integrations.length > 0 && (
         <div className="flex flex-col gap-1.5">

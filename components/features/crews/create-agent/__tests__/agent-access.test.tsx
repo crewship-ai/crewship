@@ -140,6 +140,13 @@ describe("<CreateAgentDialog> — Tools & notifications", () => {
     const warning = await screen.findByText(/available to every agent/i)
     expect(warning).toHaveTextContent(/GitHub/)
     expect(warning).toHaveTextContent(/every OTHER agent loses access/i)
+
+    // It APPEARS in response to a switch, so it needs a live region —
+    // CreateSurfaceNotice gives role="alert" only to tone="error", and warn is
+    // right here because nothing is blocked. Without this a screen-reader user
+    // flips the switch and is told nothing about what it cost.
+    expect(warning.closest('[role="status"]')).not.toBeNull()
+    expect(warning.closest('[aria-live="polite"]')).not.toBeNull()
   })
 
   it("says nothing when the integration is already opt-in", async () => {
