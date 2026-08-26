@@ -9,6 +9,528 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+<!--
+  Backfill (#2086). The fifteen entries between this marker and the next one
+  chronicle PRs that merged with no changelog trace anywhere — written from
+  their diffs, after the fact, rather than by their authors at the time. The
+  `Changelog Guard` workflow now fails a PR that touches `internal/api/`,
+  `cmd/crewship/`, `app/` or `components/` without touching this file.
+-->
+
+### Added
+
+- **A provider is now a credential, and two new ones can be created (#2051).**
+  The sidecar's LLM proxy routed on a hardcoded three-arm `strings.HasPrefix`
+  switch over `/v1`, `/openai` and `/gemini`. It now routes on a compiled-in
+  descriptor table (`internal/llmroute`, longest bounded prefix wins), and
+  `credentials.provider` is carried end to end — into the sidecar boot payload,
+  the credential loaders, the ledger key and the scrubber — so a provider is a
+  row rather than a branch.
+
+  Two arrive with it: **`OPENROUTER`** (`/llm/openrouter`, credential required,
+  probed live against `GET https://openrouter.ai/api/v1/key`) and
+  **`OPENAI_COMPAT`** (`/llm/openai-compat`, upstream read from the credential
+  itself, unpriced). Every future provider is confined to `/llm/…`; the three
+  legacy prefixes keep their exact paths and strip behaviour, pinned by eleven
+  golden fixtures of the byte-identical outbound request.
+
+  `crewship credential create` gains **`--base-url`** (required for
+  `--provider OPENAI_COMPAT`, rejected for every other provider) and
+  **`--auth-token-stdin`** (also on `credential rotate`), so an operator
+  token never reaches the process table. Two local commands read the route
+  table with no server: **`crewship provider route list`** and
+  **`crewship provider route show <provider>`**. `/health` gains
+  `provider_creds` and `config_fingerprint` beside — not instead of — the
+  three legacy `*_creds` counters.
+
+  ⚠️ **Behaviour change: proxied agent calls start billing for real.** See
+  *Changed*, below. This is the release's most consequential line and it
+  reaches operators who changed nothing.
+
+- **One shell for every create surface, and a `/design` route to audit them
+  (#2056).** Twelve create entry points that had each grown their own dialog
+  are now one kit (`components/layout/create-surface.tsx`): four fixed widths,
+  a bottom sheet below `sm`, ⌘↵ to submit, and a discard guard on Esc, overlay
+  and header-close. `/design` is the scaffolding that tracks the migration and
+  the browser-vs-CLI parity gap — it holds no data, calls no API, has no CLI
+  command, and is meant to be deleted with `components/features/design/` once
+  its table is empty. It is linked from the sidebar under System so the gap is
+  visible rather than filed.
+
+  Three things became reachable from the browser for the first time:
+  **importing a crew manifest** into New crew (parsed client-side, and it names
+  what it cannot create rather than pretending — "This file also declares 2
+  agents and 1 credential", pointing at `crewship apply -f`); **per-agent
+  tools and notification channels** on New agent; and **creating a label from
+  the issue modal**. The crew wizard is four steps, not five — Runtime folded
+  into Container — and "Empty crew" is now "Start empty".
+
+  ⚠️ **Behaviour change: New crew now defaults to `network_mode: "free"`.**
+  The wizard's initial state flipped from `restricted`; the server-side
+  default in `internal/database/crew_defaults.go` is untouched, so anything
+  that creates a crew *without* stating a mode still gets `restricted`. Only
+  the wizard's pre-selection moved, and the copy beside it now says what free
+  means ("Any host, plus your private network and localhost. Cloud metadata
+  stays blocked.").
+
+- **Multi-provider phase 1: two codecs, an embedded catalogue, and the CLI to
+  see them (#2016).** `internal/llm`'s three-arm switch became a registry of
+  `ProviderSpec` rows read by the aux-slot builder, the Keeper validator, the
+  console picker and the error message that tells an operator what they may
+  type. Three ids are registered — `anthropic`, `openai`, `ollama` — and
+  lookup is case-insensitive, which the old switch was not while `internal/api`
+  carried the uppercase enum one layer up. The two hand-written HTTP clients
+  became configurable codecs, so any OpenAI-compatible backend (DeepSeek,
+  vLLM, llama.cpp, Ollama's `/v1` shim) is a preset rather than a new file.
+
+  A trimmed [models.dev](https://models.dev) snapshot ships embedded — eight
+  providers, ~650 KB, refreshed by `go generate ./internal/modelcatalog/...` —
+  and becomes the third step of the rate lookup, below the hand-verified table
+  and its `<provider>/*` wildcard so `ollama/*` and `local/*` stay free.
+  Three local commands read all of it with no server, token or workspace:
+  **`crewship provider list`**, **`crewship provider check`** and
+  **`crewship model price`** (which prints *which* lookup step produced the
+  rate). `crewship model list` gains `--source auto|live|catalog` and
+  `--search`, and answers offline for providers the server cannot reach.
+
+  ⚠️ **Behaviour change: an evaluator slot can move provider, and a call
+  within budget can now trip a cap.** See *Changed*, below.
+
+- **Run a routine from a slash command, with a form for its inputs (#1987).**
+  A routine may opt in with a `spec.slash` block (`enabled`, `label`,
+  `label_cs`, `icon`); it then appears as `/<slug>` in the chat palette and in
+  `crewship shell`, opening a typed form built from the routine's declared
+  `inputs` — widget and coercion chosen from each input's JSON type, help text
+  from its description, defaults formatted losslessly. In the REPL the same
+  thing is `/<slug> key=value key=value`.
+
+  A new **`routine.run`** capability decides who may ask, so a MEMBER can
+  invoke a routine without being promoted to MANAGER
+  (`crewship workspace member capabilities grant <user> routine.run`;
+  it is in the `power` and `admin` bundles). Everything else still applies to
+  an admitted caller — governance status, credential and integration
+  preconditions, spend caps, concurrency.
+
+  Three limits are worth knowing. The run endpoint is **synchronous**, and the
+  REPL drives it through the CLI's 30 s default timeout, so a longer routine is
+  cancelled client-side unless `CREWSHIP_HTTP_TIMEOUT` is raised. The
+  routine's **output is not shown on either surface** — you read it in the run
+  records. And the catalogue is capped at 50 routines, ordered by popularity,
+  with a slug that collides with a platform command (`routine`, `issue`,
+  `skill`, `credential`) dropped.
+
+  `spec.slash` was documented before this and silently dropped by
+  `crewship apply`, so export→edit→apply *stripped* a block set from the
+  dashboard. It now round-trips. `crewship shell` also gains the server
+  catalogue at all: `LoadServerSlashCommands` had no production caller, so the
+  REPL half of the slash feature did not previously exist.
+
+- **A page can be published, webhooked, exported, imported and deleted from
+  the browser (#2054).** Those were CLI-only. New settings cards cover public
+  links (with expiry and password; revoked rows are kept with their withdrawal
+  time rather than vanishing), webhook mint/revoke, export and delete, plus
+  revoking every access level for a subject in **one** DELETE — three
+  sequential revokes leave a window open in between. Import renders a 422
+  refusal as the worklist that caused it, not a toast.
+
+  `crewship page create` gains **`--owner crew/<slug>`**, create-only on
+  purpose: `page update` never sends it, so re-applying a manifest can never
+  be a silent transfer of ownership. `crewship page get` now prints the
+  authored half of each panel — `tab`, `public`, wake gates, `on_fail`,
+  `refresh`, action count — which `--format json` already carried. The demo
+  seed ships four pages, one per producer door (script, routine, agent,
+  webhook) instead of showing one door of the four.
+
+### Changed
+
+- **⚠️ Proxied agent calls start billing for real (#2051).** ⚠️ **Behaviour
+  change: budget warnings and hard stops that have never fired on a crew can
+  fire on the first deploy.** Every LLM call an agent made through the sidecar
+  proxy recorded **zero tokens and $0** since the proxy was built:
+  `parseLLMUsage` switched on a lowercase provider name while the proxy handed
+  it the uppercase `ProviderType`, so no proxied response body was ever parsed
+  — Anthropic wrote $0 rows, OpenAI and Gemini wrote none at all. Codec and
+  ledger key are now separate fields on the route spec and both are correct.
+
+  Nothing got more expensive. The spend was always there and was being
+  recorded as nothing, so a ceiling that looked generous against $0 may be
+  below a normal day. Before deploying, check `budget_limits` for any crew
+  running proxied agents. Historic rows are **not** backfilled, so a rollup
+  spanning the change is not comparable across it.
+
+- **⚠️ `PATCH /api/v1/credentials/{id}` returns 400 where it returned 200
+  (#2051).** An endpoint-backed credential holds a `{baseURL, apiKey, headers}`
+  object; every other kind holds an opaque value. A PATCH that moves the
+  credential across that line — `provider` to or from `OPENAI_COMPAT`, or
+  `type` between `ENDPOINT_URL` and `API_KEY` — silently re-interprets bytes
+  it did not send, so `value` must now be sent in the same request. A PATCH
+  carrying a `value` also validates the endpoint URL for the first time, which
+  it only ever did on create; a PATCH that used to accept
+  `http://169.254.169.254/v1` now refuses it.
+
+  Two smaller edges from the same PR. `credentials.provider` is folded through
+  `credprovider.Canonical()` on every write, so a client that POSTs
+  `provider: "github"` now reads back `"GITHUB"` — unrecognised strings are
+  still stored verbatim, trimmed. And several `credential create` argument
+  errors moved from a bare exit 1 to `cli.ExitValidation` (**exit 2**): a
+  `--type`/`--auth-token` mismatch, a malformed `--header`, a missing
+  `--value`. A script that branches on exit 1 will see 2.
+
+  `OPENAI_COMPAT` is deliberately **not** validated on create — Crewship does
+  not dial an operator-supplied endpoint from that path — and prints a warning
+  saying so instead of "Key validated successfully". (#2057 later gave it the
+  test it could safely have; see *Fixed*.)
+
+- **⚠️ Rate ceilings moved, and an evaluator slot can change provider
+  (#2016).** ⚠️ **Behaviour change: a call that used to sit inside a spend cap
+  can now trip it.** Four fallback ceilings were below what the embedded
+  snapshot says the provider actually charges and were raised — `openai`
+  $20/$80 → **$150/$600**, `google` $2.50/$15 → **$4/$120**, `xai` $2/$6 →
+  **$4/$12**, `mistral` output $6 → **$7.50** — and two rows were added
+  (`openrouter`, `amazon-bedrock`). Models that previously billed at **$0**
+  because nothing in the table named them (unknown OpenRouter slugs, hosted
+  models with no row) now bill at a real or ceiling rate. The over-estimate is
+  deliberate: under-billing weakens the budget signal exactly when it matters.
+
+  Separately, `LoadAuxiliaryModels` now points each auxiliary slot at the
+  first registered provider **whose key env is actually set**, before env
+  overrides. An instance holding only `OPENAI_API_KEY` used to get six slots
+  hardcoded to Anthropic that each failed at first use; it now gets working
+  evaluators on OpenAI. An instance holding both keys keeps Anthropic —
+  declaration order breaks the tie — and an instance holding neither keeps the
+  shipped default and still errors loudly.
+
+- **⚠️ A crew whose mise shims do not resolve now fails to provision (#2070).**
+  ⚠️ **Behaviour change: a provision that used to succeed can now fail.**
+  `mise reshim` exits 0 whether or not the shims it wrote point at anything.
+  On crews provisioned before #1787 they pointed at a `mise` binary the agent
+  could not read, and a dangling symlink is skipped **silently** by PATH
+  lookup — so the pin served whatever the base image shipped. Measured on a
+  real crew: `config.toml` pinned `terraform = "1.9"`, the agent ran
+  `Terraform v1.15.7`, and nothing was logged anywhere.
+
+  `InstallMiseTools` now verifies every shim resolves and returns
+  `ErrMiseInstallFailed` naming the broken ones when they do not. Crews
+  created before 2026-08-07 carry stale shims and **do not self-heal**, so
+  expect their next provision to fail rather than quietly serve the wrong
+  toolchain. Crews declaring no mise tools are untouched, and an empty shim
+  directory is not treated as a failure. `docs/manifest/crew.md` gains the
+  PATH ordering that makes a pin effective.
+
+- **Crew template slugs are unique per workspace, not globally (#2028).**
+  `crew_templates.slug` carried a global `UNIQUE` declared in v23; v26 added
+  `workspace_id` and never rescoped it, so the column naming the owner played
+  no part in deciding whether a name was free. Two workspaces could not both
+  hold a template called `backend-team`, and — worse — a user template holding
+  a builtin's slug made the seeder's `UPDATE` match nothing and its
+  `INSERT OR IGNORE` collide, so that builtin was **never seeded again, ever**.
+
+  Migration `20260820124407_crew_template_slug_workspace_scope.sql` rebuilds
+  the table behind two partial unique indexes —
+  `(workspace_id, slug) WHERE workspace_id IS NOT NULL` and
+  `(slug) WHERE workspace_id IS NULL`. A single non-partial
+  `UNIQUE(workspace_id, slug)` would not do: SQLite treats NULLs as distinct,
+  so every builtin would be unique to itself no matter how many shared a slug.
+
+  The old constraint was doing undeclared work — it guaranteed the six
+  read/write sites matched at most one row, which is why four of them used
+  `QueryRow` with no tie-break. The rule is now written down: **a workspace
+  template shadows the builtin of the same slug, for that workspace only**,
+  expressed as `ORDER BY (workspace_id IS NULL) LIMIT 1` in a shared constant.
+  The tenant predicate was retightened at the same time: `is_builtin` has no
+  `CHECK` tying it to `workspace_id`, so a row owned by one workspace could
+  carry `is_builtin = 1` and match for every tenant — unreachable while the
+  global UNIQUE stood, expressible the moment it was split.
+
+  **Upgrade note.** The rebuild cannot fail on duplicate slugs: the old
+  constraint is strictly stronger than both new indexes. It does drop one row
+  class — a template whose `workspace_id` names a workspace that no longer
+  exists. Such a row is an FK orphan the schema's own `ON DELETE CASCADE` says
+  should not exist, and copying it would abort boot with
+  `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
+
+### Fixed
+
+- **Backups were silently short, and `--replace` deleted through the same
+  wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
+  reverse-foreign-key chain from each table to `workspaces` and built a `WHERE`
+  from it, without ever asking whether the column it landed on was nullable. A
+  filter on a nullable column omits every row where that column is NULL. The
+  bundle is written, `crewship backup verify` passes — it only checks the
+  payload's SHA-256 against the sealed bytes — and the rows are simply absent
+  at restore.
+
+  Eight tables were scoped that way. `mission_tasks` through
+  `assignment_id` lost **every task nobody had claimed**; `crew_mcp_servers`
+  through `workspace_mcp_server_id` lost **every server a crew configured for
+  itself**; `page_versions` through `author_agent_id` lost **every version a
+  human saved**; `agent_credentials` and `agent_mcp_bindings` through
+  `credential_id` lost every binding with no credential; `page_panel_data` and
+  `page_panel_alerts` lost every panel not fed by a routine and every lapse on
+  a panel with no `on_failure`.
+
+  It was not even stable. `reverseFK` was built by ranging over a Go map, so
+  two equidistant parents raced to claim a child and **the same binary against
+  the same schema produced different filters on consecutive runs** — one run
+  lost `mission_tasks`, the next lost `crew_mcp_servers`. And
+  `discoverScopedTablesTx` in `replace.go` was a verbatim copy of the same
+  walk, which is the one deciding what a `--replace` restore **deletes**.
+
+  The walk now minimises `(nullable hops, total hops)` over the whole path,
+  relaxes to a fixed point rather than doing a shortest-path sweep, and breaks
+  every remaining tie deterministically. The `replace.go` fork is deleted.
+
+  **Bundles written before this are still short and nothing detects it** —
+  `Verify` compares a checksum and the manifest records no per-table row
+  counts. That gap is #2009, and it is called out as a `<Warning>` in
+  `docs/guides/backup.mdx`.
+
+  ⚠️ **Upgrade note.** Migration
+  `20260820074400_issue_counters_crew_not_null.sql` rebuilds `issue_counters`
+  to make `crew_id` genuinely `NOT NULL`. There is no `DELETE` statement, but
+  the copy is filtered and the original is dropped, so two row classes are
+  **discarded and not recoverable in place**: rows with `crew_id IS NULL`
+  (which name no crew, hence no workspace and no prefix, and which no code
+  path reads) and rows whose `crew_id` names a crew that no longer exists
+  (FK orphans that would otherwise abort boot with SQLite error 787). Every
+  counter naming a live crew is carried across with `next_number` intact. No
+  action is required before upgrading beyond the ordinary one — keep a copy of
+  the database file.
+
+- **The timeline's "Restore" restored nothing and said it had (#2070).**
+  `POST /api/v1/…/checkpoints/{id}/restore` is non-destructive by design and
+  says so in its own doc comment: no rows are mutated, no containers are torn
+  down, no memory is rewound. It computes a **preview** and journals it as one.
+  The dropdown item said `Restore` and, on any `res.ok`, raised
+  `toast.success("Mission restored to checkpoint")`.
+
+  What it threw away is the part that mattered. The response carries
+  `warn_divergence` — the journal entries strictly newer than the checkpoint
+  cursor, which is precisely the work a real rewind would have to abandon —
+  and the handler discarded the body unread. The item is now labelled
+  **Preview restore**, the body is parsed, and the result says
+  "Restore preview — nothing has been rewound", naming how many later events a
+  restore would abandon and that rewinding is not implemented yet.
+
+- **`pins.md` and `learned-*.md` could be read empty (#1994, #2021).** All
+  three writers opened with `O_CREATE|O_APPEND` and then wrote, which leaves
+  the file on disk at **zero bytes** between two syscalls. The flock above them
+  guards `<name>.lock`, so it serialises writers and does nothing at all for
+  the three readers that take no lock: the memory audit watcher, the
+  proposal-diff endpoint, and **agents reading their own learned rules**.
+
+  A reader landing in that window got an empty file instead of the previous
+  good contents — an operator's entire pinned set momentarily gone from the
+  file the agent reads. It is not a rare race: reproduced at 101/300 and
+  100/300 runs for the two consolidator writers on the six-hourly tick, and
+  55/300 for the approve path. It also produced a CI failure that looked like
+  a data race and was not, because `os.ReadFile` of an empty file returns a
+  non-nil zero-length slice and the poll loop accepted it.
+
+  All three now build the file in memory and go through
+  `memory.WriteFileDurable` (tempfile → fsync → atomic rename → fsync parent).
+  Append-only semantics are preserved verbatim, so hand annotations in
+  `pins.md` survive, and `appendRules` pays nothing for it — it already re-read
+  the whole file after every append to hand back the audit blob, and that read
+  simply moved ahead of the write.
+
+  Two corrections rode along. The exists-check read *every* `stat` failure as
+  "absent", which under a whole-file replace would write the first-run header
+  over content it never read; only `fs.ErrNotExist` qualifies now. And the
+  canonical path is refused if it is a symlink — `os.ReadFile` follows one, and
+  its target's bytes would have become the prefix of what was written back into
+  the crew's learned rules.
+
+  The guard that should have caught this class **had gone blind**:
+  `crash_safe_writes_invariant_test.go` matched `os.OpenFile(` while these
+  packages open through `*os.Root` handles, so every root-anchored write in
+  them was unscanned and two allowlist entries had been matching nothing.
+  Widened to `\.OpenFile\(`.
+
+  Named side effect: the rename resets the file mode to `0o644`, so an
+  operator `chmod` on `pins.md` no longer survives a consolidation tick.
+
+- **Two Keeper aux slots were settable, validated, rendered — and read by
+  nothing (#1986).** The **`curator`** slot was described everywhere, including
+  in the console, as governing skill review *and memory consolidation*. The
+  consolidator never read it: the summariser was built once at boot straight
+  from `KEEPER_OLLAMA_URL` + `KEEPER_MODEL`, bypassing the slot, the resolver
+  and the override store. So an instance with an `ANTHROPIC_API_KEY` and no
+  Ollama logged "memory consolidation disabled" at boot while the Judge models
+  card reported `curator` as configured and healthy — consolidation silently
+  did not run, and mid-conversation compaction fell back to plain truncation on
+  the same unadvertised wiring. Consolidation now resolves the slot per run,
+  through the standard middleware stack so it still appears in the cost ledger,
+  with the boot-time `KEEPER_*` client kept as a fallback so a local-judge
+  install does not *lose* consolidation.
+
+  The **`run_summary`** slot's timeout bounded nothing. `Router.RunVerdict()`
+  returned provider and model and discarded the budget, and both production
+  call sites hand the verdict a background context — so the operator's number
+  sat on the card beside four rows where the identical control worked, while a
+  hung provider could keep a verdict call outstanding indefinitely. The
+  deadline is now applied in the one place both call sites share, and covers
+  the model call only: a verdict answered at 19.9 s of a 20 s budget is not
+  generated, billed and then dropped on the floor.
+
+  ⚠️ **Behaviour change:** `crewship keeper aux set run_summary --timeout 45s`
+  and `keeper aux set curator --provider …` now do something. The shipped
+  `run_summary` default moves 15 s → **20 s**, because the first real deadline
+  on a call must not be tighter than what it had been running under — it
+  matters most on a fully local judge. Consolidation itself is a documented
+  exception and stays on the provider's client timeout: it is batch work over
+  hundreds of journal entries, and a 20 s cut-off would kill every local-model
+  consolidation mid-flight.
+
+- **One unrenderable chat message took down the whole page and dropped the live
+  session (#2024).** There was no error boundary anywhere in the chat tree, so
+  a throw while rendering a single turn propagated to the route segment
+  boundary, which replaces the entire page with "Something went wrong". In
+  practice that meant the chat client unmounted, every turn's state was
+  discarded, a half-typed composer draft was lost, and the **WebSocket of the
+  very session that had just degraded was dropped**. The shipped trigger was
+  `TypeError: value.trim is not a function` — CLI init metadata is forwarded
+  verbatim, so a key holding a string in one CLI release holds an object in the
+  next, and a type assertion catches nothing.
+
+  Now only that one message is replaced, inline in the transcript, with a card
+  saying the rest of the conversation is unaffected and the session is still
+  live. The boundary's reset keys include a **content** digest, not just
+  `turn.id`: a streaming turn mutates in place under a constant id, so keying
+  on identity alone would have wedged that message on the error card until a
+  full page reload, even after the following tokens rendered perfectly. Keyed
+  on content, a garbled message heals itself as soon as the next token arrives.
+
+- **A page's `public` flag was silently cleared by reading it (#2054).** The
+  panel wire shape was built from a record with no `public` column, so the flag
+  travelled inward only. `crewship page export | crewship apply`, a hand-edited
+  `page get -f json`, or the editor's own PATCH therefore **unpublished every
+  public panel**. The published link kept resolving and rendered an empty page,
+  and the next `crewship page publish` refused the page for having no public
+  panels — pointing the operator at entirely the wrong thing.
+
+  Five more from the same PR. A `metric.v1` sparkline drew straight through
+  its gaps: the schema says a `null` marks a producer-known gap, and the
+  renderer filtered nulls out of the array entirely, which also slid every
+  later point leftwards and compressed the window's own time axis. A wake gate
+  told the woken agent to run `crewship page set` — a binary that does not
+  exist in the container it wakes in — and now names the sidecar `PUT` with
+  `curl`. `crewship page set` threw away the 429's body, printing a bare rate
+  limit instead of the reason, the scope ("this panel" and "this workspace"
+  have different fixes) and the retry delay. **`-f quiet` was broken on all six
+  page listings** — each hand-rolled a `tabwriter` table, which ignores the
+  format, so `crewship page links x -f quiet | xargs` was fed column headers.
+  And `crewship page rollback --to 0` answered "`--to <seq>` is required",
+  because 0 is the flag's zero value; it now says what is actually wrong —
+  versions are numbered from 1.
+
+- **`OPENAI_COMPAT` was the one LLM provider that could not be tested, and it
+  reported success (#2057).** Because such a credential is stored as
+  `type = API_KEY`, it fell past every provider arm in `probeProviderInner` to
+  a default that failed an `ENDPOINT_URL` type check and returned
+  `{Valid: true, Error: "No validation available for this provider"}` **without
+  dialling anything**. The operator pasted a base URL, pressed **Test**, got a
+  green tick, and found out the endpoint was unreachable when an agent run
+  failed. It is the provider where this matters most: the endpoint is the one
+  part of it Crewship does not control.
+
+  ⚠️ **Behaviour change:** `crewship credential test-stored <name>` and
+  `POST /api/v1/credentials/{id}/test` now return a real failure for an
+  unreachable host, a broken TLS chain, a wrong path prefix, or an endpoint
+  serving no model list. The probe deliberately tests **reachability, not
+  authentication** — it sends no `Authorization`, no stored key and no custom
+  headers, because whoever holds `update` on a credential can repoint its
+  `baseURL`, and sending the secret would turn Test into an exfiltration
+  primitive. The unauthenticated body path (`POST /credentials/test`, no
+  workspace and no role floor) still does not dial at all and says so.
+
+- **The Add-MCP wizard's "Test" tested nothing and could not fail (#2078).**
+  Its handler was a 400 ms `setTimeout` that set `ok: true` — no socket, no
+  read of any field it claimed to check, and no failure path at any input. A
+  typo'd endpoint, a command that does not exist, a host that is down: green
+  tick every time.
+
+  It is removed rather than wired, because it cannot be wired from where it
+  stands: both real probes begin by selecting the transport, endpoint and
+  command **out of the database**, and the wizard tests before it creates.
+  There is no draft-test route for MCP as there is for credentials and
+  notification channels. In its place the step says connectivity is checked
+  after the server exists, and names the two surfaces that do it — the
+  **Test connection** button on the server's row, and
+  `crewship integration crew test <crew-slug> <integration-id>`.
+
+- **A first integration grant silently revoked it from every other agent
+  (#2070).** A workspace integration with **zero** agent bindings resolves for
+  every agent; the moment any agent gets one it flips to opt-in and everyone
+  else loses it — with no warning, no audit line and nothing on the
+  integration's own page. It was previously reachable only through
+  `crewship integration bind`; the new create-agent form put a switch on it.
+  The form now warns, by name, which integrations are about to flip. It warns
+  rather than prevents: making a first grant is legitimate.
+
+- **The mission fork button called a route that does not exist (#2056).** It
+  posted to `POST /api/v1/missions/{missionId}/fork`; the route is
+  `POST /api/v1/checkpoints/{checkpointId}/fork`. Every fork 404'd, and the
+  404 was rendered as the friendly *"Not yet wired to backend"* — so a broken
+  call read as an unbuilt feature. It now forks and navigates to the new
+  mission, and a 2xx that carries no new mission id is surfaced as an error
+  rather than as success.
+
+  The checkpoint id it passed was wrong too: it fell back to the journal row
+  id, which could only ever 404. The id is now read from where the journal
+  actually writes it, and Restore is **disabled** when there is none rather
+  than firing a request that cannot succeed.
+
+  Also from #2056: chat reactions moved off `localStorage` onto three real
+  endpoints, so a reaction survives a different browser (the legacy
+  `crewship-reactions` key is dropped on load and **not** migrated); the crew
+  slug field enforces its rule as you type instead of 400-ing three steps
+  later; the crew wizard's "Never" auto-stop actually means never, rather than
+  omitting the field and inheriting the 4-hour default; New project stopped
+  sending a summary and labels that the endpoint binds nowhere and silently
+  discarded; and popovers inside dialogs scroll instead of clipping.
+
+- **New routine had no Cancel on two of its four screens (#2076).** The
+  `entry` and `fork` modes — one of which is the screen the dialog opens on —
+  rendered an empty footer strip where every other create surface in the
+  product puts Cancel. Esc, the header × and an overlay click always worked, so
+  it was never a dead end; what was missing was the affordance, in the one
+  place the shell's own contract promises it will always be. The hint reads
+  `Esc to cancel` rather than the default `⌘↵ to confirm · Esc to cancel`,
+  because ⌘↵ genuinely does nothing on a screen whose action is a row.
+
+- **The crew and agent canvas tab strips said "tab" without meaning it
+  (#2026).** They were plain buttons carrying `aria-selected`, which is not
+  allowed on a button's implicit role — so the one fact the markup tried to
+  convey, *which section you are on*, was dropped by the screen reader and
+  raised an axe `aria-allowed-attr` violation. There was no tablist, no
+  labelled strip and no tabpanel. All three now exist. Separately, the admin
+  console's content pane was a scrollable region with no focusable child, so on
+  the default Overview section a **keyboard-only admin could not scroll it at
+  all** and anything below the fold was unreachable; and the chat crew link was
+  distinguished from surrounding text by colour alone, at a token below the
+  4.5:1 contrast floor.
+
+  **Known gap:** the canvas tab strips still have no arrow-key roving focus —
+  each tab is its own Tab stop. CodeRabbit raised exactly this on the PR and it
+  merged unimplemented. Its sibling #2025 shipped that pattern for the Pages
+  strip, so the two now differ.
+
+- **Every Pages tab was announced without the panel it reveals (#2025).** The
+  buttons carried `role="tab"` and the groups carried `role="tabpanel"`, and
+  **nothing linked them** — so a screen-reader user activating a tab heard
+  "tab, selected" and then had to hunt the document for whatever had appeared,
+  which is the entire thing the tabs pattern exists to prevent. The two halves
+  are now joined by id, and the strip gained full keyboard orchestration:
+  arrow keys cycle, Home/End jump, and roving `tabIndex` makes the whole group
+  one Tab stop instead of one per tab. There is no axe rule for a tab missing
+  `aria-controls`, which is why this went unnoticed; the guard is explicit
+  assertions instead. The bar is also suppressed entirely on an error, where
+  stale cached data used to render it above a body that mounted no panels — a
+  screenful of dangling `aria-controls`.
+
+<!-- End of the #2086 backfill. Entries below were written with their PRs. -->
+
 ### Fixed
 
 - **Upgrading threw finished users back into the setup wizard.**

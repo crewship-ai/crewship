@@ -257,6 +257,38 @@ CI (`ci.yml`) runs `pnpm lint && pnpm build` and
 security workflow runs gitleaks and the dependency audit on the same
 trigger. Both must be green for review.
 
+## Changelog entries
+
+`RELEASING.md` cuts release notes from `CHANGELOG.md`'s
+`## [Unreleased]` section. That makes a missing entry not untidiness but
+a release note that does not exist — and a change nobody is told about.
+
+**A PR that touches `internal/api/`, `cmd/crewship/`, `app/` or
+`components/` must add an entry under `## [Unreleased]`.** The
+**Changelog Guard** workflow enforces it. Test files inside those trees
+don't count as user-visible, and Dependabot is exempt by actor.
+
+If the change genuinely has no user-visible effect — a chore, an
+internal refactor, a test-only fix — apply the **`skip-changelog`**
+label. The guard re-runs on `labeled`/`unlabeled`, so it clears within
+seconds and no push is needed. Reach for the label when it is true, not
+when the entry is inconvenient: the guard exists because 15 user-visible
+PRs merged in one window with no trace anywhere (#2086), including a
+breaking credential-model change across 117 files.
+
+Write the entry the way the file already does — lead with the
+**user-visible symptom in bold**, then what was actually wrong and what
+changed. Mark a change that can break a working setup with
+`⚠️ **Behaviour change:**` and say plainly what used to succeed and now
+fails. Group under `### Added` / `### Changed` / `### Fixed` /
+`### Security`.
+
+`docs/changelog/overview.mdx` is a different surface with a different
+job — a curated highlights reel for users, cut per release window, not
+a per-PR log. It is deliberately **not** gated; see the scope note at
+the top of the page. Adding to it is a release-time editorial call, not
+a per-PR obligation.
+
 ## CodeRabbit — wait when it is reviewing, not when it is throttled
 
 After `gh pr create`, give CodeRabbit ~2–5 minutes to post its review.
