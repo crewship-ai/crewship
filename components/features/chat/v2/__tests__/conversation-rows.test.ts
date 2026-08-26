@@ -3,11 +3,10 @@ import { describe, it, expect } from "vitest"
 import {
   buildConversationRows,
   filterConversationRows,
+  liveThreadIds,
   type ConversationRow,
 } from "../conversations-sidebar"
 import type { ChatTreeAgent, ChatTreeThread } from "../../chat-tree-sidebar"
-
-const NOW = Date.parse("2026-08-26T12:00:00Z")
 
 function agent(partial: Partial<ChatTreeAgent> & { id: string }): ChatTreeAgent {
   return {
@@ -69,8 +68,53 @@ describe("buildConversationRows", () => {
   })
 })
 
+describe("liveThreadIds", () => {
+  it("marks a RUNNING agent's freshest thread and nothing else", () => {
+    const rows = buildConversationRows(
+      [agent({ id: "a1", name: "Morgan", status: "RUNNING" })],
+      {
+        a1: [
+          thread({ id: "t-new", last_activity_at: "2026-08-26T11:50:00Z" }),
+          thread({ id: "t-old", last_activity_at: "2026-08-24T10:00:00Z" }),
+        ],
+      },
+    )
+    // One run, one live row. Lighting up every thread an agent owns would
+    // claim four things are happening when one is.
+    expect([...liveThreadIds(rows)]).toEqual(["t-new"])
+  })
+
+  it("marks nothing for an idle agent, however recently it replied", () => {
+    const rows = buildConversationRows([agent({ id: "a1", status: "IDLE" })], {
+      a1: [thread({ id: "t1", last_activity_at: "2026-08-26T11:59:00Z" })],
+    })
+    // The old rule was "moved in the last hour", which called a finished
+    // conversation live. A reply forty minutes ago is over.
+    expect(liveThreadIds(rows).size).toBe(0)
+  })
+
+  it("marks one thread per running agent", () => {
+    const rows = buildConversationRows(
+      [
+        agent({ id: "a1", status: "RUNNING" }),
+        agent({ id: "a2", status: "RUNNING" }),
+        agent({ id: "a3", status: "IDLE" }),
+      ],
+      {
+        a1: [thread({ id: "t1", last_activity_at: "2026-08-26T11:00:00Z" })],
+        a2: [thread({ id: "t2", last_activity_at: "2026-08-26T10:00:00Z" })],
+        a3: [thread({ id: "t3", last_activity_at: "2026-08-26T11:30:00Z" })],
+      },
+    )
+    expect([...liveThreadIds(rows)].sort()).toEqual(["t1", "t2"])
+  })
+})
+
 describe("filterConversationRows", () => {
-  const agents = [agent({ id: "a1", name: "Morgan" }), agent({ id: "a2", name: "Riley" })]
+  const agents = [
+    agent({ id: "a1", name: "Morgan", status: "RUNNING" }),
+    agent({ id: "a2", name: "Riley", status: "IDLE" }),
+  ]
   const rows: ConversationRow[] = buildConversationRows(agents, {
     a1: [
       thread({
@@ -88,40 +132,66 @@ describe("filterConversationRows", () => {
       }),
     ],
   })
+  const live = liveThreadIds(rows)
 
   it("keeps everything under the All facet", () => {
-    expect(filterConversationRows(rows, "all", "", NOW)).toHaveLength(2)
+    expect(filterConversationRows(rows, "all", "", live)).toHaveLength(2)
   })
 
   it("keeps only threads with unread messages under Unread", () => {
-    const out = filterConversationRows(rows, "unread", "", NOW)
+    const out = filterConversationRows(rows, "unread", "", live)
     expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
   })
 
-  it("keeps only threads that moved within the hour under Live", () => {
-    const out = filterConversationRows(rows, "live", "", NOW)
+  it("keeps only threads whose agent is working under Live", () => {
+    const out = filterConversationRows(rows, "live", "", live)
     expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
   })
 
   it("matches on the thread title", () => {
-    const out = filterConversationRows(rows, "all", "seznam", NOW)
+    const out = filterConversationRows(rows, "all", "seznam", live)
     expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
   })
 
   it("matches on the agent's name, because that is how people look for threads", () => {
-    const out = filterConversationRows(rows, "all", "riley", NOW)
+    const out = filterConversationRows(rows, "all", "riley", live)
     expect(out.map((r) => r.thread.id)).toEqual(["t-stale"])
   })
 
   it("applies the query to the same fields whichever facet is active", () => {
-    // Live + a query only the stale thread matches returns nothing — the facet
-    // IS the filter — but the field set the query reads is identical either
-    // way, so a result can never disappear because of where it was searched.
-    expect(filterConversationRows(rows, "live", "push", NOW)).toHaveLength(0)
-    expect(filterConversationRows(rows, "all", "push", NOW)).toHaveLength(1)
+    expect(filterConversationRows(rows, "live", "push", live)).toHaveLength(0)
+    expect(filterConversationRows(rows, "all", "push", live)).toHaveLength(1)
   })
 
   it("treats a whitespace-only query as no query", () => {
-    expect(filterConversationRows(rows, "all", "   ", NOW)).toHaveLength(2)
+    expect(filterConversationRows(rows, "all", "   ", live)).toHaveLength(2)
+  })
+
+  describe("the open conversation is never filtered away", () => {
+    it("keeps a read thread visible under Unread", () => {
+      // The disorienting one: clicking an unread row marks it read, and
+      // without the pin the row you just clicked vanishes from under the
+      // cursor. It stays, now without its badge.
+      const out = filterConversationRows(rows, "unread", "", live, "t-stale")
+      expect(out.map((r) => r.thread.id).sort()).toEqual(["t-live", "t-stale"])
+    })
+
+    it("keeps a finished thread visible under Live", () => {
+      const out = filterConversationRows(rows, "live", "", live, "t-stale")
+      expect(out.map((r) => r.thread.id)).toContain("t-stale")
+    })
+
+    it("does not pin a thread that is not open", () => {
+      const out = filterConversationRows(rows, "unread", "", live, "t-live")
+      expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
+    })
+
+    it("still answers the search honestly", () => {
+      // A query is the reader asking for a specific thing. Pinning against
+      // the FACET is help; pinning against the QUERY would be answering a
+      // question with something they did not ask about.
+      const out = filterConversationRows(rows, "all", "seznam", live, "t-stale")
+      expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
+    })
   })
 })

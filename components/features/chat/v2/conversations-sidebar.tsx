@@ -39,13 +39,30 @@ import type { ChatTreeAgent, ChatTreeThread } from "../chat-tree-sidebar"
 /**
  * Three facets, where classic has four.
  *
- * Running and Done are gone and they are not coming back in this shape.
- * "Done" reads `chats.ended_at`, which the sidebar's own comment admits
- * "nothing writes yet" — a facet that can only ever be 0 is a control that
- * teaches the reader their filters do nothing. "Running" is the agent's
- * status, not the thread's, so it answered a question about a different
- * object than the list it filtered. `Live` replaces both with the one thing
- * either endpoint can actually say about a THREAD: it has moved recently.
+ * "Done" is gone and is not coming back in this shape: it reads
+ * `chats.ended_at`, which the sidebar's own comment admits "nothing writes
+ * yet", and a facet that can only ever be 0 is a control that teaches the
+ * reader their filters do nothing.
+ *
+ * `Live` means what a reader assumes it means: the agent is working RIGHT
+ * NOW. It reads `agent.status === "RUNNING"`, which is the one live signal
+ * either endpoint carries — the column flips when a chat message starts a
+ * run. Classic exposed the same signal as "Running" but let it filter a list
+ * of THREADS, so it answered a question about a different object than the one
+ * it was narrowing.
+ *
+ * The honest limitation, and the reason `liveThreadIds` is computed rather
+ * than being a per-row test: a RUNNING agent is running *something*, and
+ * nothing either endpoint returns says which of its threads. Marking all of
+ * them live would be wrong, so the agent's most recently active thread is
+ * marked and the rest are not. That is the correct answer unless you have two
+ * threads with one agent and wrote to the older one — at which point the
+ * indicator is one row off, which is a better failure than lighting up four
+ * rows for one run.
+ *
+ * It replaced "has moved in the last hour", which was measurable but was not
+ * what anybody reads the word to mean: a thread the agent answered forty
+ * minutes ago is finished, not live.
  */
 type Facet = "all" | "unread" | "live"
 
@@ -55,15 +72,30 @@ const FACETS: { id: Facet; label: string }[] = [
   { id: "live", label: "Live" },
 ]
 
-/** How recent counts as live. An hour, because a thread an agent replied in
- *  twenty minutes ago is still the one you are working in. */
-const LIVE_WINDOW_MS = 60 * 60 * 1000
-
 export interface ConversationRow {
   agent: ChatTreeAgent
   thread: ChatTreeThread
-  /** Epoch ms of last activity, already resolved. Sort key and Live test. */
+  /** Epoch ms of last activity, already resolved. The sort key. */
   at: number
+}
+
+/**
+ * Which threads to call live: for every RUNNING agent, its freshest thread.
+ *
+ * Rows arrive newest-first from `buildConversationRows`, so the first row an
+ * agent appears in IS its freshest — no second sort, and no chance of the two
+ * orderings disagreeing.
+ */
+export function liveThreadIds(rows: ConversationRow[]): Set<string> {
+  const live = new Set<string>()
+  const claimed = new Set<string>()
+  for (const row of rows) {
+    if (row.agent.status !== "RUNNING") continue
+    if (claimed.has(row.agent.id)) continue
+    claimed.add(row.agent.id)
+    live.add(row.thread.id)
+  }
+  return live
 }
 
 export function buildConversationRows(
@@ -92,15 +124,36 @@ export function filterConversationRows(
   rows: ConversationRow[],
   facet: Facet,
   query: string,
-  now: number,
+  live: Set<string>,
+  /**
+   * The thread currently open in the panel.
+   *
+   * It survives every facet, and that is the fix for the most disorienting
+   * thing this column did: open an unread conversation and it is marked read,
+   * which under the Unread facet meant the row you had just clicked vanished
+   * from under the cursor. The same happened under Live the moment the agent
+   * stopped working. Reading something must not delete it from the list you
+   * are reading it from — mail clients settled this decades ago.
+   *
+   * Pinning rather than switching the facet to All: the facet is a choice the
+   * reader made, and throwing it away because they opened one row is a bigger
+   * surprise than keeping one extra row visible.
+   */
+  activeThreadId?: string | null,
 ): ConversationRow[] {
   const q = query.trim().toLowerCase()
   return rows.filter((row) => {
-    if (facet === "unread" && !(row.thread.unread_count ?? 0)) return false
-    if (facet === "live" && now - row.at > LIVE_WINDOW_MS) return false
+    const isActive = !!activeThreadId && row.thread.id === activeThreadId
+    if (!isActive) {
+      if (facet === "unread" && !(row.thread.unread_count ?? 0)) return false
+      if (facet === "live" && !live.has(row.thread.id)) return false
+    }
     if (!q) return true
     // Search reaches past the facet the same way classic's does, and across
     // the agent name too: "morgan" is how people look for Morgan's threads.
+    // The active row is pinned against the FACET, not against the query: a
+    // search is the reader asking to see a specific thing, and answering it
+    // with something they did not ask for is not helpful.
     return (
       (row.thread.title ?? "").toLowerCase().includes(q) ||
       row.agent.name.toLowerCase().includes(q)
@@ -140,20 +193,17 @@ export function ConversationsSidebar({
     [roster, threadsByAgent],
   )
 
-  // Read once per render rather than per row: a clock that advances between
-  // two rows of the same list can put a thread on both sides of the Live
-  // boundary in one paint.
-  const now = Date.now()
+  const live = useMemo(() => liveThreadIds(rows), [rows])
   const visible = useMemo(
-    () => filterConversationRows(rows, facet, query, now),
-    // `now` is deliberately not a dependency — it changes every render and
-    // would defeat the memo. The list re-derives whenever the data or the
-    // controls move, which is when the answer can actually differ.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, facet, query],
+    () => filterConversationRows(rows, facet, query, live, activeThreadId),
+    [rows, facet, query, live, activeThreadId],
   )
 
+  // Counts describe what the facet WOULD show, so they are computed without
+  // the active-row pin — otherwise "Unread 0" could sit above a list with a
+  // row in it, and the number would stop meaning anything.
   const unreadTotal = rows.reduce((n, r) => n + (r.thread.unread_count ?? 0), 0)
+  const liveTotal = live.size
   const idle = roster.filter((a) => (threadsByAgent[a.id] ?? []).length === 0)
 
   return (
@@ -246,7 +296,7 @@ export function ConversationsSidebar({
       >
         {FACETS.map((f) => {
           const on = facet === f.id
-          const n = f.id === "all" ? rows.length : f.id === "unread" ? unreadTotal : null
+          const n = f.id === "all" ? rows.length : f.id === "unread" ? unreadTotal : liveTotal
           return (
             <button
               key={f.id}

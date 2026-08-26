@@ -12,6 +12,8 @@ import {
 import { ChatSkinProvider, type ChatSkinAgent } from "@/components/features/chat/v2/chat-skin"
 import { ConversationsSidebar } from "@/components/features/chat/v2/conversations-sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useWorkspace } from "@/hooks/use-workspace"
+import { apiFetch } from "@/lib/api-fetch"
 import { parseSessionTimestamp } from "@/components/features/chat/session-sort"
 import { randomUUIDv4 } from "@/lib/random-id"
 
@@ -32,8 +34,27 @@ export function Chat2Client() {
   const searchParams = useSearchParams()
   const tree = useChatTreeData<ChatTreeAgent>()
 
+  const { workspaceId } = useWorkspace()
   const [agentSlug, setAgentSlug] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
+
+  /**
+   * Threads this page has marked read, and therefore knows are read whatever
+   * the fetched list still says.
+   *
+   * `useChatTreeData` owns `threadsByAgent` and exposes no mutator — classic
+   * gets around that by keeping its own `sessions` state for the one agent it
+   * is looking at and passing `skipSlug` so the hook does not fetch it. This
+   * page shows every agent's threads at once, so it cannot claim one; an
+   * override map is the smaller change, and it cannot desync from the fetch
+   * because it only ever forces a count DOWN to zero.
+   *
+   * Without this the badge does not move when you open a conversation: the
+   * count came from a GET that ran before the read cursor advanced, and
+   * nothing on this page told it otherwise. Under the Unread facet that also
+   * meant the row you clicked stayed unread-looking forever.
+   */
+  const [readThreads, setReadThreads] = useState<Set<string>>(new Set())
 
   // Read the URL once per navigation. After that the page owns the selection:
   // picking a thread is a `useState` plus a `history.replaceState`, never a
@@ -52,18 +73,83 @@ export function Chat2Client() {
     [tree.roster, agentSlug],
   )
 
+  /**
+   * The fetched lists with this page's read overrides applied.
+   *
+   * Applied here rather than inside the sidebar so the column stays a pure
+   * function of what it is given — it renders the counts it is handed and
+   * owns no opinion about which of them are stale.
+   */
+  const threadsByAgent = useMemo(() => {
+    if (readThreads.size === 0) return tree.threadsByAgent
+    const out: Record<string, ChatTreeThread[]> = {}
+    for (const [agentId, threads] of Object.entries(tree.threadsByAgent)) {
+      out[agentId] = threads.map((t) =>
+        readThreads.has(t.id) && t.unread_count ? { ...t, unread_count: 0 } : t,
+      )
+    }
+    return out
+  }, [tree.threadsByAgent, readThreads])
+
   const writeUrl = useCallback((slug: string, session: string) => {
     const url = `/chat2?agent=${encodeURIComponent(slug)}&session=${encodeURIComponent(session)}`
     window.history.replaceState(null, "", url)
   }, [])
+
+  /**
+   * Advance the server-side read cursor (migration v130 — the unread badge's
+   * source) and clear the paired inbox notification.
+   *
+   * Fire-and-forget: a failed PUT just leaves the badge until the next visit,
+   * which is the same contract classic works under. The local override goes
+   * in FIRST so the sidebar never lags behind the click.
+   */
+  const markThreadRead = useCallback(
+    (agentId: string, threadId: string) => {
+      if (!workspaceId || !threadId) return
+      setReadThreads((prev) => {
+        if (prev.has(threadId)) return prev
+        const next = new Set(prev)
+        next.add(threadId)
+        return next
+      })
+      apiFetch(
+        `/api/v1/agents/${agentId}/chats/${encodeURIComponent(threadId)}/read?workspace_id=${workspaceId}`,
+        { method: "PUT" },
+      ).catch(() => {
+        /* non-fatal: the cursor advances on the next successful visit */
+      })
+    },
+    [workspaceId],
+  )
 
   const selectThread = useCallback(
     (a: ChatTreeAgent, t: ChatTreeThread) => {
       setAgentSlug(a.slug)
       setSessionId(t.id)
       writeUrl(a.slug, t.id)
+      markThreadRead(a.id, t.id)
     },
-    [writeUrl],
+    [writeUrl, markThreadRead],
+  )
+
+  /**
+   * Re-fire when a streamed reply settles.
+   *
+   * The server counts the just-persisted reply as unread against the cursor
+   * we advanced at selection time, so without this the thread you are sitting
+   * in grows a badge the moment you look away. Classic does the same thing
+   * for the same reason.
+   */
+  const handleReplySettled = useCallback(
+    (sid: string) => {
+      if (agent) markThreadRead(agent.id, sid)
+      // And refresh the fan-out, so a reply that landed in ANOTHER thread —
+      // or an agent whose status has gone back to idle — is reflected in the
+      // column rather than sitting on numbers fetched when the page mounted.
+      tree.retryThreads()
+    },
+    [agent, markThreadRead, tree],
   )
 
   const startConversation = useCallback(
@@ -87,13 +173,13 @@ export function Chat2Client() {
     if (agentSlug || !tree.threadsLoaded || !tree.agents) return
     let best: { agent: ChatTreeAgent; thread: ChatTreeThread; at: number } | null = null
     for (const a of tree.agents) {
-      for (const t of tree.threadsByAgent[a.id] ?? []) {
+      for (const t of threadsByAgent[a.id] ?? []) {
         const at = parseSessionTimestamp(t.last_activity_at ?? t.started_at)
         if (!best || at > best.at) best = { agent: a, thread: t, at }
       }
     }
     if (best) selectThread(best.agent, best.thread)
-  }, [agentSlug, tree.threadsLoaded, tree.agents, tree.threadsByAgent, selectThread])
+  }, [agentSlug, tree.threadsLoaded, tree.agents, threadsByAgent, selectThread])
 
   const skinAgent: ChatSkinAgent | null = useMemo(
     () =>
@@ -133,7 +219,7 @@ export function Chat2Client() {
     <div className="flex h-full min-h-0 overflow-hidden bg-card">
       <ConversationsSidebar
         agents={tree.agents}
-        threadsByAgent={tree.threadsByAgent}
+        threadsByAgent={threadsByAgent}
         threadsLoaded={tree.threadsLoaded}
         activeThreadId={sessionId}
         onSelectThread={selectThread}
@@ -154,6 +240,7 @@ export function Chat2Client() {
               agentSlug={agent.slug}
               agentRole={agent.role_title ?? null}
               sessionId={sessionId}
+              onReplySettled={handleReplySettled}
             />
           </ChatSkinProvider>
         ) : tree.agents === null ? (
