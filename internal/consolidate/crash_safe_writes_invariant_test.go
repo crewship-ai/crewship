@@ -294,7 +294,15 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 				// — the "backlog rebuilds itself invisibly" failure this
 				// guard exists to prevent. A site that moves to another
 				// file now needs its entry re-stated, which is the point.
-				key := f + "|" + line
+				// ToSlash because f comes from filepath.Glob, which
+				// yields "..\memory\writer.go" on Windows while every
+				// key below is written with forward slashes — without
+				// it every lookup misses there and the guard fails the
+				// build on a clean tree. (The previous dir-scoped key
+				// used the literal dirs entry, which was already
+				// forward-slashed, so this only became reachable when
+				// the keys went file-scoped.)
+				key := filepath.ToSlash(f) + "|" + line
 				isAppend := strings.Contains(line, "O_APPEND")
 				if isAppend {
 					if reason, ok := appendLines[key]; ok {
