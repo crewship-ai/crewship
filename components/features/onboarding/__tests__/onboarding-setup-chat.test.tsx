@@ -1,7 +1,7 @@
 import { readFileSync } from "fs"
 import { join } from "path"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 
 import { OnboardingSetupChat } from "../onboarding-setup-chat"
 import type { ChatTurn } from "@/hooks/use-chat"
@@ -455,6 +455,13 @@ describe("OnboardingSetupChat — sending inside the history-load window", () =>
     return input as HTMLTextAreaElement
   }
 
+  /** Give the submit chain every chance to reach `sendMessage`, so that a
+   *  "nothing went out" assertion means the latch held it and not merely that
+   *  the assertion ran a microtask too early. */
+  async function letTheSendThroughIfItCan() {
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+  }
+
   it("holds a send typed before history has settled, then sends it once it has", async () => {
     const { sendMessage, release } = await renderWithHeldHistory()
     const input = typeAndSend("I need to scrape listings")
@@ -462,13 +469,53 @@ describe("OnboardingSetupChat — sending inside the history-load window", () =>
     // Not yet: useChat buffers every sequenced frame until the transcript
     // base is in place, so a message that went out now would be answered
     // into a gate that is still shut.
-    await Promise.resolve()
+    await letTheSendThroughIfItCan()
     expect(sendMessage).not.toHaveBeenCalled()
 
     release()
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("I need to scrape listings"))
     // And it went out as a real send: the draft is consumed, not stranded.
     await waitFor(() => expect(input.value).toBe(""))
+  })
+
+  // A stream reset shuts useChat's own frame gate (historyLoadedRef) and calls
+  // back for a re-fetch, so the transcript base is missing again — and the
+  // latch has to close again with it. It is closed in `requestHistoryReload`,
+  // synchronously with the reset, rather than left to the reload effect: the
+  // composer is rendered and interactive in between, and a send that slipped
+  // through there would be answered into a gate that is already shut.
+  //
+  // This drives the reload through the exact callback useChat invokes.
+  it("closes again on a stream reset, and holds a send until the reload lands", async () => {
+    startSetupAgentSessionMock.mockResolvedValue({
+      ok: true,
+      session: { agentId: "a1", sessionId: "s1", workspaceId: "ws-test" },
+    })
+    const loadHistory = vi.fn()
+    const sendMessage = mockUseChat([], { loadHistory })
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} />)
+    // The first load must be all the way through — `loadHistory` is the last
+    // thing it does — or what follows would be testing the mount again.
+    await waitFor(() => expect(loadHistory).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByText(/Loading setup chat/i)).toBeNull())
+
+    // The reload's GET, held open — the state the reset puts us back into.
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    apiFetchMock.mockImplementation(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/messages")) await held
+      return { ok: true, json: async () => ({ messages: [] }) }
+    })
+
+    const onStreamReset = useChatMock.mock.calls[0][0].onStreamReset as () => void
+    act(() => { onStreamReset() })
+
+    typeAndSend("try again then")
+    await letTheSendThroughIfItCan()
+    expect(sendMessage).not.toHaveBeenCalled()
+
+    release()
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("try again then"))
   })
 
   it("still sends it when history could not be loaded at all", async () => {

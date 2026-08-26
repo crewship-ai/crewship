@@ -280,7 +280,30 @@ function ConnectedSetupChat({
   const [historyReady, setHistoryReady] = useState(false)
   const [historyWarning, setHistoryWarning] = useState<string | null>(null)
   const [historyReloadNonce, setHistoryReloadNonce] = useState(0)
-  const requestHistoryReload = useCallback(() => setHistoryReloadNonce((n) => n + 1), [])
+
+  // The latch a send typed during the load waits on. Created on the first
+  // render rather than in the effect below, because the composer is on screen
+  // for that render and the user can press Send in it — there must already be
+  // something for that send to wait on. See `ensureSession`.
+  const historyGateRef = useRef<HistoryGate | null>(null)
+  if (!historyGateRef.current) historyGateRef.current = newHistoryGate()
+  const rearmHistoryGate = useCallback(() => {
+    if (historyGateRef.current?.settled) historyGateRef.current = newHistoryGate()
+  }, [])
+
+  const requestHistoryReload = useCallback(() => {
+    // Shut the latch in the SAME tick useChat shut its own frame gate, not
+    // when the reload effect gets around to running. This is called straight
+    // out of the WS handler that has already set historyLoadedRef to false
+    // (hooks/use-chat.ts), and between that call and the passive effect below
+    // there is a rendered, interactive composer whose ensureSession would
+    // otherwise still be looking at the settled latch and wave a send through
+    // into a gate that is shut. The effect re-arms too — harmlessly, since
+    // this one already did it and re-arming only replaces a SETTLED latch.
+    rearmHistoryGate()
+    setHistoryReloadNonce((n) => n + 1)
+  }, [rearmHistoryGate])
+
   const {
     turns,
     sendMessage,
@@ -298,13 +321,6 @@ function ConnectedSetupChat({
     onStreamReset: requestHistoryReload,
   })
 
-  // The latch a send typed during the load waits on. Created on the first
-  // render rather than in the effect below, because the composer is on screen
-  // for that render and the user can press Send in it — there must already be
-  // something for that send to wait on. See `ensureSession`.
-  const historyGateRef = useRef<HistoryGate | null>(null)
-  if (!historyGateRef.current) historyGateRef.current = newHistoryGate()
-
   // useChat intentionally keeps every sequenced WS frame behind a history
   // gate until its caller establishes the transcript base. The main ChatPanel
   // does this, but the onboarding shell originally never called loadHistory;
@@ -316,11 +332,12 @@ function ConnectedSetupChat({
     let cancelled = false
     setHistoryReady(false)
     setHistoryWarning(null)
-    // Re-arm for a reload. A stream reset shuts useChat's frame gate again
-    // (historyLoadedRef, hooks/use-chat.ts) and asks us to re-fetch, so a
-    // send typed now has to wait for the NEW base — it must not sail through
-    // on the strength of a transcript that is already being replaced.
-    if (historyGateRef.current?.settled) historyGateRef.current = newHistoryGate()
+    // Re-arm for a reload: a send typed now has to wait for the NEW base and
+    // must not sail through on the strength of a transcript already being
+    // replaced. On the stream-reset path requestHistoryReload has done this
+    // already, in the tick the reset happened; this covers every other way
+    // the effect can re-run and is a no-op when the latch is still closed.
+    rearmHistoryGate()
     const gate = historyGateRef.current
 
     const settleUnavailable = (message: string) => {
@@ -376,7 +393,7 @@ function ConnectedSetupChat({
     })()
 
     return () => { cancelled = true }
-  }, [sessionId, workspaceId, historyReloadNonce, loadHistory, markHistoryUnavailable])
+  }, [sessionId, workspaceId, historyReloadNonce, loadHistory, markHistoryUnavailable, rearmHistoryGate])
 
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
