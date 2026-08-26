@@ -77,6 +77,35 @@ function followUpPrompts(language?: string): string[] {
   return FOLLOW_UP_PROMPTS_BY_LANGUAGE[language ?? "English"] ?? FOLLOW_UP_PROMPTS_BY_LANGUAGE.English
 }
 
+/** A one-shot latch the composer can await instead of being refused.
+ *
+ *  `settle` is idempotent and there is deliberately no way to close one again:
+ *  a gate is re-armed by replacing it, so a promise that was already handed to
+ *  a waiting send can never be un-resolved under it. */
+interface HistoryGate {
+  /** Resolves once the transcript base is in place — loaded, or given up on.
+   *  Never rejects: "we could not load the old messages" is a state this
+   *  surface continues from, not one it fails on. */
+  open: Promise<void>
+  settle: () => void
+  settled: boolean
+}
+
+function newHistoryGate(): HistoryGate {
+  let resolve!: () => void
+  const open = new Promise<void>((r) => { resolve = r })
+  const gate: HistoryGate = {
+    open,
+    settled: false,
+    settle: () => {
+      if (gate.settled) return
+      gate.settled = true
+      resolve()
+    },
+  }
+  return gate
+}
+
 interface OnboardingSetupChatProps {
   /** Fires once, the moment starting the setup agent's session turns out not
    *  to be possible, with WHY. The parent step should fall back to the
@@ -269,6 +298,13 @@ function ConnectedSetupChat({
     onStreamReset: requestHistoryReload,
   })
 
+  // The latch a send typed during the load waits on. Created on the first
+  // render rather than in the effect below, because the composer is on screen
+  // for that render and the user can press Send in it — there must already be
+  // something for that send to wait on. See `ensureSession`.
+  const historyGateRef = useRef<HistoryGate | null>(null)
+  if (!historyGateRef.current) historyGateRef.current = newHistoryGate()
+
   // useChat intentionally keeps every sequenced WS frame behind a history
   // gate until its caller establishes the transcript base. The main ChatPanel
   // does this, but the onboarding shell originally never called loadHistory;
@@ -280,6 +316,12 @@ function ConnectedSetupChat({
     let cancelled = false
     setHistoryReady(false)
     setHistoryWarning(null)
+    // Re-arm for a reload. A stream reset shuts useChat's frame gate again
+    // (historyLoadedRef, hooks/use-chat.ts) and asks us to re-fetch, so a
+    // send typed now has to wait for the NEW base — it must not sail through
+    // on the strength of a transcript that is already being replaced.
+    if (historyGateRef.current?.settled) historyGateRef.current = newHistoryGate()
+    const gate = historyGateRef.current
 
     const settleUnavailable = (message: string) => {
       if (cancelled) return
@@ -319,6 +361,17 @@ function ConnectedSetupChat({
         setHistoryReady(true)
       } catch {
         settleUnavailable("Previous setup messages could not be loaded. You can still continue chatting.")
+      } finally {
+        // ONE settle site, in a `finally`, so no branch added here later can
+        // leave a waiting send hanging: every way out of this function — a
+        // transcript, a refused GET, a thrown one — is a way past the gate.
+        //
+        // Not on `cancelled`, deliberately. That is an unmount or a re-run
+        // (Strict Mode double-invokes this in development), and the run that
+        // replaces this one inherits the same unsettled gate and settles it.
+        // Opening it here would either release a send into a component that
+        // is gone, or release it against a transcript we just abandoned.
+        if (!cancelled) gate?.settle()
       }
     })()
 
@@ -472,7 +525,38 @@ function ConnectedSetupChat({
     [sendMessage],
   )
 
-  const ensureSession = useCallback(async () => historyReady, [historyReady])
+  /** The composer's pre-send hook — here, a wait rather than a verdict.
+   *
+   *  There is nothing on this surface for it to ensure. The setup chat's row
+   *  was written server-side by `startSetupAgentSession` before this component
+   *  was ever rendered, which is where `sessionId` comes from; unlike the main
+   *  chat's draft sessions (chat-panel.tsx's own ensureSession, which POSTs the
+   *  row on the first send) there is no create here that can be refused. The
+   *  only thing that was ever in question is whether the transcript base has
+   *  landed — and until it has, a message must not go out, because useChat
+   *  buffers every sequenced frame behind that same gate and the reply would
+   *  arrive into a shut one.
+   *
+   *  So this returns `false` never, and waits instead. It used to return
+   *  `historyReady` directly, and that boolean collapsed "not yet" into "no":
+   *  the send was dropped in silence by useMessageSubmit (the toast belongs to
+   *  chat-panel's `ensureSessionForSend`, whose doc comment is explicit that it
+   *  fires only when a create is actually refused — which is exactly what this
+   *  caller could not tell it), and the SAME `false` reaching the upload path
+   *  through EnsureChatSessionProvider marked the file with an error chip
+   *  saying the conversation could not be started. Both statements were false
+   *  about a local GET that was still in flight and about to succeed.
+   *
+   *  The wait is bounded by the load itself and cannot outlive it: the gate is
+   *  settled in a `finally`, on every outcome including a failed fetch. The
+   *  draft survives the wait (nothing clears it until `onSent`), the transcript
+   *  above the composer is already showing "Loading setup chat…" while it
+   *  happens, and on any load fast enough to be uninteresting it is not a wait
+   *  at all — the gate is open before the user has finished typing. */
+  const ensureSession = useCallback(async () => {
+    await historyGateRef.current?.open
+    return true
+  }, [])
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {})
   }, [])

@@ -406,6 +406,84 @@ describe("OnboardingSetupChat — once connected", () => {
   })
 })
 
+// The composer's `ensureSession` on this surface is not a create — the setup
+// session's row was written server-side by startSetupAgentSession before this
+// component existed. The only question it has ever answered is "has the
+// transcript base landed yet", which is a WAIT, and a wait must not be
+// reported as a refusal: `useMessageSubmit` drops the send silently on a
+// `false` (chat-panel's toast is the other caller's), and the attachment
+// upload turns the same `false` into an error chip that says the conversation
+// could not be started. Neither is true while a local GET is still in flight.
+//
+// These tests drive the window directly: history is held open, the user sends
+// inside it, and the send has to survive. That window is also the whole
+// content of the "sends a message when the composer's Send is clicked" flake
+// above — on a loaded runner the click lands before the history effect
+// resolves, so the assertion there is really an assertion about this.
+describe("OnboardingSetupChat — sending inside the history-load window", () => {
+  /** Renders with the transcript GET held open, and hands back the lever
+   *  that lets it finish. `outcome` is what that GET then does — a normal
+   *  200, or the failure the component degrades on rather than deadlocks. */
+  async function renderWithHeldHistory(outcome: "ok" | "error" = "ok") {
+    startSetupAgentSessionMock.mockResolvedValue({
+      ok: true,
+      session: { agentId: "a1", sessionId: "s1", workspaceId: "ws-test" },
+    })
+    const sendMessage = mockUseChat([])
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    apiFetchMock.mockImplementation(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/messages")) {
+        await held
+        if (outcome === "error") throw new Error("network down")
+      }
+      return { ok: true, json: async () => ({ messages: [] }) }
+    })
+
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} />)
+    await waitFor(() => expect(useChatMock).toHaveBeenCalled())
+    // Precondition: the window is genuinely open, not already closed by the
+    // time the composer is on screen — otherwise these tests prove nothing.
+    expect(screen.getByText(/Loading setup chat/i)).toBeTruthy()
+    return { sendMessage, release }
+  }
+
+  function typeAndSend(text: string) {
+    const input = screen.getByRole("textbox")
+    fireEvent.change(input, { target: { value: text } })
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }))
+    return input as HTMLTextAreaElement
+  }
+
+  it("holds a send typed before history has settled, then sends it once it has", async () => {
+    const { sendMessage, release } = await renderWithHeldHistory()
+    const input = typeAndSend("I need to scrape listings")
+
+    // Not yet: useChat buffers every sequenced frame until the transcript
+    // base is in place, so a message that went out now would be answered
+    // into a gate that is still shut.
+    await Promise.resolve()
+    expect(sendMessage).not.toHaveBeenCalled()
+
+    release()
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("I need to scrape listings"))
+    // And it went out as a real send: the draft is consumed, not stranded.
+    await waitFor(() => expect(input.value).toBe(""))
+  })
+
+  it("still sends it when history could not be loaded at all", async () => {
+    const { sendMessage, release } = await renderWithHeldHistory("error")
+    typeAndSend("I need to scrape listings")
+
+    release()
+    // The failure path opens useChat's gate deliberately (markHistoryUnavailable)
+    // rather than deadlocking live chat behind a missing transcript — so the
+    // waiting send is released by it too, and only OLD messages are missing.
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("I need to scrape listings"))
+    expect(await screen.findByText(/Previous setup messages could not be loaded/i)).toBeTruthy()
+  })
+})
+
 describe("OnboardingSetupChat — a deferred send must never look like silence", () => {
   // SYMPTOM this prevents: the real bug report. The server defers the first
   // message on an un-built crew (internal/ws/client.go's ErrCrewProvisioning
