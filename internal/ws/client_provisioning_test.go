@@ -6,15 +6,46 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// syncBuffer is a bytes.Buffer the test goroutine can READ while the hub's
+// own goroutine is still writing to it.
+//
+// newRunningHub starts Hub.Run in a goroutine, and Run logs on every
+// register/unregister ("client connected", hub.go). The assertions below read
+// the captured output with String(). A bare bytes.Buffer is not safe for
+// concurrent use, so that pairing is a data race — one the detector caught on
+// main intermittently, because it needs the hub's Debug call to land inside
+// the window where the test is reading.
+//
+// A mutex rather than draining the buffer at a synchronisation point: the
+// hub's writes are asynchronous by design and there is no point in this test
+// where it is guaranteed to be idle.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // captureLogger returns a logger recording every record (debug and up) as
 // one JSON line per call into buf, with no global side effects — unlike
 // internal/logging.New, which stamps a process-wide runtime level control
 // that a t.Parallel subtest here would race against.
-func captureLogger(buf *bytes.Buffer) *slog.Logger {
+func captureLogger(buf *syncBuffer) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
@@ -131,7 +162,7 @@ func TestHandleSendMessage_ProvisioningSentinel(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			var logBuf bytes.Buffer
+			var logBuf syncBuffer
 			hub := newRunningHub(t, withLogger(captureLogger(&logBuf)))
 			hub.SetChannelAuthorizer(allowAllAuthorizer{})
 			hub.SetChatHandler(&stubChatHandler{err: tc.err, events: tc.events})
