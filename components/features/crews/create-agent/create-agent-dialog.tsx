@@ -483,8 +483,20 @@ export function CreateAgentDialog({
                 className="group relative w-14 h-14 shrink-0 rounded-xl overflow-hidden border border-white/10 bg-muted hover:border-primary/50 transition-colors"
               >
                 <img src={avatarUrl} alt="" aria-hidden="true" className="w-full h-full object-cover" />
+                {/* The badge that says the tile is clickable — and until now
+                    rendered as a plain blue dot.
+
+                    This repo sets `--spacing: 0.23rem`, so `h-2.5` is 9.2px,
+                    not 10. A lucide glyph is a 24-unit viewBox at
+                    stroke-width 2, so at 9.2px its strokes come out at
+                    2 × 9.2/24 = 0.77px — under a pixel, on a saturated fill.
+                    The pencil was there the whole time and could not be seen.
+
+                    11px at stroke-width 2.5 gives 1.15px, which survives.
+                    Same values on New crew's icon tile; the two had already
+                    drifted to different sizes with the same defect. */}
                 <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary rounded-full grid place-items-center text-white shadow-md ring-2 ring-card">
-                  <Pencil className="h-2.5 w-2.5" />
+                  <Pencil className="h-3 w-3" strokeWidth={2.5} />
                 </span>
               </button>
 

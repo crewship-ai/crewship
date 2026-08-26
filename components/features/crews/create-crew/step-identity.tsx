@@ -55,8 +55,13 @@ export function StepIdentity({ state, setState, onPickIcon }: Props) {
               size="lg"
               className="border border-white/10 transition-colors group-hover:border-white/25"
             />
+            {/* strokeWidth 2.5, not lucide's default 2. `--spacing: 0.23rem`
+                makes h-3 eleven pixels, and a 24-unit viewBox scaled there
+                draws its strokes at 0.92px — under a pixel, on a saturated
+                fill, which is how New agent's copy of this badge ended up
+                reading as a plain blue dot. See the comment there. */}
             <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-white shadow-lg ring-2 ring-card">
-              <Pencil className="h-3 w-3" />
+              <Pencil className="h-3 w-3" strokeWidth={2.5} />
             </span>
           </button>
 
