@@ -42,6 +42,9 @@ export interface AccessIntegration {
   display_name: string
   transport: string
   enabled: boolean
+  /** How many agents in the workspace are bound to this server, from
+   *  GET /api/v1/integrations. Drives the opt-in warning below. */
+  agent_binding_count?: number
 }
 
 export interface AccessChannel {
@@ -208,6 +211,16 @@ interface SectionProps {
 export function AgentAccessSection({ catalog, selection, onChange }: SectionProps) {
   const { integrations, channels, loading, error } = catalog
 
+  /**
+   * Picked integrations that no agent is bound to yet.
+   *
+   * Those are exactly the ones whose first binding flips the server from
+   * "everyone gets it" to "only the bound agents get it".
+   */
+  const willFlipToOptIn = integrations
+    .filter((i) => selection.integrationIds.includes(i.id) && (i.agent_binding_count ?? 0) === 0)
+    .map((i) => i.display_name || i.name)
+
   const toggle = useCallback(
     (key: keyof AgentAccessSelection, id: string) => {
       const current = selection[key]
@@ -241,6 +254,39 @@ export function AgentAccessSection({ catalog, selection, onChange }: SectionProp
           Integrations and Settings → Notifications, then grant them per agent — here, or on the
           agent&apos;s canvas.
         </p>
+      )}
+
+      {/* The flip nobody is told about.
+       *
+       * integration_resolve.go builds the effective server list and then:
+       *
+       *   if !hasBind && serversWithBindings[s.ServerID] { continue }
+       *
+       * A workspace server with ZERO bindings resolves for every agent. The
+       * moment ANY agent gets one, it becomes opt-in and every other agent
+       * loses it — no warning, no audit line, nothing on the integration's
+       * own page. Before this form existed the only way to trigger it was
+       * `crewship integration bind`; now a switch on the create surface does
+       * it, which is a trap of our own making.
+       *
+       * Warned rather than prevented: making the first grant is a legitimate
+       * thing to want, and `agent_binding_count` is already on the wire from
+       * GET /api/v1/integrations, so this costs no request. The deeper fix is
+       * to stop inferring "available to all" from a COUNT — tracked
+       * separately. */}
+      {willFlipToOptIn.length > 0 && (
+        <CreateSurfaceNotice tone="warn" icon={TriangleAlert}>
+          {willFlipToOptIn.length === 1 ? (
+            <><strong>{willFlipToOptIn[0]}</strong> is currently available to every agent in this
+            workspace.</>
+          ) : (
+            <>{willFlipToOptIn.length} of these are currently available to every agent in this
+            workspace.</>
+          )}{" "}
+          Granting {willFlipToOptIn.length === 1 ? "it" : "them"} here makes{" "}
+          {willFlipToOptIn.length === 1 ? "it" : "them"} opt-in, so every OTHER agent loses access
+          until granted too.
+        </CreateSurfaceNotice>
       )}
 
       {integrations.length > 0 && (
