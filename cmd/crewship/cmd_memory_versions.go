@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/spf13/cobra"
 )
@@ -23,6 +25,20 @@ import (
 // search` (FTS over markdown chunks) because the audit trail is
 // SQL-on-DB, not filesystem-on-FTS. Both subcommands share the
 // `memory` parent so they read like sibling verbs in the help.
+//
+// log and show read the SERVER (#2086). Two routes for exactly this
+// already existed and had no CLI command at all —
+// GET /api/v1/admin/memory/versions and
+// GET /api/v1/admin/memory/versions/{id}/content — while these two
+// commands opened ~/.crewship/crewship.db, so on any host where the
+// server runs with a different DATABASE_URL they reported an audit
+// chain that was not the one being audited. --local reads the file.
+//
+// restore stays local in both directions: it WRITES a canonical file
+// onto this machine's disk from a blob in this machine's
+// content-addressed store. There is no route because there is nothing
+// a remote server could do with the request; it is gated instead, so
+// it refuses rather than restore from the wrong instance's history.
 
 var memoryLogCmd = &cobra.Command{
 	Use:   "log <workspace_id> <path>",
@@ -85,6 +101,13 @@ func init() {
 	memoryLogCmd.Flags().Int("limit", 20, "max rows (clamped to 1000)")
 	memoryLogCmd.Flags().String("format", "json", "output format: json|text")
 
+	// Declared per-command rather than persistently on `memory`: the rest of
+	// the memory tree (search, status, pin, …) is server-side already, and a
+	// --local it would ignore is worse than no flag.
+	memoryLogCmd.Flags().Bool("local", false, localOnlyFlagHelp)
+	memoryShowCmd.Flags().Bool("local", false, localOnlyFlagHelp)
+	memoryRestoreCmd.Flags().Bool("local", false, localOnlyFlagHelp)
+
 	memoryRestoreCmd.Flags().String("blob-root", "", "content-addressed blob root (default: {data_dir}/memory/versions)")
 	memoryRestoreCmd.Flags().String("user", "", "audit-trail writtenBy for the restore row (default: $USER)")
 	memoryRestoreCmd.Flags().String("tier", "learned", "tier to record the restored version under: agent|crew|workspace|pins|learned")
@@ -101,18 +124,9 @@ func runMemoryLog(cmd *cobra.Command, args []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
 	format, _ := cmd.Flags().GetString("format")
 
-	db, err := openAdminDB()
+	entries, err := memoryVersionEntries(cmd, workspaceID, path, limit)
 	if err != nil {
 		return err
-	}
-	defer db.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	entries, err := memory.LogVersions(ctx, db.DB, workspaceID, path, limit)
-	if err != nil {
-		return fmt.Errorf("log versions: %w", err)
 	}
 	if len(entries) == 0 {
 		fmt.Fprintf(os.Stderr, "no versions for %s @ %s\n", workspaceID, path)
@@ -145,7 +159,11 @@ func runMemoryShow(cmd *cobra.Command, args []string) error {
 	path := args[1]
 	sha := args[2]
 
-	db, err := openAdminDB()
+	if !localOnlyFlag(cmd) {
+		return memoryShowOverAPI(cmd, workspaceID, path, sha)
+	}
+
+	db, err := openGatedLocalDB(cmd, "crewship memory show --local", "")
 	if err != nil {
 		return err
 	}
@@ -157,13 +175,66 @@ func runMemoryShow(cmd *cobra.Command, args []string) error {
 	content, err := memory.ReadVersion(ctx, db.DB, workspaceID, path, sha)
 	if err != nil {
 		if errors.Is(err, memory.ErrVersionNotFound) {
-			fmt.Fprintf(os.Stderr, "version not found: workspace=%s path=%s sha=%s\n", workspaceID, path, sha)
-			os.Exit(1)
+			return memoryVersionNotFound(workspaceID, path, sha)
 		}
 		return err
 	}
-	_, _ = io.Copy(os.Stdout, strings.NewReader(string(content)))
-	return nil
+	// cmd.OutOrStdout(), same as the API path: one destination for the blob so
+	// the two halves of this command cannot drift on where the payload lands.
+	_, err = io.Copy(cmd.OutOrStdout(), strings.NewReader(string(content)))
+	return err
+}
+
+// memoryVersionNotFound is the documented "1 blob not found" exit. It returns
+// an error rather than calling os.Exit so deferred closes still run and the
+// two paths (API, local file) cannot drift on exit code or wording.
+func memoryVersionNotFound(workspaceID, path, sha string) error {
+	return cli.WithExitCode(
+		fmt.Errorf("version not found: workspace=%s path=%s sha=%s", workspaceID, path, sha),
+		cli.ExitGeneric)
+}
+
+// memoryShowOverAPI resolves the row by (path, sha) through the versions list
+// endpoint, then streams its bytes from the content endpoint.
+//
+// Two calls because the content route is keyed by row id while the CLI's
+// arguments are the audit chain's own coordinates (path + sha), which is what
+// an operator reading `memory log` output actually has in front of them.
+func memoryShowOverAPI(cmd *cobra.Command, workspaceID, path, sha string) error {
+	// requireAuth, not requireAuthAndWorkspace: the workspace is an argument
+	// to this command, so a shell with no `workspace use` is not an error.
+	if err := requireAuth(); err != nil {
+		return err
+	}
+	client := newAPIClient()
+	entries, err := memoryVersionsFromAPI(client, workspaceID, path, 0)
+	if err != nil {
+		return err
+	}
+	id := ""
+	for _, e := range entries {
+		if e.Sha256 == sha {
+			id = e.ID
+			break
+		}
+	}
+	if id == "" {
+		return memoryVersionNotFound(workspaceID, path, sha)
+	}
+
+	resp, err := client.Get(fmt.Sprintf("/api/v1/admin/memory/versions/%s/content%s",
+		url.PathEscape(id), queryString("workspace_id", workspaceID)))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if err := cli.CheckError(resp); err != nil {
+		return err
+	}
+	// Raw bytes to stdout, unwrapped: the command is documented as
+	// pipe-friendly and the blob is the payload, not a field in one.
+	_, err = io.Copy(cmd.OutOrStdout(), resp.Body)
+	return err
 }
 
 func runMemoryRestore(cmd *cobra.Command, args []string) error {
@@ -214,7 +285,7 @@ func runMemoryRestore(cmd *cobra.Command, args []string) error {
 			canonicalPath, restoreRoot)
 	}
 
-	db, err := openAdminDB()
+	db, err := openGatedLocalDB(cmd, "crewship memory restore", "")
 	if err != nil {
 		return err
 	}
@@ -234,6 +305,95 @@ func runMemoryRestore(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "restored %s @ %s -> %s (new audit row id=%s, sha=%s)\n",
 		workspaceID, path, canonicalPath, res.VersionID, res.Sha256)
 	return nil
+}
+
+// memoryVersionEntries returns the audit chain for (workspace, path), from
+// the server the CLI targets or — with --local — from the database file on
+// this host.
+func memoryVersionEntries(cmd *cobra.Command, workspaceID, path string, limit int) ([]memory.VersionEntry, error) {
+	if localOnlyFlag(cmd) {
+		db, err := openGatedLocalDB(cmd, "crewship memory log --local", "")
+		if err != nil {
+			return nil, err
+		}
+		defer db.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		entries, err := memory.LogVersions(ctx, db.DB, workspaceID, path, limit)
+		if err != nil {
+			return nil, fmt.Errorf("log versions: %w", err)
+		}
+		return entries, nil
+	}
+	if err := requireAuth(); err != nil {
+		return nil, err
+	}
+	return memoryVersionsFromAPI(newAPIClient(), workspaceID, path, limit)
+}
+
+// memoryVersionsPageCeiling bounds the pagination walk below. The list
+// endpoint filters by path PREFIX and this command wants one exact path, so a
+// workspace with thousands of sibling rows under a shared prefix could
+// otherwise keep the CLI paging forever. 200 pages x 500 rows is far past any
+// real audit chain; hitting it is reported, never silently truncated.
+const memoryVersionsPageCeiling = 200
+
+// memoryVersionsFromAPI walks GET /api/v1/admin/memory/versions and returns
+// the rows whose path matches exactly, newest first.
+//
+// limit <= 0 means "every match". The exact-path filter is applied AFTER the
+// server's page limit, so the walk continues across pages until it has `limit`
+// matches or the cursor runs out — filtering a single page and stopping would
+// return zero rows for a path whose newest siblings happen to fill page one,
+// which is the same shape of quiet under-reporting that
+// `admin sessions list --active-only` was fixed for.
+func memoryVersionsFromAPI(client *cli.Client, workspaceID, path string, limit int) ([]memory.VersionEntry, error) {
+	type apiRow struct {
+		ID        string `json:"id"`
+		Path      string `json:"path"`
+		Tier      string `json:"tier"`
+		Sha256    string `json:"sha256"`
+		Bytes     int    `json:"bytes"`
+		WrittenAt string `json:"written_at"`
+		WrittenBy string `json:"written_by"`
+		ParentSha string `json:"parent_sha"`
+	}
+	type apiPage struct {
+		Rows       []apiRow `json:"rows"`
+		NextCursor *string  `json:"next_cursor"`
+	}
+
+	var out []memory.VersionEntry
+	cursor := ""
+	for page := 0; ; page++ {
+		if page >= memoryVersionsPageCeiling {
+			return nil, fmt.Errorf(
+				"gave up after %d pages of /api/v1/admin/memory/versions without exhausting the path prefix %q — narrow the path",
+				memoryVersionsPageCeiling, path)
+		}
+		var body apiPage
+		q := queryString("workspace_id", workspaceID, "path_prefix", path, "limit", "500", "cursor", cursor)
+		if err := getJSON(client, "/api/v1/admin/memory/versions"+q, &body); err != nil {
+			return nil, err
+		}
+		for _, r := range body.Rows {
+			if r.Path != path {
+				continue
+			}
+			out = append(out, memory.VersionEntry{
+				ID: r.ID, Path: r.Path, Tier: r.Tier, Sha256: r.Sha256, Bytes: r.Bytes,
+				WrittenAt: r.WrittenAt, WrittenBy: r.WrittenBy, ParentSha: r.ParentSha,
+			})
+			if limit > 0 && len(out) >= limit {
+				return out, nil
+			}
+		}
+		if body.NextCursor == nil || *body.NextCursor == "" {
+			return out, nil
+		}
+		cursor = *body.NextCursor
+	}
 }
 
 // defaultBlobRoot resolves {DataDir.Root}/memory/versions, matching

@@ -7,14 +7,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/spf13/cobra"
 	sqlite "modernc.org/sqlite"
@@ -100,38 +97,28 @@ func (g dbWriteGuard) check(announce bool) error {
 	return nil
 }
 
-// warnDBLocalOnly prints a stderr notice when the CLI's effective server
-// target is a non-local host: `crewship db` never touches that remote.
-func warnDBLocalOnly(dbPath string) {
-	srv := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
-	if srv == "" || isLoopbackServerURL(srv) {
-		return
-	}
-	fmt.Fprintf(os.Stderr,
-		"note: your CLI targets %s, but 'crewship db' only touches the LOCAL database at %s\n",
-		srv, dbPath)
-}
-
-// isLoopbackServerURL reports whether the server URL points at this host.
-func isLoopbackServerURL(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	host := u.Hostname()
-	if host == "localhost" {
-		return true
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
-	}
-	return false
-}
+// warnDBLocalOnly is gone, and so is the isLoopbackServerURL exemption that
+// made it quiet. It printed a note only when the CLI's server was a REMOTE
+// host, on the reasoning that a server on localhost must be using the local
+// data directory. That inference is false wherever crewshipd runs with its own
+// DATABASE_URL — every dev clone (file:./crewship.db), every container, every
+// multi-instance box — and it is why a whole family of commands answered from
+// the wrong database for months (#2086). Its replacement is requireLocalDB in
+// local_db_target.go, which names the file every time and refuses, loopback or
+// not, when the operator has named a server without saying --local.
 
 var dbCmd = &cobra.Command{
 	Use:   "db",
-	Short: "Local database maintenance (snapshots, restore)",
-	Long:  "Host-side maintenance for the local Crewship SQLite database in the data directory.",
+	Short: "Maintenance on the database FILE on this host (snapshots, restore, ledger)",
+	Long: `Host-side maintenance for the Crewship SQLite file on this machine —
+DATABASE_URL when set, otherwise the data directory.
+
+Nothing here goes over HTTP, so nothing here can act on a remote
+instance. Because of that, these commands refuse to run when
+--server / CREWSHIP_SERVER / --profile names a server, unless you
+pass --local to say you mean the file on this host. A server on
+localhost is not an exemption: it may well be running against a
+different database than the one in your data directory.`,
 }
 
 var restoreSnapshotCmd = &cobra.Command{
@@ -163,19 +150,17 @@ is definitely in use; that answer is knowable, and restoring under a live
 server tears the file.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dd, err := database.DefaultDataDir()
+		// `db` is host-side maintenance on the LOCAL SQLite file, and this one
+		// overwrites it. When the CLI is pointed at a server, that is a
+		// contradiction the command cannot resolve on the operator's behalf —
+		// restoring a snapshot over the wrong database is not undone by a
+		// warning. (Contrast: `nuke` acts through the remote API and is the
+		// model for remote-destructive commands.)
+		localDB, err := requireLocalDB(cmd, "crewship db restore-snapshot", "")
 		if err != nil {
-			return fmt.Errorf("resolve data dir: %w", err)
+			return err
 		}
-		dbPath := dd.DatabasePath()
-
-		// `db` is host-side maintenance on the LOCAL SQLite file. When the
-		// CLI is pointed at a remote server (profile / CREWSHIP_SERVER /
-		// --server), say so explicitly — silently doing local-disk work
-		// while the operator believes they are targeting a remote instance
-		// is worse than a noisy line. (Contrast: `nuke` acts through the
-		// remote API and is the model for remote-destructive commands.)
-		warnDBLocalOnly(dbPath)
+		dbPath := localDB.Path
 
 		snaps, err := database.ListSnapshots(dbPath)
 		if err != nil {
@@ -270,6 +255,10 @@ server tears the file.`,
 }
 
 func init() {
+	// Persistent: every `db` subcommand is local-only by construction, so the
+	// flag belongs to the group rather than being re-declared four times.
+	dbCmd.PersistentFlags().Bool("local", false, localOnlyFlagHelp)
+
 	restoreSnapshotCmd.Flags().BoolVar(&restoreSnapshotList, "list", false, "list available snapshots and exit")
 	restoreSnapshotCmd.Flags().BoolVar(&restoreSnapshotYes, "yes", false, "skip the confirmation prompt")
 	restoreSnapshotCmd.Flags().BoolVar(&restoreSnapshotForce, "force", false,

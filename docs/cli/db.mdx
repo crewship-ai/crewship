@@ -6,22 +6,56 @@ stability: experimental
 tag: Experimental
 ---
 
-`crewship db` operates on the local SQLite database in the configured data
-directory. It does not perform maintenance on a remote server selected with
-`--server`, a profile, or `CREWSHIP_SERVER`; it prints a notice when those
-settings point elsewhere.
+`crewship db` operates on the SQLite database file on **this host** —
+`DATABASE_URL` when set, otherwise `<data dir>/crewship.db`. Nothing here goes
+over HTTP, so nothing here can act on a remote instance.
 
 Stop `crewshipd` before commands that write or replace the database. The
 commands are host-side operations and do not require an API session.
 
+## `--local`: which database, and why the CLI asks
+
+If `--server`, `--profile` or `CREWSHIP_SERVER` names a server, every `db`
+command **refuses to run** unless you also pass `--local`. The refusal names
+the server, names the file it would otherwise have opened, and names the flag:
+
+```
+crewship db migration-status can only work on the database FILE on this host —
+/home/you/.crewship/crewship.db (the default data directory) — but your CLI
+targets http://localhost:8083 (CREWSHIP_SERVER).
+Those are not the same thing, and this command cannot tell whether that server
+uses that file.
+
+  • to act on the local file, say so:  add --local
+```
+
+A server on `localhost` is **not** an exemption. Earlier versions printed a
+note only for a remote target, on the reasoning that a server on this host
+must be using this host's data directory. That is false whenever `crewshipd`
+runs with its own `DATABASE_URL` — every development clone uses
+`file:./crewship.db` — and it is how `migration-status` came to report a
+completely unrelated schema version under the heading `Database:`
+([#2086](https://github.com/crewship-ai/crewship/issues/2086)).
+
+Every run prints the path it resolved, whether or not a server was named.
+
+| Flag | Applies to | Description |
+|---|---|---|
+| `--local` | every `db` subcommand (persistent) | Act on the database file on this host, not the server the CLI targets. |
+
 ## `crewship db migration-status`
 
-Reads the local migration ledger and reports the applied schema version plus
-outstanding post-deployment migrations. It is read-only and can run while the
-server is stopped.
+Reads the migration ledger in the database file on this host and reports the
+applied schema version plus outstanding post-deployment migrations. It is
+read-only and can run while the server is stopped.
+
+It honours `DATABASE_URL`, which it did not before #2086 — pointing it at the
+file a given `crewshipd` actually uses is how you ask about that instance.
 
 ```bash
-crewship db migration-status
+crewship db migration-status --local
+DATABASE_URL=file:/srv/crewship/crewship_3/crewship.db \
+  crewship db migration-status --local
 ```
 
 ## `crewship db repair-ledger`
@@ -30,10 +64,10 @@ Repairs a migration version collision after a migration was renumbered. It
 moves ledger version numbers only; it does not change table data or schema.
 
 ```bash
-crewship db repair-ledger --dry-run   # inspect the plan
-crewship db repair-ledger             # show plan and confirm before writing
-crewship db repair-ledger --yes       # skip confirmation
-crewship db repair-ledger --force     # override an indeterminate in-use probe
+crewship db repair-ledger --dry-run --local   # inspect the plan
+crewship db repair-ledger --local             # show plan and confirm before writing
+crewship db repair-ledger --yes --local       # skip confirmation
+crewship db repair-ledger --force --local     # override an indeterminate in-use probe
 ```
 
 `--dry-run` is read-only and may be used while the server is running. Applying
@@ -49,16 +83,16 @@ actual restore, the current database is copied to a reversible
 `.before-restore-*` file. Stop the server first.
 
 ```bash
-crewship db restore-snapshot --list        # list snapshots only
-crewship db restore-snapshot               # restore newest, with confirmation
-crewship db restore-snapshot snapshot.bak  # restore a named snapshot
-crewship db restore-snapshot --yes         # skip confirmation
-crewship db restore-snapshot --force       # override an indeterminate in-use probe
+crewship db restore-snapshot --list --local        # list snapshots only
+crewship db restore-snapshot --local               # restore newest, with confirmation
+crewship db restore-snapshot snapshot.bak --local  # restore a named snapshot
+crewship db restore-snapshot --yes --local         # skip confirmation
+crewship db restore-snapshot --force --local       # override an indeterminate in-use probe
 ```
 
 Restoring is the database half of a downgrade: run the matching older binary
-afterwards. A remote `--server` target does not change which local file this
-command operates on.
+afterwards. A `--server` target does not change which file this command
+operates on — it makes the command refuse until you say `--local`.
 
 ### When the in-use check cannot answer
 

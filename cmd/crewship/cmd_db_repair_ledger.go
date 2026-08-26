@@ -62,12 +62,14 @@ that one case, on your word that no crewshipd is running. It does not override
 a database that is definitely in use.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dd, err := database.DefaultDataDir()
+		// Same gate as the rest of `db`: this rewrites the migration ledger in
+		// place, and doing that to the wrong database is not something a
+		// stderr note makes recoverable.
+		target, err := requireLocalDB(cmd, "crewship db repair-ledger", "")
 		if err != nil {
-			return fmt.Errorf("resolve data dir: %w", err)
+			return err
 		}
-		dbPath := dd.DatabasePath()
-		warnDBLocalOnly(dbPath)
+		dbPath := target.Path
 
 		// Read-only inspection is safe against a live server; writing is not.
 		// The guard therefore sits between the plan and the apply, so

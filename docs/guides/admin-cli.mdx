@@ -1,6 +1,6 @@
 ---
 title: "Admin CLI"
-description: "Host-only `crewship admin` subcommands that bypass the HTTP API and write directly to the SQLite database — the recovery surface for an operator who's locked out of the UI."
+description: "Host-side `crewship admin` subcommands that act on the SQLite database file on this machine — the recovery surface for an operator who's locked out of the UI. Says --local, because the CLI cannot guess which database you mean."
 icon: "wrench"
 stability: experimental
 tag: Experimental
@@ -14,6 +14,17 @@ The `crewship admin` command group is the operator-on-the-host recovery surface.
 
 The flow is deliberately non-circular. The most important caller is an admin whose account is locked out and whose server may or may not be running — routing recovery through the same server they're recovering would be a chicken-and-egg failure. `crewship admin` therefore opens `~/.crewship/crewship.db` directly (or whatever `CREWSHIP_DATA_DIR` / `DATABASE_URL` points at), runs the requested SQL — the mutating commands in a transaction — and exits. The HTTP layer never sees the request and the auth middleware never runs.
 
+## `--local`: the CLI cannot guess which database you mean
+
+The file the admin CLI resolves and the server your CLI is configured for are **two different targets**, and until [#2086](https://github.com/crewship-ai/crewship/issues/2086) nothing in the CLI acknowledged that. It resolved `~/.crewship/crewship.db` and ignored `--server`, `CREWSHIP_SERVER` and `--profile` entirely — so `crewship admin list-users` against a populated server printed `(no users …)` and exited **0**.
+
+Two changes:
+
+- **`list-users` reads the server** (`GET /api/v1/admin/users`), scoped to the current workspace. It is the one verb in this group with a route, and it now uses it.
+- **Every other verb here refuses to run when a server is named**, unless you pass `--local`. The refusal names the server, names the file, and names the flag. A server on `localhost` is not an exemption — `crewshipd` routinely runs with its own `DATABASE_URL` (every development clone uses `file:./crewship.db`), so "same host" says nothing about "same database".
+
+So the recovery commands in this guide carry `--local`. It costs one word and it is the difference between resetting the password you meant to reset and resetting one in a database nobody was looking at.
+
 <Warning>
 Because the write happens straight against SQLite, an admin-CLI action does **not** produce a `journal_entries` row the way HTTP-fronted actions do — it never passes through the audit middleware. Treat these commands as out-of-band operator actions and record them in your own change log if you need an audit trail.
 </Warning>
@@ -24,12 +35,12 @@ Five verbs ship today, all in `cmd/crewship/cmd_admin.go`. `reset-password` mint
 
 Reach for `crewship admin` only when the in-band recovery paths can't apply. For everyday user management — invites, role changes on a healthy server, password rotation from inside the app — the web UI is the right surface; bypassing it leaves the audit trail thinner and risks racing the running server. The narrow set of legitimate uses:
 
-- **You can't log in at all.** Forgot password, sole owner of the workspace, mailer not configured, OAuth provider misconfigured — any combination where the web `/forgot` flow won't deliver a reset link. `crewship admin reset-password --email=…` mints a new hash directly.
+- **You can't log in at all.** Forgot password, sole owner of the workspace, mailer not configured, OAuth provider misconfigured — any combination where the web `/forgot` flow won't deliver a reset link. `crewship admin reset-password --email=… --local` mints a new hash directly.
 - **The mailer is unreachable or never set up.** Fresh self-hosted installs without `RESEND_API_KEY` get a deliberate `mailer.Disabled` — `/forgot` still returns 200 (no enumeration) but no email goes out. Use the CLI instead of standing up SMTP just to recover one account.
-- **CI / unattended provisioning needs a seeded admin.** A Dockerfile that bakes a baseline workspace can run `crewship admin reset-password --email=admin@example.com --password=$BOOTSTRAP_PASSWORD` non-interactively against the freshly migrated database, then start the server. The HTTP API isn't available yet at that point, so this is the only path.
-- **You need to verify which email actually exists.** Operators routinely guess at email casing (`Admin@…` vs `admin@…`) before a reset. `crewship admin list-users` dumps the table so the reset command targets the right row instead of silently failing.
+- **CI / unattended provisioning needs a seeded admin.** A Dockerfile that bakes a baseline workspace can run `crewship admin reset-password --email=admin@example.com --password=$BOOTSTRAP_PASSWORD --local` non-interactively against the freshly migrated database, then start the server. The HTTP API isn't available yet at that point, so this is the only path.
+- **You need to verify which email actually exists.** Operators routinely guess at email casing (`Admin@…` vs `admin@…`) before a reset. `crewship admin list-users --local` dumps the table so the reset command targets the right row instead of silently failing. (Without `--local` it asks the server, which is workspace-scoped and does not report lockout state.)
 - **A botched RBAC change locked everyone out of a workspace.** If a `promote` from the UI accidentally demoted the last `OWNER`, the UI can no longer fix it (no `OWNER` left to call the endpoint). Re-promoting from the CLI is the unblock.
-- **You suspect a session token leak but the password is fine.** Stolen laptop recovered, browser history dumped to a chat, a tester pasted a session cookie in a screenshot — `crewship admin invalidate-sessions --email=…` force-logs the user from every device without forcing a password rotation. The user can log back in normally on the next attempt; only the cached cookies on the lost devices stop working.
+- **You suspect a session token leak but the password is fine.** Stolen laptop recovered, browser history dumped to a chat, a tester pasted a session cookie in a screenshot — `crewship admin invalidate-sessions --email=… --local` force-logs the user from every device without forcing a password rotation. The user can log back in normally on the next attempt; only the cached cookies on the lost devices stop working.
 - **Periodic compliance sweep.** Audit guidance that says "log every operator out at the end of the quarter" maps to a one-shot `invalidate-sessions` per user; same audit row shape as the leaked-token response (`revoked_reason='admin_invalidate'`).
 
 If the server is healthy, the user is logged in, and the workspace still has at least one `OWNER`, prefer the corresponding HTTP endpoint or settings page — every admin-CLI call is one more uncontrolled DB write to keep out of the audit story.
@@ -44,7 +55,7 @@ If the server is healthy, the user is logged in, and the workspace still has at 
 | **`--workspace` resolution** | If the user belongs to exactly one workspace, `promote` infers it. If they belong to multiple, the flag is required and a clear error (`user belongs to multiple workspaces — pass --workspace=<slug>`) tells the operator to disambiguate. No silent "picks the first one" behaviour. |
 | **`reset-password`** | Mints a new bcrypt hash for `--email=…`. Interactive password prompt by default; `--password=…` for scripted use (CI bootstrap); `--password-stdin` reads the password from stdin so it never lands in shell history or `ps`. ALSO revokes every active session for that user in the same transaction (with `revoked_reason='password_change'`) and clears any lockout (`failed_login_count=0`, `locked_until=NULL`) so any leaked cookie can't outlive the recovery — no separate restart needed. |
 | **`invalidate-sessions`** | Revokes every active session for `--email=…` WITHOUT changing the password. The user can log in normally on the next attempt; only their cached cookies stop working. Audited as `revoked_reason='admin_invalidate'` so the journal distinguishes this from password-change revokes. |
-| **`list-users`** | Reads the `users` table and renders it via `text/tabwriter`. Email, name, created-at, lockout status (`-` / `LOCKED until <ts>` / `expired <ts>`), failed-login count, workspace roles. Footer summarizes the active-lockout count with a hint to `reset-password` when any exist. Accepts `--locked-only` to filter to just the currently-locked accounts. Usually run before `reset-password` to verify the email row exists with the expected casing. |
+| **`list-users`** | Default: `GET /api/v1/admin/users` on the targeted server, workspace-scoped (EMAIL / NAME / CREATED / ROLE), needs a login. With `--local`: reads the `users` table and renders it via `text/tabwriter`. Email, name, created-at, lockout status (`-` / `LOCKED until <ts>` / `expired <ts>`), failed-login count, workspace roles. Footer summarizes the active-lockout count with a hint to `reset-password` when any exist. Accepts `--locked-only` to filter to just the currently-locked accounts — which requires `--local`, since lockout state is not on the API.  Usually run before `reset-password` to verify the email row exists with the expected casing. |
 | **`promote`** | Rewrites a single `workspace_members` row to the requested role. Errors if the user isn't a member of the resolved workspace. **Unlike the HTTP role endpoints, it does _not_ guard against demoting the last `OWNER`** of a workspace — a direct write can leave a workspace ownerless, so double-check with `list-users` first. |
 
 ## Usage
@@ -64,7 +75,7 @@ The admin CLI opens the database with a 30-second `busy_timeout`, so a write tha
 ### 2. Verify the user exists
 
 ```bash
-crewship admin list-users
+crewship admin list-users --local
 ```
 
 Outputs a tab-aligned table:
@@ -83,7 +94,7 @@ The `LOCKED` column shows one of `-` (no lockout), `LOCKED until <ts>` (currentl
 To filter to just the currently-locked accounts:
 
 ```bash
-crewship admin list-users --locked-only
+crewship admin list-users --locked-only --local
 ```
 
 The admin CLI lowercases the `--email` argument before querying, so it can only target rows whose stored email is already lowercase. Since web signup stores email verbatim, run `list-users` first to confirm the row exists in lowercase form; if the row you want isn't matched, `reset-password` fails loudly rather than silently creating a new one.
@@ -93,7 +104,7 @@ The admin CLI lowercases the `--email` argument before querying, so it can only 
 Interactive (preferred — the password is not logged anywhere):
 
 ```bash
-crewship admin reset-password --email=admin@example.com
+crewship admin reset-password --email=admin@example.com --local
 # New password: ********
 # Confirm password: ********
 # ✓ Password reset for Pavel Srba (admin@example.com).
@@ -106,7 +117,8 @@ Scripted (for CI / Docker provisioning):
 ```bash
 crewship admin reset-password \
   --email=admin@example.com \
-  --password="$BOOTSTRAP_PASSWORD"
+  --password="$BOOTSTRAP_PASSWORD" \
+  --local
 ```
 
 Never embed the password as a literal in a shell history — pass it via env var or stdin redirection so it lands neither in `~/.bash_history` nor in `ps`. The leak-free pattern is `--password-stdin`:
@@ -114,7 +126,8 @@ Never embed the password as a literal in a shell history — pass it via env var
 ```bash
 op read op://Dev/crewship/admin | crewship admin reset-password \
   --email=admin@example.com \
-  --password-stdin
+  --password-stdin \
+  --local
 ```
 
 `--password-stdin` reads stdin verbatim (preserving embedded spaces and UTF-8; trims exactly one trailing LF/CRLF). The flag is mutually exclusive with `--password` — passing both is a configuration error.
@@ -122,7 +135,7 @@ op read op://Dev/crewship/admin | crewship admin reset-password \
 ### 4. Invalidate all sessions WITHOUT changing the password
 
 ```bash
-crewship admin invalidate-sessions --email=alice@example.com
+crewship admin invalidate-sessions --email=alice@example.com --local
 # ✓ Sessions invalidated for Alice Example (alice@example.com).
 #   3 active session(s) revoked.
 ```
@@ -135,13 +148,14 @@ Use when the password is believed safe but a session token / cookie is suspected
 
 ```bash
 # Single-workspace user — slug is inferred:
-crewship admin promote --email=admin@example.com --role=OWNER
+crewship admin promote --email=admin@example.com --role=OWNER --local
 
 # Multi-workspace user — slug is required:
 crewship admin promote \
   --email=admin@example.com \
   --role=ADMIN \
-  --workspace=acme-research
+  --workspace=acme-research \
+  --local
 ```
 
 The role must be one of `OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, or `VIEWER`. Note that `promote` writes the row directly and does **not** stop you from demoting the last `OWNER` of a workspace — verify with `list-users` first if you're changing an owner.
@@ -165,9 +179,9 @@ You're the sole `OWNER` of a self-hosted Crewship instance. The mailer was never
 ```bash
 ssh prod-server
 sudo systemctl stop crewshipd
-sudo -u crewship crewship admin list-users
+sudo -u crewship crewship admin list-users --local
 # admin@example.com   OWNER   2025-09-01 14:22   2026-04-30 09:15
-sudo -u crewship crewship admin reset-password --email=admin@example.com
+sudo -u crewship crewship admin reset-password --email=admin@example.com --local
 # New password: ********
 sudo systemctl start crewshipd
 ```
@@ -193,9 +207,11 @@ RUN --mount=type=secret,id=bootstrap_password \
     crewship admin reset-password \
       --email="$BOOTSTRAP_EMAIL" \
       --password="$(cat /run/secrets/bootstrap_password)" \
+      --local \
   && crewship admin promote \
       --email="$BOOTSTRAP_EMAIL" \
-      --role=OWNER
+      --role=OWNER \
+      --local
 
 CMD ["crewship", "start"]
 ```
@@ -213,7 +229,8 @@ sudo systemctl stop crewshipd
 crewship admin promote \
   --email=lead@example.com \
   --role=OWNER \
-  --workspace=marketing
+  --workspace=marketing \
+  --local
 # ✓ Promoted lead@example.com to OWNER in workspace "Marketing" (marketing).
 sudo systemctl start crewshipd
 ```
@@ -248,7 +265,7 @@ For the user/workspace data model these commands operate on, see the [Admin API 
 - **The admin CLI lowercases `--email`.** Every admin subcommand runs `strings.ToLower` on the `--email` argument before querying. Web signup stores emails **as typed**, so a user who registered as `Admin@example.com` cannot be targeted by these commands (the lowercased `admin@example.com` won't match the stored row). Run `list-users` first: if the row you need shows mixed case, fix it through the app, not the CLI.
 - **`reset-password` DOES invalidate active sessions.** Every active session for the user is revoked in the same transaction as the password change (`revoked_reason='password_change'`), so a leaked cookie can't outlive the recovery. No server restart needed — the next request on the old cookie returns 401. If you want force-logout WITHOUT changing the password (suspected token leak but the password is believed safe), use `crewship admin invalidate-sessions` instead.
 - **Don't put the password in shell history.** `--password='…'` lands in `~/.bash_history` and is visible in `ps` to anyone with shell access during the window the command runs. Prefer the interactive prompt; for scripted use, pass via `--password="$VAR"` where `VAR` is sourced from an env file or BuildKit secret mount.
-- **`CREWSHIP_DATA_DIR` overrides `~/.crewship`.** On a host where the service was started with a custom data dir (common on dev VMs), running `crewship admin` with default env points at the wrong empty database, silently fails to find the user, and prints a misleading "no such email" error. Export the same `CREWSHIP_DATA_DIR` the service uses (there is no `--data-dir` flag). If the service was configured with an explicit `DATABASE_URL` instead, set that — it takes precedence over `CREWSHIP_DATA_DIR` in the admin CLI's resolution.
+- **`CREWSHIP_DATA_DIR` overrides `~/.crewship`.** On a host where the service was started with a custom data dir (common on dev VMs), running `crewship admin` with default env points at the wrong empty database, silently fails to find the user, and prints a misleading "no such email" error. Every command now prints the path it resolved, so check that line before you believe the answer. Export the same `CREWSHIP_DATA_DIR` the service uses (there is no `--data-dir` flag). If the service was configured with an explicit `DATABASE_URL` instead, set that — it takes precedence over `CREWSHIP_DATA_DIR` in the admin CLI's resolution.
 - **Migration version conflicts can hide your write.** If the data directory predates the migration that added the column you're updating (e.g. `password_updated_at`), the write succeeds but the new column stays at its default. Migrations apply automatically on `crewship start`, so start the server once against an older database (letting it migrate) before running `crewship admin` against it.
 
 ## Related

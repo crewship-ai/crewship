@@ -26,15 +26,22 @@ Two kinds of pending work look different and matter differently:
   outstanding the schema change is only partly applied; that is by design and
   the running code tolerates it. If one is stuck, this is where you find out.
 
-Reads the local database directly, so it works with the server down.`,
+Reads the database file on this host directly, so it works with the server
+down. That also means it cannot answer for a remote instance: with a server
+named, it refuses unless you pass --local.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dd, err := database.DefaultDataDir()
+		// Previously this resolved the data dir and nothing else — it did not
+		// even honour DATABASE_URL, so on a clone whose server runs against
+		// file:./crewship.db it reported a completely unrelated schema version
+		// under the heading "Database:" (#2086). requireLocalDB does both:
+		// resolves the file the operator's environment actually names, and
+		// refuses when that file is not plausibly the targeted server's.
+		target, err := requireLocalDB(cmd, "crewship db migration-status", "")
 		if err != nil {
-			return fmt.Errorf("resolve data dir: %w", err)
+			return err
 		}
-		dbPath := dd.DatabasePath()
-		warnDBLocalOnly(dbPath)
+		dbPath := target.Path
 
 		db, err := sql.Open("sqlite", dbPath)
 		if err != nil {

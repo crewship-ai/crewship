@@ -361,7 +361,7 @@ func openLocalDBReadOnly(ctx context.Context) (*sql.DB, error) {
 	}
 	dbPath := dataDir.DatabasePath()
 	if _, err := os.Stat(dbPath); err != nil {
-		// Only ENOENT means "not initialised" — mirroring openAdminDB, a
+		// Only ENOENT means "not initialised" — mirroring openGatedLocalDB, a
 		// permission error or symlink loop must surface verbatim so the
 		// operator fixes access rights instead of chasing `crewship start`.
 		if os.IsNotExist(err) {

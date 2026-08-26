@@ -19,35 +19,51 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/cli"
-	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // `crewship admin ...` is the operator-on-the-host recovery surface.
-// All subcommands here run a direct DB write against the local SQLite
-// file, no HTTP. That's deliberate: the most important caller is an
-// admin whose account is locked out and whose server may or may not
+// The WRITE subcommands here run a direct DB write against the local
+// SQLite file, no HTTP. That's deliberate: the most important caller is
+// an admin whose account is locked out and whose server may or may not
 // be running. Routing the recovery through the same server they're
 // recovering would be circular.
 //
-// The "credential" for these commands is shell access to the host.
+// The "credential" for those commands is shell access to the host.
 // That matches what GitLab (`gitlab-rake gitlab:password:reset`),
 // Gitea (`gitea admin user change-password`), Nextcloud (`occ
 // user:resetpassword`) and Mattermost (`mmctl user change-password`)
 // all do, and it's the right model for a self-hosted product: if you
 // can ssh to the box, you ARE the admin.
+//
+// What that reasoning never covered is `list-users`, which has an HTTP
+// route (GET /api/v1/admin/users) and used it for nothing: it read
+// ~/.crewship/crewship.db while the operator's CLI was pointed
+// somewhere else entirely, and printed "(no users …)" with exit 0
+// against a populated server (#2086). It now reads the server, and
+// --local is how you ask for the file instead. Every remaining
+// subcommand goes through requireLocalDB, which refuses rather than
+// answer for a server it cannot reach — see local_db_target.go.
 
 var adminCmd = &cobra.Command{
 	Use:   "admin",
-	Short: "Direct DB operations (host-only). Use when locked out of the UI.",
-	Long: `Operator commands that bypass the HTTP API and write directly
-to the local SQLite database. Requires read+write access to the
-data directory (default: ~/.crewship). The server does not need to
-be running.
+	Short: "Host-side recovery on the local database. Use when locked out of the UI.",
+	Long: `Operator commands for the database FILE on this host. Requires
+read+write access to the data directory (default: ~/.crewship, or
+DATABASE_URL). The server does not need to be running.
 
 Use these when a user (typically yourself) cannot log in:
-  crewship admin reset-password --email=admin@example.com
-  crewship admin list-users
-  crewship admin promote --email=admin@example.com --role=OWNER`,
+  crewship admin reset-password --email=admin@example.com --local
+  crewship admin promote --email=admin@example.com --role=OWNER --local
+
+'list-users' is the exception: it reads the server the CLI targets
+(GET /api/v1/admin/users), scoped to the current workspace. Pass
+--local to read the database file on this host instead.
+
+Because "the file I found" and "the server you named" are different
+targets, the local-only subcommands refuse to run when --server /
+CREWSHIP_SERVER / --profile names a server, unless you pass --local.
+Loopback is not an exemption: a server on localhost routinely runs
+with DATABASE_URL pointing somewhere other than the default data dir.`,
 }
 
 var adminResetPasswordCmd = &cobra.Command{
@@ -58,8 +74,19 @@ var adminResetPasswordCmd = &cobra.Command{
 
 var adminListUsersCmd = &cobra.Command{
 	Use:   "list-users",
-	Short: "List every user in the local database",
-	RunE:  runAdminListUsers,
+	Short: "List the users of the workspace on the server the CLI targets",
+	Long: `List users.
+
+By default this reads GET /api/v1/admin/users on the server the CLI is
+pointed at, scoped to the current workspace — which is what an admin
+asking "who is in here?" means, and what this command failed to do for
+its whole life before #2086.
+
+--local reads the database file on this host instead. That path lists
+EVERY user in the instance, across all workspaces, and adds the LOCKED
+and FAILS columns (lockout state is not exposed by the API), so it is
+also the only way to answer --locked-only.`,
+	RunE: runAdminListUsers,
 }
 
 var adminPromoteCmd = &cobra.Command{
@@ -136,6 +163,11 @@ historic sessions; default 50 mirrors the journal_entries default.`,
 }
 
 func init() {
+	// Persistent so every admin subcommand — including ones added later —
+	// inherits the same escape hatch under the same name. A per-command flag
+	// is how three spellings of the same idea appear.
+	adminCmd.PersistentFlags().Bool("local", false, localOnlyFlagHelp)
+
 	adminResetPasswordCmd.Flags().String("email", "", "Email of the user to reset (required)")
 	adminResetPasswordCmd.Flags().String("password", "", "New password (leaks to shell history; prefer --password-stdin in CI)")
 	adminResetPasswordCmd.Flags().Bool("password-stdin", false, "Read new password from stdin (preferred for CI / scripts — avoids argv leak)")
@@ -184,7 +216,13 @@ func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
 		limit = 50
 	}
 
-	db, err := openAdminDB()
+	// Forensic read of user_sessions for an ARBITRARY user. No HTTP route
+	// exists and none is proposed: an endpoint that enumerates any user's
+	// session inventory is a new pre-auth-adjacent surface on the exact table
+	// an attacker wants, and the audience for this command already has shell
+	// access to the host. So it stays local — and refuses when the CLI names a
+	// server, rather than reporting some other instance's sessions.
+	db, err := openGatedLocalDB(cmd, "crewship admin sessions list", "")
 	if err != nil {
 		return err
 	}
@@ -366,7 +404,13 @@ func runAdminInvalidateSessions(cmd *cobra.Command, _ []string) error {
 		return errors.New("--email is required")
 	}
 
-	db, err := openAdminDB()
+	// A write with no route. Revoking every session of an arbitrary user is
+	// the incident-response twin of reset-password and belongs to the same
+	// host-only family; the API's equivalent is the user logging themselves
+	// out, which is not what an operator responding to a leak needs. Gated:
+	// revoking sessions in the wrong database is not something a warning
+	// makes safe.
+	db, err := openGatedLocalDB(cmd, "crewship admin invalidate-sessions", "")
 	if err != nil {
 		return err
 	}
@@ -418,32 +462,13 @@ func runAdminInvalidateSessions(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// openAdminDB opens the SQLite database directly, mirroring the
-// resolution logic of the server (default ~/.crewship/crewship.db,
-// overridable via DATABASE_URL). Does NOT run migrations — admin
-// commands operate on the schema as-is; if the schema is stale,
-// that's the server's job to fix, not ours.
-func openAdminDB() (*database.DB, error) {
-	if dsn := strings.TrimSpace(os.Getenv("DATABASE_URL")); dsn != "" {
-		return database.Open(dsn)
-	}
-	dd, err := database.DefaultDataDir()
-	if err != nil {
-		return nil, fmt.Errorf("resolve data dir: %w", err)
-	}
-	if _, err := os.Stat(dd.DatabasePath()); err != nil {
-		// Only treat ENOENT as "not initialised" — permission denied,
-		// I/O error, or symlink-loop should surface verbatim instead
-		// of being mis-reported as a missing database. Otherwise the
-		// operator chases the wrong fix (`crewship init`) when the
-		// real problem is access rights.
-		if os.IsNotExist(err) {
-			return nil, cli.NotFoundf("database not found at %s — set DATABASE_URL or run `crewship init` first", dd.DatabasePath())
-		}
-		return nil, fmt.Errorf("stat database path %s: %w", dd.DatabasePath(), err)
-	}
-	return database.Open(dd.DatabaseURL())
-}
+// openAdminDB is gone. It resolved ~/.crewship/crewship.db, claimed in its own
+// comment to "mirror the resolution logic of the server", and never looked at
+// --server / CREWSHIP_SERVER / --profile — so on every host where crewshipd
+// runs with its own DATABASE_URL it opened a different database than the one
+// it was being asked about, and said nothing (#2086). Its replacement is
+// resolveLocalDBTarget + requireLocalDB in local_db_target.go, which names the
+// file it picked and refuses when the operator has named a server.
 
 func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	email, _ := cmd.Flags().GetString("email")
@@ -459,7 +484,12 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	db, err := openAdminDB()
+	// The one command whose local-only nature is not a gap to close: routing
+	// a password recovery through the server you are locked out of is
+	// circular, which is why every comparable product ships exactly this.
+	// Gated all the same — writing a new password hash into a database that
+	// belongs to a different instance is a silent, irreversible wrong answer.
+	db, err := openGatedLocalDB(cmd, "crewship admin reset-password", "")
 	if err != nil {
 		return err
 	}
@@ -560,10 +590,101 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// adminListUsersLocalHint is appended to every failure of the server-backed
+// listing, because the command's oldest use — "who exists on this box, so I
+// can reset the right password?" — is the one that has to survive a server
+// that is down or a login that is the thing broken.
+const adminListUsersLocalHint = "\n(if that server is down, or the login is what is broken, and you are on its host: " +
+	"`crewship admin list-users --local` reads the database file directly)"
+
+// adminAPIUser is one row of GET /api/v1/admin/users. Only the fields the
+// table renders are decoded; the endpoint is workspace-scoped by middleware,
+// so `workspace` is the caller's own and `role` is the membership in it.
+type adminAPIUser struct {
+	Email     string  `json:"email"`
+	FullName  *string `json:"full_name"`
+	CreatedAt string  `json:"created_at"`
+	Workspace *struct {
+		Slug string `json:"slug"`
+	} `json:"workspace"`
+	Role *string `json:"role"`
+}
+
+// runAdminListUsers reads the server the CLI targets, unless --local asks for
+// the database file on this host.
+//
+// The two answers are genuinely different questions, and the help says so:
+// the API is workspace-scoped (a workspace admin has no business enumerating
+// every tenant on the instance), while the file is instance-wide and is the
+// only place lockout state lives. What is NOT a difference is which one is
+// authoritative about a server — before #2086 this command answered the
+// server question from the file, and got it wrong wherever the two diverged.
 func runAdminListUsers(cmd *cobra.Command, _ []string) error {
+	if localOnlyFlag(cmd) {
+		return runAdminListUsersLocal(cmd)
+	}
+
+	lockedOnly, _ := cmd.Flags().GetBool("locked-only")
+	if lockedOnly {
+		// Lockout state is not on the API. Filtering client-side on a field we
+		// do not have would print "(no currently locked-out users)" for a
+		// workspace full of them — the same silent-wrong-answer shape this
+		// command is being fixed for.
+		return cli.WithExitCode(errors.New(
+			"--locked-only needs lockout state, which GET /api/v1/admin/users does not return.\n"+
+				"Run it on the host that owns the database:  crewship admin list-users --locked-only --local"),
+			cli.ExitValidation)
+	}
+
+	// Both failure paths carry the same hint. The original audience for this
+	// command is an operator whose server is down or whose login is exactly
+	// what is broken — "not logged in" or a bare connection error, with no
+	// mention of the escape hatch, would be a worse answer than the one this
+	// change removed.
+	client, err := requireAuthAndWorkspace()
+	if err != nil {
+		return fmt.Errorf("%w%s", err, adminListUsersLocalHint)
+	}
+	var users []adminAPIUser
+	if err := getJSON(client, "/api/v1/admin/users", &users); err != nil {
+		return fmt.Errorf("%w%s", err, adminListUsersLocalHint)
+	}
+
+	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "EMAIL\tNAME\tCREATED\tROLE")
+	for _, u := range users {
+		name := "-"
+		if u.FullName != nil && *u.FullName != "" {
+			name = *u.FullName
+		}
+		role := "-"
+		if u.Role != nil && *u.Role != "" {
+			role = *u.Role
+		}
+		if u.Workspace != nil && u.Workspace.Slug != "" {
+			role += "@" + u.Workspace.Slug
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", u.Email, name, shortAdminTime(u.CreatedAt), role)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(users) == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "(no users in this workspace)")
+	}
+	// Say what this view does NOT cover, so nobody reads a clean table as
+	// "nobody is locked out".
+	fmt.Fprintln(cmd.OutOrStdout(),
+		"\n(workspace-scoped; lockout state lives on the database host — `crewship admin list-users --local`)")
+	return nil
+}
+
+// runAdminListUsersLocal is the --local half: every user in the instance, plus
+// the lockout columns, read from the database file on this host.
+func runAdminListUsersLocal(cmd *cobra.Command) error {
 	lockedOnly, _ := cmd.Flags().GetBool("locked-only")
 
-	db, err := openAdminDB()
+	db, err := openGatedLocalDB(cmd, "crewship admin list-users --local", "")
 	if err != nil {
 		return err
 	}
@@ -702,7 +823,14 @@ func runAdminPromote(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("invalid role %q — must be OWNER | ADMIN | MANAGER | MEMBER | VIEWER", role)
 	}
 
-	db, err := openAdminDB()
+	// The server-side equivalent exists — PATCH /api/v1/workspaces/{id}/
+	// members/{memberId}, wrapped by `crewship workspace member role` — and it
+	// is the right tool whenever you can log in. This one is not a duplicate
+	// of it: the API path enforces the role ladder against the CALLER's role,
+	// so it cannot mint the first OWNER, and it needs a session, which is what
+	// the operator running this does not have. Local, and gated.
+	db, err := openGatedLocalDB(cmd, "crewship admin promote",
+		"crewship workspace member role <member-id|user-id> "+role)
 	if err != nil {
 		return err
 	}

@@ -604,6 +604,34 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The `admin` family answered from a different database than the server you
+  pointed it at.** `openAdminDB()` resolved `~/.crewship/crewship.db` and
+  ignored `--server`, `CREWSHIP_SERVER` and `--profile` entirely, while its own
+  comment claimed it "mirrors the resolution logic of the server" — false on
+  every host where crewshipd runs with its own `DATABASE_URL`, which is every
+  development clone (`file:./crewship.db`), every container and every
+  multi-instance box. `crewship admin list-users` against a populated server
+  printed `(no users — run 'crewship seed' …)` and exited **0**.
+  `db migration-status` reported an unrelated schema version under the heading
+  `Database:`. `memory log` / `memory show` audited an audit chain that was not
+  the one under audit — and the two routes that answer those questions,
+  `GET /api/v1/admin/memory/versions` and `…/{id}/content`, had no CLI command
+  at all.
+
+  `list-users`, `memory log` and `memory show` now read the server, through the
+  routes that already existed. Everything with no route — `reset-password`,
+  `promote`, `invalidate-sessions`, `sessions list`, `memory restore`,
+  `db migration-status`, `db repair-ledger`, `db restore-snapshot`,
+  `keeper eval` — names the file it resolved and **refuses to run when a server
+  is named**, unless you pass the new `--local`. A server on `localhost` is not
+  an exemption: the old rule warned only for a *remote* target, on the
+  inference that a server on this host must use this host's data directory, and
+  that inference is exactly the hole this was reproduced through. **Breaking
+  for scripts**: local-only invocations from a shell that exports
+  `CREWSHIP_SERVER` (or a machine that has run `crewship login`) now need
+  `--local`. `db migration-status` and `keeper eval` also honour `DATABASE_URL`
+  for the first time. (#2086)
+
 - **`crewship resume <chat-id>` never worked, and the guard that should have
   caught it could not see two thirds of the CLI.** `resume` asked for two flat
   chat routes — `GET /api/v1/chats/{chatId}` to find the agent that owns a
