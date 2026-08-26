@@ -48,7 +48,13 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	}), "error": str()})
 	backupCreate := object(map[string]any{"path": str(), "size_bytes": integer(), "payload_sha256": str(), "format_version": integer(), "scope": str(), "scope_level": str(), "created_at": str(), "encrypted": boolean()})
 	backupRotate := object(map[string]any{"deleted": array(str()), "dry_run": boolean()})
-	backupRestore := object(map[string]any{"manifest": object(map[string]any{}), "restored_ws": boolean(), "restored_workspace_id": str(), "crews_count": integer(), "crews_restored": integer(), "rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": array(str()), "security_level_clamped": integer(), "security_level_clamps": array(object(map[string]any{}))})
+	backupRestore := object(map[string]any{"manifest": object(map[string]any{}), "restored_ws": boolean(), "restored_workspace_id": str(), "crews_count": integer(), "crews_restored": integer(), "rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": array(str()), "security_level_clamped": integer(), "security_level_clamps": array(object(map[string]any{})),
+		// Schema skew: values discarded because the bundle named a column
+		// this instance's schema does not have (#2034). Spelled out rather
+		// than left as a bare object — the whole point of the field is that
+		// a client can act on WHICH table lost WHAT.
+		"columns_dropped": integer(),
+		"dropped_columns": array(object(map[string]any{"table": str(), "column": str(), "rows": integer()}))})
 	backupSelfTest := object(map[string]any{"ok": boolean(), "crew_id": str(), "crew_slug": str(), "canary_path": str(), "canary_bytes": integer(), "bundle_bytes": integer(), "elapsed_ms": integer(), "error": str()})
 	backupMetrics := object(map[string]any{"created_total": integer(), "created_by_scope": map[string]any{"type": "object", "additionalProperties": integer()}, "failed_total": integer(), "failed_by_reason": map[string]any{"type": "object", "additionalProperties": integer()}, "restored_total": integer(), "size_bytes_total": integer(), "duration_seconds_p50": numberSchema(), "duration_seconds_p95": numberSchema(), "duration_seconds_mean": numberSchema(), "lock_held_seconds_by_workspace": map[string]any{"type": "object", "additionalProperties": integer()}})
 	setup := object(map[string]any{

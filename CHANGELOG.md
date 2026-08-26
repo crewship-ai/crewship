@@ -82,6 +82,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   prefix outside the rule cannot be written again, so a crew holding one has
   to move to a valid prefix the next time it changes.
 
+- **A restore dropped columns your schema does not have, and said nothing.**
+  Applying only the columns the target has is what lets a bundle from a newer
+  Crewship restore onto an older instance, and every migration this project
+  had written was additive, so the dropped column was always one the target
+  genuinely did not need. A migration that *re-keys* a table breaks that
+  assumption: a bundle taken before `issue_counters` moved from `crew_id` to
+  `(workspace_id, prefix)` carries a key column the new table does not have,
+  the statement degenerates to `INSERT OR IGNORE INTO issue_counters
+  (next_number) VALUES (?)`, and the `NOT NULL` violation that follows is
+  swallowed by `OR IGNORE`. No error, no row, and `rows_inserted` counts a
+  row that never landed as nothing at all — indistinguishable from a bundle
+  that never carried it. Restore now counts every discarded value, names each
+  `table.column` and how many rows carried it, and warns; `--dry-run` reports
+  the same skew before anything is written. The drop itself is unchanged —
+  what is gone is the silence, which is what made this shape of loss
+  (#1437, #1444, #1973) discoverable only months later.
+
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and
   `OnboardingHandler.Status` reads a NULL there as "this completion was

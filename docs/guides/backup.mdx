@@ -284,6 +284,26 @@ Three things about that behaviour are deliberate:
 
 `--dry-run` reports the same thing (as *would be clamped*) without writing, which is the cheapest way to check a bundle before a cutover.
 
+### Columns your schema does not have are reported, not just dropped
+
+A restore applies only the columns that exist on this instance. That is what lets a bundle from a newer Crewship land on an older one — the newer columns are skipped and the rest of the row goes in. When it happens, the restore now says so:
+
+```bash
+crewship backup restore old-bundle.tar.zst
+# ✓ Restore complete — workspace=acme crews=4 rows=311 id=ws_abc123
+# ⚠ 1 value(s) in this bundle were dropped because this instance's schema has no
+#   such column: issue_counters.crew_id (1 row(s)).
+#   The bundle was written against a different schema. Rows that needed one of
+#   those columns to satisfy a NOT NULL or a primary key did NOT land, and the
+#   restore could not report them individually.
+```
+
+Why it is worth a warning rather than a shrug: dropping a column is harmless when the row still makes sense without it, and it is *silent data loss* when it does not. If the dropped column was part of the row's primary key or a `NOT NULL`, the insert violates a constraint, `INSERT OR IGNORE` discards the whole row, and nothing errors — the bundle verifies, the restore reports success, and the rows are simply not there. `rows_inserted` cannot show you the difference, because a row that never landed is not counted anywhere.
+
+The case that produces it is a bundle taken before a **non-additive** migration — one that re-keys or renames a table rather than adding to it. Restoring across one is not something the restore path can repair on its own: it does not know what the old column meant. What it can do is refuse to be quiet about it, so you check the tables it names instead of finding out months later.
+
+`--dry-run` reports the same skew (as *would be dropped*) before anything is written.
+
 ## Delete & rotate
 
 ```bash

@@ -369,7 +369,9 @@ Restore a bundle into the current workspace.
   "security_level_clamped": 1,
   "security_level_clamps": [
     { "credential_id": "cred_abc123", "name": "deploy-key", "from": "0", "to": 4 }
-  ]
+  ],
+  "columns_dropped": 0,
+  "dropped_columns": []
 }
 ```
 
@@ -380,6 +382,10 @@ Re-calling WITHOUT `files_only` after a rename does not work and is not the reco
 `crews_count` is what the bundle describes; `crews_restored` is how many crews actually received container state. The two differ whenever a crew carries no filesystem sections or has no provisioned container on this instance. A `files_only` call that would land nothing is **rejected** rather than returning `200` with the bundle's count — an operation reporting success without having written anything is the failure mode this whole area exists to have stopped.
 
 `security_level_clamped` counts the restored credentials whose `security_level` was not one of the defined tiers (L1–L4) and were therefore written at the strictest tier instead — every other writer of that column validates it, so restore does too. `security_level_clamps` is a bounded sample naming the affected credentials and the value the bundle carried; the full list of what happened is also written to the journal as `credential.security_level.clamped`. On a `dry_run` both fields report what *would* be clamped. Re-set each affected credential with `PATCH /api/v1/credentials/{id}` (`security_level`) or `crewship credential update <name> --security-level N`.
+
+`columns_dropped` counts the values this restore discarded because the bundle named a column this instance's schema does not have; `dropped_columns` names them as `{table, column, rows}`, bounded to 20 pairs while the count stays exact. On a `dry_run` both report what *would* be discarded, which is the point at which you can still do something about it.
+
+Dropping unknown columns is deliberate — it is what lets a bundle from a newer Crewship restore into an older instance — but it is not always harmless, and `rows_inserted` cannot show the difference. A row whose remaining columns satisfy the table lands **without** those values. A row that needed a dropped column to satisfy a `NOT NULL` or a primary key does not land **at all**, and `INSERT OR IGNORE` reports neither the violation nor the loss. That is what a non-zero `columns_dropped` is warning about: the bundle was written against a different schema, and this restore is incomplete in a way nothing else in the response records. Check each table named before treating the restore as done. Restoring a bundle taken before a **non-additive** migration (one that re-keys or renames rather than adds) is the case that produces it.
 
 ### Errors
 
