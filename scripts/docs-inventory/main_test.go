@@ -328,6 +328,13 @@ var openapiStatsSentence = regexp.MustCompile(
 // where the paragraph happens to wrap.
 var whitespaceRun = regexp.MustCompile(`\s+`)
 
+// mdxComment matches an MDX expression comment. Those are stripped before the
+// match, because this gate is about what the page PUBLISHES: a sentence that
+// has been commented out renders nothing, and a matcher reading raw source
+// would keep passing on it. The page carries such a comment immediately above
+// the sentence, so this is a live hole rather than a hypothetical one.
+var mdxComment = regexp.MustCompile(`(?s)\{/\*.*?\*/\}`)
+
 // The figures in docs/api-reference/openapi.mdx were 52 operations out of date
 // — "513 of 536 … 184 request bodies" against a spec that had reached 588 —
 // and the generated report sitting in the same tree carried the right ones. Two
@@ -362,9 +369,10 @@ func TestOpenAPIReferenceQuotesTheCurrentSpec(t *testing.T) {
 	// Every occurrence, not the first. FindString would let a page carrying a
 	// correct sentence followed by a stale duplicate pass on the strength of the
 	// correct one — the published figure would still be wrong on screen.
-	found := openapiStatsSentence.FindAllString(whitespaceRun.ReplaceAllString(string(body), " "), -1)
+	published := whitespaceRun.ReplaceAllString(mdxComment.ReplaceAllString(string(body), " "), " ")
+	found := openapiStatsSentence.FindAllString(published, -1)
 	if len(found) == 0 {
-		t.Fatalf("%s no longer carries the schema-quality sentence in the shape this test reads.\nEither restore it or update openapiStatsSentence. It should read:\n\n  %s", openapiReferencePage, want)
+		t.Fatalf("%s no longer carries the schema-quality sentence in the shape this test reads (MDX comments do not count — the page has to publish it).\nEither restore it or update openapiStatsSentence. It should read:\n\n  %s", openapiReferencePage, want)
 	}
 	if len(found) > 1 {
 		t.Errorf("%s states the schema-quality figures %d times; one page should answer this once.\n  %s", openapiReferencePage, len(found), strings.Join(found, "\n  "))
