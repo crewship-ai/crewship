@@ -311,6 +311,17 @@ func runMemoryRestore(cmd *cobra.Command, args []string) error {
 // the server the CLI targets or — with --local — from the database file on
 // this host.
 func memoryVersionEntries(cmd *cobra.Command, workspaceID, path string, limit int) ([]memory.VersionEntry, error) {
+	// Clamp here rather than only inside memory.LogVersions, which is the local
+	// path's own guard. Without it the two halves disagree at the edges — the
+	// help promises "clamped to 1000", and `--limit 0` would return 20 rows
+	// from the file and the entire chain from the server. Same numbers
+	// memory.LogVersions uses, so the local path sees a no-op.
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
 	if localOnlyFlag(cmd) {
 		db, err := openGatedLocalDB(cmd, "crewship memory log --local", "")
 		if err != nil {

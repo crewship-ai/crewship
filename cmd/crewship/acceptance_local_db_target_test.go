@@ -14,6 +14,7 @@ package main
 // database does not merely lack data, it reports someone else's.
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -339,6 +340,58 @@ func newMemoryVersionsStub(t *testing.T) *memoryVersionsStub {
 	}))
 	t.Cleanup(s.srv.Close)
 	return s
+}
+
+// --limit means the same thing on both halves of `memory log`. The local half
+// clamps inside memory.LogVersions ("<=0 → 20, >1000 → 1000"), and the help
+// promises "clamped to 1000"; without the same clamp on the API half, the
+// default-ish `--limit 0` would print 20 rows from the file and the entire
+// chain from the server.
+func TestAcceptance_MemoryLog_LimitClampMatchesTheLocalPath(t *testing.T) {
+	// 25 rows on a single page, all on the same path, no next cursor.
+	rows := make([]string, 0, 25)
+	for i := 0; i < 25; i++ {
+		rows = append(rows, fmt.Sprintf(
+			`{"id":"mv-%02d","path":"crew:c1/x.md","tier":"learned","sha256":"sha%02d",`+
+				`"bytes":1,"written_at":"2026-01-02T03:04:05Z","written_by":"w"}`, i, i))
+	}
+	page := `{"workspace_id":"ws_test","rows":[` + strings.Join(rows, ",") +
+		`],"next_cursor":null,"limit":500,"filters_applied":{}}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/admin/memory/versions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(page))
+	}))
+	t.Cleanup(srv.Close)
+
+	dataDir := localDBFixture(t)
+	cfg := localDBStubConfig(t, srv.URL)
+
+	for _, tc := range []struct {
+		name  string
+		limit string
+		want  int
+	}{
+		{"explicit limit is honoured", "3", 3},
+		{"zero falls back to the documented default, not everything", "0", 20},
+		{"negative is the same fallback", "-5", 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := runLocalDBCLI(t, cfg, dataDir, nil,
+				"memory", "log", "ws_test", "crew:c1/x.md", "--limit", tc.limit, "--format", "text")
+			if err != nil {
+				t.Fatalf("memory log --limit %s: %v\noutput: %s", tc.limit, err, out)
+			}
+			// --format text prints one line per row, ending in the writer column.
+			if got := strings.Count(out, " B  w"); got != tc.want {
+				t.Errorf("printed %d rows, want %d:\n%s", got, tc.want, out)
+			}
+		})
+	}
 }
 
 // `memory log` and `memory show` read the audit chain of the server the CLI
