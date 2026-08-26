@@ -33,19 +33,44 @@ described as text or JSON below keep that output shape.
 
 | Command | Human output | Structured output |
 | --- | --- | --- |
-| `integration list` | Table: `NAME`, `DISPLAY`, `TRANSPORT`, `ENDPOINT`, `ENABLED`, `AGENTS`, `CREWS`. Long endpoints are shortened. | The API list. |
+| `integration list` | Table: `NAME`, `DISPLAY`, `TRANSPORT`, `ENDPOINT`, `ENABLED`, `ACCESS`, `AGENTS`, `CREWS`. Long endpoints are shortened. | The API list. |
 | `integration add` | `Integration created: <name> (<id>)` | No structured output; the success line is always printed. |
-| `integration get <id-or-name>` | Detail fields: ID, name, display, transport, endpoint, command, enabled, icon, created, updated. Empty optional fields show `-`. | The integration object. |
+| `integration get <id-or-name>` | Detail fields: ID, name, display, transport, endpoint, command, enabled, access, icon, created, updated. Empty optional fields show `-`. | The integration object. |
 | `integration remove <id-or-name>` | Confirmation prompt, then `Integration <arg> deleted.` | No structured output. |
 | `integration enable <id-or-name>` | `Integration <arg> enabled.` | No structured output. |
 | `integration disable <id-or-name>` | `Integration <arg> disabled.` | No structured output. |
+| `integration access <id-or-name> <all\|bound-only>` | `Integration <arg> is now available to all agents in the workspace.` or `Integration <arg> is now bound-only: only agents with an explicit binding can use it.` | No structured output. |
 | `integration test <id-or-name>` | The server result is printed as JSON. | The server result object. |
 | `integration crews-overview` | The server result is printed as JSON. | The server result array. |
 
 `remove` accepts `-y`/`--yes` to skip its confirmation prompt. `add` requires
 `--name`; `--display` defaults to the name, and `--transport` defaults to
 `streamable-http`. For `stdio`, `--command` is split into an executable and
-arguments before it is sent to the server; no shell is run.
+arguments before it is sent to the server; no shell is run. `add --access`
+takes `all` (the default) or `bound-only`; anything else is rejected before the
+request is sent.
+
+### Who can use an integration
+
+`ACCESS` is the integration's stored audience, and it is the only thing that
+decides who resolves it:
+
+| Value | Who resolves the integration |
+| --- | --- |
+| `all` (default for new integrations) | every agent in the workspace |
+| `bound-only` | only agents with an explicit binding |
+
+```bash
+crewship integration access github bound-only   # narrow it
+crewship integration bind --agent pepa --server github
+crewship integration access github all          # open it back up
+```
+
+`integration bind` grants **one** agent a credential and a config override on a
+server. It does not change the audience and does not affect any other agent —
+before Crewship 2026.08 it did both, because "available to everyone" was
+inferred from the binding count being zero and evaporated the moment it wasn't.
+Use `integration resolve <agent-slug>` to see what a given agent actually gets.
 
 ### Agent bindings
 
@@ -65,7 +90,7 @@ workspace integration ID.
 
 | Command | Human output | Structured output |
 | --- | --- | --- |
-| `integration crew list <crew-slug>` | Table: `ID`, `NAME`, `DISPLAY`, `TRANSPORT`, `ENDPOINT`, `ENABLED`. Long endpoints are shortened. | The crew integration list. |
+| `integration crew list <crew-slug>` | Table: `ID`, `NAME`, `DISPLAY`, `TRANSPORT`, `ENDPOINT`, `ENABLED`, `ACCESS`. Long endpoints are shortened. | The crew integration list. |
 | `integration crew create <crew-slug>` | `Crew integration created: <name> (<id>)` | No structured output. |
 | `integration crew update <crew-slug> <integration-id>` | `Crew integration <id> updated.` | No structured output. |
 | `integration crew delete <crew-slug> <integration-id>` | Confirmation prompt, then `Crew integration <id> deleted.` | No structured output. |
@@ -73,7 +98,9 @@ workspace integration ID.
 
 `crew delete` accepts `-y`/`--yes`. `crew create` requires `--name`; its
 `--display` and `--transport` defaults match workspace `add`. `--link-workspace-server`
-links the new crew integration to a workspace integration by ID.
+links the new crew integration to a workspace integration by ID. Both
+`crew create` and `crew update` take `--access all|bound-only`, the crew-scoped
+equivalent of `integration access`.
 
 ### Per-tool controls
 

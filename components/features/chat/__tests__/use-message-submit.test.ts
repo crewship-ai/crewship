@@ -182,6 +182,84 @@ describe("useMessageSubmit", () => {
     expect(sendMessage).not.toHaveBeenCalled()
     expect(toastError).not.toHaveBeenCalled()
   })
+
+  // `isStreaming` is the only other guard on this path and it is read BEFORE
+  // the await, from a prop that cannot change until the send it is waiting on
+  // produces a render. So while `ensureSession` is in flight — a POST that
+  // creates the `chats` row on the main chat, a wait for the transcript base
+  // on the onboarding one — every guard in this function is already behind
+  // the user, and a second Send lands on nothing. Both submits await, both
+  // resolve, and the same text goes out twice.
+  //
+  // A ref rather than state, for the reason create-agent-dialog.tsx spells out
+  // at its own latch: state does not flip until the next render, and both
+  // events are dispatched before React gets one.
+  describe("re-entrancy while ensureSession is in flight", () => {
+    /** An ensureSession that hangs until the test lets it finish — the window
+     *  the second click lands in, made long enough to click into. */
+    function heldEnsureSession() {
+      let release!: () => void
+      const held = new Promise<void>((resolve) => { release = resolve })
+      const ensureSession = vi.fn(async () => { await held; return true })
+      return { ensureSession, release }
+    }
+
+    it("sends once when Send is pressed twice inside one create", async () => {
+      const { ensureSession, release } = heldEnsureSession()
+      const { result, sendMessage, onSend, onSent } = setup({ ensureSession })
+
+      // Both submits are dispatched before either resolves — deliberately not
+      // awaited one at a time, because sequentially is exactly the case that
+      // already worked.
+      let submits!: Promise<void[]>
+      await act(async () => {
+        submits = Promise.all([
+          result.current({ text: "hello", files: [] }),
+          result.current({ text: "hello", files: [] }),
+        ])
+        release()
+        await submits
+      })
+
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith("hello")
+      // And nothing downstream ran twice either: no duplicate sidebar row, no
+      // second auto-title PATCH, no second clear of a draft already cleared.
+      expect(onSend).toHaveBeenCalledTimes(1)
+      expect(onSent).toHaveBeenCalledTimes(1)
+      // The second submit is not a failure to report — it is the same send.
+      expect(toastError).not.toHaveBeenCalled()
+    })
+
+    it("lets the next message through once the first has gone", async () => {
+      const { result, sendMessage } = setup()
+
+      await act(async () => { await result.current({ text: "first", files: [] }) })
+      await act(async () => { await result.current({ text: "second", files: [] }) })
+
+      expect(sendMessage).toHaveBeenCalledTimes(2)
+      expect(sendMessage).toHaveBeenNthCalledWith(1, "first")
+      expect(sendMessage).toHaveBeenNthCalledWith(2, "second")
+    })
+
+    it("does not wedge the composer shut when a send throws", async () => {
+      // sendMessage goes through useWebSocket; if it ever throws, the latch
+      // must still clear or the composer is dead for the rest of the session
+      // with nothing on screen to say why. That is a worse failure than the
+      // duplicate it exists to prevent.
+      const sendMessage = vi.fn(() => { throw new Error("socket gone") })
+      const { result } = setup({ sendMessage })
+
+      await act(async () => {
+        await result.current({ text: "boom", files: [] }).catch(() => {})
+      })
+      sendMessage.mockImplementation(() => {})
+      await act(async () => { await result.current({ text: "after", files: [] }) })
+
+      expect(sendMessage).toHaveBeenCalledTimes(2)
+      expect(sendMessage).toHaveBeenLastCalledWith("after")
+    })
+  })
 })
 
 // The bug: the composer uploaded the file, the file landed in the agent's

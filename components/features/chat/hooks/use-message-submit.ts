@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useRef } from "react"
 import { toast } from "sonner"
 import { encodedByteLength, WS_MAX_OUTBOUND_FRAME_BYTES } from "@/hooks/use-websocket"
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input"
@@ -139,7 +139,25 @@ export interface UseMessageSubmitOptions {
  *  would leave a draft that fits and a message that does not.
  *
  *  Nothing is cleared on a refusal — `onSent` is the only thing that clears
- *  the draft or the attachments, and it fires only after the send is away. */
+ *  the draft or the attachments, and it fires only after the send is away.
+ *
+ *  One send at a time. Every guard above is synchronous and runs BEFORE
+ *  `ensureSession` is awaited, so once that await is reached there is nothing
+ *  left in this function for a second Send to hit: both submits pass the same
+ *  checks, both wait on the same promise, and the same message goes out twice.
+ *  The window is as long as whatever `ensureSession` is doing — a POST that
+ *  creates the `chats` row for a draft session (chat-panel.tsx), or a wait for
+ *  the transcript base to land (onboarding-setup-chat.tsx) — which is exactly
+ *  the interval during which pressing Send appears to have done nothing and
+ *  the user presses it again.
+ *
+ *  A ref, not state, for the reason create-agent-dialog.tsx gives at its own
+ *  latch: state does not flip until the next render, and both events are
+ *  dispatched before React commits one. Cleared in a `finally` so a throw
+ *  anywhere — including out of `sendMessage`, which goes through the socket —
+ *  cannot leave the composer permanently shut with nothing on screen to
+ *  explain it. Sequential sends are untouched: by the time the first has
+ *  returned, the latch is open again. */
 export function useMessageSubmit({
   sessionId,
   isStreaming,
@@ -149,63 +167,75 @@ export function useMessageSubmit({
   onSend,
   onSent,
 }: UseMessageSubmitOptions) {
+  // Held across the await, not across a render — see the doc comment above.
+  const submittingRef = useRef(false)
+
   return useCallback(
     async (message: SubmittedMessage) => {
       if (isStreaming) return
-      const text = message.text?.trim() ?? ""
-      const items = attachments ?? []
-      const metadata = message.metadata
+      // A send is already past its guards and waiting on the session. This
+      // one IS that send, pressed twice — not a second message to refuse
+      // out loud, so nothing is said and nothing is cleared.
+      if (submittingRef.current) return
+      submittingRef.current = true
+      try {
+        const text = message.text?.trim() ?? ""
+        const items = attachments ?? []
+        const metadata = message.metadata
 
-      // An upload still in flight has no path yet. Sending now would produce
-      // a message that names some of the files the user attached and stays
-      // silent about the rest — the same defect, one file narrower.
-      if (hasPendingUploads(items)) {
-        toast.error("Still uploading — wait for the attachment to finish, then send.")
-        return
-      }
-
-      // An attachment with no caption is a real message. Requiring text here
-      // is how a photo sent from a phone used to disappear without a trace.
-      if (!text && sendableAttachments(items).length === 0) {
-        // There IS something in the composer, it just cannot go: every
-        // attachment failed to upload. Returning silently is what made a
-        // refused upload look like a working one — the user presses Send on a
-        // composer that visibly holds a file and nothing happens at all.
-        if (items.length > 0) {
-          toast.error("Nothing to send — no attachment uploaded", {
-            description:
-              "Retry the failed attachment, or remove it and write a message instead.",
-          })
+        // An upload still in flight has no path yet. Sending now would produce
+        // a message that names some of the files the user attached and stays
+        // silent about the rest — the same defect, one file narrower.
+        if (hasPendingUploads(items)) {
+          toast.error("Still uploading — wait for the attachment to finish, then send.")
+          return
         }
-        return
-      }
 
-      const content = composeMessageWithAttachments(text, items)
+        // An attachment with no caption is a real message. Requiring text here
+        // is how a photo sent from a phone used to disappear without a trace.
+        if (!text && sendableAttachments(items).length === 0) {
+          // There IS something in the composer, it just cannot go: every
+          // attachment failed to upload. Returning silently is what made a
+          // refused upload look like a working one — the user presses Send on a
+          // composer that visibly holds a file and nothing happens at all.
+          if (items.length > 0) {
+            toast.error("Nothing to send — no attachment uploaded", {
+              description:
+                "Retry the failed attachment, or remove it and write a message instead.",
+            })
+          }
+          return
+        }
 
-      const sizeCheck = checkChatMessageSize(sessionId, content, metadata)
-      if (!sizeCheck.ok) {
-        toast.error(sizeCheck.message)
-        return
-      }
+        const content = composeMessageWithAttachments(text, items)
 
-      // The row has to exist before the message can go anywhere. When it
-      // could not be created, nothing else runs: no send, no `onSend` (which
-      // would put a phantom row in the sidebar and fire an auto-title PATCH at
-      // a chat that isn't there), and no `onSent` — so the draft and the
-      // attachments survive for a retry. The caller has already told the user.
-      if (!(await ensureSession())) return
-      // Called with ONE argument when there is nothing to carry, not with a
-      // trailing `undefined`. A plain composer message, a suggestion chip and
-      // `?prompt=` all come through here, and "the send path is untouched for
-      // them" has to mean the call itself too — `arguments.length` is
-      // observable, to a spy in a test and to any wrapper a caller passes in.
-      if (metadata) {
-        sendMessage(content, metadata)
-      } else {
-        sendMessage(content)
+        const sizeCheck = checkChatMessageSize(sessionId, content, metadata)
+        if (!sizeCheck.ok) {
+          toast.error(sizeCheck.message)
+          return
+        }
+
+        // The row has to exist before the message can go anywhere. When it
+        // could not be created, nothing else runs: no send, no `onSend` (which
+        // would put a phantom row in the sidebar and fire an auto-title PATCH at
+        // a chat that isn't there), and no `onSent` — so the draft and the
+        // attachments survive for a retry. The caller has already told the user.
+        if (!(await ensureSession())) return
+        // Called with ONE argument when there is nothing to carry, not with a
+        // trailing `undefined`. A plain composer message, a suggestion chip and
+        // `?prompt=` all come through here, and "the send path is untouched for
+        // them" has to mean the call itself too — `arguments.length` is
+        // observable, to a spy in a test and to any wrapper a caller passes in.
+        if (metadata) {
+          sendMessage(content, metadata)
+        } else {
+          sendMessage(content)
+        }
+        onSend?.(sessionId, text)
+        onSent()
+      } finally {
+        submittingRef.current = false
       }
-      onSend?.(sessionId, text)
-      onSent()
     },
     [sessionId, isStreaming, ensureSession, sendMessage, attachments, onSend, onSent],
   )

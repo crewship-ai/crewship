@@ -23,6 +23,10 @@ type createCrewIntegrationRequest struct {
 	EnvJSON              *string `json:"env_json"`
 	ConfigJSON           *string `json:"config_json"`
 	Icon                 *string `json:"icon"`
+	// DefaultAccess: "all" (default) or "bound-only". See #2072 — the
+	// audience is stored, not inferred from how many agents happen to be
+	// bound.
+	DefaultAccess *string `json:"default_access"`
 }
 
 // ==========================================
@@ -102,15 +106,25 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 		}
 	}
 
+	access := accessAll
+	if req.DefaultAccess != nil && *req.DefaultAccess != "" {
+		normalized, ok := normalizeDefaultAccess(*req.DefaultAccess)
+		if !ok {
+			replyError(w, http.StatusBadRequest, errDefaultAccessVocabulary)
+			return
+		}
+		access = normalized
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
 
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO crew_mcp_servers (id, crew_id, workspace_mcp_server_id, name, display_name, transport,
-			endpoint, command, args_json, env_json, config_json, icon, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+			endpoint, command, args_json, env_json, config_json, icon, enabled, default_access, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
 		id, crewID, req.WorkspaceMCPServerID, req.Name, req.DisplayName, req.Transport,
-		req.Endpoint, req.Command, req.ArgsJSON, req.EnvJSON, req.ConfigJSON, req.Icon, now, now)
+		req.Endpoint, req.Command, req.ArgsJSON, req.EnvJSON, req.ConfigJSON, req.Icon, access, now, now)
 	if err != nil {
 		h.logger.Error("create crew integration", "error", err)
 		replyError(w, http.StatusConflict, "Integration with this name already exists in this crew")
@@ -126,7 +140,7 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 		Name: req.Name, DisplayName: req.DisplayName, Transport: req.Transport,
 		Endpoint: req.Endpoint, Command: req.Command,
 		ArgsJSON: req.ArgsJSON, EnvJSON: req.EnvJSON, ConfigJSON: req.ConfigJSON,
-		Icon: req.Icon, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		Icon: req.Icon, Enabled: true, DefaultAccess: access, CreatedAt: now, UpdatedAt: now,
 	})
 }
 
@@ -205,6 +219,14 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 		}
 		u.Set("enabled", enabled)
 	}
+	if req.DefaultAccess != nil {
+		normalized, ok := normalizeDefaultAccess(*req.DefaultAccess)
+		if !ok {
+			replyError(w, http.StatusBadRequest, errDefaultAccessVocabulary)
+			return
+		}
+		u.Set("default_access", normalized)
+	}
 
 	// Validate transport/field combination against merged final state
 	if req.Transport != nil {
@@ -249,12 +271,13 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 	var enabled int
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT id, crew_id, workspace_mcp_server_id, name, display_name, transport,
-			endpoint, command, args_json, env_json, config_json, icon, enabled, created_at, updated_at,
+			endpoint, command, args_json, env_json, config_json, icon, enabled, default_access,
+			created_at, updated_at,
 			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = crew_mcp_servers.id AND mcp_server_scope = 'crew')
 		FROM crew_mcp_servers WHERE id = ?`, id).Scan(
 		&s.ID, &s.CrewID, &s.WorkspaceMCPServerID, &s.Name, &s.DisplayName, &s.Transport,
 		&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-		&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt, &s.AgentBindCount); err != nil {
+		&s.Icon, &enabled, &s.DefaultAccess, &s.CreatedAt, &s.UpdatedAt, &s.AgentBindCount); err != nil {
 		replyInternalError(w, h.logger, "fetch updated crew integration", err)
 		return
 	}

@@ -999,20 +999,29 @@ func (h *ComposioHandler) BindAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// (2)+(3) Per app: workspace_mcp_servers row (upsert) then its agent binding.
+	//
+	// These rows are workspace-scoped only because that is where the table
+	// lives; each one is named "composio-<agentID>-<toolkit>" and carries ONE
+	// agent's connected account. default_access is pinned to 'bound-only' so
+	// that stays true: before #2072 the privacy was a side effect of the row
+	// having a binding at all, which meant any change to how bindings were
+	// counted could hand one agent's Gmail to every other agent in the
+	// workspace.
 	grantedNames := make([]string, 0, len(resolved))
 	for _, ra := range resolved {
 		serverID := generateCUID()
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO workspace_mcp_servers (id, workspace_id, name, display_name, transport, endpoint, icon, enabled, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 'streamable-http', ?, 'composio', 1, ?, ?)
+			INSERT INTO workspace_mcp_servers (id, workspace_id, name, display_name, transport, endpoint, icon, enabled, default_access, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'streamable-http', ?, 'composio', 1, 'bound-only', ?, ?)
 			ON CONFLICT(workspace_id, name) DO UPDATE SET
-				display_name = excluded.display_name,
-				transport    = excluded.transport,
-				endpoint     = excluded.endpoint,
-				icon         = excluded.icon,
-				enabled      = 1,
-				deleted_at   = NULL,
-				updated_at   = excluded.updated_at`,
+				display_name   = excluded.display_name,
+				transport      = excluded.transport,
+				endpoint       = excluded.endpoint,
+				icon           = excluded.icon,
+				enabled        = 1,
+				default_access = 'bound-only',
+				deleted_at     = NULL,
+				updated_at     = excluded.updated_at`,
 			serverID, wsID, ra.serverRow, ra.display, ra.endpoint, now, now); err != nil {
 			internalError(w, r, h.logger, "composio: upsert mcp server row", err)
 			return

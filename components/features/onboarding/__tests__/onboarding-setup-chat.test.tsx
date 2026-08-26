@@ -1,7 +1,7 @@
 import { readFileSync } from "fs"
 import { join } from "path"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 
 import { OnboardingSetupChat } from "../onboarding-setup-chat"
 import type { ChatTurn } from "@/hooks/use-chat"
@@ -403,6 +403,148 @@ describe("OnboardingSetupChat — once connected", () => {
     fireEvent.click(screen.getByRole("button", { name: /submit/i }))
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("I need to scrape listings"))
     await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(""))
+  })
+})
+
+// The composer's `ensureSession` on this surface is not a create — the setup
+// session's row was written server-side by startSetupAgentSession before this
+// component existed. The only question it has ever answered is "has the
+// transcript base landed yet", which is a WAIT, and a wait must not be
+// reported as a refusal: `useMessageSubmit` drops the send silently on a
+// `false` (chat-panel's toast is the other caller's), and the attachment
+// upload turns the same `false` into an error chip that says the conversation
+// could not be started. Neither is true while a local GET is still in flight.
+//
+// These tests drive the window directly: history is held open, the user sends
+// inside it, and the send has to survive. That window is also the whole
+// content of the "sends a message when the composer's Send is clicked" flake
+// above — on a loaded runner the click lands before the history effect
+// resolves, so the assertion there is really an assertion about this.
+describe("OnboardingSetupChat — sending inside the history-load window", () => {
+  /** Renders with the transcript GET held open, and hands back the lever
+   *  that lets it finish. `outcome` is what that GET then does — a normal
+   *  200, or the failure the component degrades on rather than deadlocks. */
+  async function renderWithHeldHistory(outcome: "ok" | "error" = "ok") {
+    startSetupAgentSessionMock.mockResolvedValue({
+      ok: true,
+      session: { agentId: "a1", sessionId: "s1", workspaceId: "ws-test" },
+    })
+    const sendMessage = mockUseChat([])
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    apiFetchMock.mockImplementation(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/messages")) {
+        await held
+        if (outcome === "error") throw new Error("network down")
+      }
+      return { ok: true, json: async () => ({ messages: [] }) }
+    })
+
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} />)
+    await waitFor(() => expect(useChatMock).toHaveBeenCalled())
+    // Precondition: the window is genuinely open, not already closed by the
+    // time the composer is on screen — otherwise these tests prove nothing.
+    expect(screen.getByText(/Loading setup chat/i)).toBeTruthy()
+    return { sendMessage, release }
+  }
+
+  function typeAndSend(text: string) {
+    const input = screen.getByRole("textbox")
+    fireEvent.change(input, { target: { value: text } })
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }))
+    return input as HTMLTextAreaElement
+  }
+
+  /** Give the submit chain every chance to reach `sendMessage`, so that a
+   *  "nothing went out" assertion means the latch held it and not merely that
+   *  the assertion ran a microtask too early. */
+  async function letTheSendThroughIfItCan() {
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
+  }
+
+  it("holds a send typed before history has settled, then sends it once it has", async () => {
+    const { sendMessage, release } = await renderWithHeldHistory()
+    const input = typeAndSend("I need to scrape listings")
+
+    // Not yet: useChat buffers every sequenced frame until the transcript
+    // base is in place, so a message that went out now would be answered
+    // into a gate that is still shut.
+    await letTheSendThroughIfItCan()
+    expect(sendMessage).not.toHaveBeenCalled()
+
+    release()
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("I need to scrape listings"))
+    // And it went out as a real send: the draft is consumed, not stranded.
+    await waitFor(() => expect(input.value).toBe(""))
+  })
+
+  // A stream reset shuts useChat's own frame gate (historyLoadedRef) and calls
+  // back for a re-fetch, so the transcript base is missing again — and the
+  // latch has to close again with it. It is closed in `requestHistoryReload`,
+  // synchronously with the reset, rather than left to the reload effect: the
+  // composer is rendered and interactive in between, and a send that slipped
+  // through there would be answered into a gate that is already shut.
+  //
+  // This drives the reload through the exact callback useChat invokes.
+  it("closes again on a stream reset, and holds a send until the reload lands", async () => {
+    startSetupAgentSessionMock.mockResolvedValue({
+      ok: true,
+      session: { agentId: "a1", sessionId: "s1", workspaceId: "ws-test" },
+    })
+    const loadHistory = vi.fn()
+    const sendMessage = mockUseChat([], { loadHistory })
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} />)
+    // The first load must be all the way through — `loadHistory` is the last
+    // thing it does — or what follows would be testing the mount again.
+    await waitFor(() => expect(loadHistory).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByText(/Loading setup chat/i)).toBeNull())
+
+    // The reload's GET, held open — the state the reset puts us back into.
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    apiFetchMock.mockImplementation(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/messages")) await held
+      return { ok: true, json: async () => ({ messages: [] }) }
+    })
+
+    const onStreamReset = useChatMock.mock.calls[0][0].onStreamReset as () => void
+    act(() => { onStreamReset() })
+
+    typeAndSend("try again then")
+    await letTheSendThroughIfItCan()
+    expect(sendMessage).not.toHaveBeenCalled()
+
+    release()
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("try again then"))
+  })
+
+  // The other half of the same trade. Waiting rather than refusing means the
+  // window a click can land in is now a window it SURVIVES — so two clicks in
+  // it would both survive, and the Guide would be told the same thing twice by
+  // someone who thought the first press had not registered. The composer's
+  // submit path latches on the first one (use-message-submit.ts).
+  it("sends once when Send is pressed twice while it waits", async () => {
+    const { sendMessage, release } = await renderWithHeldHistory()
+    typeAndSend("I need to scrape listings")
+    // The draft is still in the box — nothing clears until the send is away —
+    // so the second press is the same message, not a new one.
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }))
+
+    release()
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(sendMessage).toHaveBeenCalledWith("I need to scrape listings")
+  })
+
+  it("still sends it when history could not be loaded at all", async () => {
+    const { sendMessage, release } = await renderWithHeldHistory("error")
+    typeAndSend("I need to scrape listings")
+
+    release()
+    // The failure path opens useChat's gate deliberately (markHistoryUnavailable)
+    // rather than deadlocking live chat behind a missing transcript — so the
+    // waiting send is released by it too, and only OLD messages are missing.
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("I need to scrape listings"))
+    expect(await screen.findByText(/Previous setup messages could not be loaded/i)).toBeTruthy()
   })
 })
 
