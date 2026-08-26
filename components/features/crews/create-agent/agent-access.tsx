@@ -43,7 +43,9 @@ export interface AccessIntegration {
   transport: string
   enabled: boolean
   /** How many agents in the workspace are bound to this server, from
-   *  GET /api/v1/integrations. Drives the opt-in warning below. */
+   *  GET /api/v1/integrations. Informational: it used to decide who could
+   *  use the server, which is what #2072 removed. Nothing on this form
+   *  branches on it. */
   agent_binding_count?: number
 }
 
