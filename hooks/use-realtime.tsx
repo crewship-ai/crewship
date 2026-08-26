@@ -45,6 +45,16 @@ export type RealtimeEventType =
   | "escalation.created"
   | "escalation.resolved"
   | "mission.updated"
+  // An issue changed — `{id, identifier?}`, and `status`/`assignee` where the
+  // handler has one. Nine production sites broadcast it (code links
+  // attach/refresh/delete, the PATCH path, workflow, relations, comments and
+  // the internal agent-facing routes), and it is NOT the same thing as
+  // "mission.updated": that one comes from the mission ENGINE and reports the
+  // run. Both are needed. This one was emitted for a long time with nothing
+  // able to receive it, because the type was missing here and from
+  // VALID_REALTIME_TYPES — so an issue a human had open never learned that an
+  // agent had written to it.
+  | "issue.updated"
   | "task.updated"
   | "peer_conversation.updated"
   | "crew.created"
@@ -133,6 +143,9 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   "assignment.updated", "assignment_queued", "assignment_unqueued",
   "escalation.created",
   "escalation.resolved", "mission.updated", "task.updated",
+  // Without this, handleMessage drops every issue broadcast and the issue
+  // detail can only learn about an agent's write by being reloaded.
+  "issue.updated",
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   // Without this in the allowlist, workspace.deleted is dropped by
   // handleMessage and the redirect-on-delete listener never fires (#890).
