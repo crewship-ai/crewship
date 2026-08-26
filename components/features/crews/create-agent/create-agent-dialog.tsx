@@ -837,6 +837,14 @@ WORK STYLE: …`}
               )}
             </CreateSurfaceGrid>
 
+            {/* These three are columns in the v01 migration with no read and
+                no write site anywhere in the product — see #1781. This note
+                used to end "set on the agent canvas after create", which sent
+                the user to a tab that deliberately does not carry them
+                (agent-canvas-tabs/config-tab.tsx). Whether the columns get
+                enforced or dropped is still open; until it is decided, the
+                only honest thing this door can say is that nothing sets them.
+                Do not name another screen here again. */}
             <p className="text-[10.5px] text-muted-foreground">
               Not editable here:{" "}
               <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.04]">
@@ -850,7 +858,7 @@ WORK STYLE: …`}
               <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.04]">
                 delegation caps
               </code>{" "}
-              — set on the agent canvas after create.
+              — no API exposes these, so they cannot be set anywhere.
             </p>
           </CreateSurfaceDisclosure>
           </div>

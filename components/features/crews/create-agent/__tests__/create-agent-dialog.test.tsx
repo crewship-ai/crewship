@@ -309,6 +309,42 @@ describe("CreateAgentDialog", () => {
     })
   })
 
+  // -- The note under Advanced must not send anyone somewhere ------------
+  //
+  // #1781: this note used to end "— set on the agent canvas after create."
+  // The canvas deliberately does not carry those fields (see the header
+  // comment in agent-canvas-tabs/config-tab.tsx) because no handler exposes
+  // them: they are columns in the v01 migration with zero read and zero
+  // write sites. So the sentence sent a user to a tab that will never grow
+  // the control. Whatever the enforce-or-remove decision turns out to be,
+  // this door must not name another screen as the place to set them.
+  describe("the 'not editable here' note", () => {
+    /** Opens Advanced and returns the paragraph that lists the three names. */
+    async function findNote() {
+      renderDialog()
+      fireEvent.click(await screen.findByRole("button", { name: /advanced/i }))
+      const code = await screen.findByText("temperature")
+      const note = code.closest("p")
+      expect(note).not.toBeNull()
+      return note!
+    }
+
+    it("still names the three settings it cannot offer", async () => {
+      const note = await findNote()
+      expect(note.textContent).toContain("temperature")
+      expect(note.textContent).toContain("max_tokens")
+      expect(note.textContent).toContain("delegation caps")
+    })
+
+    it("does NOT point at the agent canvas — or any other screen", async () => {
+      const note = await findNote()
+      // The canvas is the specific lie; "after create" was the promise that
+      // some later screen carries these. Neither may come back.
+      expect(note.textContent).not.toMatch(/canvas/i)
+      expect(note.textContent).not.toMatch(/after create/i)
+    })
+  })
+
   // -- The crew field is a picker, not a native list ----------------------
   //
   // It was a <select> of every crew in the workspace: one alphabetical
