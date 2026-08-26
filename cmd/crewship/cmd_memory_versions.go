@@ -201,13 +201,15 @@ func memoryVersionNotFound(workspaceID, path, sha string) error {
 // arguments are the audit chain's own coordinates (path + sha), which is what
 // an operator reading `memory log` output actually has in front of them.
 func memoryShowOverAPI(cmd *cobra.Command, workspaceID, path, sha string) error {
-	// requireAuth, not requireAuthAndWorkspace: the workspace is an argument
-	// to this command, so a shell with no `workspace use` is not an error.
-	if err := requireAuth(); err != nil {
+	client, err := memoryVersionsClient()
+	if err != nil {
 		return err
 	}
-	client := newAPIClient()
-	entries, err := memoryVersionsFromAPI(client, workspaceID, path, 0)
+	// matchSha, not "fetch everything then scan": the rows come back
+	// newest-first and this needs exactly one of them, so the walk stops at the
+	// first hit. Without it, resolving a single sha could issue up to
+	// memoryVersionsPageCeiling requests of 500 rows and then give up.
+	entries, err := memoryVersionsFromAPI(client, workspaceID, path, 0, sha)
 	if err != nil {
 		return err
 	}
@@ -260,6 +262,7 @@ func runMemoryRestore(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --tier %q (allowed: agent|crew|workspace|pins|learned)", tierStr)
 	}
 
+	blobRootDefaulted := blobRoot == ""
 	if blobRoot == "" {
 		// Default to the data dir's versions path — mirrors how
 		// the server wires cfg.Storage.MemoryRoot + "/versions".
@@ -272,6 +275,18 @@ func runMemoryRestore(cmd *cobra.Command, args []string) error {
 		} else {
 			return fmt.Errorf("resolve --blob-root: %w", ddErr)
 		}
+	}
+	// The two halves of a restore resolve independently: the audit rows come
+	// from the database the gate resolved (DATABASE_URL first), the bytes come
+	// from a blob root derived from CREWSHIP_DATA_DIR / $HOME, which does not
+	// look at DATABASE_URL at all. That was true before #2086 and is still
+	// true; what is new is a "using the database file at …" note that makes
+	// the pair look coherent. Say when they were resolved from different
+	// places, rather than let the note imply otherwise.
+	if blobRootDefaulted && strings.TrimSpace(os.Getenv("DATABASE_URL")) != "" {
+		fmt.Fprintf(os.Stderr,
+			"note: --blob-root was not given, so blobs come from %s — resolved from CREWSHIP_DATA_DIR/$HOME, NOT from DATABASE_URL\n",
+			blobRoot)
 	}
 
 	// Confine the restore target to the data dir tree (one level above
@@ -337,10 +352,32 @@ func memoryVersionEntries(cmd *cobra.Command, workspaceID, path string, limit in
 		}
 		return entries, nil
 	}
+	client, err := memoryVersionsClient()
+	if err != nil {
+		return nil, err
+	}
+	return memoryVersionsFromAPI(client, workspaceID, path, limit, "")
+}
+
+// memoryVersionsClient builds the API client for `memory log` / `memory show`
+// with its workspace binding cleared.
+//
+// requireAuth, not requireAuthAndWorkspace: the workspace is an ARGUMENT to
+// these two commands, so a shell with no `workspace use` is not an error. That
+// is only half of it, though — cli.Client.NewRequest resolves c.WorkspaceID on
+// every request and returns its error BEFORE it checks whether workspace_id is
+// already in the query, so a stale `workspace:` in cli-config (a slug the
+// target server no longer has) fails the request with "workspace … not found"
+// about a workspace the command was never asked about. Clearing the field
+// short-circuits resolveWorkspaceID entirely, which is correct here precisely
+// because both callers always put workspace_id in the query themselves.
+func memoryVersionsClient() (*cli.Client, error) {
 	if err := requireAuth(); err != nil {
 		return nil, err
 	}
-	return memoryVersionsFromAPI(newAPIClient(), workspaceID, path, limit)
+	client := newAPIClient()
+	client.WorkspaceID = ""
+	return client, nil
 }
 
 // memoryVersionsPageCeiling bounds the pagination walk below. The list
@@ -359,7 +396,11 @@ const memoryVersionsPageCeiling = 200
 // return zero rows for a path whose newest siblings happen to fill page one,
 // which is the same shape of quiet under-reporting that
 // `admin sessions list --active-only` was fixed for.
-func memoryVersionsFromAPI(client *cli.Client, workspaceID, path string, limit int) ([]memory.VersionEntry, error) {
+//
+// matchSha, when non-empty, stops the walk at the first row carrying that
+// digest. `memory show` needs exactly one row and would otherwise page the
+// entire chain to find it.
+func memoryVersionsFromAPI(client *cli.Client, workspaceID, path string, limit int, matchSha string) ([]memory.VersionEntry, error) {
 	type apiRow struct {
 		ID        string `json:"id"`
 		Path      string `json:"path"`
@@ -395,7 +436,13 @@ func memoryVersionsFromAPI(client *cli.Client, workspaceID, path string, limit i
 			out = append(out, memory.VersionEntry{
 				ID: r.ID, Path: r.Path, Tier: r.Tier, Sha256: r.Sha256, Bytes: r.Bytes,
 				WrittenAt: r.WrittenAt, WrittenBy: r.WrittenBy, ParentSha: r.ParentSha,
+				// PayloadRef stays empty on this path: the content endpoint
+				// serves the bytes and the API deliberately does not publish
+				// on-disk blob locations. Only --local can fill it.
 			})
+			if matchSha != "" && r.Sha256 == matchSha {
+				return out, nil
+			}
 			if limit > 0 && len(out) >= limit {
 				return out, nil
 			}

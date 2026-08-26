@@ -29,6 +29,10 @@ func TestExplicitServerTarget(t *testing.T) {
 		cfg        *cli.CLIConfig
 		wantURL    string
 		wantOrigin string
+		// wantNamed is separate from wantURL because they came apart: a
+		// selected-but-serverless profile names a target that resolves to no
+		// URL, and folding "no URL" into "not named" is the bug below.
+		wantNamed bool
 	}{
 		{
 			name: "nothing configured is not a target",
@@ -76,16 +80,34 @@ func TestExplicitServerTarget(t *testing.T) {
 			wantOrigin: `profile "prod"`,
 		},
 		{
-			// Matches cli.EffectiveServer's fail-closed rule: a selected
-			// profile is authoritative even when it carries no server, so the
-			// gate must not fall through to the env or the legacy field.
-			name: "a selected profile with no server names nothing",
+			// A selected profile is authoritative — it does not fall through
+			// to the env or the legacy field, matching cli.EffectiveServer.
+			// But unlike EffectiveServer it must still count as a NAMED
+			// target: EffectiveServer's "" fails closed for dialling, whereas
+			// here the same "" would fail OPEN and let the command answer from
+			// the local file. See the two cases below.
+			name: "a serverless profile is still a named target",
 			env:  "https://env.example",
 			cfg: &cli.CLIConfig{
 				Current: "prod",
 				Servers: map[string]*cli.ServerProfile{"prod": {}},
 				Server:  "https://cfg.example",
 			},
+			wantURL:    "",
+			wantOrigin: `profile "prod"`,
+			wantNamed:  true,
+		},
+		{
+			name: "an undefined profile is a named target too",
+			env:  "https://env.example",
+			cfg: &cli.CLIConfig{
+				Current: "typo",
+				Servers: map[string]*cli.ServerProfile{"prod": {Server: "https://prod.example"}},
+				Server:  "https://cfg.example",
+			},
+			wantURL:    "",
+			wantOrigin: `profile "typo"`,
+			wantNamed:  true,
 		},
 	}
 
@@ -96,20 +118,23 @@ func TestExplicitServerTarget(t *testing.T) {
 			flagServer, flagProfile, cliCfg = tt.flagServer, "", tt.cfg
 
 			got, named := explicitServerTarget()
-			if tt.wantURL == "" {
-				if named {
-					t.Fatalf("named a server nobody configured: %+v", got)
-				}
-				return
+			wantNamed := tt.wantNamed || tt.wantURL != ""
+			if named != wantNamed {
+				t.Fatalf("named = %v, want %v (target %+v)", named, wantNamed, got)
 			}
-			if !named {
-				t.Fatalf("did not see the target %q", tt.wantURL)
+			if !wantNamed {
+				return
 			}
 			if got.URL != tt.wantURL {
 				t.Errorf("URL = %q, want %q", got.URL, tt.wantURL)
 			}
 			if !strings.Contains(got.Origin, tt.wantOrigin) {
 				t.Errorf("Origin = %q, want it to name %q", got.Origin, tt.wantOrigin)
+			}
+			// Whatever the shape, the description has to be readable — an
+			// empty URL must not render as "targets  ()".
+			if d := got.describe(); strings.TrimSpace(d) == "" || strings.Contains(d, "()") {
+				t.Errorf("describe() = %q, which is not a sentence a human can act on", d)
 			}
 		})
 	}
@@ -305,6 +330,58 @@ func TestLocalDBGate_EveryGatedCommandCanOptIn(t *testing.T) {
 	if seen < 9 {
 		t.Errorf("found only %d gate call sites; the matcher has probably stopped seeing them", seen)
 	}
+}
+
+// …and the converse: no command may ADVERTISE --local unless it honours it.
+//
+// The first draft declared the flag persistently on `adminCmd`, which also
+// hosts eight HTTP-only verbs (stats, health, gdpr, prune-legacy, reencrypt,
+// reap-orphan-containers, ratelimits, memory-config). `crewship admin stats
+// --help` listed "--local  Act on the database FILE on this host", the flag was
+// accepted, and the command went to the server anyway. Advertising a switch
+// that does nothing is the same category of lie this whole PR is about, and it
+// is exactly what cmd_memory_versions.go's own comment argues against.
+func TestLocalDBGate_NoCommandAdvertisesALocalFlagItIgnores(t *testing.T) {
+	gated := map[string]bool{}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, m := range localDBGateCallSite.FindAllStringSubmatch(string(src), -1) {
+			var args []string
+			for _, tok := range strings.Fields(m[1])[1:] {
+				if !strings.HasPrefix(tok, "-") {
+					args = append(args, tok)
+				}
+			}
+			if cmd, _, err := rootCmd.Find(args); err == nil && cmd != nil {
+				gated[cmd.CommandPath()] = true
+			}
+		}
+	}
+
+	var walk func(*cobra.Command)
+	walk = func(c *cobra.Command) {
+		// Runnable commands only: a group like `admin` or `db` carries the
+		// persistent declaration but never executes anything itself.
+		if c.Runnable() && (c.Flags().Lookup("local") != nil || hasInheritedLocalFlag(c)) && !gated[c.CommandPath()] {
+			t.Errorf("`%s` advertises --local but no gate call site names it — "+
+				"the flag will be accepted and silently ignored", c.CommandPath())
+		}
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+	}
+	walk(rootCmd)
 }
 
 // hasInheritedLocalFlag walks the parents for a persistent --local, which is

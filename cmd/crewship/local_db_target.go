@@ -43,9 +43,21 @@ import (
 
 // serverTarget is a server the operator has explicitly named, and where they
 // named it. The origin goes into the refusal so they know which knob to turn.
+//
+// URL may be empty: a selected-but-undefined profile names a target that
+// resolves to no address. That is still a named target — see
+// explicitServerTarget.
 type serverTarget struct {
 	URL    string
 	Origin string
+}
+
+// describe renders the target for a message to a human, in both of its shapes.
+func (t serverTarget) describe() string {
+	if strings.TrimSpace(t.URL) == "" {
+		return fmt.Sprintf("%s, which resolves to no server URL at all", t.Origin)
+	}
+	return fmt.Sprintf("%s (%s)", t.URL, t.Origin)
 }
 
 // explicitServerTarget reports the server the operator actually named, if any.
@@ -59,14 +71,26 @@ func explicitServerTarget() (serverTarget, bool) {
 	if s := strings.TrimSpace(flagServer); s != "" {
 		return serverTarget{URL: s, Origin: "--server"}, true
 	}
-	// A selected profile is authoritative, exactly as in EffectiveServer: a
-	// profile with no server does NOT fall through to the env or the legacy
-	// top-level field, so neither does the gate.
+	// A selected profile is authoritative, exactly as in EffectiveServer: it
+	// does NOT fall through to the env or the legacy top-level field.
+	//
+	// Where this parts company with EffectiveServer is the profile that is
+	// selected but carries no server — a typo'd --profile / CREWSHIP_PROFILE,
+	// or `current` pointing at a removed entry. EffectiveServer returns "" and
+	// calls that failing closed, which it is *for dialling*: an empty base URL
+	// cannot reach anything. Here the same "" would mean "no server was
+	// named", and the gate would wave the command through to the local file —
+	// failing OPEN, and restoring the exact pre-#2086 behaviour for anyone who
+	// mistypes a profile name, including for `admin reset-password` and
+	// `db restore-snapshot`. The same value, opposite safety polarity.
+	//
+	// So: a selected profile is a named target whether or not it resolves.
 	if name, p := cliCfg.ActiveProfile(flagProfile); name != "" {
-		if p != nil && strings.TrimSpace(p.Server) != "" {
-			return serverTarget{URL: p.Server, Origin: fmt.Sprintf("profile %q", name)}, true
+		url := ""
+		if p != nil {
+			url = strings.TrimSpace(p.Server)
 		}
-		return serverTarget{}, false
+		return serverTarget{URL: url, Origin: fmt.Sprintf("profile %q", name)}, true
 	}
 	if v := strings.TrimSpace(os.Getenv("CREWSHIP_SERVER")); v != "" {
 		return serverTarget{URL: v, Origin: "CREWSHIP_SERVER"}, true
@@ -176,20 +200,46 @@ func requireLocalDB(cmd *cobra.Command, what, alternative string) (localDBTarget
 
 	if localOnlyFlag(cmd) {
 		fmt.Fprintf(os.Stderr,
-			"note: --local: using the database file at %s (%s), NOT the server at %s\n",
-			target.Path, target.Origin, srv.URL)
+			"note: --local: using the database file at %s (%s), NOT %s\n",
+			target.Path, target.Origin, srv.describe())
 		return target, nil
 	}
 
 	msg := fmt.Sprintf(
-		"%s can only work on the database FILE on this host — %s (%s) — but your CLI targets %s (%s).\n"+
+		"%s can only work on the database FILE on this host — %s (%s) — but your CLI targets %s.\n"+
 			"Those are not the same thing, and this command cannot tell whether that server uses that file.\n\n"+
 			"  • to act on the local file, say so:  add --local\n",
-		what, target.Path, target.Origin, srv.URL, srv.Origin)
+		what, target.Path, target.Origin, srv.describe())
 	if alternative != "" {
 		msg += "  • to act on the server:              " + alternative + "\n"
 	}
 	return localDBTarget{}, cli.WithExitCode(fmt.Errorf("%s", msg), cli.ExitValidation)
+}
+
+// mustExist reports whether the resolved database file is actually there.
+//
+// The stat is not decoration. resolveLocalDBTarget uses ResolveDefaultDataDir,
+// which — unlike the DefaultDataDir it replaced — creates nothing, so on a box
+// that has never run crewshipd the path it returns may sit inside a directory
+// that does not exist. Handing that to sql.Open produces
+// "unable to open database file (14)" from the driver, where the callers have
+// a much better message ready and are precisely the commands an operator runs
+// when the box is broken.
+//
+// Only ENOENT means "not initialised" — permission denied, an I/O error or a
+// symlink loop must surface verbatim instead of being mis-reported as a
+// missing database, or the operator chases `crewship init` when the real
+// problem is access rights.
+func (t localDBTarget) mustExist(notFound string) error {
+	_, err := os.Stat(t.Path)
+	switch {
+	case err == nil:
+		return nil
+	case os.IsNotExist(err):
+		return cli.NotFoundf("%s", notFound)
+	default:
+		return fmt.Errorf("stat database path %s: %w", t.Path, err)
+	}
 }
 
 // openGatedLocalDB is requireLocalDB plus the open, for the commands that want a
@@ -199,15 +249,9 @@ func openGatedLocalDB(cmd *cobra.Command, what, alternative string) (*database.D
 	if err != nil {
 		return nil, err
 	}
-	// Only ENOENT means "not initialised" — permission denied, an I/O error or
-	// a symlink loop must surface verbatim instead of being mis-reported as a
-	// missing database, or the operator chases `crewship init` when the real
-	// problem is access rights.
-	if _, statErr := os.Stat(target.Path); statErr != nil {
-		if os.IsNotExist(statErr) {
-			return nil, cli.NotFoundf("database not found at %s — set DATABASE_URL or run `crewship init` first", target.Path)
-		}
-		return nil, fmt.Errorf("stat database path %s: %w", target.Path, statErr)
+	if err := target.mustExist(fmt.Sprintf(
+		"database not found at %s — set DATABASE_URL or run `crewship init` first", target.Path)); err != nil {
+		return nil, err
 	}
 	return database.Open(target.DSN)
 }

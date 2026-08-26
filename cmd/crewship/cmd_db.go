@@ -255,8 +255,11 @@ server tears the file.`,
 }
 
 func init() {
-	// Persistent: every `db` subcommand is local-only by construction, so the
-	// flag belongs to the group rather than being re-declared four times.
+	// Persistent here and nowhere else: every `db` subcommand — restore-snapshot,
+	// migration-status, repair-ledger — is local-only by construction, so an
+	// inherited flag is advertised on exactly the commands that honour it.
+	// `admin` cannot do this; it mixes local-only and HTTP-only verbs.
+	// localdb_flag_guard_test.go holds both halves of that rule.
 	dbCmd.PersistentFlags().Bool("local", false, localOnlyFlagHelp)
 
 	restoreSnapshotCmd.Flags().BoolVar(&restoreSnapshotList, "list", false, "list available snapshots and exit")

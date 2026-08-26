@@ -163,10 +163,20 @@ historic sessions; default 50 mirrors the journal_entries default.`,
 }
 
 func init() {
-	// Persistent so every admin subcommand — including ones added later —
-	// inherits the same escape hatch under the same name. A per-command flag
-	// is how three spellings of the same idea appear.
-	adminCmd.PersistentFlags().Bool("local", false, localOnlyFlagHelp)
+	// Per-command, NOT persistent on adminCmd. Persistent looked tidier and was
+	// wrong: `admin` also hosts eight HTTP-only verbs — stats, health, gdpr,
+	// prune-legacy, reencrypt, reap-orphan-containers, ratelimits,
+	// memory-config — and an inherited --local would have appeared in all their
+	// help output, been accepted, and been ignored. That is the same
+	// advertise-then-ignore shape this PR exists to remove, and it is the
+	// reason cmd_memory_versions.go and cmd_keeper_eval.go declare theirs
+	// per-command too. localdb_flag_guard sits over both halves.
+	for _, c := range []*cobra.Command{
+		adminResetPasswordCmd, adminListUsersCmd, adminPromoteCmd,
+		adminInvalidateSessionsCmd, adminSessionsListCmd,
+	} {
+		c.Flags().Bool("local", false, localOnlyFlagHelp)
+	}
 
 	adminResetPasswordCmd.Flags().String("email", "", "Email of the user to reset (required)")
 	adminResetPasswordCmd.Flags().String("password", "", "New password (leaks to shell history; prefer --password-stdin in CI)")

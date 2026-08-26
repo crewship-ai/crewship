@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/testutil"
@@ -91,8 +92,12 @@ func runLocalDBCLI(t *testing.T, cfgPath, dataDir string, extraEnv []string, arg
 
 // adminUsersStub answers GET /api/v1/admin/users with a user that exists only
 // on the server, and records whether it was ever asked.
+// called is atomic: it is written on the httptest handler's goroutine and read
+// on the test's, and `cmd/crewship` has a dedicated -race job in CI. A plain
+// bool here is a WARNING: DATA RACE inside a test asserting about somebody
+// else's bug.
 type adminUsersStub struct {
-	called bool
+	called atomic.Bool
 	srv    *httptest.Server
 }
 
@@ -103,7 +108,7 @@ func newAdminUsersStub(t *testing.T) *adminUsersStub {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/v1/admin/users":
-			s.called = true
+			s.called.Store(true)
 			_, _ = w.Write([]byte(`[{"id":"u-server","email":"live@server.invalid",` +
 				`"full_name":"Live Server Row","avatar_url":null,"created_at":"2026-01-02T03:04:05Z",` +
 				`"workspace":{"id":"ws_test","name":"Test","slug":"test"},"role":"OWNER"}]`))
@@ -128,7 +133,7 @@ func TestAcceptance_AdminListUsers_ReadsTheServerNotTheLocalFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list-users: %v\noutput: %s", err, out)
 	}
-	if !stub.called {
+	if !stub.called.Load() {
 		t.Error("GET /api/v1/admin/users was never called — the command answered without contacting the server it was pointed at")
 	}
 	if !strings.Contains(out, "live@server.invalid") {
@@ -153,7 +158,7 @@ func TestAcceptance_AdminListUsers_LocalFlagReadsTheFile(t *testing.T) {
 	if !strings.Contains(out, "stale@localfile.invalid") {
 		t.Errorf("--local did not read the local database:\n%s", out)
 	}
-	if stub.called {
+	if stub.called.Load() {
 		t.Error("--local still contacted the server")
 	}
 	if !strings.Contains(out, filepath.Join(dataDir, "crewship.db")) {
@@ -292,6 +297,52 @@ func TestAcceptance_LocalDBGate_HonoursCrewshipServerEnv(t *testing.T) {
 	}
 }
 
+// A typo'd profile must not disarm the gate.
+//
+// `cli.EffectiveServer` returns "" for a profile that is selected but has no
+// server entry, and calls that failing closed — which it is, for dialling: an
+// empty base URL reaches nothing. Reused verbatim in this gate, the same ""
+// means "no server was named" and the command proceeds against the local file.
+// Failing OPEN. So one mistyped CREWSHIP_PROFILE restored the entire
+// pre-#2086 behaviour, for `admin reset-password` and `db restore-snapshot`
+// as much as for the read-only commands.
+func TestAcceptance_LocalDBGate_TypodProfileStillArmsTheGate(t *testing.T) {
+	dataDir := localDBFixture(t)
+	cfgPath := filepath.Join(t.TempDir(), "cli-config.yaml")
+	cfg := "server: https://legacy.example\ntoken: fake-token\nformat: table\n" +
+		"servers:\n  prod:\n    server: https://prod.example\n    token: t\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		profile string
+	}{
+		{"profile that does not exist", "typo"},
+		{"profile that exists but names no server", "serverless"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := runLocalDBCLI(t, cfgPath, dataDir,
+				[]string{
+					"CREWSHIP_PROFILE=" + tc.profile,
+					"CREWSHIP_SERVER=https://env.example",
+				},
+				"db", "migration-status")
+			if err == nil {
+				t.Fatalf("a %s disarmed the gate and the command answered from the local file:\n%s",
+					tc.name, out)
+			}
+			if !strings.Contains(out, tc.profile) {
+				t.Errorf("refusal does not name the profile that armed it:\n%s", out)
+			}
+			if !strings.Contains(out, "--local") {
+				t.Errorf("refusal does not name the escape hatch:\n%s", out)
+			}
+		})
+	}
+}
+
 // With no server named anywhere, a local-only command is unambiguous and must
 // still run — the recovery path on a host whose server is down.
 func TestAcceptance_LocalDBGate_RunsWhenNoServerIsNamed(t *testing.T) {
@@ -311,9 +362,10 @@ func TestAcceptance_LocalDBGate_RunsWhenNoServerIsNamed(t *testing.T) {
 }
 
 // memoryVersionsStub answers the two admin memory-versions routes.
+// Atomic for the same reason as adminUsersStub above.
 type memoryVersionsStub struct {
-	listCalled    bool
-	contentCalled bool
+	listCalled    atomic.Bool
+	contentCalled atomic.Bool
 	srv           *httptest.Server
 }
 
@@ -323,14 +375,14 @@ func newMemoryVersionsStub(t *testing.T) *memoryVersionsStub {
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/admin/memory/versions":
-			s.listCalled = true
+			s.listCalled.Store(true)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"workspace_id":"ws_test","rows":[` +
 				`{"id":"mv-server","path":"crew:c1/learned-x.md","tier":"learned",` +
 				`"sha256":"aaaabbbbcccc","bytes":42,"written_at":"2026-01-02T03:04:05Z",` +
 				`"written_by":"audit-watcher"}],"next_cursor":null,"limit":50,"filters_applied":{}}`))
 		case r.URL.Path == "/api/v1/admin/memory/versions/mv-server/content":
-			s.contentCalled = true
+			s.contentCalled.Store(true)
 			w.Header().Set("Content-Type", "text/markdown")
 			_, _ = w.Write([]byte("content from the server\n"))
 		default:
@@ -406,7 +458,7 @@ func TestAcceptance_MemoryVersions_ReadTheServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("memory log: %v\noutput: %s", err, out)
 	}
-	if !stub.listCalled {
+	if !stub.listCalled.Load() {
 		t.Error("GET /api/v1/admin/memory/versions was never called")
 	}
 	if !strings.Contains(out, "aaaabbbbcccc") {
@@ -418,7 +470,7 @@ func TestAcceptance_MemoryVersions_ReadTheServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("memory show: %v\noutput: %s", err, out)
 	}
-	if !stub.contentCalled {
+	if !stub.contentCalled.Load() {
 		t.Error("GET /api/v1/admin/memory/versions/{id}/content was never called")
 	}
 	if !strings.Contains(out, "content from the server") {
