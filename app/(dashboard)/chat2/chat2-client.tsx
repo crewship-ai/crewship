@@ -101,6 +101,8 @@ export function Chat2Client() {
         ? {
             id: agent.id,
             name: agent.name,
+            slug: agent.slug,
+            crewId: agent.crew_id ?? null,
             avatarSeed: agent.avatar_seed ?? agent.slug,
             avatarStyle: agent.avatar_style ?? null,
             avatarUrl: agent.avatar_url ?? null,
@@ -110,11 +112,23 @@ export function Chat2Client() {
   )
 
   return (
-    // The pane is on this element and this element does not scroll — the
-    // scroll containers are inside it. On a scroll container the gradient
-    // stretches to the full document height and the top highlight, which is
-    // the entire point of the treatment, leaves the screen.
-    <div className="surface-pane flex h-full min-h-0 overflow-hidden">
+    /**
+     * Two depths, and only two.
+     *
+     * The first cut put `.surface-pane` on this wrapper and let the sidebar
+     * sit on it transparently. That is what a pane wants — except it made the
+     * column and the conversation the same surface, so the boundary between
+     * "where I navigate" and "what I am reading" was carried by a 1px border
+     * and nothing else. The two halves ran together.
+     *
+     * So: the shell is GROUND (`bg-background`, what the app sidebar and the
+     * toolbar already sit on, and what classic /chat's column sits on), and
+     * the pane is only on the conversation. The centre is then genuinely
+     * raised — lit along its top edge, falling away at its foot — against a
+     * column that reads as the surround. That is also the honest depth
+     * order: you navigate on the ground and read on the thing in front of you.
+     */
+    <div className="flex h-full min-h-0 overflow-hidden bg-background">
       <ConversationsSidebar
         agents={tree.agents}
         threadsByAgent={tree.threadsByAgent}
@@ -122,10 +136,13 @@ export function Chat2Client() {
         activeThreadId={sessionId}
         onSelectThread={selectThread}
         onStartConversation={startConversation}
-        className="bg-transparent"
       />
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+      {/* The pane is on this element and this element does not scroll — the
+          scroll containers are inside it. On a scroll container the gradient
+          stretches to the full document height and the top highlight, which
+          is the entire point of the treatment, leaves the screen. */}
+      <div className="surface-pane min-h-0 min-w-0 flex-1 overflow-hidden">
         {agent && sessionId ? (
           <ChatSkinProvider variant="v2" agent={skinAgent}>
             <ChatPanel

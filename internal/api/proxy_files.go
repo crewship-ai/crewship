@@ -69,6 +69,62 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
+// forwardFileDownloadError maps crewshipd's download status onto the public
+// API's, preserving the distinction between absent and unreadable. Anything
+// unrecognised stays 404, which is the historical answer.
+func forwardFileDownloadError(w http.ResponseWriter, status int) {
+	switch status {
+	case http.StatusForbidden:
+		replyError(w, http.StatusForbidden, "File is not readable by the server")
+	case http.StatusConflict:
+		replyError(w, http.StatusConflict,
+			"File exists but could not be read — the crew container is not running")
+	default:
+		replyError(w, http.StatusNotFound, "File not found")
+	}
+}
+
+// resolveAgentFilePath turns whatever the FE sent into a full storage key, or
+// says why it may not.
+//
+// Three shapes arrive here, and all three are legitimate:
+//
+//	"workspace/x.toml"                     relative — gets this agent's prefix
+//	"<crewID>/<slug>/workspace/x.toml"     this agent's own namespace
+//	"<crewID>/report.md"                   the CREW ROOT
+//
+// The third is the one that used to be refused, and refusing it was a
+// straightforward contradiction with the listing: handleFileList, when given
+// an agent_slug, deliberately merges the crew-root files into that agent's
+// result — its own comment says "files the agent saved to /output/ instead of
+// /output/<agent-slug>/". So the list handed out `<crewID>/report.md` and the
+// download answered 403 "path not scoped to this agent" for it. That is not a
+// rare corner: an agent told to write a report puts it in the working
+// directory, which IS the crew root, so it was the common case.
+//
+// What the 403 legitimately guards is a SIBLING agent's namespace —
+// "<crewID>/<other-slug>/notes.md" — and that is still refused. Crew root is
+// shared by construction: every agent in the crew writes there and every
+// agent's listing shows it, so an agent of this crew reading it leaks nothing
+// the list did not already offer. Cross-CREW is unreachable either way; crewID
+// comes from this agent's own row.
+func resolveAgentFilePath(crewID, slug, cleanPath string) (string, bool) {
+	prefix := crewID + "/" + slug + "/"
+	if strings.HasPrefix(cleanPath, prefix) {
+		return cleanPath, true
+	}
+	if rest, isCrewScoped := strings.CutPrefix(cleanPath, crewID+"/"); isCrewScoped {
+		// A crew-root FILE has no further separator. Anything with one names a
+		// directory under the crew — a sibling agent's namespace — and is not
+		// this agent's to touch.
+		if rest != "" && !strings.Contains(rest, "/") {
+			return cleanPath, true
+		}
+		return "", false
+	}
+	return prefix + cleanPath, true
+}
+
 // AgentFileDownload streams a file from an agent's working directory.
 //
 // The FE may send EITHER a relative path (e.g. "workspace/demo/config/x.toml")
@@ -109,17 +165,10 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Resolve to a full storage path scoped under this agent.
-	prefix := crewID.String + "/" + slug.String + "/"
-	var fullPath string
-	if strings.HasPrefix(cleanPath, prefix) {
-		fullPath = cleanPath
-	} else if strings.HasPrefix(cleanPath, crewID.String+"/") {
-		// Path is in the crew namespace but not under this agent — reject.
+	fullPath, allowed := resolveAgentFilePath(crewID.String, slug.String, cleanPath)
+	if !allowed {
 		replyError(w, http.StatusForbidden, "path not scoped to this agent")
 		return
-	} else {
-		fullPath = prefix + cleanPath
 	}
 
 	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", url.PathEscape(crewID.String), url.QueryEscape(fullPath))
@@ -132,7 +181,14 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		replyError(w, http.StatusNotFound, "File not found")
+		// Do not flatten every non-200 into 404.
+		//
+		// crewshipd distinguishes "the bytes are not there" from "the bytes
+		// are there and neither the host nor the container could hand them
+		// over" (routes_files.go). Collapsing the second into the first is
+		// what made the agent-file defect unreadable from the outside: the
+		// panel listed a tree and said every entry in it was missing.
+		forwardFileDownloadError(w, resp.StatusCode)
 		return
 	}
 
@@ -178,18 +234,12 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Match the path-resolution rules used by AgentFileDownload: accept
-	// either relative ("workspace/x.toml") or full storage paths
-	// ("<crewID>/<slug>/workspace/x.toml"). Cross-agent writes get a 403.
-	prefix := crewID.String + "/" + slug.String + "/"
-	var fullPath string
-	if strings.HasPrefix(cleanPath, prefix) {
-		fullPath = cleanPath
-	} else if strings.HasPrefix(cleanPath, crewID.String+"/") {
+	// Same resolver as the download, so a file the editor could OPEN is never
+	// one it then refuses to SAVE.
+	fullPath, allowed := resolveAgentFilePath(crewID.String, slug.String, cleanPath)
+	if !allowed {
 		replyError(w, http.StatusForbidden, "path not scoped to this agent")
 		return
-	} else {
-		fullPath = prefix + cleanPath
 	}
 
 	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", url.PathEscape(crewID.String), url.QueryEscape(fullPath))
@@ -291,7 +341,14 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		replyError(w, http.StatusNotFound, "File not found")
+		// Do not flatten every non-200 into 404.
+		//
+		// crewshipd distinguishes "the bytes are not there" from "the bytes
+		// are there and neither the host nor the container could hand them
+		// over" (routes_files.go). Collapsing the second into the first is
+		// what made the agent-file defect unreadable from the outside: the
+		// panel listed a tree and said every entry in it was missing.
+		forwardFileDownloadError(w, resp.StatusCode)
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")

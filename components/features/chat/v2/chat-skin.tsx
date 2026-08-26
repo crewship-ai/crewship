@@ -26,6 +26,11 @@ import { createContext, useContext, useMemo, type ReactNode } from "react"
 export interface ChatSkinAgent {
   id: string
   name: string
+  /** Canonical slug. With crewId it is what turns a storage key into a path
+   *  relative to the agent, which is the only form the file classifier can
+   *  read (see v2/file-scope.ts). */
+  slug?: string | null
+  crewId?: string | null
   /** DiceBear seed. Falls back to the agent id, matching every other caller. */
   avatarSeed?: string | null
   avatarStyle?: string | null

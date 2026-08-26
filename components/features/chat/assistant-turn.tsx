@@ -707,6 +707,7 @@ function TurnFeedbackActions({
   fullText: string
   chatId?: string
 }) {
+  const isV2 = useChatSkin().variant === "v2"
   // Bind the feedback store to the authenticated user. Without this,
   // signing out and back in as a different account on the same browser
   // would rehydrate the previous user's votes — a privacy leak the
@@ -747,7 +748,20 @@ function TurnFeedbackActions({
   }
 
   return (
-    <MessageActions>
+    <MessageActions
+      className={cn(
+        // Same treatment as the cost line, for the same reason: four controls
+        // under every single reply is four controls the eye has to step over
+        // to reach the next thing anybody said. They appear on the turn the
+        // reader is actually looking at.
+        //
+        // `focus-within` is not optional here — these are the only way to
+        // register feedback, and hover-only would put them out of reach of a
+        // keyboard entirely.
+        isV2 &&
+          "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
+      )}
+    >
       <MessageAction tooltip="Copy" onClick={() => onCopy(fullText)}>
         <Copy className="h-3.5 w-3.5" />
       </MessageAction>
@@ -771,7 +785,22 @@ function TurnFeedbackActions({
           className={"h-3.5 w-3.5 " + (submitted.not_helpful ? "text-destructive" : "")}
         />
       </MessageAction>
-      <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
+      {/* No emoji picker in v2.
+       *
+       * Reactions persist — `message_reactions`, keyed per (chat, message,
+       * emoji, user) — and they render back. But an emoji is addressed to
+       * somebody, and in a one-person chat there is nobody in the room to
+       * read it: nothing downstream consumes the table, and the only reader
+       * is the person who clicked. The thumbs stay because they are a
+       * different thing wearing a similar shape — `message_feedback` carries
+       * a trace_id back to the run that produced the answer, and
+       * `crewship feedback` can read it.
+       *
+       * When more than one person is in a thread this comes back, because
+       * then the emoji finally has an audience. */}
+      {!isV2 && (
+        <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
+      )}
     </MessageActions>
   )
 }

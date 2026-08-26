@@ -47,6 +47,8 @@ import { ConversationSearch } from "./search/conversation-search"
 import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
 import type { FileEntry } from "./chat-tree-row"
+import { useChatSkin } from "./v2/chat-skin"
+import { useComposerStore, messageOwnAttachments } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch } from "@/lib/api-fetch"
 import { resolveWsBase } from "@/lib/server-base"
@@ -130,6 +132,15 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
+
+  // Does the composer currently hold a file the user has not sent yet?
+  //
+  // `messageOwnAttachments` rather than the raw list: an attachment with an
+  // `owner` belongs to an ask-form field, not to the message being typed, and
+  // filling in a form is not a reason to take the follow-up chips away.
+  const hasStagedAttachment = useComposerStore(
+    (s) => messageOwnAttachments(s.attachments[sessionId] ?? []).length > 0,
+  )
 
   // Sessions whose `chats` row this panel has CONFIRMED exists. Confirmed
   // means one of exactly two things happened: we created the row ourselves
@@ -852,7 +863,17 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           onPick={handleSuggestionClick}
           forms={askFormList}
           onPickForm={handleFormClick}
-          show={!isStreaming && turns.length > 0 && turns[turns.length - 1].role === "assistant"}
+          // Staging a file is the user saying what this message is about, and
+          // a follow-up chip SENDS IMMEDIATELY — so leaving the chips up put
+          // "Tell me more" one mis-click away from firing a message that
+          // silently consumes the attachment the reader was still composing
+          // around. They come back the moment the attachment clears.
+          show={
+            !isStreaming &&
+            !hasStagedAttachment &&
+            turns.length > 0 &&
+            turns[turns.length - 1].role === "assistant"
+          }
         />
         </div>
         <ChatComposer
@@ -952,7 +973,22 @@ function CommandsButton({ onClick }: { onClick: () => void }) {
   )
 }
 
+/**
+ * The socket, but only when it is worth saying something about.
+ *
+ * A permanently-green "Connected" pill is a status light for a state that is
+ * true ~100% of the time, in the top-left corner of the thing the reader came
+ * to read. What the badge is genuinely FOR is the other two states: typing
+ * into a chat whose socket has gone is typing into a void, and that is worth
+ * a lot of pixels. So v2 shows it exactly then.
+ *
+ * The badge is not deleted for the healthy case — it is the same component,
+ * and `/chat` still renders all three states, so the "is it connected"
+ * question has an answer for anyone who has learned to look there.
+ */
 function ConnectionBadge({ status }: { status: string }) {
+  const isV2 = useChatSkin().variant === "v2"
+  if (isV2 && status === "connected") return null
   return (
     <div className={cn(
       "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-micro font-medium",

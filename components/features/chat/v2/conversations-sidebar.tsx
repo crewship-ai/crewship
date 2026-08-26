@@ -1,15 +1,13 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { MessageSquarePlus, Plus } from "lucide-react"
+import { MessageSquarePlus, Plus, Search, X } from "lucide-react"
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import {
   SIDEBAR_WIDTH,
   SidebarRow,
-  SidebarSearch,
   SidebarSection,
-  SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
 import { timeAgo } from "@/lib/time"
 import { cn } from "@/lib/utils"
@@ -166,26 +164,72 @@ export function ConversationsSidebar({
         className,
       )}
     >
-      <SidebarToolbar>
-        <SidebarSearch
-          value={query}
-          onValueChange={setQuery}
-          placeholder="Search conversations…"
-          aria-label="Search conversations"
-        />
-      </SidebarToolbar>
+      {/**
+       * `pt-4`, and it is load-bearing rather than taste.
+       *
+       * The dashboard shell rounds the top of its content area
+       * (`rounded-t-2xl`, app/(dashboard)/layout.tsx), so the first 16px of
+       * this column is cut by a curve. The search field used to start inside
+       * that curve, which is why its top-left corner looked bitten off. A
+       * child cannot un-round its parent, so the fix is to let the curve pass
+       * through empty space and start the content below it.
+       */}
+      <div className="flex flex-col gap-2 px-2 pb-2 pt-4">
+        <div
+          className={cn(
+            "flex h-9 items-center gap-2 rounded-lg px-2.5",
+            "border border-white/[0.09] bg-white/[0.03]",
+            "transition-colors focus-within:border-primary/50 focus-within:bg-white/[0.05]",
+          )}
+        >
+          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            // Escape clears rather than blurring: the box is a filter over the
+            // list below it, so "get me back to everything" is the thing you
+            // want one key away, and it was previously three backspaces.
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault()
+                setQuery("")
+              }
+            }}
+            placeholder="Search conversations…"
+            aria-label="Search conversations"
+            className={cn(
+              "min-w-0 flex-1 bg-transparent type-nav text-foreground",
+              "placeholder:text-muted-foreground focus:outline-none",
+            )}
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
 
-      {/* Starting a conversation is the primary action of a chat surface and
-          classic makes you find an agent with no threads to discover it. */}
-      <div className="px-1.5 pb-1.5">
+        {/* Starting a conversation is the primary action of a chat surface,
+            and classic makes you find an agent with no threads to discover
+            it. Solid rather than the dashed outline it started as: a dashed
+            border is the vocabulary of a drop zone or a placeholder, and this
+            is neither — it is the one button on the column. */}
         <button
           type="button"
           onClick={() => roster[0] && onStartConversation(roster[0])}
           disabled={roster.length === 0}
           className={cn(
-            "flex w-full items-center gap-2 rounded-md border border-dashed border-primary/35",
-            "px-2.5 py-1.5 type-nav text-primary/90 transition-colors",
-            "hover:border-primary/60 hover:bg-primary/5 disabled:opacity-40",
+            "flex h-9 w-full items-center justify-center gap-2 rounded-lg",
+            "bg-primary/15 type-nav font-medium text-primary",
+            "border border-primary/25 transition-colors",
+            "hover:bg-primary/25 hover:border-primary/40",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+            "disabled:opacity-40 disabled:hover:bg-primary/15",
           )}
         >
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
@@ -198,7 +242,7 @@ export function ConversationsSidebar({
       <div
         role="tablist"
         aria-label="Filter conversations"
-        className="mx-1.5 mb-1.5 flex overflow-hidden rounded-md border border-white/[0.08]"
+        className="mx-2 mb-2 flex overflow-hidden rounded-lg border border-white/[0.08]"
       >
         {FACETS.map((f) => {
           const on = facet === f.id

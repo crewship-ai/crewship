@@ -272,7 +272,7 @@ func writeCanonicalMemoryFiles(
 	var firstErr error
 	failures := 0
 	for _, t := range targets {
-		if err := writeFileViaContainer(ctx, container, containerID, workDir, t, body, logger); err != nil {
+		if err := writeFileViaContainer(ctx, container, containerID, workDir, t, body, containerFileReadable, logger); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -290,17 +290,42 @@ func writeCanonicalMemoryFiles(
 	return nil
 }
 
+// How readable a file written into the container should be.
+//
+// This used to be one value — 0600, applied unconditionally — and the reason
+// given was sound for HALF the callers: every agent in a crew shares one
+// container and runs as the same UID (1001), and an MCP config can hold a
+// literal API token (a Codex env-block value the user typed in), so a sibling
+// agent could `cat` it. That argument is about SECRETS.
+//
+// The same helper also writes the canonical memory files (AGENTS.md,
+// CLAUDE.md, GEMINI.md, .cursor/rules, .factory) and every assigned skill's
+// SKILL.md. Those hold the system prompt — the thing the user WROTE, that the
+// product offers to show them back — and no secret at all. At 0600 owned by
+// UID 1001 they were unreadable by crewshipd, which runs as the host user
+// (1000), so `List` succeeded on the directory while `Read` took EACCES on
+// every file. The Files panel listed a tree it could not open a single entry
+// of, and reported each one as "file not found".
+//
+// So the mode is now the caller's decision, with no default: a new call site
+// has to say which of the two kinds of file it is writing.
+type containerFileMode string
+
+const (
+	// containerFileSecret — 0600. Contents a sibling agent must not be able to
+	// read: anything that can carry a credential.
+	containerFileSecret containerFileMode = "600"
+	// containerFileReadable — 0644. Contents the operator is entitled to read
+	// back through the product, and that carry nothing sensitive.
+	containerFileReadable containerFileMode = "644"
+)
+
 // writeFileViaContainer is a small helper used by adapters that need to drop
 // a single text file (system prompt, config) into the container before the CLI
 // runs. The content is base64-encoded over the shell to avoid any quoting or
 // heredoc-delimiter problems with arbitrary user-supplied prompts.
 //
-// SECURITY: chmod 600 is applied unconditionally because all agents in a crew
-// share one container and run as the same UID (1001). MCP configs may contain
-// literal API tokens (e.g. Codex env-block values that the user typed
-// directly). Without 600 perms a sibling agent could `cat` the config and
-// exfiltrate the token. Match the pre-existing pattern in setupMCPConfig +
-// setupClaudeConfig (exec_mcp.go) which already chmod 600 their writes.
+// See containerFileMode for why the permission bits are a parameter.
 func writeFileViaContainer(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -308,12 +333,15 @@ func writeFileViaContainer(
 	workDir string,
 	relPath string,
 	content string,
+	mode containerFileMode,
 	logger *slog.Logger,
 ) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	escapedPath := shellEscape(relPath)
-	script := fmt.Sprintf("mkdir -p \"$(dirname %s)\" && echo %s | base64 -d > %s && chmod 600 %s",
-		escapedPath, encoded, escapedPath, escapedPath)
+	// mode is a package-private typed constant, never user input, so it cannot
+	// carry shell metacharacters into the script.
+	script := fmt.Sprintf("mkdir -p \"$(dirname %s)\" && echo %s | base64 -d > %s && chmod %s %s",
+		escapedPath, encoded, escapedPath, string(mode), escapedPath)
 
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,

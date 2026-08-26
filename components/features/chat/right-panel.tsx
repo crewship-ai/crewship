@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
 import {
   FileText,
@@ -39,6 +39,8 @@ import { SharedContextTab } from "./right-panel-tabs/shared-context-tab"
 import { TeamTab } from "./right-panel-tabs/team-tab"
 import { DRAWER_TAB_LABELS } from "./right-rail"
 import type { DrawerTab } from "@/stores/drawer-store"
+import { useChatSkin } from "./v2/chat-skin"
+import { classifyAgentFile, relativeToAgent } from "./v2/file-scope"
 
 interface ChatFileTreeState {
   expandedPaths: string[]
@@ -75,6 +77,15 @@ interface RightPanelProps {
 }
 
 export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, files, initialTab, hideTabs, style }: RightPanelProps) {
+  const { variant, agent: skinAgent } = useChatSkin()
+  const isV2 = variant === "v2"
+  const crewId = skinAgent?.crewId ?? null
+  const agentSlug = skinAgent?.slug ?? null
+  // Off by default. The scaffolding is the answer to "why is my agent
+  // behaving like that", so it has to stay one click away — it is just not
+  // the answer to "what has this agent made for me", which is the question
+  // the panel is on screen to answer.
+  const [showInternals, setShowInternals] = useState(false)
   const [activeTab, setActiveTab] = useState<string>(initialTab ?? "files")
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -107,14 +118,40 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     handleEditorSave,
   } = useFileEditor({ agentId, workspaceId })
 
+  /**
+   * What the panel lists.
+   *
+   * Classic lists the namespace as it is on disk, which means the first thing
+   * a customer sees is `.opencode`, and the three largest entries are the same
+   * 40 KB system prompt under three names. v2 hides Crewship's own scaffolding
+   * by default and offers it back behind a toggle — hidden, never deleted,
+   * because "why is my agent behaving like that" is answered by exactly those
+   * files.
+   *
+   * The classification runs on the path RELATIVE to the agent, which is why
+   * the crew id and slug are derived from the entries themselves: the panel is
+   * handed storage keys (`<crewId>/<slug>/…`), and a marker like `AGENTS.md`
+   * only means "plumbing" when it sits at the root of the namespace.
+   */
+  const visibleFiles = useMemo(() => {
+    if (!isV2 || showInternals) return files
+    return files.filter((f) => classifyAgentFile(relativeToAgent(f.path, crewId, agentSlug)) !== "plumbing")
+  }, [files, isV2, showInternals, crewId, agentSlug])
+
+  const hiddenCount = files.length - visibleFiles.length
+
   useEffect(() => {
-    setTree(buildTopLevelTree(files))
+    setTree(buildTopLevelTree(visibleFiles))
     if (files.length > 0) {
+      // basePrefix is derived from the UNFILTERED list on purpose: it is the
+      // storage prefix every key shares, and filtering cannot change it — but
+      // a filter that removed every entry would leave it empty and break the
+      // lazy subdirectory fetch for the entries that remain.
       const first = files[0]
       const idx = first.path.lastIndexOf(first.name)
       setBasePrefix(idx > 0 ? first.path.slice(0, idx) : "")
     }
-  }, [files])
+  }, [files, visibleFiles])
 
   // Reset all per-agent state on agent change so the next agent
   // doesn't inherit the previous one's expanded set or open editor.
@@ -205,7 +242,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     })
   }, [])
 
-  const fileCount = files.filter((f) => !f.is_dir).length
+  const fileCount = visibleFiles.filter((f) => !f.is_dir).length
   const editorOpen = editorFile !== null && activeTab === "files"
   const ActiveTabIcon = RIGHT_PANEL_TABS.find((t) => t.id === activeTab)?.icon
 
@@ -263,6 +300,24 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                   <FileText className="h-3 w-3" />
                   No files in this session yet
                 </div>
+              )}
+              {/* The toggle sits at the FOOT of the agent scope, not in the
+                  panel header: it is a property of this list, and a control
+                  in the header would read as applying to the crew scope
+                  below it too. Rendered only when something is actually
+                  hidden — a permanent "Show 0 internal files" is a control
+                  that teaches the reader their clicks do nothing. */}
+              {isV2 && (hiddenCount > 0 || showInternals) && (
+                <button
+                  type="button"
+                  onClick={() => setShowInternals((v) => !v)}
+                  aria-expanded={showInternals}
+                  className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-micro text-muted-foreground hover:text-foreground"
+                >
+                  {showInternals
+                    ? "Hide Crewship's internal files"
+                    : `Show ${hiddenCount} internal file${hiddenCount === 1 ? "" : "s"}`}
+                </button>
               )}
             </ScopeSection>
             {/* Collapsed, and the section mounts its children only when open,
