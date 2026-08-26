@@ -41,6 +41,7 @@ import {
   shortId,
   sourceEntryTypes,
   sourceMeta,
+  waitingEntryTypes,
   type SpineLabels,
   type SpineLink,
 } from "@/lib/activity-stream"
@@ -228,7 +229,11 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
       facets.scope === "active"
         ? ACTIVE_ENTRY_TYPES
         : facets.scope === "waiting"
-          ? sourceEntryTypes("human")
+          ? // The ask types AND the answers that retire them. Asking for the
+            // human facet alone excluded `approval.granted` and friends
+            // server-side, so `entriesInScope` below had nothing to join
+            // against and listed answered asks under "Waiting on you" (#2036).
+            waitingEntryTypes()
           : facets.sources.length > 0
             ? facets.sources.flatMap((s) => sourceEntryTypes(s))
             : []
@@ -341,10 +346,11 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     // `done` has no server-side expression (it is "everything else"), so it
     // is narrowed client-side.
     //
-    // `waiting` is narrowed here too (#1876), even though the fetch already
-    // asked for `sourceEntryTypes("human")`. That query returns ask-shaped
-    // ROWS, and the journal is an event log: a granted approval's request and
-    // a resolved escalation both stay in it. Listing them under "Waiting on
+    // `waiting` is narrowed here too (#1876). The fetch asks for the ask
+    // types AND their answers, because the journal is an event log: a granted
+    // approval's request and a terminal escalation both stay in it, and only
+    // the answer beside a row proves that row is closed. The narrowing is
+    // what keeps the answers out of the feed — listing them under "Waiting on
     // you" is the rail contradicting the card beside it, which counts asks
     // that are still open. Same join, one function.
     if (facets.scope === "done" || facets.scope === "waiting") {

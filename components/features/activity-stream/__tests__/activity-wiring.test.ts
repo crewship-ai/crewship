@@ -67,6 +67,22 @@ describe("the shell's chain wiring", () => {
     }
   })
 
+  it("fetches the answers the waiting join needs, not the ask types alone", () => {
+    // #2036. `entriesInScope(_, "waiting")` retires a row by finding its
+    // ANSWER in the window, and the answers are filed under Security —
+    // `sourceEntryTypes("human")` excludes every one of them server-side. The
+    // list read "Waiting on you: 5" beside a card reading 1, one click apart.
+    //
+    // Asserted over the source for the same reason as the chain wiring above:
+    // the fact lives in one branch of one useMemo, and mounting the shell to
+    // reach it costs five mocks. `waitingEntryTypes` itself is covered by
+    // behaviour in lib/__tests__/activity-stream.test.ts.
+    const branch = /facets\.scope === "waiting"[\s\S]{0,400}?\n\s*: /.exec(source)?.[0] ?? ""
+    expect(branch, 'the params memo no longer has a "waiting" branch').not.toBe("")
+    expect(branch).toContain("waitingEntryTypes()")
+    expect(branch).not.toMatch(/\?\s*sourceEntryTypes\("human"\)/)
+  })
+
   it("hands the drill-downs an id, never a display label, as the key they match on", () => {
     // `stop.label` is `identifier || title || id`, so on a workspace without
     // issue identifiers it is the TITLE — nothing matched, and the deep link

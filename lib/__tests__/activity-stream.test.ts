@@ -4,8 +4,12 @@ import { resolve } from "node:path"
 
 import {
   ACTIVITY_SOURCES,
+  ANSWER_ENTRY_TYPES,
+  ESCALATION_TERMINAL_STATES,
   activitySource,
+  answerRef,
   answeredAsks,
+  askRef,
   buildSpine,
   chainElapsedMs,
   entriesInScope,
@@ -22,6 +26,7 @@ import {
   railInventory,
   runIdOf,
   timeBucket,
+  waitingEntryTypes,
 } from "@/lib/activity-stream"
 // The one cross-module import in this file, and the point of it: the rail's
 // count and the overview card's list must be the same answer, so the test
@@ -270,6 +275,42 @@ const escalationAutoResolved = (id: string) =>
     refs: { escalation_id: id },
   })
 
+// internal/api/escalation_lifecycle.go:359 — the deadline answered it, not a
+// person. Severity stays warn: an agent that proceeded without the answer
+// needs attention. Terminal all the same.
+const escalationExpired = (id: string) =>
+  entry({
+    id: `exp-${id}`,
+    entry_type: "peer.escalation",
+    severity: "warn",
+    summary: "escalation expired unanswered: needs a prod credential",
+    payload: {
+      state: "expired",
+      resolution: "",
+      deadline_at: "2026-08-07T11:00:00Z",
+      agent_outcome: "continued_with_warning",
+      warning: "No human answered before the deadline.",
+    },
+    refs: { escalation_id: id, chat_id: "chat1" },
+  })
+
+// internal/api/escalation_lifecycle.go:633 — withdrawn by an operator.
+const escalationCancelled = (id: string) =>
+  entry({
+    id: `can-${id}`,
+    entry_type: "peer.escalation",
+    severity: "notice",
+    summary: `escalation ${id} cancelled`,
+    payload: {
+      state: "cancelled",
+      reason: "asked the wrong crew",
+      resolution: "",
+      from_slug: "scout",
+      agent_outcome: "continued_with_warning",
+    },
+    refs: { escalation_id: id, chat_id: "chat1" },
+  })
+
 // internal/harbormaster/store_mutate.go:83 / :232 — the ask and its grant.
 const approvalAsk = (id: string) =>
   entry({
@@ -397,6 +438,150 @@ describe("scopeCounts / entriesInScope — the rail counts what the card counts"
 
   it("lists exactly the open asks under the waiting scope, in feed order", () => {
     expect(entriesInScope(feed, "waiting").map((e) => e.id)).toEqual(["ask-k2"])
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ *  #2036 — expired and cancelled escalations
+ *
+ *  `escalationIsResolved` recognised only `state === "resolved"`, so a
+ *  terminal row missed BOTH ways: `askRef` filed it as a fresh ask, and
+ *  `answerRef` returned null so the original `pending` row was never
+ *  closed either. Two dead escalations, four permanent "Waiting on you"
+ *  rows.
+ *
+ *  The expectations below are hand-written id lists on purpose. The two
+ *  older assertions in this file — `scopeCounts(feed).waiting ===
+ *  openAsks(feed).length` and "the four buckets sum to feed.length" — are
+ *  tautologies: `openAsks` IS `entriesInScope(entries, "waiting")` and
+ *  `scopeOf` is total, so neither can go red for any implementation of
+ *  `scopeOf`. They stay because the equality documents intent, but they
+ *  are not what catches a regression here.
+ * ------------------------------------------------------------------ */
+
+describe("terminal escalations are answers, not fresh asks (#2036)", () => {
+  const feed = [
+    escalationAsk("e1"),
+    escalationExpired("e1"),
+    escalationAsk("e2"),
+    escalationCancelled("e2"),
+  ]
+
+  it("leaves nothing waiting once every escalation reached a terminal state", () => {
+    // Shipped code answered 4 here: two asks never closed, two terminal
+    // rows counted as new asks.
+    expect(scopeCounts(feed).waiting).toBe(0)
+  })
+
+  it("files all four rows under done, by id", () => {
+    expect(entriesInScope(feed, "done").map((e) => e.id)).toEqual([
+      "ask-e1",
+      "exp-e1",
+      "ask-e2",
+      "can-e2",
+    ])
+    expect(entriesInScope(feed, "waiting").map((e) => e.id)).toEqual([])
+  })
+
+  it("treats a terminal row as the answer, never as an ask", () => {
+    for (const dead of [escalationExpired("e9"), escalationCancelled("e9")]) {
+      expect(askRef(dead)).toBeNull()
+      expect(answerRef(dead)).toEqual({ kind: "escalation", id: "e9" })
+      expect(scopeOf(dead)).toBe("done")
+    }
+  })
+
+  it("still calls an escalation in an unknown state an open ask", () => {
+    // Conservative on purpose: a state this set has never heard of must not
+    // silently retire a question nobody answered.
+    const odd = entry({
+      id: "odd-e1",
+      entry_type: "peer.escalation",
+      payload: { state: "escalated_further" },
+      refs: { escalation_id: "e1" },
+    })
+    expect(scopeOf(odd)).toBe("waiting")
+    expect(answerRef(odd)).toBeNull()
+  })
+
+  it("knows every terminal state the Go emit sites actually write", () => {
+    // Backend parity, same argument as the EntryType scan below: a set
+    // maintained by hand against a backend that grew a fourth state is a set
+    // that silently stops matching.
+    const src = ["escalation_handler.go", "escalation_lifecycle.go", "escalation_autoresolve.go"]
+      .map((f) => readFileSync(resolve(process.cwd(), "internal/api", f), "utf8"))
+      .join("\n")
+    const states = new Set([...src.matchAll(/"state":\s*"([^"]+)"/g)].map((m) => m[1]))
+    expect(states.size).toBeGreaterThan(1) // guards against a moved file
+    expect([...states].sort()).toEqual(["cancelled", "expired", "pending", "resolved"])
+
+    const unknown = [...states].filter(
+      (s) => s !== "pending" && !ESCALATION_TERMINAL_STATES.includes(s),
+    )
+    expect(unknown, "a state the API emits that scopeOf has never heard of").toEqual([])
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ *  #2036 — the waiting scope's server-side entry_type filter
+ *
+ *  `entriesInScope(_, "waiting")` can only retire a row when the ANSWER is
+ *  in the window. The fetch asked for `sourceEntryTypes("human")`, which
+ *  excludes every approval decision and `keeper.decision` server-side, so
+ *  the join was starved: the Overview card counted 1 over the unfiltered
+ *  window and the list it linked to showed 5.
+ * ------------------------------------------------------------------ */
+
+describe("waitingEntryTypes — the fetch that feeds the waiting join", () => {
+  it("asks for the ask types", () => {
+    for (const t of sourceEntryTypes("human")) {
+      expect(waitingEntryTypes()).toContain(t)
+    }
+  })
+
+  it("asks for the answers too — approval.granted and keeper.decision", () => {
+    expect(waitingEntryTypes()).toContain("approval.granted")
+    expect(waitingEntryTypes()).toContain("keeper.decision")
+  })
+
+  it("covers every non-ask type answerRef can close an ask with", () => {
+    // Derived from `answerRef`, not from a second hand-written list: a fifth
+    // answer type added there must arrive in the window too, or it retires
+    // nothing.
+    const asks = new Set(sourceEntryTypes("human"))
+    const missing = ANSWER_ENTRY_TYPES.filter(
+      (t) => !asks.has(t) && !waitingEntryTypes().includes(t),
+    )
+    expect(missing).toEqual([])
+  })
+
+  it("names only types answerRef or askRef actually recognises, once each", () => {
+    const types = waitingEntryTypes()
+    expect(types.length).toBe(new Set(types).size)
+    for (const t of types) {
+      const probe = entry({ entry_type: t, payload: {}, refs: {} })
+      expect(askRef(probe) !== null || answerRef(probe) !== null, `${t} joins nothing`).toBe(true)
+    }
+  })
+
+  it("does not widen the feed: the answers land in done, never in waiting", () => {
+    // The whole point of fetching them. The window the server now returns
+    // holds the answers, and the client-side narrowing keeps them off the
+    // "Waiting on you" list.
+    const window = [
+      approvalGranted("a1"),
+      approvalAsk("a1"),
+      keeperDecision("k1"),
+      keeperAsk("k1"),
+      approvalAsk("a2"), // the only one still open
+    ]
+    expect(entriesInScope(window, "waiting").map((e) => e.id)).toEqual(["ask-a2"])
+    expect(entriesInScope(window, "done").map((e) => e.id)).toEqual([
+      "grant-a1",
+      "ask-a1",
+      "dec-k1",
+      "ask-k1",
+    ])
   })
 })
 

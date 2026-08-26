@@ -487,9 +487,10 @@ const ACTIVE_SET = new Set(ACTIVE_ENTRY_TYPES)
  *
  *  The journal is an EVENT LOG. An `approval.requested` row stays in it
  *  after the approval was granted, and `peer.escalation` is emitted for
- *  BOTH the ask (escalation_handler.go:255, `state: "pending"`) and its
- *  answer (escalation_handler.go:607 and escalation_autoresolve.go:172,
- *  `state: "resolved"`). So "is this row of a human-source type" answers
+ *  BOTH the ask (escalation_handler.go:287, `state: "pending"`) and every
+ *  way it can end — `resolved` (escalation_handler.go:658,
+ *  escalation_autoresolve.go:179), `expired` (escalation_lifecycle.go:359)
+ *  and `cancelled` (:633). So "is this row of a human-source type" answers
  *  "was somebody asked", never "is somebody still being asked" — and on
  *  an instance that works, most asks have been answered.
  *
@@ -514,9 +515,36 @@ function idFrom(entry: JournalEntry, ...keys: string[]): string | undefined {
   return undefined
 }
 
-/** True once an escalation row carries its terminal state. */
-function escalationIsResolved(entry: JournalEntry): boolean {
-  return entry.payload?.["state"] === "resolved"
+/**
+ * Every `payload.state` an escalation is DEAD in, from the four Go emit
+ * sites that write one:
+ *
+ *   pending    escalation_handler.go:287    — the ask itself
+ *   resolved   escalation_handler.go:658    — a person answered
+ *              escalation_autoresolve.go:179 — the system answered
+ *   expired    escalation_lifecycle.go:359  — the deadline answered
+ *   cancelled  escalation_lifecycle.go:633  — an operator withdrew it
+ *
+ * Listed explicitly rather than as `state !== "pending"` so that a future
+ * non-terminal state (say `escalated_further`) does not silently retire a
+ * question nobody has answered. A backend-parity test scans those Go files
+ * and fails when a state appears here that this set has never heard of.
+ */
+export const ESCALATION_TERMINAL_STATES: readonly string[] = ["resolved", "expired", "cancelled"]
+
+const ESCALATION_TERMINAL_SET = new Set(ESCALATION_TERMINAL_STATES)
+
+/**
+ * True once an escalation row carries a terminal state.
+ *
+ * Recognising only `resolved` was a double miss (#2036): an expired or
+ * cancelled row registered as a fresh ask through `askRef` AND failed to
+ * close its own `pending` row through `answerRef`, so one dead escalation
+ * left two permanent "Waiting on you" entries.
+ */
+function escalationIsTerminal(entry: JournalEntry): boolean {
+  const state = entry.payload?.["state"]
+  return typeof state === "string" && ESCALATION_TERMINAL_SET.has(state)
 }
 
 /**
@@ -536,7 +564,7 @@ export function askRef(entry: JournalEntry): AskRef | null {
     case "keeper.request":
       return { kind: "keeper", id: idFrom(entry, "keeper_request_id", "request_id") ?? "" }
     case "peer.escalation":
-      if (escalationIsResolved(entry)) return null
+      if (escalationIsTerminal(entry)) return null
       return { kind: "escalation", id: idFrom(entry, "escalation_id") ?? "" }
     default:
       return null
@@ -547,9 +575,10 @@ export function askRef(entry: JournalEntry): AskRef | null {
  * The ask an entry CLOSES, or null.
  *
  * Approvals and keeper requests are closed by a different entry_type;
- * escalations are closed by their own type carrying state "resolved",
- * whether a person did it (escalation_handler.go:607) or the system did
- * (escalation_autoresolve.go:172).
+ * escalations are closed by their own type carrying a terminal state —
+ * whether a person did it (escalation_handler.go:658), the system did
+ * (escalation_autoresolve.go:179), the deadline did
+ * (escalation_lifecycle.go:359) or an operator withdrew it (:633).
  */
 export function answerRef(entry: JournalEntry): AskRef | null {
   switch (entry.entry_type) {
@@ -561,11 +590,44 @@ export function answerRef(entry: JournalEntry): AskRef | null {
     case "keeper.decision":
       return { kind: "keeper", id: idFrom(entry, "keeper_request_id", "request_id") ?? "" }
     case "peer.escalation":
-      if (!escalationIsResolved(entry)) return null
+      if (!escalationIsTerminal(entry)) return null
       return { kind: "escalation", id: idFrom(entry, "escalation_id") ?? "" }
     default:
       return null
   }
+}
+
+/**
+ * The entry types that CLOSE an ask and are not already ask-shaped.
+ *
+ * `peer.escalation` is deliberately absent: it is both the ask and its own
+ * answer, so it already arrives with `sourceEntryTypes("human")`. Every
+ * other type here is filed under a different facet (Security), which is
+ * exactly why a query for the human facet alone cannot see it.
+ */
+export const ANSWER_ENTRY_TYPES: readonly string[] = [
+  "approval.granted",
+  "approval.denied",
+  "approval.cancelled",
+  "approval.timeout",
+  "keeper.decision",
+]
+
+/**
+ * The `entry_type` filter the WAITING scope must send to the server.
+ *
+ * Asking for `sourceEntryTypes("human")` alone starved the join (#2036):
+ * the answers live under the Security facet, so they were excluded
+ * server-side while `entriesInScope` needed them in the window to retire a
+ * row. The result was the card-vs-list contradiction #1876 set out to
+ * remove, one click from the card — "Waiting on you 1" opening a list of
+ * five, four of them granted an hour ago.
+ *
+ * Fetch both halves and let `entriesInScope` narrow: the answer rows never
+ * reach the feed, because `scopeOf` files them under `done`.
+ */
+export function waitingEntryTypes(): string[] {
+  return [...new Set([...sourceEntryTypes("human"), ...ANSWER_ENTRY_TYPES])]
 }
 
 /**
@@ -596,8 +658,9 @@ export function answeredAsks(entries: JournalEntry[]): ReadonlySet<string> {
  * (#1876). A row of a human-source type is only waiting on somebody while
  * its ask is still OPEN:
  *
- *   - a resolved `peer.escalation` says so on its own face, so it needs no
- *     window at all — it is the answer, not a second ask;
+ *   - a terminal `peer.escalation` — resolved, expired or cancelled — says
+ *     so on its own face, so it needs no window at all: it is the answer,
+ *     not a second ask;
  *   - an `approval.requested` or `keeper.request` is closed by a DIFFERENT
  *     entry type, so proving it answered needs the rest of the window.
  *     Pass `answered` from `answeredAsks` — `scopeCounts` and
@@ -625,9 +688,16 @@ export function scopeOf(entry: JournalEntry, answered?: ReadonlySet<string>): Ac
 /**
  * The four bucket counts over one window, joined once.
  *
- * This is what a status control should count. Calling `scopeOf` per row
- * without a window is what let the rail read "Waiting 4" beside a card
- * reading 0 — two answers to one question on one screen.
+ * This is what a journal-row status control should count: calling `scopeOf`
+ * per row without a window is what let the rail read "Waiting 4" beside a
+ * card reading 0 — two answers to one question on one screen.
+ *
+ * NOTE (#2036): no production caller today. The rail's segments count
+ * CHAINS, via `chainScopeCounts` (activity-sidebar.tsx) over the chain index,
+ * which is fetched independently of the scope facet and so can answer for
+ * buckets the journal query did not fetch. Kept because it is the one place
+ * the four-bucket invariant is stated over journal rows, and because
+ * `entriesInScope` and the Overview card are the same join by construction.
  */
 export function scopeCounts(entries: JournalEntry[]): Record<ActivityScope, number> {
   const answered = answeredAsks(entries)
