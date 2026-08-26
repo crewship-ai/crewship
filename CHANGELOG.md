@@ -297,6 +297,39 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Go toolchain moved 1.26.6 → 1.27.0, and every place that names it now
+  agrees (#2060).** Dependabot bumps the root `Dockerfile` alone, which is the
+  one Go version no PR ever exercises — the image is built only by `release.yml`
+  and `nightly.yml`. Taken by itself that bump would have shipped release
+  binaries compiled by 1.27.0 while all eleven CI pins, `go.mod`'s `toolchain`
+  directive and the `Go Vuln Scan` gate stayed on 1.26.6, so the published
+  artefact would have been the only thing built by a toolchain nothing had
+  verified. The pins move together instead: `GO_VERSION` in ten workflows,
+  the literal in `codeql.yml`, and `toolchain go1.27.0` in `go.mod`. The `go`
+  directive stays at 1.26 — the language floor is a separate promise to
+  consumers and nothing here needs 1.27 semantics.
+
+  No advisories are cleared or introduced by the move; govulncheck reports zero
+  either side of it. This is a build-toolchain change, not a security fix.
+
+  Two analysis tools had to move with it, both for the same underlying reason:
+  they vendor a copy of `golang.org/x/tools`, and an `x/tools` older than the
+  standard library it is asked to analyse dies on syntax it does not know.
+  `golangci-lint` goes v2.1.6 → v2.13.1 — v2.1.6 answers a 1.27 target with 908
+  phantom `typecheck` errors on valid code, and v2.12.2 panics outright.
+  `govulncheck` goes v1.1.4 → v1.7.0, panicking the same way
+  (`unexpected expr: *ast.KeyValueExpr`). Both pins are now documented as
+  coupled to `GO_VERSION` and must be re-checked whenever it moves.
+
+  The govulncheck failure is worth recording because of *how* it presents: it
+  is not reproducible on demand. v1.1.4 only builds SSA for packages the
+  vulnerability database hands it candidate symbols in, so the same tree
+  scanned clean on one run and crashed on the next — measured here at one of
+  each. A green local scan is therefore not evidence that the pin is
+  compatible. What holds the line is the run step's existing rule that any
+  exit code other than 0 or 3 is a hard failure, so a crashed scan reports as
+  a broken gate instead of falling through as "no vulnerabilities found".
+
 - **The builtin crew templates ship models that are not being retired.** All
   twelve template files pinned dated snapshots — `claude-sonnet-4-20250514` on
   43 agents, `claude-opus-4-20250514` on one, `claude-haiku-4-20250514` on

@@ -19,13 +19,24 @@ func TestGatekeeper_L1AutoAllow_RequiresMinimumIntent(t *testing.T) {
 		intent      string
 		expectAllow bool
 	}{
-		{"x", false},                                    // single char — too short
-		{"asdf", false},                                 // 4 chars — too short
-		{"         ", false},                            // whitespace only
-		{"123456789", false},                            // 9 chars — one short of threshold
-		{"1234567890", true},                            // exactly 10 chars — allowed
-		{"I need to deploy the npm package", true},      // meaningful intent — allowed
-		{"Deploy service to staging environment", true}, // long meaningful intent
+		// Comments sit above their case rather than trailing it: a trailing
+		// comment column here is the one construct where golangci-lint's
+		// vendored gofmt fork and upstream gofmt disagree, and each rewrites
+		// what the other just wrote. See the PR that moved us to Go 1.27.
+		// single char — too short
+		{"x", false},
+		// 4 chars — too short
+		{"asdf", false},
+		// whitespace only
+		{"         ", false},
+		// 9 chars — one short of threshold
+		{"123456789", false},
+		// exactly 10 chars — allowed
+		{"1234567890", true},
+		// meaningful intent — allowed
+		{"I need to deploy the npm package", true},
+		// long meaningful intent
+		{"Deploy service to staging environment", true},
 	}
 
 	for _, tc := range cases {

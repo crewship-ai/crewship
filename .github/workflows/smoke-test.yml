@@ -35,7 +35,7 @@ env:
   # workflow_run triggered by a tag push, head_branch is the tag name. Empty on
   # pull_request events (those jobs don't use it — they build a snapshot).
   TAG: ${{ github.event.workflow_run.head_branch }}
-  GO_VERSION: "1.26.6"
+  GO_VERSION: "1.27.0"
 
 jobs:
   binary:

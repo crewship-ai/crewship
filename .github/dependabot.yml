@@ -168,7 +168,7 @@ updates:
           - "patch"
 
   # Docker base images
-  # The root Dockerfile (node:24-alpine + golang:1.26-alpine + alpine:3.23
+  # The root Dockerfile (node:24-alpine + golang:1.27-alpine + alpine:3.23
   # multi-stage) and docker/crewship-sandbox (debian:bookworm-slim) all
   # use floating tags. Audit M15 flagged that this lets a published patch
   # release of the base sit unreviewed in CI forever -- Dependabot
