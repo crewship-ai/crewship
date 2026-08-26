@@ -312,10 +312,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   No advisories are cleared or introduced by the move; govulncheck reports zero
   either side of it. This is a build-toolchain change, not a security fix.
 
-  `golangci-lint` had to move with it, v2.1.6 → v2.13.1: v2.1.6 answers a 1.27
-  target with 908 phantom `typecheck` errors on valid code, and v2.12.2 panics
-  inside `honnef.co/go/tools` against the 1.27 standard library. The pin is now
-  documented as coupled to `GO_VERSION`.
+  Two analysis tools had to move with it, both for the same underlying reason:
+  they vendor a copy of `golang.org/x/tools`, and an `x/tools` older than the
+  standard library it is asked to analyse dies on syntax it does not know.
+  `golangci-lint` goes v2.1.6 → v2.13.1 — v2.1.6 answers a 1.27 target with 908
+  phantom `typecheck` errors on valid code, and v2.12.2 panics outright.
+  `govulncheck` goes v1.1.4 → v1.7.0, panicking the same way
+  (`unexpected expr: *ast.KeyValueExpr`). Both pins are now documented as
+  coupled to `GO_VERSION` and must be re-checked whenever it moves.
+
+  The govulncheck failure is worth recording because of *how* it presents: it
+  is not reproducible on demand. v1.1.4 only builds SSA for packages the
+  vulnerability database hands it candidate symbols in, so the same tree
+  scanned clean on one run and crashed on the next — measured here at one of
+  each. A green local scan is therefore not evidence that the pin is
+  compatible. What holds the line is the run step's existing rule that any
+  exit code other than 0 or 3 is a hard failure, so a crashed scan reports as
+  a broken gate instead of falling through as "no vulnerabilities found".
 
 - **The builtin crew templates ship models that are not being retired.** All
   twelve template files pinned dated snapshots — `claude-sonnet-4-20250514` on

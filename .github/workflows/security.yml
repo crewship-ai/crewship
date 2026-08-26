@@ -172,8 +172,23 @@ jobs:
 
       # Pin to a specific govulncheck version so CI runs are reproducible.
       # '@latest' would silently upgrade across breaking changes.
+      #
+      # Like GOLANGCI_VERSION in ci.yml, this pin is coupled to GO_VERSION and
+      # must be re-checked whenever the toolchain moves. govulncheck vendors
+      # golang.org/x/tools, and an x/tools older than the analysed standard
+      # library dies building SSA for constructs it does not know: on the Go
+      # 1.27 bump, v1.1.4 (x/tools v0.29.0) panicked with
+      # `unexpected expr: *ast.KeyValueExpr`. v1.7.0 analyses 1.27 cleanly.
+      #
+      # That panic is *not* reliably reproducible — v1.1.4 only builds SSA for
+      # packages the vulnerability database gives it candidate symbols in, so
+      # the same tree scans clean one hour and crashes the next as the DB
+      # moves underneath it. A single green local run is not evidence that
+      # this pin is compatible; the run step below is what makes it safe,
+      # since it treats any exit code other than 0 or 3 as a hard failure
+      # rather than letting a crashed scan fall through as "no findings".
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
       - name: Run govulncheck (known-accepted CVEs allowlisted)
         run: |
