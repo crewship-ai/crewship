@@ -331,48 +331,96 @@ func TestRetentionSweepAllWorkspacesDefaultsWhenConfigMissing(t *testing.T) {
 	}
 }
 
+// waitForEmits blocks until the emitter has recorded at least `want`
+// calls, or fails the test. The deadline is a stuck-test backstop, not
+// the thing under test: every assertion below is on an event the
+// sweeper produces, so a slow host makes this loop wait longer rather
+// than making it decide differently.
+func waitForEmits(t *testing.T, cap *captureEmitter, want int64) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if got := cap.calls.Load(); got >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("emit call count = %d, want at least %d", cap.calls.Load(), want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestRetentionStartRetentionSweeperFiresAndStops exercises the
-// background-ticker plumbing: a 50ms interval over a 200ms window
-// should fire ~3-4 times (1 immediate + ~3 ticker beats), then exit
-// cleanly when ctx is cancelled. We assert "fired at least twice"
-// rather than an exact count to tolerate scheduler jitter on slow CI.
+// background-ticker plumbing: the boot sweep fires immediately, the
+// ticker keeps sweeping after it, and the goroutine exits when ctx is
+// cancelled.
+//
+// Every step waits for an event the sweeper itself produces — a
+// journal emit, then the sweeper's done channel. The previous version
+// instead slept fixed windows (200ms to "cover ~3 beats", 50ms to
+// "settle") and inferred shutdown from the absence of an emit inside a
+// further 150ms. That inference is only as good as the host: under
+// load a sweep already in flight at cancel time can land its DELETE
+// after the re-seed, and the test reads a leaked ticker where there is
+// none (#1597). Nothing here now depends on how fast the box is.
 func TestRetentionStartRetentionSweeperFiresAndStops(t *testing.T) {
 	db := retentionTestDB(t)
-	// Seed enough rows so each tick has work to do (and thus
-	// produces a journal event we can count).
+	// One stale row for the boot sweep to delete — a sweep that
+	// deletes nothing emits nothing, so a row per observation is what
+	// makes each sweep visible.
 	seedVersion(t, db, "ws_test", "A.md", 60)
 
-	cap := &captureEmitter{}
-	// Need at least one row to delete per tick or no journal emit
-	// fires. Re-insert before each tick is impractical; instead we
-	// rely on the FIRST tick to delete the seeded row and assert
-	// the loop ran at least once + exited on cancel without
-	// goroutine leak.
-	ctx, cancel := context.WithCancel(context.Background())
-	StartRetentionSweeper(ctx, db, cap, 50*time.Millisecond)
-
-	// Window long enough for the immediate first sweep + at least
-	// one ticker beat to fire. 200ms covers ~3 ticker beats at 50ms.
-	time.Sleep(200 * time.Millisecond)
-	cancel()
-
-	// Settle: give the goroutine a moment to observe cancellation.
-	time.Sleep(50 * time.Millisecond)
-
-	if got := cap.calls.Load(); got < 1 {
-		t.Errorf("emit call count = %d, want at least 1 (immediate first sweep deletes seeded row)", got)
+	// 1. Boot sweep. The interval is an hour, so no ticker beat can
+	//    account for this emit — the sweep that deletes A.md is the
+	//    documented immediate first tick and nothing else.
+	bootCap := &captureEmitter{}
+	bootCtx, bootCancel := context.WithCancel(context.Background())
+	defer bootCancel()
+	bootDone := StartRetentionSweeper(bootCtx, db, bootCap, time.Hour)
+	waitForEmits(t, bootCap, 1)
+	bootCancel()
+	select {
+	case <-bootDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("retention sweeper goroutine did not exit after ctx cancel (boot phase)")
 	}
 
-	// Race check: after cancel + settle, the goroutine should have
-	// exited. Re-seed a row; the count should not grow on subsequent
-	// ticker beats. If a ticker fires after cancel we'd see the
-	// counter advance.
+	// 2. The ticker keeps sweeping after the boot tick. B.md feeds this
+	//    sweeper's own boot sweep; C.md is seeded only once that first
+	//    emit has been observed, so nothing but a later beat can delete
+	//    it — the second emit is proof of the cadence loop, with no
+	//    beats counted against a wall clock.
 	seedVersion(t, db, "ws_test", "B.md", 60)
+	cap := &captureEmitter{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := StartRetentionSweeper(ctx, db, cap, 50*time.Millisecond)
+	waitForEmits(t, cap, 1)
+	seedVersion(t, db, "ws_test", "C.md", 60)
+	waitForEmits(t, cap, 2)
+
+	// 3. Cancel stops the loop. Waiting on done is the direct
+	//    observation: it closes only when the goroutine has returned,
+	//    including any sweep still in flight. A leaked sweeper fails
+	//    here on the deadline instead of slipping through a quiet
+	//    sampling window.
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("retention sweeper goroutine did not exit after ctx cancel")
+	}
+
+	// 4. With the goroutine provably gone, nothing can sweep any more:
+	//    a freshly seeded stale row survives and the emit count is
+	//    frozen. Both checks are exact now, not sampled.
 	before := cap.calls.Load()
-	time.Sleep(150 * time.Millisecond)
-	after := cap.calls.Load()
-	if after != before {
-		t.Errorf("ticker still running after cancel: calls before=%d after=%d", before, after)
+	seedVersion(t, db, "ws_test", "D.md", 60)
+	if after := cap.calls.Load(); after != before {
+		t.Errorf("sweeper emitted after exiting: calls before=%d after=%d", before, after)
+	}
+	if got := countVersions(t, db, "ws_test"); got != 1 {
+		t.Errorf("remaining versions = %d, want 1 (the row seeded after shutdown must survive)", got)
 	}
 }
 
