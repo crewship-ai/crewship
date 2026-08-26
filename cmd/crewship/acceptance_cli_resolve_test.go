@@ -456,22 +456,29 @@ func TestAcceptance_MemoryStatus_FailsLoudlyAndActionably(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
+		// path is what --path pointed at, which the message must name: the
+		// directory actually opened is --path plus --scope, so the user
+		// cannot reconstruct it from the flags alone.
+		path string
 		// wantText is the actionable phrasing the operator must get.
 		wantText string
 	}{
 		{
 			name:     "missing directory",
 			args:     []string{"memory", "status", "--path", missing},
+			path:     missing,
 			wantText: "does not exist",
 		},
 		{
 			name:     "workspace scope on a missing directory",
 			args:     []string{"memory", "status", "--path", missing, "--scope", "workspace"},
+			path:     missing,
 			wantText: "does not exist",
 		},
 		{
 			name:     "a file where the memory directory belongs",
 			args:     []string{"memory", "status", "--path", notADir, "--scope", "workspace"},
+			path:     notADir,
 			wantText: "not a directory",
 		},
 	}
@@ -486,8 +493,8 @@ func TestAcceptance_MemoryStatus_FailsLoudlyAndActionably(t *testing.T) {
 			if err == nil {
 				t.Fatalf("memory status exited 0 on a failure; no script can detect this\noutput: %s", out)
 			}
-			if got := exitCodeOf(t, err); got == 0 {
-				t.Fatalf("exit code = 0 on a failure\noutput: %s", out)
+			if got := exitCodeOf(t, err); got != cli.ExitNotFound {
+				t.Errorf("exit code = %d, want ExitNotFound (%d)\noutput: %s", got, cli.ExitNotFound, out)
 			}
 			// The raw driver string must not reach the user.
 			for _, leak := range []string{"unable to open database file", "(14)", "init memory schema"} {
@@ -498,11 +505,8 @@ func TestAcceptance_MemoryStatus_FailsLoudlyAndActionably(t *testing.T) {
 			if !strings.Contains(out, tc.wantText) {
 				t.Errorf("output does not say %q:\n%s", tc.wantText, out)
 			}
-			// Naming the path is what makes the message actionable — the
-			// path is derived from --path plus --scope, so the user cannot
-			// reconstruct it from the flags alone.
-			if !strings.Contains(out, filepath.Base(tc.args[3])) {
-				t.Errorf("output does not name the path it tried:\n%s", out)
+			if !strings.Contains(out, tc.path) {
+				t.Errorf("output does not name the path it tried (%s):\n%s", tc.path, out)
 			}
 		})
 	}

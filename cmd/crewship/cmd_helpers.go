@@ -207,9 +207,10 @@ func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
 // advertise `<id-or-slug>` in their help and in docs/cli/project.mdx — used to
 // 404 on a slug that `project list` had just printed (#2086).
 //
-// The CUID fast path is verified rather than trusted: a project slug can
-// legitimately be 21+ lowercase-alphanumeric characters starting with "c"
-// (say, "customer-portal" without the dash), so a shape match that misses
+// The CUID fast path is verified rather than trusted: slugify turns spaces
+// into dashes, but a single-word name still slugs to bare lowercase
+// alphanumerics, so a project called "Consolidationpipeline" produces a
+// 21-character slug that satisfies looksLikeCUID. A shape match that misses
 // falls through to the LIST scan instead of forwarding a doomed id (#1075).
 func resolveProjectID(client *cli.Client, slugOrID string) (string, error) {
 	if looksLikeCUID(slugOrID) {
