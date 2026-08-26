@@ -336,15 +336,15 @@ func TestRetentionSweepAllWorkspacesDefaultsWhenConfigMissing(t *testing.T) {
 // the thing under test: every assertion below is on an event the
 // sweeper produces, so a slow host makes this loop wait longer rather
 // than making it decide differently.
-func waitForEmits(t *testing.T, cap *captureEmitter, want int64) {
+func waitForEmits(t *testing.T, em *captureEmitter, want int64) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		if got := cap.calls.Load(); got >= want {
+		if got := em.calls.Load(); got >= want {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("emit call count = %d, want at least %d", cap.calls.Load(), want)
+			t.Fatalf("emit call count = %d, want at least %d", em.calls.Load(), want)
 		}
 		time.Sleep(time.Millisecond)
 	}

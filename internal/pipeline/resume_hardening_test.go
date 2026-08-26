@@ -457,8 +457,8 @@ func TestResume_DefinitionEditedWhileWaitingForSlot_Interrupted(t *testing.T) {
 	// release doesn't leave the resume retry loop spinning against a
 	// permanently held slot during test teardown.
 	// The release itself is handed to the resume goroutine (see the
-	// slotBusy rendezvous below), so it is once-guarded rather than
-	// flag-guarded.
+	// onResumeSlotBusy rendezvous below), so it is once-guarded rather
+	// than flag-guarded.
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(releaseBlocker) }
 	t.Cleanup(release)
