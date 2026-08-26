@@ -72,7 +72,7 @@ These commands update one workspace governance field at a time unless noted.
 
 | Command | What it does |
 | --- | --- |
-| `keeper status` | Shows server judge status and workspace governance: enabled state, endpoint/model, Ollama reachability, secret count, contact, DENY-notify threshold, effective four-eyes rule, and auto-lease. |
+| `keeper status` | Shows server judge status and workspace governance: enabled state, endpoint/model, Ollama reachability, secret count, contact, sampling cadence, DENY-notify threshold, effective four-eyes rule, and auto-lease. |
 | `keeper enable` | Enables the behavioral watchdog for this workspace. It is opt-in and off by default. |
 | `keeper disable` | Disables the behavioral watchdog. This does not erase its configuration or audit history. |
 | `keeper contact <email>` | Resolves a workspace member by email and routes findings to that OWNER/ADMIN. |
@@ -80,6 +80,9 @@ These commands update one workspace governance field at a time unless noted.
 | `keeper threshold <1-10>` | Sets the risk at or above which a DENY also reaches the inbox. ESCALATE always notifies; the default is 7. |
 | `keeper second-approver enable` | Requires a different human to resolve credential escalations raised by the approver's own agent. |
 | `keeper second-approver disable` | Disables the workspace toggle; a credential tier can still force the rule. |
+| `keeper sampling status` | Shows how often the behavioral watchdog reviews a tool call. |
+| `keeper sampling set <N>` | Reviews one in every N tool calls per crew. N is 1 through 100; the default is 5. |
+| `keeper sampling default` | Returns the workspace to the built-in cadence of one in 5. |
 | `keeper requests` | Lists recent decision-audit rows for agents in the current workspace. |
 | `keeper history <request-id>` | Shows append-only state transitions, actors, risk, exit code, and reasons for one request. An empty result does not distinguish an old/foreign/missing ID. |
 | `keeper health` | Prints the rolling decision window. It exits non-zero when the Keeper collapse alarm is standing, making it suitable for cron. The window is in memory and empties on restart. |
@@ -103,6 +106,32 @@ crewship keeper auto-lease off
 `set` accepts a Go duration from 60 seconds through 30 days (`720h`). It is
 opt-in and applies only to L3/L4 grants approved by Keeper, including approved
 credential escalations. It never shortens a longer manually assigned lease.
+
+### Sampling cadence
+
+```bash
+crewship keeper sampling status
+crewship keeper sampling set 1
+crewship keeper sampling set 20
+crewship keeper sampling default
+```
+
+The behavioral watchdog does not review every tool call. Each review is a call
+to the governance model, so it samples: one in every N tool calls, counted per
+crew. `set` accepts 1 through 100 and the default is 5. The change applies to
+the next tool call; no restart.
+
+`set 1` reviews every tool call. It is accepted, and the server returns a
+non-blocking warning with it: at that cadence essentially every tool call your
+agents make carries a governance-model round-trip, which on a hosted judge bills
+per review.
+
+There is no cadence that turns the watchdog off. `set 0` is rejected, because a
+stored 0 would leave the workspace reading "watchdog enabled" while nothing was
+ever reviewed. Use `keeper disable`. The ceiling of 100 exists for the same
+reason from the other end: the per-crew counter is in memory and starts at zero
+each restart, so a cadence larger than the number of tool calls a run makes
+would never fire.
 `off` restores standing grants for future approvals but does not un-lease
 already leased grants.
 
@@ -391,6 +420,7 @@ keeper
 ├── requests [--limit --offset]
 ├── resolve <request-id> [--adjudicator --decision --reason]
 ├── review: run <slot> [--agent --crew --failure --skill --tool --tool-args --trigger]
+├── sampling: default | set <N> | status
 ├── second-approver: disable | enable
 ├── status
 ├── threshold <1-10>
@@ -442,6 +472,22 @@ Shows the recent Keeper decision window.
 ### `crewship keeper requests`
 
 Lists recent Keeper decision-audit requests.
+
+### `crewship keeper sampling`
+
+Groups the behavioral watchdog's sampling cadence.
+
+### `crewship keeper sampling default`
+
+Returns the workspace to the built-in cadence of one review in 5 tool calls.
+
+### `crewship keeper sampling set <N>`
+
+Reviews one in every N tool calls per crew. N is 1 through 100.
+
+### `crewship keeper sampling status`
+
+Shows how often tool calls are reviewed.
 
 ### `crewship keeper second-approver disable`
 

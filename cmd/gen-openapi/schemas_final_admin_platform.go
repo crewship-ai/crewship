@@ -31,6 +31,7 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"configured": boolean(), "enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(),
 		"watch_spec": str(), "watch_presets": array(str()), "require_second_approver": boolean(),
 		"gov_model_provider": str(), "gov_model_id": str(), "auto_lease_seconds": integer(), "gov_model_credential_id": str(),
+		"behavior_sample_every": integer(),
 		"effective_second_approver": object(map[string]any{
 			"min_security_level": integer(), "min_security_level_label": str(), "source": str(),
 			"tier_floor_security_level": integer(), "tier_floor_label": str(),

@@ -83,6 +83,12 @@ interface GovernanceResponse {
   // re-issue an L3/L4 grant as a lease of that length. Server accepts 0 or
   // [60, 2592000] and 400s anything else rather than clamping.
   auto_lease_seconds?: number
+  // How often the watchdog reviews a tool call (#1001 M3): one in every N per
+  // crew. 0 is the "never configured" sentinel and means the built-in default
+  // (SAMPLE_EVERY_DEFAULT) — it does NOT mean "never". The server accepts
+  // [1, 100] and 400s anything else, 0 included: there is no cadence that means
+  // off, because that is what the enable switch is for.
+  behavior_sample_every?: number
   // Non-blocking advisory returned by PUT — e.g. enabling the four-eyes rule on
   // a workspace that lacks a second eligible approver. Empty on GET.
   warning?: string
@@ -219,6 +225,22 @@ interface WorkspaceMember {
 // message — it is not the gate.
 const AUTO_LEASE_MIN_SECONDS = 60
 const AUTO_LEASE_MAX_SECONDS = 30 * 24 * 60 * 60
+
+// Sampling cadence bounds, mirroring governance.MinBehaviorSampleEvery /
+// MaxBehaviorSampleEvery / DefaultBehaviorSampleEvery. Same deal as above: the
+// server rejects rather than clamps, so this is the actionable-message layer.
+//
+// Neither bound is arbitrary. 1 is allowed — "review every tool call" is a real
+// posture — but 0 is not, because a cadence of 0 stops the monitor while the
+// switch above still says it is on. And past 100 the per-crew counter (in
+// memory, reset each boot) would never reach the threshold inside a run.
+const SAMPLE_EVERY_MIN = 1
+const SAMPLE_EVERY_MAX = 100
+const SAMPLE_EVERY_DEFAULT = 5
+// Mirrors governance.WarnBehaviorSampleEveryBelow — the cadence under which the
+// server also returns a non-blocking cost advisory. Said inline here too, so it
+// arrives while the operator is choosing rather than after they have saved.
+const SAMPLE_EVERY_WARN_BELOW = 3
 
 // secondsToLeaseMinutes renders the wire value for the minutes input. 0 /
 // undefined (auto-lease off) becomes "" so the field reads as empty rather than
@@ -443,7 +465,20 @@ function WatchdogCard({
     enabled: gov.enabled,
     presets: presetsToKey(gov.watch_presets ?? []),
     spec: gov.watch_spec ?? "",
+    // Kept as a string so the number input can be cleared and retyped without
+    // snapping mid-edit. Empty renders the sentinel as the default it means.
+    sampleEvery: gov.behavior_sample_every ? String(gov.behavior_sample_every) : String(SAMPLE_EVERY_DEFAULT),
   })
+
+  const sampleEveryNum = Number(form.draft.sampleEvery)
+  const sampleEveryProblem =
+    !Number.isInteger(sampleEveryNum) || form.draft.sampleEvery.trim() === ""
+      ? "Must be a whole number."
+      : sampleEveryNum === 0
+        ? "0 would leave the watchdog on but never looking. Use the switch above to turn it off."
+        : sampleEveryNum < SAMPLE_EVERY_MIN || sampleEveryNum > SAMPLE_EVERY_MAX
+          ? `Must be from ${SAMPLE_EVERY_MIN} to ${SAMPLE_EVERY_MAX}.`
+          : null
 
   function handleSave() {
     void form.submit(async (draft) => {
@@ -451,6 +486,7 @@ function WatchdogCard({
         enabled: draft.enabled,
         watch_presets: keyToPresets(draft.presets),
         watch_spec: draft.spec,
+        behavior_sample_every: Number(draft.sampleEvery),
       })
     })
   }
@@ -485,6 +521,58 @@ function WatchdogCard({
           most of what made this page feel like work. */}
       {form.draft.enabled && (
       <>
+      {/* How often it looks (#1001 M3). Every review is a call to the governance
+          model, so this is the cost dial as much as the coverage dial — and the
+          number was previously unreachable: the monitor ran on a hardwired 5 for
+          every workspace.
+
+          There is deliberately no "off" value here — the switch above is the off
+          switch. A cadence that silenced the monitor while that switch still
+          read on is the one thing this control must not be able to express. */}
+      <SettingsRow
+        label="Review one in every"
+        description="Tool calls between reviews, counted per crew. Lower catches more and calls the governance model more often — 1 reviews everything. Higher is cheaper and quieter."
+      >
+        <span className="flex flex-col items-end gap-1">
+          <span className="flex items-center gap-1.5">
+            <Input
+              type="number"
+              min={SAMPLE_EVERY_MIN}
+              max={SAMPLE_EVERY_MAX}
+              step={1}
+              inputMode="numeric"
+              value={form.draft.sampleEvery}
+              onChange={(e) => form.set("sampleEvery", e.target.value)}
+              disabled={!canEdit}
+              className="h-8 w-16 text-xs text-right tabular-nums"
+              aria-label={`Review one in every N tool calls (${SAMPLE_EVERY_MIN}-${SAMPLE_EVERY_MAX})`}
+              aria-invalid={sampleEveryProblem !== null}
+              data-testid="keeper-governance-sample-every"
+            />
+            <span className="text-xs text-muted-foreground">tool calls</span>
+          </span>
+          {sampleEveryProblem ? (
+            <span
+              className="text-xs text-destructive/90 text-right max-w-[15rem]"
+              data-testid="keeper-governance-sample-every-invalid"
+            >
+              {sampleEveryProblem}
+            </span>
+          ) : sampleEveryNum < SAMPLE_EVERY_WARN_BELOW ? (
+            /* Allowed, and expensive. Said here rather than refused, because
+               "review everything" is a legitimate posture — it is just one that
+               puts a model round-trip behind most of what agents do. */
+            <span
+              className="text-xs text-muted-foreground/80 text-right max-w-[15rem] leading-snug"
+              data-testid="keeper-governance-sample-every-cost"
+            >
+              Most tool calls will carry a governance-model round-trip. On a
+              hosted judge that bills per review.
+            </span>
+          ) : null}
+        </span>
+      </SettingsRow>
+
       {/* A full-width block rather than a SettingsRow: a five-way multi-select
           does not belong in a right-aligned control slot. */}
       <div className="px-4 py-2.5 border-b border-border/40">
@@ -558,6 +646,7 @@ function WatchdogCard({
           dirty={form.isDirty}
           status={form.status}
           error={form.error}
+          canSave={sampleEveryProblem === null}
           onSave={handleSave}
           onCancel={form.reset}
           testId="keeper-watchdog-save"
