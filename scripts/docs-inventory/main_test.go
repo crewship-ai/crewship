@@ -2,6 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -299,5 +303,56 @@ func TestManifestKindsRefuseToReportAnEmptyRosterAsADocsGap(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), manifestKindSourcePath) {
 		t.Errorf("the error must name where the roster was looked for, got: %v", err)
+	}
+}
+
+// openapiReferencePage is the one published page that quotes the spec's
+// schema-quality figures in prose.
+const openapiReferencePage = "docs/api-reference/openapi.mdx"
+
+// openapiStatsSentence is the exact wording that page carries. Keeping the
+// shape in one regexp is what makes the numbers checkable at all: prose is
+// where they went stale, because nothing read prose.
+var openapiStatsSentence = regexp.MustCompile(
+	`(\d+) of (\d+) operations return a named 2xx schema, (\d+) fall back to an unconstrained ` + "`object`" +
+		`, and (\d+) have no success body at all\. (\d+) operations carry a request body: (\d+) with a named JSON schema, (\d+) with a non-JSON media type, and (\d+) with a generic JSON fallback\.`)
+
+// The figures in docs/api-reference/openapi.mdx were 52 operations out of date
+// — "513 of 536 … 184 request bodies" against a spec that had reached 588 —
+// and the generated report sitting in the same tree carried the right ones. Two
+// numbers for one fact, and the wrong one was the published one, because the
+// published one was typed by a human and nothing re-read it (#2086).
+//
+// This is that missing reader. When the spec moves, it fails with the sentence
+// to paste, so the fix is mechanical rather than another hand count.
+func TestOpenAPIReferenceQuotesTheCurrentSpec(t *testing.T) {
+	doc, err := readOpenAPI(filepath.Join("..", "..", openAPIPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := schemaStats(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Operations == 0 {
+		t.Fatalf("%s parsed to zero operations; the spec was not read", openAPIPath)
+	}
+
+	want := fmt.Sprintf(
+		"%d of %d operations return a named 2xx schema, %d fall back to an unconstrained `object`, and %d have no success body at all. "+
+			"%d operations carry a request body: %d with a named JSON schema, %d with a non-JSON media type, and %d with a generic JSON fallback.",
+		stats.NamedResponses, stats.Operations, stats.GenericResponses, stats.NoSuccessBody,
+		stats.RequestBodies, stats.ConcreteJSONRequests, stats.NonJSONRequestBodies, stats.GenericJSONRequests)
+
+	body, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(openapiReferencePage)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := openapiStatsSentence.FindString(string(body))
+	if got == "" {
+		t.Fatalf("%s no longer carries the schema-quality sentence in the shape this test reads.\nEither restore it or update openapiStatsSentence. It should read:\n\n  %s", openapiReferencePage, want)
+	}
+	if got != want {
+		t.Errorf("%s quotes figures the generated spec does not support.\n  page: %s\n  spec: %s\nReplace the sentence in the page with the second line.", openapiReferencePage, got, want)
 	}
 }

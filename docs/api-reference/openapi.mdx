@@ -73,7 +73,13 @@ Content-Type: application/json
 This used not to hold. Go's router matches method and path together, so an unlisted method on a literal path could fall through to a sibling parameterised route — `DELETE /api/v1/notifications/count` reached the delete-notification handler with `id="count"` and answered `401`/`404` instead of `405`. Twenty-nine paths behaved that way. (That particular pair of routes has since been removed — see [#1751](https://github.com/crewship-ai/crewship/issues/1751) — but the failure mode it illustrates is why the guards exist.) <!-- docs-inventory: ignore --> A client can now trust the spec's method list: what it does not list, the server refuses.
 
 <Note>
-  This used to say that bodies were a generic placeholder and that every operation documented only `200`. Neither is true any more: the document enumerates the error statuses each operation can answer (`400`, `401`, `403`, `404`, `409`, `429`, `500`, …) alongside its success status, and 513 of 536 operations return a named schema — 9 still fall back to an unconstrained `object`, and 14 have no success body at all. Request bodies are named for 184 operations and generic for 40. The spec is authoritative for **paths, methods and path parameters**; treat a derived body as a strong hint and this reference section as authoritative for meaning.
+  This used to say that bodies were a generic placeholder and that every operation documented only `200`. Neither is true any more: the document enumerates the error statuses each operation can answer (`400`, `401`, `403`, `404`, `409`, `429`, `500`, …) alongside its success status.
+
+  {/* These five numbers are derived from internal/api/openapi.gen.json, not typed. TestOpenAPIReferenceQuotesTheCurrentSpec in scripts/docs-inventory re-derives them on every run and prints the replacement sentence when they drift — they had gone 52 operations stale before that test existed. */}
+
+  573 of 588 operations return a named 2xx schema, 0 fall back to an unconstrained `object`, and 15 have no success body at all. 251 operations carry a request body: 247 with a named JSON schema, 4 with a non-JSON media type, and 0 with a generic JSON fallback.
+
+  The spec is authoritative for **paths, methods and path parameters**; treat a derived body as a strong hint and this reference section as authoritative for meaning.
 </Note>
 
 <Note>

@@ -79,6 +79,41 @@ var allowedDeprecatedOccurrences = map[string][]string{
 	},
 }
 
+// unnavigatedPages and unnavigatedPrefixes are the pages that live in the docs
+// tree on purpose without a docs.json entry. Everything else that is not
+// declared is an orphan: Mintlify publishes it, no sidebar reaches it, and —
+// because llms.txt is generated from the navigation — no agent can find it
+// either. Three pages sat in exactly that state (`cli/onboarding`,
+// `api-reference/onboarding`, `manifest/page`), hiding all seven `onboarding`
+// commands, because every gate this repository had validated nav→file and
+// nothing validated file→nav (#2086).
+//
+// The allowlist is explicit rather than inferred so that adding a page and
+// forgetting the navigation entry is a build failure, while the two genuinely
+// internal trees stay quiet:
+//
+//   - `prd/` is product-requirement and report material written for the repo,
+//     not for the published site.
+//   - `audit-methodology` documents how the audits are run and is linked from
+//     the reports that cite it, not from the sidebar.
+var unnavigatedPages = map[string]bool{
+	"audit-methodology": true,
+}
+
+var unnavigatedPrefixes = []string{"prd/"}
+
+func unnavigatedByDesign(page string) bool {
+	if unnavigatedPages[page] {
+		return true
+	}
+	for _, prefix := range unnavigatedPrefixes {
+		if strings.HasPrefix(page, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	root := flag.String("root", ".", "repository root")
 	// Empty by default: the repository-side assertions are hermetic and safe
@@ -121,6 +156,18 @@ func main() {
 	if len(missing) > 0 {
 		fail(fmt.Errorf("navigation pages missing from docs tree: %s", strings.Join(missing, ", ")))
 	}
+
+	// The other direction. The pass above proves every declared id has a file;
+	// it says nothing about a file nobody declared, which is why the inventory
+	// could report "0 missing" while three published pages were unreachable.
+	orphans, reachable, err := orphanedPages(*root, declared)
+	if err != nil {
+		fail(err)
+	}
+	if len(orphans) > 0 {
+		fail(fmt.Errorf("published pages missing from docs/docs.json navigation — unreachable from the sidebar and absent from llms.txt:\n  %s\nAdd each to docs/docs.json, or to unnavigatedPages/unnavigatedPrefixes in scripts/docs-surface-check if it is unlisted on purpose.", strings.Join(orphans, "\n  ")))
+	}
+	fmt.Printf("docs-surface-check: navigation reachability %d/%d pages declared, 0 orphaned\n", reachable, reachable)
 
 	// Third pass: the links written inside the pages, not just the ids
 	// docs.json declares. Hermetic like the two above — it reads the same
@@ -248,6 +295,52 @@ func navigationPages(raw json.RawMessage) []string {
 	}
 	sort.Strings(pages)
 	return pages
+}
+
+// orphanedPages returns every page in the docs tree that docs.json does not
+// declare and the allowlist does not excuse, plus the number of pages that were
+// required to be declared.
+//
+// This is the file→nav direction, and it is the one that was missing. It also
+// keeps the llms.txt assertion in checkServed honest: that comparison counts
+// what the navigation declares, so a page outside the navigation is invisible
+// to it by construction — the deployed index can match docs.json exactly while
+// a published page is reachable from neither.
+func orphanedPages(root string, declared []string) ([]string, int, error) {
+	inNav := make(map[string]bool, len(declared))
+	for _, page := range declared {
+		inNav[page] = true
+	}
+	docs := filepath.Join(root, "docs")
+	orphans := []string{}
+	reachable := 0
+	err := filepath.Walk(docs, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || (!strings.HasSuffix(path, ".mdx") && !strings.HasSuffix(path, ".md")) {
+			return nil
+		}
+		rel, err := filepath.Rel(docs, path)
+		if err != nil {
+			return err
+		}
+		page := filepath.ToSlash(rel)
+		page = strings.TrimSuffix(strings.TrimSuffix(page, ".mdx"), ".md")
+		if unnavigatedByDesign(page) {
+			return nil
+		}
+		reachable++
+		if !inNav[page] {
+			orphans = append(orphans, page)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, reachable, err
+	}
+	sort.Strings(orphans)
+	return orphans, reachable, nil
 }
 
 // docsClient bounds the deployed-index requests. http.DefaultClient has no

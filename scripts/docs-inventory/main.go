@@ -26,9 +26,14 @@ import (
 )
 
 const (
-	openAPIPath    = "internal/api/openapi.gen.json"
-	docsRoot       = "docs"
-	docsNavigation = "docs/docs.json"
+	openAPIPath = "internal/api/openapi.gen.json"
+	docsRoot    = "docs"
+	// docs/docs.json was declared here and never read, which is a large part of
+	// why three published pages could sit outside the navigation while this
+	// report said "0 missing": the inventory matches operations against page
+	// *files*, so a page nothing links to counts as documented. Navigation
+	// reachability is checked in scripts/docs-surface-check, in both
+	// directions — see orphanedPages there (#2086).
 	reportDir      = "docs/prd/reports"
 	jsonReport     = reportDir + "/release-1-0-api-cli-inventory.json"
 	markdownReport = reportDir + "/release-1-0-api-cli-inventory.md"
@@ -788,6 +793,69 @@ func tokenMentioned(text, needle string) bool {
 
 func isTokenByte(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-'
+}
+
+// specSchemaStats are the schema-quality figures the generated report prints
+// and docs/api-reference/openapi.mdx quotes in prose.
+//
+// They live in one function because they were maintained in two places and the
+// two disagreed: the MDX claimed "513 of 536 operations … 184 request bodies"
+// long after the spec had reached 588, while the report next door carried the
+// right numbers (#2086). A number copied by hand into prose has no gate on it,
+// so this is the shape that does — see TestOpenAPIReferenceQuotesTheCurrentSpec.
+type specSchemaStats struct {
+	Operations           int
+	NamedResponses       int
+	GenericResponses     int
+	NoSuccessBody        int
+	RequestBodies        int
+	ConcreteJSONRequests int
+	NonJSONRequestBodies int
+	GenericJSONRequests  int
+}
+
+// schemaStats derives the figures from the generated spec, using exactly the
+// predicates the report uses, so the two can never drift from one another.
+func schemaStats(doc openAPIDocument) (specSchemaStats, error) {
+	var s specSchemaStats
+	for path, methods := range doc.Paths {
+		for method, raw := range methods {
+			if method == "parameters" {
+				continue
+			}
+			var op openAPIOperation
+			if err := json.Unmarshal(raw, &op); err != nil {
+				return s, fmt.Errorf("decode OpenAPI operation %s %s: %w", method, path, err)
+			}
+			s.Operations++
+			switch {
+			case hasConcreteSuccessSchema(op.Responses):
+				s.NamedResponses++
+			case hasSuccessSchema(op.Responses):
+				s.GenericResponses++
+			default:
+				s.NoSuccessBody++
+			}
+			if op.RequestBody == nil {
+				continue
+			}
+			s.RequestBodies++
+			if jsonBody, ok := op.RequestBody.Content["application/json"]; ok {
+				if isConcreteSchema(jsonBody.Schema) {
+					s.ConcreteJSONRequests++
+				} else {
+					s.GenericJSONRequests++
+				}
+			}
+			for media := range op.RequestBody.Content {
+				if media != "application/json" {
+					s.NonJSONRequestBodies++
+					break
+				}
+			}
+		}
+	}
+	return s, nil
 }
 
 func hasSuccessSchema(responses map[string]openAPIResponse) bool {

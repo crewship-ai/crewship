@@ -8527,6 +8527,7 @@
         "docs/api-reference/skills.mdx",
         "docs/cli/setup.mdx",
         "docs/cli/template.mdx",
+        "docs/guides/templates.mdx",
         "docs/manifest/crew_template.md"
       ],
       "status": "documented_exact",
@@ -8579,6 +8580,7 @@
       "exact_docs": [
         "docs/api-reference/skills.mdx",
         "docs/cli/template.mdx",
+        "docs/guides/templates.mdx",
         "docs/manifest/crew_template.md"
       ],
       "status": "documented_exact",
@@ -8617,6 +8619,7 @@
       "exact_docs": [
         "docs/api-reference/skills.mdx",
         "docs/cli/template.mdx",
+        "docs/guides/templates.mdx",
         "docs/manifest/crew_template.md"
       ],
       "status": "documented_exact",
@@ -48606,6 +48609,7 @@
         "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
+        "docs/guides/templates.mdx",
         "docs/manifest/README.md",
         "docs/manifest/connector.md",
         "docs/manifest/crew.md",
@@ -49056,10 +49060,10 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4422,
-    "api_path_references": 2166,
+    "command_references": 4424,
+    "api_path_references": 2170,
     "environment_references": 432,
-    "manifest_kind_references": 230,
+    "manifest_kind_references": 231,
     "flag_references": 2091,
     "missing_commands": 0,
     "missing_api_paths": 0,
