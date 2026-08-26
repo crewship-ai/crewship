@@ -327,6 +327,53 @@ func TestInstallMiseTools_FailsOnDanglingShims(t *testing.T) {
 	}
 }
 
+// The check must not invent a failure when there is nothing to check.
+//
+// With no shims the glob stays literal, so the loop variable is the pattern
+// itself. A naive `[ -e "$s" ]` reports that as a broken shim named "*" and
+// fails the whole provision — which would be a worse bug than the silent
+// wrong version this check exists to catch. The shell guards it with
+// `[ -L ]`; this pins that the Go side treats exit 0 as success and does not
+// depend on any output.
+func TestInstallMiseTools_PassesWhenThereAreNoShims(t *testing.T) {
+	mockExec := func(_ context.Context, _ string, cmd []string, _ string, _ []string) (string, int, error) {
+		if strings.Contains(strings.Join(cmd, " "), miseShimsDir) {
+			// What the shell returns for an empty or missing directory.
+			return "", 0, nil
+		}
+		return "ok", 0, nil
+	}
+
+	cfg := &MiseConfig{Tools: map[string]string{"terraform": "1.9"}}
+	if err := InstallMiseTools(context.Background(), "test-container", cfg, mockExec); err != nil {
+		t.Fatalf("no shims must not fail provisioning, got %v", err)
+	}
+}
+
+// The guard is a shell one-liner, so pin its shape rather than trusting the
+// prose: `[ -L ]` is the difference between "there are no shims" and "the
+// shims are broken", and dropping it is a silent regression.
+func TestVerifyMiseShims_GuardsTheUnexpandedGlob(t *testing.T) {
+	var got string
+	mockExec := func(_ context.Context, _ string, cmd []string, _ string, _ []string) (string, int, error) {
+		joined := strings.Join(cmd, " ")
+		if strings.Contains(joined, miseShimsDir) {
+			got = joined
+		}
+		return "ok", 0, nil
+	}
+
+	cfg := &MiseConfig{Tools: map[string]string{"jq": "1.7"}}
+	if err := InstallMiseTools(context.Background(), "test-container", cfg, mockExec); err != nil {
+		t.Fatalf("InstallMiseTools: %v", err)
+	}
+	for _, want := range []string{`[ -L "$s" ] || continue`, `[ -e "$s" ] && continue`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("shim check missing %q; got:\n%s", want, got)
+		}
+	}
+}
+
 // mise writes to three XDG roots besides its config: tool payloads to
 // $XDG_DATA_HOME/mise, tracked-config state to $XDG_STATE_HOME/mise and
 // downloads to $XDG_CACHE_HOME/mise. Only .config/mise used to be created and

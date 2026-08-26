@@ -407,10 +407,18 @@ const miseShimsDir = "/home/agent/.local/share/mise/shims"
 
 // verifyMiseShims fails when any shim mise just wrote does not resolve.
 func verifyMiseShims(ctx context.Context, containerID string, exec ExecFunc) error {
+	// `[ -L ]` before `[ -e ]` is what keeps an empty directory from failing
+	// the build. With no shims the glob stays literal, so `$s` is the pattern
+	// itself — which is neither a symlink nor an existing file, and would
+	// otherwise be reported as a broken shim named "*". Blocking provisioning
+	// on a crew whose tools happen to produce no shims would be a worse bug
+	// than the one this check exists for.
 	stdout, exitCode, err := exec(ctx, containerID, []string{
 		"sh", "-c",
 		`broken=""; for s in ` + miseShimsDir + `/*; do ` +
-			`[ -e "$s" ] || broken="$broken $(basename "$s")"; done; ` +
+			`[ -e "$s" ] && continue; ` +
+			`[ -L "$s" ] || continue; ` +
+			`broken="$broken $(basename "$s")"; done; ` +
 			`[ -z "$broken" ] || { echo "$broken"; exit 1; }`,
 	}, "1001:1001", miseAgentEnv)
 	if err != nil {
