@@ -61,6 +61,33 @@ function renderDialog() {
 const openPicker = () =>
   fireEvent.click(screen.getByRole("button", { name: /Customize avatar/i }))
 
+describe("<CreateAgentDialog> — leaving with unsaved input", () => {
+  it("asks before the footer Cancel throws a draft away", async () => {
+    // CreateSurfaceFooter routes Cancel through the discard guard unless the
+    // caller opts out — `guardCancel` defaults to true (create-surface.tsx).
+    // This dialog does not opt out, so all four exits (Esc, the overlay, the
+    // header ×, and Cancel) ask the same question. Pinned because the default
+    // used to be the other way round, and a silent Cancel is indistinguishable
+    // from a working one until someone loses a draft.
+    const onOpenChange = vi.fn()
+    render(
+      <CreateAgentDialog
+        workspaceId="ws-1"
+        open
+        onOpenChange={onOpenChange}
+        defaultCrewSlug="engineering"
+        crews={CREWS}
+        onCreated={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }))
+
+    await screen.findByText(/unsaved input/i)
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+})
+
 describe("<CreateAgentDialog> — the template row", () => {
   // It was six PersonaChips + "All 30 templates" + "Blank": eight pills that
   // wrap to two rows at the surface's 800px and take the top of the form

@@ -213,6 +213,26 @@ export function OAuthForm({
   const authorizeRef = useRef<() => void>(() => {})
   const authorize = useCallback(() => authorizeRef.current(), [])
 
+  /**
+   * Publish the current handler AFTER commit, not during render.
+   *
+   * This was a bare `authorizeRef.current = handleAuthorize` down in the
+   * render body. React may replay or discard a render — StrictMode does it on
+   * every one — so a discarded render could leave the committed footer's
+   * stable `authorize` pointing at a closure over state the UI never showed.
+   * The footer's primary creates a credential, so "runs against state nobody
+   * saw" is not a theoretical cost.
+   *
+   * No dependency array: the point is that it tracks every commit.
+   * `handleAuthorize` is a function declaration, so it is hoisted and this
+   * effect can be declared above it — deliberately, because effects fire in
+   * declaration order and the ref must be current before the effect below
+   * hands `authorize` to the caller.
+   */
+  useEffect(() => {
+    authorizeRef.current = handleAuthorize
+  })
+
   useEffect(() => {
     onActionChange?.({
       authorize,
@@ -437,10 +457,6 @@ export function OAuthForm({
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
-
-  // Kept current so the stable `authorize` callback above always runs the
-  // handler this render closed over.
-  authorizeRef.current = handleAuthorize
 
   return (
     <div className={cn("space-y-3", variant === "surface" ? "p-0" : "p-3")}>

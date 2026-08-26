@@ -150,6 +150,11 @@ export function NewRoutineContent({ onClose }: { onClose: () => void }) {
             <CreateSurfaceSection title="Goal" icon={Sparkles} accent="gold">
               <CreateSurfaceDescriptionInput
                 autoFocus
+                // CreateSurfaceField renders its <label> as a SIBLING of the
+                // control, so a name comes from htmlFor + a matching id. This
+                // one is not in a field at all — a CreateSurfaceSection
+                // heading is not a label — so it needs the name directly.
+                aria-label="Goal"
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
                 rows={4}
@@ -252,8 +257,9 @@ export function NewRoutineContent({ onClose }: { onClose: () => void }) {
                   </select>
                 </CreateSurfaceField>
               </CreateSurfaceGrid>
-              <CreateSurfaceField label="Description">
+              <CreateSurfaceField label="Description" htmlFor="design-routine-description">
                 <Input
+                  id="design-routine-description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="What it does, in one line."

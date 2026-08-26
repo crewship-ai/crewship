@@ -688,6 +688,11 @@ export function CreateSurfaceBody({
 }: CreateSurfaceBodyProps) {
   return (
     <div
+      // The scrollport, nameable. Tests asserting "the primary is NOT in the
+      // scrollport" were reaching for it as the surface's first direct <div>,
+      // which is SheetGrabber — so the assertion held no matter where the
+      // button was. Declared before the spread so a caller can still override.
+      data-slot="create-surface-body"
       className={cn(
         // min-h-0 is what actually lets this shrink inside the flex column;
         // without it the body pushes the footer off a short viewport.

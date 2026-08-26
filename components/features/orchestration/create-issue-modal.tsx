@@ -1049,6 +1049,12 @@ export function CreateIssueModal({
                 value={labelQuery}
                 onChange={(e) => setLabelQuery(e.target.value)}
                 onKeyDown={(e) => {
+                  // A CJK user presses Enter to accept an IME candidate. Treat
+                  // that as a commit and a half-composed string becomes a
+                  // label. Same guard the egress allowlist input carries, for
+                  // the same reason — this is the other place Enter turns free
+                  // text into a row.
+                  if (e.nativeEvent.isComposing) return
                   // Enter creates when nothing matches — the same key that
                   // would otherwise do nothing here.
                   if (e.key === "Enter" && canCreateLabel) {

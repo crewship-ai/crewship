@@ -247,8 +247,13 @@ describe("ConnectOAuthDialog — the request it has always issued", () => {
     const authorize = screen.getByRole("button", { name: /authorize/i })
     // The scrollport is the body; the footer is its sibling. A primary inside
     // the body scrolls away from the fields it commits.
-    const body = shell()!.querySelector('[data-slot="dialog-content"] > div')
-    expect(body?.contains(authorize)).not.toBe(true)
+    //
+    // Keyed on the body's own slot. This used to select the surface's first
+    // direct <div>, which is SheetGrabber — so `contains` was false whatever
+    // the footer did and the assertion never failed.
+    const body = shell()!.querySelector('[data-slot="create-surface-body"]')
+    expect(body).not.toBeNull()
+    expect(body!.contains(authorize)).toBe(false)
     // And exactly one of it — the form's own row is suppressed when the
     // caller takes the action.
     expect(screen.getAllByRole("button", { name: /authorize/i })).toHaveLength(1)
