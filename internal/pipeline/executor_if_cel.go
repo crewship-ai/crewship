@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/google/cel-go/cel"
+	"cel.dev/cel-go/cel"
 )
 
 // evalStepCondition decides whether a step's `if:` gate passes (#1419, part 2).

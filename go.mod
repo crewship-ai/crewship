@@ -5,6 +5,7 @@ go 1.26
 toolchain go1.27.0
 
 require (
+	cel.dev/cel-go v0.32.0
 	filippo.io/age v1.3.1
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
@@ -14,7 +15,6 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/getsentry/sentry-go v0.48.0
 	github.com/go-jose/go-jose/v4 v4.1.4
-	github.com/google/cel-go v0.31.0
 	github.com/google/go-containerregistry v0.22.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3

@@ -909,6 +909,24 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **cel-go can receive security updates again (#2067).** It had stopped, and
+  nothing said so. cel-go renamed its module: `v0.31.0` declares
+  `module github.com/google/cel-go`, but `v0.32.0` and everything after declare
+  `module cel.dev/cel-go`, served from a different origin repository. v0.31.0 —
+  where we were — is therefore the last release reachable under the import path
+  we used, and Dependabot cannot cross a rename because doing so means editing
+  source. It failed the whole `go_modules` job with `go_module_path_mismatch`
+  instead, in a job log nobody reads, on every run since at least 2026-08-24.
+
+  This matters more than a stale pin because CEL evaluates expressions that
+  come from pipeline definitions, and because the *advisory* channel was
+  affected too: a future advisory would be published against `cel.dev/cel-go`
+  and would not have matched a requirement naming the old path. The gate meant
+  to catch a stale dependency was looking at the wrong name for it.
+
+  Imports move to `cel.dev/cel-go` and the module to v0.32.0. No behaviour
+  change is intended — the two paths serve identical content for the same tags.
+
 - **A crew no longer starts on a known-stale runtime image, whichever way the
   host got there (#2006, #2019).** ⚠️ **Behaviour change:** a start that used to
   succeed can now fail.
