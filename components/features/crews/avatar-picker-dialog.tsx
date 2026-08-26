@@ -3,8 +3,11 @@
 import { useEffect, useState } from "react"
 import { RefreshCw } from "lucide-react"
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { AVATAR_STYLES, getAgentAvatarUrl, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { cn } from "@/lib/utils"
@@ -214,7 +217,7 @@ export function AvatarPickerBody({
           </div>
           <div
             data-testid="avatar-style-grid"
-            className="grid max-h-[210px] grid-cols-5 gap-1 overflow-y-auto pr-1 sm:grid-cols-7"
+            className="grid max-h-[210px] grid-cols-4 gap-1 overflow-y-auto pr-1 sm:grid-cols-6"
           >
             {STYLE_OPTIONS.map((s) => (
               <button
@@ -293,15 +296,29 @@ export function AvatarPickerDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Avatar — {agentName}</DialogTitle>
-          <DialogDescription>
-            Pick a style and a seed. Same seed always produces the same face.
-          </DialogDescription>
-        </DialogHeader>
+    // The shared shell, not a bare DialogContent.
+    //
+    // Radix's default content is `bg-background`, which in this theme is
+    // oklch(0.10) — the darkest surface in the palette. Every migrated create
+    // surface is `bg-card`, oklch(0.155). Side by side that reads as two
+    // different applications, and this dialog is opened FROM those surfaces'
+    // neighbourhood: the agent canvas and the crew roster. It also arrived
+    // with the primitive's p-6, a blue confirm of its own, and no bottom
+    // sheet on a phone.
+    //
+    // `md` rather than the create surfaces' `lg`: this is one question, and
+    // 640px is enough for the style grid without the tile labels truncating
+    // the way they did at the primitive's 512.
+    <CreateSurface open={open} onOpenChange={onOpenChange} size="md" onSubmit={() => void submit()}>
+      <CreateSurfaceHeader
+        concept="crews"
+        context={agentName}
+        title="Avatar"
+        description="Pick a style and a seed. The same seed always produces the same face."
+        onClose={() => onOpenChange(false)}
+      />
 
+      <CreateSurfaceBody className="flex flex-col gap-3">
         <AvatarPickerBody
           agentName={agentName}
           seed={draftSeed}
@@ -309,26 +326,18 @@ export function AvatarPickerDialog({
           crewStyle={crewStyle}
           onChange={(next) => { setDraftSeed(next.seed); setDraftStyle(next.style) }}
         />
+      </CreateSurfaceBody>
 
-        <DialogFooter>
-          <button
-            type="button"
-            className="text-sm px-3 py-1.5 rounded text-muted-foreground hover:text-foreground"
-            onClick={() => onOpenChange(false)}
-            disabled={busy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={busy}
-            className="text-sm px-3 py-1.5 rounded bg-primary hover:bg-primary text-white disabled:opacity-40"
-          >
-            {busy ? "Saving…" : "Save avatar"}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={busy ? "Saving…" : "Save avatar"}
+        onPrimary={() => void submit()}
+        busy={busy}
+        // Nothing is lost by closing: the draft only reaches the server
+        // through Save, so the shell's are-you-sure would be asking about
+        // work that was never at risk.
+        guardCancel={false}
+      />
+    </CreateSurface>
   )
 }
