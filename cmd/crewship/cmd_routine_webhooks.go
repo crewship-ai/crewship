@@ -307,8 +307,18 @@ var routineWebhooksUrlCmd = &cobra.Command{
 				if baseURL == "" {
 					baseURL = clientBaseURL(client)
 				}
-				fmt.Println(strings.TrimRight(baseURL, "/") + "/api/v1/webhooks/" + url.PathEscape(w.Token))
-				return nil
+				full := strings.TrimRight(baseURL, "/") + "/api/v1/webhooks/" + url.PathEscape(w.Token)
+				// The bare URL stays the human output — this command exists so
+				// you can paste it into a sender's config, and a JSON envelope
+				// around it would be in the way. Under a machine format it
+				// becomes an object, because a bare URL on stdout is not a
+				// document and `-f json` promises one.
+				return resolvedFormatter(cmd).AutoHuman(struct {
+					WebhookID string `json:"webhook_id"`
+					URL       string `json:"url"`
+				}{w.ID, full}, func() {
+					fmt.Println(full)
+				})
 			}
 		}
 		return cli.NotFoundf("webhook %s not found", args[0])

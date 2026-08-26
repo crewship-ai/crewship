@@ -785,6 +785,60 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   what is gone is the silence, which is what made this shape of loss
   (#1437, #1444, #1973) discoverable only months later.
 
+- **44 commands advertised `-f json` and did not honour it.** `--format`/`-f`
+  is a persistent flag on the root command, so every one of the ~800 commands
+  prints `Output format: table|json|yaml|ndjson|quiet` in its help — and the
+  platform's premise is that agents drive this CLI, which means that flag is
+  what the pipelines depend on. A sweep of the whole tree found four ways it
+  was broken, all of them silent and all exiting 0:
+
+  - **34 reporting commands never resolved the format at all** and printed
+    human text — sometimes ANSI-coloured — under `-f json`. Among them
+    `config show`, `config validate`, `notify status`, `telemetry status`,
+    `server current`, `crew status`, `crew config --show`, `persona view`,
+    `persona history`, `lint`, `logs`, `db migration-status`,
+    `admin sessions list`, `memory search`, `memory status`, `backup metrics`,
+    and eleven of the `routine` family.
+  - **Nine more resolved it and wrote prose to stdout first**, so the JSON was
+    real and the *stream* still would not parse. `digest enable` printed nine
+    advisory lines and then handed `AutoHuman` an empty human renderer.
+  - **Empty lists came back as `null`, not `[]`.** Go marshals an unfilled
+    slice as `null`, so a list command answered `[]` on a populated workspace
+    and `null` on an empty one — `crewship prompt list -f json | jq '.[]'`
+    worked in development and failed on a fresh install. Fixed once, in the
+    shared `cli.Formatter`, rather than at each call site.
+  - **Two commands owned a local flag named `format`**, which shadows the root
+    persistent flag *and takes its `-f` shorthand with it*. `crewship memory
+    search … -f json` therefore did not fall back to human output — it failed
+    with `unknown shorthand flag: 'f'`. `routine get` accepted `-f json` and
+    rejected `-f yaml` and `-f ndjson` outright.
+
+  Human output is byte-identical throughout; the machine formats are what
+  changed. Machine payloads also stop inheriting the human view's display
+  truncation, so `routine active -f json` carries the full run id (the table
+  cuts it at 24 characters, and a truncated id fed back to `routine cancel`
+  is a 404) and `routine versions -f json` the full definition hash.
+
+  Four guards keep it from recurring: two walk the entire command tree and
+  fail the build on a new offender, one ratchets the remaining
+  mutation-receipts-on-stdout population downward, and one keeps the exemption
+  table from rotting. (#2086)
+
+- **`crewship memory search -F` is deprecated.** It survives as
+  `--output-format`, a differently-named alias, so existing scripts keep
+  working; taking the name `format` back would re-break `-f` on that command.
+  It warns and will be removed.
+
+- **`crewship routine get --format human|json` is now the global flag.** The
+  local flag is gone, so all five formats work. `--format human` still renders
+  the human report. `--format xml` no longer errors — an unrecognised format
+  renders as human, uniformly, the way it does on every other command.
+
+- **`crewship routine versions show` no longer prints a non-JSON body to
+  stdout and exits 0.** A 200 whose body does not parse is now an error that
+  names the problem, which is what the command's own help ("pipe to jq")
+  promises.
+
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and
   `OnboardingHandler.Status` reads a NULL there as "this completion was

@@ -271,15 +271,22 @@ var routineSchedulesCreateCmd = &cobra.Command{
 				previewTZ = "UTC"
 			}
 			occs, oerr := pipeline.NextOccurrences(cronExpr, previewTZ, 3, time.Now())
-			fmt.Printf("Parsed %q as cron %q (%s).\n", when, cronExpr, previewTZ)
+			// The preview and the prompt go to STDERR, which is where every
+			// other confirmation in this CLI already lives (see
+			// confirmAction). They were on stdout, so `-f json` prefixed the
+			// created schedule with four lines of English and the stream
+			// stopped parsing (#2086). A human sees them either way; a pipe
+			// no longer does.
+			errOut := cmd.ErrOrStderr()
+			fmt.Fprintf(errOut, "Parsed %q as cron %q (%s).\n", when, cronExpr, previewTZ)
 			if oerr == nil {
-				fmt.Println("Next 3 fire times:")
+				fmt.Fprintln(errOut, "Next 3 fire times:")
 				for _, o := range occs {
-					fmt.Printf("  - %s\n", o.Format("2006-01-02 15:04 MST"))
+					fmt.Fprintf(errOut, "  - %s\n", o.Format("2006-01-02 15:04 MST"))
 				}
 			}
 			if !yes {
-				fmt.Print("Create this schedule? [y/N]: ")
+				fmt.Fprint(errOut, "Create this schedule? [y/N]: ")
 				var input string
 				_, _ = fmt.Scanln(&input)
 				if strings.ToLower(strings.TrimSpace(input)) != "y" && strings.ToLower(strings.TrimSpace(input)) != "yes" {
@@ -592,8 +599,14 @@ var routineSchedulesDeleteCmd = &cobra.Command{
 		}
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			fmt.Printf("Delete schedule %s? Use --yes to skip this prompt.\n", args[0])
-			fmt.Print("Type 'yes' to confirm: ")
+			// Prompt on STDERR, like confirmAction and every other
+			// confirmation in the CLI. On stdout it prefixed whatever the
+			// command printed afterwards, so `-f json` returned prose plus a
+			// document (#2086). The stricter "type yes" wording is kept —
+			// this delete cannot be undone.
+			errOut := cmd.ErrOrStderr()
+			fmt.Fprintf(errOut, "Delete schedule %s? Use --yes to skip this prompt.\n", args[0])
+			fmt.Fprint(errOut, "Type 'yes' to confirm: ")
 			var input string
 			_, _ = fmt.Scanln(&input)
 			if strings.ToLower(strings.TrimSpace(input)) != "yes" {

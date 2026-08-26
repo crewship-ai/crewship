@@ -58,46 +58,51 @@ var routineVersionsCmd = &cobra.Command{
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		if len(rows) == 0 {
-			fmt.Println("No version history yet.")
-			return nil
-		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "VERSION\tHEAD\tPARENT\tHASH\tAUTHOR\tCREATED\tSUMMARY")
-		// HEAD comes from the server's is_head (pipelines.head_version) —
-		// after a rollback it sits on an OLDER row, so guessing rows[0]
-		// (max version) shows a stale HEAD (#996). Servers predating the
-		// field mark nothing; fall back to the old max-version heuristic —
-		// but ONLY when the page isn't full. On a full page (server default
-		// LIMIT 100), a new server's head may simply live beyond the page;
-		// printing no marker beats confidently marking the wrong row.
-		serverMarksHead := false
-		for _, v := range rows {
-			if v.IsHead {
-				serverMarksHead = true
-				break
+		// The machine rows are the server's, untouched: the human table
+		// truncates the definition hash and the author id to 12 characters
+		// and the change summary to 50, and a truncated hash is not a hash.
+		return resolvedFormatter(cmd).AutoHuman(rows, func() {
+			if len(rows) == 0 {
+				fmt.Println("No version history yet.")
+				return
 			}
-		}
-		const versionsPageCap = 100
-		guessHead := !serverMarksHead && len(rows) < versionsPageCap
-		for _, v := range rows {
-			isHead := ""
-			if v.IsHead || (guessHead && v.Version == rows[0].Version) {
-				isHead = "*"
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "VERSION\tHEAD\tPARENT\tHASH\tAUTHOR\tCREATED\tSUMMARY")
+			// HEAD comes from the server's is_head (pipelines.head_version) —
+			// after a rollback it sits on an OLDER row, so guessing rows[0]
+			// (max version) shows a stale HEAD (#996). Servers predating the
+			// field mark nothing; fall back to the old max-version heuristic —
+			// but ONLY when the page isn't full. On a full page (server default
+			// LIMIT 100), a new server's head may simply live beyond the page;
+			// printing no marker beats confidently marking the wrong row.
+			serverMarksHead := false
+			for _, v := range rows {
+				if v.IsHead {
+					serverMarksHead = true
+					break
+				}
 			}
-			parent := "—"
-			if v.ParentVersion != nil {
-				parent = fmt.Sprintf("v%d", *v.ParentVersion)
+			const versionsPageCap = 100
+			guessHead := !serverMarksHead && len(rows) < versionsPageCap
+			for _, v := range rows {
+				isHead := ""
+				if v.IsHead || (guessHead && v.Version == rows[0].Version) {
+					isHead = "*"
+				}
+				parent := "—"
+				if v.ParentVersion != nil {
+					parent = fmt.Sprintf("v%d", *v.ParentVersion)
+				}
+				summary := v.ChangeSummary
+				if len(summary) > 50 {
+					summary = summary[:47] + "..."
+				}
+				fmt.Fprintf(w, "v%d\t%s\t%s\t%s\t%s/%s\t%s\t%s\n",
+					v.Version, isHead, parent, truncIDForCLI(v.DefinitionHash, 12),
+					v.AuthorType, truncIDForCLI(v.AuthorID, 12), v.CreatedAt, summary)
 			}
-			summary := v.ChangeSummary
-			if len(summary) > 50 {
-				summary = summary[:47] + "..."
-			}
-			fmt.Fprintf(w, "v%d\t%s\t%s\t%s\t%s/%s\t%s\t%s\n",
-				v.Version, isHead, parent, truncIDForCLI(v.DefinitionHash, 12),
-				v.AuthorType, truncIDForCLI(v.AuthorID, 12), v.CreatedAt, summary)
-		}
-		return w.Flush()
+			_ = w.Flush()
+		})
 	},
 }
 
@@ -140,22 +145,25 @@ Examples:
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		// Pretty-print the JSON so it's readable on a terminal but
-		// still valid for piping. Indent at 2 spaces — matches the
-		// rest of the CLI's JSON output style.
 		raw, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return fmt.Errorf("read response: %w", err)
 		}
-		var pretty bytes.Buffer
-		if err := json.Indent(&pretty, raw, "", "  "); err != nil {
-			// Not valid JSON? Surface the raw bytes so the user can
-			// see what came back.
-			fmt.Println(string(raw))
-			return nil
+		// This command's canonical output has always been the version
+		// document itself, so JSON stays the default (Machine, not
+		// AutoHuman) — the Long help tells people to pipe it to jq and that
+		// keeps working with no flag. What changes is that `-f yaml` and
+		// `-f ndjson` are now honoured instead of silently answering JSON.
+		var doc any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			// The previous behaviour here was to print the raw bytes and
+			// return nil, which under `-f json` puts non-JSON on stdout and
+			// exits 0 — the precise failure this command's own help promises
+			// against. A server that answers a 200 with a non-JSON body is a
+			// broken server; say so.
+			return fmt.Errorf("server returned a %d with a body that is not JSON: %w", resp.StatusCode, err)
 		}
-		fmt.Println(pretty.String())
-		return nil
+		return resolvedFormatter(cmd).Machine(doc)
 	},
 }
 
@@ -184,32 +192,43 @@ var routineActiveCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var rows []struct {
-			RunID           string `json:"run_id"`
-			PipelineSlug    string `json:"pipeline_slug"`
-			ConcurrencyKey  string `json:"concurrency_key"`
-			StartedAt       string `json:"started_at"`
-			CancelRequested bool   `json:"cancel_requested"`
-		}
+		var rows []activeRunRow
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		if len(rows) == 0 {
-			fmt.Println("No active runs.")
-			return nil
-		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "RUN_ID\tSLUG\tSTARTED\tCANCEL_REQ\tCONCURRENCY_KEY")
-		for _, r := range rows {
-			cancelMark := ""
-			if r.CancelRequested {
-				cancelMark = "yes"
+		// An idle workspace is the normal state and the one a watchdog polls
+		// most often; it has to answer `[]`, not "No active runs.".
+		//
+		// The machine rows also carry the FULL run id. The human column
+		// truncates at 24 characters to keep the table readable, and a
+		// truncated id fed back to `routine cancel` is a 404.
+		return resolvedFormatter(cmd).AutoHuman(rows, func() {
+			if len(rows) == 0 {
+				fmt.Println("No active runs.")
+				return
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				truncIDForCLI(r.RunID, 24), r.PipelineSlug, r.StartedAt, cancelMark, r.ConcurrencyKey)
-		}
-		return w.Flush()
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "RUN_ID\tSLUG\tSTARTED\tCANCEL_REQ\tCONCURRENCY_KEY")
+			for _, r := range rows {
+				cancelMark := ""
+				if r.CancelRequested {
+					cancelMark = "yes"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+					truncIDForCLI(r.RunID, 24), r.PipelineSlug, r.StartedAt, cancelMark, r.ConcurrencyKey)
+			}
+			_ = w.Flush()
+		})
 	},
+}
+
+// activeRunRow is one in-flight routine run.
+type activeRunRow struct {
+	RunID           string `json:"run_id"`
+	PipelineSlug    string `json:"pipeline_slug"`
+	ConcurrencyKey  string `json:"concurrency_key"`
+	StartedAt       string `json:"started_at"`
+	CancelRequested bool   `json:"cancel_requested"`
 }
 
 // ---- diff (#1422 item 5) ----

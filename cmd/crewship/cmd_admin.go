@@ -286,10 +286,7 @@ func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
 	defer rows.Close()
 
 	now := time.Now().UTC()
-	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSTATUS\tCREATED\tLAST USED\tEXPIRES\tIP\tUA")
-
-	rendered := 0
+	sessions := []adminSessionRow{}
 	hidden := 0
 	for rows.Next() {
 		var id, createdAt, expiresAt, lastUsedAt, revokedAt, revokedReason, userAgent, ip string
@@ -301,52 +298,106 @@ func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
 			hidden++
 			continue
 		}
-		statusCell := status
-		if status == "revoked" && revokedReason != "" {
-			statusCell = "revoked:" + revokedReason
-		}
-		dispID := id
-		if len(dispID) > 16 {
-			dispID = dispID[:16]
-		}
-		dispIP := ip
-		if dispIP == "" {
-			dispIP = "-"
-		}
-		dispUA := userAgent
-		if dispUA == "" {
-			dispUA = "-"
-		}
-		if len(dispUA) > 32 {
-			dispUA = dispUA[:29] + "..."
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			dispID, statusCell, shortAdminTime(createdAt), shortAdminTime(lastUsedAt), shortAdminTime(expiresAt),
-			dispIP, dispUA)
-		rendered++
+		sessions = append(sessions, adminSessionRow{
+			ID:            id,
+			Status:        status,
+			CreatedAt:     createdAt,
+			LastUsedAt:    lastUsedAt,
+			ExpiresAt:     expiresAt,
+			RevokedAt:     revokedAt,
+			RevokedReason: revokedReason,
+			IP:            ip,
+			UserAgent:     userAgent,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate sessions: %w", err)
-	}
-	if err := tw.Flush(); err != nil {
-		return err
 	}
 
 	displayName := fullName
 	if displayName == "" {
 		displayName = email
 	}
-	if rendered == 0 {
-		if activeOnly {
-			fmt.Fprintf(cmd.OutOrStdout(), "(no active sessions for %s)\n", displayName)
-		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "(no sessions for %s)\n", displayName)
+
+	// This is a forensic read, so the machine rows carry the FULL session id,
+	// the untruncated user agent, and revoked_at / revoked_reason as their own
+	// fields. The human table cuts the id to 16 characters, the UA to 32, and
+	// folds the reason into the status cell — all fine to read and none of it
+	// safe to correlate against a server log.
+	return resolvedFormatter(cmd).AutoHuman(adminSessionsResult{
+		Email:       email,
+		UserID:      userID,
+		DisplayName: displayName,
+		ActiveOnly:  activeOnly,
+		Hidden:      hidden,
+		Sessions:    sessions,
+	}, func() {
+		out := cmd.OutOrStdout()
+		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "ID\tSTATUS\tCREATED\tLAST USED\tEXPIRES\tIP\tUA")
+		for _, s := range sessions {
+			statusCell := s.Status
+			if s.Status == "revoked" && s.RevokedReason != "" {
+				statusCell = "revoked:" + s.RevokedReason
+			}
+			dispID := s.ID
+			if len(dispID) > 16 {
+				dispID = dispID[:16]
+			}
+			dispIP := s.IP
+			if dispIP == "" {
+				dispIP = "-"
+			}
+			dispUA := s.UserAgent
+			if dispUA == "" {
+				dispUA = "-"
+			}
+			if len(dispUA) > 32 {
+				dispUA = dispUA[:29] + "..."
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				dispID, statusCell, shortAdminTime(s.CreatedAt), shortAdminTime(s.LastUsedAt),
+				shortAdminTime(s.ExpiresAt), dispIP, dispUA)
 		}
-	}
-	if activeOnly && hidden > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "\n(%d revoked/expired session(s) hidden by --active-only)\n", hidden)
-	}
-	return nil
+		_ = tw.Flush()
+		if len(sessions) == 0 {
+			if activeOnly {
+				fmt.Fprintf(out, "(no active sessions for %s)\n", displayName)
+			} else {
+				fmt.Fprintf(out, "(no sessions for %s)\n", displayName)
+			}
+		}
+		if activeOnly && hidden > 0 {
+			fmt.Fprintf(out, "\n(%d revoked/expired session(s) hidden by --active-only)\n", hidden)
+		}
+	})
+}
+
+// adminSessionRow is one user_sessions row in the forensic read.
+type adminSessionRow struct {
+	ID            string `json:"id"`
+	Status        string `json:"status"` // active | revoked | expired
+	CreatedAt     string `json:"created_at"`
+	LastUsedAt    string `json:"last_used_at,omitempty"`
+	ExpiresAt     string `json:"expires_at"`
+	RevokedAt     string `json:"revoked_at,omitempty"`
+	RevokedReason string `json:"revoked_reason,omitempty"`
+	IP            string `json:"ip,omitempty"`
+	UserAgent     string `json:"user_agent,omitempty"`
+}
+
+// adminSessionsResult is the machine-readable form of `admin sessions list`.
+//
+// `hidden` is carried because "0 rows" and "0 rows shown, 40 filtered out by
+// --active-only" are different answers, and only the human output distinguished
+// them.
+type adminSessionsResult struct {
+	Email       string            `json:"email"`
+	UserID      string            `json:"user_id"`
+	DisplayName string            `json:"display_name"`
+	ActiveOnly  bool              `json:"active_only"`
+	Hidden      int               `json:"hidden"`
+	Sessions    []adminSessionRow `json:"sessions"`
 }
 
 // classifyAdminSessionRow derives the STATUS cell from the raw

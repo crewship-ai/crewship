@@ -193,11 +193,19 @@ func TestMemoryReindexStatusSearch_EndToEnd(t *testing.T) {
 		t.Errorf("status should report 1 indexed file, got %q", out)
 	}
 
-	// search finds the indexed content (table format).
+	// search finds the indexed content (human format).
+	//
+	// The format comes from the global flagFormat now. `memory search` used to
+	// own a local --format/-F, and because it took the NAME "format" it
+	// shadowed the root's persistent flag on this command — which meant
+	// `memory search … -f json` failed with `unknown shorthand flag: 'f'`
+	// rather than producing JSON (#2086). -F survives as a deprecated,
+	// differently-named alias.
 	covSetMemoryFlags(t, 0, base, "agent")
-	if err := memorySearchCmd.Flags().Set("format", "table"); err != nil {
-		t.Fatal(err)
-	}
+	origFormat := flagFormat
+	t.Cleanup(func() { flagFormat = origFormat })
+	flagFormat = ""
+
 	out, err = covCaptureStdoutCli7(t, func() error {
 		return memorySearchCmd.RunE(memorySearchCmd, []string{"kraken"})
 	})
@@ -209,10 +217,7 @@ func TestMemoryReindexStatusSearch_EndToEnd(t *testing.T) {
 	}
 
 	// JSON format path.
-	if err := memorySearchCmd.Flags().Set("format", "json"); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = memorySearchCmd.Flags().Set("format", "table") })
+	flagFormat = "json"
 	out, err = covCaptureStdoutCli7(t, func() error {
 		return memorySearchCmd.RunE(memorySearchCmd, []string{"kraken"})
 	})
@@ -223,15 +228,48 @@ func TestMemoryReindexStatusSearch_EndToEnd(t *testing.T) {
 		t.Errorf("json search output = %q", out)
 	}
 
-	// A query with no hits prints the empty-state message.
+	// A query with no hits, still under -f json, must produce an empty JSON
+	// ARRAY. This assertion used to demand "No results found." — the English
+	// sentence the command printed before it consulted the format at all — so
+	// the test encoded the bug it should have caught. A search that matches
+	// nothing is the case a caller most needs to survive.
 	out, err = covCaptureStdoutCli7(t, func() error {
 		return memorySearchCmd.RunE(memorySearchCmd, []string{"zebrasaurus"})
 	})
 	if err != nil {
 		t.Fatalf("search no hits: %v", err)
 	}
+	if strings.TrimSpace(out) != "[]" {
+		t.Errorf("-f json with no hits must emit [] so `jq '.[]'` works; got %q", out)
+	}
+
+	// …and the human path keeps the sentence.
+	flagFormat = ""
+	out, err = covCaptureStdoutCli7(t, func() error {
+		return memorySearchCmd.RunE(memorySearchCmd, []string{"zebrasaurus"})
+	})
+	if err != nil {
+		t.Fatalf("search no hits (human): %v", err)
+	}
 	if !strings.Contains(out, "No results found.") {
 		t.Errorf("expected empty-state output, got %q", out)
+	}
+
+	// The deprecated -F alias still selects a format, without stealing "format"
+	// back and re-breaking -f.
+	flagFormat = ""
+	if err := memorySearchCmd.Flags().Set("output-format", "json"); err != nil {
+		t.Fatalf("set deprecated --output-format: %v", err)
+	}
+	t.Cleanup(func() { _ = memorySearchCmd.Flags().Set("output-format", "") })
+	out, err = covCaptureStdoutCli7(t, func() error {
+		return memorySearchCmd.RunE(memorySearchCmd, []string{"kraken"})
+	})
+	if err != nil {
+		t.Fatalf("search via deprecated alias: %v", err)
+	}
+	if !strings.Contains(out, `"source": "agent"`) {
+		t.Errorf("deprecated -F alias lost its meaning; got %q", out)
 	}
 }
 

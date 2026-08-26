@@ -98,33 +98,48 @@ Pick a fingerprint and replay the whole group with:
 			return err
 		}
 		var body struct {
-			Groups []struct {
-				Fingerprint  string   `json:"fingerprint"`
-				Count        int      `json:"count"`
-				PipelineSlug string   `json:"pipeline_slug"`
-				FailedAtStep string   `json:"failed_at_step"`
-				SampleError  string   `json:"sample_error"`
-				RunIDs       []string `json:"run_ids"`
-			} `json:"groups"`
+			Groups []errorGroupRow `json:"groups"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		if len(body.Groups) == 0 {
-			fmt.Println("No failed runs. 🎉")
-			return nil
+		// A healthy workspace has no failed runs, so the empty case is the
+		// one a monitoring job sees on every green day — `[]`, not "No failed
+		// runs. 🎉", which is prose AND an emoji in a JSON stream.
+		//
+		// The machine rows keep run_ids and the untruncated sample error; the
+		// human table drops the former and cuts the latter at 60 characters,
+		// and run_ids is exactly what you need to feed `routine bulk-replay`.
+		if body.Groups == nil {
+			body.Groups = []errorGroupRow{}
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "FINGERPRINT\tCOUNT\tROUTINE\tSTEP\tSAMPLE ERROR")
-		for _, g := range body.Groups {
-			msg := g.SampleError
-			if len(msg) > 60 {
-				msg = msg[:60] + "…"
+		return resolvedFormatter(cmd).AutoHuman(body.Groups, func() {
+			if len(body.Groups) == 0 {
+				fmt.Println("No failed runs. 🎉")
+				return
 			}
-			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n", g.Fingerprint, g.Count, g.PipelineSlug, g.FailedAtStep, msg)
-		}
-		return w.Flush()
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "FINGERPRINT\tCOUNT\tROUTINE\tSTEP\tSAMPLE ERROR")
+			for _, g := range body.Groups {
+				msg := g.SampleError
+				if len(msg) > 60 {
+					msg = msg[:60] + "…"
+				}
+				fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n", g.Fingerprint, g.Count, g.PipelineSlug, g.FailedAtStep, msg)
+			}
+			_ = w.Flush()
+		})
 	},
+}
+
+// errorGroupRow is one error fingerprint bucket from `routine errors`.
+type errorGroupRow struct {
+	Fingerprint  string   `json:"fingerprint"`
+	Count        int      `json:"count"`
+	PipelineSlug string   `json:"pipeline_slug"`
+	FailedAtStep string   `json:"failed_at_step"`
+	SampleError  string   `json:"sample_error"`
+	RunIDs       []string `json:"run_ids"`
 }
 
 var routineBulkReplayCmd = &cobra.Command{

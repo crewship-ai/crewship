@@ -276,33 +276,71 @@ var serverCurrentCmd = &cobra.Command{
 			return err
 		}
 		name, source := cli.ActiveProfileNameWithSource(flagProfile, cfg)
+		f := resolvedFormatter(cmd)
+		hint := directoryOverrideHint(cfg, source)
+
+		// Three outcomes, and a script has to be able to tell them apart:
+		// no profile at all (legacy single-server), a selected profile whose
+		// definition is missing (a typo or a removed entry — the case that
+		// produces a confusing 403 later), and a real one. `state` names them
+		// so the caller does not have to infer from which fields are empty.
 		if name == "" {
-			fmt.Printf("No profile active (legacy single-server mode).\nServer: %s\n",
-				valueOrDefault(cfg.Server, "http://localhost:8080"))
-			return nil
+			return f.AutoHuman(serverCurrentResult{
+				State:  "no-profile",
+				Server: valueOrDefault(cfg.Server, "http://localhost:8080"),
+			}, func() {
+				fmt.Printf("No profile active (legacy single-server mode).\nServer: %s\n",
+					valueOrDefault(cfg.Server, "http://localhost:8080"))
+			})
 		}
 		var p *cli.ServerProfile
 		if cfg.Servers != nil {
 			p = cfg.Servers[name]
 		}
 		if p == nil {
-			fmt.Printf("Active profile %q is selected but not defined (see 'crewship server list').\n", name)
-			if hint := directoryOverrideHint(cfg, source); hint != "" {
-				fmt.Println(hint)
-			}
-			return nil
+			return f.AutoHuman(serverCurrentResult{
+				State:                 "profile-undefined",
+				Profile:               name,
+				DirectoryOverrideHint: hint,
+			}, func() {
+				fmt.Printf("Active profile %q is selected but not defined (see 'crewship server list').\n", name)
+				if hint != "" {
+					fmt.Println(hint)
+				}
+			})
 		}
 		auth := "(none)"
 		if p.Token != "" {
 			auth = "set"
 		}
-		fmt.Printf("Active profile: %s\nServer:         %s\nWorkspace:      %s\nToken:          %s\n",
-			name, p.Server, valueOrDefault(p.Workspace, "(none)"), auth)
-		if hint := directoryOverrideHint(cfg, source); hint != "" {
-			fmt.Println(hint)
-		}
-		return nil
+		return f.AutoHuman(serverCurrentResult{
+			State:                 "active",
+			Profile:               name,
+			Server:                p.Server,
+			Workspace:             p.Workspace,
+			TokenSet:              p.Token != "",
+			DirectoryOverrideHint: hint,
+		}, func() {
+			fmt.Printf("Active profile: %s\nServer:         %s\nWorkspace:      %s\nToken:          %s\n",
+				name, p.Server, valueOrDefault(p.Workspace, "(none)"), auth)
+			if hint != "" {
+				fmt.Println(hint)
+			}
+		})
 	},
+}
+
+// serverCurrentResult is the machine-readable form of `server current`.
+//
+// TokenSet rather than the token: this output is what a setup script captures
+// into its log.
+type serverCurrentResult struct {
+	State                 string `json:"state"` // active | no-profile | profile-undefined
+	Profile               string `json:"profile,omitempty"`
+	Server                string `json:"server,omitempty"`
+	Workspace             string `json:"workspace,omitempty"`
+	TokenSet              bool   `json:"token_set"`
+	DirectoryOverrideHint string `json:"directory_override_hint,omitempty"`
 }
 
 // directoryOverrideHint explains, when a directory_profiles cwd match won

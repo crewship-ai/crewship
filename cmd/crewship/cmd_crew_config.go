@@ -116,7 +116,7 @@ always enabled for crew containers.`,
 
 		switch {
 		case show:
-			return showCrewConfig(client, crewID)
+			return showCrewConfig(cmd, client, crewID)
 		case exportJSON:
 			return exportCrewConfig(client, crewID)
 		case clear:
@@ -218,7 +218,7 @@ func derefOrDash(s *string) string {
 	return *s
 }
 
-func showCrewConfig(client *cli.Client, crewID string) error {
+func showCrewConfig(cmd *cobra.Command, client *cli.Client, crewID string) error {
 	info, err := fetchCrewInfo(client, crewID)
 	if err != nil {
 		return err
@@ -237,19 +237,73 @@ func showCrewConfig(client *cli.Client, crewID string) error {
 		miseStr = *info.MiseConfig
 	}
 
-	fmt.Printf("Name:          %s\n", info.Name)
-	fmt.Printf("Slug:          %s\n", info.Slug)
-	fmt.Printf("Runtime Image: %s\n", derefOrDash(info.RuntimeImage))
-	fmt.Printf("Cached Image:  %s\n", derefOrDash(info.CachedImage))
-	fmt.Printf("Config Hash:   %s\n", derefOrDash(info.ConfigHash))
-	fmt.Printf("Status:        %s\n", status.Status)
-	fmt.Println()
-	fmt.Println("Devcontainer Config:")
-	fmt.Println(prettyJSON(devStr))
-	fmt.Println()
-	fmt.Println("Mise Config:")
-	fmt.Println(prettyJSON(miseStr))
-	return nil
+	// The two configs are stored as JSON *strings*. Embedding them as parsed
+	// documents rather than as escaped strings is what makes
+	// `crew config X --show -f json | jq '.devcontainer_config.image'` work at
+	// all — the same choice exportCrewConfig already makes below. A value that
+	// does not parse is carried as the raw string rather than dropped, because
+	// a hand-edited config that broke is exactly what you are looking at when
+	// you run this.
+	result := crewConfigShowResult{
+		Name:               info.Name,
+		Slug:               info.Slug,
+		RuntimeImage:       derefOrEmpty(info.RuntimeImage),
+		CachedImage:        derefOrEmpty(info.CachedImage),
+		ConfigHash:         derefOrEmpty(info.ConfigHash),
+		Status:             status.Status,
+		DevcontainerConfig: parsedOrRaw(devStr),
+		MiseConfig:         parsedOrRaw(miseStr),
+	}
+
+	return resolvedFormatter(cmd).AutoHuman(result, func() {
+		fmt.Printf("Name:          %s\n", info.Name)
+		fmt.Printf("Slug:          %s\n", info.Slug)
+		fmt.Printf("Runtime Image: %s\n", derefOrDash(info.RuntimeImage))
+		fmt.Printf("Cached Image:  %s\n", derefOrDash(info.CachedImage))
+		fmt.Printf("Config Hash:   %s\n", derefOrDash(info.ConfigHash))
+		fmt.Printf("Status:        %s\n", status.Status)
+		fmt.Println()
+		fmt.Println("Devcontainer Config:")
+		fmt.Println(prettyJSON(devStr))
+		fmt.Println()
+		fmt.Println("Mise Config:")
+		fmt.Println(prettyJSON(miseStr))
+	})
+}
+
+// crewConfigShowResult is the machine-readable form of `crew config --show`.
+type crewConfigShowResult struct {
+	Name               string `json:"name"`
+	Slug               string `json:"slug"`
+	RuntimeImage       string `json:"runtime_image"`
+	CachedImage        string `json:"cached_image"`
+	ConfigHash         string `json:"config_hash"`
+	Status             string `json:"status"`
+	DevcontainerConfig any    `json:"devcontainer_config"`
+	MiseConfig         any    `json:"mise_config"`
+}
+
+// derefOrEmpty is derefOrDash's machine twin: a missing value is an empty
+// string, not the "-" a human column uses to keep its width.
+func derefOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// parsedOrRaw turns a stored JSON string into a document, or hands back the
+// raw string when it does not parse. nil for empty, so an unconfigured crew
+// reads as `null` rather than `""`.
+func parsedOrRaw(s string) any {
+	if s == "" {
+		return nil
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+		return parsed
+	}
+	return s
 }
 
 func exportCrewConfig(client *cli.Client, crewID string) error {

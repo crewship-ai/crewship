@@ -136,7 +136,13 @@ var routineWaitpointsShowCmd = &cobra.Command{
 			return fmt.Errorf("decode response: %w", err)
 		}
 		for _, r := range rows {
-			if r.Token == args[0] {
+			if r.Token != args[0] {
+				continue
+			}
+			// The waitpoint row IS the machine payload — the human view adds
+			// a curl recipe and a "Prompt:" heading, both of which are
+			// instructions to a person rather than data.
+			return resolvedFormatter(cmd).AutoHuman(r, func() {
 				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 				fmt.Fprintf(w, "Token:\t%s\n", r.Token)
 				fmt.Fprintf(w, "Run ID:\t%s\n", r.PipelineRunID)
@@ -157,8 +163,7 @@ var routineWaitpointsShowCmd = &cobra.Command{
 				}
 				fmt.Println("\nPrompt:")
 				fmt.Println(r.Prompt)
-				return nil
-			}
+			})
 		}
 		return cli.NotFoundf("waitpoint %s not found (already decided, expired, or wrong token)", args[0])
 	},

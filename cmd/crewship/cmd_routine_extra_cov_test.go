@@ -215,18 +215,29 @@ func TestRoutineVersionsShowCmd(t *testing.T) {
 		}
 	})
 
-	t.Run("non-json body printed raw", func(t *testing.T) {
+	// A 200 whose body is not JSON used to be echoed to stdout verbatim, and
+	// the command returned nil. Under `-f json` — the format this command's
+	// own help tells you to pipe to jq — that puts non-JSON on stdout and
+	// exits 0, which is the exact failure the help promises against (#2086).
+	// It is now an error, so the exit code says something went wrong and the
+	// message says what.
+	t.Run("non-json body is an error, not raw bytes on stdout", func(t *testing.T) {
 		stub := covStub(t)
 		covResetFlags(t, routineVersionsShowCmd)
 		stub.OnGet(showPath, clitest.TextResponse(200, "not json payload"))
 		covSetFlags(t, routineVersionsShowCmd, map[string]string{"version": "3"})
+		var err error
 		out := covCaptureStdoutCli3(t, func() {
-			if err := routineVersionsShowCmd.RunE(routineVersionsShowCmd, []string{"my-routine"}); err != nil {
-				t.Errorf("RunE: %v", err)
-			}
+			err = routineVersionsShowCmd.RunE(routineVersionsShowCmd, []string{"my-routine"})
 		})
-		if !strings.Contains(out, "not json payload") {
-			t.Errorf("raw body missing: %q", out)
+		if err == nil {
+			t.Fatalf("expected an error for a non-JSON 200; got nil with stdout %q", out)
+		}
+		if !strings.Contains(err.Error(), "not JSON") {
+			t.Errorf("error should name the problem; got %v", err)
+		}
+		if strings.Contains(out, "not json payload") {
+			t.Errorf("the unparseable body must not reach stdout; got %q", out)
 		}
 	})
 

@@ -69,8 +69,7 @@ var personaViewCmd = &cobra.Command{
 		if err := getJSON(client, "/api/v1/agents/"+url.PathEscape(agentID)+"/persona", &resp); err != nil {
 			return err
 		}
-		printPersona(cmd, "agent", resp)
-		return nil
+		return printPersona(cmd, "agent", resp)
 	},
 }
 
@@ -152,27 +151,46 @@ var personaHistoryCmd = &cobra.Command{
 			return err
 		}
 		var resp struct {
-			Entries []struct {
-				ID        string `json:"id"`
-				SHA256    string `json:"sha256"`
-				Bytes     int    `json:"bytes"`
-				WrittenAt string `json:"written_at"`
-				WrittenBy string `json:"written_by"`
-			} `json:"entries"`
+			Entries []personaHistoryEntry `json:"entries"`
 		}
 		if err := getJSON(client, "/api/v1/agents/"+url.PathEscape(agentID)+"/persona/history?limit=20", &resp); err != nil {
 			return err
 		}
-		if len(resp.Entries) == 0 {
-			fmt.Fprintln(cmd.OutOrStdout(), "(no history)")
-			return nil
+		// An agent that has never had its persona edited is the common case,
+		// and it used to answer the prose "(no history)" under `-f json`.
+		// Empty list, not null and not a sentence.
+		if resp.Entries == nil {
+			resp.Entries = []personaHistoryEntry{}
 		}
-		for _, e := range resp.Entries {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %5d B  by %s\n",
-				e.WrittenAt, e.SHA256[:12], e.Bytes, e.WrittenBy)
-		}
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(resp.Entries, func() {
+			out := cmd.OutOrStdout()
+			if len(resp.Entries) == 0 {
+				fmt.Fprintln(out, "(no history)")
+				return
+			}
+			for _, e := range resp.Entries {
+				// The full digest goes into the machine output; the human
+				// column is a 12-character prefix because a column is a
+				// width decision and a hash is not an identifier anyone
+				// retypes.
+				sha := e.SHA256
+				if len(sha) > 12 {
+					sha = sha[:12]
+				}
+				fmt.Fprintf(out, "%s  %s  %5d B  by %s\n",
+					e.WrittenAt, sha, e.Bytes, e.WrittenBy)
+			}
+		})
 	},
+}
+
+// personaHistoryEntry is one recorded PERSONA.md version.
+type personaHistoryEntry struct {
+	ID        string `json:"id"`
+	SHA256    string `json:"sha256"`
+	Bytes     int    `json:"bytes"`
+	WrittenAt string `json:"written_at"`
+	WrittenBy string `json:"written_by"`
 }
 
 // personaSuggestFromInboxCmd applies a pending agent proposal that
@@ -230,8 +248,7 @@ var personaCrewCmd = &cobra.Command{
 			if err := getJSON(client, path, &resp); err != nil {
 				return err
 			}
-			printPersona(cmd, "crew", resp)
-			return nil
+			return printPersona(cmd, "crew", resp)
 		case "edit":
 			var current personaResponse
 			if err := getJSON(client, path, &current); err != nil {
@@ -265,15 +282,36 @@ var personaCrewCmd = &cobra.Command{
 
 // --- helpers ---------------------------------------------------------------
 
-func printPersona(cmd *cobra.Command, kind string, p personaResponse) {
-	out := cmd.OutOrStdout()
+// printPersona renders one resolved persona in the requested format.
+//
+// The machine form carries the API response plus `kind` (agent or crew) and
+// the resolved `source`, both of which the human header derives on the fly —
+// a caller reading `-f json` needs to know whether it is looking at a real
+// PERSONA.md or at the synthesized fallback just as much as a reader does,
+// and inferring it from `from_default` is a rule that lives in this function
+// rather than in the payload.
+func printPersona(cmd *cobra.Command, kind string, p personaResponse) error {
 	source := p.Layer
 	if p.FromDefault {
 		source = "synthesized default"
 	}
-	fmt.Fprintf(out, "=== %s persona (source: %s, %d/%d bytes) ===\n",
-		kind, source, p.Bytes, p.CapBytes)
-	fmt.Fprintln(out, p.Content)
+	return resolvedFormatter(cmd).AutoHuman(personaView{
+		Kind:            kind,
+		Source:          source,
+		personaResponse: p,
+	}, func() {
+		out := cmd.OutOrStdout()
+		fmt.Fprintf(out, "=== %s persona (source: %s, %d/%d bytes) ===\n",
+			kind, source, p.Bytes, p.CapBytes)
+		fmt.Fprintln(out, p.Content)
+	})
+}
+
+// personaView is the machine-readable form of `persona view`.
+type personaView struct {
+	Kind            string `json:"kind"`
+	Source          string `json:"source"`
+	personaResponse `json:",inline"`
 }
 
 // openInEditor writes seed to a temp file with the given extension,

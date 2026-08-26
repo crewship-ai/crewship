@@ -118,9 +118,16 @@ var backupMetricsCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &raw); err != nil {
 			return err
 		}
-		pretty, _ := json.MarshalIndent(raw, "", "  ")
-		fmt.Println(string(pretty))
-		return nil
+		// This command's output has always been the server's document, so
+		// JSON stays the default (Machine, not AutoHuman) — nothing that
+		// already scrapes it breaks. What changes is that `-f yaml` and
+		// `-f ndjson` now do what the global flag's help says instead of
+		// being silently ignored.
+		var doc any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+		return resolvedFormatter(cmd).Machine(doc)
 	},
 }
 
@@ -228,9 +235,16 @@ returns the canary result with an "ok" boolean and per-stage timing.`,
 		if err := cli.ReadJSON(resp, &raw); err != nil {
 			return err
 		}
-		pretty, _ := json.MarshalIndent(raw, "", "  ")
-		fmt.Println(string(pretty))
-		return nil
+		// This command's output has always been the server's document, so
+		// JSON stays the default (Machine, not AutoHuman) — nothing that
+		// already scrapes it breaks. What changes is that `-f yaml` and
+		// `-f ndjson` now do what the global flag's help says instead of
+		// being silently ignored.
+		var doc any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+		return resolvedFormatter(cmd).Machine(doc)
 	},
 }
 

@@ -308,15 +308,28 @@ refreshing with nothing would report success while changing nothing; pass
 		if err != nil {
 			return fmt.Errorf("read refresh response: %w", err)
 		}
+		f := resolvedFormatter(cmd)
+		// An empty body is a valid 2xx from this endpoint (see the TODO
+		// above), and it used to answer a sentence on stdout regardless of
+		// format. Give the machine formats the same envelope shape they get
+		// when the server does return a document.
 		if len(data) == 0 {
-			fmt.Printf("Tool bindings refresh requested for %s/%s.\n", args[0], args[1])
-			return nil
+			return f.AutoHuman(map[string]any{
+				"crew":        args[0],
+				"integration": args[1],
+				"refreshed":   true,
+			}, func() {
+				fmt.Printf("Tool bindings refresh requested for %s/%s.\n", args[0], args[1])
+			})
 		}
 		var result map[string]any
 		if err := json.Unmarshal(data, &result); err != nil {
 			return fmt.Errorf("decode refresh response: %w", err)
 		}
-		return newFormatter().JSON(result)
+		// Machine, not JSON: the server's document has always been this
+		// command's output, so JSON stays the default, but `-f yaml` and
+		// `-f ndjson` are no longer ignored.
+		return f.Machine(result)
 	},
 }
 

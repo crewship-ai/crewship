@@ -277,11 +277,7 @@ var crewStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		var agentsList []struct {
-			Slug      string `json:"slug"`
-			AgentRole string `json:"agent_role"`
-			Status    string `json:"status"`
-		}
+		var agentsList []crewStatusAgent
 		if err := cli.CheckError(agentsResp); err != nil {
 			return fmt.Errorf("fetch agents: %w", err)
 		}
@@ -294,12 +290,7 @@ var crewStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		var assignmentsList []struct {
-			Task           string  `json:"task"`
-			Status         string  `json:"status"`
-			AssignedBySlug string  `json:"assigned_by_slug"`
-			AssignedToSlug *string `json:"assigned_to_slug"`
-		}
+		var assignmentsList []crewStatusAssignment
 		if err := cli.CheckError(assignResp); err != nil {
 			return fmt.Errorf("fetch assignments: %w", err)
 		}
@@ -312,10 +303,7 @@ var crewStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		var escalationsList []struct {
-			Reason string `json:"reason"`
-			Status string `json:"status"`
-		}
+		var escalationsList []crewStatusEscalation
 		if err := cli.CheckError(escResp); err != nil {
 			return fmt.Errorf("fetch escalations: %w", err)
 		}
@@ -323,57 +311,122 @@ var crewStatusCmd = &cobra.Command{
 			return fmt.Errorf("parse escalations: %w", err)
 		}
 
-		// Display compound view
-		fmt.Printf("%sCrew: %s%s (%s)\n\n", cli.Bold, crew.Name, cli.Reset, crew.Slug)
-
-		fmt.Printf("%sAGENTS (%d):%s\n", cli.Bold, len(agentsList), cli.Reset)
-		if len(agentsList) > 0 {
-			w := cli.NewFormatter("table")
-			headers := []string{"SLUG", "ROLE", "STATUS"}
-			var rows [][]string
-			for _, a := range agentsList {
-				rows = append(rows, []string{a.Slug, a.AgentRole, a.Status})
-			}
-			w.Table(headers, rows)
-		} else {
-			fmt.Println("  No agents")
+		// The three lists are always slices, never nil: a crew with no agents
+		// is a real state (freshly created) and `.agents | length` must
+		// answer 0 rather than fail.
+		if agentsList == nil {
+			agentsList = []crewStatusAgent{}
 		}
-
-		fmt.Printf("\n%sASSIGNMENTS (last 5):%s\n", cli.Bold, cli.Reset)
-		if len(assignmentsList) > 0 {
-			limit := 5
-			if len(assignmentsList) < limit {
-				limit = len(assignmentsList)
-			}
-			for _, a := range assignmentsList[:limit] {
-				to := "-"
-				if a.AssignedToSlug != nil {
-					to = *a.AssignedToSlug
-				}
-				task := a.Task
-				if utf8.RuneCountInString(task) > 60 {
-					task = string([]rune(task)[:57]) + "..."
-				}
-				fmt.Printf("  %s%-10s%s %s -> %s: %q\n", statusColor(a.Status), a.Status, cli.Reset, a.AssignedBySlug, to, task)
-			}
-		} else {
-			fmt.Println("  No assignments")
+		if assignmentsList == nil {
+			assignmentsList = []crewStatusAssignment{}
 		}
-
-		fmt.Printf("\n%sESCALATIONS (open):%s\n", cli.Bold, cli.Reset)
-		openEsc := 0
+		openEscalations := []crewStatusEscalation{}
 		for _, e := range escalationsList {
 			if e.Status == "PENDING" || e.Status == "OPEN" {
-				fmt.Printf("  %s%s%s\n", cli.Yellow, e.Reason, cli.Reset)
-				openEsc++
+				openEscalations = append(openEscalations, e)
 			}
 		}
-		if openEsc == 0 {
-			fmt.Println("  None")
+
+		// The machine view carries ALL assignments and the untruncated task
+		// text. The human view shows the last five with the task cut at 60
+		// runes, which is a screen-space decision — a caller asking for JSON
+		// is not looking at a screen.
+		result := crewStatusResult{
+			Slug:             crew.Slug,
+			Name:             crew.Name,
+			Agents:           agentsList,
+			Assignments:      assignmentsList,
+			OpenEscalations:  openEscalations,
+			AgentCount:       len(agentsList),
+			AssignmentCount:  len(assignmentsList),
+			OpenEscalationsN: len(openEscalations),
 		}
 
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			fmt.Printf("%sCrew: %s%s (%s)\n\n", cli.Bold, crew.Name, cli.Reset, crew.Slug)
+
+			fmt.Printf("%sAGENTS (%d):%s\n", cli.Bold, len(agentsList), cli.Reset)
+			if len(agentsList) > 0 {
+				// Pinned to "table" on purpose: this is a sub-section of a
+				// compound human view, reached only from the human branch.
+				w := cli.NewFormatter("table")
+				headers := []string{"SLUG", "ROLE", "STATUS"}
+				var rows [][]string
+				for _, a := range agentsList {
+					rows = append(rows, []string{a.Slug, a.AgentRole, a.Status})
+				}
+				w.Table(headers, rows)
+			} else {
+				fmt.Println("  No agents")
+			}
+
+			fmt.Printf("\n%sASSIGNMENTS (last 5):%s\n", cli.Bold, cli.Reset)
+			if len(assignmentsList) > 0 {
+				limit := 5
+				if len(assignmentsList) < limit {
+					limit = len(assignmentsList)
+				}
+				for _, a := range assignmentsList[:limit] {
+					to := "-"
+					if a.AssignedToSlug != nil {
+						to = *a.AssignedToSlug
+					}
+					task := a.Task
+					if utf8.RuneCountInString(task) > 60 {
+						task = string([]rune(task)[:57]) + "..."
+					}
+					fmt.Printf("  %s%-10s%s %s -> %s: %q\n", statusColor(a.Status), a.Status, cli.Reset, a.AssignedBySlug, to, task)
+				}
+			} else {
+				fmt.Println("  No assignments")
+			}
+
+			fmt.Printf("\n%sESCALATIONS (open):%s\n", cli.Bold, cli.Reset)
+			for _, e := range openEscalations {
+				fmt.Printf("  %s%s%s\n", cli.Yellow, e.Reason, cli.Reset)
+			}
+			if len(openEscalations) == 0 {
+				fmt.Println("  None")
+			}
+		})
 	},
+}
+
+// crewStatusAgent is one agent row in `crew status`.
+type crewStatusAgent struct {
+	Slug      string `json:"slug"`
+	AgentRole string `json:"agent_role"`
+	Status    string `json:"status"`
+}
+
+// crewStatusAssignment is one assignment row in `crew status`.
+type crewStatusAssignment struct {
+	Task           string  `json:"task"`
+	Status         string  `json:"status"`
+	AssignedBySlug string  `json:"assigned_by_slug"`
+	AssignedToSlug *string `json:"assigned_to_slug"`
+}
+
+// crewStatusEscalation is one escalation row in `crew status`.
+type crewStatusEscalation struct {
+	Reason string `json:"reason"`
+	Status string `json:"status"`
+}
+
+// crewStatusResult is the machine-readable form of `crew status`.
+//
+// The counts are redundant with the arrays and present anyway: a health check
+// wants `.open_escalations_count > 0` without pulling the whole payload
+// through jq, and it costs three integers.
+type crewStatusResult struct {
+	Slug             string                 `json:"slug"`
+	Name             string                 `json:"name"`
+	Agents           []crewStatusAgent      `json:"agents"`
+	Assignments      []crewStatusAssignment `json:"assignments"`
+	OpenEscalations  []crewStatusEscalation `json:"open_escalations"`
+	AgentCount       int                    `json:"agent_count"`
+	AssignmentCount  int                    `json:"assignment_count"`
+	OpenEscalationsN int                    `json:"open_escalations_count"`
 }
 
 func statusColor(status string) string {

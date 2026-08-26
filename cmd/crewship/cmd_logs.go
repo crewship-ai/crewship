@@ -79,51 +79,64 @@ Examples:
 			return err
 		}
 
-		var logEntries []struct {
-			Timestamp string `json:"ts"`
-			Level     string `json:"level"`
-			Agent     string `json:"agent"`
-			Event     string `json:"event"`
-			Content   string `json:"content"`
-		}
+		var logEntries []logEntry
 		if err := cli.ReadJSON(logResp, &logEntries); err != nil {
 			return err
 		}
+		if logEntries == nil {
+			logEntries = []logEntry{}
+		}
 
-		for _, l := range logEntries {
-			ts := l.Timestamp
-			if t, err := time.Parse(time.RFC3339Nano, l.Timestamp); err == nil {
-				ts = t.Format("2006-01-02 15:04:05")
+		f := resolvedFormatter(cmd)
+		// The machine formats carry the log entries as the server sent them:
+		// the human rendering truncates content at 200 characters and strips
+		// terminal escapes, both of which are protections for a terminal and
+		// data loss for a parser. sanitizeTerminal exists because agent stdout
+		// is untrusted and a rogue entry could smuggle ANSI/OSC sequences into
+		// the operator's scrollback — a JSON string has no such hazard, and a
+		// consumer that renders one to a terminal has to sanitise anyway.
+		if err := f.AutoHuman(logEntries, func() {
+			for _, l := range logEntries {
+				ts := l.Timestamp
+				if t, err := time.Parse(time.RFC3339Nano, l.Timestamp); err == nil {
+					ts = t.Format("2006-01-02 15:04:05")
+				}
+				eventColor := ""
+				switch l.Event {
+				case "output":
+					eventColor = cli.White
+				case "error":
+					eventColor = cli.Red
+				default:
+					eventColor = cli.Gray
+				}
+				fmt.Printf("%s%s%s %s[%s]%s %s\n",
+					cli.Dim, ts, cli.Reset,
+					eventColor, sanitizeTerminal(l.Event), cli.Reset,
+					truncate(sanitizeTerminal(l.Content), 200))
 			}
-			eventColor := ""
-			switch l.Event {
-			case "output":
-				eventColor = cli.White
-			case "error":
-				eventColor = cli.Red
-			default:
-				eventColor = cli.Gray
-			}
-			// Both event tag (constrained enum) and content (agent
-			// stdout) are sanitised before reaching the terminal so a
-			// rogue log entry can't smuggle ANSI escapes / OSC links
-			// into the operator's scrollback. Same hardening as the
-			// streaming path below.
-			fmt.Printf("%s%s%s %s[%s]%s %s\n",
-				cli.Dim, ts, cli.Reset,
-				eventColor, sanitizeTerminal(l.Event), cli.Reset,
-				truncate(sanitizeTerminal(l.Content), 200))
+		}); err != nil {
+			return err
 		}
 
 		if follow {
-			return logsFollow(client, agentID, agentSlug)
+			return logsFollow(f, client, agentID, agentSlug)
 		}
 
 		return nil
 	},
 }
 
-func logsFollow(client *cli.Client, agentID, agentSlug string) error {
+// logEntry is one line of an agent's log, in the shape the API returns it.
+type logEntry struct {
+	Timestamp string `json:"ts"`
+	Level     string `json:"level"`
+	Agent     string `json:"agent"`
+	Event     string `json:"event"`
+	Content   string `json:"content"`
+}
+
+func logsFollow(f *cli.Formatter, client *cli.Client, agentID, agentSlug string) error {
 	wsToken, err := cli.WSTokenFromServer(client)
 	if err != nil {
 		return fmt.Errorf("get WS token for follow: %w", err)
@@ -154,13 +167,30 @@ func logsFollow(client *cli.Client, agentID, agentSlug string) error {
 			continue
 		}
 
-		ts := time.Now().Format("2006-01-02 15:04:05")
+		now := time.Now()
+		// A follow is a stream, so the machine rendering is one JSON object
+		// per line rather than a document — a `-f json` array could only be
+		// closed when the stream ends, which for `--follow` is never. NDJSON
+		// is the shape every streaming consumer already expects, and it is
+		// what `-f json` gets here for that reason.
+		switch f.Format {
+		case "json", "ndjson", "yaml":
+			if err := f.WriteNDJSONRow(logEntry{
+				Timestamp: now.Format(time.RFC3339Nano),
+				Event:     event.Type,
+				Content:   event.Content,
+				Agent:     agentSlug,
+			}); err != nil {
+				return err
+			}
+			continue
+		}
 		// event.Type is a constrained enum from the journal but we
 		// sanitise anyway so an unknown type from a future agent can't
 		// smuggle ANSI escapes into the user's terminal. event.Content
 		// is fully untrusted (agent stdout) and definitely needs it.
 		fmt.Printf("%s%s%s [%s] %s\n",
-			cli.Dim, ts, cli.Reset,
+			cli.Dim, now.Format("2006-01-02 15:04:05"), cli.Reset,
 			sanitizeTerminal(event.Type),
 			truncate(sanitizeTerminal(event.Content), 200))
 	}

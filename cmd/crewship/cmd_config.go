@@ -12,6 +12,27 @@ var configCmd = &cobra.Command{
 	Short: "Manage CLI configuration",
 }
 
+// configShowResult is the machine-readable form of `config show`.
+//
+// Deliberately no token, masked or otherwise. The human view prints
+// maskedToken() because a person reading their own terminal is checking which
+// credential is loaded, but `-f json` output is what gets piped, captured into
+// CI logs and pasted into issues — and maskedToken keeps the first 20
+// characters, which is plenty to identify (and for some formats, to begin
+// reconstructing) a credential. A boolean answers "am I authenticated?", which
+// is the only question a script has.
+type configShowResult struct {
+	ConfigFile   string `json:"config_file"`
+	Server       string `json:"server"`
+	Workspace    string `json:"workspace"`
+	Format       string `json:"format"`
+	DefaultAgent string `json:"default_agent"`
+	Markdown     string `json:"markdown"`
+	TokenSet     bool   `json:"token_set"`
+	Profile      string `json:"profile,omitempty"`
+	ProfileCount int    `json:"profile_count"`
+}
+
 var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Display current configuration",
@@ -27,24 +48,40 @@ var configShowCmd = &cobra.Command{
 		// profile-authenticated user sees their real target, not the empty
 		// top-level fields. Format/DefAgent/Markdown are global prefs.
 		eff := cfg.WithActiveProfile(flagProfile)
+		active := cli.ActiveProfileName(flagProfile, cfg)
 
-		fmt.Printf("%sConfig file:%s %s\n", cli.Bold, cli.Reset, path)
-		fmt.Printf("%sServer:%s     %s\n", cli.Dim, cli.Reset, valueOrDefault(eff.Server, "(default: http://localhost:8080)"))
-		fmt.Printf("%sWorkspace:%s  %s\n", cli.Dim, cli.Reset, valueOrDefault(eff.Workspace, "(not set)"))
-		fmt.Printf("%sFormat:%s     %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.Format, "(default: table)"))
-		fmt.Printf("%sDefAgent:%s   %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.DefaultAgent, "(not set, used by `crewship ask`)"))
-		fmt.Printf("%sMarkdown:%s   %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.Markdown, "(default: auto)"))
-		if eff.Token != "" {
-			fmt.Printf("%sToken:%s      %s\n", cli.Dim, cli.Reset, maskedToken(eff.Token))
-		} else {
-			fmt.Printf("%sToken:%s      (not set)\n", cli.Dim, cli.Reset)
+		// The machine view carries the resolved values with empty strings for
+		// "not set"; the human view keeps its parenthesised defaults, which
+		// are guidance for a reader and noise for a parser.
+		result := configShowResult{
+			ConfigFile:   path,
+			Server:       eff.Server,
+			Workspace:    eff.Workspace,
+			Format:       cfg.Format,
+			DefaultAgent: cfg.DefaultAgent,
+			Markdown:     cfg.Markdown,
+			TokenSet:     eff.Token != "",
+			Profile:      active,
+			ProfileCount: len(cfg.Servers),
 		}
-		if len(cfg.Servers) > 0 {
-			active := cli.ActiveProfileName(flagProfile, cfg)
-			fmt.Printf("%sProfile:%s    %s %s(%d defined; switch with 'crewship server use')%s\n",
-				cli.Dim, cli.Reset, valueOrDefault(active, "(none active)"), cli.Dim, len(cfg.Servers), cli.Reset)
-		}
-		return nil
+
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			fmt.Printf("%sConfig file:%s %s\n", cli.Bold, cli.Reset, path)
+			fmt.Printf("%sServer:%s     %s\n", cli.Dim, cli.Reset, valueOrDefault(eff.Server, "(default: http://localhost:8080)"))
+			fmt.Printf("%sWorkspace:%s  %s\n", cli.Dim, cli.Reset, valueOrDefault(eff.Workspace, "(not set)"))
+			fmt.Printf("%sFormat:%s     %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.Format, "(default: table)"))
+			fmt.Printf("%sDefAgent:%s   %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.DefaultAgent, "(not set, used by `crewship ask`)"))
+			fmt.Printf("%sMarkdown:%s   %s\n", cli.Dim, cli.Reset, valueOrDefault(cfg.Markdown, "(default: auto)"))
+			if eff.Token != "" {
+				fmt.Printf("%sToken:%s      %s\n", cli.Dim, cli.Reset, maskedToken(eff.Token))
+			} else {
+				fmt.Printf("%sToken:%s      (not set)\n", cli.Dim, cli.Reset)
+			}
+			if len(cfg.Servers) > 0 {
+				fmt.Printf("%sProfile:%s    %s %s(%d defined; switch with 'crewship server use')%s\n",
+					cli.Dim, cli.Reset, valueOrDefault(active, "(none active)"), cli.Dim, len(cfg.Servers), cli.Reset)
+			}
+		})
 	},
 }
 
@@ -132,26 +169,49 @@ var configValidateCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
+		// Checks are collected rather than printed as they run, so the same
+		// sequence can be rendered as a report or as a document. Under
+		// -f json the caller gets every check with its verdict, which is the
+		// whole value of a validator to a pipeline: not "did it pass" (the
+		// exit code says that) but "which one failed and what is the hint".
+		var checks []configCheck
 		errs := 0
 		warns := 0
 
 		check := func(label string, ok bool, hint string) {
-			if ok {
-				fmt.Printf("  %s✓%s %s\n", cli.Green, cli.Reset, label)
-				return
+			status := "pass"
+			if !ok {
+				status, errs = "fail", errs+1
 			}
-			fmt.Printf("  %s✗%s %s\n      %s\n", cli.Red, cli.Reset, label, hint)
-			errs++
+			checks = append(checks, configCheck{Label: label, Status: status, Hint: hint})
 		}
 		warn := func(label, hint string) {
-			fmt.Printf("  %s!%s %s — %s\n", cli.Yellow, cli.Reset, label, hint)
+			checks = append(checks, configCheck{Label: label, Status: "warn", Hint: hint})
 			warns++
+		}
+
+		// human renders the collected checks in the original layout. It is a
+		// closure over `checks` rather than a snapshot so it can be handed to
+		// AutoHuman once, at each of the two exit points, and still print
+		// everything gathered by then.
+		f := resolvedFormatter(cmd)
+		human := func() {
+			fmt.Printf("%sCLI config%s\n", cli.Bold, cli.Reset)
+			for _, c := range checks {
+				switch c.Status {
+				case "pass":
+					fmt.Printf("  %s✓%s %s\n", cli.Green, cli.Reset, c.Label)
+				case "warn":
+					fmt.Printf("  %s!%s %s — %s\n", cli.Yellow, cli.Reset, c.Label, c.Hint)
+				default:
+					fmt.Printf("  %s✗%s %s\n      %s\n", cli.Red, cli.Reset, c.Label, c.Hint)
+				}
+			}
 		}
 
 		// Validate the active target: a profile-authenticated user has their
 		// token under cfg.Servers[name], so check the overlay, not raw top-level.
 		eff := cfg.WithActiveProfile(flagProfile)
-		fmt.Printf("%sCLI config%s\n", cli.Bold, cli.Reset)
 		check("token present", eff.Token != "",
 			"run `crewship login` to authenticate")
 		check("server URL set", cli.EffectiveServer(flagServer, flagProfile, cfg) != "",
@@ -161,7 +221,12 @@ var configValidateCmd = &cobra.Command{
 			"run `crewship workspace use <slug>` or set CREWSHIP_WORKSPACE")
 
 		if eff.Token == "" || ws == "" {
-			fmt.Printf("\n%s%d error(s), %d warning(s)%s\n", cli.Red, errs, warns, cli.Reset)
+			if err := f.AutoHuman(configValidateResult{Checks: checks, Errors: errs, Warnings: warns}, func() {
+				human()
+				fmt.Printf("\n%s%d error(s), %d warning(s)%s\n", cli.Red, errs, warns, cli.Reset)
+			}); err != nil {
+				return err
+			}
 			return fmt.Errorf("config validation failed")
 		}
 
@@ -186,12 +251,31 @@ var configValidateCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("\n%sresult:%s %d error(s), %d warning(s)\n", cli.Bold, cli.Reset, errs, warns)
+		if err := f.AutoHuman(configValidateResult{Checks: checks, Errors: errs, Warnings: warns}, func() {
+			human()
+			fmt.Printf("\n%sresult:%s %d error(s), %d warning(s)\n", cli.Bold, cli.Reset, errs, warns)
+		}); err != nil {
+			return err
+		}
 		if errs > 0 {
 			return fmt.Errorf("config validation failed")
 		}
 		return nil
 	},
+}
+
+// configCheck is one line of the `config validate` report.
+type configCheck struct {
+	Label  string `json:"label"`
+	Status string `json:"status"` // pass | fail | warn
+	Hint   string `json:"hint,omitempty"`
+}
+
+// configValidateResult is the machine-readable form of `config validate`.
+type configValidateResult struct {
+	Checks   []configCheck `json:"checks"`
+	Errors   int           `json:"errors"`
+	Warnings int           `json:"warnings"`
 }
 
 func init() {

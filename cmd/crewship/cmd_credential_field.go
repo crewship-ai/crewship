@@ -86,8 +86,7 @@ value, which is what they are for.`,
 			return err
 		}
 		if len(rows) == 0 {
-			fmt.Fprintf(cmd.OutOrStdout(), "No custom fields on this credential.\n")
-			return nil
+			return emptyListNote(cmd, rows, "No custom fields on this credential.")
 		}
 
 		f := newFormatter()

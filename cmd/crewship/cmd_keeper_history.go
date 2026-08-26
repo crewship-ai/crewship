@@ -66,10 +66,17 @@ Examples:
 			// An empty list is also what a foreign-workspace request id returns —
 			// the endpoint deliberately does not distinguish "no such request" from
 			// "not yours", so the message must not claim it does not exist.
-			fmt.Println("No recorded transitions for this request in the current workspace.")
-			fmt.Printf("%sNote:%s requests raised before the ledger migration have their current\n"+
-				"state backfilled but no intermediate history.\n", cli.Yellow, cli.Reset)
-			return nil
+			//
+			// Both of these lines are guidance for a person and neither is a
+			// transition, so under a machine format the answer is `[]`. The
+			// command's own help documents `--format json | jq '.[].state'`,
+			// which this used to break on exactly the ambiguous case the note
+			// exists to explain.
+			return resolvedFormatter(cmd).AutoHuman(events, func() {
+				fmt.Println("No recorded transitions for this request in the current workspace.")
+				fmt.Printf("%sNote:%s requests raised before the ledger migration have their current\n"+
+					"state backfilled but no intermediate history.\n", cli.Yellow, cli.Reset)
+			})
 		}
 
 		headers := []string{"SEQ", "STATE", "ACTOR", "RISK", "EXIT", "RECORDED AT", "REASON"}

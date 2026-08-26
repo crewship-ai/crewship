@@ -83,6 +83,19 @@ Examples:
 
 		result := digestEnableResult{}
 
+		// Everything this command has to say to a person is collected and
+		// replayed from the human renderer at the end. It used to be printed
+		// as it happened — nine lines on stdout — and then AutoHuman appended
+		// the JSON document with an EMPTY human renderer, so `-f json` emitted
+		// prose followed by a perfectly good object and `jq` failed on the
+		// whole thing (#2086). The empty `func() {}` was the tell: the human
+		// output had already escaped.
+		var notes []string
+		note := func(format string, a ...any) {
+			notes = append(notes, fmt.Sprintf(format, a...))
+		}
+		errOut := cmd.ErrOrStderr()
+
 		exists, err := digestRoutineExists(client, ws)
 		if err != nil {
 			return err
@@ -95,9 +108,9 @@ Examples:
 				return fmt.Errorf("create workspace-digest routine: %w", err)
 			}
 			result.RoutineCreated = true
-			fmt.Println("Created routine: workspace-digest")
+			note("Created routine: workspace-digest")
 		} else {
-			fmt.Println("Routine workspace-digest already exists.")
+			note("Routine workspace-digest already exists.")
 		}
 
 		if when != "" {
@@ -107,15 +120,24 @@ Examples:
 			}
 			cronExpr = derived
 			occs, oerr := pipeline.NextOccurrences(cronExpr, "UTC", 3, time.Now())
-			fmt.Printf("Parsed %q as cron %q (UTC).\n", when, cronExpr)
+			note("Parsed %q as cron %q (UTC).", when, cronExpr)
 			if oerr == nil {
-				fmt.Println("Next 3 fire times:")
+				note("Next 3 fire times:")
 				for _, o := range occs {
-					fmt.Printf("  - %s\n", o.Format("2006-01-02 15:04 MST"))
+					note("  - %s", o.Format("2006-01-02 15:04 MST"))
+					result.NextFireTimes = append(result.NextFireTimes, o.UTC().Format(time.RFC3339))
 				}
 			}
 			if !yes {
-				fmt.Print("Schedule the digest with this cadence? [y/N]: ")
+				// The prompt cannot be deferred — it needs an answer now — so
+				// it goes to stderr, where confirmAction already puts every
+				// other confirmation in this CLI. The preview lines above it
+				// are echoed there too, or the question arrives without the
+				// context it is asking about.
+				for _, n := range notes {
+					fmt.Fprintln(errOut, n)
+				}
+				fmt.Fprint(errOut, "Schedule the digest with this cadence? [y/N]: ")
 				var input string
 				_, _ = fmt.Scanln(&input)
 				if strings.ToLower(strings.TrimSpace(input)) != "y" && strings.ToLower(strings.TrimSpace(input)) != "yes" {
@@ -134,13 +156,18 @@ Examples:
 		result.CronExpr = cronExpr
 		result.ScheduleID = scheduleID
 		if alreadyScheduled {
-			fmt.Printf("A schedule already targets workspace-digest (id=%s) — leaving its cadence as-is. Use `crewship routine schedules update %s --cron '...'` to change it.\n", scheduleID, scheduleID)
+			note("A schedule already targets workspace-digest (id=%s) — leaving its cadence as-is. Use `crewship routine schedules update %s --cron '...'` to change it.", scheduleID, scheduleID)
 		} else {
 			result.ScheduleCreated = true
-			fmt.Printf("Scheduled workspace-digest: %s UTC (id=%s)\n", cronExpr, scheduleID)
+			note("Scheduled workspace-digest: %s UTC (id=%s)", cronExpr, scheduleID)
 		}
-		fmt.Println("Configure delivery to Slack/email: `crewship notifychannel add ...` + `crewship notify prefs set`.")
-		return resolvedFormatter(cmd).AutoHuman(result, func() {})
+		note("Configure delivery to Slack/email: `crewship notifychannel add ...` + `crewship notify prefs set`.")
+
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			for _, n := range notes {
+				fmt.Println(n)
+			}
+		})
 	},
 }
 
@@ -151,6 +178,10 @@ type digestEnableResult struct {
 	ScheduleCreated bool   `json:"schedule_created"`
 	ScheduleID      string `json:"schedule_id,omitempty"`
 	CronExpr        string `json:"cron_expr,omitempty"`
+	// NextFireTimes is populated only for --when, where the derived cron is a
+	// guess the operator is being asked to confirm. RFC3339/UTC rather than
+	// the human "2006-01-02 15:04 MST" — a machine consumer parses it.
+	NextFireTimes []string `json:"next_fire_times,omitempty"`
 }
 
 // digestRoutineExists checks GET /pipelines/workspace-digest.

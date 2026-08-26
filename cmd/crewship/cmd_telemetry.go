@@ -119,43 +119,100 @@ var telemetryStatusCmd = &cobra.Command{
 			dsnSource = "CREWSHIP_SENTRY_DSN env override"
 		}
 
+		// `state` collapses the two booleans into the single value a caller
+		// actually branches on. "unconfigured" is not the same as "disabled":
+		// on a prerelease build it means telemetry is about to turn ITSELF on,
+		// which is precisely the state an operator automating a fleet needs to
+		// be able to detect.
+		state := "disabled"
 		switch {
 		case !asked:
-			// Prerelease/dev builds settle the default on first
-			// `crewship start`, so this branch is mostly seen on stable
-			// builds (default-off writes nothing) and on DBs that have
-			// never booted the server.
-			if crashreport.DefaultOptIn(version) {
-				fmt.Println("Telemetry: not yet configured. This prerelease/dev build defaults to ENABLED on the next `crewship start` — opt out now with `crewship telemetry off`.")
-			} else {
-				fmt.Println("Telemetry: not yet configured. This stable build keeps telemetry DISABLED until you opt in with `crewship telemetry on`.")
-			}
+			state = "unconfigured"
 		case enabled:
-			fmt.Println("Telemetry: ENABLED")
-			if installID != "" {
-				fmt.Printf("  install_id: %s\n", installID)
-			}
-			if dsn == "" {
-				cli.PrintWarning("No DSN compiled in and CREWSHIP_SENTRY_DSN is not set — consent is recorded but no events are sent.")
-			} else {
-				fmt.Printf("  endpoint:   %s (%s)\n", dsnEndpointHost(dsn), dsnSource)
-			}
-			fmt.Println("  to disable: crewship telemetry off")
-		default:
-			fmt.Println("Telemetry: DISABLED")
-			fmt.Println("  to enable:  crewship telemetry on")
+			state = "enabled"
 		}
 		// Consent is a row in a database, so the answer above is only as
 		// meaningful as the file it came from. Say which file, and how it was
 		// resolved — the read-only route has no gate to refuse with, so naming
-		// is the whole guard against reporting a stale decoy (#2086). Printed
+		// is the whole guard against reporting a stale decoy (#2086). Reported
 		// even when there is no database: "which file is missing" is exactly
 		// what the "not yet configured" line leaves open.
+		//
+		// It is a pair of FIELDS as well as a printed line: a caller comparing
+		// two machines' telemetry state needs to know they answered from the
+		// same file, and that is not something to make it parse back out of
+		// prose.
+		var dbPath, dbOrigin string
 		if target, terr := resolveLocalDBTarget(); terr == nil {
-			fmt.Printf("  database:   %s (%s)\n", target.Path, target.Origin)
+			dbPath, dbOrigin = target.Path, target.Origin
 		}
-		return nil
+
+		result := telemetryStatusResult{
+			Database:       dbPath,
+			DatabaseOrigin: dbOrigin,
+			State:          state,
+			Enabled:        asked && enabled,
+			Configured:     asked,
+			DefaultOptIn:   crashreport.DefaultOptIn(version),
+			InstallID:      installID,
+			EndpointHost:   dsnEndpointHost(dsn),
+			EndpointSource: dsnSource,
+			// A recorded consent with nowhere to send events is a silent
+			// no-op, so it is a field rather than only a printed warning.
+			DSNConfigured: dsn != "",
+		}
+
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			switch {
+			case !asked:
+				// Prerelease/dev builds settle the default on first
+				// `crewship start`, so this branch is mostly seen on stable
+				// builds (default-off writes nothing) and on DBs that have
+				// never booted the server.
+				if crashreport.DefaultOptIn(version) {
+					fmt.Println("Telemetry: not yet configured. This prerelease/dev build defaults to ENABLED on the next `crewship start` — opt out now with `crewship telemetry off`.")
+				} else {
+					fmt.Println("Telemetry: not yet configured. This stable build keeps telemetry DISABLED until you opt in with `crewship telemetry on`.")
+				}
+			case enabled:
+				fmt.Println("Telemetry: ENABLED")
+				if installID != "" {
+					fmt.Printf("  install_id: %s\n", installID)
+				}
+				if dsn == "" {
+					cli.PrintWarning("No DSN compiled in and CREWSHIP_SENTRY_DSN is not set — consent is recorded but no events are sent.")
+				} else {
+					fmt.Printf("  endpoint:   %s (%s)\n", dsnEndpointHost(dsn), dsnSource)
+				}
+				fmt.Println("  to disable: crewship telemetry off")
+			default:
+				fmt.Println("Telemetry: DISABLED")
+				fmt.Println("  to enable:  crewship telemetry on")
+			}
+			if dbPath != "" {
+				fmt.Printf("  database:   %s (%s)\n", dbPath, dbOrigin)
+			}
+		})
 	},
+}
+
+// telemetryStatusResult is the machine-readable form of `telemetry status`.
+//
+// The endpoint is the DSN's HOST only, never the DSN — the full URL embeds a
+// public key, and the human path has always withheld it for the same reason.
+type telemetryStatusResult struct {
+	State          string `json:"state"` // enabled | disabled | unconfigured
+	Enabled        bool   `json:"enabled"`
+	Configured     bool   `json:"configured"`
+	DefaultOptIn   bool   `json:"default_opt_in"`
+	InstallID      string `json:"install_id,omitempty"`
+	EndpointHost   string `json:"endpoint_host,omitempty"`
+	EndpointSource string `json:"endpoint_source,omitempty"`
+	DSNConfigured  bool   `json:"dsn_configured"`
+	// Which database answered, and how that path was resolved (#2109). A
+	// consent state is only as meaningful as the file it was read from.
+	Database       string `json:"database,omitempty"`
+	DatabaseOrigin string `json:"database_origin,omitempty"`
 }
 
 // dsnEndpointHost extracts the host portion of a Sentry DSN

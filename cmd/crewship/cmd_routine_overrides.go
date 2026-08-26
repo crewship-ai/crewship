@@ -103,30 +103,45 @@ var routineStepOverrideListCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Overrides []struct {
-				StepID        string `json:"step_id"`
-				Prompt        string `json:"prompt"`
-				ModelOverride string `json:"model_override"`
-			} `json:"overrides"`
+			Overrides []stepOverrideRow `json:"overrides"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		if len(body.Overrides) == 0 {
-			fmt.Println("No step overrides — routine runs as authored.")
-			return nil
+		// "Runs as authored" is the state of nearly every routine, so the
+		// empty case is the overwhelmingly common one — and it answered a
+		// sentence under `-f json`.
+		//
+		// The machine rows carry the whole replacement prompt; the human
+		// column cuts it at 50 characters, which is fine to read and useless
+		// to diff.
+		if body.Overrides == nil {
+			body.Overrides = []stepOverrideRow{}
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "STEP\tMODEL\tPROMPT")
-		for _, o := range body.Overrides {
-			p := o.Prompt
-			if len(p) > 50 {
-				p = p[:50] + "…"
+		return resolvedFormatter(cmd).AutoHuman(body.Overrides, func() {
+			if len(body.Overrides) == 0 {
+				fmt.Println("No step overrides — routine runs as authored.")
+				return
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\n", o.StepID, o.ModelOverride, p)
-		}
-		return w.Flush()
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "STEP\tMODEL\tPROMPT")
+			for _, o := range body.Overrides {
+				p := o.Prompt
+				if len(p) > 50 {
+					p = p[:50] + "…"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\n", o.StepID, o.ModelOverride, p)
+			}
+			_ = w.Flush()
+		})
 	},
+}
+
+// stepOverrideRow is one active per-step override on a routine.
+type stepOverrideRow struct {
+	StepID        string `json:"step_id"`
+	Prompt        string `json:"prompt"`
+	ModelOverride string `json:"model_override"`
 }
 
 func init() {

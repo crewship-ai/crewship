@@ -203,7 +203,6 @@ var pipelineGetCmd = &cobra.Command{
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
-		format, _ := cmd.Flags().GetString("format")
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
 		resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s", ws, args[0]))
@@ -219,59 +218,50 @@ var pipelineGetCmd = &cobra.Command{
 			return fmt.Errorf("decode response: %w", err)
 		}
 
-		switch strings.ToLower(format) {
-		case "json":
-			// Machine-readable mode: emit the whole row as
-			// pretty-printed JSON. Used by `crewship export` callers
-			// and any operator scripting against the CLI.
-			out, err := json.MarshalIndent(p, "", "  ")
-			if err != nil {
-				return fmt.Errorf("marshal routine to JSON: %w", err)
+		// This command used to own a LOCAL --format flag (human | json) that
+		// stole the global `-f` shorthand. It therefore accepted `-f json`,
+		// which is why it looked healthy, and rejected `-f yaml` / `-f ndjson`
+		// outright — the global flag advertises five formats and this command
+		// implemented two. Routing through the shared formatter gives all of
+		// them; `--format human` still lands in AutoHuman's default branch, so
+		// the value the old flag documented keeps working.
+		return resolvedFormatter(cmd).AutoHuman(p, func() {
+			// Pretty-print: human header on top, full DSL JSON below.
+			// Tabwriter for the header keeps the layout aligned even when
+			// fields wrap.
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintf(w, "Slug:\t%s\n", p.Slug)
+			fmt.Fprintf(w, "Name:\t%s\n", p.Name)
+			fmt.Fprintf(w, "Description:\t%s\n", p.Description)
+			fmt.Fprintf(w, "DSL version:\t%s\n", p.DSLVersion)
+			fmt.Fprintf(w, "Author crew:\t%s\n", p.AuthorCrewID)
+			fmt.Fprintf(w, "Author agent:\t%s\n", p.AuthorAgentID)
+			fmt.Fprintf(w, "Authored via:\t%s\n", p.AuthoredVia)
+			govStatus := p.Status
+			if govStatus == "" {
+				govStatus = "active"
 			}
-			fmt.Println(string(out))
-			return nil
-		case "", "human", "table":
-			// fall through to human-readable rendering below
-		default:
-			return fmt.Errorf("unknown --format %q (want human | json)", format)
-		}
-
-		// Pretty-print: human header on top, full DSL JSON below.
-		// Tabwriter for the header keeps the layout aligned even when
-		// fields wrap.
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "Slug:\t%s\n", p.Slug)
-		fmt.Fprintf(w, "Name:\t%s\n", p.Name)
-		fmt.Fprintf(w, "Description:\t%s\n", p.Description)
-		fmt.Fprintf(w, "DSL version:\t%s\n", p.DSLVersion)
-		fmt.Fprintf(w, "Author crew:\t%s\n", p.AuthorCrewID)
-		fmt.Fprintf(w, "Author agent:\t%s\n", p.AuthorAgentID)
-		fmt.Fprintf(w, "Authored via:\t%s\n", p.AuthoredVia)
-		govStatus := p.Status
-		if govStatus == "" {
-			govStatus = "active"
-		}
-		fmt.Fprintf(w, "Status:\t%s\n", govStatus)
-		if len(p.IntegrationsRequired) > 0 {
-			// Enforced at run time: a run is blocked when the author crew
-			// hasn't connected one of these (422 + missing_integrations).
-			fmt.Fprintf(w, "Integrations:\t%s\n", strings.Join(p.IntegrationsRequired, ", "))
-		}
-		fmt.Fprintf(w, "Invocations:\t%d\n", p.InvocationCount)
-		if p.LastInvokedAt != nil && *p.LastInvokedAt != "" {
-			fmt.Fprintf(w, "Last invoked:\t%s (status=%s)\n", *p.LastInvokedAt, p.LastInvocationStatus)
-		}
-		fmt.Fprintf(w, "Created:\t%s\n", p.CreatedAt)
-		fmt.Fprintf(w, "Updated:\t%s\n", p.UpdatedAt)
-		_ = w.Flush()
-		fmt.Println("\nDefinition:")
-		var pretty bytes.Buffer
-		if err := json.Indent(&pretty, p.Definition, "  ", "  "); err != nil {
-			fmt.Println(string(p.Definition))
-		} else {
-			fmt.Println("  " + pretty.String())
-		}
-		return nil
+			fmt.Fprintf(w, "Status:\t%s\n", govStatus)
+			if len(p.IntegrationsRequired) > 0 {
+				// Enforced at run time: a run is blocked when the author crew
+				// hasn't connected one of these (422 + missing_integrations).
+				fmt.Fprintf(w, "Integrations:\t%s\n", strings.Join(p.IntegrationsRequired, ", "))
+			}
+			fmt.Fprintf(w, "Invocations:\t%d\n", p.InvocationCount)
+			if p.LastInvokedAt != nil && *p.LastInvokedAt != "" {
+				fmt.Fprintf(w, "Last invoked:\t%s (status=%s)\n", *p.LastInvokedAt, p.LastInvocationStatus)
+			}
+			fmt.Fprintf(w, "Created:\t%s\n", p.CreatedAt)
+			fmt.Fprintf(w, "Updated:\t%s\n", p.UpdatedAt)
+			_ = w.Flush()
+			fmt.Println("\nDefinition:")
+			var pretty bytes.Buffer
+			if err := json.Indent(&pretty, p.Definition, "  ", "  "); err != nil {
+				fmt.Println(string(p.Definition))
+			} else {
+				fmt.Println("  " + pretty.String())
+			}
+		})
 	},
 }
 
@@ -775,56 +765,72 @@ var pipelineDryRunCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var result struct {
-			Status     string  `json:"status"`
-			DurationMs int64   `json:"duration_ms"`
-			CostUSD    float64 `json:"cost_usd"`
-			// JSON tag MUST match the server-side wire name (`would_execute`)
-			// — the server marshals types.RunResult.WouldExecute with
-			// `json:"would_execute,omitempty"` (internal/pipeline/types.go).
-			// Previously this struct used `json:"WouldExecute"` which never
-			// matched the wire, so the CLI silently rendered "0 steps" for
-			// every dry-run regardless of what the server returned.
-			WouldExecute []struct {
-				StepID         string  `json:"step_id"`
-				StepType       string  `json:"step_type"`
-				WouldCallAgent string  `json:"would_call_agent,omitempty"`
-				WouldCallSlug  string  `json:"would_call_pipeline,omitempty"`
-				WouldPass      string  `json:"would_pass,omitempty"`
-				TierAdapter    string  `json:"tier_adapter,omitempty"`
-				TierModel      string  `json:"tier_model,omitempty"`
-				EstimatedCost  float64 `json:"estimated_cost_usd,omitempty"`
-			} `json:"would_execute"`
-		}
+		var result dryRunResult
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("decode dry_run response: %w", err)
 		}
-		fmt.Printf("Dry run: %s (estimated %dms, $%.4f total)\n\n", result.Status, result.DurationMs, result.CostUSD)
-		for i, s := range result.WouldExecute {
-			fmt.Printf("Step %d [%s] (%s):\n", i+1, s.StepID, s.StepType)
-			if s.WouldCallAgent != "" {
-				fmt.Printf("  would call agent: %s\n", s.WouldCallAgent)
-			}
-			if s.WouldCallSlug != "" {
-				fmt.Printf("  would call routine: %s\n", s.WouldCallSlug)
-			}
-			if s.TierAdapter != "" {
-				fmt.Printf("  resolved tier: %s/%s\n", s.TierAdapter, s.TierModel)
-			}
-			if s.EstimatedCost > 0 {
-				fmt.Printf("  estimated cost: $%.4f\n", s.EstimatedCost)
-			}
-			if s.WouldPass != "" {
-				preview := s.WouldPass
-				if len(preview) > 300 {
-					preview = preview[:300] + "..."
-				}
-				fmt.Printf("  rendered prompt:\n%s\n", indent(preview, "    "))
-			}
-			fmt.Println()
+		if result.WouldExecute == nil {
+			result.WouldExecute = []dryRunStep{}
 		}
-		return nil
+		// A dry run's whole purpose is to be inspected before committing to a
+		// real one, which makes it one of the commands most likely to sit in
+		// front of a decision in a script. The machine form also keeps the
+		// FULL rendered prompt — the human preview cuts it at 300 characters,
+		// and "would this prompt do the right thing" is not a question you can
+		// answer from the first 300 characters.
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			fmt.Printf("Dry run: %s (estimated %dms, $%.4f total)\n\n", result.Status, result.DurationMs, result.CostUSD)
+			for i, s := range result.WouldExecute {
+				fmt.Printf("Step %d [%s] (%s):\n", i+1, s.StepID, s.StepType)
+				if s.WouldCallAgent != "" {
+					fmt.Printf("  would call agent: %s\n", s.WouldCallAgent)
+				}
+				if s.WouldCallSlug != "" {
+					fmt.Printf("  would call routine: %s\n", s.WouldCallSlug)
+				}
+				if s.TierAdapter != "" {
+					fmt.Printf("  resolved tier: %s/%s\n", s.TierAdapter, s.TierModel)
+				}
+				if s.EstimatedCost > 0 {
+					fmt.Printf("  estimated cost: $%.4f\n", s.EstimatedCost)
+				}
+				if s.WouldPass != "" {
+					preview := s.WouldPass
+					if len(preview) > 300 {
+						preview = preview[:300] + "..."
+					}
+					fmt.Printf("  rendered prompt:\n%s\n", indent(preview, "    "))
+				}
+				fmt.Println()
+			}
+		})
 	},
+}
+
+// dryRunStep is one step a dry run would execute.
+//
+// The JSON tags MUST match the server-side wire names — the server marshals
+// types.RunResult.WouldExecute with `json:"would_execute,omitempty"`
+// (internal/pipeline/types.go). This struct once used `json:"WouldExecute"`,
+// which never matched the wire, so the CLI silently rendered "0 steps" for
+// every dry run regardless of what the server returned.
+type dryRunStep struct {
+	StepID         string  `json:"step_id"`
+	StepType       string  `json:"step_type"`
+	WouldCallAgent string  `json:"would_call_agent,omitempty"`
+	WouldCallSlug  string  `json:"would_call_pipeline,omitempty"`
+	WouldPass      string  `json:"would_pass,omitempty"`
+	TierAdapter    string  `json:"tier_adapter,omitempty"`
+	TierModel      string  `json:"tier_model,omitempty"`
+	EstimatedCost  float64 `json:"estimated_cost_usd,omitempty"`
+}
+
+// dryRunResult is the machine-readable form of `routine dry-run`.
+type dryRunResult struct {
+	Status       string       `json:"status"`
+	DurationMs   int64        `json:"duration_ms"`
+	CostUSD      float64      `json:"cost_usd"`
+	WouldExecute []dryRunStep `json:"would_execute"`
 }
 
 var pipelineDeleteCmd = &cobra.Command{
@@ -1027,7 +1033,11 @@ func init() {
 	pipelineListCmd.Flags().String("order", "popularity", "sort order: popularity | recent | name")
 	pipelineListCmd.Flags().String("tag", "", "filter routines by definition tag (cross-crew discovery)")
 	pipelineListCmd.Flags().String("status", "", "filter by governance status: active | proposed | disabled")
-	pipelineGetCmd.Flags().StringP("format", "f", "human", "output format: human | json")
+	// No local --format flag here. It used to shadow the global one, taking
+	// the `-f` shorthand with it, so `routine get -f json` worked while
+	// `-f yaml` and `-f ndjson` were rejected by a command that advertised
+	// all five in its help (#2086). The global persistent flag now reaches
+	// this command like every other.
 	pipelineRunsCmd.Flags().Int("limit", 20, "max number of run entries to return (1-500)")
 
 	pipelineSaveCmd.Flags().String("name", "", "human-readable name (REQUIRED; slug derived from this)")

@@ -146,12 +146,19 @@ func TestPipelineGetRunE(t *testing.T) {
 		}
 	})
 
+	// `routine get` used to own a LOCAL --format flag (human|json) that stole
+	// the global `-f` shorthand, so it accepted `-f json` and REJECTED
+	// `-f yaml` / `-f ndjson` — five advertised formats, two implemented
+	// (#2086). These subtests drive the global flagFormat, which is the only
+	// thing the command reads now.
 	t.Run("json format", func(t *testing.T) {
 		stub := clitest.NewStubServer()
 		defer stub.Close()
 		setupStubCLICov(t, stub)
 		stub.OnGet(pipelinesPathCov()+"/email-fetch", clitest.JSONResponse(200, row))
-		setFlagCov(t, pipelineGetCmd, "format", "json")
+		origFormat := flagFormat
+		t.Cleanup(func() { flagFormat = origFormat })
+		flagFormat = "json"
 
 		out, err := captureStdoutCov(t, func() error {
 			return pipelineGetCmd.RunE(pipelineGetCmd, []string{"email-fetch"})
@@ -168,16 +175,93 @@ func TestPipelineGetRunE(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown format rejected", func(t *testing.T) {
+	// The formats the local flag used to reject outright. This is the
+	// regression: `-f yaml` on a command whose help advertises yaml must
+	// produce yaml, not an error.
+	for _, format := range []string{"yaml", "ndjson"} {
+		t.Run(format+" format is honoured", func(t *testing.T) {
+			stub := clitest.NewStubServer()
+			defer stub.Close()
+			setupStubCLICov(t, stub)
+			stub.OnGet(pipelinesPathCov()+"/email-fetch", clitest.JSONResponse(200, row))
+			origFormat := flagFormat
+			t.Cleanup(func() { flagFormat = origFormat })
+			flagFormat = format
+
+			out, err := captureStdoutCov(t, func() error {
+				return pipelineGetCmd.RunE(pipelineGetCmd, []string{"email-fetch"})
+			})
+			if err != nil {
+				t.Fatalf("RunE with -f %s: %v", format, err)
+			}
+			if !strings.Contains(out, "email-fetch") {
+				t.Errorf("-f %s produced no routine data:\n%s", format, out)
+			}
+			// The human rendering is unmistakable — it leads with a
+			// tabwriter "Slug:" header and a "Definition:" section.
+			if strings.Contains(out, "Definition:") {
+				t.Errorf("-f %s fell through to the human renderer:\n%s", format, out)
+			}
+		})
+	}
+
+	// `--format human` was the local flag's default and its documented
+	// value; it must keep working now that the flag is gone, because
+	// AutoHuman treats anything that is not a machine format as human.
+	t.Run("legacy human format still renders the report", func(t *testing.T) {
 		stub := clitest.NewStubServer()
 		defer stub.Close()
 		setupStubCLICov(t, stub)
 		stub.OnGet(pipelinesPathCov()+"/email-fetch", clitest.JSONResponse(200, row))
-		setFlagCov(t, pipelineGetCmd, "format", "xml")
+		origFormat := flagFormat
+		t.Cleanup(func() { flagFormat = origFormat })
+		flagFormat = "human"
 
-		err := pipelineGetCmd.RunE(pipelineGetCmd, []string{"email-fetch"})
-		if err == nil || !strings.Contains(err.Error(), `unknown --format "xml"`) {
-			t.Fatalf("want unknown format error, got %v", err)
+		out, err := captureStdoutCov(t, func() error {
+			return pipelineGetCmd.RunE(pipelineGetCmd, []string{"email-fetch"})
+		})
+		if err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+		if !strings.Contains(out, "Slug:") || !strings.Contains(out, "Definition:") {
+			t.Errorf("--format human lost the report:\n%s", out)
+		}
+	})
+
+	t.Run("no local format flag shadows the global one", func(t *testing.T) {
+		// The shadow is the root cause, so it gets its own guard: a local
+		// flag NAMED "format" removes the root's persistent flag from this
+		// command, and with it the `-f` shorthand, so `-f json` fails with
+		// `unknown shorthand flag: 'f'` rather than falling back.
+		if f := pipelineGetCmd.LocalFlags().Lookup("format"); f != nil {
+			t.Errorf("`routine get` declares a local --format flag again — it shadows the "+
+				"root persistent flag and takes `-f` with it (#2086). Flag usage: %q", f.Usage)
+		}
+	})
+
+	// There was an "unknown format rejected" subtest here, asserting that
+	// `--format xml` returned `unknown --format "xml"`. It went with the local
+	// flag: the global --format owns the vocabulary now and does not reject
+	// unknown values on ANY command — an unrecognised format renders as human,
+	// uniformly. Rejecting on one command out of 800 was not validation, it was
+	// an inconsistency.
+	t.Run("unrecognised format renders as human rather than erroring", func(t *testing.T) {
+		stub := clitest.NewStubServer()
+		defer stub.Close()
+		setupStubCLICov(t, stub)
+		stub.OnGet(pipelinesPathCov()+"/email-fetch", clitest.JSONResponse(200, row))
+		origFormat := flagFormat
+		t.Cleanup(func() { flagFormat = origFormat })
+		flagFormat = "xml"
+
+		out, err := captureStdoutCov(t, func() error {
+			return pipelineGetCmd.RunE(pipelineGetCmd, []string{"email-fetch"})
+		})
+		if err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+		if !strings.Contains(out, "Slug:") {
+			t.Errorf("an unrecognised format should fall back to the human report; got:\n%s", out)
 		}
 	})
 }
