@@ -298,7 +298,7 @@ crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
 | `--allowed-domains` | `string` | | Comma-separated allowed domains. Supports `*.example.com` subdomain wildcards. Pass empty string to clear. |
 | `--allow-package-registries` | `bool` | `false` | Append the common package registries (npm, pip, cargo, go, apt, Docker Hub) to the crew's allowed domains. When passed alone it unions onto the crew's existing domains rather than replacing them. |
 | `--allow-private-endpoints` | `bool` | `false` | Allow agents to reach a private/LAN model endpoint (RFC1918/loopback). Link-local and cloud-metadata addresses stay blocked. Subject to the instance ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS`. |
-| `--issue-prefix` | `string` | | Prefix for this crew's issue identifiers — `ENG` gives `ENG-42`. Pass an empty string to clear it, after which identifiers use the first three letters of the crew slug upper-cased. See [Issue prefixes](#issue-prefixes). |
+| `--issue-prefix` | `string` | | Prefix for this crew's issue identifiers — `ENG` gives `ENG-42`. Must match `^[A-Za-z0-9_-]{1,16}$`. Pass an empty string to clear it, after which identifiers use the first three letters of the crew slug upper-cased. See [Issue prefixes](#issue-prefixes). |
 
 ### Issue prefixes
 
@@ -314,6 +314,23 @@ crewship issue create --crew engineering --title "Ship it"
 
 crewship crew update engineering --issue-prefix ""   # back to the slug
 ```
+
+**The prefix must match `^[A-Za-z0-9_-]{1,16}$`** — letters, digits, underscore
+or hyphen, one to sixteen characters. The identifier is a single URL path
+segment on every route that addresses an issue, so a prefix carrying `/`, a
+space, `%`, `#` or `?` would mint an issue at an address no route can reach:
+
+```bash
+crewship crew update engineering --issue-prefix "A/B"
+# Error: issue_prefix must match ^[A-Za-z0-9_-]{1,16}$ (letters, digits,
+#        underscore or hyphen; 1-16 characters) — it becomes part of the issue
+#        identifier, which is a single URL path segment.
+#        Send "" to clear it and fall back to the crew slug.
+```
+
+A prefix stored before this rule existed is **not** migrated and keeps minting
+identifiers exactly as it does today — but the next write to that crew's prefix
+has to satisfy the rule.
 
 **Two crews in a workspace may share a prefix.** They then share one sequence
 and interleave — `engineering` files `ENG-1`, `engine` files `ENG-2` — because

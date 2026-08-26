@@ -2040,7 +2040,10 @@
             "type": "string"
           },
           "issue_prefix": {
+            "description": "Issue identifier prefix, e.g. \"ENG\" for ENG-42. Letters, digits, underscore or hyphen, 1-16 characters; \"\" clears it and identifiers fall back to the first three letters of the crew slug.",
+            "maxLength": 16,
             "nullable": true,
+            "pattern": "^$|^[A-Za-z0-9_-]{1,16}$",
             "type": "string"
           },
           "max_ephemeral_agents": {
