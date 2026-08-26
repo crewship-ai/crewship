@@ -62,9 +62,9 @@ const (
 	DefaultBehaviorSampleEvery = 5
 	MinBehaviorSampleEvery     = 1
 	MaxBehaviorSampleEvery     = 100
-	// WarnBehaviorSampleEveryBelow is the cadence at or under which the API
-	// returns a non-blocking cost advisory: below every 3rd call, a majority of
-	// the workspace's tool calls each carry a judge round-trip.
+	// WarnBehaviorSampleEveryBelow is the cadence STRICTLY BELOW which the API
+	// returns a non-blocking cost advisory — i.e. 1 and 2, where at least half
+	// of the workspace's tool calls each carry a judge round-trip.
 	WarnBehaviorSampleEveryBelow = 3
 )
 
