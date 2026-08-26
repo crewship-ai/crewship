@@ -124,11 +124,60 @@ you have *not* installed are still named; containerd and nerdctl are
 deliberately absent, because containerd serves a gRPC API that Crewship's
 Docker client cannot speak.
 
+The entry marked `in_use` also carries **`gaps[]`** when that runtime is
+measured not to honour one of the hardening controls Crewship applies to every
+crew container:
+
+```json
+{
+  "runtime": "podman", "version": "4.9.3", "in_use": true,
+  "gaps": [
+    {
+      "control": "GroupAdd",
+      "detail": "podman 4.9.3 drops supplementary GIDs that have no /etc/group entry; agents will not hold gid 1002 and crew-shared memory reads will fail with EACCES. Fixed in podman 5; upgrading is the only remedy — the GID cannot be delivered any other way through the compat API"
+    }
+  ]
+}
+```
+
+The key is **absent when there is nothing to report**, which is every runtime
+except Podman below 5, and it is set on the `in_use` entry only — an idle
+runtime is not being asked for anything, so nothing is being dropped. The same
+finding appears as a startup `WARN` in the server log, in
+[`crewship system info`](/cli/system#known-gaps), and as an advisory row in
+[`crewship doctor`](/cli/doctor#container-runtime-gaps).
+
 ## Symptom catalog
 
 Find your symptom below; each panel expands to its diagnosis and fix.
 
 <AccordionGroup>
+
+<Accordion title="On Podman, agents behave as if the crew's shared memory were empty">
+
+The symptom is a memory problem and the cause is a container-runtime one, which
+is why it is worth naming: agents write to their own memory fine, read their own
+entries back fine, and see nothing the rest of the crew wrote.
+
+**Podman below 5 drops supplementary GIDs that have no `/etc/group` entry.**
+Crewship `chgrp`s the crew's `.memory` subtrees to gid 1002 and marks them
+setgid `2775`, so holding gid 1002 is what lets an agent read what its crewmates
+stored. Podman 4.9.3 accepts the `GroupAdd` and silently reduces the container
+to its primary GID — every crew-shared read then fails with `EACCES`, and an
+agent that cannot read is indistinguishable from one that forgot.
+
+Confirm it:
+
+```bash
+crewship doctor | grep -A1 'container runtime gaps'
+crewship system info -f json | jq '.runtime.runtimes[] | select(.in_use) | .gaps'
+```
+
+**Fix: upgrade to Podman 5 or later** (verified honoured on 6.0.2). There is no
+workaround — the GID cannot be delivered any other way through the Docker compat
+API, which is why Crewship reports the gap rather than working around it.
+
+</Accordion>
 
 <Accordion title="A run says failed with `agent reported a failed run`, but the CLI exited 0">
 

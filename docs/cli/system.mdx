@@ -63,6 +63,34 @@ to change which one is driven are to point `DOCKER_HOST` at the socket you want,
 or to stop the daemon that currently wins the probe order.
 </Note>
 
+### Known gaps
+
+The runtimes Crewship drives are not equivalent. When the one in use is
+measured not to honour a crew hardening control, `system info` says so — and
+names what breaks, not just what was dropped:
+
+```
+Container Runtime
+  Available:  true
+  Runtime:    podman
+  Version:    4.9.3
+  Socket:     /run/user/501/podman/podman.sock
+  Known gaps:
+    GroupAdd — podman 4.9.3 drops supplementary GIDs that have no /etc/group
+    entry; agents will not hold gid 1002 and crew-shared memory reads will fail
+    with EACCES. Fixed in podman 5; upgrading is the only remedy.
+```
+
+Nothing is printed when there are none, which is every runtime except Podman
+below 5 — Docker, Podman 5+, Colima, OrbStack and Rancher Desktop (dockerd
+mode) all pass the full conformance suite
+([#1673](https://github.com/crewship-ai/crewship/issues/1673)).
+
+Every entry is **measured against a live daemon** by the runtime-conformance
+harness rather than read out of release notes: it means "we ran it and watched
+it not happen". The same finding appears as a startup `WARN` in the server log,
+and as an advisory row in [`crewship doctor`](/cli/doctor#container-runtime-gaps).
+
 **License output:** Edition, Max crews, Max agents/crew, Max members, Licensee.
 
 With `--format json|yaml|ndjson` the command emits a structured payload
@@ -71,13 +99,22 @@ is unavailable). The same applies to `system keeper`, `system stats`, and
 `system onboarding status`.
 
 The `runtime` object carries the endpoint's full inventory — `runtimes[]` with
-**`in_use`** per entry, and **`install_links`**, the map of every runtime
-Crewship can drive to where you get it:
+**`in_use`** per entry, an optional **`gaps[]`** on that entry, and
+**`install_links`**, the map of every runtime Crewship can drive to where you
+get it:
 
 ```bash
 crewship system info -f json | jq '.runtime.runtimes[] | select(.in_use)'
 crewship system info -f json | jq -r '.runtime.install_links | to_entries[] | "\(.key)\t\(.value)"'
+
+# Fleet sweep: which hosts run a runtime that drops a control?
+crewship system info -f json | jq -r '.runtime.runtimes[] | select(.gaps) | "\(.runtime) \(.version): \(.gaps[].control)"'
 ```
+
+`gaps[]` is `{control, detail}` and appears **on the `in_use` entry only** —
+it describes what the daemon this server is driving will not do, so an idle
+runtime you could not select anyway never carries one. The key is absent
+rather than empty when there is nothing to report.
 
 `runtime` / `version` / `socket` are **empty when runtimes are installed but
 none is in use** — the server booted without a container provider

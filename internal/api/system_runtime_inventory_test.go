@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -443,4 +444,125 @@ func mapKeys(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// A runtime the server is driving can have measured limitations, and until
+// #1672 the only surface that ever said so was a WARN emitted once at startup
+// (docker.logRuntimeGaps). An operator on podman 4.9.3 learns that their agents
+// silently lack gid 1002 — and that crew-shared memory reads will therefore
+// fail with EACCES — only if they still have the boot log. /system/runtime is
+// the endpoint whose whole job is describing the runtime; it has to carry it.
+//
+// Deliberately on the `in_use` entry ONLY. The gap set is a function of the
+// DetectResult the provider actually dialled, which is exactly what the startup
+// WARN is computed from, so the two surfaces cannot drift into disagreeing. A
+// gap hung on an installed-but-unused runtime would also be advice nobody can
+// act on: `container.provider` accepts only docker|apple|auto, so there is no
+// switching to the entry it would be warning about (#1689).
+type decodedGapEntry struct {
+	Runtime string `json:"runtime"`
+	InUse   bool   `json:"in_use"`
+	Gaps    []struct {
+		Control string `json:"control"`
+		Detail  string `json:"detail"`
+	} `json:"gaps"`
+}
+
+func decodeGapEntries(t *testing.T, body map[string]any) []decodedGapEntry {
+	t.Helper()
+	raw, err := json.Marshal(body["runtimes"])
+	if err != nil {
+		t.Fatalf("re-marshal runtimes: %v", err)
+	}
+	var out []decodedGapEntry
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode runtimes: %v", err)
+	}
+	return out
+}
+
+func TestSystemRuntime_InUseEntryCarriesKnownGaps(t *testing.T) {
+	t.Parallel()
+	podman := docker.DetectResult{
+		Runtime: "podman", Version: "4.9.3",
+		Socket: "/run/user/501/podman/podman.sock",
+		Host:   "unix:///run/user/501/podman/podman.sock",
+	}
+	h := stubbedRuntimeHandler(t, []docker.DetectResult{podman}, "")
+	h.activeRuntime = usingDocker(podman)
+
+	entries := decodeGapEntries(t, runtimeBody(t, h))
+	if len(entries) != 1 {
+		t.Fatalf("runtimes = %+v, want exactly the podman entry", entries)
+	}
+	got := entries[0]
+	if !got.InUse {
+		t.Fatalf("podman entry is not marked in_use: %+v", got)
+	}
+	if len(got.Gaps) == 0 {
+		t.Fatalf("podman 4.9.3 is in use and reports no gaps; GroupAdd is measurably dropped there (#1673)")
+	}
+	if got.Gaps[0].Control != "GroupAdd" {
+		t.Errorf("gaps[0].control = %q, want GroupAdd", got.Gaps[0].Control)
+	}
+	// The detail has to name the CONSEQUENCE. "GroupAdd not honoured" is not
+	// something an operator can connect to the memory failures they are seeing.
+	if !strings.Contains(got.Gaps[0].Detail, "crew-shared memory") {
+		t.Errorf("gaps[0].detail does not say what breaks: %q", got.Gaps[0].Detail)
+	}
+}
+
+// The other side of the same contract: a runtime with nothing measured against
+// it says nothing. A false alarm here is worse than silence — it sends an
+// operator chasing a group problem they do not have, and it is how real
+// warnings stop being read.
+func TestSystemRuntime_NoGapsOnARuntimeThatHonoursEverything(t *testing.T) {
+	t.Parallel()
+	for _, d := range []docker.DetectResult{
+		{Runtime: "podman", Version: "6.0.2", Socket: "/run/user/501/podman/podman.sock"},
+		{Runtime: "docker", Version: "28.0.4", Socket: "/var/run/docker.sock"},
+	} {
+		h := stubbedRuntimeHandler(t, []docker.DetectResult{d}, "")
+		h.activeRuntime = usingDocker(d)
+		for _, e := range decodeGapEntries(t, runtimeBody(t, h)) {
+			if len(e.Gaps) != 0 {
+				t.Errorf("%s %s reported %d gap(s), want none", d.Runtime, d.Version, len(e.Gaps))
+			}
+		}
+	}
+}
+
+// An installed runtime this server is NOT driving carries no gaps, however bad
+// its own would be. Nothing is being asked of it, so nothing is being dropped.
+func TestSystemRuntime_GapsOnlyOnTheRuntimeInUse(t *testing.T) {
+	t.Parallel()
+	dockerRT := docker.DetectResult{Runtime: "docker", Version: "28.0.4", Socket: "/var/run/docker.sock"}
+	h := stubbedRuntimeHandler(t, []docker.DetectResult{
+		{Runtime: "podman", Version: "4.9.3", Socket: "/run/user/501/podman/podman.sock"},
+		dockerRT,
+	}, "")
+	h.activeRuntime = usingDocker(dockerRT)
+
+	for _, e := range decodeGapEntries(t, runtimeBody(t, h)) {
+		if len(e.Gaps) != 0 {
+			t.Errorf("%s carries %d gap(s) while not in use, want none", e.Runtime, len(e.Gaps))
+		}
+	}
+}
+
+// Apple Containers is not a Docker-API daemon and the gap table has no entry
+// for it. The path has to be quiet rather than absent — an Apple provider in
+// use must not trip a zero DetectResult through the docker gap lookup.
+func TestSystemRuntime_AppleInUseReportsNoGaps(t *testing.T) {
+	t.Parallel()
+	h := stubbedRuntimeHandler(t, nil, "1.2.0")
+	h.activeRuntime = usingApple
+
+	entries := decodeGapEntries(t, runtimeBody(t, h))
+	if len(entries) != 1 || !entries[0].InUse {
+		t.Fatalf("runtimes = %+v, want one apple entry in use", entries)
+	}
+	if len(entries[0].Gaps) != 0 {
+		t.Errorf("apple reported %d gap(s), want none", len(entries[0].Gaps))
+	}
 }
