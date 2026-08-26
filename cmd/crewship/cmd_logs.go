@@ -88,6 +88,26 @@ Examples:
 		}
 
 		f := resolvedFormatter(cmd)
+
+		// --follow turns the whole command into a stream, and a stream cannot
+		// be a JSON array: the closing bracket would arrive when the follow
+		// ends, which is never. So under --follow the BACKLOG is emitted in the
+		// same NDJSON shape the live tail uses, one object per line — otherwise
+		// stdout would be an array followed by loose objects, which is the very
+		// defect this change exists to remove, in a new costume.
+		//
+		// Without --follow the result is a finite document and the array is
+		// correct.
+		machine := f.Format == "json" || f.Format == "yaml" || f.Format == "ndjson"
+		if follow && machine {
+			for _, l := range logEntries {
+				if err := f.WriteNDJSONRow(l); err != nil {
+					return err
+				}
+			}
+			return logsFollow(f, client, agentID, agentSlug)
+		}
+
 		// The machine formats carry the log entries as the server sent them:
 		// the human rendering truncates content at 200 characters and strips
 		// terminal escapes, both of which are protections for a terminal and
