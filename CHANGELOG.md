@@ -11,6 +11,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **A port-expose URL on Colima returned a bare `502` and explained nothing.**
+  The capability-URL proxy dials the crew container on its Docker bridge IP,
+  which is reachable only where crewshipd shares a network namespace with
+  dockerd — true for Docker Engine on Linux and for OrbStack, false for
+  Colima, Rancher Desktop and Docker Desktop, where the bridge exists only
+  inside a VM. Every request timed out and rendered as `bad gateway`, leaving
+  the one useful fact — the target address — visible only in the server log,
+  which is not where a self-hoster debugging their own setup looks. The 502
+  now names the target, and when a *dial* into a private address was
+  blackholed it offers VM routing as one of the two situations that look
+  identical from the proxy's side; a refused connection proves routing works,
+  so the runtime is not blamed there, and neither is a slow response, which
+  is no longer classified at all. The constraint is now documented on the
+  port-expose API page and the `expose` CLI page. The unreachability itself
+  is unchanged — this is diagnosis, not support for those runtimes.
+
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and
   `OnboardingHandler.Status` reads a NULL there as "this completion was
