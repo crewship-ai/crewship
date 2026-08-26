@@ -95,6 +95,27 @@ describe("<CreateAgentDialog> — the template row", () => {
   })
 })
 
+describe("<CreateAgentDialog> — the avatar tile", () => {
+  it("does not clip the badge that says the tile is editable", () => {
+    // The button carried `overflow-hidden` to round the portrait, and the
+    // badge is positioned outside the box (-bottom-1 -right-1), so the clip
+    // ate it: what was left was the arc falling inside the rounded rect,
+    // which reads as a meaningless blue dot. jsdom computes no layout, so
+    // this asserts the structure that caused it — the clip belongs to the
+    // image wrapper, not to the element the badge is a child of.
+    renderDialog()
+    const tile = screen.getByRole("button", { name: /Customize avatar/i })
+
+    expect(tile.className).not.toContain("overflow-hidden")
+    expect(tile.querySelector(".overflow-hidden")).not.toBeNull()
+
+    const badge = tile.querySelector(".rounded-full")
+    expect(badge).not.toBeNull()
+    // …and the badge is not inside the thing doing the clipping.
+    expect(tile.querySelector(".overflow-hidden")!.contains(badge!)).toBe(false)
+  })
+})
+
 describe("<CreateAgentDialog> — the avatar picker", () => {
   it("swaps the surface it is in, rather than stacking a dialog on it", () => {
     renderDialog()

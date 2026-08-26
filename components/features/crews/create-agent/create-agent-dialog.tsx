@@ -480,22 +480,28 @@ export function CreateAgentDialog({
                 aria-label="Customize avatar"
                 aria-haspopup="dialog"
                 aria-expanded={pickerOpen}
-                className="group relative w-14 h-14 shrink-0 rounded-xl overflow-hidden border border-white/10 bg-muted hover:border-primary/50 transition-colors"
+                // No `overflow-hidden` here. It used to be on the button, to
+                // clip the portrait to the rounded corner — and it clipped
+                // the badge below with it. The badge is deliberately outside
+                // the box (`-bottom-1 -right-1`), so all that survived was
+                // the sliver falling inside the tile's rounded rect: a blue
+                // arc that reads as a meaningless dot. The clip belongs to
+                // the image, which is the only thing that needs it.
+                className="group relative w-14 h-14 shrink-0 rounded-xl border border-white/10 bg-muted hover:border-primary/50 transition-colors"
               >
-                <img src={avatarUrl} alt="" aria-hidden="true" className="w-full h-full object-cover" />
-                {/* The badge that says the tile is clickable — and until now
-                    rendered as a plain blue dot.
+                <span className="block h-full w-full overflow-hidden rounded-xl">
+                  <img src={avatarUrl} alt="" aria-hidden="true" className="h-full w-full object-cover" />
+                </span>
+                {/* The badge that says the tile is clickable.
 
-                    This repo sets `--spacing: 0.23rem`, so `h-2.5` is 9.2px,
-                    not 10. A lucide glyph is a 24-unit viewBox at
-                    stroke-width 2, so at 9.2px its strokes come out at
-                    2 × 9.2/24 = 0.77px — under a pixel, on a saturated fill.
-                    The pencil was there the whole time and could not be seen.
-
-                    11px at stroke-width 2.5 gives 1.15px, which survives.
-                    Same values on New crew's icon tile; the two had already
-                    drifted to different sizes with the same defect. */}
-                <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary rounded-full grid place-items-center text-white shadow-md ring-2 ring-card">
+                    Two things were hiding the pencil. The clip above was one.
+                    The other is that `--spacing: 0.23rem` here, so `h-2.5` is
+                    9.2px rather than 10, and a lucide glyph is a 24-unit
+                    viewBox at stroke-width 2 — which at that size draws its
+                    strokes at 2 × 9.2/24 = 0.77px, under a pixel, on a
+                    saturated fill. 11px at stroke-width 2.5 gives 1.15px.
+                    Same values as New crew's icon tile. */}
+                <span className="pointer-events-none absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-primary text-white shadow-md ring-2 ring-card">
                   <Pencil className="h-3 w-3" strokeWidth={2.5} />
                 </span>
               </button>
