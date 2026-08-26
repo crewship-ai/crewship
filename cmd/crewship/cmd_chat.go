@@ -851,25 +851,37 @@ Examples:
 	},
 }
 
-// lookupChatAgentID finds which agent owns a chat by walking the agents
-// list and querying each agent's chat list until the chat ID is found.
-// Worst case scales with #agents — fine for the typical workspace size
-// (single-digit to low-tens). Falls back to a clear error so the user
-// knows to pass --agent.
+// lookupChatAgentID finds which agent owns a chat. See lookupChatAgent —
+// this is the id-only spelling most callers want.
 func lookupChatAgentID(client *cli.Client, chatID string) (string, error) {
+	id, _, err := lookupChatAgent(client, chatID)
+	return id, err
+}
+
+// lookupChatAgent finds which agent owns a chat by walking the agents list
+// and querying each agent's chat list until the chat ID is found, returning
+// both the agent id and its slug. Worst case scales with #agents — fine for
+// the typical workspace size (single-digit to low-tens). Falls back to a
+// clear error so the user knows to pass --agent.
+//
+// This walk is the ONLY way to answer "who owns this chat": a chat is
+// addressable solely under its agent (GET /api/v1/agents/{agentId}/chats),
+// and there is no flat GET /api/v1/chats/{chatId} — `resume` used to call one
+// and got a 404 every time (#2086).
+func lookupChatAgent(client *cli.Client, chatID string) (agentID, agentSlug string, err error) {
 	resp, err := client.Get("/api/v1/agents")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := cli.CheckError(resp); err != nil {
-		return "", err
+		return "", "", err
 	}
 	var agents []struct {
 		ID   string `json:"id"`
 		Slug string `json:"slug"`
 	}
 	if err := cli.ReadJSON(resp, &agents); err != nil {
-		return "", err
+		return "", "", err
 	}
 	for _, a := range agents {
 		var chats []struct {
@@ -882,11 +894,11 @@ func lookupChatAgentID(client *cli.Client, chatID string) (string, error) {
 		}
 		for _, c := range chats {
 			if c.ID == chatID {
-				return a.ID, nil
+				return a.ID, a.Slug, nil
 			}
 		}
 	}
-	return "", cli.NotFoundf("chat %s not found in any agent's recent sessions", chatID)
+	return "", "", cli.NotFoundf("chat %s not found in any agent's recent sessions", chatID)
 }
 
 // postMultipart issues a multipart/form-data POST without going through

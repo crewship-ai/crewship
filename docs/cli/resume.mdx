@@ -12,12 +12,16 @@ tag: Experimental
 
 | Input | Resolution |
 |---|---|
-| (no arg) | Interactive `huh` picker over the 10 most recent CLI-origin chats. Requires a TTY on stdin **and** stderr. |
+| (no arg) | Interactive `huh` picker over the 10 most recently active sessions, read from `GET /api/v1/runs` and deduplicated by chat. Requires a TTY on stdin **and** stderr. |
 | `c_…` | Treated as a chat ID. |
 | `r_…` / `run_…` | Looked up via `client.GetRun`; the run's `chat_id` is followed. |
 | `https://github.com/owner/repo/pull/<n>` | Searches the journal for the PR identifier and reuses the chat that produced it (best-effort — only works if an agent journaled the PR creation). |
 
-If the agent slug isn't part of the resolved object, the chat detail is fetched from `GET /api/v1/agents/{agentId}/chats/{chatId}` to recover it.
+If the agent slug isn't part of the resolved object, `resume` finds the agent that owns the chat by walking `GET /api/v1/agents` and reading each agent's `GET /api/v1/agents/{agentId}/chats`. A chat is only addressable under its agent — there is no flat `GET /api/v1/chats/{chatId}` — so this walk is the lookup.
+
+<Note>
+Before [#2086](https://github.com/crewship-ai/crewship/issues/2086), both resolution paths called routes that do not exist (`GET /api/v1/chats` for the picker, `GET /api/v1/chats/{chatId}` for the agent lookup). The picker silently fell through to its `/runs` fallback; the agent lookup just failed, so `crewship resume <chat-id>` always reported `could not determine agent`.
+</Note>
 
 ## `crewship resume [chat-id | run-id | pr-url]`
 
@@ -36,10 +40,10 @@ crewship resume https://github.com/foo/bar/pull/42       # via journal lookup
 
 - **`interactive picker requires a TTY; pass a chat-id or run-id`** — running without a TTY but no argument.
 - **`run <id> has no associated chat to resume`** — the run pre-dates chat threading or was created without one.
-- **`could not determine agent for chat <id>`** — chat detail lookup did not surface an agent.
-- **`no recent sessions to resume`** — the workspace has no CLI-origin chats in the last 10 entries.
+- **`could not determine agent for chat <id>: …`** — no agent in the workspace lists that chat (wrong workspace, or the chat id is a typo). The wrapped error names what the lookup actually hit.
+- **`no recent sessions to resume`** — no run in the workspace's recent history carries a chat id.
 - **`no session found for PR <owner/repo#n> — pass a chat-id directly`** — journal search came up empty; fall back to the chat-id form.
-- **`list recent: chats endpoint: <err>; fallback runs: <err>`** — both `/api/v1/chats` and the `/runs` fallback failed; both errors are surfaced to make the actual problem identifiable.
+- **`list recent sessions: <err>`** — the runs list the picker reads failed.
 
 ## See also
 

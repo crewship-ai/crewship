@@ -89,7 +89,7 @@ func TestResumeRunE_ChatIDAgentUnresolvable(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	covSetupCli8(t, stub.URL())
-	// /chats/{id} 404s → agent slug stays empty → resolution error.
+	// The agents walk 404s → no owning agent → resolution error.
 	resumeCmd.SetContext(context.Background())
 
 	err := resumeCmd.RunE(resumeCmd, []string{"chat-unknown"})
@@ -208,15 +208,20 @@ func TestResumeRunE_RunIDDispatches(t *testing.T) {
 	}
 }
 
-// TestResumeRunE_ChatIDLooksUpAgent covers the /chats/{id} agent lookup
-// (agent_id fallback when agent_slug is empty) before dispatch.
+// TestResumeRunE_ChatIDLooksUpAgent covers the owning-agent lookup before
+// dispatch: the agents walk, not a flat /chats/{id} fetch. #2086 — there is
+// no GET /api/v1/chats/{chatId} route, so the old lookup 404'd every time
+// and `resume <chat-id>` could never resolve an agent.
 func TestResumeRunE_ChatIDLooksUpAgent(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	covSetupCli8(t, stub.URL())
 	covResetRunCmdFlags(t)
-	stub.OnGet("/api/v1/chats/chat-77", clitest.JSONResponse(200, map[string]any{
-		"agent_slug": "", "agent_id": covAgentIDCli8,
+	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{
+		{"id": covAgentIDCli8, "slug": "viktor"},
+	}))
+	stub.OnGet("/api/v1/agents/"+covAgentIDCli8+"/chats", clitest.JSONResponse(200, []map[string]any{
+		{"id": "chat-77"},
 	}))
 	stub.OnGet("/api/v1/ws-token", clitest.ErrorResponse(500, "no ws for you"))
 	resumeCmd.SetContext(context.Background())
@@ -230,6 +235,70 @@ func TestResumeRunE_ChatIDLooksUpAgent(t *testing.T) {
 	}
 	if got, _ := runCmd.Flags().GetString("chat"); got != "chat-77" {
 		t.Errorf("chat not threaded into run command: %q", got)
+	}
+	for _, c := range stub.Calls() {
+		if c.Path == "/api/v1/chats/chat-77" || c.Path == "/api/v1/chats" {
+			t.Errorf("resume called %s %s — that route does not exist (#2086)", c.Method, c.Path)
+		}
+	}
+}
+
+// TestRecentSessions_DedupesChatsAndCapsAtWant proves the picker's source of
+// truth: the workspace-scoped runs list (the only registered route that lists
+// sessions across agents), one entry per chat, newest first.
+func TestRecentSessions_DedupesChatsAndCapsAtWant(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	slug := "viktor"
+	chatA, chatB := "chat-a", "chat-b"
+	stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{
+		"data": []map[string]any{
+			{"id": "r1", "chat_id": &chatA, "agent_slug": &slug, "created_at": "2026-08-26T10:00:00Z"},
+			{"id": "r2", "chat_id": &chatA, "agent_slug": &slug, "created_at": "2026-08-26T09:00:00Z"},
+			{"id": "r3", "chat_id": nil, "agent_slug": &slug, "created_at": "2026-08-26T08:00:00Z"},
+			{"id": "r4", "chat_id": &chatB, "agent_slug": &slug, "created_at": "2026-08-26T07:00:00Z"},
+		},
+	}))
+	client := newAPIClient()
+
+	got, err := recentSessions(client, 2)
+	if err != nil {
+		t.Fatalf("recentSessions: %v", err)
+	}
+	want := []recentSession{
+		{ChatID: chatA, AgentSlug: slug, Title: "run r1", UpdatedAt: "2026-08-26T10:00:00Z"},
+		{ChatID: chatB, AgentSlug: slug, Title: "run r4", UpdatedAt: "2026-08-26T07:00:00Z"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d sessions, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("session %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	calls := stub.CallsFor("GET", "/api/v1/runs")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 runs list call, got %d", len(calls))
+	}
+	// Over-fetch: several runs can share one chat, so `want` sessions needs
+	// more than `want` runs.
+	if !strings.Contains(calls[0].Query, "limit=10") {
+		t.Errorf("expected limit=10 for want=2, got query %q", calls[0].Query)
+	}
+}
+
+func TestRecentSessions_ListError(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	stub.OnGet("/api/v1/runs", clitest.ErrorResponse(500, "Internal server error"))
+	client := newAPIClient()
+
+	if _, err := recentSessions(client, 10); err == nil ||
+		!strings.Contains(err.Error(), "list recent sessions") {
+		t.Errorf("expected list-recent-sessions error; got %v", err)
 	}
 }
 
