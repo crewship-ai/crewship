@@ -285,13 +285,14 @@ Operator-side HITL surface for the memory→Skills bridge. When the consolidator
 ### `crewship skill proposed list`
 
 ```bash
-crewship skill proposed list --crew <crew-id>
-crewship skill proposed list --crew <crew-id> --format json
+crewship skill proposed list --crew engineering          # slug
+crewship skill proposed list --crew <crew-id>            # or id
+crewship skill proposed list --crew engineering --format json
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--crew` | yes | Crew id whose `.proposed/` dir to scan. The CLI URL-encodes this value so any future id-scheme change with special chars stays safe. |
+| `--crew` | yes | Crew slug or id whose `.proposed/` dir to scan. A slug is resolved against `crewship crew list` before the request; the resolved id is URL-encoded so any future id-scheme change with special chars stays safe. |
 | `--format` | no | `text` (default) or `json`. |
 
 **Output columns:** FILE, NAME, CATEGORY, DESCRIPTION (truncated to 60 chars), QUALITY (`ok` when the server didn't flag it).
@@ -303,12 +304,12 @@ Backed by `GET /api/v1/skills/proposed?crew_id=<id>`.
 Run the staged file through the canonical skill importer — same path as URL-based imports, so the SPDX license check and prompt-injection scan apply. On success the staging file is deleted and an `EntryMemorySkillApproved` journal entry fires.
 
 ```bash
-crewship skill proposed approve --crew <crew-id> --file skill-deploy-friday.md
+crewship skill proposed approve --crew engineering --file skill-deploy-friday.md
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--crew` | yes | Crew id. |
+| `--crew` | yes | Crew slug or id. |
 | `--file` | yes | Staged file name as listed (e.g. `skill-deploy-friday.md`). |
 
 Backed by `POST /api/v1/skills/proposed/approve`. Output: `approved <file> -> skill <id> (<slug>, created|updated)`.
@@ -318,12 +319,12 @@ Backed by `POST /api/v1/skills/proposed/approve`. Output: `approved <file> -> sk
 Discard the staging file without importing. **Idempotent** — rejecting an already-deleted file returns success, and an `EntryMemorySkillRejected` journal entry fires either way.
 
 ```bash
-crewship skill proposed reject --crew <crew-id> --file skill-noise.md
+crewship skill proposed reject --crew engineering --file skill-noise.md
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--crew` | yes | Crew id. |
+| `--crew` | yes | Crew slug or id. |
 | `--file` | yes | Staged file name. |
 
 Backed by `POST /api/v1/skills/proposed/reject`.

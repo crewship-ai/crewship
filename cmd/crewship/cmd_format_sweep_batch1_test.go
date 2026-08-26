@@ -64,9 +64,14 @@ func TestRoutineDoctorRunE_DefaultStaysHuman(t *testing.T) {
 
 func TestAgentLogsRunE_DefaultStaysHuman(t *testing.T) {
 	stub := covSetupCli5(t)
-	const agentID = "c0000000000000000000001" // CUID-shaped → skips slug resolve
-	stub.OnGet("/api/v1/agents/"+agentID+"/logs", clitest.JSONResponse(200, map[string]any{
-		"logs": "boot line one\nboot line two\n",
+	const agentID = "c0000000000000000000001"
+	// The LIST is where the crew id comes from, and logs need one.
+	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{
+		{"id": agentID, "slug": "viktor", "crew_id": "c0000000000000000000009"},
+	}))
+	stub.OnGet("/api/v1/agents/"+agentID+"/logs", clitest.JSONResponse(200, []map[string]any{
+		{"ts": "2026-06-01T09:00:00Z", "level": "info", "agent": "viktor", "event": "output", "content": "boot line one"},
+		{"ts": "2026-06-01T09:00:01Z", "level": "info", "agent": "viktor", "event": "output", "content": "boot line two"},
 	}))
 
 	var err error

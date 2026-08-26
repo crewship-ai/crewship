@@ -4,11 +4,35 @@ package main
 // memory engine is real (SQLite in a temp dir); no server involved.
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
+
+// covCaptureStderrMemory captures os.Stderr for the duration of fn. The memory
+// commands write per-scope failures there, so a test that asserts on the
+// wording an operator sees has to read that stream.
+func covCaptureStderrMemory(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stderr = w
+	runErr := fn()
+	_ = w.Close()
+	os.Stderr = old
+	data, readErr := io.ReadAll(r)
+	if readErr != nil {
+		t.Fatalf("read captured stderr: %v", readErr)
+	}
+	return string(data), runErr
+}
 
 func TestResolveMemoryPaths(t *testing.T) {
 	base := t.TempDir()
@@ -289,19 +313,31 @@ func TestMemoryReindex_AllTargetsFailing(t *testing.T) {
 	}
 }
 
-func TestMemoryStatus_NotInitialized(t *testing.T) {
+// A memory index that cannot be read is a failure, and the command has to say
+// so with its exit status — it used to print the SQLite driver's own
+// "unable to open database file (14)" and return nil, so `crewship memory
+// status … || handle_it` never fired (#2086).
+func TestMemoryStatus_MissingIndexIsAFailure(t *testing.T) {
 	saveCLIState(t)
 	base := filepath.Join(t.TempDir(), "missing-root")
 	covSetMemoryFlags(t, 1, base, "agent")
 
-	out, err := covCaptureStdoutCli7(t, func() error {
+	// stderr, not stdout: the per-scope failure is a diagnostic, and stdout
+	// stays clean for the scopes that did report.
+	out, err := covCaptureStderrMemory(t, func() error {
 		return memoryStatusCmd.RunE(memoryStatusCmd, nil)
 	})
-	if err != nil {
-		t.Fatalf("status should not error on missing index: %v", err)
+	if err == nil {
+		t.Fatalf("status returned nil on an unreadable index; out=%q", out)
 	}
-	if !strings.Contains(out, "not initialized") {
-		t.Errorf("expected 'not initialized', got %q", out)
+	if got := cli.ExitCodeFor(err); got != cli.ExitNotFound {
+		t.Errorf("exit code = %d, want ExitNotFound (%d) — err: %v", got, cli.ExitNotFound, err)
+	}
+	if !strings.Contains(out, "does not exist") {
+		t.Errorf("expected an actionable cause, got %q", out)
+	}
+	if strings.Contains(out, "unable to open database file") || strings.Contains(out, "(14)") {
+		t.Errorf("the raw driver error leaked to the user: %q", out)
 	}
 }
 

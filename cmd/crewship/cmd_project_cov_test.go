@@ -11,6 +11,20 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
 
+// stubProjectDirectory registers the project LIST that resolveProjectID scans.
+// `project get` and the milestone verbs advertise `<id-or-slug>` and now
+// resolve the reference before building a URL (#2086), so a test that names a
+// project has to let it be found. Each ref is registered as its own slug and
+// id, which keeps the downstream single-resource paths spelled the way these
+// tests already spell them.
+func stubProjectDirectory(stub *clitest.StubServer, refs ...string) {
+	rows := make([]map[string]any, 0, len(refs))
+	for _, ref := range refs {
+		rows = append(rows, map[string]any{"id": ref, "slug": ref})
+	}
+	stub.OnGet("/api/v1/projects", clitest.JSONResponse(200, rows))
+}
+
 func TestProjectCmdStructure(t *testing.T) {
 	if projectCmd.Use != "project" {
 		t.Errorf("Use = %q, want project", projectCmd.Use)
@@ -134,6 +148,7 @@ func TestProjectCreateRunE_HappyPath_FullBody(t *testing.T) {
 
 func TestProjectGetRunE_DetailPairs(t *testing.T) {
 	stub := covSetupCli4(t)
+	stubProjectDirectory(stub, "hardening")
 	lead := "Viktor"
 	desc := "the big one"
 	stub.OnGet("/api/v1/projects/hardening", clitest.JSONResponse(200, map[string]any{
@@ -373,6 +388,10 @@ func TestProject_ServerErrors(t *testing.T) {
 	for name, ep := range endpoints {
 		t.Run(name, func(t *testing.T) {
 			stub := covSetupCli4(t)
+			// Registered first so the "list" case's own 500 overwrites it;
+			// `get` needs the directory to resolve its reference before the
+			// endpoint error is what the test is measuring.
+			stubProjectDirectory(stub, "p1")
 			stub.On(ep.method, ep.path, clitest.ErrorResponse(500, "projects exploded"))
 			c := cmds[name]
 			if err := c.RunE(c, []string{"p1"}); err == nil || !strings.Contains(err.Error(), "projects exploded") {
@@ -418,6 +437,7 @@ func TestProject_MalformedResponses(t *testing.T) {
 
 func TestProjectGetRunE_TargetDateSet(t *testing.T) {
 	stub := covSetupCli4(t)
+	stubProjectDirectory(stub, "p2")
 	stub.OnGet("/api/v1/projects/p2", clitest.JSONResponse(200, map[string]any{
 		"id": "p2", "name": "Dated", "slug": "dated", "status": "planned",
 		"priority": "low", "health": "on_track", "target_date": "2026-12-24",

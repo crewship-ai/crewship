@@ -12,9 +12,12 @@ import (
 
 // stubAgentDirectory registers the agent list used by slug→ID
 // resolution in every introspection command.
+// stubAgentDirectory answers the agent LIST every slug→id resolve reads. The
+// crew id is part of the row because `agent logs` needs it: logs come out of a
+// crew container, and an agent with no crew has none to read.
 func stubAgentDirectory(stub *clitest.StubServer) {
-	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]string{
-		{"id": covAgentIDCli4, "slug": "viktor"},
+	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{
+		{"id": covAgentIDCli4, "slug": "viktor", "crew_id": "ccrew0123456789abcdefghi"},
 	}))
 }
 
@@ -85,11 +88,16 @@ func TestAgentStopRunE_PostsStop(t *testing.T) {
 	}
 }
 
-func TestAgentLogsRunE_TailQueryAndRawPrint(t *testing.T) {
+// The response stubbed here is the one proxy.AgentLogs actually writes — an
+// array of journal rows. This test used to stub `{"logs": "..."}`, the shape
+// the CLI's own decode struct believed in and the server has never sent, which
+// is exactly how #2086 stayed green in CI while failing on every real agent.
+func TestAgentLogsRunE_LimitQueryAndEntryPrint(t *testing.T) {
 	stub := covSetupCli4(t)
 	stubAgentDirectory(stub)
-	stub.OnGet("/api/v1/agents/"+covAgentIDCli4+"/logs", clitest.JSONResponse(200, map[string]string{
-		"logs": "line-a\nline-b\n",
+	stub.OnGet("/api/v1/agents/"+covAgentIDCli4+"/logs", clitest.JSONResponse(200, []map[string]any{
+		{"ts": "2026-06-01T09:00:00Z", "level": "info", "agent": "viktor", "event": "output", "content": "line-a"},
+		{"ts": "2026-06-01T09:00:01Z", "level": "error", "agent": "viktor", "event": "error", "content": "line-b"},
 	}))
 
 	c := covFreshCmd(agentLogsCmd, func(c *cobra.Command) {
@@ -101,23 +109,27 @@ func TestAgentLogsRunE_TailQueryAndRawPrint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "line-a\nline-b\n") {
-		t.Errorf("raw logs not printed: %q", out)
+	for _, want := range []string{"line-a", "line-b"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log entry %q not printed: %q", want, out)
+		}
 	}
 
 	calls := stub.CallsFor("GET", "/api/v1/agents/"+covAgentIDCli4+"/logs")
 	if len(calls) != 1 {
 		t.Fatalf("logs calls = %d, want 1", len(calls))
 	}
-	if !strings.Contains(calls[0].Query, "tail=25") {
-		t.Errorf("tail not propagated, query=%q", calls[0].Query)
+	// `limit`, not `tail`: parsePagination is what reads this query, and it
+	// has never looked at a `tail` parameter.
+	if !strings.Contains(calls[0].Query, "limit=25") {
+		t.Errorf("--tail not propagated as limit, query=%q", calls[0].Query)
 	}
 }
 
-func TestAgentLogsRunE_NoLogsField(t *testing.T) {
+func TestAgentLogsRunE_EmptyLogArray(t *testing.T) {
 	stub := covSetupCli4(t)
 	stubAgentDirectory(stub)
-	stub.OnGet("/api/v1/agents/"+covAgentIDCli4+"/logs", clitest.JSONResponse(200, map[string]any{}))
+	stub.OnGet("/api/v1/agents/"+covAgentIDCli4+"/logs", clitest.JSONResponse(200, []map[string]any{}))
 
 	c := covFreshCmd(agentLogsCmd, func(c *cobra.Command) {
 		c.Flags().Int("tail", 0, "")
@@ -126,8 +138,8 @@ func TestAgentLogsRunE_NoLogsField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "No logs available.") {
-		t.Errorf("expected fallback message, got %q", out)
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("empty log array should print nothing, got %q", out)
 	}
 }
 
@@ -314,6 +326,10 @@ func TestAgentIntrospect_EndpointErrorPerCommand(t *testing.T) {
 	for name, ep := range endpoints {
 		t.Run(name, func(t *testing.T) {
 			stub := covSetupCli4(t)
+			// `logs` resolves through the agent LIST (it needs the crew id
+			// too), so the directory has to be there before the endpoint
+			// error is the thing under test.
+			stubAgentDirectory(stub)
 			stub.On(ep.method, ep.path, clitest.ErrorResponse(500, "introspect exploded"))
 			c := cmds[name]
 			err := c.RunE(c, []string{covAgentIDCli4})

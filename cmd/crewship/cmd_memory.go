@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/spf13/cobra"
 )
@@ -120,21 +123,42 @@ var memoryStatusCmd = &cobra.Command{
 		// initialised. It used to be printed as prose and exit 0, so a caller
 		// asking for JSON got a mix of a driver error and, sometimes,
 		// nothing else. Each scope now carries its own error field.
+		//
+		// #2086 adds the other half: the text in that field has to name a
+		// cause the operator can act on, and when NO scope could be read the
+		// command must not still exit 0 — `crewship memory status … ||
+		// handle_it` was dead code in every script that had it. The row shape
+		// is unchanged, so `--format json` keeps carrying the error per scope.
 		scopes := []memoryScopeStatus{}
+		var failed int
 		for _, mp := range paths {
 			row := memoryScopeStatus{Scope: mp.scope, Path: mp.path}
+
+			// Ask the filesystem before SQLite does: the driver collapses a
+			// missing path, a file where a directory belongs, and a directory
+			// it cannot enter into one "unable to open database file (14)",
+			// which names neither the cause nor the path it tried.
+			if err := memoryDirError(mp.path); err != nil {
+				row.Error = err.Error()
+				scopes = append(scopes, row)
+				failed++
+				continue
+			}
+
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
 			if err != nil {
-				row.Error = "not initialized: " + err.Error()
+				row.Error = fmt.Sprintf("cannot open the memory index in %s: %v", mp.path, err)
 				scopes = append(scopes, row)
+				failed++
 				continue
 			}
 
 			status, err := eng.Status(ctx)
 			eng.Close()
 			if err != nil {
-				row.Error = err.Error()
+				row.Error = fmt.Sprintf("cannot read the memory index in %s: %v", mp.path, err)
 				scopes = append(scopes, row)
+				failed++
 				continue
 			}
 
@@ -147,10 +171,14 @@ var memoryStatusCmd = &cobra.Command{
 			scopes = append(scopes, row)
 		}
 
-		return resolvedFormatter(cmd).AutoHuman(scopes, func() {
+		if err := resolvedFormatter(cmd).AutoHuman(scopes, func() {
 			for _, s := range scopes {
+				// A per-scope failure is a diagnostic, so in human output it
+				// goes to stderr and stdout stays clean for the scopes that
+				// did report. Structured formats keep it in the row, where a
+				// caller can read it per scope.
 				if s.Error != "" {
-					fmt.Printf("[%s] %s — %s\n", s.Scope, s.Path, s.Error)
+					fmt.Fprintf(os.Stderr, "[%s] %s\n", s.Scope, s.Error)
 					continue
 				}
 				fmt.Printf("[%s] %s\n", s.Scope, s.Path)
@@ -160,7 +188,20 @@ var memoryStatusCmd = &cobra.Command{
 				fmt.Printf("  Indexed: %s\n", s.IndexedAt)
 				fmt.Printf("  Ready:   %v\n\n", s.SearchReady)
 			}
-		})
+		}); err != nil {
+			return err
+		}
+
+		// Every scope failed: nothing was reported, so the command did not
+		// do what it was asked and must not claim success. A partial failure
+		// stays exit 0 — the scopes that answered, answered — with the
+		// failures already rendered above.
+		if failed == len(paths) {
+			return cli.WithExitCode(
+				fmt.Errorf("no readable memory index for scope %q under %s", scope, basePath),
+				cli.ExitNotFound)
+		}
+		return nil
 	},
 }
 
@@ -198,9 +239,16 @@ var memoryReindexCmd = &cobra.Command{
 
 		var succeeded int
 		for _, mp := range paths {
+			// Same driver-error leak as `status` had, same fix (#2086) —
+			// reindex already exits non-zero when every scope fails.
+			if err := memoryDirError(mp.path); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] %v\n", mp.scope, err)
+				continue
+			}
+
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
 			if err != nil {
-				fmt.Printf("[%s] %s — cannot open: %v\n", mp.scope, mp.path, err)
+				fmt.Fprintf(os.Stderr, "[%s] cannot open the memory index in %s: %v\n", mp.scope, mp.path, err)
 				continue
 			}
 
@@ -319,4 +367,29 @@ func ensureMemorySubdir(p string) string {
 func dirExists(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
+}
+
+// memoryDirError reports, in words an operator can act on, why p cannot hold a
+// memory index — or nil when it looks usable.
+//
+// The check exists because SQLite collapses every one of these causes into the
+// single opaque SQLITE_CANTOPEN, which the driver renders as "unable to open
+// database file (14)": that string is identical for a path that does not
+// exist, a file where a directory belongs, and a directory the caller cannot
+// enter, and it never names the path it tried (#2086). The path itself is
+// derived from --path *and* --scope, so the user cannot reconstruct it from
+// the flags they typed.
+func memoryDirError(p string) error {
+	info, err := os.Stat(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("%s does not exist — check --path and --scope (`crewship memory --help` lists what --path means per scope), then build an index with `crewship memory reindex`", p)
+	case errors.Is(err, fs.ErrPermission):
+		return fmt.Errorf("%s cannot be read: permission denied — memory dirs inside an agent container are owned by uid 1001", p)
+	case err != nil:
+		return fmt.Errorf("%s cannot be read: %v", p, err)
+	case !info.IsDir():
+		return fmt.Errorf("%s is not a directory — --path names the directory holding the index, not a file inside it", p)
+	}
+	return nil
 }

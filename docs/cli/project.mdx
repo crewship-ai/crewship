@@ -31,10 +31,12 @@ crewship project <subcommand> [flags]
 | `project update <id>` | Patch any mutable field. |
 | `project delete <id>` | Delete the project. Issues are unlinked (set `project_id = NULL`), not deleted. |
 | `project stats <id>` | Breakdown by status / assignee / label / crews. |
-| `project milestone list <id>` | List milestones for a project. |
-| `project milestone create <id> --name <n>` | Create a milestone. |
+| `project milestone list <id-or-slug>` | List milestones for a project. |
+| `project milestone create <id-or-slug> --name <n>` | Create a milestone. |
 | `project milestone update <milestone-id>` | Patch a milestone. |
 | `project milestone delete <milestone-id>` | Delete a milestone (prompts unless `-y`). Aliases: `remove`, `rm`. |
+
+The three verbs written `<id-or-slug>` accept either. `/api/v1/projects/{projectId}` keys on the **id** alone, so the CLI resolves a slug against `project list` before it builds the URL — `update`, `delete` and `stats`, written `<id>`, take the id only.
 
 ## Flags
 

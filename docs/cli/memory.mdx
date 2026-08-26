@@ -78,6 +78,15 @@ crewship memory status -p /path/to/agents/lead/.memory
 #   Ready:   true
 ```
 
+**Exit codes.** A scope whose index cannot be read is reported on stderr, naming the resolved path (which `--path` *and* `--scope` decide together) and the cause — the directory does not exist, is not a directory, or cannot be read. When **every** scope fails the command exits `3`; a partial failure exits `0` with the successful scopes on stdout.
+
+```bash
+crewship memory status -p /path/that/is/not/there
+# [agent] /path/that/is/not/there/.memory does not exist — check --path and --scope …
+# no readable memory index for scope "agent" under /path/that/is/not/there
+# exit 3
+```
+
 ### health
 
 Print the 5-metric memory health score for the caller's workspace. Hits the running server (requires `crewship login` and a workspace context) — unlike `search`/`status`/`reindex` which read local FTS indexes, `health` calls `GET /api/v1/memory/health`, which **recomputes fresh** on every request from five aggregate SQL queries. The persisted `memory_health_snapshots` table is for trend graphs, not for this command.
@@ -124,7 +133,7 @@ crewship memory reindex -p /path/to/crew-root -S crew
 # [crew] reindexed 3 files (10 chunks) in 19ms
 ```
 
-Returns non-zero exit code if all reindex operations fail.
+Returns non-zero exit code if all reindex operations fail. Per-scope failures go to stderr with the same actionable wording `status` uses.
 
 ### hybrid
 
