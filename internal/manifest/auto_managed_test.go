@@ -3,6 +3,7 @@ package manifest
 import (
 	"context"
 	"encoding/hex"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -290,6 +291,14 @@ func TestGenerateAutoCredentialValue_LengthAndHex(t *testing.T) {
 		{0, 64},  // default 32 bytes → 64 hex
 		{16, 32}, // 16 bytes → 32 hex
 		{48, 96}, // 48 bytes → 96 hex
+		{-1, 64}, // nonsense → default, not a panic
+		{maxAutoCredentialBytes, 2 * maxAutoCredentialBytes},
+		// The validator rejects anything above the ceiling, but the
+		// generator must hold on its own: any other caller reaching
+		// here with a manifest-supplied byte count must not be able
+		// to turn it into a 1 GiB allocation.
+		{1 << 30, 2 * maxAutoCredentialBytes},
+		{math.MaxInt32, 2 * maxAutoCredentialBytes},
 	}
 	for _, tc := range cases {
 		got, err := generateAutoCredentialValue(tc.in)

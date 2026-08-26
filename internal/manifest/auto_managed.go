@@ -433,10 +433,21 @@ type plannedAutoCredential struct {
 // (not base64) so the resulting env var is safe to embed in shell
 // scripts, container env files, and Docker --env arg lists without
 // quoting concerns. The length parameter is in bytes; the hex output
-// is 2× that many characters.
+// is 2× that many characters. Non-positive input falls back to the
+// 32-byte default and anything above maxAutoCredentialBytes is
+// clamped down to it.
 func generateAutoCredentialValue(bytes int) (string, error) {
 	if bytes <= 0 {
 		bytes = 32
+	}
+	// Clamp independently of the validator. `bytes` originates in a
+	// manifest, and make([]byte, n) on an unbounded manifest integer
+	// is a remote allocation primitive; a caller that reaches this
+	// generator by some other path must not get the allocation
+	// either. maxAutoCredentialBytes is already far past any real
+	// credential, so clamping still yields a strong value.
+	if bytes > maxAutoCredentialBytes {
+		bytes = maxAutoCredentialBytes
 	}
 	buf := make([]byte, bytes)
 	if _, err := rand.Read(buf); err != nil {

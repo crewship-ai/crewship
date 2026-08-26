@@ -66,6 +66,31 @@ spec:
 			wantErr: true,
 		},
 		{
+			// A manifest is attacker-controlled input: the byte count
+			// reaches make([]byte, n) in generateAutoCredentialValue,
+			// so an unbounded value is a remote allocation primitive
+			// (1<<30 here is a 1 GiB buffer per auto_credential).
+			name: "length above ceiling",
+			body: `
+  services:
+    - name: pg
+      image: postgres:16-alpine
+      auto_credentials:
+        - { name: POSTGRES_PASSWORD, length: 1073741824 }`,
+			wantErr:        true,
+			errMustContain: "above the 512-byte maximum",
+		},
+		{
+			name: "length at ceiling allowed",
+			body: `
+  services:
+    - name: pg
+      image: postgres:16-alpine
+      auto_credentials:
+        - { name: POSTGRES_PASSWORD, length: 512 }`,
+			wantErr: false,
+		},
+		{
 			name: "length zero allowed as default",
 			body: `
   services:
