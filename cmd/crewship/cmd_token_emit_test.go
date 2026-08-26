@@ -107,6 +107,75 @@ func TestSecTokenEmit_OutputFile0600(t *testing.T) {
 	}
 }
 
+// TestSecTokenEmit_OverwriteTightensPerms is the perms half of the
+// #1999 conversion to memory.WriteFileDurable.
+//
+// The durable helper writes a tempfile and renames it over the target,
+// which is what makes an interrupted rotation leave the OLD token
+// intact. That rename must not become a way for a credential to inherit
+// a loose mode: the helper passes perm straight into the tempfile's
+// O_CREATE|O_EXCL open (it never creates at 0644 and chmods after), so
+// the replacement is a fresh 0600 inode no matter how permissive the
+// file it replaced was.
+//
+// Seeding a world-readable 0644 file first is the case the previous
+// implementation needed an explicit f.Chmod to survive — os.WriteFile
+// and a bare O_CREATE both PRESERVE an existing file's mode. This test
+// fails if a future refactor drops back to either.
+func TestSecTokenEmit_OverwriteTightensPerms(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix mode bits don't map cleanly on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token.txt")
+
+	// A pre-existing, world-readable token file from an older run.
+	if err := os.WriteFile(path, []byte("stale_token\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, _, _ := newEmitCmd()
+	if err := cmd.Flags().Set("output-file", path); err != nil {
+		t.Fatal(err)
+	}
+	if err := emitToken(cmd, "ci-runner", "tok_id_1", emitTok); err != nil {
+		t.Fatalf("emitToken: %v", err)
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("rotated token file perms = %o, want 0600 — a credential "+
+			"must not inherit the mode of the file it replaced", perm)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(data)) != emitTok {
+		t.Errorf("file content = %q, want the new token %q", string(data), emitTok)
+	}
+
+	// The durable write must not leave its tempfile behind — a stray
+	// token.txt.tmp.* would be a second copy of a live credential.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "token.txt" {
+			t.Errorf("leftover file %q beside the token — a tempfile holding "+
+				"a credential must be cleaned up", e.Name())
+		}
+	}
+}
+
 // TestSecTokenEmitFlagsWired guards the create/rotate flag surface so a
 // refactor that drops the secret-safe sinks fails loudly.
 func TestSecTokenEmitFlagsWired(t *testing.T) {
