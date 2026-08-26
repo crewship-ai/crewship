@@ -23,6 +23,8 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -454,12 +456,12 @@ func TestResume_DefinitionEditedWhileWaitingForSlot_Interrupted(t *testing.T) {
 	// Guard the slot release so a failed assertion before the explicit
 	// release doesn't leave the resume retry loop spinning against a
 	// permanently held slot during test teardown.
-	releasedBlocker := false
-	t.Cleanup(func() {
-		if !releasedBlocker {
-			releaseBlocker()
-		}
-	})
+	// The release itself is handed to the resume goroutine (see the
+	// slotBusy rendezvous below), so it is once-guarded rather than
+	// flag-guarded.
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(releaseBlocker) }
+	t.Cleanup(release)
 
 	insertInFlightRun(t, runStore, &RunRecord{
 		ID: "run_toctou", WorkspaceID: "ws_test",
@@ -477,6 +479,38 @@ func TestResume_DefinitionEditedWhileWaitingForSlot_Interrupted(t *testing.T) {
 		WithRunRegistry(reg).
 		WithResumeRetryBackoff(10*time.Millisecond, 50*time.Millisecond)
 
+	// Rendezvous with the retry loop. Statement order in this test
+	// cannot establish the TOCTOU window on its own: the resume
+	// goroutine may pass the drift gate (executor.go, before the
+	// Acquire) and simply not have reached the slot yet, in which case
+	// releasing on the test's own timeline lets it acquire and execute
+	// the definition it already loaded — the run completes and the
+	// window was never entered (issue #1597).
+	//
+	// So the blocker is released BY the resume goroutine, from the
+	// busy-retry hook: that point is reached only after a failed
+	// Acquire, and it sits between two Run attempts, so the edit is
+	// committed strictly before the next attempt reloads the pipeline.
+	// No wall-clock guess decides the ordering.
+	var busyAcquires atomic.Int64
+	firstBusy := make(chan struct{})
+	editCommitted := make(chan struct{})
+	var firstBusyOnce sync.Once
+	exec.onResumeSlotBusy = func(runID string) {
+		if runID != "run_toctou" {
+			return
+		}
+		busyAcquires.Add(1)
+		firstBusyOnce.Do(func() { close(firstBusy) })
+		select {
+		case <-editCommitted:
+			// The edited definition is durable; hand the slot back so
+			// the next attempt reloads it and trips the drift gate.
+			release()
+		default:
+		}
+	}
+
 	// Scan-time gate passes: the stamped hash matches the definition.
 	resumed, interrupted, err := exec.ResumeInterruptedRuns(ctx, slog.Default())
 	if err != nil {
@@ -484,6 +518,16 @@ func TestResume_DefinitionEditedWhileWaitingForSlot_Interrupted(t *testing.T) {
 	}
 	if resumed != 1 || interrupted != 0 {
 		t.Fatalf("resumed=%d interrupted=%d, want 1/0", resumed, interrupted)
+	}
+
+	// Do not edit until the run is provably parked on the slot.
+	select {
+	case <-firstBusy:
+	case <-time.After(30 * time.Second):
+		t.Fatal("resumed run never lost the concurrency-slot race: the TOCTOU window under test was never entered")
+	}
+	if got := busyAcquires.Load(); got < 1 {
+		t.Fatalf("busy-retry count = %d, want >= 1 before the edit (the run must be waiting for the slot)", got)
 	}
 
 	// Edit the pipeline WHILE the resumed run is parked on the slot —
@@ -500,9 +544,9 @@ func TestResume_DefinitionEditedWhileWaitingForSlot_Interrupted(t *testing.T) {
 		t.Fatal("test setup: definition hash did not change")
 	}
 
-	// Free the slot — the retry's reload must now detect the drift.
-	releaseBlocker()
-	releasedBlocker = true
+	// Publish the edit to the retry loop; the next busy-retry frees the
+	// slot, and the reload after it must detect the drift.
+	close(editCommitted)
 
 	final := waitForRunStatus(t, runStore, "run_toctou", RunStatusInterrupted, 5*time.Second)
 	if !strings.Contains(final.ErrorMessage, "definition changed while waiting to resume") {
