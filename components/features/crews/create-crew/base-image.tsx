@@ -50,6 +50,23 @@ export function patchImage(state: WizardState, image: string): Partial<WizardSta
       return { runtimeImage: image }
     }
   }
+  if (image === "") {
+    // Clearing the registry field DELETES the key; it does not set it empty.
+    //
+    // The custom-image input calls onChange per keystroke, so select-all +
+    // delete arrives here as "". An `"image": ""` in the document gets the
+    // create refused by Config.Validate (internal/devcontainer/config.go →
+    // ErrEmptyImage) — while the row on screen still reads "Debian slim, the
+    // shipped default", because effectiveBaseImage falls back for DISPLAY
+    // only. The refusal then points at nothing the user can see.
+    //
+    // An object left with no keys serialises to "" rather than "{}", so
+    // containerCreateBody skips the field entirely and the server applies its
+    // own default — which is what the row was claiming all along.
+    delete obj.image
+    const rest = Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : ""
+    return { runtimeImage: "", devcontainerConfig: rest }
+  }
   obj.image = image
   return { runtimeImage: image, devcontainerConfig: JSON.stringify(obj, null, 2) }
 }

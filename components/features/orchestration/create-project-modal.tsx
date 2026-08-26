@@ -325,7 +325,15 @@ export function CreateProjectModal({
       // ⌘↵ comes from the shell now. handleSubmit keeps its own empty-name
       // guard because the keyboard route reaches it while the footer's primary
       // is still disabled.
-      onSubmit={handleSubmit}
+      onSubmit={() => {
+        // Inside the icon panel the body IS the picker and the footer's
+        // primary reads "Use this icon", so ⌘↵ must close the panel — not
+        // create the project from a surface the user is not looking at. Both
+        // sibling wizards already guard this (create-crew-dialog.tsx,
+        // create-agent-dialog.tsx); this one was the exception.
+        if (panel) { setPanel(null); return }
+        handleSubmit()
+      }}
     >
       <CreateSurfaceHeader
         icon={FolderKanban}

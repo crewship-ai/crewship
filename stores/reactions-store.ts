@@ -103,7 +103,42 @@ function messageBusy(chatId: string, messageId: string): boolean {
   return false
 }
 
+/**
+ * How many mutations a message has seen, ever.
+ *
+ * `messageBusy` alone cannot make hydrate safe: it answers "is one in flight
+ * RIGHT NOW", and the losing case is a mutation that starts AND finishes
+ * inside the GET's window. Click 👍 the moment a turn renders, the POST
+ * returns before the list does, `inflight` is empty again by the time hydrate
+ * checks — and the pre-click snapshot overwrites the reaction the server has
+ * already accepted. The chip disappears until the next mount.
+ *
+ * So hydrate reads this counter before its request and again before its
+ * write, and stands down if it moved. Module scope, not zustand state, for
+ * the same reason `inflight` is: bumping it must not re-render every
+ * consumer.
+ */
+const mutations = new Map<string, number>()
+
+function messageEpoch(chatId: string, messageId: string): number {
+  return mutations.get(`${chatId}|${messageId}`) ?? 0
+}
+
+function bumpEpoch(chatId: string, messageId: string): void {
+  const k = `${chatId}|${messageId}`
+  mutations.set(k, (mutations.get(k) ?? 0) + 1)
+}
+
+/**
+ * Serialise one emoji's mutations, and mark the message as moved on.
+ *
+ * The epoch is bumped HERE rather than at each call site so no future
+ * mutation can be added without it — a mutation that forgets to bump is a
+ * mutation hydrate is allowed to overwrite.
+ */
 function chain(key: string, op: () => Promise<void>): Promise<void> {
+  const [chatId, messageId] = key.split("|")
+  bumpEpoch(chatId, messageId)
   const prev = inflight.get(key) ?? Promise.resolve()
   let self: Promise<void>
   const cleanup = () => {
@@ -141,6 +176,10 @@ export const useReactionsStore = create<ReactionsState>()((set, get) => {
 
     hydrate: async (chatId, messageId) => {
       if (!chatId || !messageId) return
+      // Captured BEFORE the request. Anything that mutates this message from
+      // here on makes the response below stale, whether or not it is still in
+      // flight when it arrives.
+      const epoch = messageEpoch(chatId, messageId)
       let payload: { reactions?: unknown }
       try {
         const res = await apiFetch(reactionsURL(chatId, messageId))
@@ -153,8 +192,12 @@ export const useReactionsStore = create<ReactionsState>()((set, get) => {
         warn("list failed; keeping local state:", err)
         return
       }
-      // A mutation that started while the GET was in flight is newer
-      // than this snapshot — let it stand and re-read on the next mount.
+      // A mutation that touched this message while the GET was in flight is
+      // newer than this snapshot — let it stand and re-read on the next
+      // mount. The epoch catches the ones that already finished; messageBusy
+      // catches an optimistic write whose request has not returned yet and so
+      // has not bumped anything the server agrees with.
+      if (messageEpoch(chatId, messageId) !== epoch) return
       if (messageBusy(chatId, messageId)) return
       const next: ReactionMap = {}
       for (const row of Array.isArray(payload.reactions) ? payload.reactions : []) {

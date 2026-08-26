@@ -213,6 +213,31 @@ describe("<StepLineup> — empty crew", () => {
   })
 })
 
+describe("<StepLineup> — coming back to it", () => {
+  it("keeps the pick while the catalogue is still loading", async () => {
+    // Step 2 is conditionally rendered, so Continue → Back REMOUNTS this and
+    // restarts the fetch. `filtered` is [] until the response lands, and the
+    // reconcile effect below read that as "the picked template is not on
+    // screen" and cleared it — leaving Continue disabled on a step the user
+    // had already completed, with nothing saying why.
+    const { setState } = harness(
+      { pickedTemplateSlug: "software-development", pickedTemplateMeta: { name: "SD", agentCount: 4, agents: [] } },
+      [TPL_BUILTIN_ENG],
+    )
+
+    // Before the fetch resolves: nothing may be cleared.
+    expect(setState).not.toHaveBeenCalledWith(
+      expect.objectContaining({ pickedTemplateSlug: null }),
+    )
+
+    // And once it lands, the pick is still there.
+    await screen.findByRole("button", { name: /^Software Development/ })
+    expect(setState).not.toHaveBeenCalledWith(
+      expect.objectContaining({ pickedTemplateSlug: null }),
+    )
+  })
+})
+
 describe("<StepLineup> — the two ways in that are not a template", () => {
   it("puts Start empty and Import above the grid, not inside it", async () => {
     harness({}, [TPL_BUILTIN_ENG])

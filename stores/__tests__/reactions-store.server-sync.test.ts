@@ -198,6 +198,35 @@ describe("hydrate", () => {
     })
   })
 
+  it("stands down when a mutation started and FINISHED inside its window", async () => {
+    // The losing case an in-flight check cannot see. Click 👍 the moment a
+    // turn renders: the POST returns before the list does, so `inflight` is
+    // empty again by the time hydrate checks it — and the pre-click snapshot
+    // overwrites a reaction the server has already accepted. The chip
+    // vanishes until the next mount.
+    let releaseList: (v: unknown) => void = () => {}
+    const listPending = new Promise((r) => { releaseList = r })
+
+    mockFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "GET") {
+        await listPending
+        // The server's answer as of BEFORE the click.
+        return list([])
+      }
+      return noContent()
+    })
+
+    const hydrating = useReactionsStore.getState().hydrate(CHAT, MSG)
+    // Runs to completion while the GET is still outstanding.
+    await useReactionsStore.getState().add(CHAT, MSG, "👍")
+    releaseList(null)
+    await hydrating
+
+    expect(useReactionsStore.getState().byTurn[MSG]).toEqual({
+      "👍": { count: 1, mine: true },
+    })
+  })
+
   it("leaves local state alone when the GET fails", async () => {
     mockFetch.mockResolvedValue(fail(404))
     useReactionsStore.setState({ byTurn: { [MSG]: { "👍": { count: 1, mine: true } } } })

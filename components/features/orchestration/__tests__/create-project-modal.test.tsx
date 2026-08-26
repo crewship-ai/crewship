@@ -440,3 +440,40 @@ describe("CreateProjectModal — what it no longer hides", () => {
     expect(screen.getAllByRole("dialog")).toHaveLength(1)
   })
 })
+
+// ── ⌘↵ inside the icon panel ─────────────────────────────────────────────
+//
+// While the panel is open the body IS the picker and the footer's primary
+// reads "Use this icon". The shell routes ⌘↵ to the surface's onSubmit
+// regardless, so passing handleSubmit unguarded meant the shortcut created
+// the project from a form the user was not looking at. Both sibling wizards
+// already guarded it; this one was the exception.
+describe("<CreateProjectModal> — the icon panel and ⌘↵", () => {
+  it("closes the panel instead of creating the project", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ id: "p1", slug: "x" }), { status: 201 }),
+    )
+    render(<CreateProjectModal {...defaultProps} />)
+
+    // A name, so the create would otherwise be valid and actually fire.
+    fireEvent.change(screen.getByPlaceholderText("Project name"), { target: { value: "Alpha" } })
+    fireEvent.click(screen.getByRole("button", { name: /Change project icon/i }))
+    await screen.findByPlaceholderText(/Search icons/i)
+
+    fireEvent.keyDown(document.querySelector('[data-slot="dialog-content"]')!, {
+      key: "Enter",
+      metaKey: true,
+    })
+
+    // The lead picker GETs /agents on mount, so assert on the create itself.
+    const created = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        String(url).includes("/api/v1/projects") && (init as RequestInit | undefined)?.method === "POST",
+    )
+    expect(created).toBeUndefined()
+    // …and the shortcut did what it should: back to the form.
+    expect(screen.getByPlaceholderText("Project name")).toBeInTheDocument()
+    vi.restoreAllMocks()
+  })
+})
+

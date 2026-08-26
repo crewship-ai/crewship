@@ -110,12 +110,20 @@ export function StepLineup({ state, setState, workspaceId, onImport }: Props) {
 
   // Keep the wizard's picked meta in step with what is on screen: a template
   // filtered out by a search still deployed if state kept pointing at it.
+  //
+  // `templates === null` is NOT "filtered out", and the guard is the whole
+  // reason this effect is safe. Step 2 is conditionally rendered, so
+  // Continue → Back remounts this component and restarts the fetch; until it
+  // lands `filtered` is [], which read as "the picked template is not on
+  // screen" and cleared a pick the user had already made. Continue then sat
+  // disabled on a step they had completed, with nothing on screen saying why.
   useEffect(() => {
+    if (templates === null) return
     if (state.mode === "empty") return
     if (state.pickedTemplateSlug && !filtered.some((t) => t.slug === state.pickedTemplateSlug)) {
       setState({ pickedTemplateSlug: null, pickedTemplateMeta: null })
     }
-  }, [filtered, state.mode, state.pickedTemplateSlug, setState])
+  }, [templates, filtered, state.mode, state.pickedTemplateSlug, setState])
 
   return (
     <div className="flex flex-col gap-3">
