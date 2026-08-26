@@ -232,8 +232,10 @@ func TestInstallMiseTools_WritesTOMLConfig(t *testing.T) {
 	if err := InstallMiseTools(context.Background(), "cid", cfg, covStepExec(-1, 0, false, &calls)); err != nil {
 		t.Fatalf("InstallMiseTools: %v", err)
 	}
-	if len(calls) != 4 {
-		t.Fatalf("expected 4 exec calls, got %d", len(calls))
+	// Five: config write, chown, install, reshim, and the shim-resolves check
+	// that reshim's own exit code cannot stand in for (verifyMiseShims).
+	if len(calls) != 5 {
+		t.Fatalf("expected 5 exec calls, got %d", len(calls))
 	}
 	// The first call writes the TOML config via heredoc.
 	writeCmd := strings.Join(calls[0], " ")

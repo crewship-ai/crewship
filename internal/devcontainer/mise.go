@@ -378,5 +378,55 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 		return fmt.Errorf("mise: reshim exited %d: %s", exitCode, stdout)
 	}
 
+	// Verify every shim resolves to something executable.
+	//
+	// `mise reshim` exiting 0 says nothing about whether the shim TARGET
+	// exists. Before #1787 the shims pointed at /root/.local/bin/mise — mode
+	// 0700 on the devcontainer bases — and reshim reported success all the
+	// same. The result is the failure shape worth engineering against: a
+	// dangling symlink is skipped SILENTLY by PATH lookup, so the agent falls
+	// through to whatever the base image ships and the pin serves a DIFFERENT
+	// VERSION. Not a missing binary anyone would notice — a wrong one.
+	//
+	// Measured on a crew provisioned before that fix: pinned terraform 1.9,
+	// running v1.15.7, nothing logged.
+	//
+	// Checked by walking the shim directory rather than the configured tool
+	// names, because one tool installs several shims (node brings npm and
+	// npx) and the mapping is mise's to know, not ours. `[ -e ]` follows the
+	// link, so a dangling one fails it.
+	if err := verifyMiseShims(ctx, containerID, exec); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// miseShimsDir is where `mise reshim` writes, given miseAgentEnv's XDG_DATA_HOME.
+const miseShimsDir = "/home/agent/.local/share/mise/shims"
+
+// verifyMiseShims fails when any shim mise just wrote does not resolve.
+func verifyMiseShims(ctx context.Context, containerID string, exec ExecFunc) error {
+	// `[ -L ]` before `[ -e ]` is what keeps an empty directory from failing
+	// the build. With no shims the glob stays literal, so `$s` is the pattern
+	// itself — which is neither a symlink nor an existing file, and would
+	// otherwise be reported as a broken shim named "*". Blocking provisioning
+	// on a crew whose tools happen to produce no shims would be a worse bug
+	// than the one this check exists for.
+	stdout, exitCode, err := exec(ctx, containerID, []string{
+		"sh", "-c",
+		`broken=""; for s in ` + miseShimsDir + `/*; do ` +
+			`[ -e "$s" ] && continue; ` +
+			`[ -L "$s" ] || continue; ` +
+			`broken="$broken $(basename "$s")"; done; ` +
+			`[ -z "$broken" ] || { echo "$broken"; exit 1; }`,
+	}, "1001:1001", miseAgentEnv)
+	if err != nil {
+		return fmt.Errorf("%w: verify shims: %v", ErrMiseInstallFailed, err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("%w: shims do not resolve (dangling:%s) — the pinned versions would be "+
+			"silently replaced by whatever the base image ships", ErrMiseInstallFailed, strings.TrimSpace(stdout))
+	}
 	return nil
 }

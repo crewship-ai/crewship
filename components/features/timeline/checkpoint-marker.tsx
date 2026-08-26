@@ -46,9 +46,27 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
       if (res.status === 404) {
         toast.error("Checkpoint not found or restore unavailable")
       } else if (!res.ok) {
-        toast.error(`Restore failed (${res.status})`)
+        toast.error(`Restore preview failed (${res.status})`)
       } else {
-        toast.success("Mission restored to checkpoint")
+        // Say what the endpoint DID, which is not what this used to claim.
+        //
+        // It reported "Mission restored to checkpoint". POST
+        // /checkpoints/{id}/restore does not restore anything —
+        // cartographer.Restore says so in its own doc comment ("no DB rows are
+        // mutated, no containers are torn down, no memory is rewound") and
+        // journals the attempt as "restore preview for checkpoint …". The
+        // rewind is deferred to a handler that does not exist yet.
+        //
+        // So the toast reports the one thing the call actually produces: the
+        // divergence list, which is what a real restore would have to abandon.
+        // Throwing that away AND claiming success was the worst of both.
+        const body = (await res.json().catch(() => null)) as { warn_divergence?: unknown } | null
+        const diverged = Array.isArray(body?.warn_divergence) ? body.warn_divergence.length : 0
+        toast.info("Restore preview — nothing has been rewound", {
+          description: diverged > 0
+            ? `Restoring here would abandon ${diverged} later event${diverged === 1 ? "" : "s"}. Rewinding is not implemented yet.`
+            : "No later events to abandon. Rewinding is not implemented yet.",
+        })
       }
     } catch {
       toast.error("Restore failed")
@@ -93,7 +111,7 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
                 ) : (
                   <RotateCcw className="h-3 w-3 mr-1.5" />
                 )}
-                Restore
+                Preview restore
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

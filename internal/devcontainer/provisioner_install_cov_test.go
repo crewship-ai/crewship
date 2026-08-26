@@ -527,10 +527,12 @@ func TestInstallMiseMethod_FullPipeline(t *testing.T) {
 		t.Fatalf("installMise: %v", err)
 	}
 	// InstallMise (2 calls — install-to-/usr/local/bin, verify) +
-	// InstallMiseTools (4 calls). The separate symlink step is gone: mise is
-	// installed at its final path rather than linked out of root's home.
-	if len(exec.execs) != 6 {
-		t.Fatalf("expected 6 execs, got %d", len(exec.execs))
+	// InstallMiseTools (5 calls). The separate symlink step is gone: mise is
+	// installed at its final path rather than linked out of root's home. The
+	// fifth tools call is verifyMiseShims — reshim's exit code does not tell
+	// you whether the shims it wrote resolve.
+	if len(exec.execs) != 7 {
+		t.Fatalf("expected 7 execs, got %d", len(exec.execs))
 	}
 	if !strings.Contains(exec.execCmd(0), "mise.jdx.dev/install.sh") {
 		t.Errorf("exec 0 = %q, want mise installer download", exec.execCmd(0))

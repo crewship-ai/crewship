@@ -29,8 +29,12 @@ vi.mock("sonner", () => ({
 const CREWS = [{ id: "c1", slug: "engineering", name: "Engineering" }]
 
 const INTEGRATIONS = [
-  { id: "i1", name: "github", display_name: "GitHub", transport: "http", enabled: true },
-  { id: "i2", name: "jira", display_name: "Jira", transport: "stdio", enabled: false },
+  // Nobody bound yet → resolves for EVERY agent today, and the first binding
+  // takes it away from all of them.
+  { id: "i1", name: "github", display_name: "GitHub", transport: "http", enabled: true, agent_binding_count: 0 },
+  { id: "i2", name: "jira", display_name: "Jira", transport: "stdio", enabled: false, agent_binding_count: 0 },
+  // Already opt-in — granting it changes nothing for anyone else.
+  { id: "i3", name: "linear", display_name: "Linear", transport: "http", enabled: true, agent_binding_count: 3 },
 ]
 const CHANNELS = [
   { id: "ch1", type: "shoutrrr", provider: "slack", url: "https://hooks.slack.com/services/T/B/xoxb-secret", enabled: true, scope: "workspace" },
@@ -121,6 +125,49 @@ describe("<CreateAgentDialog> — Tools & notifications", () => {
     expect(await screen.findByRole("switch", { name: "GitHub" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "slack · hooks.slack.com" })).toBeInTheDocument()
     expect(screen.getByText(/what this agent may reach/i)).toBeInTheDocument()
+  })
+
+  // integration_resolve.go: `if !hasBind && serversWithBindings[id] { continue }`.
+  // A server with zero bindings resolves for every agent; the first binding
+  // flips it to opt-in and silently revokes it from all the others. Before
+  // this form existed you needed `crewship integration bind` to do that — now
+  // a switch does, so the switch has to say so.
+  it("warns that the first grant revokes the integration from every other agent", async () => {
+    setupFetch()
+    renderDialog()
+    fireEvent.click(await screen.findByRole("switch", { name: "GitHub" }))
+
+    const warning = await screen.findByText(/available to every agent/i)
+    expect(warning).toHaveTextContent(/GitHub/)
+    expect(warning).toHaveTextContent(/every OTHER agent loses access/i)
+
+    // It APPEARS in response to a switch, so it needs a live region —
+    // CreateSurfaceNotice gives role="alert" only to tone="error", and warn is
+    // right here because nothing is blocked. Without this a screen-reader user
+    // flips the switch and is told nothing about what it cost.
+    expect(warning.closest('[role="status"]')).not.toBeNull()
+    expect(warning.closest('[aria-live="polite"]')).not.toBeNull()
+  })
+
+  it("says nothing when the integration is already opt-in", async () => {
+    // Linear has 3 bindings, so granting a 4th takes nothing from anyone.
+    setupFetch()
+    renderDialog()
+    fireEvent.click(await screen.findByRole("switch", { name: "Linear" }))
+
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Linear" })).toBeChecked())
+    expect(screen.queryByText(/available to every agent/i)).toBeNull()
+  })
+
+  it("drops the warning again when the grant is taken back", async () => {
+    setupFetch()
+    renderDialog()
+    const sw = await screen.findByRole("switch", { name: "GitHub" })
+    fireEvent.click(sw)
+    await screen.findByText(/available to every agent/i)
+
+    fireEvent.click(sw)
+    await waitFor(() => expect(screen.queryByText(/available to every agent/i)).toBeNull())
   })
 
   it("will not grant an integration the workspace has switched off", async () => {
