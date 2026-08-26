@@ -330,12 +330,38 @@ func TestLint_JSONContract(t *testing.T) {
 	if uerr := json.Unmarshal([]byte(out), &doc); uerr != nil {
 		t.Fatalf("`lint -f json` stdout is not valid JSON: %v\ngot:\n%s", uerr, out)
 	}
-	if doc.Errors != len(filterBySeverity(doc.Findings, "error")) {
-		t.Errorf("errors count %d disagrees with the findings list", doc.Errors)
+	// The counts are a summary of the findings list, so they have to agree
+	// with it. Asserting the relationship rather than a fixed number is what
+	// keeps this meaningful on a machine whose config lints differently from
+	// yours — CI finds warnings this repo's checkout does not.
+	// Severities are "error" and "warn" (lintFinding, cmd_lint.go), and the
+	// producer counts anything that is not "error" as a warning — mirror that
+	// rather than matching "warn" literally, so a new severity shows up as a
+	// disagreement here instead of silently vanishing from both counts.
+	var wantErrors, wantWarnings int
+	for _, f := range doc.Findings {
+		if f.Severity == "error" {
+			wantErrors++
+		} else {
+			wantWarnings++
+		}
+	}
+	if doc.Errors != wantErrors {
+		t.Errorf("errors = %d, but %d of %d findings carry severity %q",
+			doc.Errors, wantErrors, len(doc.Findings), "error")
+	}
+	if doc.Warnings != wantWarnings {
+		t.Errorf("warnings = %d, but %d of %d findings are non-error",
+			doc.Warnings, wantWarnings, len(doc.Findings))
+	}
+	// Without --strict, warnings do not fail the run — so `passed` tracks the
+	// error count alone. (With --strict it would also depend on warnings; this
+	// case does not set it.)
+	if doc.Passed != (doc.Errors == 0) {
+		t.Errorf("passed = %v with %d errors and %d warnings (strict off)",
+			doc.Passed, doc.Errors, doc.Warnings)
 	}
 }
-
-func filterBySeverity[T any](in []T, _ string) []T { return in }
 
 // ─── mode (b): `null` instead of `[]` ────────────────────────────────────
 
