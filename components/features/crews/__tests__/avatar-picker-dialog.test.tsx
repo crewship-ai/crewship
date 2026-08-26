@@ -49,10 +49,13 @@ describe("<AvatarPickerDialog>", () => {
 
   it("clicking a style button updates the preview src to the new style", async () => {
     render(<AvatarPickerDialog {...baseProps} />)
-    // The big preview is the first <img> in the dialog with class containing w-24
-    const preview = document.querySelector("img.w-24") as HTMLImageElement | null
+    // Keyed on a testid, not a Tailwind size class: the picker has been
+    // resized once already (it ran past the surface's height and cut the
+    // quick picks off the bottom) and a size class is not what this test is
+    // about.
+    const preview = screen.getByTestId("avatar-preview") as HTMLImageElement
     expect(preview).not.toBeNull()
-    const initialSrc = preview!.src
+    const initialSrc = preview.src
 
     // Click "Adventurer" style (real catalog entry)
     const adventurerBtn = screen.getByText("Adventurer").closest("button")
@@ -67,14 +70,14 @@ describe("<AvatarPickerDialog>", () => {
 
   it("clicking a quick-pick seed updates the preview", async () => {
     render(<AvatarPickerDialog {...baseProps} />)
-    const preview = document.querySelector("img.w-24") as HTMLImageElement | null
+    const preview = screen.getByTestId("avatar-preview") as HTMLImageElement
     expect(preview).not.toBeNull()
     const initialSrc = preview!.src
 
     // Quick-pick row has 8 thumbnails. Click the third.
-    const quickPickButtons = document.querySelectorAll("button > img.w-full")
-    expect(quickPickButtons.length).toBeGreaterThanOrEqual(8)
-    fireEvent.click((quickPickButtons[2] as HTMLImageElement).parentElement!)
+    const quickPickButtons = screen.getByTestId("avatar-quick-pick").querySelectorAll("button")
+    expect(quickPickButtons.length).toBe(8)
+    fireEvent.click(quickPickButtons[2])
 
     await waitFor(() => {
       expect(preview!.src).not.toBe(initialSrc)
@@ -124,6 +127,30 @@ describe("<AvatarPickerDialog>", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(baseProps.onSave).not.toHaveBeenCalled()
     expect(baseProps.onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("keeps every control reachable without the panel outgrowing the surface", () => {
+    // The four blocks used to stack full-width — a 96px preview, 25 tiles of
+    // 40px faces with labels, eight quick picks each a full grid column wide,
+    // and a seed field under its own heading. Past 650px the quick picks fell
+    // off the bottom of the create surface and could not be scrolled to.
+    //
+    // jsdom computes no layout, so this cannot assert pixels. What it can
+    // assert is the structural decisions that produced the height: the style
+    // grid is the only scrollport, and the seed controls share a row with the
+    // preview instead of being a fifth block below the grid.
+    render(<AvatarPickerDialog {...baseProps} />)
+
+    const grid = screen.getByTestId("avatar-style-grid")
+    expect(grid.className).toContain("overflow-y-auto")
+    expect(grid.className).toMatch(/max-h-\[\d+px\]/)
+
+    // Preview, seed input and quick picks in one subtree — the grid is not
+    // between them.
+    const row = screen.getByTestId("avatar-preview").parentElement!
+    expect(row).toContainElement(screen.getByLabelText("Avatar seed"))
+    expect(row).toContainElement(screen.getByTestId("avatar-quick-pick"))
+    expect(row).not.toContainElement(grid)
   })
 
   it("seed field is editable and Regenerate produces a new seed", () => {

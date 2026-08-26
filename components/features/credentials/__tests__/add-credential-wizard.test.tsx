@@ -130,12 +130,21 @@ describe("the step bar", () => {
     expect(screen.getByRole("button", { name: /^login/i })).toBeInTheDocument()
   })
 
-  it("keeps three steps on one line at 390px by muting the labels you are not on", () => {
+  // The three steps still have to fit at 390px, and CreateSurfaceSteps solves
+  // that differently from the step bar this wizard used to own: instead of
+  // muting the labels you are not on (sr-only below sm), the chip row is
+  // hidden outright on a phone and replaced by the current label plus a
+  // progress bar. The accessible names of the three step buttons are unchanged
+  // either way, which is what the two tests above pin.
+  it("collapses to one label and a progress bar at 390px", () => {
     renderWizard()
-    // Visible to a screen reader either way — the accessible name of each step
-    // button is unchanged — but only the current label takes horizontal space.
-    expect(screen.getByText("Values").className).toContain("max-sm:sr-only")
-    expect(screen.getByText("Shape").className).not.toContain("max-sm:sr-only")
+    const bar = screen.getByRole("progressbar")
+    expect(bar).toHaveAttribute("aria-valuenow", "1")
+    expect(bar).toHaveAttribute("aria-valuemax", "3")
+    // The chip row is what a pointer device gets; it does not take width on a
+    // phone, and it is not what the phone reads.
+    const chips = screen.getByRole("button", { name: /shape/i }).parentElement!
+    expect(chips.className).toContain("max-sm:hidden")
   })
 })
 
@@ -160,11 +169,17 @@ describe("layout on a phone", () => {
     expect(within(footer).getByRole("button", { name: /^cancel$/i })).toBeInTheDocument()
   })
 
+  // h-12, not h-11. This project sets `--spacing: 0.23rem` (globals.css), so
+  // the whole scale is 92% of what its name suggests and `h-11` is 40.5px —
+  // 8% short of the 44px every platform HIG asks for, and short in a way
+  // nobody notices because 40px still looks fine. The shell's footer is the
+  // one place that number is now decided; this surface used to be 40.5px.
   it("gives the footer buttons a thumb-sized target and the width to share", () => {
     renderWizard()
     const cont = screen.getByRole("button", { name: /^continue$/i })
-    expect(cont.className).toContain("max-sm:h-11")
-    expect(cont.className).toContain("max-sm:flex-1")
+    expect(cont.className).toContain("max-sm:h-12")
+    expect(cont.className).toContain("max-sm:flex-[2]")
+    expect(screen.getByRole("button", { name: /^cancel$/i }).className).toContain("max-sm:flex-1")
   })
 
   it("keeps every field at 16px, so the first tap does not zoom the dialog", () => {
@@ -414,6 +429,37 @@ describe("saving", () => {
     ])
   })
 
+  // The create request already accepts `token_expires_at`
+  // (internal/api/credentials_mutate.go createCredentialRequest.TokenExpires)
+  // and writes it straight into the column the "Expiring" KPI and the 30-day
+  // warning read — the wizard just never offered a control for it.
+  it("sends the expiry date as an ISO string when the user sets one", async () => {
+    const { onSuccess } = renderWizard()
+    pickShape(/^token/i)
+    fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "expiring-thing" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.change(screen.getByLabelText(/expires on/i), { target: { value: "2027-01-15" } })
+    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).toMatchObject({ token_expires_at: "2027-01-15T00:00:00.000Z" })
+  })
+
+  it("omits the expiry entirely when the user leaves it blank", async () => {
+    const { onSuccess } = renderWizard()
+    pickShape(/^token/i)
+    fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "no-expiry-thing" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).not.toHaveProperty("token_expires_at")
+  })
+
   // Tags drive the sidebar's Tag facet. Dropping them from the create path
   // (the old flat form had them) would leave a filter nobody can populate
   // without a second visit to the edit dialog.
@@ -421,7 +467,9 @@ describe("saving", () => {
     const { onSuccess } = renderWizard()
     pickShape(/^token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
-    const tagInput = screen.getByLabelText(/tags \(optional\)/i)
+    // "(optional)" moved out of the label and into the kit's hint line
+    // under the control, where every other optional field says it.
+    const tagInput = screen.getByLabelText(/^tags$/i)
     fireEvent.change(tagInput, { target: { value: "Prod" } })
     fireEvent.keyDown(tagInput, { key: "Enter" })
     fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "THING" } })

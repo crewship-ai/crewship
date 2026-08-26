@@ -109,6 +109,28 @@ describe("<StepReview>", () => {
     expect(screen.getByText("+3 more")).toBeInTheDocument()
   })
 
+  // Step 3 opens with nine base images and a search box; a Review that then
+  // says nothing about which one won is the one place the choice can be
+  // checked before it is committed. The row used to appear only when the
+  // state carried an override, so a crew taking the default — the common
+  // case — reviewed a container with no image in it. /design's specimen
+  // spells this row "RUNS ON" and always shows it.
+  it("always says what the crew runs on, default included", () => {
+    render(<StepReview state={filledState} lineupSummary={baseSummary} />)
+    expect(screen.getByText("Runs on")).toBeInTheDocument()
+    expect(screen.getByText("debian:bookworm-slim")).toBeInTheDocument()
+    expect(screen.getByText(/default/i)).toBeInTheDocument()
+  })
+
+  it("shows the picked image instead once one is chosen", () => {
+    render(<StepReview
+      state={{ ...filledState, runtimeImage: "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm" }}
+      lineupSummary={baseSummary}
+    />)
+    expect(screen.getByText("mcr.microsoft.com/devcontainers/javascript-node:22-bookworm")).toBeInTheDocument()
+    expect(screen.queryByText(/default/i)).toBeNull()
+  })
+
   it("clicking 'edit' on a row calls onEdit with the right step number", () => {
     const onEdit = vi.fn()
     render(<StepReview state={filledState} lineupSummary={baseSummary} onEdit={onEdit} />)

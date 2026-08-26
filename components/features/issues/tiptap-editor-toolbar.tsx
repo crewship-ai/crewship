@@ -51,11 +51,19 @@ function ToolbarButton({
       disabled={disabled}
       title={title}
       className={cn(
-        "p-1.5 rounded transition-colors",
-        "hover:bg-white/[0.08] disabled:opacity-30 disabled:pointer-events-none",
+        "rounded p-1.5 transition-colors",
+        // A 14px glyph with 1.5 of padding measures 22px, which is half a tap
+        // target. The toolbar sits above the project brief on a phone, so
+        // every one of these is a control someone has to hit.
+        // min-h-12, not min-h-11: `--spacing: 0.23rem` makes h-11 40.5px.
+        "max-sm:min-h-12 max-sm:min-w-12 max-sm:p-3",
+        "hover:bg-white/[0.08] disabled:pointer-events-none disabled:opacity-30",
         active
           ? "bg-primary/20 text-primary"
-          : "text-muted-foreground/60 hover:text-muted-foreground",
+          // Was muted-foreground/60 — a dimmed version of the dimmest text
+          // colour, on glyphs that were already 11px. Two dampeners stacked
+          // on the one row of controls that has no labels to fall back on.
+          : "text-muted-foreground hover:text-foreground",
       )}
     >
       {children}

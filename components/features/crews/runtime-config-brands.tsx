@@ -22,6 +22,13 @@ import {
   SiAnthropic,
   SiVercel, SiCloudflare, SiFlydotio,
   SiOllama, SiSentry, SiDatadog, SiRailway, SiNetlify,
+  // Base-image and devcontainer-feature brands. Without these the catalogue
+  // rows that name an OS or a Python distribution drew the generic package
+  // glyph — 1241 rows of identical grey, which is the same as no icon.
+  SiUbuntu, SiDebian, SiAlpinelinux, SiLinux, SiRedhat, SiFedora, SiArchlinux,
+  SiAnaconda, SiGithubcopilot, SiJupyter, SiXfce, SiRstudioide,
+  SiPoetry, SiGradle, SiApachemaven, SiTypescript, SiJfrog, SiSnyk,
+  SiGnuprivacyguard, SiCurl,
 } from "react-icons/si"
 // OpenAI/Heroku were removed from react-icons/si in 5.7.0 — vendored locally.
 import { SiOpenai, SiHeroku } from "@/components/icons/si-fallback"
@@ -32,6 +39,40 @@ import { SiOpenai, SiHeroku } from "@/components/icons/si-fallback"
 // data and lookup helpers, no JSX.
 
 const BRAND_ICONS: Record<string, IconType> = {
+  // Operating systems — what a base image usually names.
+  ubuntu: SiUbuntu,
+  debian: SiDebian,
+  bookworm: SiDebian,
+  "debian-slim": SiDebian,
+  alpine: SiAlpinelinux,
+  "alpine-linux": SiAlpinelinux,
+  linux: SiLinux,
+  rhel: SiRedhat,
+  redhat: SiRedhat,
+  fedora: SiFedora,
+  arch: SiArchlinux,
+  archlinux: SiArchlinux,
+  // devcontainer features that shipped without a mark.
+  anaconda: SiAnaconda,
+  conda: SiAnaconda,
+  miniconda: SiAnaconda,
+  copilot: SiGithubcopilot,
+  "copilot-cli": SiGithubcopilot,
+  jupyter: SiJupyter,
+  jupyterlab: SiJupyter,
+  "desktop-lite": SiXfce,
+  rstudio: SiRstudioide,
+  poetry: SiPoetry,
+  gradle: SiGradle,
+  maven: SiApachemaven,
+  typescript: SiTypescript,
+  ts: SiTypescript,
+  jfrog: SiJfrog,
+  artifactory: SiJfrog,
+  snyk: SiSnyk,
+  gpg: SiGnuprivacyguard,
+  gnupg: SiGnuprivacyguard,
+  curl: SiCurl,
   python: SiPython,
   node: SiNodedotjs,
   nodejs: SiNodedotjs,
@@ -180,6 +221,36 @@ function getBrandIcon(tool: string): IconType | null {
 // theme — that's the brand-recommended dark-mode treatment.
 
 const BRAND_COLORS: Record<string, string> = {
+  // Official brand colours, same source as the rest of this table: an icon
+  // tinted grey is a shape, and shapes at 14px all look alike.
+  bookworm: "#A81D33",
+  "debian-slim": "#A81D33",
+  "alpine-linux": "#0D597F",
+  linux: "#FCC624",
+  rhel: "#EE0000",
+  redhat: "#EE0000",
+  fedora: "#51A2DA",
+  arch: "#1793D1",
+  archlinux: "#1793D1",
+  conda: "#44A833",
+  miniconda: "#44A833",
+  copilot: "#8957E5",
+  "copilot-cli": "#8957E5",
+  jupyter: "#F37626",
+  jupyterlab: "#F37626",
+  "desktop-lite": "#2284F2",
+  rstudio: "#75AADB",
+  poetry: "#60A5FA",
+  gradle: "#02303A",
+  maven: "#C71A36",
+  typescript: "#3178C6",
+  ts: "#3178C6",
+  jfrog: "#41BF47",
+  artifactory: "#41BF47",
+  snyk: "#4C4A73",
+  gpg: "#0093DD",
+  gnupg: "#0093DD",
+  curl: "#073551",
   python: "#3776AB",
   node: "#339933",
   nodejs: "#339933",
@@ -315,6 +386,35 @@ function getBrandColor(tool: string): string | null {
 }
 
 
+/**
+ * The brand hiding in an image reference.
+ *
+ * `debian:bookworm-slim` is a Debian image and
+ * `mcr.microsoft.com/devcontainers/javascript-node:22-bookworm` is a Node one,
+ * but neither yields its brand by taking the last segment: the first gives
+ * "bookworm-slim" and the second "javascript-node". Try the repository name,
+ * then each hyphen-separated word inside it, then the TAG — devcontainers
+ * publishes `.../base:ubuntu-24.04`, where the only thing naming the distro is
+ * the tag — then the remaining path segments. First hit wins. Returns "" when
+ * none does, which is the honest answer for ghcr.io/acme/thing.
+ */
+function imageBrandKey(image: string): string {
+  const withoutDigest = image.split("@")[0]
+  const [path, tag = ""] = [withoutDigest.split(":")[0], withoutDigest.split(":")[1]]
+  const segments = path.split("/").filter(Boolean)
+  const last = segments[segments.length - 1] ?? ""
+  const candidates = [
+    last,
+    ...last.split("-"),
+    ...tag.split(/[-.]/),
+    ...segments.slice(0, -1).reverse(),
+  ]
+  for (const c of candidates) {
+    if (c && (BRAND_ICONS[c.toLowerCase()] || BRAND_COLORS[c.toLowerCase()])) return c.toLowerCase()
+  }
+  return ""
+}
+
 function featureRefToTool(ref: string): string {
   // ghcr.io/devcontainers/features/python:1 -> "python"
   const withoutTag = ref.split(":")[0]
@@ -330,5 +430,6 @@ export {
   BRAND_COLORS,
   getBrandIcon,
   getBrandColor,
+  imageBrandKey,
   featureRefToTool,
 }

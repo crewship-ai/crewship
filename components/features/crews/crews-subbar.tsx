@@ -18,7 +18,10 @@ export interface CrewsSubbarProps {
   /** Optional: shown only on mobile to open the explorer drawer. */
   onOpenExplorer?: () => void
   /** Crews list for the agent-creation form. */
-  crews: { id: string; name: string; slug: string }[]
+  /** Carries the crew's face and agent count through to New agent's picker:
+   *  narrowing to {id, name, slug} here is what left that picker with a
+   *  colourless list of names. Optional so other callers need not change. */
+  crews: { id: string; name: string; slug: string; icon?: string | null; color?: string | null; _count?: { agents: number } }[]
 }
 
 /**
@@ -118,7 +121,16 @@ export function CrewsSubbar({
         open={createAgentOpen}
         onOpenChange={setCreateAgentOpen}
         defaultCrewSlug={createAgentDefaultCrew}
-        crews={crews}
+        // `_count.agents` is what the picker groups on; the rest of the app
+        // reads it under that name, and CrewLite calls it agentCount.
+        crews={crews.map((c) => ({
+          id: c.id,
+          slug: c.slug,
+          name: c.name,
+          icon: c.icon,
+          color: c.color,
+          agentCount: c._count?.agents,
+        }))}
         onCreated={onAgentCreated}
       />
     </>

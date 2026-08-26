@@ -1,6 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react"
 import { CreateIssueModal } from "../create-issue-modal"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { getCrewIconDef } from "@/lib/crew-icons"
+import { resolveRoutineIcon } from "@/lib/routine-identity"
+
+// Testing Library's async default is 1000ms while vitest.config.ts allows a
+// test 30000, so under a full-suite run — 523 files on a shared box — the
+// assertion, not the code, is what runs out of road. Every await here goes
+// through a render, an effect and a stubbed fetch, so raise the floor for the
+// file rather than annotate seventeen call sites.
+//
+// The waits below are `waitFor(() => expect(getBy…))`, not
+// `expect(await findBy…)`. The two are not equivalent under load: findBy
+// resolves the node and hands it to a matcher that runs one tick later, and a
+// node React found mid-commit can be detached by then — which reports as
+// "element could not be found in the document" about an element the query just
+// returned. waitFor retries the whole assertion, so the transient loses and a
+// genuinely absent node still fails.
+configure({ asyncUtilTimeout: 5000 })
 
 // Mock sonner toast
 vi.mock("sonner", () => ({
@@ -149,9 +167,16 @@ describe("CreateIssueModal", () => {
   it("calls onCreated and closes after successful submit", async () => {
     const onCreated = vi.fn()
     const onOpenChange = vi.fn()
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+    // A method-aware mock rather than a positional mockResolvedValueOnce
+    // chain: New issue now fires TWO crew-scoped GETs on mount (agents,
+    // parent-issue candidates), not one, and a chain keyed to call order
+    // breaks again the next time a fetch is added. Every GET gets an empty
+    // list; the POST is what this test actually cares about.
+    global.fetch = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
 
     render(
       <CreateIssueModal {...defaultProps} onCreated={onCreated} onOpenChange={onOpenChange} />
@@ -168,12 +193,13 @@ describe("CreateIssueModal", () => {
 
   it("shows error toast on API failure", async () => {
     const { toast } = await import("sonner")
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
-      .mockResolvedValueOnce({
-        ok: false,
-        json: () => Promise.resolve({ detail: "Server error" }),
-      })
+    // Method-aware for the same reason as above: the GETs that fire on
+    // mount must not eat the mock slot the POST assertion depends on.
+    global.fetch = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve({ ok: false, json: () => Promise.resolve({ detail: "Server error" }) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
 
     render(<CreateIssueModal {...defaultProps} />)
 
@@ -202,6 +228,652 @@ describe("CreateIssueModal", () => {
 
   it("shows crew selector in header breadcrumb", () => {
     render(<CreateIssueModal {...defaultProps} />)
-    expect(screen.getByText("New issue")).toBeInTheDocument()
+    // CreateSurfaceHeader renders `context › Title` as ONE heading (two
+    // headings would make the accessible name "ENGNew issue"), and adds an
+    // sr-only DialogDescription echoing the title when the surface passes no
+    // description — so a bare getByText("New issue") now matches twice.
+    const heading = screen.getByRole("heading", { level: 2 })
+    expect(heading.textContent).toContain("ENG")
+    expect(heading.textContent).toContain("New issue")
+  })
+
+  // ── The shared shell ────────────────────────────────────────────────────
+  //
+  // New issue is the surface `components/layout/create-surface.tsx` was
+  // designed from, so it is the one that must actually mount it rather than
+  // re-draw the same geometry by hand.
+
+  it("mounts the shared CreateSurface shell", () => {
+    render(<CreateIssueModal {...defaultProps} />)
+
+    const content = document.querySelector('[data-slot="dialog-content"]')
+    expect(content).not.toBeNull()
+
+    // SHELL_BASE, the `md` width, and the bottom-sheet geometry — none of
+    // which a hand-rolled DialogContent carries.
+    expect(content!.className).toContain("group/surface")
+    expect(content!.className).toContain("sm:max-w-[640px]")
+    expect(content!.className).toContain("max-sm:rounded-t-2xl")
+
+    // The shell's footer always offers Cancel, leftmost of the action group.
+    expect(screen.getByText("Cancel")).toBeInTheDocument()
+  })
+
+  it("still POSTs the same create-issue request from the shell footer", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+    global.fetch = mockFetch
+
+    render(<CreateIssueModal {...defaultProps} />)
+
+    // It has to be the shell's primary that fires the request, not a raw
+    // <button> that happens to say the same words.
+    const content = document.querySelector('[data-slot="dialog-content"]')
+    expect(content).not.toBeNull()
+    expect(content!.className).toContain("group/surface")
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Shell issue" },
+    })
+    fireEvent.change(screen.getByPlaceholderText("Add description..."), {
+      target: { value: "Body text" },
+    })
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => {
+      const createCall = mockFetch.mock.calls.find(
+        (call: [string, RequestInit?]) => typeof call[1] === "object" && call[1]?.method === "POST",
+      )
+      expect(createCall).toBeDefined()
+      expect(createCall![0]).toBe(
+        "/api/v1/crews/crew-1/issues?workspace_id=ws-1",
+      )
+      expect(JSON.parse(createCall![1]!.body as string)).toEqual({
+        title: "Shell issue",
+        description: "Body text",
+        priority: "none",
+      })
+    })
+  })
+
+  it("still submits on ⌘↵, now wired by the shell rather than by hand", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+    global.fetch = mockFetch
+
+    render(<CreateIssueModal {...defaultProps} />)
+
+    const titleInput = screen.getByPlaceholderText("Issue title")
+    fireEvent.change(titleInput, { target: { value: "Keyboard issue" } })
+    fireEvent.keyDown(titleInput, { key: "Enter", metaKey: true })
+
+    await waitFor(() => {
+      const createCall = mockFetch.mock.calls.find(
+        (call: [string, RequestInit?]) => typeof call[1] === "object" && call[1]?.method === "POST",
+      )
+      expect(createCall).toBeDefined()
+      expect(JSON.parse(createCall![1]!.body as string).title).toBe("Keyboard issue")
+    })
+  })
+
+  it("still opens the pill popovers now that the pill is the trigger", async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+    global.fetch = mockFetch
+
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Urgent one" } })
+
+    // CreateSurfacePill is a plain function component; Radix's asChild needs
+    // the ref to reach the <button> for the popover to anchor and open.
+    fireEvent.click(screen.getByText("No priority"))
+    fireEvent.click(await screen.findByText("Urgent"))
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => {
+      const createCall = mockFetch.mock.calls.find(
+        (call: [string, RequestInit?]) => typeof call[1] === "object" && call[1]?.method === "POST",
+      )
+      expect(createCall).toBeDefined()
+      expect(JSON.parse(createCall![1]!.body as string).priority).toBe("urgent")
+    })
+  })
+
+  it("surfaces a server refusal in the band, not only in a toast", async () => {
+    const { toast } = await import("sonner")
+    // Method-aware for the same reason as the two tests above.
+    global.fetch = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve({ ok: false, json: () => Promise.resolve({ detail: "Title is already taken" }) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
+
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Dup" } })
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Title is already taken")
+    })
+
+    const alert = await screen.findByRole("alert")
+    expect(alert.textContent).toContain("Title is already taken")
+  })
+})
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * The four defects the migration left behind.
+ *
+ * One functional (the assignee picker offered nobody) and three cosmetic —
+ * an agent, a project and a routine each rendering a generic glyph here and
+ * their real identity everywhere else in the product.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The lucide class token the icon kit renders for `name`, read out of the kit
+ * itself rather than retyped — a rename in `lib/crew-icons.ts` then fails this
+ * test instead of silently asserting on a glyph that no longer resolves.
+ */
+function iconToken(name: string): string {
+  const Icon = getCrewIconDef(name).icon
+  const { container, unmount } = render(<Icon />)
+  const token = Array.from(container.querySelector("svg")!.classList).find(
+    (c) => c.startsWith("lucide-") && c !== "lucide",
+  )!
+  unmount()
+  return token
+}
+
+/** The `[cmdk-item]` row whose visible text is `label`. */
+function commandRow(label: string): HTMLElement {
+  const row = screen.getByText(label).closest("[cmdk-item]")
+  expect(row).not.toBeNull()
+  return row as HTMLElement
+}
+
+// Two crews in the order the API returns them: the FIRST is empty, which is
+// exactly the live shape (`e2e-empty-…` and `smoke-…` sort ahead of the crews
+// that have anyone in them) and the reason the picker offered nobody.
+const emptyFirstCrews = [
+  { id: "crew-1", name: "Engineering", slug: "engineering", color: "blue", icon: "code", _count: { agents: 0, members: 1 } },
+  { id: "crew-2", name: "Design", slug: "design", color: "violet", icon: "palette", _count: { agents: 2, members: 1 } },
+]
+
+// `avatar_seed`/`avatar_style` are NULL on every agent in the dev database, so
+// these rows are the case the read-side surfaces fall back for.
+const morgan = {
+  id: "agent-morgan",
+  name: "Morgan",
+  slug: "morgan",
+  avatar_seed: null,
+  avatar_style: null,
+  avatar_url: null,
+  crew: { name: "Design", slug: "design", color: null, avatar_style: null },
+}
+
+const mockRoutines = [
+  {
+    id: "routine-1",
+    slug: "nightly-sweep",
+    name: "Nightly sweep",
+    dsl_version: "1",
+    definition_hash: "abc",
+    ephemeral: false,
+    workspace_visible: true,
+    invocation_count: 0,
+    authored_via: "user_api" as const,
+    created_at: "",
+    updated_at: "",
+  },
+]
+
+const iconProjects = [
+  {
+    id: "proj-1", workspace_id: "ws-1", name: "Launch Prep", slug: "launch-prep",
+    description: null, icon: "rocket", color: "#EC4899", status: "in_progress" as const,
+    priority: "high" as const, health: "on_track" as const,
+    lead_type: null, lead_id: null, start_date: null, target_date: null,
+    created_at: "", updated_at: "", issue_count: 5, done_count: 2, progress: 40,
+  },
+]
+
+describe("CreateIssueModal — identity and the empty assignee list", () => {
+  const originalFetch = global.fetch
+
+  /** Answers the agents fetch per crew; anything else is a bare ok. */
+  function stubAgents(byCrew: Record<string, unknown[]>) {
+    const fetchMock = vi.fn((url: string) => {
+      const m = /crew_id=([^&]+)/.exec(url)
+      if (url.startsWith("/api/v1/agents") && m) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(byCrew[m[1]] ?? []) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    return fetchMock
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    stubAgents({})
+  })
+
+  afterAll(() => {
+    global.fetch = originalFetch
+  })
+
+  // ── 1. The assignee picker offers nobody ────────────────────────────────
+
+  it("auto-selects a crew that HAS agents rather than whichever sorts first", async () => {
+    stubAgents({ "crew-2": [morgan] })
+
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+
+    // The header names where the issue will land, so the choice is visible
+    // and still overridable — it is not made behind the user's back.
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2 }).textContent).toContain("DES")
+    })
+
+    fireEvent.click(screen.getByText("Assignee"))
+    await waitFor(() => expect(screen.getByText("Morgan")).toBeInTheDocument())
+  })
+
+  it("says the crew has no agents instead of showing a silently empty list", async () => {
+    const allEmpty = emptyFirstCrews.map((c) => ({ ...c, _count: { agents: 0, members: 1 } }))
+    stubAgents({})
+
+    render(<CreateIssueModal {...defaultProps} crews={allEmpty} />)
+
+    fireEvent.click(screen.getByText("Assignee"))
+
+    // Names the crew, so "there is nobody here" cannot be mistaken for
+    // "the list failed to arrive".
+    const note = await screen.findByText(/no agents/i)
+    expect(note.textContent).toContain("Engineering")
+  })
+
+  it("distinguishes a failed agent load from a crew with nobody in it", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+    ) as unknown as typeof fetch
+
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+
+    fireEvent.click(screen.getByText("Assignee"))
+
+    await waitFor(() => expect(screen.getByText(/could not be loaded/i)).toBeInTheDocument())
+    expect(screen.queryByText(/no agents/i)).toBeNull()
+  })
+
+  it("retries the agent load from the error state", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+    ) as unknown as typeof fetch
+
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+    fireEvent.click(screen.getByText("Assignee"))
+    await screen.findByText(/could not be loaded/i)
+
+    // The retry has to be a control. Re-picking the crew that is already
+    // picked sets the same id, so React bails out and the effect never
+    // re-runs — the previous copy told the reader to do something that
+    // silently did nothing.
+    const retried = stubAgents({ "crew-2": [morgan] })
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }))
+
+    // Asserts the request, not the repainted list. Whether the popover is
+    // still open a tick later is Radix's business and moves with machine
+    // load; whether the button re-asks the server is this button's whole
+    // contract, and it fails on the old copy-only version because there is
+    // no button to click at all.
+    await waitFor(() =>
+      expect(
+        retried.mock.calls.some(
+          (c) => typeof c[0] === "string" && c[0].includes("crew_id=crew-2"),
+        ),
+      ).toBe(true),
+    )
+  })
+
+  // ── 2. Agents in the assignee picker have no avatar ─────────────────────
+
+  it("wears the same face as the roster, seeded from the name when the seed is NULL", async () => {
+    stubAgents({ "crew-2": [morgan] })
+
+    render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
+
+    fireEvent.click(screen.getByText("Assignee"))
+
+    // One retried assertion, not "find the name, then go looking for its row".
+    // The second form resolves a node and queries from it a tick later, which
+    // under a loaded suite reads a row React has already replaced.
+    // crews-explorer.tsx / agent-canvas.tsx both pass `avatar_seed || name`.
+    await waitFor(() => {
+      const img = commandRow("Morgan").querySelector("img")
+      expect(img).not.toBeNull()
+      expect(img!.getAttribute("src")).toBe(getAgentAvatarUrl("Morgan", null))
+    })
+  })
+
+  // ── 3. The project picker shows a generic glyph ─────────────────────────
+
+  it("renders a project with its own icon and colour, not a folder", async () => {
+    render(<CreateIssueModal {...defaultProps} projects={iconProjects} />)
+
+    fireEvent.click(screen.getByText("Project"))
+
+    await waitFor(() => {
+      const row = commandRow("Launch Prep")
+      expect(row.querySelector(`svg.${iconToken("rocket")}`)).not.toBeNull()
+      // CrewIcon tints a raw hex inline; the class palette cannot express one.
+      expect(row.querySelector('[style*="#EC4899"]')).not.toBeNull()
+    })
+  })
+
+  // ── 4. The routine picker shows a generic glyph ─────────────────────────
+
+  it("renders a routine with the icon routines-explorer derives for it", async () => {
+    render(<CreateIssueModal {...defaultProps} routines={mockRoutines} />)
+
+    fireEvent.click(screen.getByText("Routine"))
+
+    await waitFor(() => {
+      const row = commandRow("Nightly sweep")
+      const expected = iconToken(resolveRoutineIcon(mockRoutines[0]))
+      expect(row.querySelector(`svg.${expected}`)).not.toBeNull()
+    })
+  })
+})
+
+// ── The four fields POST /issues accepts and the modal never offered ──────
+//
+// `internal/api/issue_handler_create.go:32-51` declares due_date, estimate,
+// parent_issue_id and milestone_id on the very endpoint this modal calls. The
+// modal offered none of them, which is the standing rule — what the API can do
+// the frontend must do — broken on the door the audit page calls the reference.
+//
+// These assert the WIRE, not the widgets: a picker that shows a value and does
+// not send it is the failure worth catching, and an optional field that sends
+// `""` or `null` instead of being absent is the other one.
+describe("CreateIssueModal — the fields the API takes", () => {
+  /** Answers every GET with an empty list; hands the POST back for inspection. */
+  function stubWire() {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
+    global.fetch = fetchMock as unknown as typeof fetch
+    return fetchMock
+  }
+
+  function postBody(fetchMock: ReturnType<typeof vi.fn>) {
+    const call = fetchMock.mock.calls.find(
+      (c) => (c[1] as RequestInit | undefined)?.method === "POST",
+    )
+    return call ? JSON.parse((call[1] as RequestInit).body as string) : null
+  }
+
+  it("offers all four as pills", () => {
+    stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+    for (const label of ["Due date", "Estimate", "Parent issue", "Milestone"]) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+  })
+
+  it("leaves every one of them out of the body when untouched", async () => {
+    const fetchMock = stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Bare" } })
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => expect(postBody(fetchMock)).not.toBeNull())
+    const body = postBody(fetchMock)
+    // Absent, not null and not "". The Go side takes *string / *int, so an
+    // empty string would be stored as an empty due date rather than none.
+    for (const key of ["due_date", "estimate", "parent_issue_id", "milestone_id"]) {
+      expect(body).not.toHaveProperty(key)
+    }
+  })
+
+  it("sends the estimate as a number, under the name the handler reads", async () => {
+    const fetchMock = stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Pointed" } })
+    fireEvent.click(screen.getByText("Estimate"))
+    fireEvent.click(await screen.findByText("5 points"))
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => expect(postBody(fetchMock)?.estimate).toBe(5))
+    // A string would be accepted by JSON and rejected by `Estimate *int`.
+    expect(typeof postBody(fetchMock).estimate).toBe("number")
+  })
+
+  it("clearing an estimate removes it from the body rather than sending zero", async () => {
+    const fetchMock = stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Cleared" } })
+    fireEvent.click(screen.getByText("Estimate"))
+    fireEvent.click(await screen.findByText("5 points"))
+    // Let the popover finish closing before reopening it.
+    //
+    // Picking a value calls setEstimateOpen(false), and Radix unmounts the
+    // content asynchronously. Clicking the pill again while that unmount is
+    // still in flight makes the reopen race it: the content that comes back
+    // can be the node being torn down, so the "Clear estimate" click lands on
+    // a detached element and does nothing — no error, no state change, and a
+    // POST that still carries the estimate. It reproduced only with enough
+    // files running beside this one, which is what a missing barrier looks
+    // like rather than a broken component.
+    await waitFor(() => expect(screen.queryByText("5 points")).toBeNull())
+
+    fireEvent.click(screen.getByText("5 pts"))
+    fireEvent.click(await screen.findByText(/clear estimate/i))
+    // The pill going back to "Estimate" is the clear having landed.
+    await screen.findByText("Estimate")
+
+    fireEvent.click(screen.getByText("Create issue"))
+
+    await waitFor(() => expect(postBody(fetchMock)).not.toBeNull())
+    // 0 is a legitimate estimate; "cleared" must not become it.
+    expect(postBody(fetchMock)).not.toHaveProperty("estimate")
+  })
+
+  it("scopes the milestone picker to the project, and says so before one is picked", async () => {
+    stubWire()
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.click(screen.getByText("Milestone"))
+    // Milestones hang off a project (GET /api/v1/projects/{id}/milestones), so
+    // with no project there is nothing to list and the picker has to say which
+    // choice unlocks it rather than showing an empty menu.
+    expect(await screen.findByText(/set a project first/i)).toBeInTheDocument()
+  })
+})
+
+// The crew control in the header was the last picker in this file drawing bare
+// names while Project, Routine and Assignee beside it all draw their icon.
+describe("CreateIssueModal — the crew control", () => {
+  it("wears the crew's icon, like every other picker in this surface", async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+    render(<CreateIssueModal {...defaultProps} />)
+
+    fireEvent.click(await screen.findByText("ENG"))
+    await waitFor(() => {
+      const row = commandRow("Design")
+      expect(row.querySelector("svg")).not.toBeNull()
+    })
+  })
+})
+
+// ── One keystroke, one issue ──────────────────────────────────────────────
+//
+// Each migrated modal dropped its own ⌘↵ handler and took the shell's. The
+// shell calls `onSubmit` on the keystroke and cannot know the surface is busy;
+// the footer's primary IS disabled while saving, but the keyboard does not go
+// through the footer. So two fast presses were two POSTs — and `saving` is
+// state, which has not flipped yet when the second one reads it.
+describe("CreateIssueModal — submitting twice", () => {
+  it("issues one create for two fast ⌘↵ presses", async () => {
+    let resolve: (v: unknown) => void = () => {}
+    const inFlight = new Promise((r) => { resolve = r })
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? inFlight.then(() => ({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) }))
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    )
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { baseElement } = render(<CreateIssueModal {...defaultProps} />)
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Twice" } })
+
+    const surface = baseElement.querySelector('[data-slot="dialog-content"]')!
+    fireEvent.keyDown(surface, { key: "Enter", metaKey: true })
+    fireEvent.keyDown(surface, { key: "Enter", metaKey: true })
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter((c) => (c[1] as RequestInit | undefined)?.method === "POST")).toHaveLength(1),
+    )
+    resolve(null)
+  })
+})
+
+// =============================================================================
+// The pickers in the chip row live inside a Radix Dialog.
+//
+// Dialog wraps its content in react-remove-scroll with `shards: [contentRef]`
+// — that content element is the ONLY subtree exempt from the scroll lock. A
+// PopoverContent portals to document.body, so it is in neither, and
+// react-remove-scroll swallows its wheel events: the list clips at its max-h
+// and will not scroll, with nothing in the DOM looking wrong. `modal` on the
+// Popover root gives it its own RemoveScroll around its own content.
+//
+// jsdom does not run react-remove-scroll's wheel handling, so this asserts
+// the prop that fixes it rather than the scrolling itself.
+// =============================================================================
+describe("CreateIssueModal — pickers inside a dialog", () => {
+  it("opens Labels as a modal popover, so the wheel reaches it", async () => {
+    render(<CreateIssueModal {...defaultProps} />)
+    // The surface itself is a modal dialog, so one lock is already counted.
+    const before = document.body.getAttribute("data-scroll-locked")
+
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+    await screen.findByPlaceholderText(/Filter or create/i)
+
+    // react-remove-scroll keeps a reference count on the body. A SECOND lock
+    // appearing is the popover mounting its own RemoveScroll — which is the
+    // thing that exempts its subtree from the dialog's lock and puts the
+    // wheel back. Without `modal` the count does not move and the list
+    // cannot be scrolled.
+    // Verified red without `modal`: the attribute stays at "1".
+    expect(document.body.getAttribute("data-scroll-locked")).not.toBe(before)
+  })
+
+  it("filters the label list instead of asking you to find yours by eye", async () => {
+    render(<CreateIssueModal {...defaultProps} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+
+    expect(await screen.findByText("Bug")).toBeInTheDocument()
+    expect(screen.getByText("Feature")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText(/Filter or create/i), {
+      target: { value: "feat" },
+    })
+    expect(screen.queryByText("Bug")).toBeNull()
+    expect(screen.getByText("Feature")).toBeInTheDocument()
+  })
+
+  it("still offers the Labels pill when the workspace has none", async () => {
+    // Hiding it made a workspace with no labels look like issues do not have
+    // labels, rather than like there are none yet.
+    render(<CreateIssueModal {...defaultProps} labels={[]} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+    expect(await screen.findByText(/No labels in this workspace yet/i)).toBeInTheDocument()
+  })
+})
+
+// =============================================================================
+// Creating a label without leaving the issue.
+//
+// POST /api/v1/labels and the LabelsDialog behind Issues → Labels could both
+// always do this; the create path could reach neither. Noticing halfway
+// through writing an issue that the label you want does not exist meant
+// abandoning the issue, opening another dialog, making the label, and
+// starting again.
+// =============================================================================
+describe("CreateIssueModal — making a label from the picker", () => {
+  function labelFetch() {
+    const calls: { url: string; method: string; body: Record<string, unknown> | undefined }[] = []
+    global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = String(url)
+      let body: Record<string, unknown> | undefined
+      if (typeof init?.body === "string") { try { body = JSON.parse(init.body) } catch { /* not JSON */ } }
+      calls.push({ url: u, method: init?.method ?? "GET", body })
+      if (u.includes("/api/v1/labels") && init?.method === "POST") {
+        return { ok: true, json: async () => ({ id: "label-new", name: "Infra", color: "#fff" }) } as Response
+      }
+      return { ok: true, json: async () => [] } as Response
+    }) as unknown as typeof fetch
+    return calls
+  }
+
+  it("offers to create what was typed, and posts it", async () => {
+    const calls = labelFetch()
+    const onLabelsChanged = vi.fn()
+    render(<CreateIssueModal {...defaultProps} onLabelsChanged={onLabelsChanged} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+
+    fireEvent.change(await screen.findByPlaceholderText(/Filter or create/i), {
+      target: { value: "Infra" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Create “Infra”/ }))
+
+    await waitFor(() => {
+      expect(calls.some((c) => c.url.includes("/api/v1/labels") && c.method === "POST")).toBe(true)
+    })
+    const post = calls.find((c) => c.url.includes("/api/v1/labels") && c.method === "POST")!
+    expect(post.body).toMatchObject({ name: "Infra" })
+    // A colour is chosen rather than asked for: a colour picker inside a
+    // popover inside a dialog is a third layer for a decision nobody has an
+    // opinion about mid-issue.
+    expect(typeof post.body!.color).toBe("string")
+    // And the list it came from is told to refetch.
+    await waitFor(() => expect(onLabelsChanged).toHaveBeenCalled())
+  })
+
+  it("does not offer to create a label that already exists", async () => {
+    labelFetch()
+    render(<CreateIssueModal {...defaultProps} onLabelsChanged={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+
+    // "Bug" is in mockLabels. Exact match, not "no results" — the server
+    // would happily accept a second Bug.
+    fireEvent.change(await screen.findByPlaceholderText(/Filter or create/i), {
+      target: { value: "bug" },
+    })
+    expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull()
+    expect(screen.getByText("Bug")).toBeInTheDocument()
+  })
+
+  it("hides the create action when there is no way to refetch the list", async () => {
+    // Without onLabelsChanged a created label would not appear in the list it
+    // was created from, so the action is absent rather than quietly useless.
+    labelFetch()
+    render(<CreateIssueModal {...defaultProps} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+    fireEvent.change(await screen.findByPlaceholderText(/Filter or create/i), {
+      target: { value: "Infra" },
+    })
+    expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull()
   })
 })

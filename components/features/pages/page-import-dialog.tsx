@@ -20,15 +20,33 @@
  * `script` and `webhook` producers are NOT bindable and are not asked about —
  * there is no table of scripts to point them at, so they travel as
  * declarations. That is why `bindable` is on the wire at all.
+ *
+ * The chrome is `CreateSurface` and nothing else. This used to be one of the
+ * two surfaces that hand-rolled `fixed inset-0` with
+ * `bg-background/70 backdrop-blur-md` — no focus trap, no Esc, and a frosted
+ * page that made Import read as a different application. Everything above is
+ * unchanged by that move: same local format check, same request body, same
+ * rule about when `slug` and `bind` reach the wire. The one thing that moved
+ * is where the refusal is DRAWN — `CreateSurfaceRefusal` sits between the body
+ * and the footer, outside the scrollport, which is the same argument for the
+ * worklist that this dialog already made for itself.
  */
 
 import * as React from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Upload } from "lucide-react"
+import { FileJson, Upload, Wand2 } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
+import {
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceDropzone,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceRefusal,
+  CreateSurfaceSection,
+} from "@/components/layout/create-surface"
 import {
   type WireBundleRef,
   type WirePageBundle,
@@ -124,154 +142,139 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
   // into the form. These inputs are the override, not the gate.
   const overridden = bindable.filter((r) => bind[r.ref]?.trim()).length
 
+  const submit = () => {
+    if (!bundle || install.isPending) return
+    setRefusal(null)
+    setUnresolved([])
+    install.mutate({
+      bundle,
+      slug: slug.trim() && slug.trim() !== bundle.page.slug ? slug.trim() : undefined,
+      bind,
+    })
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8">
-      <button
-        type="button"
-        aria-label="Close import"
-        onClick={onClose}
-        className="absolute inset-0 bg-background/70 backdrop-blur-md"
+    <CreateSurface
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      size="sm"
+      // A read bundle plus whatever slug or mapping was typed on top of it is
+      // the unsaved input. A file that was REFUSED leaves nothing to lose, so
+      // it does not arm the guard.
+      dirty={bundle !== null}
+      discardLabel="this import"
+      onSubmit={submit}
+    >
+      <CreateSurfaceHeader
+        icon={Upload}
+        accent="green"
+        context="Pages"
+        title="Import a page"
+        description="A bundle written by Export."
+        onClose={onClose}
       />
-      <div
-        role="dialog"
-        aria-label="Import a page"
-        className="relative flex max-h-[90vh] w-full max-w-[560px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl"
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-4 py-2.5">
-          <span className="type-page-value font-medium">Import a page</span>
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
 
-        <div className="flex flex-col gap-3 overflow-auto p-4">
-          {refusal && (
-            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/[0.06] p-2.5">
-              <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-destructive" />
-              <span className="type-page-meta text-foreground/90">{refusal}</span>
+      <CreateSurfaceBody className="flex flex-col gap-3">
+        {/* `htmlFor` rather than a wrapping label around a `hidden` input.
+            `display: none` takes the input out of the tab order entirely, so
+            the only way to reach this control was a mouse. The kit's dropzone
+            keeps the `sr-only` + `htmlFor` pairing this had. */}
+        <CreateSurfaceDropzone
+          id="page-import-file"
+          icon={FileJson}
+          accent="green"
+          accept="application/json,.json"
+          fileName={fileName || null}
+          placeholder="Choose a bundle written by Export"
+          onFile={(f) => void readFile(f)}
+        />
+
+        {bundle && (
+          <>
+            <div className="type-page-meta text-muted-foreground">
+              <strong className="text-foreground/90">{bundle.page.name}</strong> ·{" "}
+              {bundle.metadata?.panel_count ?? bundle.page.panels?.length ?? 0} panels · exported{" "}
+              {bundle.metadata?.exported_at ?? "—"}
             </div>
-          )}
 
-          {/* The refusal IS the worklist. Rendered as rows so the next attempt
-              is a form to fill rather than a paragraph to decode. */}
-          {unresolved.length > 0 && (
-            <div className="flex flex-col gap-1.5 rounded-md border border-border/50 p-2.5">
-              <span className="type-page-label text-muted-foreground">Could not be bound</span>
-              {unresolved.map((u) => (
-                <div key={u.ref} className="type-page-meta">
-                  <span className="type-page-stamp text-foreground/90">{u.ref}</span>
-                  <span className="text-muted-foreground"> — {u.reason}</span>
-                  {u.used_by.length > 0 && (
-                    <span className="text-muted-foreground-soft"> (used by {u.used_by.join(", ")})</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+            <CreateSurfaceField label="Install as" htmlFor="page-import-slug">
+              <Input
+                id="page-import-slug"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value)}
+                placeholder={bundle.page.slug}
+                aria-label="Slug to install under"
+                className="h-8 text-xs max-sm:h-12 max-sm:text-sm"
+              />
+            </CreateSurfaceField>
 
-          {/* `htmlFor` rather than a wrapping label around a `hidden` input.
-              `display: none` takes the input out of the tab order entirely, so
-              the only way to reach this control was a mouse. Visually hidden
-              but focusable, with the label pointing at it, keeps the styling
-              and gives it back to the keyboard. */}
-          <label
-            htmlFor="page-import-file"
-            className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border p-3 hover:bg-white/[0.02] focus-within:ring-1 focus-within:ring-ring"
-          >
-            <Upload className="h-4 w-4 shrink-0 text-muted-foreground-soft" />
-            <span className="type-page-meta text-muted-foreground">
-              {fileName || "Choose a bundle written by Export"}
-            </span>
-            <input
-              id="page-import-file"
-              type="file"
-              accept="application/json,.json"
-              className="sr-only"
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) void readFile(f)
-              }}
-            />
-          </label>
-
-          {bundle && (
-            <>
-              <div className="type-page-meta text-muted-foreground">
-                <strong className="text-foreground/90">{bundle.page.name}</strong> ·{" "}
-                {bundle.metadata?.panel_count ?? bundle.page.panels?.length ?? 0} panels · exported{" "}
-                {bundle.metadata?.exported_at ?? "—"}
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <span className="type-page-label text-muted-foreground">Install as</span>
-                <Input
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                  placeholder={bundle.page.slug}
-                  aria-label="Slug to install under"
-                  className="h-8 text-xs"
-                />
-              </div>
-
-              {bindable.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <span className="type-page-label text-muted-foreground">
-                    What this page needs here
-                    {overridden > 0 ? ` · ${overridden} mapped` : ""}
-                  </span>
-                  <p className="type-page-meta text-muted-foreground-soft">
-                    Leave these empty to let the same names resolve here. Fill one in only to point
-                    it somewhere else — the install is refused as a whole if anything cannot be
-                    found, and it will say which.
-                  </p>
-                  {bindable.map((r) => (
-                    <div key={r.ref} className="flex flex-col gap-1">
-                      <div className="type-page-meta text-muted-foreground">
-                        <span className="type-page-stamp text-foreground/90">{r.ref}</span>
-                        {r.used_by.length > 0 && <span> — used by {r.used_by.join(", ")}</span>}
-                      </div>
-                      <Input
-                        value={bind[r.ref] ?? ""}
-                        onChange={(e) => setBind((b) => ({ ...b, [r.ref]: e.target.value }))}
-                        placeholder={r.ref}
-                        aria-label={`Bind ${r.ref}`}
-                        className="h-8 text-xs"
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {bindable.length === 0 && (
+            {bindable.length > 0 && (
+              // The count rides in the TITLE rather than the section's `hint`
+              // slot, which is hidden below `sm` — a phone would lose it.
+              <CreateSurfaceSection
+                title={`What this page needs here${overridden > 0 ? ` · ${overridden} mapped` : ""}`}
+              >
                 <p className="type-page-meta text-muted-foreground-soft">
-                  Nothing to bind — this bundle names no crews or routines that have to exist here.
+                  Leave these empty to let the same names resolve here. Fill one in only to point
+                  it somewhere else — the install is refused as a whole if anything cannot be
+                  found, and it will say which.
                 </p>
-              )}
-            </>
-          )}
-        </div>
+                {bindable.map((r) => (
+                  <CreateSurfaceField
+                    key={r.ref}
+                    label={
+                      // A ref is machine text: the field label's uppercasing
+                      // and tracking would make `crew:platform` unreadable.
+                      <span className="type-page-stamp normal-case tracking-normal text-foreground/90">
+                        {r.ref}
+                      </span>
+                    }
+                    hint={r.used_by.length > 0 ? `used by ${r.used_by.join(", ")}` : undefined}
+                  >
+                    <Input
+                      value={bind[r.ref] ?? ""}
+                      onChange={(e) => setBind((b) => ({ ...b, [r.ref]: e.target.value }))}
+                      placeholder={r.ref}
+                      aria-label={`Bind ${r.ref}`}
+                      className="h-8 text-xs max-sm:h-12 max-sm:text-sm"
+                    />
+                  </CreateSurfaceField>
+                ))}
+              </CreateSurfaceSection>
+            )}
 
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-4 py-2.5">
-          <Button
-            size="sm"
-            className="h-8 gap-1.5 px-3 text-xs"
-            disabled={!bundle || install.isPending}
-            onClick={() => {
-              if (!bundle) return
-              setRefusal(null)
-              setUnresolved([])
-              install.mutate({
-                bundle,
-                slug: slug.trim() && slug.trim() !== bundle.page.slug ? slug.trim() : undefined,
-                bind,
-              })
-            }}
-          >
-            {install.isPending && <Spinner className="h-3 w-3" />}
-            Install
-          </Button>
-        </div>
-      </div>
-    </div>
+            {bindable.length === 0 && (
+              <p className="type-page-meta text-muted-foreground-soft">
+                Nothing to bind — this bundle names no crews or routines that have to exist here.
+              </p>
+            )}
+          </>
+        )}
+      </CreateSurfaceBody>
+
+      {/* The refusal IS the worklist, and now it is outside the scrollport:
+          a list of references you have to scroll down to find is a list you
+          will not find. Each row keeps what it is used by, because that is
+          what says which panel breaks if you leave it. */}
+      <CreateSurfaceRefusal
+        message={refusal}
+        fields={unresolved.map((u) => ({
+          field: u.ref,
+          reason: u.used_by.length > 0 ? `${u.reason} (used by ${u.used_by.join(", ")})` : u.reason,
+        }))}
+      />
+
+      <CreateSurfaceFooter
+        onCancel={onClose}
+        primaryLabel="Install"
+        primaryIcon={Wand2}
+        primaryDisabled={!bundle}
+        busy={install.isPending}
+        onPrimary={submit}
+      />
+    </CreateSurface>
   )
 }
+

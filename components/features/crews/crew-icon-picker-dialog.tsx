@@ -1,13 +1,20 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Search } from "lucide-react"
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfacePicker,
+} from "@/components/layout/create-surface"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { CREW_ICONS, GRADIENT_PALETTES } from "@/lib/entities"
-import { cn } from "@/lib/utils"
+import {
+  CREW_ICON_CATEGORIES,
+  GRADIENT_PALETTES,
+  getCrewIconDef,
+  searchCrewIcons,
+} from "@/lib/entities"
 
 export interface CrewIconPickerDialogProps {
   open: boolean
@@ -21,12 +28,21 @@ export interface CrewIconPickerDialogProps {
 }
 
 /**
- * Crew icon + color picker. Grid of all CREW_ICONS with search filter,
- * row of GRADIENT_PALETTES below. Live preview at the top so you see
- * the combination before committing.
+ * Crew icon + color picker, opened from the crew canvas.
  *
- * Replaces the inline ▾ dropdown that previously promised an icon
- * picker but had nothing wired up — clicking did nothing.
+ * Wears the shared shell and the kit's own picker, which is what New crew's
+ * icon step already renders. Two reasons the hand-rolled version had to go:
+ *
+ *  · **Colour.** Radix's DialogContent is `bg-background` — oklch(0.10) in
+ *    this theme, the darkest surface in the palette — while every migrated
+ *    create surface is `bg-card` at oklch(0.155). The icon well inside it was
+ *    darker again (`bg-background/30`). Opened from a page that uses the
+ *    lighter card, it read as a hole rather than a dialog.
+ *  · **Two pickers for one job.** This file had its own preview, its own
+ *    palette row and its own search-plus-grid; `CreateSurfacePicker` is that
+ *    component, already built, already carrying the categories this one
+ *    lacked. 345 icons behind a name-substring search and no categories is
+ *    the browsing problem the kit's version solves.
  */
 export function CrewIconPickerDialog({
   open,
@@ -39,6 +55,7 @@ export function CrewIconPickerDialog({
   const [draftIcon, setDraftIcon] = useState(icon ?? "briefcase")
   const [draftColor, setDraftColor] = useState(color ?? "blue")
   const [search, setSearch] = useState("")
+  const [category, setCategory] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -46,14 +63,13 @@ export function CrewIconPickerDialog({
       setDraftIcon(icon ?? "briefcase")
       setDraftColor(color ?? "blue")
       setSearch("")
+      setCategory(null)
     }
   }, [open, icon, color])
 
-  const filteredIcons = useMemo(() => {
-    if (!search.trim()) return CREW_ICONS
-    const q = search.toLowerCase()
-    return CREW_ICONS.filter((i) => i.name.toLowerCase().includes(q))
-  }, [search])
+  // Same resolver New crew's icon panel uses: a category when one is picked,
+  // otherwise the search string, otherwise everything.
+  const results = useMemo(() => searchCrewIcons(category ?? search), [search, category])
 
   const submit = async () => {
     setBusy(true)
@@ -66,109 +82,58 @@ export function CrewIconPickerDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Icon — {crewName}</DialogTitle>
-          <DialogDescription>
-            Pick an icon and a color. Same icon can be reused across crews
-            with different colors as a quick visual differentiator.
-          </DialogDescription>
-        </DialogHeader>
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="md"
+      onSubmit={() => void submit()}
+    >
+      <CreateSurfaceHeader
+        concept="crews"
+        context={crewName}
+        title="Icon"
+        description="Pick an icon and a colour. The same icon reused across crews with different colours is a quick visual differentiator."
+        onClose={() => onOpenChange(false)}
+      />
 
-        {/* Big preview */}
-        <div className="flex items-center justify-center py-2">
-          <CrewIcon icon={draftIcon} color={draftColor} size="xl" className="scale-150" />
-        </div>
+      <CreateSurfaceBody>
+        <CreateSurfacePicker
+          preview={<CrewIcon icon={draftIcon} color={draftColor} size="xl" />}
+          previewHint={`${getCrewIconDef(draftIcon).label} · ${draftColor}`}
+          palette={{
+            value: draftColor,
+            onChange: setDraftColor,
+            options: GRADIENT_PALETTES.map((g) => ({ id: g.id, dot: g.dot })),
+          }}
+          categories={{
+            value: category,
+            options: CREW_ICON_CATEGORIES,
+            onChange: (c) => { setCategory(c); setSearch("") },
+          }}
+          search={{
+            value: search,
+            onChange: (v) => { setSearch(v); setCategory(null) },
+            placeholder: "Search icons…",
+          }}
+          options={results.map((name) => {
+            const def = getCrewIconDef(name)
+            return { id: name, label: def.label, render: <def.icon className="h-4 w-4 text-foreground/70" /> }
+          })}
+          value={draftIcon}
+          onChange={setDraftIcon}
+          columns={8}
+        />
+      </CreateSurfaceBody>
 
-        {/* Color palette */}
-        <div>
-          <div className="text-xs text-muted-foreground mb-1.5">Color</div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {GRADIENT_PALETTES.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setDraftColor(p.id)}
-                className={cn(
-                  "w-7 h-7 rounded border-2 transition-all",
-                  draftColor === p.id
-                    ? "border-foreground scale-110"
-                    : "border-transparent hover:border-white/20",
-                )}
-                style={{ background: p.dot }}
-                title={p.id}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Icon grid */}
-        <div>
-          <div className="text-xs text-muted-foreground mb-1.5 flex items-center justify-between">
-            <span>Icon</span>
-            <span className="text-[10px] text-muted-foreground">
-              {filteredIcons.length} of {CREW_ICONS.length}
-            </span>
-          </div>
-          <div className="relative mb-2">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search icons…"
-              className="w-full bg-background border border-white/15 rounded pl-7 pr-2 py-1.5 text-xs outline-none focus:border-primary"
-            />
-          </div>
-          <div className="grid grid-cols-10 gap-1 max-h-[260px] overflow-y-auto p-1 rounded bg-background/30 border border-white/5">
-            {filteredIcons.map((i) => {
-              const Icon = i.icon
-              const active = draftIcon === i.name
-              return (
-                <button
-                  key={i.name}
-                  type="button"
-                  onClick={() => setDraftIcon(i.name)}
-                  title={i.name}
-                  className={cn(
-                    "aspect-square rounded grid place-items-center transition-colors",
-                    active
-                      ? "bg-primary/25 border border-primary"
-                      : "hover:bg-white/5 border border-transparent",
-                  )}
-                >
-                  <Icon className="h-4 w-4 text-foreground/80" />
-                </button>
-              )
-            })}
-            {filteredIcons.length === 0 && (
-              <div className="col-span-10 text-center text-xs text-muted-foreground py-6">
-                No icons match &ldquo;{search}&rdquo;
-              </div>
-            )}
-          </div>
-        </div>
-
-        <DialogFooter>
-          <button
-            type="button"
-            className="text-sm px-3 py-1.5 rounded text-muted-foreground hover:text-foreground"
-            onClick={() => onOpenChange(false)}
-            disabled={busy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={busy}
-            className="text-sm px-3 py-1.5 rounded bg-primary hover:bg-primary text-white disabled:opacity-40"
-          >
-            {busy ? "Saving…" : "Save"}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={busy ? "Saving…" : "Save"}
+        onPrimary={() => void submit()}
+        busy={busy}
+        // Nothing reaches the server until Save, so there is no work for the
+        // shell's are-you-sure to protect.
+        guardCancel={false}
+      />
+    </CreateSurface>
   )
 }

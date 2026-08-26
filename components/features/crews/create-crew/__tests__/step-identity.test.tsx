@@ -8,13 +8,19 @@ function harness(initial: Partial<WizardState> = {}) {
   const setState = vi.fn((patch: Partial<WizardState>) => {
     state = { ...state, ...patch }
   })
-  const renderResult = render(<StepIdentity state={state} setState={setState} />)
+  const onPickIcon = vi.fn()
+  const renderResult = render(
+    <StepIdentity state={state} setState={setState} onPickIcon={onPickIcon} />,
+  )
   return {
     ...renderResult,
     setState,
+    onPickIcon,
     rerenderWith: (patch: Partial<WizardState>) => {
       state = { ...state, ...patch }
-      renderResult.rerender(<StepIdentity state={state} setState={setState} />)
+      renderResult.rerender(
+        <StepIdentity state={state} setState={setState} onPickIcon={onPickIcon} />,
+      )
     },
     getState: () => state,
   }
@@ -83,6 +89,26 @@ describe("<StepIdentity>", () => {
     expect(namePatch).toEqual({ name: "Foo Bar" }) // slug NOT included
   })
 
+  it("normalises what is typed into Slug instead of describing the rule", () => {
+    // Before: the field took e.target.value verbatim, the hint said
+    // "Lowercase, no spaces", and the server answered 400 on Create — three
+    // steps later. Now the field cannot hold a value POST /crews rejects.
+    const { setState } = harness({ slugTouched: true })
+
+    fireEvent.change(screen.getByPlaceholderText("engineering"), {
+      target: { value: "Engineering Team!" },
+    })
+
+    expect(setState).toHaveBeenCalledWith({ slug: "engineering-team-", slugTouched: true })
+  })
+
+  it("no longer tells the user about a rule the field enforces", () => {
+    harness({ slug: "engineering" })
+    expect(screen.queryByText(/lowercase, no spaces/i)).toBeNull()
+    // What the field cannot enforce is still said.
+    expect(screen.getByText(/permanent/i)).toBeInTheDocument()
+  })
+
   it("description input writes through to setState", () => {
     const { setState } = harness()
 
@@ -95,21 +121,42 @@ describe("<StepIdentity>", () => {
 
   it("renders the icon-tile button using current state", () => {
     harness({ icon: "rocket", color: "violet" })
-    // Caption beneath the tile shows "icon · color"
-    expect(screen.getByText(/rocket · violet/)).toBeInTheDocument()
-  })
-
-  it("clicking the icon tile opens the picker dialog", () => {
-    harness()
-    // Picker dialog isn't mounted until opened. Click triggers open via portal.
-    const tile = screen.getByLabelText("Pick icon and color")
-    fireEvent.click(tile)
-    // Dialog title is "Icon — <crewName>" — find it.
-    expect(screen.getByText(/^Icon —/)).toBeInTheDocument()
+    // The caption names the icon the way the catalogue does — "rocket" is the
+    // key, "Rocket" is what a person reads.
+    expect(screen.getByText(/Rocket · violet/)).toBeInTheDocument()
   })
 
   it("Slug field shows current slug in the TIP example", () => {
     harness({ slug: "research-team" })
     expect(screen.getByText(/--crew research-team/)).toBeInTheDocument()
+  })
+})
+
+// ── The icon picker is a panel, not part of this step ───────────────────
+//
+// It started as CrewIconPickerDialog — a full Radix <Dialog> opened from
+// inside the wizard's own — then became an inline block on this step, which
+// put the form, a notice, a preview, a colour row, a search box and a grid of
+// 345 icons on one screen. New project had already solved this: the surface
+// SWAPS to the picker, with its own header, back arrow and "Use this icon".
+// This step asks for the panel and draws none of it.
+describe("<StepIdentity> — the icon control", () => {
+  it("asks the wizard for the panel rather than opening one here", () => {
+    const { onPickIcon } = harness()
+    fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+    expect(onPickIcon).toHaveBeenCalledTimes(1)
+  })
+
+  it("draws no picker of its own", () => {
+    harness()
+    fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+    expect(screen.queryByPlaceholderText(/search icons/i)).toBeNull()
+    expect(screen.queryAllByRole("dialog")).toHaveLength(0)
+  })
+
+  it("offers the caption as a second way in, for the same panel", () => {
+    const { onPickIcon } = harness({ icon: "rocket", color: "violet" })
+    fireEvent.click(screen.getByText(/Rocket · violet/))
+    expect(onPickIcon).toHaveBeenCalled()
   })
 })

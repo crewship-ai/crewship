@@ -111,6 +111,26 @@ const BASE_IMAGES: Array<{
 
 // ---- Helpers --------------------------------------------------------------
 
+/** The image a brand-new crew starts on before anyone has picked a base
+ *  image — what parseDevcontainerFull's `empty` fallback below returns.
+ *  It is not one of BASE_IMAGES' full registry paths, but it is still the
+ *  catalogue's default, not an operator-typed custom image. */
+export const DEFAULT_BASE_IMAGE = "debian:bookworm-slim"
+
+/** True when `image` needs the free-text "custom image" escape hatch rather
+ *  than the BASE_IMAGES catalogue — i.e. it is neither a cataloged entry nor
+ *  the DEFAULT_BASE_IMAGE placeholder a fresh crew starts on.
+ *
+ *  Kept as the one place that answers this so the initial-mount state, the
+ *  external-value sync effect and the raw-JSON-apply path can't drift out of
+ *  agreement the way they did before: the sync effect re-derived the
+ *  same check without the DEFAULT_BASE_IMAGE exception, so it flipped a
+ *  freshly-opened New crew into custom mode a frame after mount and the
+ *  catalogue never appeared. */
+export function isCustomBaseImage(image: string): boolean {
+  return image !== DEFAULT_BASE_IMAGE && !BASE_IMAGES.some((b) => b.value === image)
+}
+
 
 // Per containers.dev features spec, option values are primitives
 // (string | boolean | number); the outer map is feature-ref -> options.
@@ -289,7 +309,7 @@ function normalizeMounts(raw: unknown): MountEntry[] {
 /** Full lossless parse of a devcontainer_config JSON string. */
 export function parseDevcontainerFull(jsonStr: string): ParsedDevcontainer {
   const empty: ParsedDevcontainer = {
-    image: "debian:bookworm-slim",
+    image: DEFAULT_BASE_IMAGE,
     features: {},
     containerEnv: {},
     privileged: false,
@@ -315,7 +335,7 @@ export function parseDevcontainerFull(jsonStr: string): ParsedDevcontainer {
 
   const capAddRaw = parsed.capAdd
   return {
-    image: (typeof parsed.image === "string" && parsed.image) || "debian:bookworm-slim",
+    image: (typeof parsed.image === "string" && parsed.image) || DEFAULT_BASE_IMAGE,
     features: (parsed.features as FeatureMap) || {},
     containerEnv: (parsed.containerEnv as Record<string, string>) || {},
     privileged: Boolean(parsed.privileged),
@@ -409,6 +429,7 @@ export {
   buildDevcontainerJSON,
   buildMiseJSON,
 }
+// DEFAULT_BASE_IMAGE and isCustomBaseImage are exported inline above.
 // parseDevcontainerFull, buildDevcontainerJSON extras, MountEntry,
 // ParsedDevcontainer, DevcontainerExtras, KNOWN_CAPS, normalizeCap, isKnownCap
 // and isAllowedMountSource are exported inline at their declarations above.

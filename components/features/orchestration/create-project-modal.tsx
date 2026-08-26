@@ -2,22 +2,31 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  X,
-  ChevronRight,
+  AlertTriangle,
+  CalendarDays,
   Check,
   User,
-  Bot,
   UserX,
-  Tag,
-  Calendar,
-  Search,
+  FolderKanban,
+  Milestone,
+  Palette,
 } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
 import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceChoice,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceGrid,
+  CreateSurfaceHeader,
+  CreateSurfaceNotice,
+  CreateSurfacePicker,
+  CreateSurfacePill,
+  CreateSurfacePills,
+  CreateSurfaceRefusal,
+  CreateSurfaceSection,
+  CreateSurfaceTitleInput,
+} from "@/components/layout/create-surface"
 import {
   Popover,
   PopoverContent,
@@ -31,9 +40,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { LabelBadge } from "@/components/features/issues/label-badge"
 import dynamic from "next/dynamic"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { CrewIcon } from "@/components/ui/crew-icon"
@@ -47,7 +53,7 @@ import {
   CREW_ICON_CATEGORIES, GRADIENT_PALETTES,
 } from "@/lib/entities"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
-import { cn } from "@/lib/utils"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { ISSUE_ICON_COLORS } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
@@ -55,6 +61,11 @@ import type { IssueLabel, IssuePriority, ProjectStatus } from "@/lib/types/missi
 import type { CrewSummary } from "@/lib/types/orchestration"
 
 const PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
+
+/** The two date fields. `h-12` on a phone because `--spacing` is 0.23rem, so
+ *  the usual h-11 lands at 40.5px — under the 44px floor. */
+const DATE_INPUT_CLASS =
+  "h-8 w-full rounded-md border border-hairline bg-background px-2 text-xs text-foreground outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 max-sm:h-12 max-sm:text-sm"
 
 const PROJECT_STATUSES: { value: ProjectStatus; label: string; color: string }[] = [
   { value: "backlog", label: "Backlog", color: ISSUE_ICON_COLORS.BACKLOG },
@@ -69,21 +80,62 @@ interface CreateProjectModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   crews: CrewSummary[]
+  /**
+   * Workspace issue labels. Unused: labels are an *issue* concept
+   * (labels/mission_labels) — there is no project_labels table and
+   * POST /api/v1/projects binds no labels field, so a picker here could only
+   * discard what the user chose. Kept on the props so the caller does not have
+   * to change; wire it up if project labels ever ship.
+   */
   labels: IssueLabel[]
   workspaceId: string
   onCreated: () => void
 }
 
+/** What GET /api/v1/agents actually returns, narrowed to what is used here. */
+interface RawAgent {
+  id: string
+  name: string
+  slug?: string
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  avatar_url?: string | null
+  crew?: { avatar_style?: string | null } | null
+}
+
+/**
+ * An agent, with the face it wears everywhere else.
+ *
+ * `AssigneeOption` (assignee-picker.tsx) carries id/name/type/slug only. Rather
+ * than widen a type three other surfaces import, this narrows the widening to
+ * the one modal that needs it.
+ */
+type LeadOption = AssigneeOption & {
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  avatar_url?: string | null
+  crew_avatar_style?: string | null
+}
+
+/**
+ * Where the agent list is between "not asked yet" and "here it is".
+ *
+ * Mirrors `AgentLoad` in create-issue-modal.tsx: an empty list renders
+ * identically whether the workspace has nobody, the request 500'd, or the
+ * request is still in flight, which is the same defect that picker's fix
+ * addressed. Applying the same shape here rather than inventing a second one.
+ */
+type AgentLoad = "idle" | "loading" | "ready" | "error"
+
 export function CreateProjectModal({
   open,
   onOpenChange,
   crews: _crews,
-  labels,
+  labels: _labels,
   workspaceId,
   onCreated,
 }: CreateProjectModalProps) {
   const [name, setName] = useState("")
-  const [summary, setSummary] = useState("")
   const [description, setDescription] = useState("")
   const [icon, setIcon] = useState("rocket")
   const [color, setColor] = useState("blue")
@@ -93,20 +145,30 @@ export function CreateProjectModal({
   const [leadId, setLeadId] = useState<string | null>(null)
   const [startDate, setStartDate] = useState("")
   const [targetDate, setTargetDate] = useState("")
-  const [selectedLabels, setSelectedLabels] = useState<string[]>([])
-  const [agents, setAgents] = useState<AssigneeOption[]>([])
+  const [agents, setAgents] = useState<LeadOption[]>([])
+  const [agentLoad, setAgentLoad] = useState<AgentLoad>("idle")
+  /** Bumped by the error state's Try again, purely to re-run the fetch effect. */
+  const [agentReload, setAgentReload] = useState(0)
   const [saving, setSaving] = useState(false)
+  // What the server said when it said no. Shown in the shell's refusal band,
+  // which sits outside the scrollport — the toast below it is kept because it
+  // is the notification the rest of the app uses, but the toast is what fades.
+  const [refusal, setRefusal] = useState<string | null>(null)
 
-  // Popover states
-  const [iconOpen, setIconOpen] = useState(false)
+  // Icon picker is a panel inside the surface (CreateSurfacePicker), not a
+  // second floating overlay — see the header/body/footer swap below.
+  const [panel, setPanel] = useState<null | "icon">(null)
   const [iconQuery, setIconQuery] = useState("")
   const [iconCategory, setIconCategory] = useState<string | null>(null)
-  const [statusOpen, setStatusOpen] = useState(false)
-  const [priorityOpen, setPriorityOpen] = useState(false)
   const [leadOpen, setLeadOpen] = useState(false)
-  const [startOpen, setStartOpen] = useState(false)
-  const [targetOpen, setTargetOpen] = useState(false)
-  const [labelsOpen, setLabelsOpen] = useState(false)
+
+  // A ref, not the `saving` state, and it is the difference between one create
+  // and two. The footer's primary is disabled while `saving` is true, but ⌘↵
+  // does not go through the footer — the shell calls `onSubmit` on the
+  // keystroke and does not know this surface is busy. State also does not flip
+  // until React re-renders, so two fast presses both read the old value. The
+  // ref flips synchronously, before any await.
+  const submittingRef = useRef(false)
 
   const nameRef = useRef<HTMLInputElement>(null)
 
@@ -116,39 +178,62 @@ export function CreateProjectModal({
     return searchCrewIcons(iconQuery)
   }, [iconQuery, iconCategory])
 
-  // Focus name on open
+  // Focus name on open. The shell suppresses Radix's own autofocus so the
+  // surface opens on the first real field rather than on the close button.
   useEffect(() => {
     if (open) {
       setTimeout(() => nameRef.current?.focus(), 100)
     }
   }, [open])
 
-  // Fetch all agents for lead picker
+  // Fetch all agents for lead picker.
+  //
+  // The failure paths used to be `if (!res.ok || cancelled) return` and a bare
+  // `catch {}`, which left `agents` at `[]` — identical to what a workspace
+  // with no agents renders. Same defect the assignee picker in
+  // create-issue-modal.tsx had, fixed there with a three-state load; this is
+  // that same shape rather than a second one.
   useEffect(() => {
     if (!open || !workspaceId) return
     let cancelled = false
+    setAgents([])
+    setAgentLoad("loading")
     async function fetchAgents() {
       try {
         const res = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (!res.ok || cancelled) return
+        if (cancelled) return
+        if (!res.ok) { setAgentLoad("error"); return }
         const data = await res.json()
+        if (cancelled) return
         const list = Array.isArray(data) ? data : data.agents ?? []
-        if (!cancelled) {
-          setAgents(
-            list.map((a: { id: string; name: string; slug?: string }) => ({
-              id: a.id, name: a.name, type: "agent" as const, slug: a.slug,
-            })),
-          )
-        }
-      } catch { /* ignore */ }
+        // The avatar fields were dropped in this map, which is why the lead
+        // picker drew a row of identical grey bots while the same agents
+        // wear faces on the board behind it. GET /api/v1/agents returns all
+        // four; the seed falls back to the name, which is the only reason
+        // an avatar appears anywhere (every agent here has a NULL seed).
+        setAgents(
+          list.map((a: RawAgent) => ({
+            id: a.id,
+            name: a.name,
+            type: "agent" as const,
+            slug: a.slug,
+            avatar_seed: a.avatar_seed,
+            avatar_style: a.avatar_style,
+            avatar_url: a.avatar_url,
+            crew_avatar_style: a.crew?.avatar_style ?? null,
+          })),
+        )
+        setAgentLoad("ready")
+      } catch {
+        if (!cancelled) setAgentLoad("error")
+      }
     }
     fetchAgents()
     return () => { cancelled = true }
-  }, [open, workspaceId])
+  }, [open, workspaceId, agentReload])
 
   function reset() {
     setName("")
-    setSummary("")
     setDescription("")
     setIcon("rocket")
     setColor("blue")
@@ -158,30 +243,45 @@ export function CreateProjectModal({
     setLeadId(null)
     setStartDate("")
     setTargetDate("")
-    setSelectedLabels([])
+    setRefusal(null)
   }
 
-  const statusInfo = PROJECT_STATUSES.find((s) => s.value === status) ?? PROJECT_STATUSES[0]
-  const leadName = (() => {
-    if (!leadId) return null
-    const found = agents.find((a) => a.id === leadId)
-    return found?.name ?? null
-  })()
+  const selectedLead = leadId ? (agents.find((a) => a.id === leadId) ?? null) : null
+  const leadName = selectedLead?.name ?? null
+
+  // Anything the person has typed or picked. Drives the shell's discard guard,
+  // which covers Esc, the overlay click and the header's × — the three routes
+  // out that this modal previously took without asking.
+  const dirty =
+    name.trim() !== "" ||
+    description.trim() !== "" ||
+    icon !== "rocket" ||
+    color !== "blue" ||
+    status !== "backlog" ||
+    priority !== "none" ||
+    leadId !== null ||
+    startDate !== "" ||
+    targetDate !== ""
 
   const handleSubmit = useCallback(async () => {
+    if (submittingRef.current) return
     if (!name.trim()) { toast.error("Project name is required"); return }
 
+    submittingRef.current = true
     setSaving(true)
+    setRefusal(null)
     try {
       const res = await apiFetch(
         `/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          // Every key here is bound by the create request struct in
+          // internal/api/project_handler.go. readJSON() does not reject unknown
+          // fields, so anything extra would be accepted with a 201 and dropped.
           body: JSON.stringify({
             name: name.trim(),
             description: description.trim() || undefined,
-            summary: summary?.trim() || undefined,
             icon,
             color,
             status,
@@ -190,14 +290,15 @@ export function CreateProjectModal({
             lead_id: leadId ?? undefined,
             start_date: startDate || undefined,
             target_date: targetDate || undefined,
-            labels: selectedLabels.length > 0 ? selectedLabels : undefined,
           }),
         },
       )
 
       if (!res.ok) {
         const body = await res.json().catch(() => null)
-        toast.error(body?.detail ?? "Failed to create project")
+        const detail = body?.detail ?? "Failed to create project"
+        setRefusal(detail)
+        toast.error(detail)
         return
       }
 
@@ -206,419 +307,332 @@ export function CreateProjectModal({
       onOpenChange(false)
       onCreated()
     } catch {
+      setRefusal("Failed to create project")
       toast.error("Failed to create project")
     } finally {
       setSaving(false)
+      submittingRef.current = false
     }
-  }, [name, description, summary, icon, color, status, priority, leadType, leadId, startDate, targetDate, selectedLabels, workspaceId, onCreated, onOpenChange])
-
-  // Cmd+Enter to submit
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault()
-      handleSubmit()
-    }
-  }, [handleSubmit])
-
-  function toggleLabel(labelId: string) {
-    setSelectedLabels((prev) =>
-      prev.includes(labelId) ? prev.filter((id) => id !== labelId) : [...prev, labelId],
-    )
-  }
+  }, [name, description, icon, color, status, priority, leadType, leadId, startDate, targetDate, workspaceId, onCreated, onOpenChange])
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        className="sm:max-w-[720px] p-0 gap-0 overflow-hidden flex flex-col max-h-[85vh]"
-        onKeyDown={handleKeyDown}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-      >
-        <DialogTitle className="sr-only">New Project</DialogTitle>
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="md"
+      dirty={dirty}
+      discardLabel="this project"
+      // ⌘↵ comes from the shell now. handleSubmit keeps its own empty-name
+      // guard because the keyboard route reaches it while the footer's primary
+      // is still disabled.
+      onSubmit={() => {
+        // Inside the icon panel the body IS the picker and the footer's
+        // primary reads "Use this icon", so ⌘↵ must close the panel — not
+        // create the project from a surface the user is not looking at. Both
+        // sibling wizards already guard this (create-crew-dialog.tsx,
+        // create-agent-dialog.tsx); this one was the exception.
+        if (panel) { setPanel(null); return }
+        handleSubmit()
+      }}
+    >
+      <CreateSurfaceHeader
+        icon={FolderKanban}
+        accent="blue"
+        // Not a key prefix. "CRE" was copied across from the issue modal,
+        // where it is the fallback for `crew.slug.slice(0, 3)` — a project is
+        // workspace-scoped and has no crew, so the literal froze into a string
+        // that reads as truncated text. Every other door names its page here.
+        context="Projects"
+        title={panel === "icon" ? "Icon — new project" : "New project"}
+        description={
+          panel === "icon" ? "Pick a colour, then an icon. Browse by category, or search." : undefined
+        }
+        onBack={panel ? () => setPanel(null) : undefined}
+        onClose={() => onOpenChange(false)}
+      />
 
-        {/* ── Header ── */}
-        <div className="flex items-center gap-1.5 px-4 py-3 border-b border-white/[0.06] shrink-0">
-          <span className="text-xs font-medium text-muted-foreground">CRE</span>
-          <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
-          <span className="text-xs text-muted-foreground">New project</span>
-          <div className="flex-1" />
+      <CreateSurfaceBody className="flex flex-col gap-4">
+        {/* Icon panel — CreateSurfacePicker, a PANEL INSIDE the surface rather
+            than a nested Popover. A create dialog is already one overlay; a
+            popover full of its own grid on top of it was a second, and on a
+            phone that is a sheet stacked on a sheet where the back gesture
+            dismisses the wrong one. */}
+        {panel === "icon" && (
+          <CreateSurfacePicker
+            preview={<CrewIcon icon={icon} color={color} size="xl" />}
+            previewHint={`${getCrewIconDef(icon).label} · ${color}`}
+            palette={{
+              value: color,
+              onChange: setColor,
+              options: GRADIENT_PALETTES.map((p) => ({ id: p.id, dot: p.dot })),
+            }}
+            categories={{
+              value: iconCategory,
+              options: CREW_ICON_CATEGORIES,
+              onChange: (c) => { setIconCategory(c); setIconQuery("") },
+            }}
+            search={{
+              value: iconQuery,
+              onChange: (v) => { setIconQuery(v); setIconCategory(null) },
+              placeholder: "Search icons…",
+            }}
+            options={iconResults.map((iconName) => {
+              const def = getCrewIconDef(iconName)
+              return { id: iconName, label: def.label, render: <def.icon className="h-4 w-4 text-foreground/70" /> }
+            })}
+            value={icon}
+            onChange={setIcon}
+            columns={8}
+          />
+        )}
+
+        {!panel && (
+          <>
+        {/* Identity — the icon and colour ARE the project in every list it
+            appears in, so they are not buried behind an "appearance" tab. */}
+        <CreateSurfaceSection title="Identity" icon={Palette} accent="blue">
+        <div className="flex items-start gap-3">
           <button
-            onClick={() => onOpenChange(false)}
-            className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors"
+            type="button"
+            aria-label="Change project icon"
+            onClick={() => setPanel("icon")}
+            className="shrink-0 rounded-xl transition-opacity hover:opacity-80"
           >
-            <X className="h-3.5 w-3.5" />
+            <CrewIcon icon={icon} color={color} size="lg" />
           </button>
-        </div>
 
-        {/* ── Body (scrollable) ── */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="px-5 pt-4 pb-2">
-            {/* Icon + Name row */}
-            <div className="flex items-start gap-3 mb-2">
-              {/* Icon button — uses crew icon system */}
-              <Popover open={iconOpen} onOpenChange={(v) => { setIconOpen(v); if (!v) { setIconQuery(""); setIconCategory(null) } }}>
-                <PopoverTrigger asChild>
-                  <button className="shrink-0 relative group cursor-pointer">
-                    <CrewIcon icon={icon} color={color} size="lg" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[340px] sm:w-[400px] p-0 rounded-2xl" align="start" sideOffset={8}>
-                  {/* Color picker row */}
-                  <div className="px-4 pt-4 pb-3 border-b">
-                    <div className="flex items-center justify-between mb-3">
-                      {GRADIENT_PALETTES.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => setColor(p.id)}
-                          className="transition-all hover:scale-105 shrink-0"
-                        >
-                          <CrewIcon
-                            icon={icon}
-                            color={p.id}
-                            size="sm"
-                            className={cn(
-                              "transition-all",
-                              color === p.id ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-110" : "opacity-50 hover:opacity-100",
-                            )}
-                          />
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-micro text-muted-foreground">Pick a color, then choose an icon below</p>
-                  </div>
-
-                  {/* Search */}
-                  <div className="px-4 pt-3 pb-2">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <Input
-                        value={iconQuery}
-                        onChange={(e) => { setIconQuery(e.target.value); setIconCategory(null) }}
-                        placeholder="Search icons..."
-                        className="pl-9 h-8 text-xs"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Category chips */}
-                  <div className="px-4 pb-2">
-                    <div className="flex flex-wrap gap-1">
-                      {CREW_ICON_CATEGORIES.map((cat) => (
-                        <button
-                          key={cat}
-                          type="button"
-                          onClick={() => {
-                            if (iconCategory === cat) { setIconCategory(null); setIconQuery("") }
-                            else { setIconCategory(cat); setIconQuery("") }
-                          }}
-                          className={cn(
-                            "px-2 py-0.5 text-micro rounded-full capitalize transition-colors",
-                            iconCategory === cat
-                              ? "bg-primary text-primary-foreground font-medium"
-                              : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
-                          )}
-                        >
-                          {cat}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Icon grid */}
-                  <div className="px-4 pb-4">
-                    <div className="grid grid-cols-8 gap-1 max-h-[240px] overflow-y-auto rounded-lg border bg-muted/20 p-2">
-                      {iconResults.map((iconName) => {
-                        const def = getCrewIconDef(iconName)
-                        const IconComp = def.icon
-                        const isSelected = icon === iconName
-                        return (
-                          <button
-                            key={iconName}
-                            type="button"
-                            title={def.label}
-                            onClick={() => { setIcon(iconName); setIconOpen(false) }}
-                            className={cn(
-                              "aspect-square rounded-lg flex items-center justify-center transition-all",
-                              isSelected
-                                ? "bg-primary text-primary-foreground shadow-sm scale-110"
-                                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                            )}
-                          >
-                            <IconComp className="h-4 w-4" />
-                          </button>
-                        )
-                      })}
-                      {iconResults.length === 0 && (
-                        <p className="col-span-8 text-center text-xs text-muted-foreground py-8">No icons found</p>
-                      )}
-                    </div>
-                    <p className="text-micro text-muted-foreground mt-2 text-center">
-                      {iconResults.length} icons {iconCategory ? `in ${iconCategory}` : "available"}
-                    </p>
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              {/* Name + Summary */}
-              <div className="flex-1 min-w-0">
-                <label htmlFor="project-name" className="sr-only">Project name</label>
-                <input
-                  id="project-name"
-                  ref={nameRef}
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Project name"
-                  className="w-full bg-transparent text-base font-medium text-foreground placeholder:text-muted-foreground/50 outline-none"
-                />
-                <label htmlFor="project-summary" className="sr-only">Project summary</label>
-                <input
-                  id="project-summary"
-                  type="text"
-                  value={summary}
-                  onChange={(e) => setSummary(e.target.value)}
-                  placeholder="Add a short summary..."
-                  className="w-full bg-transparent text-sm text-muted-foreground placeholder:text-muted-foreground/40 outline-none mt-1"
-                />
-              </div>
-            </div>
-
-            {/* Metadata pills */}
-            <div className="flex items-center gap-1.5 flex-wrap py-2 border-t border-white/[0.04] mt-2">
-              {/* Status */}
-              <Popover open={statusOpen} onOpenChange={setStatusOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    status !== "backlog" ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: statusInfo.color }} />
-                    <span>{statusInfo.label}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[180px] p-1" align="start">
-                  {PROJECT_STATUSES.map((s) => (
-                    <button
-                      key={s.value}
-                      onClick={() => { setStatus(s.value); setStatusOpen(false) }}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
-                        status === s.value ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
-                      )}
-                    >
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
-                      <span>{s.label}</span>
-                      {status === s.value && <Check className="ml-auto h-3 w-3" />}
-                    </button>
-                  ))}
-                </PopoverContent>
-              </Popover>
-
-              {/* Priority */}
-              <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    priority !== "none" ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    <PriorityIcon priority={priority} className="h-3.5 w-3.5" />
-                    <span>{priorityLabel[priority]}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[180px] p-1" align="start">
-                  {PRIORITIES.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => { setPriority(p); setPriorityOpen(false) }}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
-                        priority === p ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
-                      )}
-                    >
-                      <PriorityIcon priority={p} className="h-3.5 w-3.5" />
-                      <span>{priorityLabel[p]}</span>
-                      {priority === p && <Check className="ml-auto h-3 w-3" />}
-                    </button>
-                  ))}
-                </PopoverContent>
-              </Popover>
-
-              {/* Lead */}
-              <Popover open={leadOpen} onOpenChange={setLeadOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    leadId ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    {leadType === "agent" ? <Bot className="h-3 w-3" /> : <User className="h-3 w-3" />}
-                    <span>{leadName ?? "Lead"}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[220px] p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search lead..." className="h-8 text-xs" />
-                    <CommandList>
-                      <CommandEmpty>No results found.</CommandEmpty>
-                      <CommandGroup>
-                        <CommandItem onSelect={() => { setLeadType(null); setLeadId(null); setLeadOpen(false) }}>
-                          <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-xs">No lead</span>
-                          {!leadId && <Check className="ml-auto h-3.5 w-3.5" />}
-                        </CommandItem>
-                      </CommandGroup>
-                      {agents.length > 0 && (
-                        <CommandGroup heading="Agents">
-                          {agents.map((agent) => (
-                            <CommandItem
-                              key={agent.id}
-                              onSelect={() => { setLeadType("agent"); setLeadId(agent.id); setLeadOpen(false) }}
-                            >
-                              <Bot className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                              <span className="text-xs">{agent.name}</span>
-                              {leadId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      )}
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-
-              {/* Start date */}
-              <Popover open={startOpen} onOpenChange={setStartOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    startDate ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    <Calendar className="h-3 w-3" />
-                    <span>{startDate || "Start"}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-3" align="start">
-                  <p className="text-xs text-muted-foreground mb-2">Start date</p>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => { setStartDate(e.target.value); setStartOpen(false) }}
-                    className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
-                  />
-                  {startDate && (
-                    <button
-                      onClick={() => { setStartDate(""); setStartOpen(false) }}
-                      className="block mt-2 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </PopoverContent>
-              </Popover>
-
-              {/* Target date */}
-              <Popover open={targetOpen} onOpenChange={setTargetOpen}>
-                <PopoverTrigger asChild>
-                  <button className={cn(
-                    "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                    targetDate ? "text-foreground/80" : "text-muted-foreground",
-                  )}>
-                    <Calendar className="h-3 w-3" />
-                    <span>{targetDate || "Target"}</span>
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-3" align="start">
-                  <p className="text-xs text-muted-foreground mb-2">Target date</p>
-                  <input
-                    type="date"
-                    value={targetDate}
-                    onChange={(e) => { setTargetDate(e.target.value); setTargetOpen(false) }}
-                    className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
-                  />
-                  {targetDate && (
-                    <button
-                      onClick={() => { setTargetDate(""); setTargetOpen(false) }}
-                      className="block mt-2 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </PopoverContent>
-              </Popover>
-
-              {/* Labels */}
-              {labels.length > 0 && (
-                <Popover open={labelsOpen} onOpenChange={setLabelsOpen}>
-                  <PopoverTrigger asChild>
-                    <button className={cn(
-                      "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
-                      selectedLabels.length > 0 ? "text-foreground/80" : "text-muted-foreground",
-                    )}>
-                      <Tag className="h-3 w-3" />
-                      <span>{selectedLabels.length > 0 ? `${selectedLabels.length} label${selectedLabels.length > 1 ? "s" : ""}` : "Labels"}</span>
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[240px] p-1" align="start">
-                    <div className="max-h-[200px] overflow-y-auto">
-                      {labels.map((label) => (
-                        <button
-                          key={label.id}
-                          onClick={() => toggleLabel(label.id)}
-                          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors"
-                        >
-                          <Checkbox
-                            checked={selectedLabels.includes(label.id)}
-                            className="pointer-events-none h-3.5 w-3.5"
-                          />
-                          <LabelBadge label={label} />
-                        </button>
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              )}
-            </div>
-          </div>
-
-          {/* Description */}
-          <div className="px-5 pb-4 border-t border-white/[0.04]">
-            <TiptapEditor
-              content={description}
-              onChange={setDescription}
-              placeholder="Write a description, a project brief, or collect ideas..."
-              compact
-              className="min-h-[120px]"
+          {/* Name */}
+          <div className="flex-1 min-w-0">
+            <label htmlFor="project-name" className="sr-only">Project name</label>
+            <CreateSurfaceTitleInput
+              id="project-name"
+              ref={nameRef}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Project name"
             />
           </div>
-
-          {/* Milestones section (future) */}
-          <div className="px-5 py-2.5 border-t border-white/[0.06] flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Milestones</span>
-            <button className="h-5 w-5 rounded flex items-center justify-center text-muted-foreground/50 hover:text-muted-foreground hover:bg-white/[0.06] transition-colors text-xs">
-              +
-            </button>
-          </div>
         </div>
+        </CreateSurfaceSection>
 
-        {/* ── Footer ── */}
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-white/[0.06] shrink-0">
-          <button
-            onClick={() => onOpenChange(false)}
-            disabled={saving}
-            className="h-7 px-3 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving || !name.trim()}
-            className="h-7 px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5 transition-colors"
-          >
-            {saving && <Spinner className="h-3 w-3" />}
-            Create project
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        <CreateSurfaceSection title="Brief" hint="shown on the project page">
+          <TiptapEditor
+            content={description}
+            onChange={setDescription}
+            placeholder="Write a description, a project brief, or collect ideas..."
+            compact
+            // A project brief is prose with a full toolbar above it — headings,
+            // lists, tables, code. 120px is four lines, so the toolbar was
+            // taller than the thing it formats and every paragraph pushed the
+            // caret against the bottom edge. This is the one field on the
+            // surface people actually write IN rather than fill.
+            //
+            // 200, not the 280 it grew to: with Planning back in the body the
+            // brief is no longer the only thing in the scrollport, and at 280
+            // it pushed the status and dates below the fold on a laptop —
+            // which is how they came to be pills nobody opened.
+            className="min-h-[200px]"
+          />
+        </CreateSurfaceSection>
+
+        {/* Planning — in the body, not behind four pills.
+         *
+         * Status, priority and the two dates were pill-and-popover, on the
+         * grounds that the shell has a pill row and this is what it is for.
+         * That holds for New issue, which is a compose surface used dozens of
+         * times a day where every keystroke counts. A project is created
+         * rarely and deliberately, and a popover hides both the options and
+         * the fact that a choice was available: /design shows them as chip
+         * rows and date fields, and this is that. */}
+        <CreateSurfaceSection title="Planning" icon={CalendarDays} accent="amber">
+          <CreateSurfaceGrid>
+            <CreateSurfaceField label="Status">
+              <CreateSurfaceChoice
+                ariaLabel="Project status"
+                value={status}
+                onChange={setStatus}
+                options={PROJECT_STATUSES.map((s) => ({
+                  value: s.value,
+                  label: (
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
+                      {s.label}
+                    </span>
+                  ),
+                }))}
+              />
+            </CreateSurfaceField>
+            <CreateSurfaceField label="Priority">
+              <CreateSurfaceChoice
+                ariaLabel="Project priority"
+                value={priority}
+                onChange={setPriority}
+                options={PRIORITIES.map((p) => ({
+                  value: p,
+                  label: (
+                    <span className="flex items-center gap-1.5">
+                      <PriorityIcon priority={p} className="h-3.5 w-3.5" />
+                      {priorityLabel[p]}
+                    </span>
+                  ),
+                }))}
+              />
+            </CreateSurfaceField>
+            <CreateSurfaceField label="Start date" htmlFor="project-start">
+              <input
+                id="project-start"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className={DATE_INPUT_CLASS}
+              />
+            </CreateSurfaceField>
+            <CreateSurfaceField label="Target date" htmlFor="project-target">
+              <input
+                id="project-target"
+                type="date"
+                value={targetDate}
+                onChange={(e) => setTargetDate(e.target.value)}
+                className={DATE_INPUT_CLASS}
+              />
+            </CreateSurfaceField>
+          </CreateSurfaceGrid>
+        </CreateSurfaceSection>
+
+        {/* Milestones cannot be created here: POST
+            /api/v1/projects/{projectId}/milestones 404s until the project
+            already exists (milestone_handler.go's projectExists check), and
+            there is no post-create screen that can add one either. This used
+            to be a code comment only — the user was told nothing. Said
+            out loud instead, matching the read-only reference at
+            components/features/design/surfaces/issues.tsx:341-353. */}
+        <CreateSurfaceSection title="Milestones" icon={Milestone} accent="purple">
+          <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
+            Milestones cannot be created here — the endpoint refuses until the project exists — and there is
+            no screen anywhere in the web UI that can create one. The CLI can:{" "}
+            <code className="font-mono">crewship milestone create</code>.
+          </CreateSurfaceNotice>
+        </CreateSurfaceSection>
+          </>
+        )}
+      </CreateSurfaceBody>
+
+      {/* Metadata pills. Same five controls in the same order as before; they
+          moved out of the scrollport into the shell's pill row, which is the
+          slot for exactly this and keeps them on one scrolling line on a
+          phone instead of wrapping onto three. Hidden on the icon panel —
+          the pills describe the project, not the icon, and there is no room
+          for both above a 44px footer. */}
+      {/* The pill row is down to the one control that is a search, not a
+          choice: a workspace can have hundreds of agents, and a chip row of
+          hundreds is not a chip row. Status, priority and the dates moved into
+          the body's Planning section where /design puts them. */}
+      {!panel && <CreateSurfacePills>
+        {/* Lead */}
+        <Popover open={leadOpen} onOpenChange={setLeadOpen} modal>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill
+              icon={leadType === "agent" ? undefined : User}
+              leading={
+                leadType === "agent" && selectedLead ? (
+                  <AgentAvatar
+                    seed={selectedLead.avatar_seed || selectedLead.name}
+                    style={selectedLead.avatar_style || selectedLead.crew_avatar_style}
+                    agentId={selectedLead.id}
+                    avatarUrl={selectedLead.avatar_url}
+                    alt=""
+                    className="h-3.5 w-3.5 shrink-0"
+                  />
+                ) : undefined
+              }
+              set={leadId !== null}
+            >
+              <span>{leadName ?? "Lead"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[220px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search lead..." className="h-8 text-xs" />
+              <CommandList>
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem onSelect={() => { setLeadType(null); setLeadId(null); setLeadOpen(false) }}>
+                    <UserX className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs">No lead</span>
+                    {!leadId && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </CommandItem>
+                </CommandGroup>
+                {/* Three ways to have no agents to list, and they are not the
+                    same thing — see the fetch effect above. Plain nodes rather
+                    than CommandItems: not selectable, and cmdk must not filter
+                    them away when the search box has text in it. */}
+                {agentLoad === "loading" && (
+                  <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading agents…</p>
+                )}
+                {agentLoad === "error" && (
+                  <div role="status" className="flex flex-col items-start gap-1 px-3 py-2">
+                    <span className="text-[11px] leading-relaxed text-destructive">
+                      Agents could not be loaded.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAgentReload((n) => n + 1)}
+                      className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+                {agentLoad === "ready" && agents.length === 0 && (
+                  <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                    No agents in this workspace to lead the project.
+                  </p>
+                )}
+                {agents.length > 0 && (
+                  <CommandGroup heading="Agents">
+                    {agents.map((agent) => (
+                      <CommandItem
+                        key={agent.id}
+                        onSelect={() => { setLeadType("agent"); setLeadId(agent.id); setLeadOpen(false) }}
+                      >
+                        <AgentAvatar
+                          seed={agent.avatar_seed || agent.name}
+                          style={agent.avatar_style || agent.crew_avatar_style}
+                          agentId={agent.id}
+                          avatarUrl={agent.avatar_url}
+                          alt=""
+                          className="mr-2 h-4 w-4 shrink-0"
+                        />
+                        <span className="text-xs">{agent.name}</span>
+                        {leadId === agent.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+
+        {/* No labels pill: labels are an issue concept. There is no
+            project_labels table and no labels field on the create
+            request, so a picker here would discard the selection. */}
+      </CreateSurfacePills>}
+
+      {!panel && <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />}
+
+      <CreateSurfaceFooter
+        onCancel={panel ? () => setPanel(null) : () => onOpenChange(false)}
+        // Inside the icon panel Cancel means "back out of the panel", so
+        // asking about unsaved work there is a false alarm. Everywhere else it
+        // closes the surface and the guard applies.
+        guardCancel={!panel}
+        cancelLabel={panel ? "Back" : "Cancel"}
+        primaryLabel={panel ? "Use this icon" : "Create project"}
+        onPrimary={panel ? () => setPanel(null) : handleSubmit}
+        primaryDisabled={panel ? false : !name.trim() || saving}
+        busy={panel ? false : saving}
+      />
+    </CreateSurface>
   )
 }

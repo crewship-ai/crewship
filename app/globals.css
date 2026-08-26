@@ -8,6 +8,8 @@
    *    legal pages render light; main app is dark-first) ── */
   --background: oklch(0.9911 0 0);
   --foreground: oklch(0.1994 0.0470 270.6494);
+  --scrollbar-thumb: oklch(0.80 0 0);
+  --scrollbar-thumb-hover: oklch(0.66 0 0);
   --card: oklch(0.9851 0 0);
   --card-foreground: oklch(0.1994 0.0470 270.6494);
   --popover: oklch(1.0000 0 0);
@@ -153,6 +155,11 @@
    *    border at 0.24 lightness. All in hue 285 (cool purple-blue). ── */
   --background: oklch(0.10 0.008 285);
   --foreground: oklch(1.0000 0 0);
+  /* Scrollbar thumb. Well above --border (0.24) on purpose: a track hint has
+     to be legible against BOTH the background (0.10) and the card (0.155),
+     and a border-weight thumb disappeared on the card. */
+  --scrollbar-thumb: oklch(0.38 0.010 285);
+  --scrollbar-thumb-hover: oklch(0.52 0.012 285);
   --card: oklch(0.155 0.010 285);
   --card-foreground: oklch(0.8853 0 0);
   --popover: oklch(0.155 0.010 285);
@@ -398,6 +405,50 @@ body {
   body {
     @apply bg-background text-foreground;
   }
+
+  /* ── Scrollbars ──────────────────────────────────────────────────
+     Left on the browser default, an overflow region in this theme
+     announced itself with a near-black thumb on a near-black track, and
+     on macOS with nothing at all until you were already scrolling — by
+     which point you knew. Half the surfaces here are lists inside a
+     fixed-height panel, so "is there more below this" is a question the
+     UI has to answer standing still, not on hover.
+
+     Firefox and the WebKit pseudo-elements are both set because
+     `scrollbar-width`/`scrollbar-color` are the only knobs Firefox has,
+     and Chromium honours the pseudo-elements with finer control.
+     `-webkit-scrollbar` styling also opts Chromium/WebKit out of
+     overlay auto-hide, which is the "it vanished before I could
+     screenshot it" half of the complaint. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 999px;
+    /* Transparent border, clipped to the padding box: the thumb reads as
+       a 6px pill inside a 10px gutter without a second element. */
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* `.scrollbar-none` still wins — it is a utility, and utilities layer
+     after base. */
 }
 
 @layer utilities {

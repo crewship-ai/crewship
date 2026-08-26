@@ -31,29 +31,43 @@
  * impossible — UNIQUE(workspace_id, name) meant the second one would have had
  * to be called GH_TOKEN too.
  *
- * LAYOUT. The component owns a three-band flex column — step bar, scrolling
- * body, docked footer — rather than one long scroll. On a phone the dialog is
- * the whole screen (see add-secret-sheet.tsx), and a footer inside the
- * scrollport means "Save secret" is somewhere below a PEM key. The bands are
- * here rather than in the shell because only this file knows which control
- * belongs in which band. Everything visual comes from the detail kit
- * (components/ui/detail) — this dialog predates it and had been inventing its
- * own cards, labels and pills at its own sizes.
+ * LAYOUT. The component owns a three-band column — step bar, scrolling body,
+ * docked footer — rather than one long scroll: a footer inside the scrollport
+ * means "Save secret" is somewhere below a PEM key. The bands are still
+ * chosen here, because only this file knows which control belongs in which
+ * one, but they are now the SHELL's bands (CreateSurfaceSteps /
+ * CreateSurfaceBody / CreateSurfaceFooter, and CreateSurfaceRefusal for what
+ * the server said when it said no) rather than three hand-rolled divs. The
+ * container above them is CreateSurface — see add-secret-sheet.tsx for what
+ * that changed. Inside the body everything visual still comes from the detail
+ * kit (components/ui/detail): the shell owns the room, not the furniture.
+ *
+ * Two things travel back up to the shell, because the shell owns the gestures
+ * and this file owns the state they act on: `dirty` (so Esc, the overlay and
+ * the × ask before throwing a half-typed secret away) and the primary action
+ * (so ⌘↵ does whatever the footer's primary does on the step you are on).
  */
 
 import * as React from "react"
 import {
-  Check, ChevronLeft, ChevronsUpDown, FileText, KeyRound,
-  Plus, ShieldCheck, Terminal, User, X,
+  Braces, Check, ChevronLeft, ChevronsUpDown, FileText, KeyRound,
+  Palette, Plus, ShieldCheck, Tag, Terminal, User, Users, X,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { DetailCard, FieldLabel } from "@/components/ui/detail"
+import {
+  CreateSurfaceBody,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceRefusal,
+  CreateSurfaceSecondaryAction,
+  CreateSurfaceSection,
+  CreateSurfaceSteps,
+} from "@/components/layout/create-surface"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
@@ -70,8 +84,28 @@ import {
 } from "@/lib/credentials/item-types"
 import { isValidEnvVarName, suggestEnvVarName } from "@/lib/env-var-name"
 import { cn } from "@/lib/utils"
+import { ACCENT, type Accent } from "@/lib/concept-accents"
 import { BrandPicker } from "./brand-picker"
 import { CREDENTIAL_TIERS } from "./credential-form"
+
+/**
+ * A colour per shape.
+ *
+ * Not decoration and not arbitrary: the hue follows what the secret IS, so the
+ * same idea wears the same colour wherever it appears. Amber for the bearer
+ * secrets that are simply a string, purple for an identity, gold for a
+ * key-and-id pair, teal for a private key, blue for a file, green for the one
+ * that exists to prove trust. Every value is a token globals.css already
+ * declares — see lib/concept-accents.ts for why none of them is a new one.
+ */
+const SHAPE_ACCENT: Partial<Record<ItemTypeKey, Accent>> = {
+  TOKEN: ACCENT.amber,
+  LOGIN: ACCENT.purple,
+  KEYPAIR: ACCENT.gold,
+  SSH_KEY: ACCENT.teal,
+  FILE: ACCENT.blue,
+  CERTIFICATE: ACCENT.green,
+}
 
 const TYPE_ICON: Record<ItemTypeKey, React.ComponentType<{ className?: string }>> = {
   TOKEN: KeyRound,
@@ -103,14 +137,45 @@ export interface AddCredentialWizardProps {
   onSuccess: () => void
   onCancel: () => void
   knownTags?: string[]
+  /**
+   * Reports whether there is unsaved input, for the shell's discard guard.
+   * Optional so the wizard still renders standalone (and in its own tests)
+   * without a CreateSurface around it.
+   */
+  onDirtyChange?: (dirty: boolean) => void
+  /**
+   * Where the shell picks up ⌘↵. The primary action depends on the step, and
+   * the step lives here.
+   */
+  primaryRef?: React.MutableRefObject<(() => void) | null>
 }
 
 type Step = "type" | "values" | "scope"
 
-const STEP_ORDER: Step[] = ["type", "values", "scope"]
+/** The three steps, in order, as the shell's step bar wants them. */
+const STEPS: { id: Step; label: string }[] = [
+  { id: "type", label: "Shape" },
+  { id: "values", label: "Values" },
+  { id: "scope", label: "Delivery" },
+]
+
+const STEP_ORDER: Step[] = STEPS.map((s) => s.id)
+
+/**
+ * The line a DetailCard used to render in its footer.
+ *
+ * `CreateSurfaceSection` has no footer slot and its `hint` is hidden below the
+ * `sm` breakpoint, which is right for "— optional" and wrong for a sentence
+ * that stops a mistake. These stay visible everywhere.
+ */
+function CardNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="type-meta leading-relaxed text-muted-foreground-soft">{children}</p>
+  )
+}
 
 export function AddCredentialWizard({
-  workspaceId, onSuccess, onCancel, knownTags,
+  workspaceId, onSuccess, onCancel, knownTags, onDirtyChange, primaryRef,
 }: AddCredentialWizardProps) {
   const { abilities } = useAbilities()
   // POST /credentials/bindings is roleManage — OWNER/ADMIN — and the handler
@@ -139,6 +204,11 @@ export function AddCredentialWizard({
   const [crewPopoverOpen, setCrewPopoverOpen] = React.useState(false)
   const [slot, setSlot] = React.useState("")
   const [slotTouched, setSlotTouched] = React.useState(false)
+  // YYYY-MM-DD from the date input, or "" — same shape CredentialForm (the
+  // edit-only surface) already sends as `token_expires_at` on PATCH. Empty
+  // means "no expiry", not "unchanged" — there is nothing to preserve on a
+  // brand-new credential.
+  const [expiresAt, setExpiresAt] = React.useState("")
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [warning, setWarning] = React.useState<string | null>(null)
@@ -200,6 +270,31 @@ export function AddCredentialWizard({
   const blocker = missingRequired ?? (name.trim() ? null : "Name")
   const stepIndex = STEP_ORDER.indexOf(step)
 
+  /**
+   * Is there anything to lose?
+   *
+   * Typed input only. The SHAPE is deliberately not in here: TOKEN is
+   * preselected, and picking "Certificate" without filling anything in is a
+   * choice with no data behind it — prompting for it would teach people to
+   * click through the guard, which is how a guard stops working.
+   */
+  const dirty = Boolean(
+    primaryValue ||
+      username ||
+      accountLabel ||
+      name ||
+      expiresAt ||
+      tagDraft ||
+      tags.length > 0 ||
+      slotTouched ||
+      providerTouched.current ||
+      Object.values(extras).some((v) => v.trim()) ||
+      custom.some((f) => f.key.trim() || f.value.trim()),
+  )
+  React.useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
+
   async function submit() {
     setError(null)
     setWarning(null)
@@ -224,6 +319,12 @@ export function AddCredentialWizard({
       body.security_level = securityLevel
       if (itemType.usernameOnRow && username.trim()) body.username = username.trim()
       if (accountLabel.trim()) body.account_label = accountLabel.trim()
+      // Only when set — an absent key leaves the column NULL, which is what a
+      // brand-new row with no expiry should be. `internal/api/credentials_mutate.go`
+      // writes this straight into `credentials.token_expires_at` (createCredentialRequest.TokenExpires,
+      // json tag "token_expires_at"), same column and same ISO-string shape
+      // EditCredentialDialog already sends on PATCH.
+      if (expiresAt) body.token_expires_at = new Date(expiresAt).toISOString()
       if (scope === "CREW") body.crew_ids = crewIds
 
       const res = await apiFetch(`/api/v1/credentials?workspace_id=${encodeURIComponent(workspaceId)}`, {
@@ -310,29 +411,53 @@ export function AddCredentialWizard({
     }
   }
 
+  /**
+   * What the footer's primary does, which is also what ⌘↵ does. Guarded here
+   * rather than in the shell — CreateSurface fires `onSubmit` unconditionally
+   * and expects the surface to know when it is not submittable.
+   */
+  function primaryAction() {
+    if (submitting) return
+    if (step === "scope") {
+      void submit()
+      return
+    }
+    if (step === "values" && blocker) return
+    setStep(step === "type" ? "values" : "scope")
+  }
+
+  // No dependency array: the action closes over every field, so the shell has
+  // to be handed the current one after each commit rather than a stale one.
+  React.useEffect(() => {
+    if (!primaryRef) return
+    primaryRef.current = primaryAction
+    return () => {
+      primaryRef.current = null
+    }
+  })
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-hairline px-4 py-2.5 sm:px-5">
-        <StepBar
-          index={stepIndex}
-          onGoTo={(s) => { if (STEP_ORDER.indexOf(s) <= stepIndex) setStep(s) }}
-        />
-      </div>
+    <>
+      {/* The landmark is the component's own. This surface wrapped it in a
+          second <nav> back when CreateSurfaceSteps rendered a bare div; it
+          renders the nav itself now, so the wrapper was a nested landmark. */}
+      <CreateSurfaceSteps
+        ariaLabel="Add credential steps"
+        steps={STEPS}
+        current={stepIndex}
+        onJump={(i) => setStep(STEP_ORDER[i])}
+      />
 
       {/* The only scrollport. Everything that has to stay reachable — the step
           bar above, the actions below — lives outside it. */}
-      <div
-        data-testid="wizard-body"
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-5"
-      >
+      <CreateSurfaceBody data-testid="wizard-body" className="space-y-3">
         {step === "type" && (
           <>
-            <div>
-              <FieldLabel>What shape is it?</FieldLabel>
-              <p className="type-meta mt-1 leading-relaxed text-muted-foreground">
+            <CreateSurfaceSection title="What shape is it?" icon={KeyRound} accent="amber">
+              <p className="type-meta leading-relaxed text-muted-foreground">
                 The shape decides which boxes you fill next. Every brand fits one of these.
               </p>
-            </div>
+            </CreateSurfaceSection>
             {/* Two-up on a phone: six tiles in one column is four thumb-swipes
                 to reach Certificate, and three-up leaves 110px of tile for a
                 label plus a blurb. */}
@@ -340,6 +465,7 @@ export function AddCredentialWizard({
               {CREDENTIAL_ITEM_TYPES.map((t) => {
                 const Icon = TYPE_ICON[t.key]
                 const selected = t.key === itemTypeKey
+                const tone = SHAPE_ACCENT[t.key] ?? ACCENT.slate
                 return (
                   <button
                     key={t.key}
@@ -356,13 +482,20 @@ export function AddCredentialWizard({
                         : "border-border/60 bg-card hover:border-border hover:bg-surface-raised",
                     )}
                   >
+                    {/* The glyph carries the shape's own colour whether or not
+                        the tile is selected. Six identical grey squares are
+                        read by their captions every time; six colours are told
+                        apart before the caption is read, which is the whole
+                        job of a pick-one grid. Selection stays the blue
+                        border and fill, so "which is chosen" and "which is
+                        which" never compete for the same channel. */}
                     <span
                       className={cn(
-                        "mb-0.5 flex h-7 w-7 items-center justify-center rounded-lg",
-                        selected ? "bg-primary/20 text-primary" : "bg-surface-raised text-muted-foreground",
+                        "mb-0.5 flex h-7 w-7 items-center justify-center rounded-lg border",
+                        tone.chip,
                       )}
                     >
-                      <Icon className="h-4 w-4" />
+                      <Icon className={cn("h-4 w-4", tone.fg)} />
                     </span>
                     <span className="type-row font-medium leading-tight text-foreground">{t.label}</span>
                     <span className="type-meta leading-snug text-muted-foreground">{t.blurb}</span>
@@ -375,11 +508,7 @@ export function AddCredentialWizard({
                 It is offered here, next to the shape, and it gates nothing —
                 the icon is what the rail and the list draw, not a category the
                 flow makes you choose. */}
-            <DetailCard
-              title="Brand icon"
-              subtitle="optional"
-              footer="Pasting the secret on the next step usually recognises the brand on its own. Setting it here just wins the tie."
-            >
+            <CreateSurfaceSection title="Brand icon" hint="optional" icon={Palette} accent="purple">
               <div className="flex flex-wrap items-center gap-3">
                 <BrandPicker
                   value={provider}
@@ -389,13 +518,17 @@ export function AddCredentialWizard({
                   The face this credential wears everywhere it is listed.
                 </span>
               </div>
-            </DetailCard>
+              <CardNote>
+                Pasting the secret on the next step usually recognises the brand on its own. Setting it
+                here just wins the tie.
+              </CardNote>
+            </CreateSurfaceSection>
           </>
         )}
 
         {step === "values" && (
           <>
-            <DetailCard title="The secret" subtitle={itemType.label.toLowerCase()} icon={ItemIcon}>
+            <CreateSurfaceSection title="The secret" hint={itemType.label.toLowerCase()} icon={ItemIcon} accent="amber">
               <div className="space-y-3">
                 <SecretField
                   id="cred-primary"
@@ -477,12 +610,9 @@ export function AddCredentialWizard({
                   </div>
                 )}
               </div>
-            </DetailCard>
+            </CreateSurfaceSection>
 
-            <DetailCard
-              title="Identity"
-              footer="The name is a human label for the account. It does not have to be the variable name — that is the slot, on the next step."
-            >
+            <CreateSurfaceSection title="Identity" icon={Tag} accent="blue">
               <div className="space-y-3">
                 <div className="space-y-1.5">
                   {/* Wraps: "NAME (WHICH ACCOUNT)" is ~170px of wide-tracked
@@ -509,10 +639,7 @@ export function AddCredentialWizard({
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="cred-account-label" className="type-section text-muted-foreground">
-                    Account label (optional)
-                  </Label>
+                <CreateSurfaceField label="Account label" hint="optional" htmlFor="cred-account-label">
                   <Input
                     id="cred-account-label"
                     placeholder="acme-bot"
@@ -520,13 +647,12 @@ export function AddCredentialWizard({
                     onChange={(e) => setAccountLabel(e.target.value)}
                     className={FIELD}
                   />
-                </div>
+                </CreateSurfaceField>
 
                 {/* Tags stay on the create path: they drive the rail's Tag facet,
                     and a credential that can only be tagged after the fact tends
                     never to be. */}
-                <div className="space-y-1.5">
-                  <Label htmlFor="cred-tags" className="type-section text-muted-foreground">Tags (optional)</Label>
+                <CreateSurfaceField label="Tags" hint="optional" htmlFor="cred-tags">
                   <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1.5 sm:min-h-9">
                     {tags.map((t) => (
                       <Badge key={t} variant="outline" className="gap-1 type-meta font-mono">
@@ -562,28 +688,27 @@ export function AddCredentialWizard({
                       </datalist>
                     )}
                   </div>
-                </div>
+                </CreateSurfaceField>
               </div>
-            </DetailCard>
+              <CardNote>
+                The name is a human label for the account. It does not have to be the variable name —
+                that is the slot, on the next step.
+              </CardNote>
+            </CreateSurfaceSection>
 
-            <DetailCard
-              title="Extra fields"
-              subtitle="optional"
-              footer="Anything else that travels with this credential — a tenant id, an endpoint. Each part is stored separately and can be secret or plain."
-            >
+            <CreateSurfaceSection title="Extra fields" hint="optional" icon={Plus} accent="slate">
               <CustomFields fields={custom} onChange={setCustom} />
-            </DetailCard>
+              <CardNote>
+                Anything else that travels with this credential — a tenant id, an endpoint. Each part is
+                stored separately and can be secret or plain.
+              </CardNote>
+            </CreateSurfaceSection>
           </>
         )}
 
         {step === "scope" && (
           <>
-            <DetailCard
-              title="Who gets it"
-              footer={scope === "CREW"
-                ? "Every agent in the selected crews receives it — including agents created later."
-                : "Every agent in the workspace receives it — including agents created later."}
-            >
+            <CreateSurfaceSection title="Who gets it" icon={Users} accent="teal">
               <div className="space-y-3">
                 {/* Grouped rather than labelled: the card header already says
                     "Who gets it", and a second sr-only <label> pointing at
@@ -601,8 +726,7 @@ export function AddCredentialWizard({
                 </div>
 
                 {scope === "CREW" && (
-                  <div className="space-y-1.5">
-                    <Label className="type-section text-muted-foreground">Crews</Label>
+                  <CreateSurfaceField label="Crews">
                     <Popover open={crewPopoverOpen} onOpenChange={setCrewPopoverOpen}>
                       <PopoverTrigger asChild>
                         <Button variant="outline" role="combobox" className="h-10 w-full justify-between font-normal text-sm sm:h-9">
@@ -636,15 +760,24 @@ export function AddCredentialWizard({
                         </Command>
                       </PopoverContent>
                     </Popover>
-                  </div>
+                  </CreateSurfaceField>
                 )}
               </div>
-            </DetailCard>
+              <CardNote>
+                {scope === "CREW"
+                  ? "Every agent in the selected crews receives it — including agents created later."
+                  : "Every agent in the workspace receives it — including agents created later."}
+              </CardNote>
+            </CreateSurfaceSection>
 
             {/* Keeper tier. On this step rather than a fourth one: "who gets it" and
                 "how hard is it to get" are the same decision, and splitting them
                 would put the tier behind another click nobody takes. */}
-            <DetailCard title="Keeper tier" tone={securityLevel >= 4 ? "warn" : "default"}>
+            <CreateSurfaceSection
+              title="Keeper tier"
+              icon={ShieldCheck}
+              accent={securityLevel >= 4 ? "amber" : "green"}
+            >
               <div className="space-y-2.5">
                 <div
                   role="group"
@@ -674,22 +807,39 @@ export function AddCredentialWizard({
                 )}>
                   {CREDENTIAL_TIERS.find((t) => t.level === securityLevel)?.consequence}
                 </p>
-              </div>
-            </DetailCard>
 
-            <DetailCard
-              title="Env var slot"
-              footer={canBind
-                ? (suggestedSlot && !slotTouched
-                  ? "Suggested from the detected brand. Overwrite it freely — this is a hint, not a rule."
-                  : "Leave it empty to deliver the credential under its own name.")
-                : undefined}
-            >
+                {/* Same column the tier lives in, same section — "how hard is
+                    it to get" and "how long is it good for" are both about
+                    what this secret costs to keep around. Wired to
+                    `token_expires_at`, which the create request already
+                    accepts (internal/api/credentials_mutate.go) and which
+                    /credentials' "Expiring" KPI and 30-day warning read. */}
+                <CreateSurfaceField
+                  label="Expires on"
+                  hint="optional — drives the “Expiring” KPI and the 30-day warning on the credential list"
+                  htmlFor="cred-expires"
+                >
+                  <input
+                    id="cred-expires"
+                    type="date"
+                    value={expiresAt}
+                    onChange={(e) => setExpiresAt(e.target.value)}
+                    className={cn(
+                      FIELD,
+                      "w-[180px] rounded-md border border-border/60 bg-background px-2.5 font-mono text-foreground outline-none focus:border-primary",
+                    )}
+                  />
+                </CreateSurfaceField>
+              </div>
+            </CreateSurfaceSection>
+
+            <CreateSurfaceSection title="Env var slot" icon={Braces} accent="gold">
               {canBind ? (
-                <div className="space-y-1.5">
-                  <Label htmlFor="cred-slot" className="type-section text-muted-foreground">
-                    Slot — the variable the container sees
-                  </Label>
+                <CreateSurfaceField
+                  label="Slot"
+                  hint="the variable the container sees"
+                  htmlFor="cred-slot"
+                >
                   <Input
                     id="cred-slot"
                     placeholder="GH_TOKEN"
@@ -697,7 +847,7 @@ export function AddCredentialWizard({
                     onChange={(e) => { setSlotTouched(true); setSlot(e.target.value) }}
                     className={cn(FIELD, "font-mono")}
                   />
-                </div>
+                </CreateSurfaceField>
               ) : (
                 <p className="type-meta leading-relaxed text-muted-foreground">
                   Choosing the variable name (the slot) is a workspace-admin action, so this credential
@@ -721,156 +871,70 @@ export function AddCredentialWizard({
                   )}
                 </div>
               ) : null}
-            </DetailCard>
+              {canBind && (
+                <CardNote>
+                  {suggestedSlot && !slotTouched
+                    ? "Suggested from the detected brand. Overwrite it freely — this is a hint, not a rule."
+                    : "Leave it empty to deliver the credential under its own name."}
+                </CardNote>
+              )}
+            </CreateSurfaceSection>
           </>
         )}
-      </div>
+      </CreateSurfaceBody>
 
-      {/* Docked. On a phone this is the only part of the dialog guaranteed to
-          be on screen, so it also carries whatever is blocking the next move —
-          a dead Continue button eight fields below the fold explains nothing. */}
-      <div
-        data-testid="wizard-footer"
-        className={cn(
-          "shrink-0 space-y-2 border-t border-hairline bg-surface-subtle/60 px-4 py-3 sm:px-5",
-          "max-sm:pb-[max(0.75rem,env(safe-area-inset-bottom))]",
-        )}
-      >
+      {/* Docked, and outside the scrollport for the same reason the buttons
+          are: on a phone this is the only part of the surface guaranteed to be
+          on screen, so it also carries whatever is blocking the next move — a
+          dead Continue button eight fields below the fold explains nothing.
+          The wrapper is one band stack, not a second footer; each strip draws
+          its own top rule the way CreateSurfaceRefusal does. */}
+      <div data-testid="wizard-footer" className="shrink-0">
         {step === "values" && blocker && (
-          <p className="type-meta text-muted-foreground">
+          <p className="border-t border-hairline px-4 py-2 type-meta text-muted-foreground sm:px-5">
             <span className="font-medium text-foreground/80">{blocker}</span> is still empty.
           </p>
         )}
-        {error && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/[0.05] px-3 py-2 type-meta leading-relaxed break-words text-destructive">
-            {error}
-          </div>
-        )}
+
+        {/* The shell's refusal band: a 409 on the name is the one thing here
+            that must not be scrolled past or faded out. */}
+        <CreateSurfaceRefusal message={error} />
+
         {/* Bounded: a partial-save warning quotes whatever the server said
             about every part that failed, and an unbounded one would push the
             buttons it belongs to off a phone. */}
         {warning && (
-          <div className="max-h-24 overflow-y-auto rounded-md border border-warn/40 bg-warn/[0.06] px-3 py-2 type-meta leading-relaxed break-words">
+          <div className="max-h-24 overflow-y-auto border-t border-warn/40 bg-warn/[0.06] px-4 py-2.5 type-meta leading-relaxed break-words sm:px-5">
             {warning}
           </div>
         )}
 
-        <div className="flex items-center gap-2">
-          {step === "type" ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="max-sm:h-11 max-sm:flex-1"
-              onClick={onCancel}
-            >
-              Cancel
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="max-sm:h-11 max-sm:flex-1"
-              disabled={submitting}
-              onClick={() => setStep(step === "scope" ? "values" : "type")}
-            >
-              <ChevronLeft className="mr-1 h-3.5 w-3.5" /> Back
-            </Button>
-          )}
-
-          {step === "scope" ? (
-            <Button
-              type="button"
-              size="sm"
-              className="ml-auto max-sm:h-11 max-sm:flex-1"
-              onClick={submit}
-              disabled={submitting}
-            >
-              {submitting && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
-              Save secret
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              className="ml-auto max-sm:h-11 max-sm:flex-1"
-              disabled={step === "values" && Boolean(blocker)}
-              onClick={() => setStep(step === "type" ? "values" : "scope")}
-            >
-              Continue
-            </Button>
-          )}
-        </div>
+        <CreateSurfaceFooter
+          hint={
+            <>
+              <kbd className="font-mono">⌘↵</kbd> to {step === "scope" ? "save" : "continue"} ·{" "}
+              <kbd className="font-mono">Esc</kbd> to cancel
+            </>
+          }
+          onCancel={onCancel}
+          secondary={
+            step === "type" ? undefined : (
+              <CreateSurfaceSecondaryAction
+                icon={ChevronLeft}
+                disabled={submitting}
+                onClick={() => setStep(step === "scope" ? "values" : "type")}
+              >
+                Back
+              </CreateSurfaceSecondaryAction>
+            )
+          }
+          primaryLabel={step === "scope" ? "Save secret" : "Continue"}
+          onPrimary={primaryAction}
+          primaryDisabled={step === "values" && Boolean(blocker)}
+          busy={submitting}
+        />
       </div>
-    </div>
-  )
-}
-
-const STEP_LABELS = ["Shape", "Values", "Delivery"] as const
-
-/**
- * Where you are, and the way back.
- *
- * Three pills tinted by state was the whole of it before, which told a screen
- * reader nothing and told a phone to wrap. The state is in `aria-current` now,
- * a finished step is a real target (nothing here is destructive, and being
- * unable to go back and change the shape was the flow's sharpest edge), and
- * below `sm` only the current label takes horizontal space — the others stay
- * in the accessibility tree via sr-only, so the buttons keep their names.
- */
-function StepBar({ index, onGoTo }: { index: number; onGoTo: (s: Step) => void }) {
-  return (
-    <nav aria-label="Add credential steps">
-      <ol className="flex items-center gap-2">
-        {STEP_ORDER.map((key, i) => {
-          const done = i < index
-          const current = i === index
-          return (
-            <React.Fragment key={key}>
-              {i > 0 && (
-                <li aria-hidden="true" className="min-w-3 flex-1">
-                  <span className={cn("block h-px rounded", done || current ? "bg-primary/40" : "bg-border/60")} />
-                </li>
-              )}
-              <li>
-                <button
-                  type="button"
-                  disabled={i > index}
-                  aria-current={current ? "step" : undefined}
-                  onClick={() => onGoTo(key)}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-full border py-1 pl-1 pr-2.5 transition-colors",
-                    "disabled:cursor-default disabled:opacity-70",
-                    current
-                      ? "border-primary/40 bg-primary/10 text-foreground"
-                      : done
-                        ? "border-success/30 text-success hover:border-success/60"
-                        : "border-border/60 text-muted-foreground",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "flex h-5 w-5 shrink-0 items-center justify-center rounded-full type-meta font-semibold leading-none",
-                      current
-                        ? "bg-primary text-primary-foreground"
-                        : done
-                          ? "bg-success/20 text-success"
-                          : "bg-surface-raised text-muted-foreground-soft",
-                    )}
-                  >
-                    {done ? <Check className="h-3 w-3" /> : i + 1}
-                  </span>
-                  <span className={cn("type-meta font-medium", !current && "max-sm:sr-only")}>
-                    {STEP_LABELS[i]}
-                  </span>
-                </button>
-              </li>
-            </React.Fragment>
-          )
-        })}
-      </ol>
-    </nav>
+    </>
   )
 }
 

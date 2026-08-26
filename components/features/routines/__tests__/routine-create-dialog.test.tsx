@@ -45,10 +45,23 @@ describe("<RoutineCreateDialog>", () => {
     expect(editorProps[editorProps.length - 1].code).toContain("dsl_version:")
   })
 
-  it("shows the step graph beside the code", () => {
+  it("opens on the code, with the graph one click away", () => {
+    // They used to sit side by side. With the identity aside also on screen
+    // that is three columns inside an 800px surface — the graph got ~240px
+    // and the code ~52% of the rest, so the thing you come here to do (type
+    // a DSL) was the narrower of the two. Code leads; the graph is a reading
+    // of it.
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
+
+    expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("radio", { name: "Preview" }))
     expect(screen.getByTestId("graph")).toBeInTheDocument()
+
+    // And back, without losing the buffer — it is a look, not a mode.
+    fireEvent.click(screen.getByRole("radio", { name: "Code" }))
+    expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
   })
 
   it("hides the test-gate escape hatch from a role the server would refuse", () => {
@@ -70,5 +83,36 @@ describe("<RoutineCreateDialog>", () => {
     // It never stepped. It was one text field.
     render(<RoutineCreateDialog {...PROPS} />)
     expect(screen.queryByText(/step by step/i)).not.toBeInTheDocument()
+  })
+})
+
+// ── The entry tiles are three routes, not one route and two greys ────────
+//
+// Two of the three carried accent="slate" and no meta, so the picker read as
+// "the blue one, and some other options". /design gives each route its own
+// colour and says in a word what you trade: fastest, or full control.
+describe("New routine — the three entry tiles", () => {
+  function tile(name: RegExp) {
+    return screen.getByRole("button", { name }) as HTMLButtonElement
+  }
+
+  it("gives each route a colour of its own", () => {
+    render(<RoutineCreateDialog {...PROPS} />)
+    const glyphTint = (name: RegExp) =>
+      tile(name).querySelector("span")?.className ?? ""
+
+    const describe_ = glyphTint(/^Describe it/)
+    const fork = glyphTint(/^Fork an existing routine/)
+    const write = glyphTint(/^Write it yourself/)
+
+    expect(describe_).not.toBe(fork)
+    expect(fork).not.toBe(write)
+    expect(write).not.toBe(describe_)
+  })
+
+  it("says what each route trades rather than marking one with a sparkle", () => {
+    render(<RoutineCreateDialog {...PROPS} />)
+    expect(tile(/^Describe it/).textContent).toMatch(/fastest/i)
+    expect(tile(/^Write it yourself/).textContent).toMatch(/full control/i)
   })
 })

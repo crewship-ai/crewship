@@ -7,15 +7,17 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Spinner } from "@/components/ui/spinner"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CREATE_SURFACE_INPUT,
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceRefusal,
+  CreateSurfaceSection,
+  CreateSurfaceToggleRow,
+} from "@/components/layout/create-surface"
 import {
   Select,
   SelectContent,
@@ -23,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
 import { NOTIFICATION_CATEGORY_GROUPS } from "@/lib/notification-categories"
 import { ProviderForm } from "./provider-form"
 import type {
@@ -42,6 +45,34 @@ import type {
  * a dropdown mid-form. Here the catalog answers "what can I connect", and this
  * dialog answers "connect this one" — with the service already chosen, so the
  * first question is never "which of these 11 do I want".
+ *
+ * The chrome is `CreateSurface` (components/layout/create-surface.tsx), at
+ * size `md`. It used to be a bare `sm:max-w-lg` DialogContent with its own
+ * `max-h-[85vh] overflow-y-auto` — which put the FOOTER INSIDE THE SCROLLPORT,
+ * so on a short viewport "Connect" was below the 18-checkbox category matrix
+ * and you had to scroll past everything to find it. That is the defect the
+ * shell's fixed footer exists to prevent.
+ *
+ * This is the step the catalog hands off to, and until now only the catalog
+ * had been migrated: picking Slack in a unified surface opened an old-style
+ * one, which is worse than not having migrated either. Notes on the parts that
+ * are not a straight swap:
+ *
+ *  · SEND TEST STAYS IN THE BODY. It belongs to the provider's fields (it
+ *    tests exactly those, unsaved) and it is not this surface's primary —
+ *    `Connect` is. Promoting it to the footer's `secondary` would put a
+ *    non-committing action next to the committing one.
+ *  · EVERY CHECKBOX IS NAMED BY ITS OWN `<label htmlFor>` — the eighteen
+ *    category cells and the personal-connection row alike.
+ *    `CreateSurfaceToggleRow` renders its label as plain text in a `<div>`, so
+ *    a bare Checkbox in its `control` slot has no accessible name at all, and
+ *    the words beside it are not a tap target either.
+ *  · THE FAILURE PATH keeps its toast AND gains the refusal band. The toast is
+ *    the notification the rest of the app uses; the band is the one that does
+ *    not fade while you are still reading the form it refused.
+ *  · THE ONE-TIME SECRET REVEAL replaces the body and hides the footer, as it
+ *    did before: at that point there is nothing left to submit, and `Done` is
+ *    the only way forward.
  */
 
 export type ChannelKindChoice = "shoutrrr" | "email" | "webhook"
@@ -82,6 +113,16 @@ export function AddChannelDialog({
   const [minPriority, setMinPriority] = React.useState<"low" | "medium" | "high" | "urgent">("low")
   const [creating, setCreating] = React.useState(false)
   const [revealed, setRevealed] = React.useState<string | null>(null)
+  // What the server said when it said no. Shown in the shell's band, which
+  // sits outside the scrollport; the toast below it is kept because it is the
+  // notification the rest of the app uses, but the toast is what fades.
+  const [refusal, setRefusal] = React.useState<string | null>(null)
+
+  const ids = React.useId()
+  const destinationId = `${ids}-destination`
+  const secretId = `${ids}-secret`
+  const personalId = `${ids}-personal`
+  const priorityId = `${ids}-priority`
 
   // Reset every time a different service is picked: field keys differ per
   // provider, and carrying a stale webhook_url into Telegram would submit a
@@ -95,6 +136,7 @@ export function AddChannelDialog({
     setMinPriority("low")
     setPersonal(!canCreateWorkspace)
     setRevealed(null)
+    setRefusal(null)
   }, [target, canCreateWorkspace])
 
   const spec = target?.provider ? providers.find((p) => p.provider === target.provider) : undefined
@@ -106,9 +148,22 @@ export function AddChannelDialog({
       : destination.trim() !== ""
     : false
 
+  // Only what the person typed or ticked counts. The reveal is NOT dirty: the
+  // channel is already saved by then, so prompting to "discard" it on Esc
+  // would name something that no longer exists.
+  const dirty =
+    revealed === null &&
+    (Object.values(fields).some((v) => v.trim() !== "") ||
+      destination.trim() !== "" ||
+      secret.trim() !== "" ||
+      categories.length > 0 ||
+      minPriority !== "low" ||
+      personal !== !canCreateWorkspace)
+
   const submit = async () => {
-    if (!target || !ready) return
+    if (!target || !ready || creating) return
     setCreating(true)
+    setRefusal(null)
     try {
       const body: ChannelCreateBody =
         target.kind === "shoutrrr"
@@ -137,7 +192,9 @@ export function AddChannelDialog({
         onClose()
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add the connection")
+      const message = e instanceof Error ? e.message : "Failed to add the connection"
+      setRefusal(message)
+      toast.error(message)
     } finally {
       setCreating(false)
     }
@@ -146,22 +203,34 @@ export function AddChannelDialog({
   if (!target) return null
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="text-sm">Connect {target.label}</DialogTitle>
-          <DialogDescription className="text-xs">
-            {spec?.blurb ??
-              (target.kind === "webhook"
-                ? "Crewship POSTs a signed payload to an endpoint you control."
-                : "Crewship sends to this address using the instance's mail transport.")}
-          </DialogDescription>
-        </DialogHeader>
+    <CreateSurface
+      open
+      onOpenChange={(open) => !open && onClose()}
+      size="md"
+      dirty={dirty}
+      discardLabel="this connection"
+      // ⌘↵ comes from the shell. `submit` keeps its own readiness guard because
+      // the keyboard route reaches it while the footer's primary is disabled.
+      onSubmit={() => void submit()}
+    >
+      <CreateSurfaceHeader
+        concept="integrations"
+        context="Integrations"
+        title={`Connect ${target.label}`}
+        description={
+          spec?.blurb ??
+          (target.kind === "webhook"
+            ? "Crewship POSTs a signed payload to an endpoint you control."
+            : "Crewship sends to this address using the instance's mail transport.")
+        }
+        onClose={onClose}
+      />
 
+      <CreateSurfaceBody className="flex flex-col gap-4">
         {revealed ? (
           <SecretReveal secret={revealed} onDone={onClose} />
         ) : (
-          <div className="space-y-4">
+          <>
             {target.kind === "shoutrrr" && spec && (
               <ProviderForm
                 provider={spec}
@@ -174,15 +243,17 @@ export function AddChannelDialog({
             )}
 
             {target.kind !== "shoutrrr" && (
-              <Field
+              <CreateSurfaceField
                 label={target.kind === "webhook" ? "Endpoint URL" : "Email address"}
-                help={
+                htmlFor={destinationId}
+                hint={
                   target.kind === "webhook"
                     ? "Must be reachable from this instance. We sign every POST with an HMAC."
                     : "Where the notification is delivered."
                 }
               >
                 <Input
+                  id={destinationId}
                   value={destination}
                   onChange={(e) => setDestination(e.target.value)}
                   type={target.kind === "email" ? "email" : "url"}
@@ -191,94 +262,124 @@ export function AddChannelDialog({
                       ? "https://example.com/hooks/crewship"
                       : "ops@example.com"
                   }
-                  className="h-8 text-xs"
+                  className={CREATE_SURFACE_INPUT}
                 />
-              </Field>
+              </CreateSurfaceField>
             )}
 
             {target.kind === "webhook" && (
-              <Field
+              <CreateSurfaceField
                 label="Signing secret"
-                help="Leave blank and we generate one, shown once after you save."
+                htmlFor={secretId}
+                hint="Leave blank and we generate one, shown once after you save."
               >
                 <Input
+                  id={secretId}
                   value={secret}
                   onChange={(e) => setSecret(e.target.value)}
                   type="password"
                   autoComplete="off"
                   placeholder="(auto-generate)"
-                  className="h-8 text-xs"
+                  className={CREATE_SURFACE_INPUT}
                 />
-              </Field>
+              </CreateSurfaceField>
             )}
 
-            <label className="flex cursor-pointer items-start gap-2">
-              <Checkbox
-                checked={personal}
-                disabled={!canCreateWorkspace}
-                onCheckedChange={(c) => {
-                  const next = c === true
-                  setPersonal(next)
-                  // An admin allowlist is meaningless on a channel only its
-                  // owner can route to.
-                  if (next) setCategories([])
-                }}
-                className="mt-0.5"
-              />
-              <span className="text-[11px] leading-relaxed text-muted-foreground">
-                <span className="flex items-center gap-1 font-medium text-foreground/85">
-                  <User className="size-3" /> Personal connection
-                </span>
-                {canCreateWorkspace
+            {/* The label is a real <label htmlFor> inside the row's label
+                slot, which is the same workaround skills/import-dialog.tsx
+                landed on: CreateSurfaceToggleRow renders its label as plain
+                text in a <div>, so a bare Checkbox in `control` has no
+                accessible name and the words are not a tap target. */}
+            <CreateSurfaceToggleRow
+              icon={User}
+              accent="teal"
+              label={
+                <label htmlFor={personalId} className="cursor-pointer">
+                  Personal connection
+                </label>
+              }
+              hint={
+                canCreateWorkspace
                   ? "Only you can route to it, and only you see it. Leave unchecked to share it with the workspace."
-                  : "Workspace-wide connections need the ADMIN or OWNER role, so this one is yours alone."}
-              </span>
-            </label>
+                  : "Workspace-wide connections need the ADMIN or OWNER role, so this one is yours alone."
+              }
+              control={
+                <Checkbox
+                  id={personalId}
+                  checked={personal}
+                  disabled={!canCreateWorkspace}
+                  onCheckedChange={(c) => {
+                    const next = c === true
+                    setPersonal(next)
+                    // An admin allowlist is meaningless on a channel only its
+                    // owner can route to.
+                    if (next) setCategories([])
+                  }}
+                />
+              }
+            />
 
             {!personal && (
               <>
-                <Field
+                <CreateSurfaceField
                   label="Categories"
-                  help="Which categories anyone may route here. Leave empty to allow every category."
+                  hint="Which categories anyone may route here. Leave empty to allow every category."
                 >
-                  <div className="flex max-h-44 flex-col gap-2 overflow-y-auto rounded-md border border-white/[0.07] p-2">
+                  {/* A nested scrollport, as before: eighteen cells unrolled
+                      into the body push the rest of the form off the surface,
+                      and the footer no longer moves with it. */}
+                  <div className="flex max-h-44 flex-col gap-3 overflow-y-auto overscroll-contain rounded-md border border-hairline p-2">
                     {NOTIFICATION_CATEGORY_GROUPS.map((group) => (
-                      <div key={group.key} className="flex flex-col gap-1">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground/45">
-                          {group.label}
-                        </span>
-                        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-                          {group.categories.map((cat) => (
-                            <label
-                              key={cat.key}
-                              className="flex cursor-pointer items-center gap-1.5"
-                              title={cat.hint}
-                            >
-                              <Checkbox
-                                checked={categories.includes(cat.key)}
-                                onCheckedChange={() =>
-                                  setCategories((prev) =>
-                                    prev.includes(cat.key)
-                                      ? prev.filter((c) => c !== cat.key)
-                                      : [...prev, cat.key],
-                                  )
-                                }
-                              />
-                              <span className="text-[11px] text-muted-foreground">{cat.label}</span>
-                            </label>
-                          ))}
+                      <CreateSurfaceSection key={group.key} title={group.label} className="gap-1.5">
+                        <div className="flex flex-wrap gap-x-3 gap-y-2">
+                          {group.categories.map((cat) => {
+                            const id = `${ids}-cat-${cat.key}`
+                            return (
+                              <div key={cat.key} className="flex items-center gap-1.5" title={cat.hint}>
+                                <Checkbox
+                                  id={id}
+                                  checked={categories.includes(cat.key)}
+                                  onCheckedChange={() =>
+                                    setCategories((prev) =>
+                                      prev.includes(cat.key)
+                                        ? prev.filter((c) => c !== cat.key)
+                                        : [...prev, cat.key],
+                                    )
+                                  }
+                                />
+                                <label
+                                  htmlFor={id}
+                                  className="cursor-pointer text-[11px] text-muted-foreground"
+                                >
+                                  {cat.label}
+                                </label>
+                              </div>
+                            )
+                          })}
                         </div>
-                      </div>
+                      </CreateSurfaceSection>
                     ))}
                   </div>
-                </Field>
+                </CreateSurfaceField>
 
-                <Field label="Priority floor" help="Skip anything below this priority.">
+                <CreateSurfaceField
+                  label="Priority floor"
+                  htmlFor={priorityId}
+                  hint="Skip anything below this priority."
+                >
                   <Select
                     value={minPriority}
                     onValueChange={(v) => setMinPriority(v as typeof minPriority)}
                   >
-                    <SelectTrigger className="h-8 w-[180px] text-xs">
+                    {/* aria-label as well as the field's <label htmlFor>: the
+                        trigger is a <button>, and HTML-AAM does not name a
+                        button from an associated label the way it does an
+                        <input>. Without this the combobox is anonymous. */}
+                    <SelectTrigger
+                      id={priorityId}
+                      aria-label="Priority floor"
+                      className={cn(CREATE_SURFACE_INPUT, "w-[180px]")}
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -296,49 +397,27 @@ export function AddChannelDialog({
                       </SelectItem>
                     </SelectContent>
                   </Select>
-                </Field>
+                </CreateSurfaceField>
               </>
             )}
-          </div>
+          </>
         )}
+      </CreateSurfaceBody>
 
-        {!revealed && (
-          <DialogFooter>
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              variant="soft"
-              size="sm"
-              className="h-7 gap-1.5 text-xs"
-              disabled={!ready || creating}
-              onClick={submit}
-            >
-              {creating ? <Spinner className="size-3" /> : <Plus className="h-3 w-3" />}
-              Connect
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
-    </Dialog>
-  )
-}
+      <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
-function Field({
-  label,
-  help,
-  children,
-}: {
-  label: string
-  help?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="text-[11px] font-medium text-foreground/85">{label}</div>
-      {children}
-      {help && <p className="text-[11px] leading-relaxed text-muted-foreground">{help}</p>}
-    </div>
+      {!revealed && (
+        <CreateSurfaceFooter
+          onCancel={onClose}
+          guardCancel
+          primaryLabel="Connect"
+          primaryIcon={Plus}
+          onPrimary={() => void submit()}
+          primaryDisabled={!ready}
+          busy={creating}
+        />
+      )}
+    </CreateSurface>
   )
 }
 
@@ -369,7 +448,12 @@ function SecretReveal({ secret, onDone }: { secret: string; onDone: () => void }
         Verify the <code className="font-mono">X-Crewship-Signature</code> HMAC with this secret.
         We cannot show it again.
       </p>
-      <Button variant="soft" size="sm" className="h-7 text-xs" onClick={onDone}>
+      <Button
+        variant="soft"
+        size="sm"
+        className="h-8 text-xs max-sm:h-12 max-sm:text-sm"
+        onClick={onDone}
+      >
         Done
       </Button>
     </div>

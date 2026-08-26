@@ -40,17 +40,33 @@
  *     never destroy the state a retry needs). What this file lints is additive
  *     and never blocks Save: an inline warning is a hint, not a second gate that
  *     can disagree with the first.
+ *
+ * The chrome around all three is NOT this file's any more. It used to be a
+ * hand-rolled `fixed inset-0` with `bg-background/70 backdrop-blur-md` at
+ * 1100px — one of the two surfaces in the product that was not a Radix Dialog
+ * at all, and therefore one of the two with no focus trap. It now mounts
+ * `components/layout/create-surface.tsx` at `xl`, which supplies the overlay,
+ * the focus trap, Esc, ⌘↵, the phone bottom sheet and the discard guard. The
+ * guard is the one worth naming: this file hand-rolled a whole modal to get it
+ * (`confirmDiscard`), and it is now one `dirty` prop, wired to the same
+ * `dirty || save.isPending` condition for the same reason.
  */
 
 import * as React from "react"
-import { AlertCircle, Loader2, Save, X } from "lucide-react"
+import { AlertCircle, Loader2, Save } from "lucide-react"
 import { toast } from "sonner"
 import { linter, type Diagnostic } from "@codemirror/lint"
 import type { Extension } from "@codemirror/state"
 import type { EditorView } from "@codemirror/view"
 import { isMap, isSeq, parseDocument, stringify as stringifyYaml, type Node } from "yaml"
 
-import { Button } from "@/components/ui/button"
+import {
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceRefusal,
+} from "@/components/layout/create-surface"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { ApiMutationError, useApiMutation } from "@/hooks/use-api-mutation"
 import { pagesKeys, type WirePage, type WirePanel } from "@/hooks/use-pages"
@@ -877,22 +893,21 @@ export function PageEditor({
   // length not to destroy a buffer a retry needs (#1563 rule 3); a stray click
   // on the backdrop would undo all of it, and the misclick is the likeliest
   // way to lose a spec that was never on disk.
-  const [confirmDiscard, setConfirmDiscard] = React.useState(false)
-  const requestClose = () => {
-    // `dirty || save.isPending`, not `dirty && !save.isPending`.
-    //
-    // The guard was skipped during a save — the one moment it is most needed.
-    // The Save button is disabled while pending, but the backdrop and Cancel
-    // are not, so: type a spec, Save, click Cancel, and the editor unmounts
-    // with the request still in flight. If the server then refuses it,
-    // setRefusal runs on an unmounted component (a no-op) and the buffer the
-    // author would have edited is gone — the #1563 rule this block cites.
-    if (dirty || save.isPending) {
-      setConfirmDiscard(true)
-      return
-    }
-    onClose()
-  }
+  //
+  // `dirty || save.isPending`, not `dirty && !save.isPending`.
+  //
+  // The guard used to be skipped during a save — the one moment it is most
+  // needed. The Save button is disabled while pending, but the overlay and
+  // Cancel are not, so: type a spec, Save, click Cancel, and the editor
+  // unmounts with the request still in flight. If the server then refuses it,
+  // setRefusal runs on an unmounted component (a no-op) and the buffer the
+  // author would have edited is gone — the #1563 rule this file cites.
+  //
+  // The condition is unchanged; what changed is who enforces it. This file used
+  // to guard only the routes it drew (its own backdrop, its own Cancel), and
+  // the shell now guards Esc and the overlay too, which are the two a per-page
+  // guard structurally cannot reach.
+  const guardedDirty = dirty || save.isPending
 
   const handleDocChange = (next: string) => {
     bufferRef.current = next
@@ -906,6 +921,11 @@ export function PageEditor({
   }
 
   const handleSave = () => {
+    // ⌘↵ reaches this from anywhere in the surface, including from inside the
+    // editor, so the two conditions that disable the button have to hold here
+    // too. The shell's contract: "No-op when the form is not submittable —
+    // guard inside the handler."
+    if (save.isPending || sealed > 0) return
     // Pull the latest doc out of CodeMirror first: FileEditor only hands its
     // buffer back through onSave, and reading React state here would send the
     // value from before the last keystroke.
@@ -936,22 +956,39 @@ export function PageEditor({
   const title = mode === "create" ? "New page" : `Edit ${page?.slug ?? "page"}`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8">
-      <button
-        type="button"
-        aria-label="Close the page editor"
-        onClick={requestClose}
-        className="absolute inset-0 bg-background/70 backdrop-blur-md"
-      />
-      <div
-        role="dialog"
-        aria-label={title}
-        className="relative flex h-full max-h-[92vh] w-full max-w-[1100px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl"
-      >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
-          <div className="type-page-meta flex items-center gap-2.5 text-muted-foreground">
-            <span className="font-medium text-foreground">{title}</span>
-            <span className="opacity-60">·</span>
+    <CreateSurface
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+      dirty={guardedDirty}
+      discardLabel="this document"
+      // Fixed for this surface's whole life. It was 1100px, which is not one of
+      // the four; a YAML buffer with line numbers is the widest thing the shell
+      // has a size for.
+      size="xl"
+      // The shell caps this surface with `max-height` only (`sm:max-h-[min(85vh,720px)]`,
+      // `max-sm:max-h-[92dvh]`) and never gives it a definite `height`. That is fine for
+      // every other door — their content sizes itself and the dialog shrinks to fit — but
+      // this is the one door whose body is `flex-1` around an `absolute inset-0` CodeMirror
+      // mount (see the comment on that div below). An absolutely positioned child has no
+      // intrinsic size, so with no definite height anywhere in the chain the flex column's
+      // auto height resolves to header + 0 + footer and the editor renders at 0px — on
+      // every viewport, not just the phone one. Matching `height` to the shell's own
+      // `max-height` here (through the sanctioned `className` escape hatch, not by editing
+      // the shell) gives the column a definite size to grow into, without touching any
+      // other surface.
+      className="h-[min(85vh,720px)] max-sm:h-[92dvh]"
+      onSubmit={handleSave}
+      ariaLabel={title}
+    >
+      <CreateSurfaceHeader
+        concept="pages"
+        context="Pages"
+        title={title}
+        onClose={onClose}
+        meta={
+          <>
             {/* The document, named. Three doors onto it (§10b.1), and the other
                 two are a file on disk — saying which document this is makes
                 the CLI the obvious next step rather than a separate world. */}
@@ -962,39 +999,16 @@ export function PageEditor({
                 unsaved
               </span>
             )}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={requestClose}
-              className="h-8 gap-1.5 px-2.5 text-xs"
-            >
-              <X className="h-3.5 w-3.5" />
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              variant="default"
-              onClick={handleSave}
-              disabled={save.isPending || sealed > 0}
-              className="h-8 gap-1.5 px-3 text-xs font-semibold"
-              title={
-                sealed > 0
-                  ? "This page has panels you may not see; saving would delete them."
-                  : "Save. The server validates the spec and checks that every producer and owner resolves."
-              }
-            >
-              {save.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Save className="h-3.5 w-3.5" />
-              )}
-              {save.isPending ? "Saving…" : mode === "create" ? "Create page" : "Save"}
-            </Button>
-          </div>
-        </div>
+          </>
+        }
+      />
 
+      {/* The body is the shell's one scrollport everywhere else. Here it is a
+          flex column that does NOT scroll: CodeMirror owns its own scroller,
+          and nesting it inside a scrolling body gives two scrollports and a
+          buffer that grows the dialog instead of scrolling in place. The
+          padding goes with it — the editor is full-bleed. */}
+      <CreateSurfaceBody className="flex flex-col overflow-y-hidden p-0 sm:p-0">
         {/* §11b decision 14 in the one place it can cost data: the document
             cannot represent a sealed panel, so a PATCH built from it would
             delete another crew's panel without either of them being told. */}
@@ -1045,72 +1059,80 @@ export function PageEditor({
           </div>
         )}
 
-        {confirmDiscard && (
-          <div
-            role="alert"
-            className="flex shrink-0 items-center gap-3 border-b border-warn/30 bg-warn/[0.06] px-4 py-2.5 type-page-value text-warn"
-          >
-            <span className="flex-1">
-              This document has unsaved changes. Nothing has been sent to the server yet.
-            </span>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2.5 text-xs"
-              onClick={() => setConfirmDiscard(false)}
-            >
-              Keep editing
-            </Button>
-            <Button size="sm" variant="ghost" className="h-7 px-2.5 text-xs" onClick={onClose}>
-              Discard
-            </Button>
+        {/* `relative` + `absolute inset-0`, not `flex-1` alone.
+            CodeMirror's theme sets `height: 100%` on `.cm-editor`, and a
+            percentage against a flex item whose height comes from flex
+            distribution resolved to auto here — so the editor grew to fit the
+            whole buffer (measured: 1502px inside a 620px body) and
+            `.cm-scroller` had nothing to scroll. Absolute inset-0 gives it a
+            definite box, so the scroller is the buffer's scroller again. */}
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div className="absolute inset-0">
+            <FileEditor
+              key={`page-editor-${editorKey}`}
+              code={text}
+              language="yaml"
+              onSave={handleEditorSave}
+              onDirtyChange={setDirty}
+              saveRef={saveRef}
+              onDocChange={handleDocChange}
+              extraExtensions={extraExtensions}
+            />
           </div>
-        )}
-
-        {/* The server's refusal, verbatim. Its wording is the product — the
-            missing-SLA one quotes §4 — and paraphrasing it here would replace
-            an explanation with a restatement. */}
-        {refusal && (
-          <div
-            data-testid="page-editor-refusal"
-            role="alert"
-            className="shrink-0 border-b border-destructive/30 bg-destructive/[0.06] px-4 py-2.5 type-page-value text-destructive"
-          >
-            <div className="flex items-start gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span className="font-mono">{refusal}</span>
-            </div>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-hidden">
-          <FileEditor
-            key={`page-editor-${editorKey}`}
-            code={text}
-            language="yaml"
-            onSave={handleEditorSave}
-            onDirtyChange={setDirty}
-            saveRef={saveRef}
-            onDocChange={handleDocChange}
-            extraExtensions={extraExtensions}
-          />
         </div>
+      </CreateSurfaceBody>
 
-        {/* One line, and only when it has something to say. The warnings are
-            hints from the closed vocabulary; the verdict is the server's. */}
-        {validation.ok && warnings.length > 0 && (
-          <div className="shrink-0 border-t border-warn/30 bg-warn/[0.06] px-4 py-2 type-page-meta text-warn">
-            {warnings.length} thing{warnings.length === 1 ? "" : "s"} the schema would question —
-            hover the marked lines. The server has the final say.
-          </div>
-        )}
-        {!validation.ok && (
-          <div className="shrink-0 border-t border-destructive/30 bg-destructive/[0.06] px-4 py-2 type-page-stamp text-destructive">
-            {validation.line ? `line ${validation.line}: ` : ""}
-            {validation.message}
-          </div>
-        )}
-      </div>
-    </div>
+      {/* One line, and only when it has something to say. The warnings are
+          hints from the closed vocabulary; the verdict is the server's. */}
+      {validation.ok && warnings.length > 0 && (
+        <div className="shrink-0 border-t border-warn/30 bg-warn/[0.06] px-4 py-2 type-page-meta text-warn">
+          {warnings.length} thing{warnings.length === 1 ? "" : "s"} the schema would question —
+          hover the marked lines. The server has the final say.
+        </div>
+      )}
+      {!validation.ok && (
+        <div className="shrink-0 border-t border-destructive/30 bg-destructive/[0.06] px-4 py-2 type-page-stamp text-destructive">
+          {validation.line ? `line ${validation.line}: ` : ""}
+          {validation.message}
+        </div>
+      )}
+
+      {/* The server's refusal, verbatim. Its wording is the product — the
+          missing-SLA one quotes §4 — and paraphrasing it here would replace an
+          explanation with a restatement. It sits outside the scrollport, which
+          is what the shell's refusal band is for: this used to be a strip above
+          the editor, and the only thing that changed is which side of the
+          buffer it is on. No `onDismiss`, because it already clears itself the
+          moment the buffer changes. */}
+      {refusal && (
+        <div data-testid="page-editor-refusal">
+          <CreateSurfaceRefusal message={<span className="font-mono">{refusal}</span>} />
+        </div>
+      )}
+
+      <CreateSurfaceFooter
+        onCancel={onClose}
+        primaryLabel={
+          save.isPending ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Saving…
+            </>
+          ) : mode === "create" ? (
+            "Create page"
+          ) : (
+            "Save"
+          )
+        }
+        // The shell's `busy` would also disable Cancel, and Cancel staying
+        // clickable during a save is the whole reason `guardedDirty` includes
+        // `save.isPending`. So the spinner rides in the label instead.
+        primaryIcon={save.isPending ? undefined : Save}
+        primaryDisabled={save.isPending || sealed > 0}
+        onPrimary={handleSave}
+      />
+    </CreateSurface>
   )
 }
+
+

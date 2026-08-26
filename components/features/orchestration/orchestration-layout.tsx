@@ -1130,6 +1130,7 @@ export function OrchestrationLayout({
         routines={pipelines}
         workspaceId={workspaceId}
         onCreated={() => { fetchIssues(); fetchProjects() }}
+        onLabelsChanged={fetchIssueLabels}
       />
       <CreateProjectModal
         open={showCreateProject}

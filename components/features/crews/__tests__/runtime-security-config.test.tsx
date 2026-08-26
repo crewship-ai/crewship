@@ -41,9 +41,18 @@ function renderCfg(
 }
 
 describe("<RuntimeSecurityConfig>", () => {
-  it("renders the privileged danger warning", () => {
-    renderCfg()
+  // The warning used to render permanently, in destructive red, above a
+  // switch that was OFF — five lines about something not happening. A warning
+  // that is always on screen is furniture, and furniture is what people stop
+  // reading. It now appears when the thing it warns about is switched on.
+  it("warns about lost isolation once privileged is actually on", () => {
+    renderCfg({ privileged: true })
     expect(screen.getByText(/no-new-privileges/i)).toBeInTheDocument()
+  })
+
+  it("does not warn about a switch that is off", () => {
+    renderCfg()
+    expect(screen.queryByText(/no-new-privileges/i)).not.toBeInTheDocument()
   })
 
   it("toggling privileged serializes privileged=true", () => {
@@ -107,11 +116,25 @@ describe("<RuntimeSecurityConfig>", () => {
   // #1380 tail — the backend save path (Config.ValidateSecurity) rejects every
   // cap except NET_BIND_SERVICE with a 400. The picker must not offer a fresh
   // selection the server is certain to refuse.
-  it("locks capabilities the save path would reject", () => {
+  // Thirteen of the fourteen known capabilities are refused by the save path,
+  // so offering them all as disabled checkboxes made this section a wall of
+  // things you cannot do with one you can. They are listed, not offered — the
+  // reason SYS_ADMIN is unavailable is worth reading, and a dead checkbox is
+  // not how you say it.
+  it("offers only what the save path accepts", () => {
     renderCfg()
     expect(screen.getByRole("checkbox", { name: /^NET_BIND_SERVICE$/i })).toBeEnabled()
-    expect(screen.getByRole("checkbox", { name: /^SYS_ADMIN$/i })).toBeDisabled()
-    expect(screen.getAllByText(/privileged only/i).length).toBeGreaterThan(0)
+    expect(screen.queryByRole("checkbox", { name: /^SYS_ADMIN$/i })).toBeNull()
+  })
+
+  it("still says why the rest are missing, and what they are", () => {
+    renderCfg()
+    expect(screen.getByText(/privileged mode only/i)).toBeInTheDocument()
+    // Named, with its description, so the fold is a reference rather than a
+    // silence. getAllBy: the prose above the grid cites SYS_ADMIN too, as the
+    // example of what a per-cap grant would bypass.
+    expect(screen.getAllByText("SYS_ADMIN").length).toBeGreaterThan(0)
+    expect(screen.getByText(/near-root, mount\/namespaces/i)).toBeInTheDocument()
   })
 
   it("keeps a legacy stored cap unlockable so it can be removed", () => {
