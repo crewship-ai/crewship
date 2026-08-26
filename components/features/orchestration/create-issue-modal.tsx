@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Paperclip,
   User,
@@ -13,6 +13,7 @@ import {
   Hash,
   Milestone as MilestoneIcon,
   ListTree,
+  Search,
 } from "lucide-react"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import {
@@ -168,6 +169,7 @@ export function CreateIssueModal({
   const [assigneeOpen, setAssigneeOpen] = useState(false)
   const [projectOpen, setProjectOpen] = useState(false)
   const [labelsOpen, setLabelsOpen] = useState(false)
+  const [labelQuery, setLabelQuery] = useState("")
   const [routineOpen, setRoutineOpen] = useState(false)
   const [dueDateOpen, setDueDateOpen] = useState(false)
   const [estimateOpen, setEstimateOpen] = useState(false)
@@ -183,6 +185,12 @@ export function CreateIssueModal({
   const submittingRef = useRef(false)
 
   const titleRef = useRef<HTMLInputElement>(null)
+
+  const filteredLabels = useMemo(() => {
+    const q = labelQuery.trim().toLowerCase()
+    if (!q) return labels
+    return labels.filter((l) => l.name.toLowerCase().includes(q))
+  }, [labels, labelQuery])
 
   // Auto-select a crew when opening.
   //
@@ -443,7 +451,7 @@ export function CreateIssueModal({
         // anything is typed. It is also the only place the crew can be
         // changed, which is why it is a control and not a label.
         context={
-          <Popover open={crewOpen} onOpenChange={setCrewOpen}>
+          <Popover open={crewOpen} onOpenChange={setCrewOpen} modal>
             <PopoverTrigger asChild>
               <button
                 type="button"
@@ -511,7 +519,7 @@ export function CreateIssueModal({
         </CreateSurfacePill>
 
         {/* Priority */}
-        <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
+        <Popover open={priorityOpen} onOpenChange={setPriorityOpen} modal>
           <PopoverTrigger asChild>
             <CreateSurfacePill set={priority !== "none"}>
               <PriorityIcon priority={priority} className="h-3.5 w-3.5" />
@@ -538,7 +546,7 @@ export function CreateIssueModal({
 
         {/* Assignee */}
         {crewId && (
-          <Popover open={assigneeOpen} onOpenChange={setAssigneeOpen}>
+          <Popover open={assigneeOpen} onOpenChange={setAssigneeOpen} modal>
             <PopoverTrigger asChild>
               <CreateSurfacePill
                 icon={assigneeType === "agent" ? Bot : User}
@@ -639,7 +647,7 @@ export function CreateIssueModal({
         )}
 
         {/* Project */}
-        <Popover open={projectOpen} onOpenChange={setProjectOpen}>
+        <Popover open={projectOpen} onOpenChange={setProjectOpen} modal>
           <PopoverTrigger asChild>
             <CreateSurfacePill
               icon={FolderKanban}
@@ -699,7 +707,7 @@ export function CreateIssueModal({
             sidebar's MilestonePicker (issue-card-editors.tsx), rather than
             hidden until a project is picked — the "set a project first" state
             below is what tells you why the list is empty. */}
-        <Popover open={milestoneOpen} onOpenChange={setMilestoneOpen}>
+        <Popover open={milestoneOpen} onOpenChange={setMilestoneOpen} modal>
           <PopoverTrigger asChild>
             <CreateSurfacePill
               icon={MilestoneIcon}
@@ -767,7 +775,7 @@ export function CreateIssueModal({
         </Popover>
 
         {/* Routine — bind a saved routine to handle this issue */}
-        <Popover open={routineOpen} onOpenChange={setRoutineOpen}>
+        <Popover open={routineOpen} onOpenChange={setRoutineOpen} modal>
           <PopoverTrigger asChild>
             <CreateSurfacePill
               concept="routines"
@@ -825,7 +833,7 @@ export function CreateIssueModal({
         </Popover>
 
         {/* Due date */}
-        <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
+        <Popover open={dueDateOpen} onOpenChange={setDueDateOpen} modal>
           <PopoverTrigger asChild>
             <CreateSurfacePill icon={Calendar} accent="amber" set={dueDate !== ""}>
               <span>{dueDate || "Due date"}</span>
@@ -853,7 +861,7 @@ export function CreateIssueModal({
         {/* Estimate — the same Fibonacci-ish point set as the sidebar's
             EstimatePicker (issue-card-editors.tsx), so an issue estimated
             here reads the same once it lands on a board. */}
-        <Popover open={estimateOpen} onOpenChange={setEstimateOpen}>
+        <Popover open={estimateOpen} onOpenChange={setEstimateOpen} modal>
           <PopoverTrigger asChild>
             <CreateSurfacePill icon={Hash} accent="teal" set={estimate !== null}>
               <span>{estimate != null ? `${estimate} pts` : "Estimate"}</span>
@@ -887,7 +895,7 @@ export function CreateIssueModal({
         {/* Parent issue — crew-scoped, same fetch shape as Assignee. No
             picker for parent_issue_id exists anywhere else in the app (see
             the fetch effect above), so this is new rather than reused. */}
-        <Popover open={parentOpen} onOpenChange={setParentOpen}>
+        <Popover open={parentOpen} onOpenChange={setParentOpen} modal>
           <PopoverTrigger asChild>
             <CreateSurfacePill icon={ListTree} accent="slate" set={parentIssueId !== null}>
               <span>{selectedParent ? (selectedParent.identifier ?? selectedParent.title) : "Parent issue"}</span>
@@ -947,33 +955,71 @@ export function CreateIssueModal({
           </PopoverContent>
         </Popover>
 
-        {/* Labels */}
-        {labels.length > 0 && (
-          <Popover open={labelsOpen} onOpenChange={setLabelsOpen}>
-            <PopoverTrigger asChild>
-              <CreateSurfacePill icon={Tag} accent="green" set={selectedLabels.length > 0}>
-                <span>{selectedLabels.length > 0 ? `${selectedLabels.length} label${selectedLabels.length > 1 ? "s" : ""}` : "Labels"}</span>
-              </CreateSurfacePill>
-            </PopoverTrigger>
-            <PopoverContent className="w-[240px] p-1" align="start">
-              <div className="max-h-[200px] overflow-y-auto">
-                {labels.map((label) => (
-                  <button
-                    key={label.id}
-                    onClick={() => toggleLabel(label.id)}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors"
-                  >
-                    <Checkbox
-                      checked={selectedLabels.includes(label.id)}
-                      className="pointer-events-none h-3.5 w-3.5"
-                    />
-                    <LabelBadge label={label} />
-                  </button>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
-        )}
+        {/* Labels
+         *
+         * The pill renders even with no labels in the workspace. Hiding it
+         * meant a workspace that had not made any showed no Labels control at
+         * all, which reads as "issues do not have labels" rather than "you
+         * have none yet".
+         *
+         * The list is a search-and-scroll, not a bare list: every other
+         * picker in this row already has a Command with a search box, and a
+         * workspace with two dozen labels made this the one that asked you to
+         * find yours by eye. */}
+        <Popover open={labelsOpen} onOpenChange={setLabelsOpen} modal>
+          <PopoverTrigger asChild>
+            <CreateSurfacePill icon={Tag} accent="green" set={selectedLabels.length > 0}>
+              <span>{selectedLabels.length > 0 ? `${selectedLabels.length} label${selectedLabels.length > 1 ? "s" : ""}` : "Labels"}</span>
+            </CreateSurfacePill>
+          </PopoverTrigger>
+          <PopoverContent className="w-[260px] p-1" align="start">
+            {labels.length === 0 ? (
+              <p className="px-2 py-3 text-center text-[11px] leading-relaxed text-muted-foreground">
+                No labels in this workspace yet. Create them under Issues → Labels, or with{" "}
+                <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-[10px]">
+                  crewship label create
+                </code>
+                .
+              </p>
+            ) : (
+              <>
+                <div className="relative mb-1">
+                  <Search
+                    className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground-soft"
+                    aria-hidden="true"
+                  />
+                  <input
+                    value={labelQuery}
+                    onChange={(e) => setLabelQuery(e.target.value)}
+                    placeholder="Filter labels…"
+                    aria-label="Filter labels"
+                    className="h-7 w-full rounded-md border border-hairline bg-background pl-7 pr-2 text-xs outline-none transition-colors focus:border-primary"
+                  />
+                </div>
+                <div className="max-h-[200px] overflow-y-auto">
+                  {filteredLabels.map((label) => (
+                    <button
+                      key={label.id}
+                      onClick={() => toggleLabel(label.id)}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors"
+                    >
+                      <Checkbox
+                        checked={selectedLabels.includes(label.id)}
+                        className="pointer-events-none h-3.5 w-3.5"
+                      />
+                      <LabelBadge label={label} />
+                    </button>
+                  ))}
+                  {filteredLabels.length === 0 && (
+                    <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                      Nothing matches &ldquo;{labelQuery}&rdquo;.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </PopoverContent>
+        </Popover>
       </CreateSurfacePills>
 
       {/* ── Refusal ── */}

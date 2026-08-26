@@ -60,7 +60,10 @@ function ToolbarButton({
         "hover:bg-white/[0.08] disabled:pointer-events-none disabled:opacity-30",
         active
           ? "bg-primary/20 text-primary"
-          : "text-muted-foreground/60 hover:text-muted-foreground",
+          // Was muted-foreground/60 — a dimmed version of the dimmest text
+          // colour, on glyphs that were already 11px. Two dampeners stacked
+          // on the one row of controls that has no labels to fall back on.
+          : "text-muted-foreground hover:text-foreground",
       )}
     >
       {children}

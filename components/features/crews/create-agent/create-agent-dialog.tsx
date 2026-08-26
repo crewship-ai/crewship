@@ -398,7 +398,7 @@ export function CreateAgentDialog({
             hint="optional · pre-fills prompt + LLM + avatar"
           >
             <div className="flex items-center gap-2">
-              <Popover open={browserOpen} onOpenChange={setBrowserOpen}>
+              <Popover open={browserOpen} onOpenChange={setBrowserOpen} modal>
                 <PopoverTrigger asChild>
                   <button
                     type="button"

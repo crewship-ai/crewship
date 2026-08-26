@@ -747,3 +747,57 @@ describe("CreateIssueModal — submitting twice", () => {
     resolve(null)
   })
 })
+
+// =============================================================================
+// The pickers in the chip row live inside a Radix Dialog.
+//
+// Dialog wraps its content in react-remove-scroll with `shards: [contentRef]`
+// — that content element is the ONLY subtree exempt from the scroll lock. A
+// PopoverContent portals to document.body, so it is in neither, and
+// react-remove-scroll swallows its wheel events: the list clips at its max-h
+// and will not scroll, with nothing in the DOM looking wrong. `modal` on the
+// Popover root gives it its own RemoveScroll around its own content.
+//
+// jsdom does not run react-remove-scroll's wheel handling, so this asserts
+// the prop that fixes it rather than the scrolling itself.
+// =============================================================================
+describe("CreateIssueModal — pickers inside a dialog", () => {
+  it("opens Labels as a modal popover, so the wheel reaches it", async () => {
+    render(<CreateIssueModal {...defaultProps} />)
+    // The surface itself is a modal dialog, so one lock is already counted.
+    const before = document.body.getAttribute("data-scroll-locked")
+
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+    await screen.findByPlaceholderText("Filter labels…")
+
+    // react-remove-scroll keeps a reference count on the body. A SECOND lock
+    // appearing is the popover mounting its own RemoveScroll — which is the
+    // thing that exempts its subtree from the dialog's lock and puts the
+    // wheel back. Without `modal` the count does not move and the list
+    // cannot be scrolled.
+    // Verified red without `modal`: the attribute stays at "1".
+    expect(document.body.getAttribute("data-scroll-locked")).not.toBe(before)
+  })
+
+  it("filters the label list instead of asking you to find yours by eye", async () => {
+    render(<CreateIssueModal {...defaultProps} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+
+    expect(await screen.findByText("Bug")).toBeInTheDocument()
+    expect(screen.getByText("Feature")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText("Filter labels…"), {
+      target: { value: "feat" },
+    })
+    expect(screen.queryByText("Bug")).toBeNull()
+    expect(screen.getByText("Feature")).toBeInTheDocument()
+  })
+
+  it("still offers the Labels pill when the workspace has none", async () => {
+    // Hiding it made a workspace with no labels look like issues do not have
+    // labels, rather than like there are none yet.
+    render(<CreateIssueModal {...defaultProps} labels={[]} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+    expect(await screen.findByText(/No labels in this workspace yet/i)).toBeInTheDocument()
+  })
+})

@@ -390,7 +390,11 @@ export function TiptapEditor({
 
   if (!editor) return null
 
-  const iconSize = compact ? "h-3 w-3" : "h-3.5 w-3.5"
+  // 11px and 12.9px, because `--spacing: 0.23rem` makes the whole scale 92%
+  // of its name — h-3 is not 12px here and h-3.5 is not 14. A B/I/U glyph at
+  // 11px, drawn in muted-foreground at 60% opacity, is the toolbar nobody can
+  // read on the project brief. 14.7 / 18.4px, at full muted-foreground.
+  const iconSize = compact ? "h-4 w-4" : "h-5 w-5"
 
   return (
     <div ref={containerRef} className={cn("relative", className)}>

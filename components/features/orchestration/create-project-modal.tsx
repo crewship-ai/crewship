@@ -521,7 +521,7 @@ export function CreateProjectModal({
           the body's Planning section where /design puts them. */}
       {!panel && <CreateSurfacePills>
         {/* Lead */}
-        <Popover open={leadOpen} onOpenChange={setLeadOpen}>
+        <Popover open={leadOpen} onOpenChange={setLeadOpen} modal>
           <PopoverTrigger asChild>
             <CreateSurfacePill
               icon={leadType === "agent" ? undefined : User}

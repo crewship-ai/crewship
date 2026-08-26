@@ -5,6 +5,26 @@ import { Popover as PopoverPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Radix Popover root.
+ *
+ * ## Pass `modal` when the popover lives inside a dialog
+ *
+ * `PopoverContent` portals to `document.body`. Radix Dialog wraps its own
+ * content in `react-remove-scroll` with `shards: [contentRef]` — the dialog's
+ * content element is the ONLY subtree exempted from the scroll lock. A
+ * portaled popover is in neither, so `react-remove-scroll` swallows its wheel
+ * events: the list clips at its `max-h` and simply will not scroll, with no
+ * error and nothing in the DOM looking wrong.
+ *
+ * `modal` gives the popover its own `RemoveScroll` around its own content,
+ * which puts the wheel back. Every popover inside a `CreateSurface` needs it;
+ * grep for `modal` beside a `<Popover` to find them.
+ *
+ * Not the default here, because a modal popover also locks page scroll and
+ * traps focus, and the popovers that sit on plain pages (log filters, the
+ * time-range picker) should not do either.
+ */
 function Popover({
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
