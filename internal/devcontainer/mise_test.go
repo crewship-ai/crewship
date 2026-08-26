@@ -238,8 +238,8 @@ func TestInstallMiseTools(t *testing.T) {
 		t.Fatalf("InstallMiseTools: %v", err)
 	}
 
-	if len(calls) != 4 {
-		t.Fatalf("expected 4 exec calls, got %d", len(calls))
+	if len(calls) != 5 {
+		t.Fatalf("expected 5 exec calls, got %d", len(calls))
 	}
 
 	// Call 0: write config as root.
@@ -279,6 +279,51 @@ func TestInstallMiseTools(t *testing.T) {
 	}
 	if calls[3].user != "1001:1001" {
 		t.Errorf("call 3: user = %q, want 1001:1001", calls[3].user)
+	}
+
+	// Call 4: the shims actually resolve. reshim exiting 0 does not mean
+	// they do — see verifyMiseShims.
+	if !strings.Contains(calls[4].cmd, miseShimsDir) {
+		t.Errorf("call 4: expected a shim check, got %q", calls[4].cmd)
+	}
+	if calls[4].user != "1001:1001" {
+		t.Errorf("call 4: user = %q, want 1001:1001", calls[4].user)
+	}
+}
+
+// A dangling shim is the ONE failure this step exists to catch, and the
+// reason it is worth a step at all: `mise reshim` reports success while
+// writing a symlink to a target the agent cannot execute, PATH lookup skips
+// it in silence, and the pin is served by whatever the base image ships
+// instead. Measured on a crew provisioned before #1787: pinned terraform
+// 1.9, running v1.15.7, nothing logged anywhere.
+//
+// So provisioning must fail, and the message must name what actually went
+// wrong — not "reshim failed", which it did not.
+func TestInstallMiseTools_FailsOnDanglingShims(t *testing.T) {
+	mockExec := func(_ context.Context, _ string, cmd []string, _ string, _ []string) (string, int, error) {
+		joined := strings.Join(cmd, " ")
+		if strings.Contains(joined, miseShimsDir) {
+			return " terraform node\n", 1, nil
+		}
+		return "ok", 0, nil
+	}
+
+	cfg := &MiseConfig{Tools: map[string]string{"terraform": "1.9"}}
+	err := InstallMiseTools(context.Background(), "test-container", cfg, mockExec)
+	if err == nil {
+		t.Fatal("expected provisioning to fail on dangling shims, got nil")
+	}
+	if !errors.Is(err, ErrMiseInstallFailed) {
+		t.Errorf("error = %v, want it to wrap ErrMiseInstallFailed", err)
+	}
+	// The names, so the operator knows WHICH pins are not in effect.
+	if !strings.Contains(err.Error(), "terraform") {
+		t.Errorf("error must name the broken shims; got %q", err.Error())
+	}
+	// And the consequence, which is the part nobody would guess.
+	if !strings.Contains(err.Error(), "silently replaced") {
+		t.Errorf("error must say what the failure costs; got %q", err.Error())
 	}
 }
 

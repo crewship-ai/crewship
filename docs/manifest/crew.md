@@ -152,6 +152,44 @@ Two caveats worth knowing:
 | `tools` | map[string]string | tool → version pin (e.g. `node: "22"`). |
 | `raw` | map | passthrough for unmodeled mise config (e.g. `env`, `tasks`). |
 
+#### mise or a devcontainer feature?
+
+Both can install the same tool, and for most names both are available —
+`node`, `python`, `go`, `rust`, `terraform`, `kubectl` and `aws-cli` are in
+each catalogue. The difference is what you can say about the version.
+
+| | `spec.devcontainer.features` | `spec.mise.tools` |
+|---|---|---|
+| runs | as root, at image build | as the agent, after the build |
+| can | anything — packages, services, `postCreateCommand` | one thing: this tool at this version |
+| version | whatever the feature's tag ships | **exactly what you pin** |
+| cached | yes, as an image layer | no, runs on every provision |
+| capped | no | 20 tools |
+
+**Pin with mise when a version matters** — `node = "22.11.0"`, not just
+"Node". **Use a feature for everything else**: it is faster, because the
+result is cached with the image, and it is the only one that can install
+something that is not a single binary (a Postgres *server*, not `psql`).
+
+A pin takes effect because the image puts mise's shim directory on `PATH`
+*ahead* of `/usr/local/bin`, so the shim wins over anything a feature
+installed:
+
+```
+PATH=…:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:…
+```
+
+That ordering is load-bearing. A shim that does not resolve is skipped
+silently by `PATH` lookup and the feature's binary answers instead — a pin
+that produces the **wrong version** rather than an error. Provisioning
+therefore verifies every shim resolves and fails loudly if one does not
+(`internal/devcontainer/mise.go`, `verifyMiseShims`).
+
+> Crews provisioned before 2026-08-07 predate the fix in #1787 and may carry
+> shims pointing at a path the agent cannot execute. They do not self-heal —
+> the symptom is a pinned tool reporting a version you did not ask for.
+> Re-provision the crew to rebuild them.
+
 ### `spec.services[]`
 
 Each entry is one sidecar on the crew's private bridge network. The
