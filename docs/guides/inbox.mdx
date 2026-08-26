@@ -104,7 +104,7 @@ Each group is a collapsible folder with a count in its header. A group-header ch
 With anything selected, a **bulk bar** appears: **Mark read** and **Resolve** apply across the whole selection in one request (`POST /api/v1/inbox/bulk`) rather than a PATCH per row.
 
 <Warning>
-Bulk **Resolve** never silently closes a decision item. If the selection contains any `waitpoint` / `escalation` row or any `blocking=true` row, a confirmation dialog spells out how many items will be left open and resolves only the dismissable remainder. If the *entire* selection is decision items, there is no **Resolve** action at all — open each one individually and act on its source. **Mark read** is always one click and closes nothing. Even if a client bypasses these guards, the [server backstop](/api-reference/inbox#post-apiv1inboxbulk) skips the same rows, so a real decision item can never be resolved by the bulk path. The one exception, applied identically client- and server-side, is a keeper-synthetic escalation (`kind=escalation`, no backing `escalations` row): it has no source to defer to, so bulk **Resolve** clears it instead of skipping it.
+Bulk **Resolve** never silently closes a decision item. If the selection contains any `waitpoint` / `escalation` row or any `blocking=true` row, a confirmation dialog spells out how many items will be left open and resolves only the dismissable remainder. If the *entire* selection is decision items, there is no **Resolve** action at all — open each one individually and act on its source. **Mark read** is always one click and closes nothing. Even if a client bypasses these guards, the [server backstop](/api-reference/inbox#post-/api/v1/inbox/bulk) skips the same rows, so a real decision item can never be resolved by the bulk path. The one exception, applied identically client- and server-side, is a keeper-synthetic escalation (`kind=escalation`, no backing `escalations` row): it has no source to defer to, so bulk **Resolve** clears it instead of skipping it.
 </Warning>
 
 A row whose `kind` is an unknown value renders as a generic notification (hardened fallback) instead of crashing the row — new server-side kinds degrade gracefully in an older UI.
@@ -236,7 +236,7 @@ The four F4 evaluators route every DENY or ESCALATE decision to the inbox (PR-C)
 Operators see the row, decide, and click **Approve** or **Reject**:
 
 - **Approve** lands the proposed action and writes a journal entry recording the decision
-- **Reject** discards the proposal and records the dismissal; the evaluator gets the rejection as a `prior_lesson` hint on its next run for the same context (dup-suppression — see [F4.4 negative-learning](/api-reference/admin#post-apiv1internalkeepernegative-learning))
+- **Reject** discards the proposal and records the dismissal; the evaluator gets the rejection as a `prior_lesson` hint on its next run for the same context (dup-suppression — see [F4.4 negative-learning](/api-reference/admin#post-/api/v1/internal/keeper/negative-learning))
 
 For the full operator workflow on these rows — when to approve, what to investigate, how to override an evaluator — see [Keeper Reviews panel](/guides/keeper-reviews-panel) which is the dedicated triage surface (the inbox shows individual rows; the panel shows the queue).
 

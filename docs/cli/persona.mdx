@@ -10,7 +10,7 @@ tag: Experimental
 
 Manage `PERSONA.md` — the ~1.5 KB identity surface the orchestrator
 injects into every agent's system prompt at session start. The CLI
-mirrors the [agent persona API](/api-reference/agents#agent-persona) and the [crew persona API](/api-reference/crews#crew-persona).
+mirrors the [agent persona API](/api-reference/agents#agent-persona) and the [crew persona API](/api-reference/crews#persona).
 
 Two layers:
 
@@ -116,12 +116,12 @@ crewship persona crew <crew-slug> reset
 
 The verb comes **after** the crew slug (`crewship persona crew <crew-slug> <verb>`), and both arguments are required — the command takes a minimum of two positional args and errors with a usage hint if the verb is omitted.
 
-Same verbs against the crew-default layer at [`/api/v1/crews/{crewId}/persona`](/api-reference/crews#crew-persona). There is **no `suggest`** equivalent — agents propose only into their own layer, and the operator authors crew defaults directly.
+Same verbs against the crew-default layer at [`/api/v1/crews/{crewId}/persona`](/api-reference/crews#persona). There is **no `suggest`** equivalent — agents propose only into their own layer, and the operator authors crew defaults directly.
 
 ---
 
 ## See also
 
 - [Agent Persona API](/api-reference/agents#agent-persona) — REST shape per endpoint, plus the policy gating for `suggest`.
-- [Crew Persona API](/api-reference/crews#crew-persona) — the default layer this CLI's `crew` sub-tree edits.
+- [Crew Persona API](/api-reference/crews#persona) — the default layer this CLI's `crew` sub-tree edits.
 - [Autonomy & self-learning](/guides/autonomy-and-self-learning) — how crew `autonomy_level` decides whether an agent's `suggest` auto-applies or queues for operator approval.

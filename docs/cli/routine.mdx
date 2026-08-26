@@ -212,7 +212,7 @@ With `--wait`, the CLI instead keeps polling the run until the approval is resol
 
 ### Common errors
 
-- **API error (500): `pipeline: concurrency_key rendered to empty value (referenced input missing or empty)`** — the DSL declared a `concurrency_key` template that references an input you didn't supply, and the template has no literal text to fall back on. See [Troubleshooting in the routines guide](/guides/routines#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value) for the four fixes.
+- **API error (500): `pipeline: concurrency_key rendered to empty value (referenced input missing or empty)`** — the DSL declared a `concurrency_key` template that references an input you didn't supply, and the template has no literal text to fall back on. See [Troubleshooting in the routines guide](/guides/routines#run-returns-500-pipeline-concurrency-key-rendered-to-empty-value) for the four fixes.
 
 ---
 
@@ -507,7 +507,7 @@ This is a member-scoped read and returns `200 OK`; each routine row includes
 
 ## `crewship routine state`
 
-Inspect and repair a routine's **durable cross-run state** — the key/value bucket behind `{{ routine.state.<key> }}` and a step's `state_write` binding. See [Cross-run state](/guides/routines#cross-run-state-routine-state-key) for how a routine reads and writes it.
+Inspect and repair a routine's **durable cross-run state** — the key/value bucket behind `{{ routine.state.<key> }}` and a step's `state_write` binding. See [Cross-run state](/guides/routines#cross-run-state--routine-state-%3Ckey%3E-) for how a routine reads and writes it.
 
 State is scoped per **(routine, schedule)**: two cron schedules of the same routine keep independent watermarks, and manual / webhook runs share a separate bucket shown as `(manual/webhook)`. That isolation is the reason this command exists — when a routine "stops seeing new items", the stuck cursor sits in a bucket you can't guess from the outside, and until now nothing outside a run could read it.
 

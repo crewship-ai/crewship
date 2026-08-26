@@ -112,7 +112,7 @@ saved as a rule that never fires.
 | `--severity` | `stringSlice` | Only match these severities: `info`, `notice`, `warn`, `error`. Repeatable. |
 | `--payload-equals` | `stringSlice` | Only match when a journal payload field equals this, as `key=value`. Repeatable. A key no emitter writes is accepted and matches nothing — see below. |
 | `--debounce-seconds` | `int` | Hold the enqueued run open this long for further events to coalesce into. Default 10. |
-| `--max-per-hour` | `int` | Burst brake: cap runs this automation may cause per hour. Default 60. Counted per server process and cleared by a restart — see [Automations](/guides/automations#max-per-hour). |
+| `--max-per-hour` | `int` | Burst brake: cap runs this automation may cause per hour. Default 60. Counted per server process and cleared by a restart — see [Automations → Burst control](/guides/automations#burst-control). |
 
 A predicate flag you omit is "don't care"; omit all of them and every entry of
 the event type matches.
@@ -201,7 +201,7 @@ Soft-delete: the rule stops matching immediately, and the row is retained
 rather than dropped, so the runs it caused are never orphaned.
 
 The rule is filtered out of every read once deleted, including
-[`crewship chain`](/cli/chain#automations-where-a-chain-began). Its runs keep
+[`crewship chain`](/cli/chain#automations-—-where-a-chain-began). Its runs keep
 `triggered_via='automation'`, so the record that *a* rule started them
 survives, but the rule itself no longer appears as a node. Use
 `crewship automation disable <id>` instead when you want to stop a rule and
@@ -216,12 +216,12 @@ crewship chain aut_9f2c1a04bd77e310
 ```
 
 Shows the routine the rule is wired to and every run it has caused. See
-[`crewship chain`](/cli/chain#automations-where-a-chain-began).
+[`crewship chain`](/cli/chain#automations-—-where-a-chain-began).
 
 ---
 
 ## Exit codes
 
-Standard [CLI exit codes](/cli/overview#exit-codes). A routine slug that does
+Standard [CLI exit codes](/cli/overview#exit-codes-&-machine-readable-errors). A routine slug that does
 not exist in the workspace, a malformed `--event`, or a `key=value` flag
 without an `=` are all client errors, reported before anything is written.
