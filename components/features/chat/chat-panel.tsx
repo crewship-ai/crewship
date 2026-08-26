@@ -48,6 +48,7 @@ import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
 import type { FileEntry } from "./chat-tree-row"
 import { useChatSkin } from "./v2/chat-skin"
+import { ThinkingAvatar } from "./v2/thinking-avatar"
 import { useComposerStore, messageOwnAttachments } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch } from "@/lib/api-fetch"
@@ -132,6 +133,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
+  const { agent: skinAgent } = useChatSkin()
 
   // Does the composer currently hold a file the user has not sent yet?
   //
@@ -707,7 +709,19 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       <ConversationContent className="mx-auto w-full max-w-3xl">
         {turns.length === 0 && !historyLoading && (
           <ConversationEmptyState
-            icon={<Bot className="h-12 w-12" />}
+            // The agent's own face, not a generic robot. This is the one
+            // screen in the product where you are about to talk to a
+            // specific named colleague and have no other cue as to which —
+            // the transcript that would carry their portrait is, by
+            // definition, empty. Falls back to the glyph when there is no
+            // skin (classic /chat) or no agent resolved yet.
+            icon={
+              skinAgent ? (
+                <ThinkingAvatar agent={skinAgent} active={false} className="h-12 w-12" />
+              ) : (
+                <Bot className="h-12 w-12" />
+              )
+            }
             title="Start a conversation"
             description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
           />

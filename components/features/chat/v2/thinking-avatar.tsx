@@ -54,7 +54,10 @@ export function ThinkingAvatar({
         avatarUrl={agent.avatarUrl}
         alt=""
         className={cn(
-          "relative h-8 w-8 rounded-[10px]",
+          // h-full so the wrapper's size governs: the gutter mounts this at
+          // 32px, the empty state at 48px, and neither should have to know
+          // about the other.
+          "relative h-full w-full rounded-[10px]",
           active && "thinking-face",
         )}
       />

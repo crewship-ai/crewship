@@ -10,8 +10,12 @@ import {
   type ChatTreeThread,
 } from "@/components/features/chat/chat-tree-sidebar"
 import { ChatSkinProvider, type ChatSkinAgent } from "@/components/features/chat/v2/chat-skin"
-import { ConversationsSidebar } from "@/components/features/chat/v2/conversations-sidebar"
+import {
+  applyReadOverrides,
+  ConversationsSidebar,
+} from "@/components/features/chat/v2/conversations-sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import { parseSessionTimestamp } from "@/components/features/chat/session-sort"
@@ -39,22 +43,47 @@ export function Chat2Client() {
   const [sessionId, setSessionId] = useState<string | null>(null)
 
   /**
-   * Threads this page has marked read, and therefore knows are read whatever
-   * the fetched list still says.
+   * When this page last marked each thread read — epoch ms, not a boolean.
    *
-   * `useChatTreeData` owns `threadsByAgent` and exposes no mutator — classic
-   * gets around that by keeping its own `sessions` state for the one agent it
-   * is looking at and passing `skipSlug` so the hook does not fetch it. This
-   * page shows every agent's threads at once, so it cannot claim one; an
-   * override map is the smaller change, and it cannot desync from the fetch
-   * because it only ever forces a count DOWN to zero.
+   * `useChatTreeData` owns `threadsByAgent` and exposes no mutator. Classic
+   * gets around that by claiming one agent's threads via `skipSlug`, which a
+   * page showing every agent at once cannot do, so this page overlays its own
+   * knowledge on the fetched lists instead.
    *
-   * Without this the badge does not move when you open a conversation: the
-   * count came from a GET that ran before the read cursor advanced, and
-   * nothing on this page told it otherwise. Under the Unread facet that also
-   * meant the row you clicked stayed unread-looking forever.
+   * A TIMESTAMP rather than a Set, and that is the fix for the second round
+   * of this bug. A Set said "this thread is read" forever: open thread A,
+   * move to thread B, let the agent reply in A — A is genuinely unread again,
+   * the server says so, and the override kept forcing it to zero. Switching
+   * between agents therefore produced exactly the reported symptom, a column
+   * that no longer remembered what was unread.
+   *
+   * Comparing against the thread's own last activity makes the override
+   * self-expiring: it suppresses the count only while the thread has not
+   * moved since we read it, and the moment it does the server's number is the
+   * truth again. No cleanup, no staleness.
    */
-  const [readThreads, setReadThreads] = useState<Set<string>>(new Set())
+  const [readAt, setReadAt] = useState<Record<string, number>>({})
+
+  /**
+   * Live agent status, straight off the workspace event stream.
+   *
+   * The roster is fetched once, on workspaceId change — `retryThreads` re-runs
+   * the per-agent thread fan-out and does NOT re-read `/agents`. So
+   * `agent.status` was frozen at whatever it was when the page mounted, which
+   * is why the Live facet never changed: it is derived from that column.
+   *
+   * `agent.status` is broadcast on every run start and finish
+   * (internal/api/internal_runs.go), so subscribing is both cheaper and more
+   * accurate than polling — the facet flips at the same moment the run does.
+   */
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, string>>({})
+
+  useRealtimeEventSafe("agent.status", (event) => {
+    const agentId = event.payload?.agent_id
+    const status = event.payload?.status
+    if (typeof agentId !== "string" || typeof status !== "string") return
+    setStatusOverrides((prev) => (prev[agentId] === status ? prev : { ...prev, [agentId]: status }))
+  })
 
   // Read the URL once per navigation. After that the page owns the selection:
   // picking a thread is a `useState` plus a `history.replaceState`, never a
@@ -80,16 +109,21 @@ export function Chat2Client() {
    * function of what it is given — it renders the counts it is handed and
    * owns no opinion about which of them are stale.
    */
-  const threadsByAgent = useMemo(() => {
-    if (readThreads.size === 0) return tree.threadsByAgent
-    const out: Record<string, ChatTreeThread[]> = {}
-    for (const [agentId, threads] of Object.entries(tree.threadsByAgent)) {
-      out[agentId] = threads.map((t) =>
-        readThreads.has(t.id) && t.unread_count ? { ...t, unread_count: 0 } : t,
-      )
-    }
-    return out
-  }, [tree.threadsByAgent, readThreads])
+  const threadsByAgent = useMemo(
+    () => applyReadOverrides(tree.threadsByAgent, readAt, sessionId),
+    [tree.threadsByAgent, readAt, sessionId],
+  )
+
+  /** The roster with live status applied. Same overlay idea, other column. */
+  const agents = useMemo(() => {
+    if (!tree.agents) return tree.agents
+    if (Object.keys(statusOverrides).length === 0) return tree.agents
+    return tree.agents.map((a) =>
+      statusOverrides[a.id] && statusOverrides[a.id] !== a.status
+        ? { ...a, status: statusOverrides[a.id] }
+        : a,
+    )
+  }, [tree.agents, statusOverrides])
 
   const writeUrl = useCallback((slug: string, session: string) => {
     const url = `/chat2?agent=${encodeURIComponent(slug)}&session=${encodeURIComponent(session)}`
@@ -107,12 +141,7 @@ export function Chat2Client() {
   const markThreadRead = useCallback(
     (agentId: string, threadId: string) => {
       if (!workspaceId || !threadId) return
-      setReadThreads((prev) => {
-        if (prev.has(threadId)) return prev
-        const next = new Set(prev)
-        next.add(threadId)
-        return next
-      })
+      setReadAt((prev) => ({ ...prev, [threadId]: Date.now() }))
       apiFetch(
         `/api/v1/agents/${agentId}/chats/${encodeURIComponent(threadId)}/read?workspace_id=${workspaceId}`,
         { method: "PUT" },
@@ -170,16 +199,16 @@ export function Chat2Client() {
   // reader who opens /chat2 with no query wants to see the surface working,
   // and the newest thread is the one they were last in.
   useEffect(() => {
-    if (agentSlug || !tree.threadsLoaded || !tree.agents) return
+    if (agentSlug || !tree.threadsLoaded || !agents) return
     let best: { agent: ChatTreeAgent; thread: ChatTreeThread; at: number } | null = null
-    for (const a of tree.agents) {
+    for (const a of agents) {
       for (const t of threadsByAgent[a.id] ?? []) {
         const at = parseSessionTimestamp(t.last_activity_at ?? t.started_at)
         if (!best || at > best.at) best = { agent: a, thread: t, at }
       }
     }
     if (best) selectThread(best.agent, best.thread)
-  }, [agentSlug, tree.threadsLoaded, tree.agents, threadsByAgent, selectThread])
+  }, [agentSlug, tree.threadsLoaded, agents, threadsByAgent, selectThread])
 
   const skinAgent: ChatSkinAgent | null = useMemo(
     () =>
@@ -218,7 +247,7 @@ export function Chat2Client() {
      */
     <div className="flex h-full min-h-0 overflow-hidden bg-card">
       <ConversationsSidebar
-        agents={tree.agents}
+        agents={agents}
         threadsByAgent={threadsByAgent}
         threadsLoaded={tree.threadsLoaded}
         activeThreadId={sessionId}

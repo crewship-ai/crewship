@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 
 import {
+  applyReadOverrides,
   buildConversationRows,
   filterConversationRows,
   liveThreadIds,
@@ -193,5 +194,79 @@ describe("filterConversationRows", () => {
       const out = filterConversationRows(rows, "all", "seznam", live, "t-stale")
       expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
     })
+  })
+})
+
+describe("applyReadOverrides", () => {
+  const READ_AT = Date.parse("2026-08-26T12:00:00Z")
+
+  const listWith = (t: Partial<ChatTreeThread> & { id: string }) => ({
+    a1: [thread(t)],
+  })
+
+  it("zeroes the thread you are looking at, whatever the fetch said", () => {
+    // The list GET is routinely served before the mark-read PUT commits, so
+    // the open thread's count is stale by one reply almost every time.
+    const out = applyReadOverrides(listWith({ id: "t1", unread_count: 3 }), {}, "t1")
+    expect(out.a1[0].unread_count).toBe(0)
+  })
+
+  it("zeroes a thread read since its last activity", () => {
+    const out = applyReadOverrides(
+      listWith({ id: "t1", unread_count: 2, last_activity_at: "2026-08-26T11:00:00Z" }),
+      { t1: READ_AT },
+      null,
+    )
+    expect(out.a1[0].unread_count).toBe(0)
+  })
+
+  it("lets a thread go unread again once the agent replies in it", () => {
+    // The regression: a boolean "this is read" survived the agent answering.
+    // Open A, switch to B, let A get a reply — A IS unread, the server says
+    // so, and the old override kept forcing zero. Switching between agents
+    // was where this showed up.
+    const out = applyReadOverrides(
+      listWith({ id: "t1", unread_count: 2, last_activity_at: "2026-08-26T12:30:00Z" }),
+      { t1: READ_AT },
+      null,
+    )
+    expect(out.a1[0].unread_count).toBe(2)
+  })
+
+  it("leaves a thread it has never seen alone", () => {
+    const out = applyReadOverrides(listWith({ id: "t1", unread_count: 4 }), {}, null)
+    expect(out.a1[0].unread_count).toBe(4)
+  })
+
+  it("never invents unread the server does not have", () => {
+    const out = applyReadOverrides(listWith({ id: "t1", unread_count: 0 }), { t1: 0 }, "t1")
+    expect(out.a1[0].unread_count).toBe(0)
+  })
+
+  it("falls back to started_at when there is no last activity", () => {
+    const out = applyReadOverrides(
+      listWith({
+        id: "t1",
+        unread_count: 1,
+        started_at: "2026-08-26T12:30:00Z",
+        last_activity_at: null,
+      }),
+      { t1: READ_AT },
+      null,
+    )
+    expect(out.a1[0].unread_count).toBe(1)
+  })
+
+  it("carries every agent through, not just the ones it changed", () => {
+    const out = applyReadOverrides(
+      {
+        a1: [thread({ id: "t1", unread_count: 1 })],
+        a2: [thread({ id: "t2", unread_count: 2 })],
+      },
+      { t1: READ_AT },
+      null,
+    )
+    expect(Object.keys(out).sort()).toEqual(["a1", "a2"])
+    expect(out.a2[0].unread_count).toBe(2)
   })
 })

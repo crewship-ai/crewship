@@ -98,6 +98,43 @@ export function liveThreadIds(rows: ConversationRow[]): Set<string> {
   return live
 }
 
+/**
+ * Overlay what the PAGE knows about read state onto what the fetch returned.
+ *
+ * Two rules, and the second one is why `readAt` is a timestamp rather than a
+ * set of ids:
+ *
+ *  · The thread you are looking at is read by definition. The list GET can be
+ *    served before the mark-read PUT commits, so the fetched count for the
+ *    open thread is routinely stale by one reply.
+ *  · A thread stays read only while it has not MOVED since you read it. A
+ *    boolean "this is read" survives the agent replying in it — open thread
+ *    A, switch to B, let A get an answer, and A is genuinely unread again
+ *    while the override keeps forcing zero. Comparing against the thread's
+ *    own last activity makes the override expire by itself.
+ *
+ * Only ever forces a count DOWN, so it cannot invent unread that the server
+ * does not have.
+ */
+export function applyReadOverrides(
+  threadsByAgent: Record<string, ChatTreeThread[]>,
+  readAt: Record<string, number>,
+  activeThreadId: string | null,
+): Record<string, ChatTreeThread[]> {
+  const out: Record<string, ChatTreeThread[]> = {}
+  for (const [agentId, threads] of Object.entries(threadsByAgent)) {
+    out[agentId] = threads.map((t) => {
+      if (!t.unread_count) return t
+      if (t.id === activeThreadId) return { ...t, unread_count: 0 }
+      const seen = readAt[t.id]
+      if (seen === undefined) return t
+      const moved = parseSessionTimestamp(t.last_activity_at ?? t.started_at)
+      return moved <= seen ? { ...t, unread_count: 0 } : t
+    })
+  }
+  return out
+}
+
 export function buildConversationRows(
   agents: ChatTreeAgent[],
   threadsByAgent: Record<string, ChatTreeThread[]>,
