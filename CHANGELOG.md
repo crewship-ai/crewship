@@ -260,7 +260,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   payload's SHA-256 against the sealed bytes — and the rows are simply absent
   at restore.
 
-  Eight tables were scoped that way. `mission_tasks` through
+  Seven tables lost rows that way. `mission_tasks` through
   `assignment_id` lost **every task nobody had claimed**; `crew_mcp_servers`
   through `workspace_mcp_server_id` lost **every server a crew configured for
   itself**; `page_versions` through `author_agent_id` lost **every version a

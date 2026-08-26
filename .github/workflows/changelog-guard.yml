@@ -99,7 +99,11 @@ jobs:
           # `/design` route across 120 files and #2076 fixed a missing Cancel
           # button; the UI half of a user-visible change routinely lands in
           # `components/` with barely a line under `app/`.
-          mapfile -t watched < <(git diff --name-only --diff-filter=ACMR \
+          #
+          # `D` is in the filter as well as `ACMR`: deleting a route, a command
+          # or a screen is as user-visible as adding one, and a PR that only
+          # removes files would otherwise walk straight through.
+          mapfile -t watched < <(git diff --name-only --diff-filter=ACMRD \
               "origin/$BASE_REF...HEAD" -- \
               'internal/api' \
               'cmd/crewship' \
@@ -136,7 +140,7 @@ jobs:
           fi
           echo ""
 
-          changelog="$(git diff --name-only --diff-filter=ACMR \
+          changelog="$(git diff --name-only --diff-filter=ACMRD \
               "origin/$BASE_REF...HEAD" -- 'CHANGELOG.md')"
           if [ -n "$changelog" ]; then
             echo "CHANGELOG.md is touched by this PR. ✓"
