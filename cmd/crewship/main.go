@@ -118,6 +118,7 @@ func init() {
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(credentialCmd)
+	rootCmd.AddCommand(oauthCmd) // #2086: the connect flow for OAUTH2 credentials
 	rootCmd.AddCommand(integrationCmd)
 	rootCmd.AddCommand(missionCmd)
 	rootCmd.AddCommand(activityCmd)

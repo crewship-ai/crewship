@@ -1,0 +1,284 @@
+---
+title: "OAuth Commands"
+description: "Connect OAuth credentials headlessly and discover a provider's endpoints."
+icon: "key-round"
+stability: experimental
+tag: Experimental
+---
+
+# crewship oauth
+
+Drive the OAuth connect flow for an `OAUTH2` credential — the flow that turns an
+empty credential row into one that actually holds tokens — without a dashboard.
+
+```bash
+crewship oauth <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `providers` | List the built-in provider catalogue (authorize URL, token URL, default scopes). |
+| `connect <credential>` | Run the loopback flow and wait for the credential to reach `ACTIVE`. |
+| `authorize <credential>` | Print an authorize URL and its state token, for when the browser cannot reach the API host. |
+| `exchange <credential>` | Exchange an authorization code for tokens. |
+| `discover <mcp-url>` | Read a server's OAuth metadata from its well-known documents. |
+| `auto-connect <mcp-url>` | Discover, register a client via DCR, and create a `PENDING` credential. |
+
+Every subcommand honours the global `--format` flag (`json`/`yaml`/`ndjson`) —
+see [Output Formats](/cli/overview#output-formats).
+
+---
+
+## The two legs
+
+The flow has two shapes and they are **alternatives, not steps**. Pick the one
+your network allows.
+
+<Tabs>
+  <Tab title="Browser on the API host">
+    `connect` asks the server to bind a temporary listener on its own
+    `127.0.0.1`, hands back an authorize URL pointed at that listener, and
+    completes the token exchange itself when the browser lands on the redirect.
+
+    ```bash
+    crewship oauth connect my-linear-cred
+    ```
+
+    The browser must be able to reach `127.0.0.1:<port>` **on the API host**.
+    On a laptop or a dev box that is the same machine; against a remote server
+    it is not.
+  </Tab>
+  <Tab title="Browser elsewhere">
+    `authorize` + `exchange` puts you in the middle: the server stores the
+    state and PKCE verifier, you complete consent wherever you can, and you
+    paste the code back.
+
+    ```bash
+    crewship oauth authorize my-linear-cred
+    # …consent in a browser, copy the ?code= out of the redirect…
+    crewship oauth exchange my-linear-cred --code <code> --state <state>
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+**Keep the state token.** The server stored the PKCE `code_verifier` against it
+and can only recover the verifier when the state comes back with the code. An
+exchange with neither `--state` nor `--code-verifier` goes out with no verifier,
+which a provider that enforces PKCE (Google, Linear) rejects with
+`invalid_grant`. The command warns when you are about to do that.
+</Warning>
+
+---
+
+## Creating the credential first
+
+Both legs operate on a credential that already carries the OAuth **app**
+details. Create it with `crewship credential create --type OAUTH2`:
+
+```bash
+crewship credential create \
+  --name my-linear-cred \
+  --type OAUTH2 \
+  --oauth-provider linear \
+  --oauth-client-id <client-id> \
+  --oauth-client-secret <client-secret>
+```
+
+`--oauth-provider` fills the authorize URL, token URL and default scopes from
+the same catalogue `crewship oauth providers` prints. For a provider the
+catalogue does not carry — a self-hosted GitLab, a private IdP — give the
+endpoints yourself:
+
+```bash
+crewship credential create --name gitlab-internal --type OAUTH2 \
+  --oauth-client-id <client-id> \
+  --oauth-auth-url  https://gitlab.acme.internal/oauth/authorize \
+  --oauth-token-url https://gitlab.acme.internal/oauth/token \
+  --oauth-scopes    "api read_user"
+```
+
+The row is created with **no value** and status `PENDING`. It stays that way,
+and fails every agent run that resolves it, until the flow below completes.
+
+| Flag | Type | Description |
+|---|---|---|
+| `--oauth-provider` | `string` | Fill endpoints from the built-in catalogue. |
+| `--oauth-client-id` | `string` | OAuth app client ID. Required for `--type OAUTH2`. |
+| `--oauth-client-secret` | `string` | Client secret; stored encrypted. Omit for a public (PKCE-only) client. |
+| `--oauth-auth-url` | `string` | Authorization endpoint. Overrides `--oauth-provider`; required without it. |
+| `--oauth-token-url` | `string` | Token endpoint. Overrides `--oauth-provider`; required without it. |
+| `--oauth-scopes` | `string` | Space-separated scopes. Defaults to the catalogue's. |
+
+The `--oauth-*` flags are rejected on any type other than `OAUTH2` (exit `2`) —
+the server would silently drop them, which is worse than refusing them.
+
+---
+
+## `crewship oauth providers`
+
+```bash
+crewship oauth providers
+crewship oauth providers --format json
+```
+
+```
+PROVIDER    AUTH URL                                   TOKEN URL                                     DEFAULT SCOPES
+github      https://github.com/login/oauth/authorize   https://github.com/login/oauth/access_token   repo user
+linear      https://linear.app/oauth/authorize         https://api.linear.app/oauth/token            read write
+…
+```
+
+This is a **static catalogue compiled into the server**, not a list of
+providers you have configured. It tells you which providers you can point a
+credential at without looking their endpoints up yourself.
+
+Under `--format json` the map is flattened into a sorted array with the slug on
+a `provider` key, so it can be iterated rather than only indexed.
+
+---
+
+## `crewship oauth connect`
+
+```bash
+crewship oauth connect my-linear-cred
+crewship oauth connect my-linear-cred --open
+crewship oauth connect my-linear-cred --no-wait
+crewship oauth connect my-linear-cred --timeout 3m --poll-interval 5s
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--timeout` | `duration` | `2m` | How long to wait for the credential to reach `ACTIVE`. |
+| `--poll-interval` | `duration` | `2s` | How often to re-check while waiting. |
+| `--no-wait` | `bool` | `false` | Print the URL and exit immediately. |
+| `--open` | `bool` | `false` | Open the authorize URL in a browser. |
+
+By default it waits. There is no OAuth-specific "is it done yet" endpoint, so
+the only truthful completion signal is the credential flipping to `ACTIVE` as
+the tokens are stored — that is what the command polls.
+
+<Note>
+**A wait that runs out is a failure, not a tick.** It exits non-zero and names
+the status the credential is stuck in:
+
+```
+timed out after 2m waiting for credential cmt…c1a to connect; it is still
+PENDING. The authorization was never completed in a browser, or the browser
+could not reach the loopback listener on the API host
+```
+
+Reporting success there would leave the tokens absent and the next agent run
+would be the thing that found out.
+</Note>
+
+The server's listener tears itself down after 120 s, so a `--timeout` shorter
+than that gives up while the window is still open, and one longer than it
+reports the window closing rather than racing it.
+
+---
+
+## `crewship oauth authorize`
+
+```bash
+crewship oauth authorize my-linear-cred
+crewship oauth authorize my-linear-cred --redirect-uri https://crewship.acme.internal/api/v1/oauth/callback
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--redirect-uri` | `string` | Override the redirect URI. Defaults to the server's own `/api/v1/oauth/callback`. |
+
+Prints the URL, the state token, and the exact `exchange` command that finishes
+the flow.
+
+## `crewship oauth exchange`
+
+```bash
+crewship oauth exchange my-linear-cred --code <code> --state <state>
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--code` | `string` | The `?code=` from the redirect. **Required** — a missing code is exit `2`, with no round trip. |
+| `--state` | `string` | The state token from `authorize`. Lets the server recover the stored PKCE verifier. |
+| `--code-verifier` | `string` | PKCE verifier, for a flow this CLI did not start and that has no server-side state row. |
+| `--redirect-uri` | `string` | The redirect URI the code was issued for, when it differs from the stored one. |
+
+---
+
+## `crewship oauth discover`
+
+```bash
+crewship oauth discover https://mcp.linear.app/sse
+```
+
+```
+Authorize URL:          https://mcp.linear.app/authorize
+Token URL:              https://mcp.linear.app/token
+Registration endpoint:  https://mcp.linear.app/register
+Scopes:                 read write openid email
+Supports DCR:           true
+Supports PKCE:          true
+Source:                 discovery
+```
+
+Read-only. The server fetches the target's RFC 9728 protected-resource document
+and then its RFC 8414 authorization-server document, through an SSRF-guarded
+client that refuses private and loopback addresses.
+
+`Supports DCR: true` means `auto-connect` can register a client for you.
+`false` means you have to create an OAuth app in the provider's own settings.
+`Source: known_provider` means discovery failed and the URL was matched against
+the built-in catalogue instead.
+
+## `crewship oauth auto-connect`
+
+```bash
+crewship oauth auto-connect https://mcp.linear.app/sse --name linear-mcp
+crewship oauth auto-connect https://mcp.example/sse --name example --provider linear
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--name` | `string` | Name for the MCP server. Server default: `mcp-server`. |
+| `--provider` | `string` | Skip discovery and use a catalogue provider's endpoints. |
+
+Discovers the endpoints, performs RFC 7591 Dynamic Client Registration, creates
+an `OAUTH2` credential in `PENDING`, and prints the URL to authorize. Finish
+with `crewship oauth connect <credential-id>`.
+
+<Warning>
+When the provider offers no registration endpoint the server answers **200**
+with `status: "needs_client_id"` and **creates nothing**. This command treats
+that as a failure (exit `2`) and prints the server's explanation plus the
+`credential create` invocation to run instead — reporting it as success would
+leave you looking for a credential that does not exist.
+</Warning>
+
+---
+
+## Requirements
+
+| Command | Role |
+|---|---|
+| `providers` | Any authenticated user. |
+| `discover` | Any authenticated user. |
+| `authorize`, `exchange`, `connect` | `MANAGER`+, or an explicit `credential.create` capability grant. |
+| `auto-connect` | `OWNER` or `ADMIN`. |
+
+## Errors
+
+| Exit | Meaning |
+|---|---|
+| `2` | Local validation (missing `--code`, unknown `--oauth-provider`, `needs_client_id`), or a `400` from the server. |
+| `3` | Credential not found in this workspace. |
+| `4` | Not authenticated, or below the required role. |
+| `1` | The wait timed out, or the credential reached a terminal non-`ACTIVE` state. |
+
+## Related
+
+- [`crewship credential`](/cli/credential) — creating and rotating the rows these commands fill.
+- [`crewship integration`](/cli/integration) — what the connected credential is used by.

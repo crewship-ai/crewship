@@ -662,6 +662,14 @@ func init() {
 	credCreateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+" (0 = leave at the server default). L4 requires a human to approve every read.")
 	credCreateCmd.Flags().StringSlice("crews", nil, "Crew slugs or IDs to scope this credential to (repeatable/comma-separated); sets scope=CREW. Omit for a workspace-wide credential")
 	credCreateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE (default) or CREW. Usually inferred from --crews; set explicitly to override")
+	// OAuth app fields (--type OAUTH2). The row is created empty and PENDING;
+	// `crewship oauth connect` is what puts tokens in it. See cmd_oauth.go.
+	credCreateCmd.Flags().String("oauth-provider", "", "Fill the OAuth endpoints from the built-in catalogue (see `crewship oauth providers`); --type OAUTH2 only")
+	credCreateCmd.Flags().String("oauth-client-id", "", "OAuth app client ID, required for --type OAUTH2")
+	credCreateCmd.Flags().String("oauth-client-secret", "", "OAuth app client secret; stored encrypted. Omit for a public (PKCE-only) client")
+	credCreateCmd.Flags().String("oauth-auth-url", "", "Authorization endpoint; overrides --oauth-provider, and required without it")
+	credCreateCmd.Flags().String("oauth-token-url", "", "Token endpoint; overrides --oauth-provider, and required without it")
+	credCreateCmd.Flags().String("oauth-scopes", "", "Space-separated scopes to request; defaults to the catalogue's for --oauth-provider")
 
 	credUpdateCmd.Flags().String("name", "", "Credential name")
 	credUpdateCmd.Flags().String("value", "", "New value")

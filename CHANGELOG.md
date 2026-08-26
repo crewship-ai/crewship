@@ -846,6 +846,47 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   as in #849/#886, a `pnpm prisma generate` regression, the `web/out` release
   gate from #1567) is still first caught by nightly.
 
+- **`crewship oauth` — the connect flow had no CLI at all.** Six registered
+  endpoints (`providers`, `initiate`, `exchange`, `loopback`, `discover`,
+  `auto-connect`) were reachable only from the dashboard, so connecting an
+  integration was the one setup step an agent could not perform.
+  `crewship oauth connect` runs the loopback leg and then **waits for the
+  credential to reach `ACTIVE`**, because there is no completion endpoint and
+  the credential's status is the only truthful signal — a wait that runs out
+  exits non-zero and names the status it is stuck in rather than printing a
+  tick over tokens that never arrived. `oauth authorize` + `oauth exchange` is
+  the leg for a browser that cannot reach the API host, and `exchange` sends
+  the `--state` token, which is what lets the server recover the PKCE verifier
+  it stored; the web UI omits it, so that path fails against any provider that
+  enforces PKCE. `oauth auto-connect` treats the server's
+  `status: "needs_client_id"` — a `200` that creates nothing — as a failure,
+  and prints the `credential create` to run instead.
+
+- **`crewship credential create --type OAUTH2` could not set the OAuth app.**
+  `POST /api/v1/credentials` has accepted `oauth_client_id` and its endpoints
+  since the flow was written; the CLI exposed none of them, so an `OAUTH2` row
+  could only be minted through the web UI and `crewship oauth` had nothing to
+  operate on. New `--oauth-provider` fills the authorize URL, token URL and
+  scopes from the same catalogue `crewship oauth providers` prints;
+  `--oauth-client-id/-secret/-auth-url/-token-url/-scopes` cover a provider the
+  catalogue does not carry. The row is created empty and `PENDING`, no value is
+  invented for it, and nothing is probed — there is no token yet to probe. The
+  flags are refused on any other `--type`, where the server would have dropped
+  them silently.
+
+- **`crewship consolidate proposed` — the human half of memory consolidation.**
+  `consolidate run` triggered the extraction; the four review endpoints
+  (`explain`, `diff`, `approve`, `reject`) had no CLI, and `explain` and `diff`
+  had no consumer anywhere — not even the web UI, which only wires the
+  approve/reject buttons. `approve --diff` fetches the preview *before* it asks
+  to confirm, which is the pairing the server's byte-equality guarantee between
+  preview and write was built for. `reject --reason` says out loud that the
+  server does not persist the reason yet, rather than implying an audit trail
+  that is not there. The help names both things the API cannot tell you:
+  proposals only exist under `CREWSHIP_CONSOLIDATE_HITL=1`, and since no
+  endpoint lists them, the id comes from
+  `crewship inbox list --kind memory_consolidation`.
+
 - `crewship onboarding proposal create --agent "Name:Role"` (repeatable)
   names a bespoke roster, so the CLI can finally reach the branch the Guide
   actually takes. `--template-slug` is no longer required — give one or the
