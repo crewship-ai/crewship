@@ -113,22 +113,24 @@ export function Chat2Client() {
 
   return (
     /**
-     * Two depths, and only two.
+     * Chrome is one colour; the conversation is the other.
      *
-     * The first cut put `.surface-pane` on this wrapper and let the sidebar
-     * sit on it transparently. That is what a pane wants — except it made the
-     * column and the conversation the same surface, so the boundary between
-     * "where I navigate" and "what I am reading" was carried by a 1px border
-     * and nothing else. The two halves ran together.
+     * `bg-card`, and specifically because that is what the rest of the app
+     * chrome already is: measured on /chat, the app rail (`bg-sidebar`), the
+     * top bar (`bg-card`) and the classic chat column (`bg-card`) all compute
+     * to the SAME value. A left column painted `bg-background` — which is
+     * where the second cut of this page left it — is therefore the one strip
+     * of near-black in a row of grey, and it reads as a hole rather than as
+     * part of the frame.
      *
-     * So: the shell is GROUND (`bg-background`, what the app sidebar and the
-     * toolbar already sit on, and what classic /chat's column sits on), and
-     * the pane is only on the conversation. The centre is then genuinely
-     * raised — lit along its top edge, falling away at its foot — against a
-     * column that reads as the surround. That is also the honest depth
-     * order: you navigate on the ground and read on the thing in front of you.
+     * Which leaves the conversation needing to be the thing that is not
+     * chrome, and it is: `.surface-pane` is anchored on `--background`, so the
+     * centre is the recessed reading surface inside a card-coloured frame.
+     * That is exactly the relationship classic already has (its content area
+     * is `bg-background` inside `bg-card` chrome) with the pane's lighting
+     * added on top, rather than a third value invented for this page.
      */
-    <div className="flex h-full min-h-0 overflow-hidden bg-background">
+    <div className="flex h-full min-h-0 overflow-hidden bg-card">
       <ConversationsSidebar
         agents={tree.agents}
         threadsByAgent={tree.threadsByAgent}
