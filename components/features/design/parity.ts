@@ -503,11 +503,16 @@ export const PARITY: ParityRow[] = [
   {
     surface: "Integrations → Add integration",
     capability: "“Test” on the Add-MCP wizard",
-    where: "api",
-    ref: "add-mcp-wizard.tsx:213-223",
-    ui: "create",
+    where: "both",
+    ref: "add-mcp-wizard.tsx:213-223 · integration_test_connection.go:42/:54",
+    cli: "integration crew test <crew> <id>",
+    ui: "detail",
     severity: "blocker",
     note: "A setTimeout(…, 400) that returns a hard-coded “Configuration looks valid.” No network call of any kind. If anyone reports “test passed but the server is broken”, this is why.",
+    fixed: {
+      on: "2026-08-26",
+      how: "Removed, not wired. Both real probes load transport/endpoint/command out of the database, so neither can be aimed at a draft the wizard has not written yet — wiring one would have meant inventing a draft-test endpoint, which is a backend decision, not a repair to this control. The step now names the two surfaces that do test: “Test connection” on the server's row and `crewship integration crew test`. The ui state moves create → detail: the capability is deferred to after create, which is where it can actually run.",
+    },
   },
   {
     surface: "Integrations → Add integration",

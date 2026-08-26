@@ -9,8 +9,6 @@ import {
   Terminal,
   Globe,
   Sparkles,
-  CheckCircle2,
-  XCircle,
   ChevronDown,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
@@ -18,7 +16,6 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -83,10 +80,8 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
   // Step 3 auth
   const [credentialId, setCredentialId] = React.useState<string | null>(null)
   const [skipAuth, setSkipAuth] = React.useState(false)
-  // Step 4 assign + test
+  // Step 4 assign
   const [pickedCrewId, setPickedCrewId] = React.useState<string>(crewId ?? "")
-  const [testResult, setTestResult] = React.useState<{ ok: boolean; message?: string } | null>(null)
-  const [testing, setTesting] = React.useState(false)
 
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -106,7 +101,7 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
       setCommand(""); setArgs(""); setEndpoint(""); setAdvancedOpen(false)
       setOauthClientId(""); setOauthClientSecret("")
       setCredentialId(null); setSkipAuth(false); setPickedCrewId(crewId ?? "")
-      setTestResult(null); setError(null); setRegistryQ("")
+      setError(null); setRegistryQ("")
     }
   }, [open, crewId])
 
@@ -210,18 +205,6 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
     if (t.url) setEndpoint(t.url)
   }
 
-  const runTest = async () => {
-    if (!pickedCrewId) return
-    setTesting(true); setTestResult(null)
-    // For pre-flight we do a config sanity check rather than calling
-    // the live MCP server (server doesn't exist yet). Real test runs
-    // post-create against /crews/{cid}/integrations/{sid}/test.
-    setTimeout(() => {
-      setTesting(false)
-      setTestResult({ ok: true, message: "Configuration looks valid. Live mcp/list-tools runs after create." })
-    }, 400)
-  }
-
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="sm:max-w-[720px] p-0 flex flex-col">
@@ -234,7 +217,7 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
             {step === 1 && "Where does this server come from?"}
             {step === 2 && "Configure the server."}
             {step === 3 && "Pick a credential or skip if none required."}
-            {step === 4 && "Assign to a crew and run a quick sanity check."}
+            {step === 4 && "Assign to a crew, then add the server."}
           </SheetDescription>
         </SheetHeader>
 
@@ -274,9 +257,6 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
               crews={crews}
               pickedCrewId={pickedCrewId}
               setPickedCrewId={setPickedCrewId}
-              testResult={testResult}
-              testing={testing}
-              runTest={runTest}
             />
           )}
         </div>
@@ -585,13 +565,10 @@ function AuthStep({ credentials, credentialId, setCredentialId, skipAuth, setSki
   )
 }
 
-function AssignStep({ crews, pickedCrewId, setPickedCrewId, testResult, testing, runTest }: {
+function AssignStep({ crews, pickedCrewId, setPickedCrewId }: {
   crews: CrewOption[]
   pickedCrewId: string
   setPickedCrewId: (id: string) => void
-  testResult: { ok: boolean; message?: string } | null
-  testing: boolean
-  runTest: () => void
 }) {
   return (
     <div className="space-y-3">
@@ -617,20 +594,22 @@ function AssignStep({ crews, pickedCrewId, setPickedCrewId, testResult, testing,
         </div>
       </div>
 
-      <div className="pt-3 border-t border-white/10 space-y-2">
-        <Button variant="outline" size="sm" onClick={runTest} disabled={testing || !pickedCrewId}>
-          {testing ? <Spinner className="h-3.5 w-3.5 mr-1.5" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />}
-          Test config
-        </Button>
-        {testResult && (
-          <div className={cn(
-            "rounded-md p-2.5 text-xs flex gap-2 items-start",
-            testResult.ok ? "border border-success/30 bg-success/[0.05] text-success" : "border border-destructive/30 bg-destructive/[0.05] text-destructive",
-          )}>
-            {testResult.ok ? <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" /> : <XCircle className="h-4 w-4 shrink-0 mt-0.5" />}
-            <span>{testResult.message}</span>
-          </div>
-        )}
+      {/* No pre-flight test here, on purpose. Both connectivity probes
+          (POST /api/v1/integrations/{id}/test and its crew-scoped twin) read
+          transport, endpoint and command out of the database, so neither can
+          be pointed at a draft that has not been written yet. The control that
+          used to sit here answered "Configuration looks valid" off a 400ms
+          timer without reading a single field — say where the real test is
+          instead of imitating it. */}
+      <div className="rounded-md border border-info/25 bg-info/[0.05] px-3 py-2.5 text-xs space-y-1">
+        <div>
+          Connectivity is checked <strong>after</strong> the server exists — the probe reads the
+          saved config, so there is nothing to reach until this is added.
+        </div>
+        <div className="text-muted-foreground">
+          Add it, then press <strong>Test connection</strong> on the server&apos;s row, or run{" "}
+          <code className="font-mono">crewship integration crew test &lt;crew-slug&gt; &lt;integration-id&gt;</code>.
+        </div>
       </div>
     </div>
   )
