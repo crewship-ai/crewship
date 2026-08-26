@@ -55,6 +55,9 @@ import { parseRoutineBuffer } from "@/lib/routine-buffer"
 import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
 import { convertDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
 
+/** Which reading of the definition the editor pane is showing. */
+type EditorPane = "code" | "graph"
+
 // RoutineCreateDialog — describe-first authoring entry for new routines.
 //
 // The dialog is a small router over four modes:
@@ -247,6 +250,9 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   // and puts the caret at position 0 — it shredded a routine in about
   // four seconds when the detail editor did it.
   const [dslFormat, setDslFormat] = useState<DslFormat>("yaml")
+  // Code, not graph: this surface exists to type a DSL, and the graph is a
+  // reading of what was typed.
+  const [editorPane, setEditorPane] = useState<EditorPane>("code")
   const [dslText, setDslText] = useState(() => toYaml(STARTER_TEMPLATES[0].json))
   const [liveText, setLiveText] = useState(() => toYaml(STARTER_TEMPLATES[0].json))
   const bufferRef = useRef(toYaml(STARTER_TEMPLATES[0].json))
@@ -930,43 +936,69 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                   />
                   <span className="font-mono">slug: {slug}</span>
                 </div>
-                {parseError ? (
-                  <span className="truncate text-[10px] text-destructive" title={parseError}>
-                    {parseError}
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-success">syntax ok</span>
-                )}
-              </div>
-              <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-                {/* The graph, beside the code. You could not see what
-                    you were building until after it was saved. */}
-                <div className="relative min-h-[160px] w-full min-w-0 flex-1 border-b border-hairline md:min-w-[240px] md:border-b-0 md:border-r">
-                  {parsedDSL ? (
-                    <RoutineDefinitionCanvas
-                      definition={parsedDSL}
-                      slug={slug}
-                      name={name || slug}
-                    />
+                <div className="flex items-center gap-2">
+                  {/* Code and graph SHARE the pane rather than splitting it.
+                   *
+                   * They sat side by side, and with the identity aside also
+                   * on screen that is three columns inside an 800px surface:
+                   * the graph got ~240px and the code ~52% of what was left,
+                   * so neither was usable and the thing you are actually
+                   * doing here — typing a DSL — was the narrower of the two.
+                   *
+                   * Code leads because it is the input; the graph is a
+                   * reading of it. Switching is one click and keeps the
+                   * buffer, so it is a look rather than a mode change. */}
+                  <CreateSurfaceChoice
+                    ariaLabel="Editor pane"
+                    value={editorPane}
+                    onChange={setEditorPane}
+                    options={[
+                      { value: "code" as EditorPane, label: "Code" },
+                      { value: "graph" as EditorPane, label: "Preview" },
+                    ]}
+                  />
+                  {parseError ? (
+                    <span className="truncate text-[10px] text-destructive" title={parseError}>
+                      {parseError}
+                    </span>
                   ) : (
-                    <div className="flex h-full items-center justify-center px-4 text-center text-[11px] text-muted-foreground-soft">
-                      The graph appears once the definition parses.
-                    </div>
+                    <span className="text-[10px] text-success">syntax ok</span>
                   )}
                 </div>
-                <div className="min-h-[200px] w-full min-w-0 flex-1 overflow-hidden md:w-[52%] md:flex-none">
-                  <FileEditor
-                    key={editorKey}
-                    code={dslText}
-                    language={dslFormat}
-                    onDocChange={handleDocChange}
-                    extraExtensions={dslExtensions}
-                    onSave={(next) => {
-                      bufferRef.current = next
-                      setLiveText(next)
-                    }}
-                  />
-                </div>
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col">
+                {editorPane === "code" ? (
+                  <div className="min-h-[240px] w-full min-w-0 flex-1 overflow-hidden">
+                    <FileEditor
+                      key={editorKey}
+                      code={dslText}
+                      language={dslFormat}
+                      onDocChange={handleDocChange}
+                      extraExtensions={dslExtensions}
+                      onSave={(next) => {
+                        bufferRef.current = next
+                        setLiveText(next)
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="relative min-h-[240px] w-full min-w-0 flex-1">
+                    {parsedDSL ? (
+                      <RoutineDefinitionCanvas
+                        definition={parsedDSL}
+                        slug={slug}
+                        name={name || slug}
+                      />
+                    ) : (
+                      <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-[11px] text-muted-foreground-soft">
+                        <span>The graph appears once the definition parses.</span>
+                        {parseError && (
+                          <span className="font-mono text-destructive">{parseError}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </CreateSurfaceBody>

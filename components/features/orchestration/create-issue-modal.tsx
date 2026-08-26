@@ -13,6 +13,7 @@ import {
   Hash,
   Milestone as MilestoneIcon,
   ListTree,
+  Plus,
   Search,
 } from "lucide-react"
 import type { Pipeline } from "@/hooks/use-pipelines"
@@ -46,6 +47,7 @@ import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineColor, resolveRoutineIcon } from "@/lib/routine-identity"
 import { LabelBadge } from "@/components/features/issues/label-badge"
+import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
@@ -119,6 +121,9 @@ interface CreateIssueModalProps {
   routines?: Pipeline[]
   workspaceId: string
   onCreated: () => void
+  /** Refetch the workspace label list after one is created here. Optional —
+   *  without it the Create action is hidden rather than silently useless. */
+  onLabelsChanged?: () => void
 }
 
 export function CreateIssueModal({
@@ -130,6 +135,7 @@ export function CreateIssueModal({
   routines = [],
   workspaceId,
   onCreated,
+  onLabelsChanged,
 }: CreateIssueModalProps) {
   const [crewId, setCrewId] = useState("")
   const [title, setTitle] = useState("")
@@ -170,6 +176,7 @@ export function CreateIssueModal({
   const [projectOpen, setProjectOpen] = useState(false)
   const [labelsOpen, setLabelsOpen] = useState(false)
   const [labelQuery, setLabelQuery] = useState("")
+  const [creatingLabel, setCreatingLabel] = useState(false)
   const [routineOpen, setRoutineOpen] = useState(false)
   const [dueDateOpen, setDueDateOpen] = useState(false)
   const [estimateOpen, setEstimateOpen] = useState(false)
@@ -186,11 +193,71 @@ export function CreateIssueModal({
 
   const titleRef = useRef<HTMLInputElement>(null)
 
+  /**
+   * Make a label from what is typed in the filter box, and select it.
+   *
+   * `POST /api/v1/labels` and the LabelsDialog behind Issues → Labels have
+   * always been able to do this; the create path could not reach either.
+   * Noticing halfway through writing an issue that the label you want does
+   * not exist meant abandoning the issue, opening another dialog, making the
+   * label, and starting again.
+   *
+   * The colour is taken from the preset ring rather than asked for. A colour
+   * picker here would be a third layer of UI inside a popover inside a
+   * dialog, for a decision nobody has an opinion about at this moment — and
+   * Issues → Labels can still change it afterwards. Cycling by the current
+   * label count keeps consecutive labels visually distinct instead of
+   * handing everyone the same one.
+   */
+  const createLabel = useCallback(async () => {
+    const name = labelQuery.trim()
+    if (!name || creatingLabel) return
+    setCreatingLabel(true)
+    try {
+      const color = LABEL_PRESET_COLORS[labels.length % LABEL_PRESET_COLORS.length].value
+      const res = await apiFetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, color }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        toast.error(body?.error ?? body?.detail ?? "Could not create the label")
+        return
+      }
+      const created = await res.json() as { id?: string }
+      // Select it straight away: making it was a step towards putting it on
+      // THIS issue, and leaving it unticked makes you find it again.
+      if (created?.id) setSelectedLabels((prev) => [...prev, created.id!])
+      setLabelQuery("")
+      onLabelsChanged?.()
+    } catch {
+      toast.error("Could not create the label")
+    } finally {
+      setCreatingLabel(false)
+    }
+  }, [labelQuery, creatingLabel, labels.length, workspaceId, onLabelsChanged])
+
   const filteredLabels = useMemo(() => {
     const q = labelQuery.trim().toLowerCase()
     if (!q) return labels
     return labels.filter((l) => l.name.toLowerCase().includes(q))
   }, [labels, labelQuery])
+
+  /**
+   * Offer to create only when the typed name is not already a label.
+   *
+   * Exact-match, not "no results": typing "bug" while a Bug label exists
+   * filters to it AND would otherwise offer to make a second one, which the
+   * server accepts and nobody wants. Gated on onLabelsChanged, because
+   * without a way to refetch, a created label would not appear in the list
+   * it was created from.
+   */
+  const canCreateLabel = useMemo(() => {
+    const q = labelQuery.trim()
+    if (!q || !onLabelsChanged) return false
+    return !labels.some((l) => l.name.toLowerCase() === q.toLowerCase())
+  }, [labelQuery, labels, onLabelsChanged])
 
   // Auto-select a crew when opening.
   //
@@ -973,51 +1040,67 @@ export function CreateIssueModal({
             </CreateSurfacePill>
           </PopoverTrigger>
           <PopoverContent className="w-[260px] p-1" align="start">
-            {labels.length === 0 ? (
-              <p className="px-2 py-3 text-center text-[11px] leading-relaxed text-muted-foreground">
-                No labels in this workspace yet. Create them under Issues → Labels, or with{" "}
-                <code className="rounded bg-black/40 px-1 py-0.5 font-mono text-[10px]">
-                  crewship label create
-                </code>
-                .
-              </p>
-            ) : (
-              <>
-                <div className="relative mb-1">
-                  <Search
-                    className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground-soft"
-                    aria-hidden="true"
+            <div className="relative mb-1">
+              <Search
+                className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground-soft"
+                aria-hidden="true"
+              />
+              <input
+                value={labelQuery}
+                onChange={(e) => setLabelQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter creates when nothing matches — the same key that
+                  // would otherwise do nothing here.
+                  if (e.key === "Enter" && canCreateLabel) {
+                    e.preventDefault()
+                    void createLabel()
+                  }
+                }}
+                placeholder={labels.length === 0 ? "Name a new label…" : "Filter or create…"}
+                aria-label="Filter or create a label"
+                className="h-7 w-full rounded-md border border-hairline bg-background pl-7 pr-2 text-xs outline-none transition-colors focus:border-primary"
+              />
+            </div>
+
+            <div className="max-h-[200px] overflow-y-auto">
+              {filteredLabels.map((label) => (
+                <button
+                  key={label.id}
+                  onClick={() => toggleLabel(label.id)}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors"
+                >
+                  <Checkbox
+                    checked={selectedLabels.includes(label.id)}
+                    className="pointer-events-none h-3.5 w-3.5"
                   />
-                  <input
-                    value={labelQuery}
-                    onChange={(e) => setLabelQuery(e.target.value)}
-                    placeholder="Filter labels…"
-                    aria-label="Filter labels"
-                    className="h-7 w-full rounded-md border border-hairline bg-background pl-7 pr-2 text-xs outline-none transition-colors focus:border-primary"
-                  />
-                </div>
-                <div className="max-h-[200px] overflow-y-auto">
-                  {filteredLabels.map((label) => (
-                    <button
-                      key={label.id}
-                      onClick={() => toggleLabel(label.id)}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors"
-                    >
-                      <Checkbox
-                        checked={selectedLabels.includes(label.id)}
-                        className="pointer-events-none h-3.5 w-3.5"
-                      />
-                      <LabelBadge label={label} />
-                    </button>
-                  ))}
-                  {filteredLabels.length === 0 && (
-                    <p className="px-2 py-3 text-center text-[11px] text-muted-foreground">
-                      Nothing matches &ldquo;{labelQuery}&rdquo;.
-                    </p>
-                  )}
-                </div>
-              </>
-            )}
+                  <LabelBadge label={label} />
+                </button>
+              ))}
+
+              {/* The way out of "the label I want does not exist". Without it
+                  the answer was: abandon the issue, open Issues → Labels,
+                  make the label, start again. */}
+              {canCreateLabel && (
+                <button
+                  onClick={() => void createLabel()}
+                  disabled={creatingLabel}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-primary hover:bg-primary/[0.12] transition-colors disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5 shrink-0" />
+                  <span className="min-w-0 truncate">
+                    {creatingLabel ? "Creating…" : <>Create &ldquo;{labelQuery.trim()}&rdquo;</>}
+                  </span>
+                </button>
+              )}
+
+              {filteredLabels.length === 0 && !canCreateLabel && (
+                <p className="px-2 py-3 text-center text-[11px] leading-relaxed text-muted-foreground">
+                  {labels.length === 0
+                    ? "No labels in this workspace yet — type a name above to make one."
+                    : `Nothing matches “${labelQuery}”.`}
+                </p>
+              )}
+            </div>
           </PopoverContent>
         </Popover>
       </CreateSurfacePills>

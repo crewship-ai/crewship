@@ -768,7 +768,7 @@ describe("CreateIssueModal — pickers inside a dialog", () => {
     const before = document.body.getAttribute("data-scroll-locked")
 
     fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
-    await screen.findByPlaceholderText("Filter labels…")
+    await screen.findByPlaceholderText(/Filter or create/i)
 
     // react-remove-scroll keeps a reference count on the body. A SECOND lock
     // appearing is the popover mounting its own RemoveScroll — which is the
@@ -786,7 +786,7 @@ describe("CreateIssueModal — pickers inside a dialog", () => {
     expect(await screen.findByText("Bug")).toBeInTheDocument()
     expect(screen.getByText("Feature")).toBeInTheDocument()
 
-    fireEvent.change(screen.getByPlaceholderText("Filter labels…"), {
+    fireEvent.change(screen.getByPlaceholderText(/Filter or create/i), {
       target: { value: "feat" },
     })
     expect(screen.queryByText("Bug")).toBeNull()
@@ -799,5 +799,81 @@ describe("CreateIssueModal — pickers inside a dialog", () => {
     render(<CreateIssueModal {...defaultProps} labels={[]} />)
     fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
     expect(await screen.findByText(/No labels in this workspace yet/i)).toBeInTheDocument()
+  })
+})
+
+// =============================================================================
+// Creating a label without leaving the issue.
+//
+// POST /api/v1/labels and the LabelsDialog behind Issues → Labels could both
+// always do this; the create path could reach neither. Noticing halfway
+// through writing an issue that the label you want does not exist meant
+// abandoning the issue, opening another dialog, making the label, and
+// starting again.
+// =============================================================================
+describe("CreateIssueModal — making a label from the picker", () => {
+  function labelFetch() {
+    const calls: { url: string; method: string; body: Record<string, unknown> | undefined }[] = []
+    global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = String(url)
+      let body: Record<string, unknown> | undefined
+      if (typeof init?.body === "string") { try { body = JSON.parse(init.body) } catch { /* not JSON */ } }
+      calls.push({ url: u, method: init?.method ?? "GET", body })
+      if (u.includes("/api/v1/labels") && init?.method === "POST") {
+        return { ok: true, json: async () => ({ id: "label-new", name: "Infra", color: "#fff" }) } as Response
+      }
+      return { ok: true, json: async () => [] } as Response
+    }) as unknown as typeof fetch
+    return calls
+  }
+
+  it("offers to create what was typed, and posts it", async () => {
+    const calls = labelFetch()
+    const onLabelsChanged = vi.fn()
+    render(<CreateIssueModal {...defaultProps} onLabelsChanged={onLabelsChanged} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+
+    fireEvent.change(await screen.findByPlaceholderText(/Filter or create/i), {
+      target: { value: "Infra" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Create “Infra”/ }))
+
+    await waitFor(() => {
+      expect(calls.some((c) => c.url.includes("/api/v1/labels") && c.method === "POST")).toBe(true)
+    })
+    const post = calls.find((c) => c.url.includes("/api/v1/labels") && c.method === "POST")!
+    expect(post.body).toMatchObject({ name: "Infra" })
+    // A colour is chosen rather than asked for: a colour picker inside a
+    // popover inside a dialog is a third layer for a decision nobody has an
+    // opinion about mid-issue.
+    expect(typeof post.body!.color).toBe("string")
+    // And the list it came from is told to refetch.
+    await waitFor(() => expect(onLabelsChanged).toHaveBeenCalled())
+  })
+
+  it("does not offer to create a label that already exists", async () => {
+    labelFetch()
+    render(<CreateIssueModal {...defaultProps} onLabelsChanged={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+
+    // "Bug" is in mockLabels. Exact match, not "no results" — the server
+    // would happily accept a second Bug.
+    fireEvent.change(await screen.findByPlaceholderText(/Filter or create/i), {
+      target: { value: "bug" },
+    })
+    expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull()
+    expect(screen.getByText("Bug")).toBeInTheDocument()
+  })
+
+  it("hides the create action when there is no way to refetch the list", async () => {
+    // Without onLabelsChanged a created label would not appear in the list it
+    // was created from, so the action is absent rather than quietly useless.
+    labelFetch()
+    render(<CreateIssueModal {...defaultProps} />)
+    fireEvent.click(screen.getByRole("button", { name: /Labels/i }))
+    fireEvent.change(await screen.findByPlaceholderText(/Filter or create/i), {
+      target: { value: "Infra" },
+    })
+    expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull()
   })
 })

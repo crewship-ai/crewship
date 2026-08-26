@@ -45,10 +45,23 @@ describe("<RoutineCreateDialog>", () => {
     expect(editorProps[editorProps.length - 1].code).toContain("dsl_version:")
   })
 
-  it("shows the step graph beside the code", () => {
+  it("opens on the code, with the graph one click away", () => {
+    // They used to sit side by side. With the identity aside also on screen
+    // that is three columns inside an 800px surface — the graph got ~240px
+    // and the code ~52% of the rest, so the thing you come here to do (type
+    // a DSL) was the narrower of the two. Code leads; the graph is a reading
+    // of it.
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
+
+    expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("radio", { name: "Preview" }))
     expect(screen.getByTestId("graph")).toBeInTheDocument()
+
+    // And back, without losing the buffer — it is a look, not a mode.
+    fireEvent.click(screen.getByRole("radio", { name: "Code" }))
+    expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
   })
 
   it("hides the test-gate escape hatch from a role the server would refuse", () => {
