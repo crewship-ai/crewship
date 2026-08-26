@@ -28,7 +28,7 @@ type RunAgentSpan struct {
 	RunID      string            `json:"run_id"`
 	StepID     string            `json:"step_id"`
 	Seq        int               `json:"seq"`
-	Kind       string            `json:"kind"` // think|bash|write|read|edit|mcp_tool|http|tool
+	Kind       string            `json:"kind"` // think|bash|db|write|read|edit|mcp_tool|http|tool
 	Name       string            `json:"name"`
 	Detail     string            `json:"detail,omitempty"`
 	StartedAt  time.Time         `json:"started_at"`
@@ -84,11 +84,23 @@ const (
 	RunAgentSpanOutputMaxBytes = 16 * 1024
 )
 
-// DeriveSpanKind maps a CLI tool name to the coarse sub-span kind the trace
+// DeriveSpanKind maps a tool invocation to the coarse sub-span kind the trace
 // tree groups on. Unknown built-ins fall through to "tool" rather than being
 // dropped — visibility beats a perfect taxonomy. MCP tools (mcp__server__name)
-// are always "mcp_tool".
-func DeriveSpanKind(tool string) string {
+// are "mcp_tool" unless the server names a datastore.
+//
+// `input` is the raw tool-input map (nil is fine — callers that only hold a
+// tool name pass nil and get the name-derived kind). It is needed because a
+// datastore call is invisible in the tool NAME: `psql -c "delete from …"` and
+// `ls` are both the "Bash" tool, and telling them apart is the whole point of
+// the "db" kind. Classification stays here, in one function, rather than in a
+// sibling the recorder could forget to call.
+func DeriveSpanKind(tool string, input map[string]any) string {
+	// Checked before the MCP branch: a Postgres MCP server is a database
+	// action first and an MCP call second.
+	if dbEngineForCall(tool, input) != "" {
+		return "db"
+	}
 	if strings.HasPrefix(tool, "mcp__") {
 		return "mcp_tool"
 	}
@@ -108,6 +120,186 @@ func DeriveSpanKind(tool string) string {
 	default:
 		return "tool"
 	}
+}
+
+// dbEngines maps a datastore CLI executable — or an MCP server name — to the
+// canonical engine slug stamped on a "db" span. The slug is a lowercase product
+// name rather than whatever executable was typed, because it doubles as the
+// brand-icon key the trace UI resolves: postgres / mysql / redis / mongodb have
+// real logos there, and everything else falls back to a generic database glyph.
+//
+// The list is deliberately conservative. A name added here classifies every
+// command that starts with it, so it must be a program whose ONLY job is
+// talking to a datastore — which is why `docker`, `kubectl` and `supabase` are
+// absent even though each can reach a database.
+var dbEngines = map[string]string{
+	// PostgreSQL
+	"psql": "postgres", "pgcli": "postgres", "pg_dump": "postgres",
+	"pg_dumpall": "postgres", "pg_restore": "postgres", "pg_isready": "postgres",
+	"postgres": "postgres", "postgresql": "postgres", "pg": "postgres",
+	// MySQL / MariaDB — one engine as far as the trace is concerned
+	"mysql": "mysql", "mysqldump": "mysql", "mysqladmin": "mysql",
+	"mysqlsh": "mysql", "mysqlimport": "mysql", "mycli": "mysql",
+	"mariadb": "mysql", "mariadb-dump": "mysql",
+	// Redis
+	"redis-cli": "redis", "redis": "redis",
+	// MongoDB
+	"mongosh": "mongodb", "mongo": "mongodb", "mongodump": "mongodb",
+	"mongorestore": "mongodb", "mongoexport": "mongodb", "mongoimport": "mongodb",
+	"mongodb": "mongodb",
+	// No brand logo — these render with the generic database glyph.
+	"sqlite3": "sqlite", "sqlite": "sqlite", "litecli": "sqlite",
+	"clickhouse-client": "clickhouse", "clickhouse": "clickhouse",
+	"cqlsh": "cassandra", "cassandra": "cassandra",
+	"influx": "influxdb", "influxdb": "influxdb",
+	"duckdb": "duckdb",
+	"sqlcmd": "mssql", "mssql-cli": "mssql", "mssql": "mssql", "sqlserver": "mssql",
+	"cypher-shell": "neo4j", "neo4j": "neo4j",
+	"snowsql": "snowflake", "snowflake": "snowflake",
+	"bq": "bigquery", "bigquery": "bigquery",
+}
+
+// shellTools are the tool names, lowercased, whose `command` input is a shell
+// string worth classifying. "bash" is what the Claude adapter emits and
+// "shell" what the Codex parser hardcodes; the rest are the names other CLIs
+// give the same tool and are here so a datastore call does not stop being one
+// when the routine switches adapter. A shell tool NOT listed here loses only
+// the db classification — its command still lands in the span detail, and the
+// span still renders under its name-derived kind.
+var shellTools = map[string]bool{
+	"bash":              true,
+	"shell":             true,
+	"run_shell_command": true,
+	"run_terminal_cmd":  true,
+	"execute_command":   true,
+}
+
+// shellWrappers are leading tokens that prefix a command without being the
+// command — a privilege or environment wrapper. Only their BARE forms are
+// skipped: the moment a flag appears (`sudo -u postgres psql`) shellExecutable
+// gives up, because following flags means implementing each wrapper's own
+// option grammar for the sake of a nicer icon.
+var shellWrappers = map[string]bool{
+	"sudo": true, "doas": true, "env": true,
+	"command": true, "exec": true, "nohup": true, "time": true,
+}
+
+// shellExecutable returns the lowercased basename of the program a shell
+// command invokes, or "" when it cannot be identified.
+//
+// The parse is deliberately shallow, and this is where the line is drawn:
+// leading `VAR=value` assignments and bare wrappers are skipped, surrounding
+// quotes and any directory prefix are stripped, and the FIRST remaining token
+// wins. It does not split on `&&`, `;`, `|`, and does not enter subshells,
+// here-docs or `-c` payloads. Doing that correctly means implementing shell
+// quoting, and getting it wrong is exactly how `echo "psql is great"` turns
+// into a database span — a lie in the trace. Everything the shallow parse
+// misses (`cd /app && psql …`) merely under-classifies to the tool's own kind,
+// which the "db" kind is built to degrade into.
+func shellExecutable(cmd string) string {
+	for _, tok := range strings.Fields(cmd) {
+		tok = strings.Trim(tok, `"'`)
+		if tok == "" {
+			continue
+		}
+		// A flag means the tokens ran out before the program did (the `-u` of
+		// `sudo -u postgres psql`). Stop rather than guess.
+		if strings.HasPrefix(tok, "-") {
+			return ""
+		}
+		if isEnvAssignment(tok) {
+			continue
+		}
+		base := strings.ToLower(tok)
+		if i := strings.LastIndexByte(base, '/'); i >= 0 {
+			base = base[i+1:]
+		}
+		if shellWrappers[base] {
+			continue
+		}
+		return base
+	}
+	return ""
+}
+
+// isEnvAssignment reports whether tok is a leading `NAME=value` env prefix.
+// The name must be a shell identifier, so `--flag=x` and `a/b=c` are not.
+func isEnvAssignment(tok string) bool {
+	eq := strings.IndexByte(tok, '=')
+	if eq <= 0 {
+		return false
+	}
+	for i := 0; i < eq; i++ {
+		c := tok[i]
+		switch {
+		case c == '_', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// dbEngineForCall names the datastore a tool call targets ("postgres",
+// "redis", …), or "" when the call is not a database action. It is the only
+// input-aware part of span classification.
+//
+// A call is promoted to kind "db" exactly when this can NAME the engine.
+// Datastore work we cannot name — a `cockroach sql`, an MCP server called
+// `prod-db` — deliberately keeps the kind its tool name gives it. That is the
+// fallthrough contract DeriveSpanKind has always had: an unrecognised database
+// CLI must degrade to "bash", never disappear, because a classifier that
+// silently swallows a span is worse than one that under-classifies.
+func dbEngineForCall(tool string, input map[string]any) string {
+	if strings.HasPrefix(tool, "mcp__") {
+		return dbEngineForMCPServer(mcpServerName(tool))
+	}
+	if !shellTools[strings.ToLower(tool)] {
+		return ""
+	}
+	// A `command` on a tool we know execs a shell IS a shell string. The gate
+	// is the tool name rather than the mere presence of a `command` key,
+	// because reading an arbitrary tool's args as shell is how a non-shell
+	// tool would get mislabelled a database call.
+	cmd, _ := input["command"].(string)
+	if cmd == "" {
+		return ""
+	}
+	return dbEngines[shellExecutable(cmd)]
+}
+
+// dbEngineForMCPServer resolves an MCP server name to a datastore engine. The
+// whole name is matched first, then its `-`/`_`/`.`-separated segments, so the
+// common `postgres-mcp` / `mcp-redis` server naming resolves. Matching a
+// segment does mean a server called `postgres-notifier` reads as Postgres —
+// accepted: the operator named it after the datastore.
+func dbEngineForMCPServer(server string) string {
+	if server == "" {
+		return ""
+	}
+	server = strings.ToLower(server)
+	if engine, ok := dbEngines[server]; ok {
+		return engine
+	}
+	for _, seg := range strings.FieldsFunc(server, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.'
+	}) {
+		if engine, ok := dbEngines[seg]; ok {
+			return engine
+		}
+	}
+	return ""
+}
+
+// mcpServerName extracts the <server> of mcp__<server>__<tool>, or "" when the
+// name does not carry both halves.
+func mcpServerName(tool string) string {
+	parts := strings.Split(tool, "__")
+	if len(parts) < 3 {
+		return ""
+	}
+	return parts[1]
 }
 
 // mcpShortName strips the mcp__<server>__ prefix so the trace shows
@@ -161,6 +353,14 @@ func deriveSpanAttributes(tool, kind, model string, input map[string]any) map[st
 			if parsed, err := url.Parse(u); err == nil && parsed.Host != "" {
 				attrs["host"] = parsed.Host
 			}
+		}
+	case "db":
+		// The engine IS the concrete tool for a datastore call — a psql span
+		// tagged "Bash" renders the GNU bash logo and reads as a shell call in
+		// the step header, which is the confusion the "db" kind exists to end.
+		// The harness tool name is not lost: it stays the span's Name.
+		if engine := dbEngineForCall(tool, input); engine != "" {
+			attrs["tool"] = engine
 		}
 	}
 	return attrs
@@ -309,11 +509,11 @@ func (r *AgentSpanRecorder) Observe(ev AgentEvent) {
 			return
 		}
 
-		kind := DeriveSpanKind(p.name)
 		input := p.input
 		if input == nil {
 			input = map[string]any{}
 		}
+		kind := DeriveSpanKind(p.name, input)
 		detail, dTrunc := truncateDetail(deriveSpanDetail(p.name, input))
 		inputJSON, iTrunc := captureInput(p.input)
 		outputTail, oTrunc := captureOutput(ev.Content)
