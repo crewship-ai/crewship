@@ -25383,10 +25383,12 @@
         "…"
       ],
       "flags": [
-        "email"
+        "email",
+        "local"
       ],
       "documented_flags": [
-        "email"
+        "email",
+        "local"
       ]
     },
     {
@@ -25414,9 +25416,11 @@
         "…"
       ],
       "flags": [
+        "local",
         "locked-only"
       ],
       "documented_flags": [
+        "local",
         "locked-only"
       ]
     },
@@ -25526,11 +25530,13 @@
       ],
       "flags": [
         "email",
+        "local",
         "role",
         "workspace"
       ],
       "documented_flags": [
         "email",
+        "local",
         "role",
         "workspace"
       ]
@@ -25734,6 +25740,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_admin_extras_cov2_test.go",
         "cmd/crewship/cmd_admin_extras_cov_test.go",
@@ -25741,16 +25748,17 @@
         "cmd/crewship/cmd_admin_gdpr_test.go",
         "cmd/crewship/cmd_admin_health_test.go",
         "cmd/crewship/cmd_admin_invalidate_test.go",
-        "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
       ],
       "flags": [
         "email",
+        "local",
         "password",
         "password-stdin"
       ],
       "documented_flags": [
         "email",
+        "local",
         "password",
         "password-stdin"
       ]
@@ -25832,12 +25840,14 @@
       "flags": [
         "active-only",
         "email",
-        "limit"
+        "limit",
+        "local"
       ],
       "documented_flags": [
         "active-only",
         "email",
-        "limit"
+        "limit",
+        "local"
       ]
     },
     {
@@ -31100,6 +31110,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/cmd_db_remote_notice_test.go",
         "cmd/crewship/cmd_db_repair_ledger_test.go",
         "cmd/crewship/cmd_db_restore_lock_test.go"
