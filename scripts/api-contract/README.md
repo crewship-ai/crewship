@@ -85,11 +85,24 @@ response body is included in the summary.
 The generated catalog is broader than this safe probe. The runner always
 excludes `/api/auth/**` (NextAuth UI/session endpoints) and these non-JSON
 operations: backup/file downloads, avatars, pipeline and memory exports,
-memory-version content, and the journal stream. These are stable path
-exclusions because they return binary or streaming data and are not suitable
-for this JSON-focused probe. The exclusions are reported separately from the method deny-list,
-so a lower selected count is visible rather than silently looking like route
-coverage.
+admin memory-version content, memory-version bodies, and the journal and run
+streams. These are stable path exclusions because they return binary or
+streaming data and are not suitable for this JSON-focused probe. The
+exclusions are reported separately from the method deny-list, so a lower
+selected count is visible rather than silently looking like route coverage.
+
+A route earns a place on that list only when the generated document already
+**declares** its non-JSON media type — the bytes are the intended contract and
+only the placeholder schema under them is wrong. A route that answers with a
+media type the document does *not* declare is a genuine violation and stays in
+scope: `GET /api/v1/oauth/callback` returns `http.Error`'s `text/plain` on its
+4xx branches while the generator documents every error response as
+`application/json`, and that finding is the gate working. An undocumented
+*status code* on an otherwise-binary route is likewise a real finding about
+statuses, not about media. `scripts/api-contract-gate-test.sh` pins both
+directions, so a list entry that goes stale — as the memory-version content
+entry did, matching no path at all for want of its `admin/` prefix — fails by
+name.
 
 `selected` is the count of operations that survive all three exclusions —
 the complement, not the union. Note the buckets **overlap** (a non-JSON

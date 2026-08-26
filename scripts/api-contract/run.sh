@@ -113,7 +113,36 @@ AUTH_UI_PATH_REGEX='^/api/auth(/|$)'
 # placeholders, so probing them would report a schema failure for the wrong
 # reason. Keep this list explicit and review it when a new non-JSON route is
 # added.
-NON_JSON_PATH_REGEX='^/api/v1/(admin/backups/download|agents/[^/]+/avatar|agents/[^/]+/files/download|crews/[^/]+/files/download|users/[^/]+/avatar|workspaces/[^/]+/pipelines/[^/]+/export|memory/(export|versions/[^/]+/content)|journal/stream)$'
+#
+# The entry test is narrow, because a route that merely LOOKS non-JSON is
+# where this list does damage (#1815): exclude a path only when the generated
+# document already DECLARES its non-JSON media type, i.e. the bytes are the
+# intended contract and only the placeholder schema under them is wrong. A
+# route that emits a media type the document does NOT declare is a genuine
+# contract violation and has to stay in scope — `GET /api/v1/oauth/callback`
+# answers its 4xx branches with `http.Error`'s text/plain while the generator
+# documents every error response as application/json, and that is the finding
+# doing its job, not a false positive to be silenced here. Likewise, an
+# undocumented STATUS CODE on an otherwise-binary route (the issue-attachment
+# download) is a real finding about statuses, not about media.
+#
+# Two entries were stale when #1815 re-measured the gate:
+#
+#   - `memory/versions/[^/]+/content` matched NO path in the shipped
+#     document. The route it was written for is the admin one, which has
+#     carried its `admin/` prefix since #414 — so the real endpoint was
+#     probed as JSON on every run and answered 5xx, while the entry meant to
+#     cover it quietly matched nothing;
+#   - `chats/[^/]+/stream` and `memory/versions/[^/]+` were never entered.
+#     The first is the NDJSON run stream added by #1822, the same
+#     never-ending-stream case as `journal/stream` beside it (and with
+#     `follow=true` it burns a full request-timeout per generated example);
+#     the second returns raw version bytes as application/octet-stream.
+#
+# scripts/api-contract-gate-test.sh asserts each entry against the path
+# shapes the router actually registers, so a stale entry fails by name
+# instead of decaying into a finding nobody can place.
+NON_JSON_PATH_REGEX='^/api/v1/(admin/backups/download|admin/memory/versions/[^/]+/content|agents/[^/]+/avatar|agents/[^/]+/files/download|chats/[^/]+/stream|crews/[^/]+/files/download|users/[^/]+/avatar|workspaces/[^/]+/pipelines/[^/]+/export|memory/(export|versions/[^/]+)|journal/stream)$'
 
 count_operations() {
   jq -r --arg auth "$AUTH_UI_PATH_REGEX" --arg nonjson "$NON_JSON_PATH_REGEX" '
