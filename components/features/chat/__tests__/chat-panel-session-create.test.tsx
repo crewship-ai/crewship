@@ -89,6 +89,8 @@ const panelProps = {
 let serverMessages: Record<string, { id: string; role: string; content: string; ts: string }[]> = {}
 let createStatus = 201
 let creates: { url: string; body: Record<string, unknown> }[] = []
+/** Set to keep the create POST in flight for as long as a test needs. */
+let holdCreate: Promise<void> | null = null
 
 function installFetch() {
   creates = []
@@ -109,6 +111,9 @@ function installFetch() {
     if (u.includes("/chats") && method === "POST") {
       const body = JSON.parse(String(init?.body ?? "{}"))
       creates.push({ url: u, body })
+      // The create is a round trip, and the panel is fully interactive for the
+      // whole of it. Tests that care about what happens DURING it hold it here.
+      if (holdCreate) await holdCreate
       if (createStatus >= 400) {
         return { ok: false, status: createStatus, json: async () => ({ error: "nope" }) } as unknown as Response
       }
@@ -129,7 +134,49 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     vi.clearAllMocks()
     serverMessages = {}
     createStatus = 201
+    holdCreate = null
     installFetch()
+  })
+
+  // Pressing Send on a draft session starts a POST, and until it answers the
+  // composer looks exactly as it did — the draft is still in the box (it is
+  // only cleared once the send is away) and the button is still live. So the
+  // natural response to a slow create is to press Send again, and both
+  // presses used to get through: every guard in useMessageSubmit is
+  // synchronous and already behind them by the time either one is waiting.
+  //
+  // The row itself was never duplicated — `createInFlightRef` collapses the
+  // POSTs and the endpoint is an upsert — but the MESSAGE was, twice into the
+  // same conversation. The latch is in the composer's submit path, so this
+  // covers the main chat's shape of the window (a real round trip) and the
+  // onboarding suite covers the other (a wait for the transcript base).
+  it("sends once when Send is pressed twice while the create is still in flight", async () => {
+    let release!: () => void
+    holdCreate = new Promise<void>((resolve) => { release = resolve })
+
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(chatStub.loadHistory).toHaveBeenCalled())
+
+    const input = screen.getByRole("textbox")
+    fireEvent.change(input, { target: { value: "what changed yesterday?" } })
+    const submit = screen.getByRole("button", { name: /submit/i })
+    fireEvent.click(submit)
+    await waitFor(() => expect(creates).toHaveLength(1))
+
+    // Second press, inside the window the POST is holding open.
+    fireEvent.click(submit)
+    release()
+
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(sendMessage).toHaveBeenCalledWith("what changed yesterday?")
+    expect(creates).toHaveLength(1)
+    expect(toastError).not.toHaveBeenCalled()
+    // And the composer is not wedged: the next message still goes.
+    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(""))
+    fireEvent.change(input, { target: { value: "and today?" } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2))
+    expect(sendMessage).toHaveBeenLastCalledWith("and today?")
   })
 
   it("POSTs the chat on the first send even though the history came back 200/empty", async () => {

@@ -518,6 +518,23 @@ describe("OnboardingSetupChat — sending inside the history-load window", () =>
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith("try again then"))
   })
 
+  // The other half of the same trade. Waiting rather than refusing means the
+  // window a click can land in is now a window it SURVIVES — so two clicks in
+  // it would both survive, and the Guide would be told the same thing twice by
+  // someone who thought the first press had not registered. The composer's
+  // submit path latches on the first one (use-message-submit.ts).
+  it("sends once when Send is pressed twice while it waits", async () => {
+    const { sendMessage, release } = await renderWithHeldHistory()
+    typeAndSend("I need to scrape listings")
+    // The draft is still in the box — nothing clears until the send is away —
+    // so the second press is the same message, not a new one.
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }))
+
+    release()
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(sendMessage).toHaveBeenCalledWith("I need to scrape listings")
+  })
+
   it("still sends it when history could not be loaded at all", async () => {
     const { sendMessage, release } = await renderWithHeldHistory("error")
     typeAndSend("I need to scrape listings")
