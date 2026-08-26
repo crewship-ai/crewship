@@ -116,3 +116,112 @@ describe("New routine — the three entry tiles", () => {
     expect(tile(/^Write it yourself/).textContent).toMatch(/full control/i)
   })
 })
+
+// ── Every mode has a way out, and it is the same way out ─────────────────
+//
+// This dialog is a router over four screens, and only two of them rendered a
+// CreateSurfaceFooter: describe and advanced. Entry and fork rendered a body
+// and nothing else, so the shell's own rule — "Cancel is always present,
+// always leftmost of the action group, always in the same place"
+// (create-surface.tsx) — was false on half of this surface. It was not a dead
+// end (the header's × still closed it, as did Esc), which is exactly why it
+// survived: the flow works, so nobody hits a wall, and the person who is
+// looking for the button everywhere else in the product simply does not find
+// it here. That is a discoverability cost paid quietly and forever.
+//
+// The shell already supports the shape these two screens need — a footer with
+// no primary at all, because on both of them the ACTION IS A ROW (a route
+// tile, a routine to fork). CreateSurfaceFooter made `primaryLabel`/`onPrimary`
+// optional for precisely this case, and its doc comment names the defect these
+// tests pin: "before this was optional it rendered no footer at all, and
+// therefore no Cancel".
+describe("New routine — every mode offers a Cancel", () => {
+  function openDialog() {
+    const onClose = vi.fn()
+    render(
+      <RoutineCreateDialog workspaceId="ws-1" open onClose={onClose} onCreated={vi.fn()} />,
+    )
+    return { onClose }
+  }
+
+  const cancel = () => screen.getByRole("button", { name: "Cancel" })
+
+  it("gives the entry screen one, where there was only the header's ×", () => {
+    const { onClose } = openDialog()
+    fireEvent.click(cancel())
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("gives the fork list one too", () => {
+    const { onClose } = openDialog()
+    fireEvent.click(screen.getByText("Fork an existing routine"))
+    // The header's back arrow returns you to the entry screen; Cancel leaves
+    // the dialog. Two different exits, and the fork list offered only the one
+    // that keeps you inside.
+    fireEvent.click(cancel())
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not stop to ask on a screen with nothing on it to lose", () => {
+    // `guardCancel` defaults to true, and it is LEFT at true here on purpose:
+    // this Cancel closes the whole dialog, so it is the header ×'s twin and
+    // must behave like it. The pickers that opt out (crew-icon,
+    // avatar) do so because their Cancel means "back out of this panel" while
+    // the surface behind it stays dirty — a different button wearing the same
+    // word. What makes the default safe here is that the surface reports
+    // `dirty` per mode, and neither the entry tiles nor the fork list holds
+    // any input, so the guard is inert rather than a false alarm.
+    const { onClose } = openDialog()
+    fireEvent.click(cancel())
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("still asks on a screen that does hold input", () => {
+    // The other half of the decision above, and the reason Cancel is not
+    // opted out of the guard: on the editor there IS work, and Cancel must
+    // not be the one exit that drops it silently while Esc, the overlay and
+    // the × all ask. (Advanced mode already had a footer — this pins the
+    // behaviour the two new footers were measured against.)
+    const { onClose } = openDialog()
+    fireEvent.click(screen.getByText("Write it yourself"))
+    fireEvent.change(screen.getByPlaceholderText("Friendly name"), {
+      target: { value: "nightly sweep" },
+    })
+
+    fireEvent.click(cancel())
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── The footer hint has to be true on the screen it is printed on ────────
+//
+// CreateSurfaceFooter's hint defaults to "⌘↵ to confirm · Esc to cancel",
+// which is the shell's contract and true wherever there is a primary to
+// confirm. On the entry screen and the fork list there is none — the dialog's
+// own handleKeyboardSubmit no-ops for both modes — so printing the default
+// would have been the migration's other failure mode: not a missing control,
+// but a documented keystroke that does nothing when you press it. Esc is the
+// half of the contract these screens actually honour, so it is the half they
+// claim. add-integration-dialog.tsx made the same call for the same reason.
+describe("New routine — the keyboard hint", () => {
+  it("names only Esc where ⌘↵ has nothing to confirm", () => {
+    render(<RoutineCreateDialog {...PROPS} />)
+    expect(screen.queryByText("⌘↵")).not.toBeInTheDocument()
+    expect(screen.getByText("Esc")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText("Fork an existing routine"))
+    expect(screen.queryByText("⌘↵")).not.toBeInTheDocument()
+    expect(screen.getByText("Esc")).toBeInTheDocument()
+  })
+
+  it("keeps the full contract where there is a primary", () => {
+    render(<RoutineCreateDialog {...PROPS} />)
+    fireEvent.click(screen.getByText("Describe it"))
+    expect(screen.getByText("⌘↵")).toBeInTheDocument()
+  })
+})

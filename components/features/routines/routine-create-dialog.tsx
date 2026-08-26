@@ -658,6 +658,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
 
       {/* ── ENTRY — three cards ───────────────────────────────────────── */}
       {mode === "entry" && (
+        <>
         <CreateSurfaceBody className="flex flex-col gap-2.5">
           {/* Three routes, three colours.
            *  Two of these were accent="slate", which made the picker read as
@@ -689,6 +690,37 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
             onClick={() => setMode("advanced")}
           />
         </CreateSurfaceBody>
+
+        {/* No primary: the three tiles ARE the action, which is the case the
+            shell made `primaryLabel`/`onPrimary` optional for. What is not
+            optional is the Cancel — this screen used to render a body and
+            nothing else, so the one surface-wide rule the shell states
+            outright ("Cancel is always present, always leftmost, always in
+            the same place") was false the moment New routine opened. The ×
+            worked, so this was never a dead end; it was the button being
+            missing from the one place a person has learned to look.
+
+            Guarded by default, and deliberately not opted out of: unlike a
+            picker panel's "Cancel", this one closes the whole dialog, so it
+            is the header ×'s twin and has to behave like it. Nothing on this
+            screen is input, so `dirty` is false here and the guard costs
+            nothing today — but if the entry screen ever learns about the goal
+            or buffer carried back from another mode, Cancel gets the prompt
+            for free instead of being the one exit that skipped it.
+
+            The hint names Esc alone. There is no primary, so ⌘↵ has nothing
+            to confirm — `handleKeyboardSubmit` returns without doing anything
+            in this mode — and a footer that prints a keystroke which does
+            nothing is worse than one that prints nothing. */}
+        <CreateSurfaceFooter
+          hint={
+            <>
+              <kbd className="font-mono">Esc</kbd> to cancel
+            </>
+          }
+          onCancel={onClose}
+        />
+        </>
       )}
 
       {/* ── DESCRIBE ──────────────────────────────────────────────────── */}
@@ -774,6 +806,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
 
       {/* ── FORK ──────────────────────────────────────────────────────── */}
       {mode === "fork" && (
+        <>
         <CreateSurfaceBody className="flex flex-col gap-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -838,6 +871,33 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
             untouched. Save creates a new routine.
           </p>
         </CreateSurfaceBody>
+
+        {/* Same shape, same reasons: the rows are the action, so no primary
+            and no ⌘↵ to promise, and Cancel leaves the dialog rather than the
+            screen. The header's arrow already goes BACK to the entry tiles —
+            without this footer the only way OUT of the fork list was the ×,
+            so the two exits a person expects side by side were one exit and
+            an arrow that keeps you inside.
+
+            The search box is the only thing typed here and it filters a list
+            rather than composing anything, so it does not make the surface
+            dirty and the guard stays inert — the same judgement the shell
+            asks for, reached from what the screen holds rather than copied
+            from the surface next door.
+
+            Cancel is not disabled while a fork is loading. `forking` locks
+            the tiles because picking a second routine mid-load races the
+            first, but a person who changes their mind during a fetch is
+            entitled to leave. */}
+        <CreateSurfaceFooter
+          hint={
+            <>
+              <kbd className="font-mono">Esc</kbd> to cancel
+            </>
+          }
+          onCancel={onClose}
+        />
+        </>
       )}
 
       {/* ── ADVANCED (the DSL editor) ─────────────────────────────────── */}
