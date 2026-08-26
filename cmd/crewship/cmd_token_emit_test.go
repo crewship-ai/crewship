@@ -123,9 +123,6 @@ func TestSecTokenEmit_OutputFile0600(t *testing.T) {
 // and a bare O_CREATE both PRESERVE an existing file's mode. This test
 // fails if a future refactor drops back to either.
 func TestSecTokenEmit_OverwriteTightensPerms(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix mode bits don't map cleanly on Windows")
-	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "token.txt")
 
@@ -145,13 +142,21 @@ func TestSecTokenEmit_OverwriteTightensPerms(t *testing.T) {
 		t.Fatalf("emitToken: %v", err)
 	}
 
-	fi, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := fi.Mode().Perm(); perm != 0o600 {
-		t.Errorf("rotated token file perms = %o, want 0600 — a credential "+
-			"must not inherit the mode of the file it replaced", perm)
+	// Only the mode assertion is Unix-specific, so it is guarded inline
+	// rather than skipping the whole test — the content and
+	// tempfile-cleanup assertions below are platform-independent and
+	// still run on Windows. (Same pattern as
+	// TestSecTokenEmit_OutputFile0600 above; a t.Skip here would report
+	// "ok" while checking nothing at all.)
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0o600 {
+			t.Errorf("rotated token file perms = %o, want 0600 — a credential "+
+				"must not inherit the mode of the file it replaced", perm)
+		}
 	}
 
 	data, err := os.ReadFile(path)
