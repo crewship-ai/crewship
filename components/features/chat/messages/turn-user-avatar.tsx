@@ -1,7 +1,7 @@
 "use client"
 
 import { UserAvatar } from "@/components/ui/user-avatar"
-import { useSession } from "@/hooks/use-auth"
+import { useSessionSafe } from "@/hooks/use-auth"
 
 /**
  * Whoever sent this turn, in the transcript's right gutter.
@@ -19,7 +19,10 @@ import { useSession } from "@/hooks/use-auth"
  * with three people that is the difference between skimming and reading.
  */
 export function ChatTurnUserAvatar({ authorName }: { authorName?: string | null }) {
-  const { data: session } = useSession()
+  // The tolerant read: this is a portrait, and a portrait must not be able to
+  // take a message down with it when it is rendered outside the dashboard's
+  // AuthProvider.
+  const { data: session } = useSessionSafe()
   const user = session?.user
 
   // A teammate's turn: we have a display name from the group-chat resolver
@@ -43,7 +46,13 @@ export function ChatTurnUserAvatar({ authorName }: { authorName?: string | null 
   return (
     <UserAvatar
       name={user.name}
-      email={user.email}
+      // `?? ""`, because the session's email is optional in practice even
+      // though the schema defaults it: `personInitials` slices the string it
+      // is given, and an undefined one threw — inside a transcript turn,
+      // which meant the whole message fell into its error boundary. A face
+      // with no initials is a fine outcome; a message that does not render is
+      // not.
+      email={user.email ?? ""}
       src={user.avatar_url || null}
       className="h-8 w-8"
       textClassName="text-[10px]"

@@ -12,8 +12,8 @@ import {
 import { timeAgo } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
-import { parseSessionTimestamp } from "../session-sort"
-import type { ChatTreeAgent, ChatTreeThread } from "../chat-tree-sidebar"
+import { parseSessionTimestamp } from "./session-sort"
+import type { ChatTreeAgent, ChatTreeThread } from "./chat-tree-data"
 
 /**
  * The v2 left column: conversations first, roster second.

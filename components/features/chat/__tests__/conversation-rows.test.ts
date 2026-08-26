@@ -7,7 +7,7 @@ import {
   liveThreadIds,
   type ConversationRow,
 } from "../conversations-sidebar"
-import type { ChatTreeAgent, ChatTreeThread } from "../../chat-tree-sidebar"
+import type { ChatTreeAgent, ChatTreeThread } from "../chat-tree-data"
 
 function agent(partial: Partial<ChatTreeAgent> & { id: string }): ChatTreeAgent {
   return {

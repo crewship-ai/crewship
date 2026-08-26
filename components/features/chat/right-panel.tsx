@@ -39,8 +39,8 @@ import { SharedContextTab } from "./right-panel-tabs/shared-context-tab"
 import { TeamTab } from "./right-panel-tabs/team-tab"
 import { DRAWER_TAB_LABELS } from "./right-rail"
 import type { DrawerTab } from "@/stores/drawer-store"
-import { useChatSkin } from "./v2/chat-skin"
-import { classifyAgentFile, relativeToAgent } from "./v2/file-scope"
+import { useChatAgent } from "./chat-agent-context"
+import { classifyAgentFile, relativeToAgent } from "./files/file-scope"
 
 interface ChatFileTreeState {
   expandedPaths: string[]
@@ -77,10 +77,9 @@ interface RightPanelProps {
 }
 
 export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, files, initialTab, hideTabs, style }: RightPanelProps) {
-  const { variant, agent: skinAgent } = useChatSkin()
-  const isV2 = variant === "v2"
-  const crewId = skinAgent?.crewId ?? null
-  const agentSlug = skinAgent?.slug ?? null
+  const chatAgent = useChatAgent()
+  const crewId = chatAgent?.crewId ?? null
+  const agentSlug = chatAgent?.slug ?? null
   // Off by default. The scaffolding is the answer to "why is my agent
   // behaving like that", so it has to stay one click away — it is just not
   // the answer to "what has this agent made for me", which is the question
@@ -134,9 +133,9 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
    * only means "plumbing" when it sits at the root of the namespace.
    */
   const visibleFiles = useMemo(() => {
-    if (!isV2 || showInternals) return files
+    if (showInternals) return files
     return files.filter((f) => classifyAgentFile(relativeToAgent(f.path, crewId, agentSlug)) !== "plumbing")
-  }, [files, isV2, showInternals, crewId, agentSlug])
+  }, [files, showInternals, crewId, agentSlug])
 
   const hiddenCount = files.length - visibleFiles.length
 
@@ -307,7 +306,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                   below it too. Rendered only when something is actually
                   hidden — a permanent "Show 0 internal files" is a control
                   that teaches the reader their clicks do nothing. */}
-              {isV2 && (hiddenCount > 0 || showInternals) && (
+              {(hiddenCount > 0 || showInternals) && (
                 <button
                   type="button"
                   onClick={() => setShowInternals((v) => !v)}

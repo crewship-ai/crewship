@@ -43,18 +43,18 @@ vi.mock("@/components/ui/hover-card", () => ({
 // The avatar components reach for DiceBear collections and the auth session;
 // neither is what these tests are about. Probes keep the assertions on "is
 // there a face in this gutter" rather than on which PNG it resolved to.
-vi.mock("../thinking-avatar", () => ({
+vi.mock("../messages/thinking-avatar", () => ({
   ThinkingAvatar: ({ active }: { active: boolean }) => (
     <div data-testid="thinking-avatar" data-active={String(active)} />
   ),
 }))
-vi.mock("../turn-user-avatar", () => ({
+vi.mock("../messages/turn-user-avatar", () => ({
   ChatTurnUserAvatar: () => <div data-testid="user-avatar" />,
 }))
 
-import { ChatSkinProvider } from "../chat-skin"
-import { AssistantTurn } from "../../assistant-turn"
-import { TurnRenderer } from "../../turn-renderer"
+import { ChatAgentProvider } from "../chat-agent-context"
+import { AssistantTurn } from "../assistant-turn"
+import { TurnRenderer } from "../turn-renderer"
 
 function part(p: Partial<TurnPart> = {}): TurnPart {
   return {
@@ -89,76 +89,57 @@ function userTurn(): ChatTurn {
 
 const AGENT = { id: "ag1", name: "Morgan" }
 
-function renderSkinned(node: ReactNode, variant: "classic" | "v2") {
-  return render(
-    <ChatSkinProvider variant={variant} agent={variant === "v2" ? AGENT : null}>
-      {node}
-    </ChatSkinProvider>,
-  )
+function renderWithAgent(node: ReactNode) {
+  return render(<ChatAgentProvider agent={AGENT}>{node}</ChatAgentProvider>)
 }
 
 const noop = () => {}
 
-describe("reasoning is never auto-opened in v2", () => {
-  it("classic still opens the block while it streams", () => {
+describe("reasoning is never auto-opened", () => {
+  it("leaves the block closed while it streams", () => {
+    // The defect the whole transcript rewrite starts from: a streaming
+    // reasoning block dumped the model's private deliberation into the middle
+    // of the conversation and then took it away a second later. The chevron
+    // still opens it on request — a wrong answer is exactly when you want to
+    // read the reasoning.
     reasoningCalls.length = 0
-    renderSkinned(
-      <AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />,
-      "classic",
-    )
-    expect(reasoningCalls.at(-1)).toMatchObject({ isStreaming: true, defaultOpen: true })
-    cleanup()
-  })
-
-  it("v2 leaves it closed even while it streams", () => {
-    // The defect this whole skin starts from: a streaming reasoning block
-    // dumps the model's private deliberation into the transcript and then
-    // takes it away a second later. The chevron still opens it on request.
-    reasoningCalls.length = 0
-    renderSkinned(
-      <AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />,
-      "v2",
-    )
+    renderWithAgent(<AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />)
     expect(reasoningCalls.at(-1)).toMatchObject({ isStreaming: true, defaultOpen: false })
     expect(screen.getByTestId("reasoning")).toHaveAttribute("data-default-open", "false")
     cleanup()
   })
 
-  it("v2 keeps it closed once the stream has ended too", () => {
+  it("keeps it closed once the stream has ended too", () => {
     reasoningCalls.length = 0
-    renderSkinned(
-      <AssistantTurn turn={thinkingTurn(false)} onCopy={noop} onFileClick={noop} />,
-      "v2",
-    )
+    renderWithAgent(<AssistantTurn turn={thinkingTurn(false)} onCopy={noop} onFileClick={noop} />)
     expect(reasoningCalls.at(-1)).toMatchObject({ isStreaming: false, defaultOpen: false })
     cleanup()
   })
 
-  it("names the agent in the v2 header, where classic says only 'Thinking'", () => {
-    renderSkinned(
-      <AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />,
-      "v2",
-    )
+  it("names the agent in the header", () => {
+    renderWithAgent(<AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />)
     expect(screen.getByTestId("reasoning-trigger").textContent).toContain("Morgan is thinking")
     // The default brain-glyph trigger must NOT render: the turn already has a
-    // face in the gutter and two animated marks on one turn is one too many.
+    // face in the gutter, and two animated marks on one turn is one more than
+    // the reader can attribute.
     expect(screen.queryByTestId("default-trigger")).toBeNull()
     cleanup()
   })
 
-  it("falls back to the classic trigger when no skin is present", () => {
+  it("still renders without a provider, unnamed rather than broken", () => {
+    // ChatPanel is mounted in tests and in embedded surfaces with no agent in
+    // context. The header degrades to a generic label; it does not throw.
+    reasoningCalls.length = 0
     render(<AssistantTurn turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />)
-    expect(screen.getByTestId("default-trigger")).toBeTruthy()
+    expect(reasoningCalls.at(-1)).toMatchObject({ defaultOpen: false })
+    expect(screen.getByTestId("reasoning-trigger").textContent).toContain("is thinking")
     cleanup()
   })
 })
 
 describe("the transcript gutters", () => {
   it("gives an assistant turn a face and drives it from isStreaming", () => {
-    renderSkinned(
-      <TurnRenderer turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />,
-      "v2",
-    )
+    renderWithAgent(<TurnRenderer turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />)
     expect(screen.getByTestId("thinking-avatar")).toHaveAttribute("data-active", "true")
     cleanup()
   })
@@ -166,30 +147,27 @@ describe("the transcript gutters", () => {
   it("stops the animation the moment the turn settles", () => {
     // Same flag the Regenerate affordance waits on, so the ring cannot still
     // be turning on a turn the reader is already allowed to act on.
-    renderSkinned(
-      <TurnRenderer turn={thinkingTurn(false)} onCopy={noop} onFileClick={noop} />,
-      "v2",
-    )
+    renderWithAgent(<TurnRenderer turn={thinkingTurn(false)} onCopy={noop} onFileClick={noop} />)
     expect(screen.getByTestId("thinking-avatar")).toHaveAttribute("data-active", "false")
     cleanup()
   })
 
   it("gives a user turn a face in the opposite gutter", () => {
-    renderSkinned(<TurnRenderer turn={userTurn()} onCopy={noop} onFileClick={noop} />, "v2")
+    renderWithAgent(<TurnRenderer turn={userTurn()} onCopy={noop} onFileClick={noop} />)
     expect(screen.getByTestId("user-avatar")).toBeTruthy()
     expect(screen.queryByTestId("thinking-avatar")).toBeNull()
     cleanup()
   })
 
-  it("draws no gutters at all on the classic route", () => {
-    renderSkinned(<TurnRenderer turn={userTurn()} onCopy={noop} onFileClick={noop} />, "classic")
-    expect(screen.queryByTestId("user-avatar")).toBeNull()
-    cleanup()
-    renderSkinned(
-      <TurnRenderer turn={thinkingTurn(true)} onCopy={noop} onFileClick={noop} />,
-      "classic",
+  it("holds both gutters open on every turn", () => {
+    // Only one of the two ever carries a face, and the empty one is why every
+    // bubble sits on the same two text edges instead of zigzagging.
+    const { container } = renderWithAgent(
+      <TurnRenderer turn={userTurn()} onCopy={noop} onFileClick={noop} />,
     )
-    expect(screen.queryByTestId("thinking-avatar")).toBeNull()
+    const grid = container.querySelector('[data-turn-id="u1"]')
+    expect(grid?.className).toContain("grid-cols-[32px_minmax(0,1fr)_32px]")
+    expect(grid?.children).toHaveLength(3)
     cleanup()
   })
 })

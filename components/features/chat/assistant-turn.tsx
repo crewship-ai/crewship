@@ -6,7 +6,6 @@ import { useReactionsStore } from "@/stores/reactions-store"
 import { useEffect } from "react"
 import { useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
-import { ReactionPicker } from "./reactions/reaction-picker"
 import { ReactionsRow } from "./reactions/reactions-row"
 import {
   Message,
@@ -27,7 +26,7 @@ import { Shimmer } from "@/components/ai-elements/shimmer"
 import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { StatusIndicator } from "@/components/features/chat/status-indicator"
-import { useChatSkin } from "./v2/chat-skin"
+import { useChatAgent } from "./chat-agent-context"
 import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { groupTurnParts, type ToolNode } from "./turn-grouping"
@@ -57,7 +56,6 @@ function formatTokens(n: number): string {
 }
 
 function ResultCard({ part }: { part: TurnPart }) {
-  const isV2 = useChatSkin().variant === "v2"
   const meta = part.metadata ?? {}
   const cost = meta.total_cost_usd as number | undefined
   const durationMs = meta.duration_ms as number | undefined
@@ -121,15 +119,13 @@ function ResultCard({ part }: { part: TurnPart }) {
 
   return (
     <details
+      // The numbers stay exactly as accurate and stop being what the eye lands
+      // on. `group-hover` is the turn's own group, set on the turn wrapper in
+      // turn-renderer, so the line appears when the reader is already looking
+      // at this reply; `focus-within` keeps it reachable without a pointer.
       className={cn(
         "max-w-lg group",
-        // v2 keeps the numbers exactly as accurate and stops them being what
-        // the eye lands on. `group-hover` is the turn's own group, set on the
-        // turn wrapper in turn-renderer — so the line appears when the reader
-        // is already looking at this reply, and `focus-within` keeps it
-        // reachable without a pointer.
-        isV2 &&
-          "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 open:opacity-100",
+        "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 open:opacity-100",
       )}
     >
       <summary className="flex items-center gap-2 text-micro text-muted-foreground cursor-pointer hover:text-foreground select-none list-none">
@@ -509,7 +505,7 @@ function StreamingProse({ content, streaming }: { content: string; streaming: bo
  * `useReasoning()` — the timer and the open state live in the Reasoning
  * provider, and its children render inside it.
  */
-function V2ReasoningLabel({ agentName }: { agentName: string | null }) {
+function ReasoningLabel({ agentName }: { agentName: string | null }) {
   const { isStreaming, isOpen, duration, elapsed } = useReasoning()
   const who = agentName?.trim() || "Agent"
   return (
@@ -542,15 +538,11 @@ function V2ReasoningLabel({ agentName }: { agentName: string | null }) {
  *  reasoning, but reaching for it is the reader's decision. */
 function ThinkingBlock({ part }: { part: TurnPart }) {
   const text = useSmoothText(part.content, !!part.isStreaming)
-  const { variant, agent } = useChatSkin()
-  const isV2 = variant === "v2"
+  const agent = useChatAgent()
   return (
-    <Reasoning
-      isStreaming={part.isStreaming}
-      defaultOpen={isV2 ? false : part.isStreaming}
-    >
+    <Reasoning isStreaming={part.isStreaming} defaultOpen={false}>
       <ReasoningTrigger>
-        {isV2 ? <V2ReasoningLabel agentName={agent?.name ?? null} /> : undefined}
+        <ReasoningLabel agentName={agent?.name ?? null} />
       </ReasoningTrigger>
       <ReasoningContent>{part.isStreaming ? text + " " : text}</ReasoningContent>
     </Reasoning>
@@ -707,7 +699,6 @@ function TurnFeedbackActions({
   fullText: string
   chatId?: string
 }) {
-  const isV2 = useChatSkin().variant === "v2"
   // Bind the feedback store to the authenticated user. Without this,
   // signing out and back in as a different account on the same browser
   // would rehydrate the previous user's votes — a privacy leak the
@@ -749,18 +740,15 @@ function TurnFeedbackActions({
 
   return (
     <MessageActions
-      className={cn(
-        // Same treatment as the cost line, for the same reason: four controls
-        // under every single reply is four controls the eye has to step over
-        // to reach the next thing anybody said. They appear on the turn the
-        // reader is actually looking at.
-        //
-        // `focus-within` is not optional here — these are the only way to
-        // register feedback, and hover-only would put them out of reach of a
-        // keyboard entirely.
-        isV2 &&
-          "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100",
-      )}
+      // Same treatment as the cost line, for the same reason: four controls
+      // under every single reply is four controls the eye has to step over to
+      // reach the next thing anybody said. They appear on the turn the reader
+      // is actually looking at.
+      //
+      // `focus-within` is not optional here — these are the only way to
+      // register feedback, and hover-only would put them out of reach of a
+      // keyboard entirely.
+      className="opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
     >
       <MessageAction tooltip="Copy" onClick={() => onCopy(fullText)}>
         <Copy className="h-3.5 w-3.5" />
@@ -785,22 +773,18 @@ function TurnFeedbackActions({
           className={"h-3.5 w-3.5 " + (submitted.not_helpful ? "text-destructive" : "")}
         />
       </MessageAction>
-      {/* No emoji picker in v2.
+      {/* No emoji picker.
        *
        * Reactions persist — `message_reactions`, keyed per (chat, message,
        * emoji, user) — and they render back. But an emoji is addressed to
-       * somebody, and in a one-person chat there is nobody in the room to
-       * read it: nothing downstream consumes the table, and the only reader
-       * is the person who clicked. The thumbs stay because they are a
-       * different thing wearing a similar shape — `message_feedback` carries
-       * a trace_id back to the run that produced the answer, and
-       * `crewship feedback` can read it.
+       * somebody, and in a one-person chat there is nobody in the room to read
+       * it: nothing downstream consumes the table, and the only reader is the
+       * person who clicked. The thumbs stay because they are a different thing
+       * wearing a similar shape — `message_feedback` carries a trace_id back
+       * to the run that produced the answer, and `crewship feedback` reads it.
        *
-       * When more than one person is in a thread this comes back, because
-       * then the emoji finally has an audience. */}
-      {!isV2 && (
-        <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
-      )}
+       * When more than one person is in a thread this comes back, because then
+       * the emoji finally has an audience. */}
     </MessageActions>
   )
 }

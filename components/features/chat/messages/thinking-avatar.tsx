@@ -3,7 +3,7 @@
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { cn } from "@/lib/utils"
 
-import type { ChatSkinAgent } from "./chat-skin"
+import type { ChatAgent } from "../chat-agent-context"
 
 /**
  * The agent's face, doing double duty as the transcript's only spinner.
@@ -28,7 +28,7 @@ export function ThinkingAvatar({
   active,
   className,
 }: {
-  agent: ChatSkinAgent | null
+  agent: ChatAgent | null
   /** True while the reply (or its reasoning) is still streaming. */
   active: boolean
   className?: string

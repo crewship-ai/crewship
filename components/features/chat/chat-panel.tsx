@@ -47,8 +47,8 @@ import { ConversationSearch } from "./search/conversation-search"
 import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
 import type { FileEntry } from "./chat-tree-row"
-import { useChatSkin } from "./v2/chat-skin"
-import { ThinkingAvatar } from "./v2/thinking-avatar"
+import { useChatAgent } from "./chat-agent-context"
+import { ThinkingAvatar } from "./messages/thinking-avatar"
 import { useComposerStore, messageOwnAttachments } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch } from "@/lib/api-fetch"
@@ -133,7 +133,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
-  const { agent: skinAgent } = useChatSkin()
+  const chatAgent = useChatAgent()
 
   // Does the composer currently hold a file the user has not sent yet?
   //
@@ -716,8 +716,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             // definition, empty. Falls back to the glyph when there is no
             // skin (classic /chat) or no agent resolved yet.
             icon={
-              skinAgent ? (
-                <ThinkingAvatar agent={skinAgent} active={false} className="h-12 w-12" />
+              chatAgent ? (
+                <ThinkingAvatar agent={chatAgent} active={false} className="h-12 w-12" />
               ) : (
                 <Bot className="h-12 w-12" />
               )
@@ -994,15 +994,10 @@ function CommandsButton({ onClick }: { onClick: () => void }) {
  * true ~100% of the time, in the top-left corner of the thing the reader came
  * to read. What the badge is genuinely FOR is the other two states: typing
  * into a chat whose socket has gone is typing into a void, and that is worth
- * a lot of pixels. So v2 shows it exactly then.
- *
- * The badge is not deleted for the healthy case — it is the same component,
- * and `/chat` still renders all three states, so the "is it connected"
- * question has an answer for anyone who has learned to look there.
+ * a lot of pixels. So it shows up exactly then, and says nothing otherwise.
  */
 function ConnectionBadge({ status }: { status: string }) {
-  const isV2 = useChatSkin().variant === "v2"
-  if (isV2 && status === "connected") return null
+  if (status === "connected") return null
   return (
     <div className={cn(
       "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-micro font-medium",

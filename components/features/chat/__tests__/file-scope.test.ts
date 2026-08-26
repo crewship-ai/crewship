@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { classifyAgentFile, relativeToAgent } from "../file-scope"
+import { classifyAgentFile, relativeToAgent } from "../files/file-scope"
 
 describe("classifyAgentFile", () => {
   it("calls the agent's own artefacts created", () => {

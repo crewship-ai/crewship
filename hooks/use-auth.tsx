@@ -304,6 +304,26 @@ export function useAuth() {
   return ctx
 }
 
+/**
+ * Session data when a provider is mounted, and null when one is not.
+ *
+ * The `useSession` below throws without a provider, which is right for
+ * everything that cannot function without knowing who is signed in — a route
+ * guard, a mutation, the sign-out button. It is wrong for DECORATION: the
+ * transcript draws the reader's own face beside their messages, and a face
+ * that throws takes the whole message down with it. Anything mounted outside
+ * the dashboard tree (a test rendering one turn, an embedded surface) hit
+ * exactly that.
+ *
+ * Same shape as `useRealtimeEventSafe` and `useRealtimeStatusSafe`, and for
+ * the same reason: the tolerant variant is a deliberate, named choice at the
+ * call site rather than a silent weakening of the strict one.
+ */
+export function useSessionSafe() {
+  const ctx = useContext(AuthContext)
+  return { data: ctx?.session ?? null, status: ctx?.status ?? "loading" }
+}
+
 /** Returns session data and auth status (drop-in replacement for next-auth useSession). */
 export function useSession() {
   const { session, status } = useAuth()
