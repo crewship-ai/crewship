@@ -1,6 +1,6 @@
 "use client"
 
-import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
+import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, ChevronDown, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useReactionsStore } from "@/stores/reactions-store"
 import { useEffect } from "react"
@@ -19,13 +19,19 @@ import {
   Reasoning,
   ReasoningContent,
   ReasoningTrigger,
+  useReasoning,
+  thinkingLiveLabel,
+  thoughtForLabel,
 } from "@/components/ai-elements/reasoning"
+import { Shimmer } from "@/components/ai-elements/shimmer"
 import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { StatusIndicator } from "@/components/features/chat/status-indicator"
+import { useChatSkin } from "./v2/chat-skin"
 import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { groupTurnParts, type ToolNode } from "./turn-grouping"
+import { cn } from "@/lib/utils"
 import { formatCost } from "@/lib/utils/format"
 import { formatDurationMillis } from "@/lib/time"
 
@@ -51,6 +57,7 @@ function formatTokens(n: number): string {
 }
 
 function ResultCard({ part }: { part: TurnPart }) {
+  const isV2 = useChatSkin().variant === "v2"
   const meta = part.metadata ?? {}
   const cost = meta.total_cost_usd as number | undefined
   const durationMs = meta.duration_ms as number | undefined
@@ -113,7 +120,18 @@ function ResultCard({ part }: { part: TurnPart }) {
   if (modelName) summaryParts.push(modelName)
 
   return (
-    <details className="max-w-lg group">
+    <details
+      className={cn(
+        "max-w-lg group",
+        // v2 keeps the numbers exactly as accurate and stops them being what
+        // the eye lands on. `group-hover` is the turn's own group, set on the
+        // turn wrapper in turn-renderer — so the line appears when the reader
+        // is already looking at this reply, and `focus-within` keeps it
+        // reachable without a pointer.
+        isV2 &&
+          "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 open:opacity-100",
+      )}
+    >
       <summary className="flex items-center gap-2 text-micro text-muted-foreground cursor-pointer hover:text-foreground select-none list-none">
         <DollarSign className="h-3 w-3 shrink-0" />
         <span>{summaryParts.join(" · ") || "Run complete"}</span>
@@ -478,14 +496,62 @@ function StreamingProse({ content, streaming }: { content: string; streaming: bo
   )
 }
 
+/**
+ * The v2 reasoning header: one line, no glyph of its own.
+ *
+ * Classic draws a brain icon here. v2 does not, because the turn already has
+ * a face in the left gutter and that face IS the activity indicator — two
+ * animated marks on one turn is one more than the reader can attribute.
+ * Named, too: in a crew of seven, "Morgan is thinking" is the sentence the
+ * reader is actually waiting on, where "Thinking…" could be anyone.
+ *
+ * Rendered as a component rather than an element so it can call
+ * `useReasoning()` — the timer and the open state live in the Reasoning
+ * provider, and its children render inside it.
+ */
+function V2ReasoningLabel({ agentName }: { agentName: string | null }) {
+  const { isStreaming, isOpen, duration, elapsed } = useReasoning()
+  const who = agentName?.trim() || "Agent"
+  return (
+    <>
+      {/* aria-live off for the same reason the default trigger sets it: the
+          label ticks once a second and must not be announced each time. */}
+      <span aria-live="off" className="text-label">
+        {isStreaming ? (
+          <Shimmer duration={1.6}>{`${who} is ${thinkingLiveLabel(elapsed).toLowerCase()}`}</Shimmer>
+        ) : (
+          thoughtForLabel(duration)
+        )}
+      </span>
+      <ChevronDown
+        aria-hidden="true"
+        className={cn("h-3.5 w-3.5 transition-transform", isOpen ? "rotate-180" : "rotate-0")}
+      />
+    </>
+  )
+}
+
 /** One reasoning block: collapsible, live "Thinking… Ns" header,
  *  smooth-revealed content while streaming. Same trailing-space reflow
- *  workaround as StreamingProse — the reasoning body is Streamdown too. */
+ *  workaround as StreamingProse — the reasoning body is Streamdown too.
+ *
+ *  On `defaultOpen`: classic opens the block while it streams, which puts the
+ *  model's private deliberation in the middle of the conversation and then
+ *  takes it away a second later. v2 never opens it for you — the chevron is
+ *  still there, because a wrong answer is exactly when you want to read the
+ *  reasoning, but reaching for it is the reader's decision. */
 function ThinkingBlock({ part }: { part: TurnPart }) {
   const text = useSmoothText(part.content, !!part.isStreaming)
+  const { variant, agent } = useChatSkin()
+  const isV2 = variant === "v2"
   return (
-    <Reasoning isStreaming={part.isStreaming} defaultOpen={part.isStreaming}>
-      <ReasoningTrigger />
+    <Reasoning
+      isStreaming={part.isStreaming}
+      defaultOpen={isV2 ? false : part.isStreaming}
+    >
+      <ReasoningTrigger>
+        {isV2 ? <V2ReasoningLabel agentName={agent?.name ?? null} /> : undefined}
+      </ReasoningTrigger>
       <ReasoningContent>{part.isStreaming ? text + " " : text}</ReasoningContent>
     </Reasoning>
   )

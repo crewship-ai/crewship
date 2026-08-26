@@ -829,6 +829,114 @@ body {
 }
 
 /*
+ * .surface-pane — the onboarding pane's treatment, restated so it can be
+ * worn by any surface in the product instead of only by /onboarding.
+ *
+ * Same idea, different arithmetic. `.onboarding-pane` above is three literal
+ * dark hex stops, which is exactly right for a screen that only ever renders
+ * dark and wrong for anything reused. Converting those stops to OKLCH shows
+ * what they actually are: the middle one (#0b0c11) IS dark `--card`, and the
+ * outer two sit about +0.037 L above it and -0.010 L below. So the pane is
+ * not a colour, it is ONE SURFACE lifted toward the light along its top edge
+ * and falling away at its foot.
+ *
+ * Restating it that way is what makes it theme-safe, and it has to be,
+ * because the card/ground relationship INVERTS between the themes: dark
+ * `--card` (0.155) is lighter than dark `--background` (0.10), while light
+ * `--card` (0.9851) is DARKER than light `--background` (0.9911). A literal
+ * transplant of "top lighter, bottom darker" therefore reads as a raised
+ * panel in one theme and as a smudge in the other. Mixing against `--card`
+ * per theme keeps the same *gesture* while letting each theme resolve its
+ * own direction — and in light the seam highlight becomes a seam shadow,
+ * because the light is coming from the other side of the surface.
+ *
+ * Mount this on a NON-SCROLLING element. On a scroll container the gradient
+ * stretches to the full document height and the top highlight — the entire
+ * point of it — scrolls off the screen on any page taller than the viewport.
+ */
+.surface-pane {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--card), white 9%) 0%,
+    var(--card) 58%,
+    color-mix(in oklab, var(--card), black 6%) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    inset 0 -80px 90px -70px rgb(0 0 0 / 0.9);
+}
+
+:root:not(.dark) .surface-pane {
+  background: linear-gradient(
+    180deg,
+    var(--card) 0%,
+    color-mix(in oklab, var(--card), black 2%) 58%,
+    color-mix(in oklab, var(--card), black 5%) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgb(20 22 29 / 0.05),
+    inset 0 -80px 90px -70px rgb(20 22 29 / 0.14);
+}
+
+/*
+ * The transcript's thinking indicator (components/features/chat/v2).
+ *
+ * A ring that turns around the agent's avatar plus a slow breathe on the
+ * face itself. Two channels rather than one because a single spinning ring
+ * on a 32px square reads as a loading spinner bolted onto a portrait, where
+ * the pair reads as the portrait being alive.
+ *
+ * The ring is a conic gradient masked to its own outer 2px, which is one
+ * painted element — a bordered pseudo-element with a transparent side would
+ * need a second box to hide the seam, and an SVG stroke-dasharray would
+ * rasterise on every frame at this size.
+ *
+ * Periods are 1.5s and 2.6s. Deliberately not a ratio that divides, so the
+ * two never resynchronise into a single visible pulse — the same reason the
+ * three sails in components/branding/animated-mark.tsx run coprime periods.
+ */
+@keyframes thinking-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes thinking-face-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.055); }
+}
+
+.thinking-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 13px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 200deg,
+    color-mix(in oklab, var(--primary), transparent 30%) 300deg,
+    var(--primary) 340deg,
+    transparent 360deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: thinking-ring-spin 1.5s linear infinite;
+  pointer-events: none;
+}
+
+.thinking-face {
+  transform-origin: 50% 50%;
+  animation: thinking-face-breathe 2.6s ease-in-out infinite;
+}
+
+/* Held still, not removed: a reader who suppresses motion still has to be
+   able to tell that the agent has not finished. */
+@media (prefers-reduced-motion: reduce) {
+  .thinking-ring,
+  .thinking-face {
+    animation: none;
+  }
+}
+
+/*
  * Touch targets in the unauthenticated forms.
  *
  * The shared Input is h-9 and Button's default size is h-9 — 36px, which is
