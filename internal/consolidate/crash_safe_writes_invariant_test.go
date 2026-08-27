@@ -149,7 +149,7 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 		// []byte — routing them through it would mean buffering up to
 		// the 50 MiB per-entry cap in memory to buy durability for a
 		// file that is regenerated on demand.
-		"../devcontainer/features.go|f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)":                                      "features.go: tar-extraction loop for a devcontainer feature, streaming each entry via io.Copy into a destination dir extractTo just created. O_TRUNC only bites if one archive names the same entry twice; there is no pre-existing content to lose.",
+		"../devcontainer/features.go|f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)":                                      "features.go: extractTarGz's tar-extraction loop for a devcontainer feature, streaming each entry via io.Copy into the private temp dir its caller just made with createExtractTempDir (and RemoveAll's on any failure). O_TRUNC only bites if one archive names the same entry twice; there is no pre-existing content to lose.",
 		`../devcontainer/imagebuilder.go|if err = os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {`:  "imagebuilder.go: the generated Dockerfile for an image build, written into a freshly-made context dir that is handed straight to the builder and discarded after. Regenerated from the devcontainer spec every build.",
 		"../devcontainer/imagebuilder.go|out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)":                                   "imagebuilder.go: copyFile, the generic streaming file-copy primitive copyTree uses to populate a build context (io.Copy from an already-open source). Same standing as backup's storage.go Create above — a stream primitive, not a memory-content write.",
 		"../devcontainer/provenance.go|return os.WriteFile(filepath.Join(dir, featureDigestFile), []byte(digest), 0o600)":                          "provenance.go: writeFeatureDigest records a resolved feature digest beside the extracted feature cache. Best-effort by contract — readFeatureDigest degrades a missing or unreadable digest to \"unknown\" and never fails a build, so a lost write costs a provenance note, not correctness.",
@@ -238,12 +238,18 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 	//     handles every agent log line and every chat turn.
 	//
 	// Entries here are NOT exempt from proving durability: the check
-	// below requires an explicit .Sync() somewhere in the same file, so
-	// the type must own a real flush path (a Flush/Close that fsyncs)
-	// rather than merely hoping the page cache is written back. What
-	// this shape gives up, deliberately, is a per-record fsync.
+	// below requires the file's own Close method to fsync, so the type
+	// must own a boundary the process actually reaches rather than
+	// merely hoping the page cache is written back. What this shape
+	// gives up, deliberately, is a per-record fsync.
+	//
+	// Close, not "a Sync somewhere in the file": the looser form was
+	// tried first and both entries below defeated it — store.go had no
+	// Sync at all, and writer.go had one in a Flush with no caller
+	// outside tests, which fsyncs nothing in production while reading
+	// as a durability boundary.
 	appendStreamLines := map[string]string{
-		"../logcollector/writer.go|f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)": "writer.go: Writer.Append's per-(crew,agent) agent log. Handle cached in w.files and reused for every log line; Writer.Flush fsyncs them all and Close releases them. Append-only, no prior content to lose, and a whole-file rewrite per log line would be quadratic on the hottest write path in the process.",
+		"../logcollector/writer.go|f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)": "writer.go: Writer.Append's per-(crew,agent) agent log. Handle cached in w.files and reused for every log line; Writer.Close fsyncs them all before releasing them, and Server.Shutdown calls it. (Writer.Flush fsyncs too but has no caller outside tests, so it is NOT what makes this entry safe — before #1999 the Sync lived only there and these logs were never flushed in production.) Append-only, no prior content to lose, and a whole-file rewrite per log line would be quadratic on the hottest write path in the process.",
 		"../conversation/store.go|f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)":  "store.go: Store.Append's per-session chat JSONL. Same cached-handle stream-log shape as logcollector; Store.Flush/Close fsync (added in #1999 — before that this file had no Sync at all, so its own \"the JSONL is the durable source of truth\" comment was false). Append-only; the DB mirror alongside it is explicitly best-effort, the JSONL is the record.",
 	}
 
@@ -315,14 +321,17 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 					if reason, ok := appendStreamLines[key]; ok {
 						_ = reason
 						// The stream-log shape trades the per-record
-						// fsync for an explicit flush path on the type.
-						// Require that path to exist in source: without
-						// a .Sync() anywhere in the file, the entry is
-						// claiming a durability boundary it does not have
-						// (which is exactly what conversation/store.go
-						// was doing before #1999).
-						if !fileSyncsSomewhere(lines) {
-							t.Errorf("%s:%d: O_APPEND write %q is allowlisted as a cached-handle stream log, but this file contains no .Sync() at all — the type must own a Flush/Close that fsyncs, or the entry is claiming durability it does not provide", f, i+1, line)
+						// fsync for a durability boundary on the type.
+						// Require that boundary to be Close, not merely
+						// "a .Sync() somewhere in the file": a Flush
+						// method with no caller satisfies the loose form
+						// while fsyncing nothing in production, which is
+						// what conversation/store.go (no Sync at all) and
+						// logcollector/writer.go (Sync only in an uncalled
+						// Flush) were both doing before #1999. Close is
+						// the method the process is guaranteed to reach.
+						if !closeSyncsFile(lines) {
+							t.Errorf("%s:%d: O_APPEND write %q is allowlisted as a cached-handle stream log, but this file's Close does not fsync — the type must own a Close that syncs its handles, or the entry is claiming durability it does not provide (a Flush nobody calls is not a durability boundary)", f, i+1, line)
 						}
 						continue
 					}
@@ -342,15 +351,33 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 	}
 }
 
-// fileSyncsSomewhere reports whether the source file contains any
-// .Sync() call. Used for the cached-handle stream-log shape, where the
-// fsync deliberately lives in a Flush/Close method rather than in the
-// function holding the O_APPEND open, so enclosingFuncSyncsFile's
-// single-function window is the wrong scope.
-func fileSyncsSomewhere(lines []string) bool {
-	for _, l := range lines {
-		if strings.Contains(l, ".Sync()") {
-			return true
+// closeSyncsFile reports whether the file declares a Close method whose
+// body fsyncs. Used for the cached-handle stream-log shape, where the
+// fsync deliberately lives in a method rather than beside the O_APPEND
+// open, so enclosingFuncSyncsFile's single-function window is the wrong
+// scope.
+//
+// Why CLOSE specifically, and not "a .Sync() anywhere in the file":
+// that looser form is satisfied by a Flush method nobody calls, which
+// is a durability boundary on paper only. logcollector.Writer was
+// exactly that — a Flush with an fsync and zero non-test callers, next
+// to a Close that released the descriptors without flushing them —
+// while its allowlist entry claimed "Flush fsyncs them all and Close
+// releases them" as the reason the site was safe. Close is the one
+// method the process is actually guaranteed to reach (both writers are
+// closed from Server.Shutdown), so it is the one the check pins.
+func closeSyncsFile(lines []string) bool {
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "func ") || !strings.Contains(l, ") Close(") {
+			continue
+		}
+		for j := i + 1; j < len(lines); j++ {
+			if strings.HasPrefix(lines[j], "func ") {
+				break
+			}
+			if strings.Contains(lines[j], ".Sync()") {
+				return true
+			}
 		}
 	}
 	return false
