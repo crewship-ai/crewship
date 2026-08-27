@@ -14,12 +14,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   one chronicle eighteen PRs that merged with no changelog trace anywhere —
   more entries than PRs, because a PR that broke three separate things gets
   three. Written from their diffs, after the fact, rather than by their
-  authors at the time. The
-  `Changelog Guard` workflow now fails a PR that touches `internal/api/`,
-  `cmd/crewship/`, `app/`, `components/`, `lib/`, `hooks/` or `stores/`
-  without adding to the `## [Unreleased]` section above — that section
-  specifically, not the file, because it is the only one `RELEASING.md`
-  cuts release notes from.
+  authors at the time. The `Changelog Guard` workflow now fails a PR that
+  touches `internal/api/`, `cmd/crewship/`, `app/`, `components/`, `lib/`,
+  `hooks/` or `stores/` without adding to this `## [Unreleased]` section —
+  that section specifically, not the file, because it is the only one
+  `RELEASING.md` cuts release notes from.
 
   The #2086 audit reported fifteen such PRs. Reading the window's merges back
   against this file turned up seventeen, and #2079 makes eighteen: it merged
