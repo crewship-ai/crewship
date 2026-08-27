@@ -203,7 +203,7 @@ func writeMCPCursor(
 		out.MCPServers[s.Name] = entry
 	}
 	body, _ := json.MarshalIndent(out, "", "  ")
-	return writeFileViaContainer(ctx, container, containerID, workDir, ".cursor/mcp.json", string(body), logger)
+	return writeFileViaContainer(ctx, container, containerID, workDir, ".cursor/mcp.json", string(body), containerFileSecret, logger)
 }
 
 // translateEnvRefsToCursor rewrites ${VAR} and $VAR placeholders to Cursor's
@@ -264,7 +264,7 @@ func writeMCPDroid(
 		out.MCPServers[s.Name] = entry
 	}
 	body, _ := json.MarshalIndent(out, "", "  ")
-	return writeFileViaContainer(ctx, container, containerID, workDir, ".factory/mcp.json", string(body), logger)
+	return writeFileViaContainer(ctx, container, containerID, workDir, ".factory/mcp.json", string(body), containerFileSecret, logger)
 }
 
 // writeMCPGemini writes <workdir>/.gemini/settings.json with mcpServers
@@ -320,7 +320,7 @@ func writeMCPGemini(
 	}
 	out := map[string]any{"mcpServers": servers}
 	body, _ := json.MarshalIndent(out, "", "  ")
-	return writeFileViaContainer(ctx, container, containerID, workDir, ".gemini/settings.json", string(body), logger)
+	return writeFileViaContainer(ctx, container, containerID, workDir, ".gemini/settings.json", string(body), containerFileSecret, logger)
 }
 
 // writeMCPOpenCode writes <workdir>/opencode.json. Schema differs the most
@@ -380,7 +380,7 @@ func writeMCPOpenCode(
 		"mcp":     mcp,
 	}
 	body, _ := json.MarshalIndent(out, "", "  ")
-	return writeFileViaContainer(ctx, container, containerID, workDir, "opencode.json", string(body), logger)
+	return writeFileViaContainer(ctx, container, containerID, workDir, "opencode.json", string(body), containerFileSecret, logger)
 }
 
 // writeMCPCodex writes Codex's MCP config. Two important realities discovered
@@ -543,7 +543,7 @@ func writeMCPCodex(
 	}
 	// HOME-relative path so Codex loads it without project-trust ceremony.
 	homeDir := fmt.Sprintf("/crew/agents/%s", req.AgentSlug)
-	return writeFileViaContainer(ctx, container, containerID, homeDir, ".codex/config.toml", b.String(), logger)
+	return writeFileViaContainer(ctx, container, containerID, homeDir, ".codex/config.toml", b.String(), containerFileSecret, logger)
 }
 
 // anthropicShapeServer renders the canonical mcpSpec back to Claude/Cursor's

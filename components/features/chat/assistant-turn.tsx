@@ -1,11 +1,11 @@
 "use client"
 
-import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
+import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, ChevronDown, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useEffect } from "react"
 import { useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
-import { TurnReactions, TurnReactionPicker } from "./reactions/turn-reactions"
+import { TurnReactions } from "./reactions/turn-reactions"
 import {
   Message,
   MessageContent,
@@ -17,13 +17,19 @@ import {
   Reasoning,
   ReasoningContent,
   ReasoningTrigger,
+  useReasoning,
+  thinkingLiveLabel,
+  thoughtForLabel,
 } from "@/components/ai-elements/reasoning"
+import { Shimmer } from "@/components/ai-elements/shimmer"
 import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { StatusIndicator } from "@/components/features/chat/status-indicator"
+import { useChatAgent } from "./chat-agent-context"
 import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { groupTurnParts, type ToolNode } from "./turn-grouping"
+import { cn } from "@/lib/utils"
 import { formatCost } from "@/lib/utils/format"
 import { formatDurationMillis } from "@/lib/time"
 
@@ -111,7 +117,16 @@ function ResultCard({ part }: { part: TurnPart }) {
   if (modelName) summaryParts.push(modelName)
 
   return (
-    <details className="max-w-lg group">
+    <details
+      // The numbers stay exactly as accurate and stop being what the eye lands
+      // on. `group-hover` is the turn's own group, set on the turn wrapper in
+      // turn-renderer, so the line appears when the reader is already looking
+      // at this reply; `focus-within` keeps it reachable without a pointer.
+      className={cn(
+        "max-w-lg group",
+        "opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 open:opacity-100",
+      )}
+    >
       <summary className="flex items-center gap-2 text-micro text-muted-foreground cursor-pointer hover:text-foreground select-none list-none">
         <DollarSign className="h-3 w-3 shrink-0" />
         <span>{summaryParts.join(" · ") || "Run complete"}</span>
@@ -476,14 +491,58 @@ function StreamingProse({ content, streaming }: { content: string; streaming: bo
   )
 }
 
+/**
+ * The v2 reasoning header: one line, no glyph of its own.
+ *
+ * Classic draws a brain icon here. v2 does not, because the turn already has
+ * a face in the left gutter and that face IS the activity indicator — two
+ * animated marks on one turn is one more than the reader can attribute.
+ * Named, too: in a crew of seven, "Morgan is thinking" is the sentence the
+ * reader is actually waiting on, where "Thinking…" could be anyone.
+ *
+ * Rendered as a component rather than an element so it can call
+ * `useReasoning()` — the timer and the open state live in the Reasoning
+ * provider, and its children render inside it.
+ */
+function ReasoningLabel({ agentName }: { agentName: string | null }) {
+  const { isStreaming, isOpen, duration, elapsed } = useReasoning()
+  const who = agentName?.trim() || "Agent"
+  return (
+    <>
+      {/* aria-live off for the same reason the default trigger sets it: the
+          label ticks once a second and must not be announced each time. */}
+      <span aria-live="off" className="text-label">
+        {isStreaming ? (
+          <Shimmer duration={1.6}>{`${who} is ${thinkingLiveLabel(elapsed).toLowerCase()}`}</Shimmer>
+        ) : (
+          thoughtForLabel(duration)
+        )}
+      </span>
+      <ChevronDown
+        aria-hidden="true"
+        className={cn("h-3.5 w-3.5 transition-transform", isOpen ? "rotate-180" : "rotate-0")}
+      />
+    </>
+  )
+}
+
 /** One reasoning block: collapsible, live "Thinking… Ns" header,
  *  smooth-revealed content while streaming. Same trailing-space reflow
- *  workaround as StreamingProse — the reasoning body is Streamdown too. */
+ *  workaround as StreamingProse — the reasoning body is Streamdown too.
+ *
+ *  On `defaultOpen`: classic opens the block while it streams, which puts the
+ *  model's private deliberation in the middle of the conversation and then
+ *  takes it away a second later. v2 never opens it for you — the chevron is
+ *  still there, because a wrong answer is exactly when you want to read the
+ *  reasoning, but reaching for it is the reader's decision. */
 function ThinkingBlock({ part }: { part: TurnPart }) {
   const text = useSmoothText(part.content, !!part.isStreaming)
+  const agent = useChatAgent()
   return (
-    <Reasoning isStreaming={part.isStreaming} defaultOpen={part.isStreaming}>
-      <ReasoningTrigger />
+    <Reasoning isStreaming={part.isStreaming} defaultOpen={false}>
+      <ReasoningTrigger>
+        <ReasoningLabel agentName={agent?.name ?? null} />
+      </ReasoningTrigger>
       <ReasoningContent>{part.isStreaming ? text + " " : text}</ReasoningContent>
     </Reasoning>
   )
@@ -666,7 +725,17 @@ function TurnFeedbackActions({
   }
 
   return (
-    <MessageActions>
+    <MessageActions
+      // Same treatment as the cost line, for the same reason: four controls
+      // under every single reply is four controls the eye has to step over to
+      // reach the next thing anybody said. They appear on the turn the reader
+      // is actually looking at.
+      //
+      // `focus-within` is not optional here — these are the only way to
+      // register feedback, and hover-only would put them out of reach of a
+      // keyboard entirely.
+      className="opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+    >
       <MessageAction tooltip="Copy" onClick={() => onCopy(fullText)}>
         <Copy className="h-3.5 w-3.5" />
       </MessageAction>
@@ -690,7 +759,20 @@ function TurnFeedbackActions({
           className={"h-3.5 w-3.5 " + (submitted.not_helpful ? "text-destructive" : "")}
         />
       </MessageAction>
-      <TurnReactionPicker chatId={chatId} messageId={turn.id} />
+      {/* No emoji picker.
+       *
+       * Reactions persist — `message_reactions`, keyed per (chat, message,
+       * emoji, user) — and they render back, which is why `TurnReactions`
+       * above stays. But an emoji is addressed to somebody, and in a
+       * one-person chat there is nobody in the room to read it: nothing
+       * downstream consumes the table, and the only reader is the person who
+       * clicked. The thumbs stay because they are a different thing wearing a
+       * similar shape — `message_feedback` carries a trace_id back to the run
+       * that produced the answer, and `crewship feedback` reads it.
+       *
+       * When more than one person is in a thread this comes back, because then
+       * the emoji finally has an audience — `TurnReactionPicker` is still
+       * exported and tested for that day. */}
     </MessageActions>
   )
 }
