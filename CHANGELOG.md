@@ -11,6 +11,30 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **`crewship resume <chat-id>` never worked, and the guard that should have
+  caught it could not see two thirds of the CLI.** `resume` asked for two flat
+  chat routes — `GET /api/v1/chats/{chatId}` to find the agent that owns a
+  chat, and a workspace-wide chat list for the picker — neither of which the
+  router has ever registered. The lookup 404'd on every invocation and the
+  user was told `could not determine agent for chat <id>`; the picker's 404
+  fell through to a `/runs` fallback that was therefore the only code path
+  that had ever run. Both now call routes that exist: the agent lookup walks
+  `GET /api/v1/agents` → `GET /api/v1/agents/{agentId}/chats`, which is the
+  only way a chat is addressable, and the picker reads `GET /api/v1/runs`
+  directly, deduplicated so several runs of one chat no longer fill it with
+  duplicates of the same session. No new server route was needed. The
+  CLI↔route contract test is what should have failed years ago, so its
+  extractor was hardened first: it now resolves paths assembled into a local
+  (including with `+=`), the `api_helpers.go` wrappers, `Do`/`NewRequest`/
+  `StreamSSE`/`StreamNDJSON`, package-level path consts, and forwarders
+  discovered from source rather than listed — 1013 call sites checked against
+  the router's real registrations, up from ~450, with the vacuity floor moved
+  to match. Two bounds this walk carries are now named in the errors and the
+  docs rather than left to be discovered: an agent's chat list is a hard 100
+  most recent with no page parameter, so an older chat must be resumed by
+  run-id, and a 403 on every agent is reported as an access failure instead
+  of exiting not-found with "chat not found".
+
 - **A port-expose URL on Colima returned a bare `502` and explained nothing.**
   The capability-URL proxy dials the crew container on its Docker bridge IP,
   which is reachable only where crewshipd shares a network namespace with
