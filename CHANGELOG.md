@@ -1047,6 +1047,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   and the groups AND — "any Anthropic or GitHub certificate this crew can
   reach" is now one pass through the panel.
 
+- **`crewship inspect` always printed `tool calls: 0`, no matter how many
+  tools the run actually invoked.** The footer counter recognized a journal
+  entry as a tool call when `entry_type` was `tool_call` or started with
+  `tool.` — neither of which the journal ever writes. A run's individual
+  tool invocations are journaled as `run.agent_span`
+  (`internal/journal/types.go`), the leaf of the run's drillable trace tree,
+  and matched neither check, so the counter stayed at zero on every run that
+  used tools. The `errors:` counter beside it had the same blind spot from
+  a different angle: a failed tool call is journaled at severity `warn`, not
+  `error` (`internal/pipeline/agent_span_emit.go` deliberately does not
+  escalate a span failure to the run's own error severity), so a run whose
+  only failures were failed tool calls also reported `errors: 0`. Both
+  counters now recognize `run.agent_span` entries directly, reading the
+  span's own `status` field for the error count.
+
 ### Added
 
 - **A database write looked exactly like `ls` in the run trace.** Sub-span
