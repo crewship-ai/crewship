@@ -993,7 +993,12 @@ func clipRunes(s string, max int) (string, bool) {
 // so assignments can reference it (FK on chat_id)"). Idempotent, because a
 // second mention on the same issue must reuse the first's chat rather than
 // fail on the primary key.
-func ensureMissionChat(ctx context.Context, db *sql.DB, missionID, workspaceID, agentID, title string) error {
+//
+// Takes auditExecer (not *sql.DB) so a caller that already opened a
+// transaction for the mission row itself — InternalMissionHandler.Create is
+// the reason this widened — can pass its *sql.Tx and get the chat row in the
+// same atomic write instead of a second, separate one.
+func ensureMissionChat(ctx context.Context, db auditExecer, missionID, workspaceID, agentID, title string) error {
 	var exists int
 	if err := db.QueryRowContext(ctx, `SELECT 1 FROM chats WHERE id = ?`, missionID).Scan(&exists); err == nil {
 		return nil

@@ -47,7 +47,8 @@ func setupTestDB(t *testing.T) *sql.DB {
 			started_at TEXT, finished_at TEXT, result_summary TEXT, error_message TEXT,
 			group_id TEXT, created_at TEXT,
 			depth INTEGER NOT NULL DEFAULT 0, parent_assignment_id TEXT);
-		CREATE TABLE chats (id TEXT PRIMARY KEY, agent_id TEXT, workspace_id TEXT);
+		CREATE TABLE chats (id TEXT PRIMARY KEY, agent_id TEXT, workspace_id TEXT,
+			title TEXT, mode TEXT, status TEXT, started_at TEXT, created_at TEXT, updated_at TEXT);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("create schema: %v", err)
