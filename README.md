@@ -111,8 +111,10 @@ open http://localhost:8080              # 3-step wizard: workspace → crew → 
 ```
 
 You need a container runtime (Docker, Podman, Colima, OrbStack, or Apple
-Containers). `crewship doctor` autodetects one and tells you exactly what's
-missing. Want demo data to poke at? `crewship seed`.
+Containers). `crewship doctor` autodetects one, tells you exactly what's
+missing, and names the **known gaps** of the runtime it found — some daemons
+silently decline part of the sandbox Crewship asks for, and the symptom lands
+nowhere near the cause. Want demo data to poke at? `crewship seed`.
 
 > Prefer to wire everything from the terminal instead of the wizard? Jump to
 > [First crew — CLI walkthrough](#first-crew--cli-walkthrough). Full install
@@ -145,10 +147,15 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 - ✅ **Pick your engine** — drive a crew with a **local model via Ollama**,
   **OpenCode**, or **Claude Code**. No API key required if you run local.
   [→ CLI adapters](docs/guides/cli-adapters.mdx)
-- 🟡 **Provider registry + model catalogue** — an embedded catalogue of models
-  and their prices, two configurable wire codecs, and `crewship model price` to
-  see what a call will cost before you make it.
+- 🟡 **Bring your own provider** — an embedded catalogue of models and their
+  prices, two configurable wire codecs, and `crewship model price` to see what a
+  call will cost before you make it. A provider is a **credential**, not a
+  compiled-in arm of a switch: point a crew at OpenRouter or any
+  OpenAI-compatible endpoint and the key stays in the crew's sidecar — each
+  agent presents a derived route token, so the key never enters the agent
+  container and cost still lands on the agent that spent it.
   [→ multi-provider](docs/guides/multi-provider-llm.mdx) · [model discovery](docs/guides/model-discovery.mdx)
+  · [`crewship provider`](docs/cli/provider.mdx)
 - ✅ **Skills** — author or import a `SKILL.md` playbook and attach it to one
   agent or a whole crew; an agent can also turn a workflow it just performed
   into one. [→ skills](docs/guides/skills.mdx)
@@ -157,7 +164,9 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   block the action that fired them. [→ hooks](docs/guides/hooks.mdx)
 - ✅ **Manifests** — declare your whole org (workspace, crews, agents, skills,
   integrations, issues, projects) as files and `crewship apply` it. GitOps for
-  your agent fleet. [→ manifests](docs/guides/manifests.mdx)
+  your agent fleet — or read a crew manifest straight into the New-crew form in
+  the browser, which tells you up front what it will fill in and what the file
+  declares that the form cannot create. [→ manifests](docs/guides/manifests.mdx)
 
 **2 · Working with agents (the "company")**
 
@@ -206,8 +215,9 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   *(Harbormaster)* [→ harbormaster](docs/guides/harbormaster.mdx)
 - ✅ **Keeper** — optional rule-based gate + watchdog on what agents pull and do:
   it sits between an agent and the vault and can refuse a secret the job does not
-  justify asking for, with snitch-to-admin alerts. Off by default.
-  [→ keeper](docs/guides/keeper.mdx)
+  justify asking for, with snitch-to-admin alerts. How often the watchdog reviews
+  a tool call is a workspace setting (`crewship keeper sampling`), not a constant
+  compiled into the build. Off by default. [→ keeper](docs/guides/keeper.mdx)
 - ✅ **Cost ledger** — every LLM call priced with token counts; per-workspace
   budgets enforced. *(Paymaster)* [→ paymaster](docs/guides/paymaster.mdx)
 - ✅ **Input guard** — argument- and prompt-injection guardrails on LLM inputs.
@@ -243,14 +253,19 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   Crewship can read. [→ memory portability](docs/guides/memory-portability.mdx)
 - ✅ **Encrypted backups** — Age-encrypted bundles capture a whole workspace or
   crew — code, data, conversations, journal, memory — so nothing agents create
-  disappears. [→ backup](docs/guides/backup.mdx)
+  disappears. A bundle from a newer build restores on an older one, and the
+  restore **reports the values it had to drop** instead of counting them as
+  success. [→ backup](docs/guides/backup.mdx)
 - 🟡 **Integrations** — connect agents to external tools via MCP and Composio.
   [→ integrations](docs/guides/integrations.mdx)
 
 **5 · Interfaces**
 
 - ✅ **Web UI** — activity feed, per-crew dashboards, approvals queue,
-  integrations page, and a bottom command dock. [→ activity](docs/guides/activity.mdx)
+  integrations page, and a bottom command dock. Every create surface runs on one
+  shell: ⌘↵ to submit, a discard guard on Esc, a 400's field list rendered as a
+  worklist, and a bottom sheet rather than a squeezed card on a phone.
+  [→ activity](docs/guides/activity.mdx)
 - 🟡 **Pages** — dashboards an agent or routine pushes data into, permissioned
   per panel and honest about when a number goes stale. The page holds no query
   and no credentials. [→ pages](docs/guides/pages.mdx)
@@ -281,7 +296,7 @@ crewship cost --workspace demo          # token + dollar ledger
 
 Full reference: [docs/cli/overview.mdx](docs/cli/overview.mdx) and
 [docs/api-reference/overview.mdx](docs/api-reference/overview.mdx). The docs are
-large — **60+ guides and 40+ API pages** under [`docs/`](docs/), rendered at
+large — **85+ guides and 55+ API pages** under [`docs/`](docs/), rendered at
 [docs.crewship.ai](https://docs.crewship.ai) (coming soon).
 
 ---
@@ -292,8 +307,9 @@ This is an **open beta**. The pieces marked ✅ above have been used by the
 maintainer in production-shaped workloads; 🟡 and 🚧 are still being shaped.
 
 - **Claude Code is the production-tested adapter.** Ollama and OpenCode run
-  today; Codex / Gemini / Cursor / Factory Droid have adapter scaffolds but not
-  yet the integration tests and tuning to call production-ready.
+  today; Codex / Gemini / Cursor / Factory Droid are wired end to end — command
+  line, tool profile, output parsing — but do not yet have the integration tests
+  and tuning to call production-ready. [→ CLI adapters](docs/guides/cli-adapters.mdx)
 - **SQLite for now.** Runs on `modernc.org/sqlite` (single binary, WAL, no extra
   services). PostgreSQL is on the roadmap.
 - **Single host.** One instance manages many crews on its own host. A full
