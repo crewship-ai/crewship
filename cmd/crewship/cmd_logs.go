@@ -149,11 +149,11 @@ Examples:
 
 // logEntry is one line of an agent's log, in the shape the API returns it.
 type logEntry struct {
-	Timestamp string `json:"ts"`
-	Level     string `json:"level"`
-	Agent     string `json:"agent"`
-	Event     string `json:"event"`
-	Content   string `json:"content"`
+	Timestamp string `json:"ts" yaml:"ts"`
+	Level     string `json:"level" yaml:"level"`
+	Agent     string `json:"agent" yaml:"agent"`
+	Event     string `json:"event" yaml:"event"`
+	Content   string `json:"content" yaml:"content"`
 }
 
 func logsFollow(f *cli.Formatter, client *cli.Client, agentID, agentSlug string) error {

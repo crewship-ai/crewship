@@ -8711,10 +8711,10 @@
         "cmd/crewship/api_helpers_cov2_test.go",
         "cmd/crewship/api_helpers_cov_test.go",
         "cmd/crewship/cli_format_contract_test.go",
+        "cmd/crewship/cli_yaml_key_parity_test.go",
         "cmd/crewship/clistate_test.go",
         "cmd/crewship/cmd_activity_cov_test.go",
         "cmd/crewship/cmd_activity_test.go",
-        "cmd/crewship/cmd_admin_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -8738,10 +8738,10 @@
             "cmd/crewship/api_helpers_cov2_test.go",
             "cmd/crewship/api_helpers_cov_test.go",
             "cmd/crewship/cli_format_contract_test.go",
+            "cmd/crewship/cli_yaml_key_parity_test.go",
             "cmd/crewship/clistate_test.go",
             "cmd/crewship/cmd_activity_cov_test.go",
             "cmd/crewship/cmd_activity_test.go",
-            "cmd/crewship/cmd_admin_cov_test.go",
             "…"
           ]
         }
@@ -8811,10 +8811,10 @@
         "cmd/crewship/api_helpers_cov2_test.go",
         "cmd/crewship/api_helpers_cov_test.go",
         "cmd/crewship/cli_format_contract_test.go",
+        "cmd/crewship/cli_yaml_key_parity_test.go",
         "cmd/crewship/clistate_test.go",
         "cmd/crewship/cmd_activity_cov_test.go",
         "cmd/crewship/cmd_activity_test.go",
-        "cmd/crewship/cmd_admin_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -8838,10 +8838,10 @@
             "cmd/crewship/api_helpers_cov2_test.go",
             "cmd/crewship/api_helpers_cov_test.go",
             "cmd/crewship/cli_format_contract_test.go",
+            "cmd/crewship/cli_yaml_key_parity_test.go",
             "cmd/crewship/clistate_test.go",
             "cmd/crewship/cmd_activity_cov_test.go",
             "cmd/crewship/cmd_activity_test.go",
-            "cmd/crewship/cmd_admin_cov_test.go",
             "…"
           ]
         }
@@ -28692,7 +28692,8 @@
         "cmd/crewship/cmd_config_test.go",
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
-        "cmd/crewship/cmd_provider_route_test.go"
+        "cmd/crewship/cmd_provider_route_test.go",
+        "cmd/crewship/cmd_server_test.go"
       ]
     },
     {

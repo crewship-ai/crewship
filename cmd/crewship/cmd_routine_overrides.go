@@ -118,7 +118,8 @@ var routineStepOverrideListCmd = &cobra.Command{
 		if body.Overrides == nil {
 			body.Overrides = []stepOverrideRow{}
 		}
-		return resolvedFormatter(cmd).AutoHuman(body.Overrides, func() {
+		var flush tabFlush
+		if err := resolvedFormatter(cmd).AutoHuman(body.Overrides, func() {
 			if len(body.Overrides) == 0 {
 				fmt.Println("No step overrides — routine runs as authored.")
 				return
@@ -132,16 +133,19 @@ var routineStepOverrideListCmd = &cobra.Command{
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\n", o.StepID, o.ModelOverride, p)
 			}
-			_ = w.Flush()
-		})
+			flush.of(w)
+		}); err != nil {
+			return err
+		}
+		return flush.err
 	},
 }
 
 // stepOverrideRow is one active per-step override on a routine.
 type stepOverrideRow struct {
-	StepID        string `json:"step_id"`
-	Prompt        string `json:"prompt"`
-	ModelOverride string `json:"model_override"`
+	StepID        string `json:"step_id" yaml:"step_id"`
+	Prompt        string `json:"prompt" yaml:"prompt"`
+	ModelOverride string `json:"model_override" yaml:"model_override"`
 }
 
 func init() {

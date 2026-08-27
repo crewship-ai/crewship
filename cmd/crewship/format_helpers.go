@@ -79,6 +79,46 @@ func emptyListNote(cmd *cobra.Command, empty any, note string) error {
 // --force means "skip the confirmation prompt" route through here — a
 // --force that bypasses a *safety guard* (e.g. memory restore's canonical-
 // path confinement) must NOT be conflated with mere pre-confirmation.
+// tabFlush carries a tabwriter's Flush error out of AutoHuman's human
+// renderer.
+//
+// A tabwriter buffers, so Flush is where a command's whole table either
+// reaches stdout or does not: a redirect to a full disk (ENOSPC) or a closed
+// pipe (EPIPE) fails there and nowhere else. Every list command used to end
+// `return w.Flush()`, which made that the command's exit status.
+//
+// AutoHuman's human renderer is a `func()` and cannot return an error, so
+// moving the rendering inside one turned six of those into `_ = w.Flush()` —
+// output dropped, error discarded, exit 0. Record the failure here and return
+// it after AutoHuman instead:
+//
+//	var flush tabFlush
+//	if err := resolvedFormatter(cmd).AutoHuman(rows, func() {
+//	        w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+//	        …
+//	        flush.of(w)
+//	}); err != nil {
+//	        return err
+//	}
+//	return flush.err
+//
+// The machine formats need none of this — Formatter.JSON and friends return
+// their encoder's error directly.
+type tabFlush struct{ err error }
+
+// flushable is what tabFlush.of accepts: text/tabwriter.Writer, and equally a
+// bufio.Writer, for a renderer that buffers some other way.
+type flushable interface{ Flush() error }
+
+// of flushes w, keeping the FIRST error seen. A renderer that flushes more
+// than once (a table, then a footer) reports the failure that started it
+// rather than the consequent one.
+func (t *tabFlush) of(w flushable) {
+	if err := w.Flush(); err != nil && t.err == nil {
+		t.err = err
+	}
+}
+
 func skipConfirm(cmd *cobra.Command) bool {
 	if b, err := cmd.Flags().GetBool("yes"); err == nil && b {
 		return true

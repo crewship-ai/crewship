@@ -113,7 +113,8 @@ Pick a fingerprint and replay the whole group with:
 		if body.Groups == nil {
 			body.Groups = []errorGroupRow{}
 		}
-		return resolvedFormatter(cmd).AutoHuman(body.Groups, func() {
+		var flush tabFlush
+		if err := resolvedFormatter(cmd).AutoHuman(body.Groups, func() {
 			if len(body.Groups) == 0 {
 				fmt.Println("No failed runs. 🎉")
 				return
@@ -127,19 +128,22 @@ Pick a fingerprint and replay the whole group with:
 				}
 				fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n", g.Fingerprint, g.Count, g.PipelineSlug, g.FailedAtStep, msg)
 			}
-			_ = w.Flush()
-		})
+			flush.of(w)
+		}); err != nil {
+			return err
+		}
+		return flush.err
 	},
 }
 
 // errorGroupRow is one error fingerprint bucket from `routine errors`.
 type errorGroupRow struct {
-	Fingerprint  string   `json:"fingerprint"`
-	Count        int      `json:"count"`
-	PipelineSlug string   `json:"pipeline_slug"`
-	FailedAtStep string   `json:"failed_at_step"`
-	SampleError  string   `json:"sample_error"`
-	RunIDs       []string `json:"run_ids"`
+	Fingerprint  string   `json:"fingerprint" yaml:"fingerprint"`
+	Count        int      `json:"count" yaml:"count"`
+	PipelineSlug string   `json:"pipeline_slug" yaml:"pipeline_slug"`
+	FailedAtStep string   `json:"failed_at_step" yaml:"failed_at_step"`
+	SampleError  string   `json:"sample_error" yaml:"sample_error"`
+	RunIDs       []string `json:"run_ids" yaml:"run_ids"`
 }
 
 var routineBulkReplayCmd = &cobra.Command{

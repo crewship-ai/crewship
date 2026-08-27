@@ -288,6 +288,14 @@ var serverCurrentCmd = &cobra.Command{
 			return f.AutoHuman(serverCurrentResult{
 				State:  "no-profile",
 				Server: valueOrDefault(cfg.Server, "http://localhost:8080"),
+				// A legacy single-server config keeps its credential at the
+				// top level, so "no profile" and "not authenticated" are
+				// different things. Left at its zero value this branch
+				// reported token_set=false for a config `config show -f json`
+				// — same PR, same overlay — reports true for, and a setup
+				// script branching on .token_set to decide whether to run
+				// `crewship login` would loop.
+				TokenSet: cfg.Token != "",
 			}, func() {
 				fmt.Printf("No profile active (legacy single-server mode).\nServer: %s\n",
 					valueOrDefault(cfg.Server, "http://localhost:8080"))
@@ -335,12 +343,12 @@ var serverCurrentCmd = &cobra.Command{
 // TokenSet rather than the token: this output is what a setup script captures
 // into its log.
 type serverCurrentResult struct {
-	State                 string `json:"state"` // active | no-profile | profile-undefined
-	Profile               string `json:"profile,omitempty"`
-	Server                string `json:"server,omitempty"`
-	Workspace             string `json:"workspace,omitempty"`
-	TokenSet              bool   `json:"token_set"`
-	DirectoryOverrideHint string `json:"directory_override_hint,omitempty"`
+	State                 string `json:"state" yaml:"state"` // active | no-profile | profile-undefined
+	Profile               string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Server                string `json:"server,omitempty" yaml:"server,omitempty"`
+	Workspace             string `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	TokenSet              bool   `json:"token_set" yaml:"token_set"`
+	DirectoryOverrideHint string `json:"directory_override_hint,omitempty" yaml:"directory_override_hint,omitempty"`
 }
 
 // directoryOverrideHint explains, when a directory_profiles cwd match won

@@ -394,23 +394,23 @@ var crewStatusCmd = &cobra.Command{
 
 // crewStatusAgent is one agent row in `crew status`.
 type crewStatusAgent struct {
-	Slug      string `json:"slug"`
-	AgentRole string `json:"agent_role"`
-	Status    string `json:"status"`
+	Slug      string `json:"slug" yaml:"slug"`
+	AgentRole string `json:"agent_role" yaml:"agent_role"`
+	Status    string `json:"status" yaml:"status"`
 }
 
 // crewStatusAssignment is one assignment row in `crew status`.
 type crewStatusAssignment struct {
-	Task           string  `json:"task"`
-	Status         string  `json:"status"`
-	AssignedBySlug string  `json:"assigned_by_slug"`
-	AssignedToSlug *string `json:"assigned_to_slug"`
+	Task           string  `json:"task" yaml:"task"`
+	Status         string  `json:"status" yaml:"status"`
+	AssignedBySlug string  `json:"assigned_by_slug" yaml:"assigned_by_slug"`
+	AssignedToSlug *string `json:"assigned_to_slug" yaml:"assigned_to_slug"`
 }
 
 // crewStatusEscalation is one escalation row in `crew status`.
 type crewStatusEscalation struct {
-	Reason string `json:"reason"`
-	Status string `json:"status"`
+	Reason string `json:"reason" yaml:"reason"`
+	Status string `json:"status" yaml:"status"`
 }
 
 // crewStatusResult is the machine-readable form of `crew status`.
@@ -419,14 +419,14 @@ type crewStatusEscalation struct {
 // wants `.open_escalations_count > 0` without pulling the whole payload
 // through jq, and it costs three integers.
 type crewStatusResult struct {
-	Slug             string                 `json:"slug"`
-	Name             string                 `json:"name"`
-	Agents           []crewStatusAgent      `json:"agents"`
-	Assignments      []crewStatusAssignment `json:"assignments"`
-	OpenEscalations  []crewStatusEscalation `json:"open_escalations"`
-	AgentCount       int                    `json:"agent_count"`
-	AssignmentCount  int                    `json:"assignment_count"`
-	OpenEscalationsN int                    `json:"open_escalations_count"`
+	Slug             string                 `json:"slug" yaml:"slug"`
+	Name             string                 `json:"name" yaml:"name"`
+	Agents           []crewStatusAgent      `json:"agents" yaml:"agents"`
+	Assignments      []crewStatusAssignment `json:"assignments" yaml:"assignments"`
+	OpenEscalations  []crewStatusEscalation `json:"open_escalations" yaml:"open_escalations"`
+	AgentCount       int                    `json:"agent_count" yaml:"agent_count"`
+	AssignmentCount  int                    `json:"assignment_count" yaml:"assignment_count"`
+	OpenEscalationsN int                    `json:"open_escalations_count" yaml:"open_escalations_count"`
 }
 
 func statusColor(status string) string {

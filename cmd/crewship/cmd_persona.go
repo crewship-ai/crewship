@@ -186,11 +186,11 @@ var personaHistoryCmd = &cobra.Command{
 
 // personaHistoryEntry is one recorded PERSONA.md version.
 type personaHistoryEntry struct {
-	ID        string `json:"id"`
-	SHA256    string `json:"sha256"`
-	Bytes     int    `json:"bytes"`
-	WrittenAt string `json:"written_at"`
-	WrittenBy string `json:"written_by"`
+	ID        string `json:"id" yaml:"id"`
+	SHA256    string `json:"sha256" yaml:"sha256"`
+	Bytes     int    `json:"bytes" yaml:"bytes"`
+	WrittenAt string `json:"written_at" yaml:"written_at"`
+	WrittenBy string `json:"written_by" yaml:"written_by"`
 }
 
 // personaSuggestFromInboxCmd applies a pending agent proposal that

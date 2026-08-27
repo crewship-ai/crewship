@@ -201,18 +201,18 @@ var telemetryStatusCmd = &cobra.Command{
 // The endpoint is the DSN's HOST only, never the DSN — the full URL embeds a
 // public key, and the human path has always withheld it for the same reason.
 type telemetryStatusResult struct {
-	State          string `json:"state"` // enabled | disabled | unconfigured
-	Enabled        bool   `json:"enabled"`
-	Configured     bool   `json:"configured"`
-	DefaultOptIn   bool   `json:"default_opt_in"`
-	InstallID      string `json:"install_id,omitempty"`
-	EndpointHost   string `json:"endpoint_host,omitempty"`
-	EndpointSource string `json:"endpoint_source,omitempty"`
-	DSNConfigured  bool   `json:"dsn_configured"`
+	State          string `json:"state" yaml:"state"` // enabled | disabled | unconfigured
+	Enabled        bool   `json:"enabled" yaml:"enabled"`
+	Configured     bool   `json:"configured" yaml:"configured"`
+	DefaultOptIn   bool   `json:"default_opt_in" yaml:"default_opt_in"`
+	InstallID      string `json:"install_id,omitempty" yaml:"install_id,omitempty"`
+	EndpointHost   string `json:"endpoint_host,omitempty" yaml:"endpoint_host,omitempty"`
+	EndpointSource string `json:"endpoint_source,omitempty" yaml:"endpoint_source,omitempty"`
+	DSNConfigured  bool   `json:"dsn_configured" yaml:"dsn_configured"`
 	// Which database answered, and how that path was resolved (#2109). A
 	// consent state is only as meaningful as the file it was read from.
-	Database       string `json:"database,omitempty"`
-	DatabaseOrigin string `json:"database_origin,omitempty"`
+	Database       string `json:"database,omitempty" yaml:"database,omitempty"`
+	DatabaseOrigin string `json:"database_origin,omitempty" yaml:"database_origin,omitempty"`
 }
 
 // dsnEndpointHost extracts the host portion of a Sentry DSN

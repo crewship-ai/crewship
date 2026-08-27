@@ -83,26 +83,33 @@ Subcommand status:
 // adding fields server-side requires updating both sites, which is
 // the price of stable wire shape contracts.
 type pipelineRowJSON struct {
-	ID                   string          `json:"id"`
-	Slug                 string          `json:"slug"`
-	Name                 string          `json:"name"`
-	Description          string          `json:"description"`
-	DSLVersion           string          `json:"dsl_version"`
-	DefinitionHash       string          `json:"definition_hash"`
-	Ephemeral            bool            `json:"ephemeral"`
-	WorkspaceVisible     bool            `json:"workspace_visible"`
-	InvocationCount      int             `json:"invocation_count"`
-	LastInvokedAt        *string         `json:"last_invoked_at"`
-	LastInvocationStatus string          `json:"last_invocation_status"`
-	AuthorCrewID         string          `json:"author_crew_id"`
-	AuthorAgentID        string          `json:"author_agent_id"`
-	AuthorUserID         string          `json:"author_user_id"`
-	AuthoredVia          string          `json:"authored_via"`
-	Status               string          `json:"status"`
-	CreatedAt            string          `json:"created_at"`
-	UpdatedAt            string          `json:"updated_at"`
-	IntegrationsRequired []string        `json:"integrations_required,omitempty"`
-	Definition           json.RawMessage `json:"definition,omitempty"`
+	ID                   string   `json:"id" yaml:"id"`
+	Slug                 string   `json:"slug" yaml:"slug"`
+	Name                 string   `json:"name" yaml:"name"`
+	Description          string   `json:"description" yaml:"description"`
+	DSLVersion           string   `json:"dsl_version" yaml:"dsl_version"`
+	DefinitionHash       string   `json:"definition_hash" yaml:"definition_hash"`
+	Ephemeral            bool     `json:"ephemeral" yaml:"ephemeral"`
+	WorkspaceVisible     bool     `json:"workspace_visible" yaml:"workspace_visible"`
+	InvocationCount      int      `json:"invocation_count" yaml:"invocation_count"`
+	LastInvokedAt        *string  `json:"last_invoked_at" yaml:"last_invoked_at"`
+	LastInvocationStatus string   `json:"last_invocation_status" yaml:"last_invocation_status"`
+	AuthorCrewID         string   `json:"author_crew_id" yaml:"author_crew_id"`
+	AuthorAgentID        string   `json:"author_agent_id" yaml:"author_agent_id"`
+	AuthorUserID         string   `json:"author_user_id" yaml:"author_user_id"`
+	AuthoredVia          string   `json:"authored_via" yaml:"authored_via"`
+	Status               string   `json:"status" yaml:"status"`
+	CreatedAt            string   `json:"created_at" yaml:"created_at"`
+	UpdatedAt            string   `json:"updated_at" yaml:"updated_at"`
+	IntegrationsRequired []string `json:"integrations_required,omitempty" yaml:"integrations_required,omitempty"`
+	// cli.RawJSON, not json.RawMessage: the DSL document is the whole point of
+	// `routine get`, and a bare json.RawMessage IS a []byte, which yaml.v3
+	// renders as a sequence of byte integers — `definition:` came out as
+	// hundreds of lines reading `- 123`, `- 34`, exit 0, on the invocation
+	// docs/cli/routine.mdx advertises. cli.RawJSON is the same bytes plus a
+	// MarshalYAML that hands the encoder the document's SHAPE; `-f json` still
+	// gets the server's bytes back verbatim.
+	Definition cli.RawJSON `json:"definition,omitempty" yaml:"definition,omitempty"`
 }
 
 var pipelineListCmd = &cobra.Command{
@@ -815,22 +822,22 @@ var pipelineDryRunCmd = &cobra.Command{
 // which never matched the wire, so the CLI silently rendered "0 steps" for
 // every dry run regardless of what the server returned.
 type dryRunStep struct {
-	StepID         string  `json:"step_id"`
-	StepType       string  `json:"step_type"`
-	WouldCallAgent string  `json:"would_call_agent,omitempty"`
-	WouldCallSlug  string  `json:"would_call_pipeline,omitempty"`
-	WouldPass      string  `json:"would_pass,omitempty"`
-	TierAdapter    string  `json:"tier_adapter,omitempty"`
-	TierModel      string  `json:"tier_model,omitempty"`
-	EstimatedCost  float64 `json:"estimated_cost_usd,omitempty"`
+	StepID         string  `json:"step_id" yaml:"step_id"`
+	StepType       string  `json:"step_type" yaml:"step_type"`
+	WouldCallAgent string  `json:"would_call_agent,omitempty" yaml:"would_call_agent,omitempty"`
+	WouldCallSlug  string  `json:"would_call_pipeline,omitempty" yaml:"would_call_pipeline,omitempty"`
+	WouldPass      string  `json:"would_pass,omitempty" yaml:"would_pass,omitempty"`
+	TierAdapter    string  `json:"tier_adapter,omitempty" yaml:"tier_adapter,omitempty"`
+	TierModel      string  `json:"tier_model,omitempty" yaml:"tier_model,omitempty"`
+	EstimatedCost  float64 `json:"estimated_cost_usd,omitempty" yaml:"estimated_cost_usd,omitempty"`
 }
 
 // dryRunResult is the machine-readable form of `routine dry-run`.
 type dryRunResult struct {
-	Status       string       `json:"status"`
-	DurationMs   int64        `json:"duration_ms"`
-	CostUSD      float64      `json:"cost_usd"`
-	WouldExecute []dryRunStep `json:"would_execute"`
+	Status       string       `json:"status" yaml:"status"`
+	DurationMs   int64        `json:"duration_ms" yaml:"duration_ms"`
+	CostUSD      float64      `json:"cost_usd" yaml:"cost_usd"`
+	WouldExecute []dryRunStep `json:"would_execute" yaml:"would_execute"`
 }
 
 var pipelineDeleteCmd = &cobra.Command{

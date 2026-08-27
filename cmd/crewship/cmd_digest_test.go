@@ -6,6 +6,8 @@ package main
 // schedule fires it, idempotently.
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -158,5 +160,136 @@ func TestDigestEnable_CronAndWhenMutuallyExclusive(t *testing.T) {
 	err := digestEnableCmd.RunE(digestEnableCmd, nil)
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// captureDigestStreams runs fn with os.Stdout and os.Stderr redirected into
+// SEPARATE pipes, because the whole question here is which stream a line
+// landed on and how many times.
+func captureDigestStreams(t *testing.T, fn func()) (stdout, stderr string) {
+	t.Helper()
+	guardCLIState(t)
+	oldOut, oldErr := os.Stdout, os.Stderr
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout, os.Stderr = outW, errW
+	outCh, errCh := make(chan string, 1), make(chan string, 1)
+	go func() { b, _ := io.ReadAll(outR); outCh <- string(b) }()
+	go func() { b, _ := io.ReadAll(errR); errCh <- string(b) }()
+	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
+	fn()
+	_ = outW.Close()
+	_ = errW.Close()
+	os.Stdout, os.Stderr = oldOut, oldErr
+	return <-outCh, <-errCh
+}
+
+// `digest enable --when ... ` without --yes is the DEFAULT interactive path,
+// and it printed every advisory line twice.
+//
+// The confirmation prompt needs the preview above it, so the collected notes
+// are flushed to stderr before the question. That flush does not consume them,
+// so the AutoHuman human renderer at the end replayed the whole slice —
+// including the six lines already shown — to stdout. The pre-fix code printed
+// each line exactly once; deferring the human output must not have changed
+// how many times a person sees it.
+func TestDigestEnable_When_Interactive_PrintsEachNoteOnce(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	routinePath := "/api/v1/workspaces/" + covWS + "/pipelines/workspace-digest"
+	schedulesPath := "/api/v1/workspaces/" + covWS + "/pipeline-schedules"
+
+	stub.OnGet(routinePath, clitest.JSONResponse(200, map[string]any{"slug": "workspace-digest"}))
+	stub.OnGet(schedulesPath, clitest.JSONResponse(200, []scheduleRow{}))
+	stub.OnPost(schedulesPath, clitest.JSONResponse(201, scheduleRow{ID: "sch_x", CronExpr: "0 9 * * 1"}))
+	setStubCLI(t, stub.URL())
+	covResetFlags(t, digestEnableCmd)
+	covSetFlags(t, digestEnableCmd, map[string]string{"when": "every monday at 9am"})
+	covWithStdin(t, "y\n")
+
+	stdout, stderr := captureDigestStreams(t, func() {
+		if err := digestEnableCmd.RunE(digestEnableCmd, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+
+	// The preview lines belong to the prompt: stderr once, stdout never.
+	for _, preview := range []string{
+		"Routine workspace-digest already exists.",
+		`Parsed "every monday at 9am" as cron "0 9 * * 1"`,
+		"Next 3 fire times:",
+	} {
+		if n := strings.Count(stderr, preview); n != 1 {
+			t.Errorf("stderr contains %q %d times, want 1\nstderr:\n%s", preview, n, stderr)
+		}
+		if strings.Contains(stdout, preview) {
+			t.Errorf("stdout replays the prompt preview %q — every note is printed twice\n"+
+				"stdout:\n%s\nstderr:\n%s", preview, stdout, stderr)
+		}
+	}
+
+	// Everything decided AFTER the prompt is the command's answer and belongs
+	// on stdout — once, and not on stderr.
+	for _, result := range []string{
+		"Scheduled workspace-digest: 0 9 * * 1 UTC (id=sch_x)",
+		"Configure delivery to Slack/email",
+	} {
+		if n := strings.Count(stdout, result); n != 1 {
+			t.Errorf("stdout contains %q %d times, want 1\nstdout:\n%s", result, n, stdout)
+		}
+		if strings.Contains(stderr, result) {
+			t.Errorf("stderr carries the post-prompt result %q\nstderr:\n%s", result, stderr)
+		}
+	}
+
+	// The fire-time bullets are the bulk of the duplication and the easiest to
+	// count: three of them, on stderr, and nowhere else.
+	if n := strings.Count(stderr, "  - 20"); n != 3 {
+		t.Errorf("stderr has %d fire-time lines, want 3\nstderr:\n%s", n, stderr)
+	}
+	if n := strings.Count(stdout, "  - 20"); n != 0 {
+		t.Errorf("stdout replays %d fire-time lines\nstdout:\n%s", n, stdout)
+	}
+}
+
+// --yes skips the prompt entirely, so nothing has been flushed to stderr and
+// the human renderer owns the whole transcript on stdout. This is the half a
+// "just drop the notes after the prompt" fix would silently delete.
+func TestDigestEnable_When_Confirmed_KeepsFullTranscriptOnStdout(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	routinePath := "/api/v1/workspaces/" + covWS + "/pipelines/workspace-digest"
+	schedulesPath := "/api/v1/workspaces/" + covWS + "/pipeline-schedules"
+
+	stub.OnGet(routinePath, clitest.JSONResponse(200, map[string]any{"slug": "workspace-digest"}))
+	stub.OnGet(schedulesPath, clitest.JSONResponse(200, []scheduleRow{}))
+	stub.OnPost(schedulesPath, clitest.JSONResponse(201, scheduleRow{ID: "sch_y", CronExpr: "0 9 * * 1"}))
+	setStubCLI(t, stub.URL())
+	covResetFlags(t, digestEnableCmd)
+	covSetFlags(t, digestEnableCmd, map[string]string{"when": "every monday at 9am", "yes": "true"})
+
+	stdout, stderr := captureDigestStreams(t, func() {
+		if err := digestEnableCmd.RunE(digestEnableCmd, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"Routine workspace-digest already exists.",
+		`Parsed "every monday at 9am" as cron "0 9 * * 1"`,
+		"Next 3 fire times:",
+		"Scheduled workspace-digest: 0 9 * * 1 UTC (id=sch_y)",
+	} {
+		if n := strings.Count(stdout, want); n != 1 {
+			t.Errorf("stdout contains %q %d times, want 1\nstdout:\n%s", want, n, stdout)
+		}
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Errorf("--yes wrote to stderr:\n%s", stderr)
 	}
 }

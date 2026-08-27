@@ -324,7 +324,8 @@ func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
 	// fields. The human table cuts the id to 16 characters, the UA to 32, and
 	// folds the reason into the status cell — all fine to read and none of it
 	// safe to correlate against a server log.
-	return resolvedFormatter(cmd).AutoHuman(adminSessionsResult{
+	var flush tabFlush
+	if err := resolvedFormatter(cmd).AutoHuman(adminSessionsResult{
 		Email:       email,
 		UserID:      userID,
 		DisplayName: displayName,
@@ -359,7 +360,7 @@ func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
 				dispID, statusCell, shortAdminTime(s.CreatedAt), shortAdminTime(s.LastUsedAt),
 				shortAdminTime(s.ExpiresAt), dispIP, dispUA)
 		}
-		_ = tw.Flush()
+		flush.of(tw)
 		if len(sessions) == 0 {
 			if activeOnly {
 				fmt.Fprintf(out, "(no active sessions for %s)\n", displayName)
@@ -370,20 +371,23 @@ func runAdminSessionsList(cmd *cobra.Command, _ []string) error {
 		if activeOnly && hidden > 0 {
 			fmt.Fprintf(out, "\n(%d revoked/expired session(s) hidden by --active-only)\n", hidden)
 		}
-	})
+	}); err != nil {
+		return err
+	}
+	return flush.err
 }
 
 // adminSessionRow is one user_sessions row in the forensic read.
 type adminSessionRow struct {
-	ID            string `json:"id"`
-	Status        string `json:"status"` // active | revoked | expired
-	CreatedAt     string `json:"created_at"`
-	LastUsedAt    string `json:"last_used_at,omitempty"`
-	ExpiresAt     string `json:"expires_at"`
-	RevokedAt     string `json:"revoked_at,omitempty"`
-	RevokedReason string `json:"revoked_reason,omitempty"`
-	IP            string `json:"ip,omitempty"`
-	UserAgent     string `json:"user_agent,omitempty"`
+	ID            string `json:"id" yaml:"id"`
+	Status        string `json:"status" yaml:"status"` // active | revoked | expired
+	CreatedAt     string `json:"created_at" yaml:"created_at"`
+	LastUsedAt    string `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
+	ExpiresAt     string `json:"expires_at" yaml:"expires_at"`
+	RevokedAt     string `json:"revoked_at,omitempty" yaml:"revoked_at,omitempty"`
+	RevokedReason string `json:"revoked_reason,omitempty" yaml:"revoked_reason,omitempty"`
+	IP            string `json:"ip,omitempty" yaml:"ip,omitempty"`
+	UserAgent     string `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`
 }
 
 // adminSessionsResult is the machine-readable form of `admin sessions list`.
@@ -392,12 +396,12 @@ type adminSessionRow struct {
 // --active-only" are different answers, and only the human output distinguished
 // them.
 type adminSessionsResult struct {
-	Email       string            `json:"email"`
-	UserID      string            `json:"user_id"`
-	DisplayName string            `json:"display_name"`
-	ActiveOnly  bool              `json:"active_only"`
-	Hidden      int               `json:"hidden"`
-	Sessions    []adminSessionRow `json:"sessions"`
+	Email       string            `json:"email" yaml:"email"`
+	UserID      string            `json:"user_id" yaml:"user_id"`
+	DisplayName string            `json:"display_name" yaml:"display_name"`
+	ActiveOnly  bool              `json:"active_only" yaml:"active_only"`
+	Hidden      int               `json:"hidden" yaml:"hidden"`
+	Sessions    []adminSessionRow `json:"sessions" yaml:"sessions"`
 }
 
 // classifyAdminSessionRow derives the STATUS cell from the raw

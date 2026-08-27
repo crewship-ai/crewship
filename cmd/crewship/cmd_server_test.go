@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -307,5 +308,110 @@ func TestServerRemoveClearsCurrent(t *testing.T) {
 	}
 	if cfg.Current != "" {
 		t.Errorf("current should clear when the active profile is removed, got %q", cfg.Current)
+	}
+}
+
+// A legacy single-server config — top-level `token`, no profiles — IS
+// authenticated, and `server current -f json` reported `"token_set": false`
+// for it because the no-profile branch left the field at its zero value.
+//
+// `config show -f json`, which resolves the same config through the same
+// active-profile overlay, reports `true`. Two commands in the same CLI
+// contradicting each other on "am I logged in?" is worse than either answer:
+// a setup script branching on `.token_set` to decide whether to run
+// `crewship login` loops forever against a config that was fine.
+func TestServerCurrentNoProfileReportsTokenSet(t *testing.T) {
+	guardCLIState(t)
+	redirectConfigHome(t)
+	oldProfile, oldFormat := flagProfile, flagFormat
+	flagProfile, flagFormat = "", "json"
+	t.Cleanup(func() { flagProfile, flagFormat = oldProfile, oldFormat })
+	t.Setenv("CREWSHIP_PROFILE", "")
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cfg.Current = ""
+	cfg.Servers = nil
+	cfg.Server = "https://legacy.example"
+	cfg.Token = "legacy-token"
+	if err := cli.SaveConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	cli.SetWorkingDir("/tmp")
+	t.Cleanup(func() { cli.SetWorkingDir("") })
+
+	out, err := captureStdout(t, func() error {
+		return serverCurrentCmd.RunE(serverCurrentCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("current: %v", err)
+	}
+	var doc map[string]any
+	if uerr := json.Unmarshal([]byte(out), &doc); uerr != nil {
+		t.Fatalf("-f json stdout is not valid JSON: %v\ngot:\n%s", uerr, out)
+	}
+	if doc["state"] != "no-profile" {
+		t.Fatalf("state = %v, want no-profile\ngot:\n%s", doc["state"], out)
+	}
+	if doc["token_set"] != true {
+		t.Errorf("token_set = %v for a legacy config carrying a top-level token, want true\ngot:\n%s",
+			doc["token_set"], out)
+	}
+
+	// The other half of the contradiction: `config show` must agree.
+	confOut, err := captureStdout(t, func() error {
+		return configShowCmd.RunE(configShowCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("config show: %v", err)
+	}
+	var conf map[string]any
+	if uerr := json.Unmarshal([]byte(confOut), &conf); uerr != nil {
+		t.Fatalf("config show -f json is not valid JSON: %v\ngot:\n%s", uerr, confOut)
+	}
+	if conf["token_set"] != doc["token_set"] {
+		t.Errorf("config show says token_set=%v, server current says %v — the two commands disagree",
+			conf["token_set"], doc["token_set"])
+	}
+}
+
+// The inverse: an unauthenticated legacy config must still report false, or
+// the fix is just a hardcoded true in the other direction.
+func TestServerCurrentNoProfileReportsTokenUnset(t *testing.T) {
+	guardCLIState(t)
+	redirectConfigHome(t)
+	oldProfile, oldFormat := flagProfile, flagFormat
+	flagProfile, flagFormat = "", "json"
+	t.Cleanup(func() { flagProfile, flagFormat = oldProfile, oldFormat })
+	t.Setenv("CREWSHIP_PROFILE", "")
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cfg.Current = ""
+	cfg.Servers = nil
+	cfg.Server = "https://legacy.example"
+	cfg.Token = ""
+	if err := cli.SaveConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	cli.SetWorkingDir("/tmp")
+	t.Cleanup(func() { cli.SetWorkingDir("") })
+
+	out, err := captureStdout(t, func() error {
+		return serverCurrentCmd.RunE(serverCurrentCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("current: %v", err)
+	}
+	var doc map[string]any
+	if uerr := json.Unmarshal([]byte(out), &doc); uerr != nil {
+		t.Fatalf("-f json stdout is not valid JSON: %v\ngot:\n%s", uerr, out)
+	}
+	if doc["token_set"] != false {
+		t.Errorf("token_set = %v with no token anywhere, want false\ngot:\n%s", doc["token_set"], out)
 	}
 }

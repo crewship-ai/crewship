@@ -95,6 +95,14 @@ Examples:
 			notes = append(notes, fmt.Sprintf(format, a...))
 		}
 		errOut := cmd.ErrOrStderr()
+		// How many notes the confirmation prompt has already shown. Flushing
+		// them to stderr does not consume them, so without this the human
+		// renderer replayed the whole slice and a person running the default
+		// interactive path (`--when` without `--yes`) saw every line TWICE —
+		// once above the question, once again after answering it. Deferring
+		// the output was allowed to change which stream a line lands on; it
+		// was not allowed to change how many times it is printed.
+		flushed := 0
 
 		exists, err := digestRoutineExists(client, ws)
 		if err != nil {
@@ -134,9 +142,10 @@ Examples:
 				// other confirmation in this CLI. The preview lines above it
 				// are echoed there too, or the question arrives without the
 				// context it is asking about.
-				for _, n := range notes {
+				for _, n := range notes[flushed:] {
 					fmt.Fprintln(errOut, n)
 				}
+				flushed = len(notes)
 				fmt.Fprint(errOut, "Schedule the digest with this cadence? [y/N]: ")
 				var input string
 				_, _ = fmt.Scanln(&input)
@@ -164,7 +173,7 @@ Examples:
 		note("Configure delivery to Slack/email: `crewship notifychannel add ...` + `crewship notify prefs set`.")
 
 		return resolvedFormatter(cmd).AutoHuman(result, func() {
-			for _, n := range notes {
+			for _, n := range notes[flushed:] {
 				fmt.Println(n)
 			}
 		})
@@ -174,14 +183,14 @@ Examples:
 // digestEnableResult is the machine-readable summary for `digest enable`
 // (--format json/yaml/ndjson).
 type digestEnableResult struct {
-	RoutineCreated  bool   `json:"routine_created"`
-	ScheduleCreated bool   `json:"schedule_created"`
-	ScheduleID      string `json:"schedule_id,omitempty"`
-	CronExpr        string `json:"cron_expr,omitempty"`
+	RoutineCreated  bool   `json:"routine_created" yaml:"routine_created"`
+	ScheduleCreated bool   `json:"schedule_created" yaml:"schedule_created"`
+	ScheduleID      string `json:"schedule_id,omitempty" yaml:"schedule_id,omitempty"`
+	CronExpr        string `json:"cron_expr,omitempty" yaml:"cron_expr,omitempty"`
 	// NextFireTimes is populated only for --when, where the derived cron is a
 	// guess the operator is being asked to confirm. RFC3339/UTC rather than
 	// the human "2006-01-02 15:04 MST" — a machine consumer parses it.
-	NextFireTimes []string `json:"next_fire_times,omitempty"`
+	NextFireTimes []string `json:"next_fire_times,omitempty" yaml:"next_fire_times,omitempty"`
 }
 
 // digestRoutineExists checks GET /pipelines/workspace-digest.

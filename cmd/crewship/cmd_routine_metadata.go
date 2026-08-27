@@ -105,7 +105,8 @@ var routineTreeCmd = &cobra.Command{
 		// machine rows keep the empty string, because "" is how a consumer
 		// already tests for a root and "(root)" is a string it would have to
 		// know to special-case.
-		return resolvedFormatter(cmd).AutoHuman(body.Nodes, func() {
+		var flush tabFlush
+		if err := resolvedFormatter(cmd).AutoHuman(body.Nodes, func() {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "RUN ID\tPARENT\tROUTINE\tSTATUS\tVIA\tCOST")
 			for _, n := range body.Nodes {
@@ -115,19 +116,22 @@ var routineTreeCmd = &cobra.Command{
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t$%.4f\n", n.ID, parent, n.PipelineSlug, n.Status, n.TriggeredVia, n.CostUSD)
 			}
-			_ = w.Flush()
-		})
+			flush.of(w)
+		}); err != nil {
+			return err
+		}
+		return flush.err
 	},
 }
 
 // runTreeNode is one run in a `routine tree` result.
 type runTreeNode struct {
-	ID           string  `json:"id"`
-	ParentID     string  `json:"parent_id"`
-	PipelineSlug string  `json:"pipeline_slug"`
-	Status       string  `json:"status"`
-	TriggeredVia string  `json:"triggered_via"`
-	CostUSD      float64 `json:"cost_usd"`
+	ID           string  `json:"id" yaml:"id"`
+	ParentID     string  `json:"parent_id" yaml:"parent_id"`
+	PipelineSlug string  `json:"pipeline_slug" yaml:"pipeline_slug"`
+	Status       string  `json:"status" yaml:"status"`
+	TriggeredVia string  `json:"triggered_via" yaml:"triggered_via"`
+	CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
 }
 
 var routineSignalCmd = &cobra.Command{

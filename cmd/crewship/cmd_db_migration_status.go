@@ -134,8 +134,8 @@ named, it refuses unless you pass --local.`,
 
 // migrationRef is one post-deployment migration in the machine output.
 type migrationRef struct {
-	Version int    `json:"version"`
-	Name    string `json:"name"`
+	Version int    `json:"version" yaml:"version"`
+	Name    string `json:"name" yaml:"name"`
 }
 
 // migrationStatusResult is the machine-readable form of `db migration-status`.
@@ -146,12 +146,12 @@ type migrationRef struct {
 // Collapsing them into one "pending" count would make a healthy database look
 // broken to whatever is reading this.
 type migrationStatusResult struct {
-	Database      string         `json:"database"`
-	SchemaEmpty   bool           `json:"schema_empty"`
-	SchemaVersion int            `json:"schema_version,omitempty"`
-	SchemaName    string         `json:"schema_name,omitempty"`
-	AppliedCount  int            `json:"applied_count"`
-	Outstanding   []migrationRef `json:"outstanding"`
+	Database      string         `json:"database" yaml:"database"`
+	SchemaEmpty   bool           `json:"schema_empty" yaml:"schema_empty"`
+	SchemaVersion int            `json:"schema_version,omitempty" yaml:"schema_version,omitempty"`
+	SchemaName    string         `json:"schema_name,omitempty" yaml:"schema_name,omitempty"`
+	AppliedCount  int            `json:"applied_count" yaml:"applied_count"`
+	Outstanding   []migrationRef `json:"outstanding" yaml:"outstanding"`
 }
 
 func init() {

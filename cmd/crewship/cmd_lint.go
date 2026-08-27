@@ -87,9 +87,9 @@ Examples:
 
 // lintFinding is one problem `crewship lint` found.
 type lintFinding struct {
-	Severity string `json:"severity"` // error | warn
-	File     string `json:"file"`
-	Message  string `json:"message"`
+	Severity string `json:"severity" yaml:"severity"` // error | warn
+	File     string `json:"file" yaml:"file"`
+	Message  string `json:"message" yaml:"message"`
 }
 
 // lintResult is the machine-readable form of `crewship lint`.
@@ -98,11 +98,11 @@ type lintFinding struct {
 // because the exit code is lost the moment the output is captured and read
 // later — which is what a CI artifact is.
 type lintResult struct {
-	Findings []lintFinding `json:"findings"`
-	Errors   int           `json:"errors"`
-	Warnings int           `json:"warnings"`
-	Strict   bool          `json:"strict"`
-	Passed   bool          `json:"passed"`
+	Findings []lintFinding `json:"findings" yaml:"findings"`
+	Errors   int           `json:"errors" yaml:"errors"`
+	Warnings int           `json:"warnings" yaml:"warnings"`
+	Strict   bool          `json:"strict" yaml:"strict"`
+	Passed   bool          `json:"passed" yaml:"passed"`
 }
 
 // lintConfig validates the YAML config file shape and content.

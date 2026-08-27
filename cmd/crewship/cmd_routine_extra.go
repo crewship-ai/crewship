@@ -61,7 +61,8 @@ var routineVersionsCmd = &cobra.Command{
 		// The machine rows are the server's, untouched: the human table
 		// truncates the definition hash and the author id to 12 characters
 		// and the change summary to 50, and a truncated hash is not a hash.
-		return resolvedFormatter(cmd).AutoHuman(rows, func() {
+		var flush tabFlush
+		if err := resolvedFormatter(cmd).AutoHuman(rows, func() {
 			if len(rows) == 0 {
 				fmt.Println("No version history yet.")
 				return
@@ -101,8 +102,11 @@ var routineVersionsCmd = &cobra.Command{
 					v.Version, isHead, parent, truncIDForCLI(v.DefinitionHash, 12),
 					v.AuthorType, truncIDForCLI(v.AuthorID, 12), v.CreatedAt, summary)
 			}
-			_ = w.Flush()
-		})
+			flush.of(w)
+		}); err != nil {
+			return err
+		}
+		return flush.err
 	},
 }
 
@@ -202,7 +206,8 @@ var routineActiveCmd = &cobra.Command{
 		// The machine rows also carry the FULL run id. The human column
 		// truncates at 24 characters to keep the table readable, and a
 		// truncated id fed back to `routine cancel` is a 404.
-		return resolvedFormatter(cmd).AutoHuman(rows, func() {
+		var flush tabFlush
+		if err := resolvedFormatter(cmd).AutoHuman(rows, func() {
 			if len(rows) == 0 {
 				fmt.Println("No active runs.")
 				return
@@ -217,18 +222,21 @@ var routineActiveCmd = &cobra.Command{
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 					truncIDForCLI(r.RunID, 24), r.PipelineSlug, r.StartedAt, cancelMark, r.ConcurrencyKey)
 			}
-			_ = w.Flush()
-		})
+			flush.of(w)
+		}); err != nil {
+			return err
+		}
+		return flush.err
 	},
 }
 
 // activeRunRow is one in-flight routine run.
 type activeRunRow struct {
-	RunID           string `json:"run_id"`
-	PipelineSlug    string `json:"pipeline_slug"`
-	ConcurrencyKey  string `json:"concurrency_key"`
-	StartedAt       string `json:"started_at"`
-	CancelRequested bool   `json:"cancel_requested"`
+	RunID           string `json:"run_id" yaml:"run_id"`
+	PipelineSlug    string `json:"pipeline_slug" yaml:"pipeline_slug"`
+	ConcurrencyKey  string `json:"concurrency_key" yaml:"concurrency_key"`
+	StartedAt       string `json:"started_at" yaml:"started_at"`
+	CancelRequested bool   `json:"cancel_requested" yaml:"cancel_requested"`
 }
 
 // ---- diff (#1422 item 5) ----

@@ -273,14 +273,14 @@ func showCrewConfig(cmd *cobra.Command, client *cli.Client, crewID string) error
 
 // crewConfigShowResult is the machine-readable form of `crew config --show`.
 type crewConfigShowResult struct {
-	Name               string `json:"name"`
-	Slug               string `json:"slug"`
-	RuntimeImage       string `json:"runtime_image"`
-	CachedImage        string `json:"cached_image"`
-	ConfigHash         string `json:"config_hash"`
-	Status             string `json:"status"`
-	DevcontainerConfig any    `json:"devcontainer_config"`
-	MiseConfig         any    `json:"mise_config"`
+	Name               string `json:"name" yaml:"name"`
+	Slug               string `json:"slug" yaml:"slug"`
+	RuntimeImage       string `json:"runtime_image" yaml:"runtime_image"`
+	CachedImage        string `json:"cached_image" yaml:"cached_image"`
+	ConfigHash         string `json:"config_hash" yaml:"config_hash"`
+	Status             string `json:"status" yaml:"status"`
+	DevcontainerConfig any    `json:"devcontainer_config" yaml:"devcontainer_config"`
+	MiseConfig         any    `json:"mise_config" yaml:"mise_config"`
 }
 
 // derefOrEmpty is derefOrDash's machine twin: a missing value is an empty

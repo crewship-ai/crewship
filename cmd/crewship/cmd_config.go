@@ -22,15 +22,15 @@ var configCmd = &cobra.Command{
 // reconstructing) a credential. A boolean answers "am I authenticated?", which
 // is the only question a script has.
 type configShowResult struct {
-	ConfigFile   string `json:"config_file"`
-	Server       string `json:"server"`
-	Workspace    string `json:"workspace"`
-	Format       string `json:"format"`
-	DefaultAgent string `json:"default_agent"`
-	Markdown     string `json:"markdown"`
-	TokenSet     bool   `json:"token_set"`
-	Profile      string `json:"profile,omitempty"`
-	ProfileCount int    `json:"profile_count"`
+	ConfigFile   string `json:"config_file" yaml:"config_file"`
+	Server       string `json:"server" yaml:"server"`
+	Workspace    string `json:"workspace" yaml:"workspace"`
+	Format       string `json:"format" yaml:"format"`
+	DefaultAgent string `json:"default_agent" yaml:"default_agent"`
+	Markdown     string `json:"markdown" yaml:"markdown"`
+	TokenSet     bool   `json:"token_set" yaml:"token_set"`
+	Profile      string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	ProfileCount int    `json:"profile_count" yaml:"profile_count"`
 }
 
 var configShowCmd = &cobra.Command{
@@ -266,16 +266,16 @@ var configValidateCmd = &cobra.Command{
 
 // configCheck is one line of the `config validate` report.
 type configCheck struct {
-	Label  string `json:"label"`
-	Status string `json:"status"` // pass | fail | warn
-	Hint   string `json:"hint,omitempty"`
+	Label  string `json:"label" yaml:"label"`
+	Status string `json:"status" yaml:"status"` // pass | fail | warn
+	Hint   string `json:"hint,omitempty" yaml:"hint,omitempty"`
 }
 
 // configValidateResult is the machine-readable form of `config validate`.
 type configValidateResult struct {
-	Checks   []configCheck `json:"checks"`
-	Errors   int           `json:"errors"`
-	Warnings int           `json:"warnings"`
+	Checks   []configCheck `json:"checks" yaml:"checks"`
+	Errors   int           `json:"errors" yaml:"errors"`
+	Warnings int           `json:"warnings" yaml:"warnings"`
 }
 
 func init() {

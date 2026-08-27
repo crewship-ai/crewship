@@ -92,8 +92,8 @@ var memorySearchCmd = &cobra.Command{
 
 // scopedResult is one memory search hit, tagged with the scope it came from.
 type scopedResult struct {
-	Source string              `json:"source"`
-	Result memory.SearchResult `json:"result"`
+	Source string              `json:"source" yaml:"source"`
+	Result memory.SearchResult `json:"result" yaml:"result"`
 }
 
 var memoryStatusCmd = &cobra.Command{
@@ -166,15 +166,15 @@ var memoryStatusCmd = &cobra.Command{
 
 // memoryScopeStatus is one scope's index status in `memory status`.
 type memoryScopeStatus struct {
-	Scope       string `json:"scope"`
-	Path        string `json:"path"`
-	Initialized bool   `json:"initialized"`
-	TotalFiles  int    `json:"total_files"`
-	TotalChunks int    `json:"total_chunks"`
-	TotalSizeKB int64  `json:"total_size_kb"`
-	IndexedAt   string `json:"indexed_at,omitempty"`
-	SearchReady bool   `json:"search_ready"`
-	Error       string `json:"error,omitempty"`
+	Scope       string `json:"scope" yaml:"scope"`
+	Path        string `json:"path" yaml:"path"`
+	Initialized bool   `json:"initialized" yaml:"initialized"`
+	TotalFiles  int    `json:"total_files" yaml:"total_files"`
+	TotalChunks int    `json:"total_chunks" yaml:"total_chunks"`
+	TotalSizeKB int64  `json:"total_size_kb" yaml:"total_size_kb"`
+	IndexedAt   string `json:"indexed_at,omitempty" yaml:"indexed_at,omitempty"`
+	SearchReady bool   `json:"search_ready" yaml:"search_ready"`
+	Error       string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
 var memoryReindexCmd = &cobra.Command{
