@@ -1,7 +1,11 @@
 name: Changelog Guard
 
-# Catches the failure mode the #2086 audit found: 15 user-visible PRs merged
-# in one window and left no changelog trace anywhere. `RELEASING.md` makes
+# Catches the failure mode the #2086 audit found: 18 user-visible PRs merged
+# in one window and left no changelog trace anywhere — the audit counted
+# fifteen, and reading the window's merges back against the file turned up
+# three more, one of which merged 19 minutes after the audit was filed and
+# silently invalidated an entry the backfill had already written.
+# `RELEASING.md` makes
 # `CHANGELOG.md`'s `## [Unreleased]` section the release-note source of truth,
 # so a missing entry is not untidiness — it is a release note that does not
 # exist. #2051 renamed the provider model to credentials across 117 files and

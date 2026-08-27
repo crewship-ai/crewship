@@ -337,8 +337,9 @@ If the change genuinely has no user-visible effect — a chore, an
 internal refactor, a test-only fix — apply the **`skip-changelog`**
 label. The guard re-runs on `labeled`/`unlabeled`, so it clears within
 seconds and no push is needed. Reach for the label when it is true, not
-when the entry is inconvenient: the guard exists because 15 user-visible
-PRs merged in one window with no trace anywhere (#2086), including a
+when the entry is inconvenient: the guard exists because 18 user-visible
+PRs merged in one window with no trace anywhere — the #2086 audit found
+fifteen of them and the backfill turned up three more — including a
 breaking credential-model change across 117 files.
 
 Write the entry the way the file already does — lead with the
