@@ -568,8 +568,10 @@ func TestRunAgent_SidecarReusedInFreeMode(t *testing.T) {
 	if err := o.RunAgent(context.Background(), covRunReq(), nil); err != nil {
 		t.Fatalf("RunAgent: %v", err)
 	}
-	for _, call := range c.snapshotCalls() {
-		if strings.Contains(covScript(call), "crewship-sidecar --addr") {
+	// The launch script (including "crewship-sidecar --addr") rides stdin,
+	// not argv, so scan the combined Cmd+stdin text snapshotScripts builds.
+	for _, script := range c.snapshotScripts() {
+		if strings.Contains(script, "crewship-sidecar --addr") {
 			t.Fatal("healthy free-mode sidecar must be reused, not restarted")
 		}
 	}
@@ -597,8 +599,9 @@ func TestRunAgent_RestrictedModeRestartsSidecarWithDomains(t *testing.T) {
 
 	var sawPkill bool
 	var launchScript string
-	for _, call := range c.snapshotCalls() {
-		script := covScript(call)
+	// The launch script (including "crewship-sidecar --addr") rides stdin,
+	// not argv, so scan the combined Cmd+stdin text snapshotScripts builds.
+	for _, script := range c.snapshotScripts() {
 		if strings.Contains(script, "pkill -f '^crewship-sidecar'") {
 			sawPkill = true
 		}
@@ -920,8 +923,10 @@ func TestRunAgent_EmptySlugRejectedBeforeSidecarMemoryConfig(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid agent slug") {
 		t.Fatalf("expected empty slug rejection, got %v", err)
 	}
-	for _, call := range c.snapshotCalls() {
-		if strings.Contains(covScript(call), "crewship-sidecar --addr") {
+	// The launch script (including "crewship-sidecar --addr") rides stdin,
+	// not argv, so scan the combined Cmd+stdin text snapshotScripts builds.
+	for _, script := range c.snapshotScripts() {
+		if strings.Contains(script, "crewship-sidecar --addr") {
 			t.Fatal("sidecar started with an empty agent slug: the slug check no longer " +
 				"precedes SidecarMemoryConfig construction, so memory_guard.go's comment is stale")
 		}

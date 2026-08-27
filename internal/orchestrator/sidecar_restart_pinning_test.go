@@ -94,6 +94,15 @@ func sidecarPayloadPolicy(t *testing.T, script string) *SidecarNetworkPolicy {
 
 func (c *payloadDrivenContainer) exec(t *testing.T, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	joined := strings.Join(cfg.Cmd, " ")
+	// The sidecar launch script (including "crewship-sidecar --addr" and its
+	// base64 payload) rides stdin, not argv — see the security fix in
+	// startSidecar — so it must be folded in here too for this fake's
+	// script-matching and payload extraction to still see it.
+	if cfg.Stdin != nil {
+		if b, err := io.ReadAll(cfg.Stdin); err == nil {
+			joined += "\n" + string(b)
+		}
+	}
 
 	switch {
 	case strings.Contains(joined, "pkill -f '^crewship-sidecar'"):

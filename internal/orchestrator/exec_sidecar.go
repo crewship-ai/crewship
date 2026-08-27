@@ -102,10 +102,24 @@ func sidecarLaunchScript(credsB64 string) string {
 	return fmt.Sprintf(
 		// Start from an empty log.
 		`: >%[2]s`+"\n"+
-			// Pipe credentials in as base64 on stdin (never argv — see the
-			// shell-injection note at the call site). stdout/stderr go to files
-			// so the sidecar survives the docker exec stream closing; writes to
-			// a closed pipe would SIGPIPE it.
+			// Pipe credentials in as base64 on crewship-sidecar's stdin
+			// (never argv — see the shell-injection note at the call
+			// site). stdout/stderr go to files so the sidecar survives
+			// the docker exec stream closing; writes to a closed pipe
+			// would SIGPIPE it.
+			//
+			// This script — including the base64 blob on the next line —
+			// is itself delivered to THIS `sh` over its own stdin: the
+			// call site execs `sh` with no `-c` and no operands, so `sh`
+			// reads its program from stdin instead of argv. Passing the
+			// script as a `sh -c <script>` argument (the pre-fix
+			// behaviour) put the whole script, credentials included,
+			// into this process's argv — and argv is world-readable via
+			// /proc/<pid>/cmdline (mode 0444) regardless of the exec's
+			// User. UID 1002 (see startSidecar) only blocks
+			// /proc/<pid>/mem, which is a same-UID restriction, not a
+			// cmdline one. See the ExecConfig this script is handed to
+			// in startSidecar.
 			`echo '%[1]s' | base64 -d | crewship-sidecar --addr 127.0.0.1:9119 >/dev/null 2>>%[2]s &`+"\n"+
 			`SIDECAR_PID=$!`+"\n"+
 			// Background size cap. Detached from the exec's stdio so it neither
@@ -1039,10 +1053,23 @@ func startSidecar(
 	// SECURITY: Run sidecar as UID 1002 (not 1001) so the agent process
 	// cannot read /proc/<sidecar_pid>/mem to extract credentials from heap.
 	// Linux kernel restricts /proc/PID/mem access to same-UID processes.
+	//
+	// SECURITY: the script rides the exec's stdin, not `sh -c <script>`
+	// argv. `sh -c` would put the whole script — the base64 credential
+	// blob included — into ITS OWN argv, and /proc/<pid>/cmdline is
+	// world-readable (mode 0444) regardless of process UID, so the UID
+	// 1002 mem restriction above does nothing to protect it: any process
+	// in the container (the agent, at UID 1001) could read the sidecar's
+	// credentials for the sidecar's whole lifetime by reading the `sh`
+	// process's cmdline. `sh` with no `-c` and no operands reads its
+	// program from stdin instead, so neither the script nor the
+	// credentials ever appear in any process's argv. Same pattern as the
+	// #1646 fix for the credential-file preflight script.
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", script},
+		Cmd:         []string{"sh"},
 		User:        "1002:1002",
+		Stdin:       strings.NewReader(script),
 	}
 
 	result, err := container.Exec(ctx, cfg)
