@@ -125,11 +125,13 @@ are also rejected alongside `--value`/`--value-stdin`: an OAuth credential's
 value *is* the token the flow fetches, so passing both is asking for the row to
 be filled two ways and one of them to be discarded.
 
-What counts is that you *named* the flag, not that it carried anything:
-`--oauth-client-secret ""` and an empty `--oauth-client-secret-stdin` stream are
-refused on a non-`OAUTH2` type exactly like a populated one. The refusal is also
-decided before stdin is read, so a rejected command leaves whatever you piped in
-untouched for the corrected one.
+Both refusals key off the flag being *named*, not off it carrying anything:
+`--oauth-client-secret ""`, an empty `--oauth-client-secret-stdin` stream and
+`--value ""` are refused exactly like populated ones. They are also decided
+before anything reads stdin, which is what makes
+`--value-stdin --oauth-client-secret-stdin` a refusal rather than a coin toss —
+there is one stream and two readers, and whichever went first would take the
+line and leave the other silently empty.
 
 Filing a token you obtained elsewhere is still the older, flag-free form, and
 still works — it just does not involve an app:

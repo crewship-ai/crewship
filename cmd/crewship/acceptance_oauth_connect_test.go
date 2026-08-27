@@ -220,6 +220,21 @@ func runOAuthCLI(t *testing.T, cfgPath string, args ...string) (string, error) {
 	return string(out), err
 }
 
+// runOAuthCLIStdin is runOAuthCLI with something on the binary's stdin —
+// needed to drive the two flags that read it, --value-stdin and
+// --oauth-client-secret-stdin, which is where the interesting conflict is.
+func runOAuthCLIStdin(t *testing.T, cfgPath, stdin string, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command(buildCrewshipBinary(t), args...)
+	cmd.Env = append(os.Environ(),
+		"CREWSHIP_CONFIG="+cfgPath,
+		"NO_COLOR=1",
+		"CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=")
+	cmd.Stdin = strings.NewReader(stdin)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 // The provider catalogue is the entry point an agent reads before it decides
 // which OAuth app to register, so it has to render both as a table and as JSON
 // a script can index by provider slug.
@@ -659,6 +674,41 @@ func TestAcceptance_CredentialCreateOAuth2ValueAndAppFlagsConflict(t *testing.T)
 	}
 	if got := exitCodeOf(t, err); got != cli.ExitValidation {
 		t.Errorf("exit code = %d, want ExitValidation (%d)\noutput: %s", got, cli.ExitValidation, out)
+	}
+	if stub.hit("/api/v1/credentials") {
+		t.Error("the conflicting create reached the server")
+	}
+}
+
+// …including when both halves of the conflict come off stdin, which is the
+// case that used to escape.
+//
+// --value-stdin and --oauth-client-secret-stdin both read os.Stdin and there is
+// only one stream. The conflict was checked against the RESOLVED value, by
+// which point the secret had already eaten the piped line and `value` was ""
+// — so the pair the operator was warned about sailed through and created an
+// OAUTH2 row carrying app details and no token. Nothing said a word.
+func TestAcceptance_CredentialCreateOAuth2ValueStdinAndSecretStdinConflict(t *testing.T) {
+	stub := &oauthStubServer{}
+	srv := stub.start(t)
+	cfg := oauthStubConfig(t, srv.URL)
+
+	out, err := runOAuthCLIStdin(t, cfg, "one-line-for-two-readers\n",
+		"credential", "create",
+		"--name", "both-stdin", "--type", "OAUTH2",
+		"--oauth-client-id", "cid",
+		"--oauth-auth-url", "https://idp.example/authorize",
+		"--oauth-token-url", "https://idp.example/token",
+		"--oauth-client-secret-stdin",
+		"--value-stdin")
+	if err == nil {
+		t.Fatalf("--value-stdin alongside --oauth-client-secret-stdin was accepted\noutput: %s", out)
+	}
+	if got := exitCodeOf(t, err); got != cli.ExitValidation {
+		t.Errorf("exit code = %d, want ExitValidation (%d)\noutput: %s", got, cli.ExitValidation, out)
+	}
+	if !strings.Contains(out, "cannot be combined with the --oauth-* flags") {
+		t.Errorf("the refusal did not name the conflict:\n%s", out)
 	}
 	if stub.hit("/api/v1/credentials") {
 		t.Error("the conflicting create reached the server")

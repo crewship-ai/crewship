@@ -891,10 +891,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   token obtained elsewhere as `--type OAUTH2 --value <token>` is untouched.
   `--oauth-client-secret-stdin` keeps an app secret out of `argv` — it outlives
   every token it issues, and an argument is readable by anything that can see
-  the process table. The refusals key off the flag being *named*, not off it
-  carrying a value, so an explicitly empty secret source cannot slip past them
-  and be dropped in silence; they are also decided before stdin is read, so a
-  refused command leaves the piped stream intact for the corrected one.
+  the process table. Both refusals key off the flag being *named*, not off it
+  carrying a value, so an explicitly empty source cannot slip past them and be
+  dropped in silence; and both are decided before anything reads stdin, which
+  is what makes `--value-stdin --oauth-client-secret-stdin` a refusal instead of
+  a race between two readers over one stream.
 
 - **`crewship consolidate proposed` — the human half of memory consolidation.**
   `consolidate run` triggered the extraction; the four review endpoints

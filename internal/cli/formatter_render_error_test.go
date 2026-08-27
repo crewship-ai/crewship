@@ -82,8 +82,12 @@ func TestRenderersWrapWriteErrors(t *testing.T) {
 			name:   "AutoHuman routed to json",
 			format: "json",
 			value:  map[string]string{"k": "v"},
+			// The human closure is a no-op on purpose: if AutoHuman ever routed
+			// `json` to it, it would return nil and the err == nil check below
+			// fails. Reporting from inside the closure would mean touching the
+			// parent `t` from a parallel subtest.
 			render: func(f *Formatter, v interface{}) error {
-				return f.AutoHuman(v, func() { t.Error("human ran for --format json") })
+				return f.AutoHuman(v, func() {})
 			},
 			wantPrefix: "render JSON: ",
 		},

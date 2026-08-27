@@ -212,6 +212,25 @@ var credCreateCmd = &cobra.Command{
 			return fmt.Errorf("--type is required (SECRET, API_KEY, AI_CLI_TOKEN, or CLI_TOKEN)")
 		}
 
+		// An OAuth app and a value are two different ways to fill the same
+		// column, and only one of them can win. Rather than pick — and silently
+		// discard a token the operator explicitly passed — refuse the pair.
+		//
+		// Decided on the flags being NAMED, and decided here, above every stdin
+		// read, for one reason: --value-stdin and --oauth-client-secret-stdin
+		// both consume os.Stdin and there is only one stream. Checked further
+		// down against the resolved `value` — as it was — the pair escaped
+		// entirely: the secret read the piped line first, `value` stayed "",
+		// and the conflict the operator had been warned about never fired. The
+		// row was created with the app details and no token, which is a
+		// legal-looking OAUTH2 row that nobody asked for.
+		if anyOAuthAppFlagSet(flags) && (flags.Changed("value") || valueStdin) {
+			return cli.WithExitCode(fmt.Errorf(
+				"--value/--value-stdin cannot be combined with the --oauth-* flags: an OAuth credential's "+
+					"value is the access token the flow fetches, and the row is created empty so "+
+					"`crewship oauth connect` can fill it. Drop one of the two"), cli.ExitValidation)
+		}
+
 		// #2086: an OAUTH2 credential is created empty — the row exists so the
 		// connect flow has somewhere to put the tokens it fetches. It carries
 		// the OAuth *app* details instead of a value, so the two checks that
@@ -332,16 +351,6 @@ var credCreateCmd = &cobra.Command{
 			return cli.WithExitCode(
 				fmt.Errorf("--value or --value-stdin is required"), cli.ExitValidation)
 		}
-		// An OAuth app and a value are two different ways to fill the same
-		// column, and only one of them can win. Rather than pick — and silently
-		// discard a token the operator explicitly passed — refuse the pair.
-		if value != "" && oauthApp != nil {
-			return cli.WithExitCode(fmt.Errorf(
-				"--value/--value-stdin cannot be combined with the --oauth-* flags: an OAuth credential's "+
-					"value is the access token the flow fetches, and the row is created empty so "+
-					"`crewship oauth connect` can fill it. Drop one of the two"), cli.ExitValidation)
-		}
-
 		// Normalize the provider to the registry's spelling before it is
 		// stored: the sidecar looks the provider column up case-sensitively,
 		// so a credential created as "openai_compat" would be routed by nothing.
