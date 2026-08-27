@@ -369,7 +369,7 @@ crewship chat read c_abc123 --agent atlas   # skip the lookup scan
 crewship chat delete c_abc123 --yes
 ```
 
-### "Your agent replied" notifications
+### "Your agent replied" notifications {#your-agent-replied-notifications}
 
 Long-running turns shouldn't require babysitting the tab. When an assistant reply is persisted for a session and a chat user is **not** currently viewing it (no live WebSocket subscription on `session:<chatId>`), Crewship writes a `message`-kind item into the [unified inbox](/guides/inbox): agent name, session title, a scrubbed ~120-character preview, and an **Open chat** deep link to `/chat/<agentSlug>?session=<chatId>`.
 

@@ -21,7 +21,7 @@ crewship signal send --event-type <type> [--payload <string>]
 
 | You have | Command |
 |---|---|
-| A run id (you started the run and kept it) | [`crewship routine signal <run_id>`](/cli/routine#crewship-routine-signal-run_id) |
+| A run id (you started the run and kept it) | [`crewship routine signal <run_id>`](/cli/routine#crewship-routine-signal-%3Crun_id%3E) |
 | An event that happened, and no idea who cares | `crewship signal send` |
 
 The two are the same act addressed differently. Reach for the topic form
@@ -77,5 +77,5 @@ a failure would teach every caller to ignore the exit code.
 ## See also
 
 - [`wait` step](/guides/routines#wait) — authoring the step that parks
-- [`crewship routine signal`](/cli/routine#crewship-routine-signal-run_id) — the per-run form
+- [`crewship routine signal`](/cli/routine#crewship-routine-signal-%3Crun_id%3E) — the per-run form
 - [Routines API](/api-reference/pipelines) — the endpoint behind this command

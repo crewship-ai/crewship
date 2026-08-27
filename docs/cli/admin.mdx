@@ -303,7 +303,7 @@ non-committal wording rather than inferring a coverage figure it wasn't given.
 
 ### One-time step after upgrading to the stable-master build
 
-The [stable internal-token master](/api-reference/internal#internal-token-authentication)
+The [stable internal-token master](/api-reference/internal#authentication)
 (#1385) stops *future* restarts from ever orphaning a container. But the
 **deploy that first introduces it rotates the master once** — from the old
 per-boot random to the value derived from `ENCRYPTION_KEY`. Any container that

@@ -166,7 +166,7 @@ deployed=$(crewship version --remote --format json | jq -r .server.commit)
 ```
 
 The underlying endpoint is `GET /api/v1/system/version`
-([reference](/api-reference/admin#get-api-v1-system-version)); its
+([reference](/api-reference/admin#get-/api/v1/system/version)); its
 `latest` / `newer` / `url` fields drive the update-available banner in the
 web UI.
 

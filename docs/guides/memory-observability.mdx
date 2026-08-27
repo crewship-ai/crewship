@@ -29,10 +29,10 @@ The audit watcher (PR #403) closes gap 1 — a host-side fsnotify watcher rooted
 
 | Surface | Endpoint | Use it when |
 |---|---|---|
-| Aggregate stats | [`GET /api/v1/admin/memory/stats`](/api-reference/admin#get-apiv1adminmemorystats) | "How big is memory in this workspace right now?" |
-| Row-level list | [`GET /api/v1/admin/memory/versions`](/api-reference/admin#get-apiv1adminmemoryversions) | "Which rows? Filter by tier / agent / path / time window." |
-| Single-row content | [`GET /api/v1/admin/memory/versions/{id}/content`](/api-reference/admin#get-apiv1adminmemoryversionsidcontent) | "Show me the actual bytes — I need to see what the scrubber saw." |
-| Retention config | [`GET /api/v1/admin/memory/config` / `PATCH /api/v1/admin/memory/config`](/api-reference/admin#get-apiv1adminmemoryconfig) | "How long are we keeping versions for this workspace?" |
+| Aggregate stats | [`GET /api/v1/admin/memory/stats`](/api-reference/admin#get-/api/v1/admin/memory/stats) | "How big is memory in this workspace right now?" |
+| Row-level list | [`GET /api/v1/admin/memory/versions`](/api-reference/admin#get-/api/v1/admin/memory/versions) | "Which rows? Filter by tier / agent / path / time window." |
+| Single-row content | [`GET /api/v1/admin/memory/versions/{id}/content`](/api-reference/admin#get-/api/v1/admin/memory/versions/id/content) | "Show me the actual bytes — I need to see what the scrubber saw." |
+| Retention config | [`GET /api/v1/admin/memory/config` / `PATCH /api/v1/admin/memory/config`](/api-reference/admin#get-/api/v1/admin/memory/config) | "How long are we keeping versions for this workspace?" |
 
 All four require workspace context and the `manage` role. Field shapes, query parameters, and error codes live in [the Admin API reference](/api-reference/admin) — this guide does not duplicate them.
 

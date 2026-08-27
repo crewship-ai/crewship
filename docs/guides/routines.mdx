@@ -216,7 +216,7 @@ The main win is a real multiline `prompt` via YAML's literal block scalar (`|`) 
 | `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). **Declared AND enforced at run time** — a live run is refused with `422` + `missing_credentials` when the author crew's vault holds no ACTIVE credential of a declared type. See [Required credentials](#required-credentials) below. |
 | `resources` | object | Agent-declared capability manifest — `datastores[]` and `tools[]` the routine touches that **can't** be inferred from the step graph. **Declared AND enforced at run time** against the crew's container resources — see [Required resources](#required-resources) below. See [Capability manifest](#capability-manifest) below for the shape. |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
-| `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
+| `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-—-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
 | `guardrails` | object | Per-routine [Lookout](/guides/lookout) policy. `guardrails.input.prompt_injection.action`: `block` (default) \| `sanitize` \| `log`. |
 | `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
@@ -946,7 +946,7 @@ A **non-blocking** inbox message pushed mid-run — the push, author-controlled 
 | `priority` | `urgent` \| `high` \| `medium` \| `low`. Default `medium`. |
 | `category` | Which [notification category](/guides/notifications) this notice routes under, e.g. `routines.failed`. Optional; see below. |
 
-**Saying what the notice *is*.** Without `category`, every notify step routes as `chat.replies` — the category an inbox `message` maps to. That is fine for a progress ping and wrong for everything else: "the nightly deploy failed" and "here is your weekly digest" arrive under the same label, and the [preference matrix](/guides/notifications#two-layer-preferences-the-1412-category-system) people tune is invisible to you, the one author who knows what the event actually is.
+**Saying what the notice *is*.** Without `category`, every notify step routes as `chat.replies` — the category an inbox `message` maps to. That is fine for a progress ping and wrong for everything else: "the nightly deploy failed" and "here is your weekly digest" arrive under the same label, and the [preference matrix](/guides/notifications#two-layer-preferences-the-%231412-category-system) people tune is invisible to you, the one author who knows what the event actually is.
 
 ```json
 {
@@ -1588,7 +1588,7 @@ crewship routine logs <run_id> --full   # full step-by-step journal timeline
 # or: GET /api/v1/workspaces/{wsId}/pipeline-runs/{runId}
 ```
 
-`routine result` answers "what did run X produce?" — it re-fetches the run and prints the final `output` (structured JSON is pretty-printed; `--format json` for scripting), followed by a **Files changed during this run** section: the files on the run's crew written inside the run window (`report.pdf`, `summary.md`, …) with a `crew files get` fetch hint. For a document-producing routine the files *are* the deliverable. Read the list as a correlation ("what changed on the crew while this ran"), not proof of authorship — a concurrent session or overlapping run on the same crew shows up too; see the [CLI reference](/cli/routine#crewship-routine-result-run_id) for the full caveat. `routine logs` now includes the output too; use `result` when the deliverable is all you want.
+`routine result` answers "what did run X produce?" — it re-fetches the run and prints the final `output` (structured JSON is pretty-printed; `--format json` for scripting), followed by a **Files changed during this run** section: the files on the run's crew written inside the run window (`report.pdf`, `summary.md`, …) with a `crew files get` fetch hint. For a document-producing routine the files *are* the deliverable. Read the list as a correlation ("what changed on the crew while this ran"), not proof of authorship — a concurrent session or overlapping run on the same crew shows up too; see the [CLI reference](/cli/routine#crewship-routine-result-%3Crun_id%3E) for the full caveat. `routine logs` now includes the output too; use `result` when the deliverable is all you want.
 
 ### Client-facing views
 
@@ -1682,7 +1682,7 @@ History is preserved — you can roll forward to a later version by another roll
 crewship routine diff email-fetch --from 2 --to 3
 ```
 
-`rollback` calls the same endpoint automatically and prints a **"What changed"** view against the version it just rolled back from, so you see exactly what the rollback undid without a separate command. Identical versions (same `definition_hash`) print a one-line confirmation instead of an empty diff. See the [CLI reference](/cli/routine#crewship-routine-diff-slug---from-n---to-m) for the JSON shape and `--format json` output.
+`rollback` calls the same endpoint automatically and prints a **"What changed"** view against the version it just rolled back from, so you see exactly what the rollback undid without a separate command. Identical versions (same `definition_hash`) print a one-line confirmation instead of an empty diff. See the [CLI reference](/cli/routine#crewship-routine-diff-%3Cslug%3E-from-n-to-m) for the JSON shape and `--format json` output.
 
 ## The improvement loop: `routine iterate`
 
@@ -1702,7 +1702,7 @@ What makes this different from looping in a chat window:
 - **The gates don't move** — each save passes the same server-side test-run gate and governance rules as a human author; a definition that gains risky steps (`http`, `code`, egress) parks as `proposed` for review and the loop stops.
 - **Nothing is lost** — full journal per run, one version row per accepted round, reversible by design.
 
-The rubric is the contract; write it like a brief to a colleague. Grader and optimizer are ordinary crew agents — a dedicated "reviewer" persona works well as the grader. Full flag reference in the [CLI docs](/cli/routine#crewship-routine-iterate-slug).
+The rubric is the contract; write it like a brief to a colleague. Grader and optimizer are ordinary crew agents — a dedicated "reviewer" persona works well as the grader. Full flag reference in the [CLI docs](/cli/routine#crewship-routine-iterate-%3Cslug%3E).
 
 Housekeeping is automatic: the one-shot grader/optimizer chat sessions are deleted after each call (they'd otherwise pile up in the agent's session sidebar), and if a later round errors mid-loop the summary table still prints for the rounds already scored — you never lose the scores you paid for.
 
@@ -1829,7 +1829,7 @@ Every routine run emits a sequence of journal entries:
 - `pipeline.step.skipped` — the step's `if` condition was false, so it never ran (payload carries the `condition`). A dedicated entry type rather than a `completed` row with a marker, so a skipped branch is distinguishable from a real completion at the storage layer.
 - `pipeline.step.retrying` — a transient failure the retry policy is about to swallow; **non-terminal**, one per attempt (`attempt`/`max`), followed by the step's eventual `completed`/`failed`. (Rows written before this type existed arrive as `pipeline.step.completed`/`failed` carrying a `kind=skipped`/`kind=retry` payload marker; readers honour that marker as a fallback.)
 - `pipeline.run.completed` / `pipeline.run.failed` — once at run end
-- `summary.generated` — an LLM-generated outcome verdict ("did the run accomplish the goal?"), fired once after the run terminates. Shown as an outcome pill next to the status pill in the Runs sub-tab. Gated by the `run_verdict_summaries` feature flag and skipped for agentless/dry-run routines — see the [Crew Journal guide](/guides/crew-journal#outcome-verdict-summarygenerated) for the full contract.
+- `summary.generated` — an LLM-generated outcome verdict ("did the run accomplish the goal?"), fired once after the run terminates. Shown as an outcome pill next to the status pill in the Runs sub-tab. Gated by the `run_verdict_summaries` feature flag and skipped for agentless/dry-run routines — see the [Crew Journal guide](/guides/crew-journal#outcome-verdict-—-summary-generated) for the full contract.
 
 Plus WebSocket broadcast on the workspace channel for live UI updates (PipelineRunNode in the orchestration graph + Runs sub-tab waterfall both subscribe).
 
@@ -1931,7 +1931,7 @@ Three terminal-side observability surfaces, ordered by when you'd reach for each
 | **During run** | `crewship routine watch <slug>` | Polls the runs endpoint and prints events as an ANSI-coloured timeline. `--json` for JSON Lines piping into `jq`; `--once` exits after the first run terminates (CI-friendly). |
 | **After run** | `crewship routine logs <run_id> --slug X` | One-shot post-mortem dump — every step's prompt, output, validation verdict, cost. Use to investigate a specific failure surfaced by `watch` or by the UI. |
 
-For variance characterisation across many runs (is this routine production-ready at this tier?), use [`crewship routine bench`](/cli/routine#crewship-routine-bench-slug). For matrix-level cross-tier consistency (which scenarios diverge between Haiku and Opus?), use [`crewship eval scenarios`](/cli/eval#crewship-eval-scenarios) and [`crewship eval baseline diff`](/cli/eval#baseline-diff-name) for CI regression gates.
+For variance characterisation across many runs (is this routine production-ready at this tier?), use [`crewship routine bench`](/cli/routine#crewship-routine-bench-%3Cslug%3E). For matrix-level cross-tier consistency (which scenarios diverge between Haiku and Opus?), use [`crewship eval scenarios`](/cli/eval#crewship-eval-scenarios) and [`crewship eval baseline diff`](/cli/eval#baseline-diff-%3Cname%3E) for CI regression gates.
 
 ## RBAC
 
@@ -1966,7 +1966,7 @@ crewship routine webhooks create --slug pr-review-structured \
 - run: crewship routine validate routines/*.json
 ```
 
-Exit code 1 on any invalid file. Beyond the schema, `validate` catches at author time what used to fail at `save` or on the first run: a `concurrency_key` that can render empty, unsatisfiable output gates (`min_length > max_length`, same token in `must_contain` and `must_not_contain`), and dead `egress_targets` entries (`*`, `*.*`, empty host — targets are literal/suffix matched, not globbed). Agent-slug typos fail here too if you supply the roster: `--agents triage,writer` (fully offline) or `--author-crew growth` (one `GET /api/v1/agents` call); the two flags are mutually exclusive. Details in the [CLI reference](/cli/routine#crewship-routine-validate-filejson).
+Exit code 1 on any invalid file. Beyond the schema, `validate` catches at author time what used to fail at `save` or on the first run: a `concurrency_key` that can render empty, unsatisfiable output gates (`min_length > max_length`, same token in `must_contain` and `must_not_contain`), and dead `egress_targets` entries (`*`, `*.*`, empty host — targets are literal/suffix matched, not globbed). Agent-slug typos fail here too if you supply the roster: `--agents triage,writer` (fully offline) or `--author-crew growth` (one `GET /api/v1/agents` call); the two flags are mutually exclusive. Details in the [CLI reference](/cli/routine#crewship-routine-validate-file-json%7Cfile-yaml).
 
 ### "Discover what an agent is about to do, without running it"
 
@@ -2019,7 +2019,7 @@ Use `concurrency_key` with a template referencing the tenant-identifying input:
 }
 ```
 
-Two requests for the same `account_id` queue rather than fan out; requests for different `account_id`s run in parallel. Pair with the `Idempotency-Key` header for webhook handlers (see the [Concurrency + idempotency recipe](/guides/routines-cookbook#recipe-5-idempotent-routine-with-concurrency-key)).
+Two requests for the same `account_id` queue rather than fan out; requests for different `account_id`s run in parallel. Pair with the `Idempotency-Key` header for webhook handlers (see the [Concurrency + idempotency recipe](/guides/routines-cookbook#recipe-5-—-idempotent-routine-with-concurrency-key)).
 
 The platform **fails fast** if the rendered key is empty (missing input + no literal prefix in the template) — see [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value) for why and how to fix.
 

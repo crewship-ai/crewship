@@ -73,7 +73,7 @@ What `--bare` was covering is now covered explicitly, verified against 2.1.226 o
 
 See `claudeCodeAdapter.BuildCommand` in `internal/orchestrator/adapter_claude.go`.
 
-`--tools` is **always** passed with the agent's per-profile built-in allowlist (`MINIMAL` → `Read,Glob,Grep,ToolSearch`; `CODING` → `+Write,Edit,Bash,WebFetch,WebSearch`; `FULL` → `+NotebookEdit`). This removes harness-internal tools (`TaskCreate`, `Agent`, `Workflow`, `Cron*`, …) that have no Crewship backing from the agent's context. `ToolSearch` is kept so that large MCP catalogues stay reachable if the CLI defers them rather than listing them in context; MCP tools themselves are not affected by `--tools` (measured on 2.1.226: an 80-tool MCP server is listed in full even with no `ToolSearch` present). See [Tool profiles & the built-in tool allowlist](/guides/cli-adapters#tool-profiles-the-built-in-tool-allowlist).
+`--tools` is **always** passed with the agent's per-profile built-in allowlist (`MINIMAL` → `Read,Glob,Grep,ToolSearch`; `CODING` → `+Write,Edit,Bash,WebFetch,WebSearch`; `FULL` → `+NotebookEdit`). This removes harness-internal tools (`TaskCreate`, `Agent`, `Workflow`, `Cron*`, …) that have no Crewship backing from the agent's context. `ToolSearch` is kept so that large MCP catalogues stay reachable if the CLI defers them rather than listing them in context; MCP tools themselves are not affected by `--tools` (measured on 2.1.226: an 80-tool MCP server is listed in full even with no `ToolSearch` present). See [Tool profiles & the built-in tool allowlist](/guides/cli-adapters#tool-profiles-&-the-built-in-tool-allowlist).
 
 ## MCP
 
