@@ -230,6 +230,9 @@
           "auto_lease_seconds": {
             "type": "integer"
           },
+          "behavior_sample_every": {
+            "type": "integer"
+          },
           "deny_notify_min_risk": {
             "type": "integer"
           },
@@ -4522,6 +4525,9 @@
       "FinalAdminPlatformGovernance": {
         "properties": {
           "auto_lease_seconds": {
+            "type": "integer"
+          },
+          "behavior_sample_every": {
             "type": "integer"
           },
           "configured": {

@@ -44,7 +44,8 @@ func newPostToolCallObserver(logger *slog.Logger, j journal.Emitter, db *sql.DB)
 
 // Observe is called from the orchestrator's tool_call event tap. The
 // hot path is bounded by:
-//   - behaviorhook's per-crew sampling counter (default every 5th call),
+//   - behaviorhook's per-crew sampling counter, at the workspace's own
+//     cadence (behavior_sample_every; default every 5th call),
 //   - the configured Behavior aux-slot timeout (8s default on PR-B F3).
 //
 // We use a fresh background ctx with the slot timeout because the
@@ -58,14 +59,14 @@ func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 	if hook == nil {
 		return
 	}
-	// Workspace watchdog toggle (#1001 M0). The behavioral watchdog is
+	// Workspace watchdog settings (#1001 M0/M3). The behavioral watchdog is
 	// opt-in per workspace (default OFF): an unconfigured workspace is not
 	// monitored until an OWNER/ADMIN enables it. One PK lookup per sampled
 	// observation; the observer already runs off the hot path.
 	gctx, gcancel := context.WithTimeout(context.Background(), 2*time.Second)
-	enabled := governance.Resolve(gctx, o.db, o.logger, obs.WorkspaceID).Enabled
+	gov := governance.Resolve(gctx, o.db, o.logger, obs.WorkspaceID)
 	gcancel()
-	if !enabled {
+	if !gov.Enabled {
 		return
 	}
 	// Bound the call ourselves. behaviorhook.MaybeEvaluate uses the ctx
@@ -84,7 +85,14 @@ func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 		ToolName:    obs.ToolName,
 		Payload:     obs.Payload,
 	}
-	blocked, fired := hook.MaybeEvaluate(ctx, ec)
+	// The sampling cadence rides out of the SAME row read that gated Enabled
+	// above (#1001 M3). Handing it to the hook per call — rather than pushing it
+	// onto the hook once at boot — is what makes it a setting: the hook is a
+	// process-wide singleton, so a stored cadence would be one workspace's policy
+	// applied to every workspace, and it would need a restart to change (#1556,
+	// the same trap one subsystem over). A workspace that never set one resolves
+	// to 0 here and the hook keeps its built-in default.
+	blocked, fired := hook.MaybeEvaluateEvery(ctx, ec, int64(gov.BehaviorSampleEvery))
 	if !fired {
 		// Not sampled this call; common case.
 		return

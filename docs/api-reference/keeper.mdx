@@ -309,7 +309,8 @@ object. **Status:** `200` with probe result; `400` invalid slot/configuration;
 Returns the workspace watchdog settings. The response includes `configured`, the
 stored `enabled`, `security_contact_user_id`, `deny_notify_min_risk`, `watch_spec`,
 `watch_presets`, `require_second_approver`, `auto_lease_seconds`,
-`gov_model_provider`, `gov_model_id`, and `gov_model_credential_id`, plus:
+`behavior_sample_every`, `gov_model_provider`, `gov_model_id`, and
+`gov_model_credential_id`, plus:
 
 ```json
 {"effective_second_approver":{
@@ -333,13 +334,22 @@ role; `503` credential/provider unavailable.
 Partially merges the same settings and returns the full governance response. The
 body fields are `enabled`, `security_contact_user_id`, `deny_notify_min_risk`
 (1–10), `watch_spec`, `watch_presets`, `require_second_approver`,
-`auto_lease_seconds` (0/off or 60–30 days), `gov_model_provider`
-(`ollama`, `anthropic`, or `openai_compat`), `gov_model_id`, and
-`gov_model_credential_id`. A credential must be an `ENDPOINT_URL` or `API_KEY`
-in this workspace; a security contact must be an `ADMIN` or `OWNER` member.
-Validation failures are `400`; successful writes are journaled. A successful
-write may include a non-blocking `warning` when no eligible findings recipient
-exists.
+`auto_lease_seconds` (0/off or 60–30 days), `behavior_sample_every` (1–100),
+`gov_model_provider` (`ollama`, `anthropic`, or `openai_compat`), `gov_model_id`,
+and `gov_model_credential_id`. A credential must be an `ENDPOINT_URL` or
+`API_KEY` in this workspace; a security contact must be an `ADMIN` or `OWNER`
+member. Validation failures are `400`; successful writes are journaled. A
+successful write may include a non-blocking `warning` when no eligible findings
+recipient exists, or when the sampling cadence is tighter than one in 3.
+
+`behavior_sample_every` is how often the behavioral watchdog reviews a tool
+call: one in every N, counted per crew. On read, `0` means the workspace never
+configured one and follows the built-in default of 5. On write, `0` is rejected
+— a stored 0 would leave the workspace reporting `enabled` while nothing was
+ever reviewed, so turning the watchdog off is `enabled: false`, not a cadence.
+Values above 100 are rejected because the per-crew counter is in-memory and
+resets each restart, so a larger cadence would never fire within a run. A change
+applies to the next tool call; no restart is needed.
 
 ### `POST /api/v1/admin/keeper/findings/test`
 

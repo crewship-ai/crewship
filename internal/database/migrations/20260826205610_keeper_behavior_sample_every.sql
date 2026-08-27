@@ -1,0 +1,19 @@
+-- Issue #1001 (M3): the behaviour monitor's sampling cadence, per workspace.
+--
+-- internal/keeper/behaviorhook has always been able to sample at any rate
+-- (SetSampleEvery), but nothing in production ever called it: every workspace
+-- ran on the package's hardwired "every 5th tool call". This column is the
+-- setting that reaches it, alongside the other per-workspace Keeper posture
+-- knobs (watchdog toggle, watch spec, four-eyes, auto-lease, gov model) on the
+-- OWNER/ADMIN-only governance row.
+--
+-- 0 is the UNSET sentinel, not "never": it means "use the built-in default"
+-- (governance.DefaultBehaviorSampleEvery), so every existing row backfills to
+-- exactly today's behaviour and the default stays defined in one place instead
+-- of being frozen into old rows. The API rejects a written 0 — turning the
+-- monitor off is `crewship keeper disable`, not a cadence of zero that would
+-- leave the workspace reading "enabled" while nothing is ever evaluated.
+--
+-- Additive column only: SQLite's ADD COLUMN with a NOT NULL DEFAULT populates
+-- existing rows in place, so no backfill pass and no table rebuild.
+ALTER TABLE keeper_governance_settings ADD COLUMN behavior_sample_every INTEGER NOT NULL DEFAULT 0;
