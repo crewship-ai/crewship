@@ -57,7 +57,20 @@ func validateID(s string) error {
 
 // Append writes a log entry to the JSONL file for the given crew and agent,
 // creating the file and directory structure if needed.
+//
+// A nil receiver is a no-op rather than a panic. The Writer is an optional
+// dependency everywhere it is held — the scheduler, the pipeline runner and
+// the agent routes all wrap their use in `if x.logWriter != nil` — so "no log
+// sink configured" is a legitimate state, not a misconfiguration to shout
+// about. What is not legitimate is a run driver taking the daemon down for it:
+// the webhook handler builds an OutputBuffer unconditionally and feeds it from
+// a background goroutine, where a nil deref is an unrecoverable process exit
+// triggered from outside (#1947). Dropping logs is the correct failure mode
+// for a missing log sink; the run itself is unaffected.
 func (w *Writer) Append(crewID, agentID string, entry LogEntry) error {
+	if w == nil {
+		return nil
+	}
 	if err := validateID(crewID); err != nil {
 		return fmt.Errorf("invalid crew ID: %w", err)
 	}
@@ -102,8 +115,13 @@ func (w *Writer) Append(crewID, agentID string, entry LogEntry) error {
 	return nil
 }
 
-// Flush syncs all open log files to disk.
+// Flush syncs all open log files to disk. A nil receiver is a no-op — see
+// Append; Flush and Close are reached from deferred cleanup, where a panic is
+// hardest to attribute back to the missing writer.
 func (w *Writer) Flush() {
+	if w == nil {
+		return
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, f := range w.files {
@@ -111,8 +129,11 @@ func (w *Writer) Flush() {
 	}
 }
 
-// Close closes all open log file handles.
+// Close closes all open log file handles. A nil receiver is a no-op.
 func (w *Writer) Close() {
+	if w == nil {
+		return
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for key, f := range w.files {
