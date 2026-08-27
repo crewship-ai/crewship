@@ -50,7 +50,7 @@ func (m *hooksWriteMock) handler() http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		_, _ = w.Write([]byte(`{"id":"hk_abc","event":"pre_tool_call","handler_kind":"http","enabled":true}`))
+		_, _ = w.Write([]byte(`{"id":"hk_abc","event":"post_tool_call","handler_kind":"http","enabled":true}`))
 	})
 }
 
@@ -141,11 +141,39 @@ func TestHooksCreateRunE_RejectsAnUnknownEventBeforeCallingTheServer(t *testing.
 	}
 }
 
+// TestHooksCreateRunE_RejectsPreToolCall pins the CLI half of the
+// pre_tool_call regression: it used to be a legal --event value that
+// registered a hook Dispatch never fired. It is no longer in
+// hooks.AllEvents, so validateHookEvent (which is rendered straight from
+// hooks.EventNames()) must reject it locally, the same as any other
+// unknown event name, before ever hitting the server.
+func TestHooksCreateRunE_RejectsPreToolCall(t *testing.T) {
+	m := startHooksWriteMock(t)
+
+	setHookFlags(t, hooksCreateCmd, map[string]string{
+		"event":   "pre_tool_call",
+		"handler": "http",
+		"url":     "https://example.test/h",
+	})
+	err := hooksCreateCmd.RunE(hooksCreateCmd, nil)
+	if err == nil {
+		t.Fatal("expected an error for --event pre_tool_call")
+	}
+	if !strings.Contains(err.Error(), "pre_tool_call") {
+		t.Errorf("error should echo the rejected event: %v", err)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.method != "" {
+		t.Errorf("CLI hit the server (%s %s) despite a locally-invalid event", m.method, m.path)
+	}
+}
+
 func TestHooksCreateRunE_RejectsAnUnknownHandlerKind(t *testing.T) {
 	startHooksWriteMock(t)
 
 	setHookFlags(t, hooksCreateCmd, map[string]string{
-		"event":   string(hooks.EventPreToolCall),
+		"event":   string(hooks.EventPostToolCall),
 		"handler": "carrier-pigeon",
 	})
 	err := hooksCreateCmd.RunE(hooksCreateCmd, nil)
@@ -171,7 +199,7 @@ func TestHooksCreateRunE_RequiresTheHandlerTarget(t *testing.T) {
 		{"subagent", "--subagent"},
 	} {
 		setHookFlags(t, hooksCreateCmd, map[string]string{
-			"event":   string(hooks.EventPreToolCall),
+			"event":   string(hooks.EventPostToolCall),
 			"handler": tc.kind,
 		})
 		err := hooksCreateCmd.RunE(hooksCreateCmd, nil)
@@ -190,7 +218,7 @@ func TestHooksCreateRunE_PostsTheFullBody(t *testing.T) {
 	m.status = http.StatusCreated
 
 	setHookFlags(t, hooksCreateCmd, map[string]string{
-		"event":              string(hooks.EventPreToolCall),
+		"event":              string(hooks.EventPostToolCall),
 		"handler":            "http",
 		"url":                "https://example.test/h",
 		"crew":               "backend",
@@ -208,7 +236,7 @@ func TestHooksCreateRunE_PostsTheFullBody(t *testing.T) {
 	if m.method != "POST" || m.path != "/api/v1/hooks" {
 		t.Fatalf("request = %s %s, want POST /api/v1/hooks", m.method, m.path)
 	}
-	if m.body["event"] != string(hooks.EventPreToolCall) {
+	if m.body["event"] != string(hooks.EventPostToolCall) {
 		t.Errorf("event = %v", m.body["event"])
 	}
 	if m.body["handler_kind"] != "http" {
@@ -269,7 +297,7 @@ func TestHooksCreateRunE_RejectsMalformedJSONFlags(t *testing.T) {
 	startHooksWriteMock(t)
 
 	setHookFlags(t, hooksCreateCmd, map[string]string{
-		"event":          string(hooks.EventPreToolCall),
+		"event":          string(hooks.EventPostToolCall),
 		"handler":        "http",
 		"handler-config": `{not json`,
 	})

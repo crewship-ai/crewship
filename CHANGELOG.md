@@ -263,6 +263,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **`pre_tool_call` was a hook event you could register that would never
+  fire.** `crewship hooks create --event pre_tool_call` (and the matching
+  `POST /api/v1/hooks`) returned 201 and listed the hook as enabled and
+  healthy, but nothing in the platform ever called `hooks.Dispatch` with
+  that event — Crewship drives agent work by parsing the stream a driven
+  CLI (Claude Code, Cursor, ...) emits, so by the time a tool call is
+  observable the tool has already run; there is no "before the tool runs"
+  interception point to hook (see `post_tool_call`, which fires after).
+  `pre_tool_call` is no longer a valid `--event` / `event` — the CLI and
+  the API now reject it the same way they reject any other unknown event
+  name, echoing the same list of legal ones. The `hooks.EventPreToolCall`
+  Go constant stays defined so a `hooks_config` row created before this
+  change still lists and toggles normally; it just still never dispatches.
+
+  ⚠️ **Behaviour change:** a script or manifest that registers a
+  `pre_tool_call` hook now gets a 400 instead of a silently-dead 201.
+
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
   reverse-foreign-key chain from each table to `workspaces` and built a `WHERE`

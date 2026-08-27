@@ -29,15 +29,19 @@ var hooksCmd = &cobra.Command{
 	Aliases: []string{"hook"},
 	Short:   "Lifecycle hooks registry (list/create/update/delete/enable/disable)",
 	Long: `Manage the lifecycle-hook registry — shell commands, HTTP webhooks, or
-subagents that fire on platform lifecycle events (pre_tool_call,
-post_agent_stop, on_approval_requested, …).
+subagents that fire on platform lifecycle events (post_agent_stop,
+on_approval_requested, on_guardrail_triggered, …).
+
+The platform fires post_tool_call (after a tool runs), not pre_tool_call —
+there is no interception point before a tool executes, so pre_tool_call is
+not a valid --event.
 
 Examples:
   crewship hooks list
   crewship hooks list --crew backend-team
   crewship hooks create --event on_budget_exceeded --handler http \
       --url https://hooks.slack.test/services/XXX
-  crewship hooks create --event pre_tool_call --handler shell \
+  crewship hooks create --event post_tool_call --handler shell \
       --command /usr/local/bin/gate.sh --matcher-tools Bash --blocking
   crewship hooks update hk_abc --disabled
   crewship hooks delete hk_abc --yes
@@ -60,7 +64,7 @@ var hookHandlerKinds = []string{
 }
 
 // validateHookEvent rejects an unknown event locally. The server rejects it
-// too, but a client-side check keeps the fix ("you meant pre_tool_call")
+// too, but a client-side check keeps the fix ("you meant post_tool_call")
 // in the same message as the mistake instead of behind an HTTP 400 — the
 // same reasoning as validateCSV on `crewship journal`.
 func validateHookEvent(event string) error {
@@ -253,7 +257,7 @@ New hooks are enabled unless you pass --disabled.
 Examples:
   crewship hooks create --event on_approval_requested --handler http \
       --url https://hooks.slack.test/services/XXX
-  crewship hooks create --event pre_tool_call --handler shell \
+  crewship hooks create --event post_tool_call --handler shell \
       --command /usr/local/bin/gate.sh --matcher-tools 'Bash,Write' --blocking
   crewship hooks create --event post_agent_stop --handler subagent \
       --subagent oncall-router --crew backend-team
