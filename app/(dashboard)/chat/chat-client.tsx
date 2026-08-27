@@ -28,6 +28,27 @@ import { parseSessionTimestamp } from "@/components/features/chat/session-sort"
 import { randomUUIDv4 } from "@/lib/random-id"
 
 /**
+ * The roster row this page needs, which is wider than the one the column does.
+ *
+ * `GET /agents` returns both of these columns already — the fan-out in
+ * `useChatTreeData` does not ask for them, it just does not name them in its
+ * base type. The surface this replaced declared the same widening for the same
+ * reason, and dropping it was a silent regression: `ChatPanel` reads
+ * `suggestedPrompts` to decide whether to show the agent's OWN chips or the
+ * generic role pack, so an agent somebody had configured quietly went back to
+ * stock suggestions. `askForms` is the three-state prop documented on
+ * `ChatPanelProps` — omitting it does not mean "no forms", it means "ask the
+ * server", which is a detail fetch per conversation for an answer we are
+ * already holding.
+ */
+interface ChatClientAgent extends ChatTreeAgent {
+  /** `agents.suggested_prompts`, one per line. */
+  suggested_prompts?: string | null
+  /** `agents.ask_forms`, a JSON array as TEXT. */
+  ask_forms?: string | null
+}
+
+/**
  * The agent slug, read from the address bar rather than from `params`.
  *
  * `generateStaticParams` emits one placeholder and internal/api/static.go
@@ -91,7 +112,13 @@ const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquar
 export function ChatClient() {
   const searchParams = useSearchParams()
   const pathAgentSlug = useAgentSlugFromUrl()
-  const tree = useChatTreeData<ChatTreeAgent>()
+  // `ensureSlug` is the slug from the PATH, not the selection. It is the agent
+  // a deep link named, and it must survive `AGENT_FANOUT_CAP`: without it the
+  // thirteenth agent's `/chat/<slug>` arrives with an empty thread list, which
+  // this page cannot distinguish from "no history" — so it opens a new draft
+  // on top of a real conversation. It is deliberately not `agentSlug`, which
+  // changes on every pick and would re-run the fan-out for each one.
+  const tree = useChatTreeData<ChatClientAgent>({ ensureSlug: pathAgentSlug })
 
   const { workspaceId } = useWorkspace()
   const isMobile = useChatCompactLayout()
@@ -103,10 +130,10 @@ export function ChatClient() {
   /**
    * When this page last marked each thread read — epoch ms, not a boolean.
    *
-   * `useChatTreeData` owns `threadsByAgent` and exposes no mutator. Classic
-   * gets around that by claiming one agent's threads via `skipSlug`, which a
-   * page showing every agent at once cannot do, so this page overlays its own
-   * knowledge on the fetched lists instead.
+   * `useChatTreeData` owns `threadsByAgent` and exposes no mutator. The page
+   * this replaced got around that by claiming one agent's threads outright and
+   * keeping its own copy, which a page showing every agent at once cannot do,
+   * so this page overlays its own knowledge on the fetched lists instead.
    *
    * A TIMESTAMP rather than a Set, and that is the fix for the second round
    * of this bug. A Set said "this thread is read" forever: open thread A,
@@ -411,6 +438,19 @@ export function ChatClient() {
     startConversation,
   ])
 
+  /**
+   * The row for the open conversation, when the fan-out has one.
+   *
+   * A freshly minted draft has no row yet — `startConversation` mints the id
+   * locally and the server writes the row on first send — so this is null for
+   * exactly as long as the conversation has no history, which is the same
+   * window in which it has no origin to report either.
+   */
+  const activeThread = useMemo(
+    () => (agent && sessionId ? threadsByAgent[agent.id]?.find((t) => t.id === sessionId) ?? null : null),
+    [agent, sessionId, threadsByAgent],
+  )
+
   const chatAgent: ChatAgent | null = useMemo(
     () =>
       agent
@@ -453,6 +493,18 @@ export function ChatClient() {
           agentName={agent.name}
           agentSlug={agent.slug}
           agentRole={agent.role_title ?? null}
+          // The agent's own chips, from the roster row we already hold. Without
+          // it every configured agent falls back to the generic role pack.
+          suggestedPrompts={agent.suggested_prompts ?? null}
+          // Same record, same trip. `null` says "this agent has no forms",
+          // which is an answer — leaving the prop off says "I don't know", and
+          // the panel goes and asks the server once per conversation.
+          askForms={agent.ask_forms ?? null}
+          // Where this conversation came from (UI · CLI · WEBHOOK · CRON ·
+          // AGENT). It is the connection bar's origin chip, and it is the only
+          // place the surface says that a thread was opened by a cron routine
+          // rather than by a person.
+          sessionOrigin={activeThread?.origin ?? null}
           sessionId={sessionId}
           initialInput={handoffPrompt ?? undefined}
           autoSendInitial={!!handoffPrompt}
