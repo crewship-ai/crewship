@@ -4,9 +4,9 @@
     "api_exact_docs": 588,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 801,
-    "cli_exact_docs": 801,
-    "cli_root_docs_present": 801,
+    "cli_operations": 805,
+    "cli_exact_docs": 805,
+    "cli_root_docs_present": 805,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 444,
     "api_with_concrete_response_schemas": 573,
@@ -15,7 +15,7 @@
     "api_with_concrete_json_requests": 247,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 786,
+    "cli_with_test_signals": 790,
     "cli_with_flags": 380,
     "cli_with_all_flags_documented": 380,
     "cli_missing_flag_docs": 0,
@@ -36595,6 +36595,102 @@
       ]
     },
     {
+      "path": "keeper sampling",
+      "use": "sampling",
+      "short": "How often the watchdog reviews a tool call",
+      "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_keeper_auto_lease_test.go",
+        "cmd/crewship/cmd_keeper_aux_credential_test.go",
+        "cmd/crewship/cmd_keeper_config_test.go",
+        "cmd/crewship/cmd_keeper_eval_test.go",
+        "cmd/crewship/cmd_keeper_foureyes_test.go",
+        "cmd/crewship/cmd_keeper_hint_test.go",
+        "cmd/crewship/cmd_keeper_history_test.go",
+        "cmd/crewship/cmd_keeper_model_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "keeper sampling default",
+      "use": "default",
+      "short": "Return to the built-in sampling rate (requires OWNER or ADMIN)",
+      "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_admin_extras_cov_test.go",
+        "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_admin_memory_config_test.go",
+        "cmd/crewship/cmd_keeper_auto_lease_test.go",
+        "cmd/crewship/cmd_keeper_aux_credential_test.go",
+        "cmd/crewship/cmd_keeper_config_test.go",
+        "cmd/crewship/cmd_keeper_eval_test.go",
+        "cmd/crewship/cmd_keeper_foureyes_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "keeper sampling set",
+      "use": "set \u003cN\u003e",
+      "short": "Review one in every N tool calls (requires OWNER or ADMIN)",
+      "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_keeper_auto_lease_test.go",
+        "cmd/crewship/cmd_keeper_aux_credential_test.go",
+        "cmd/crewship/cmd_keeper_config_test.go",
+        "cmd/crewship/cmd_keeper_eval_test.go",
+        "cmd/crewship/cmd_keeper_foureyes_test.go",
+        "cmd/crewship/cmd_keeper_hint_test.go",
+        "cmd/crewship/cmd_keeper_history_test.go",
+        "cmd/crewship/cmd_keeper_model_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "keeper sampling status",
+      "use": "status",
+      "short": "Show how often tool calls are reviewed",
+      "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/acceptance_credential_openrouter_test.go",
+        "cmd/crewship/cmd_admin_extras_cov_test.go",
+        "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_agent_ask_test.go",
+        "cmd/crewship/cmd_agent_introspect_cov_test.go",
+        "cmd/crewship/cmd_approvals_cov_test.go",
+        "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chat_cov_test.go",
+        "…"
+      ]
+    },
+    {
       "path": "keeper second-approver",
       "use": "second-approver",
       "short": "Require a different human to approve credential escalations their own agent raised",
@@ -38447,9 +38543,9 @@
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_profile_test.go",
+        "cmd/crewship/cmd_keeper_sampling_test.go",
         "cmd/crewship/cmd_keeper_watch_test.go",
         "cmd/crewship/cmd_mcp_cov2_test.go",
-        "cmd/crewship/cmd_mcp_cov_test.go",
         "…"
       ],
       "flags": [
@@ -38607,9 +38703,9 @@
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_profile_test.go",
+        "cmd/crewship/cmd_keeper_sampling_test.go",
         "cmd/crewship/cmd_keeper_watch_test.go",
         "cmd/crewship/cmd_mcp_cov2_test.go",
-        "cmd/crewship/cmd_mcp_cov_test.go",
         "…"
       ],
       "flags": [
@@ -40385,9 +40481,9 @@
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_profile_test.go",
+        "cmd/crewship/cmd_keeper_sampling_test.go",
         "cmd/crewship/cmd_keeper_watch_test.go",
         "cmd/crewship/cmd_mcp_cov2_test.go",
-        "cmd/crewship/cmd_mcp_cov_test.go",
         "…"
       ],
       "flags": [
@@ -45844,9 +45940,9 @@
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_profile_test.go",
+        "cmd/crewship/cmd_keeper_sampling_test.go",
         "cmd/crewship/cmd_keeper_watch_test.go",
         "cmd/crewship/cmd_mcp_cov2_test.go",
-        "cmd/crewship/cmd_mcp_cov_test.go",
         "…"
       ],
       "flags": [
@@ -49086,7 +49182,7 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4429,
+    "command_references": 4442,
     "api_path_references": 2179,
     "environment_references": 432,
     "manifest_kind_references": 230,
