@@ -84,8 +84,8 @@ response body is included in the summary.
 
 The generated catalog is broader than this safe probe. The runner always
 excludes `/api/auth/**` (NextAuth UI/session endpoints) and these non-JSON
-operations: backup/file downloads, avatars, pipeline and memory exports,
-admin memory-version content, memory-version bodies, and the journal and run
+operations: backup/file downloads, avatars, the memory export, admin
+memory-version content, memory-version bodies, and the journal and run
 streams. These are stable path exclusions because they return binary or
 streaming data and are not suitable for this JSON-focused probe. The
 exclusions are reported separately from the method deny-list, so a lower
@@ -99,10 +99,18 @@ scope: `GET /api/v1/oauth/callback` returns `http.Error`'s `text/plain` on its
 4xx branches while the generator documents every error response as
 `application/json`, and that finding is the gate working. An undocumented
 *status code* on an otherwise-binary route is likewise a real finding about
-statuses, not about media. `scripts/api-contract-gate-test.sh` pins both
-directions, so a list entry that goes stale — as the memory-version content
-entry did, matching no path at all for want of its `admin/` prefix — fails by
-name.
+statuses, not about media.
+
+That criterion is checked rather than trusted. The list lives in run.sh as
+`NON_JSON_PATH_PATTERNS`, one pattern per route, and
+`scripts/api-contract-gate-test.sh` reads it back and holds every entry
+against the generated `internal/api/openapi.gen.json`: an entry matching no
+path fails by name — as the memory-version content entry would have, matching
+nothing for want of its `admin/` prefix — and so does an entry whose paths
+declare only `application/json`, which is how a pipeline *export* spent a
+release on the list next to the memory export ZIP without being a download at
+all. Prose is what rotted the first time; both failure directions now have a
+test.
 
 `selected` is the count of operations that survive all three exclusions —
 the complement, not the union. Note the buckets **overlap** (a non-JSON
