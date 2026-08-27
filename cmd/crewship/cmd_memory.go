@@ -245,7 +245,15 @@ var memoryReindexCmd = &cobra.Command{
 			// "build an index with `crewship memory reindex`" landed right
 			// back on the gate below and reproduced the identical error, one
 			// exit code lower (#2106).
-			createMemoryDir(mp.path)
+			// A mkdir that FAILS is reported here rather than left to the
+			// gate below, which would describe an unwritable parent as a
+			// directory that "does not exist" and advise running this very
+			// command again.
+			if err := createMemoryDir(mp.path); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] %v\n", mp.scope, memoryCreateError(mp.path, err))
+				gateFailed++
+				continue
+			}
 
 			// Same driver-error leak as `status` had, same fix (#2086) —
 			// reindex already exits non-zero when every scope fails.
@@ -465,17 +473,35 @@ func memoryOpenError(p string, err error) error {
 //
 // It deliberately does not mkdir -p. A --path whose own directory is absent is
 // a mistyped path, and materialising the tree hides the typo instead of
-// reporting it. Errors are dropped because memoryDirError runs immediately
-// after and names whatever is still wrong.
-func createMemoryDir(p string) {
+// reporting it — so that case returns nil and leaves the reporting to
+// memoryDirError, which names both halves and has a different remedy.
+//
+// A FAILED mkdir is returned rather than dropped. Discarding it reopened the
+// loop this issue closed, one door along: on a base path that exists but is
+// not writable the mkdir failed silently, the gate below then saw a directory
+// that merely "does not exist", and its message advised `crewship memory
+// reindex` — the command that had just failed to create it. The advice was
+// not only circular but false, since it claims "which creates it".
+func createMemoryDir(p string) error {
 	if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
-		return
+		return nil
 	}
 	if !dirExists(filepath.Dir(p)) {
-		return
+		return nil
 	}
 	// 0755 is what the engine itself uses for memory directories
 	// (internal/memory/workspace.go), so an index built here has the same
 	// mode as one built by the sidecar.
-	_ = os.Mkdir(p, 0o755)
+	return os.Mkdir(p, 0o755)
+}
+
+// memoryCreateError explains a failed mkdir in the terms the operator needs:
+// which directory could not be made, and that the thing to fix is the writable
+// bit on its PARENT, not on the index that does not exist yet.
+func memoryCreateError(p string, err error) error {
+	if errors.Is(err, fs.ErrPermission) {
+		return fmt.Errorf("%s cannot be created: permission denied — %s is not writable by uid %d, so `crewship memory reindex` has nowhere to build the index (memory written inside an agent container is owned by uid 1001)",
+			p, filepath.Dir(p), os.Getuid())
+	}
+	return fmt.Errorf("%s cannot be created: %v", p, err)
 }

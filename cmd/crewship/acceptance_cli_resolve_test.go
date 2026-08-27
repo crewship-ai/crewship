@@ -798,6 +798,54 @@ func TestAcceptance_MemoryReindex_FollowsTheAdviceStatusGives(t *testing.T) {
 	}
 }
 
+// The third door into the same loop: a base path that EXISTS but is not
+// writable. createMemoryDir's mkdir fails there, and while its error was
+// dropped the gate behind it saw only "the directory is not there" — so
+// reindex answered with the message that advises running `crewship memory
+// reindex`, which is the command that had just failed to create it. Circular,
+// and false: the message claims "which creates it".
+func TestAcceptance_MemoryReindex_SaysWhyItCannotCreateTheIndexDir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		// SKIP-WAIVER: an unwritable parent IS the premise, and root writes
+		// into a 0o500 directory regardless — at euid 0 the mkdir succeeds
+		// and the case would assert the opposite of what it claims. Same
+		// permanent platform guard as the unreadable-.memory case in
+		// TestAcceptance_MemoryStatus_FailsLoudlyAndActionably, and
+		// deliberately no tracking issue, per the #1546 precedent in
+		// scripts/skip-budget.txt.
+		t.Skip("running as root: directory permissions are not enforced")
+	}
+
+	base := filepath.Join(t.TempDir(), "ro-crew")
+	if err := os.Mkdir(base, 0o500); err != nil { // readable + searchable, not writable
+		t.Fatalf("mkdir fixture: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(base, 0o700) })
+
+	out, err := runMemoryCLI(t, "memory", "reindex", "--path", base)
+	if err == nil {
+		t.Fatalf("reindex exited 0 with no index built\noutput: %s", out)
+	}
+
+	// The failure has to name the cause. "does not exist" is the message
+	// that sends the operator back to this same command.
+	if strings.Contains(out, "does not exist") {
+		t.Errorf("an unwritable parent was reported as a missing directory, which advises re-running reindex:\n%s", out)
+	}
+	if !strings.Contains(out, "permission denied") {
+		t.Errorf("output does not say why the directory could not be created:\n%s", out)
+	}
+	// The parent is the thing to fix, so the parent is what must be named.
+	if !strings.Contains(out, base) {
+		t.Errorf("output does not name the unwritable parent (%s):\n%s", base, out)
+	}
+	for _, leak := range []string{"unable to open database file", "(14)", "init memory schema"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("driver-level error %q leaked to the user:\n%s", leak, out)
+		}
+	}
+}
+
 // The other half of that: reindex creating a directory must not turn a typo
 // into a new empty tree. The base path itself is the thing --path names, and
 // when IT is missing the answer is still "check --path", not mkdir -p.

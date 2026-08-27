@@ -126,5 +126,20 @@
 #                     SKIP-WAIVER comment and deliberately no tracking issue,
 #                     on the #1546 precedent. The other three cases in the
 #                     table run as root, and the branch added no other skip.
+#
+# 2026-08-27          136 -> 137. +1 from the CodeRabbit review on the same
+#                     PR, and the same platform reason one door along.
+#                     TestAcceptance_MemoryReindex_SaysWhyItCannotCreateTheIndexDir
+#                     pins that `memory reindex` reports a mkdir it could not
+#                     perform, instead of letting the gate behind it describe
+#                     an unwritable parent as a directory that merely "does
+#                     not exist" — wording that advises running `crewship
+#                     memory reindex`, the command that had just failed. The
+#                     fixture is a 0o500 base path, and root writes into it
+#                     regardless, so at euid 0 the mkdir succeeds and the case
+#                     would assert the opposite of what it claims. Same
+#                     permanent platform guard as the 135 -> 136 entry above,
+#                     SKIP-WAIVER comment, deliberately no tracking issue, on
+#                     the #1546 precedent. The branch added no other skip.
 
-136
+137

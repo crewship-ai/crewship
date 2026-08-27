@@ -737,7 +737,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   creates the index directory it is asked to build in, because "build an index
   with `crewship memory reindex`" was advice that looped back into the identical
   error; it still refuses to invent a missing *base* path, since that is a typo,
-  and answers 3 there like `status` does.
+  and answers 3 there like `status` does. Where it cannot create the directory —
+  a base path that exists but is not writable — it now says so and names the
+  parent, rather than dropping the `mkdir` error and letting the check behind it
+  report the directory as merely missing, which is the wording that advises
+  running `crewship memory reindex`: the command that had just failed.
 
 - **A port-expose URL on Colima returned a bare `502` and explained nothing.**
   The capability-URL proxy dials the crew container on its Docker bridge IP,

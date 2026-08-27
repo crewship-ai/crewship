@@ -16,17 +16,34 @@ import (
 // covCaptureStderrMemory captures os.Stderr for the duration of fn. The memory
 // commands write per-scope failures there, so a test that asserts on the
 // wording an operator sees has to read that stream.
+//
+// Restoration is deferred, and the read end is closed, because fn runs a
+// command's RunE: if that panics — or exits via runtime.Goexit — an inline
+// restore never happens, and os.Stderr stays pointing at a pipe nothing is
+// draining. Every later test in the binary then writes into a 64 KB buffer
+// and blocks forever, surfacing as a timeout in whichever unrelated test was
+// unlucky rather than as the panic that caused it.
 func covCaptureStderrMemory(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
+	guardCLIState(t)
 	old := os.Stderr
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
+	defer func() {
+		os.Stderr = old
+		_ = w.Close()
+		_ = r.Close()
+	}()
 	os.Stderr = w
+
 	runErr := fn()
-	_ = w.Close()
+
+	// Close the write end before draining: ReadAll needs EOF, and the
+	// deferred Close above is too late to provide it.
 	os.Stderr = old
+	_ = w.Close()
 	data, readErr := io.ReadAll(r)
 	if readErr != nil {
 		t.Fatalf("read captured stderr: %v", readErr)

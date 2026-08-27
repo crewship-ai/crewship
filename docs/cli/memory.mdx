@@ -156,6 +156,15 @@ crewship memory reindex -p /path/to/crew-root -S crew
 
 **It creates the index directory it is asked to build in**, so the `.memory` a crew has never had is one `reindex` away rather than a `mkdir` you have to work out. It will not create the *base* path: a `--path` whose own directory is absent is a typo, and inventing the tree would hide it.
 
+Creating `.memory` needs the base path to exist **and be writable by you**. When it is not, `reindex` says so rather than reporting the directory as merely missing — that wording advises running `reindex`, which is the command that just failed:
+
+```bash
+crewship memory reindex --path /crew/read-only
+# [agent] /crew/read-only/.memory cannot be created: permission denied — /crew/read-only
+#   is not writable by uid 1000, so `crewship memory reindex` has nowhere to build the
+#   index (memory written inside an agent container is owned by uid 1001)
+```
+
 Returns a non-zero exit code if all reindex operations fail — `3` when the reason is that no scope had a directory to index, which is the code `status` uses for the same condition, and `1` otherwise. Per-scope failures go to stderr with the same actionable wording `status` uses.
 
 ### hybrid
