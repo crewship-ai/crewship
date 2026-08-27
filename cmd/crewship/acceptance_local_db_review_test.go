@@ -352,3 +352,41 @@ func TestAcceptance_AdminListUsers_AdvisoryStaysOffStdout(t *testing.T) {
 		t.Errorf("the advisory is gone entirely; it belongs on stderr:\n%s", stderr)
 	}
 }
+
+// The empty table is the same break with nothing to hide behind: a workspace
+// with no users printed a header and the prose line "(no users in this
+// workspace)" on stdout, so the reproducer above returns "(no" where it should
+// return nothing. Left open in review as "say the word"; this is the word.
+//
+// The `--local` branch's own "(no users — run `crewship seed` …)" is
+// deliberately untouched — it is published example output.
+func TestAcceptance_AdminListUsers_EmptyNoticeStaysOffStdout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/admin/users" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	dataDir := localDBFixture(t)
+	cfg := localDBStubConfig(t, srv.URL)
+
+	stdout, stderr, err := runLocalDBCLIStreams(t, cfg, dataDir, nil, "admin", "list-users")
+	if err != nil {
+		t.Fatalf("list-users: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	for i, l := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
+		if i == 0 {
+			continue // header
+		}
+		if strings.TrimSpace(l) != "" {
+			t.Errorf("stdout carries a non-row line %d after the header: %q", i+1, l)
+		}
+	}
+	if !strings.Contains(stderr, "no users in this workspace") {
+		t.Errorf("the empty-result notice is gone entirely; it belongs on stderr:\n%s", stderr)
+	}
+}

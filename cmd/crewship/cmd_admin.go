@@ -680,7 +680,17 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if len(users) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "(no users in this workspace)")
+		// stderr, for the same reason as the advisory below: this line is new
+		// on this route, and on stdout it is the empty table's version of the
+		// same break — `crewship admin list-users | awk 'NR>1 {print $1}'`
+		// returns "(no" instead of nothing at all. An empty result is an empty
+		// stdout plus a header; the explanation of WHY it is empty is prose.
+		//
+		// The `--local` branch's long-standing "(no users — run `crewship
+		// seed` …)" stays on stdout: it is published example output in
+		// docs/guides/admin-cli.mdx and moving it is a change to a documented
+		// surface, not part of this fix.
+		fmt.Fprintln(cmd.ErrOrStderr(), "(no users in this workspace)")
 	}
 	// Say what this view does NOT cover, so nobody reads a clean table as
 	// "nobody is locked out".
