@@ -342,6 +342,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   ⚠️ **Behaviour change:** a script or manifest that registers a
   `pre_tool_call` hook now gets a 400 instead of a silently-dead 201.
 
+- **A forked mission could never run a task.** `Fork` wrote the mission, its
+  tasks and its checkpoint, but not the synthetic `chats` row that
+  `assignments.chat_id NOT NULL REFERENCES chats(id)` requires — the row the
+  normal mission-create path stamps in the same transaction. The fork itself
+  reported success; the failure surfaced later, as a `FOREIGN KEY constraint
+  failed` the first time the orchestrator tried to dispatch one of the copied
+  tasks. It went unnoticed for the feature's whole life because the package's
+  tests built their own fixture schema with no `chats` table at all, so the
+  constraint could not fire. Those tests now run against the real migration
+  chain, which also surfaced a second case seeding an assignment against a
+  chat that did not exist.
+
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
   reverse-foreign-key chain from each table to `workspaces` and built a `WHERE`
@@ -2610,6 +2622,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `Thinking`, and a budget-truncated answer reports `max_tokens` instead of
   `end_turn`, so callers can tell "the model said nothing" from "the model
   reasoned and never reached an answer".
+
+- **A transient database hiccup during hook dispatch was reported to users as
+  "a hook blocked this run".** `hooks.Dispatch` looks up the hooks registered
+  for an event before evaluating any of them; when that lookup itself failed
+  (a closed connection, a busy SQLite file), the error came back wrapped in
+  the same plain `error` that a genuine blocking hook's `*BlockedError`
+  travels in, and every call site — `pre_agent_start` in the orchestrator
+  chief among them — treated any non-nil `Dispatch` error as a block. An
+  infrastructure blip cancelled the agent run and printed "pre_agent_start
+  hook blocked", which was false: no hook ever ran. Registry and handler
+  failures now return a typed `*hooks.DispatchError`; an explicit policy
+  refusal remains `*hooks.BlockedError`. The `pre_agent_start` gate fails
+  closed for either condition but reports "dispatch failed" for infrastructure
+  instead of inventing a policy block. Lookup failures are also logged
+  unconditionally and, when a journal emitter is wired, recorded as a new
+  `hook.dispatch_error` entry so the outage stays observable.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
