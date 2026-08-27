@@ -3,6 +3,7 @@
 import { useId, useState } from "react"
 import { Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { isImeComposing } from "@/lib/ime"
 
 /**
  * The controls the Container step's sizing and egress rows are built from.
@@ -157,7 +158,7 @@ export function DomainChips({ value, onChange }: { value: string[]; onChange: (v
             // keystroke reaches here first — committing on it stores half a
             // word as a hostname. `isComposing` is the flag the IME sets for
             // exactly this.
-            if (e.nativeEvent.isComposing) return
+            if (isImeComposing(e)) return
             if (e.key === "Enter" || e.key === ",") {
               e.preventDefault()
               commit()

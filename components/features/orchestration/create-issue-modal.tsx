@@ -52,6 +52,7 @@ import { PriorityIcon, priorityLabel } from "@/components/features/issues/priori
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
+import { isImeComposing } from "@/lib/ime"
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import type { IssueLabel, IssuePriority, Milestone, Project } from "@/lib/types/mission"
@@ -1054,7 +1055,7 @@ export function CreateIssueModal({
                   // label. Same guard the egress allowlist input carries, for
                   // the same reason — this is the other place Enter turns free
                   // text into a row.
-                  if (e.nativeEvent.isComposing) return
+                  if (isImeComposing(e)) return
                   // Enter creates when nothing matches — the same key that
                   // would otherwise do nothing here.
                   if (e.key === "Enter" && canCreateLabel) {
