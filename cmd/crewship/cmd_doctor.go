@@ -142,6 +142,11 @@ counters or filter the per-check array.`,
 			results = append(results, fn(ctx))
 		}
 		runProbe(checkContainerRuntime)
+		// Immediately after, and reading as its pair: the check above says
+		// whether there is a runtime, this one says what that runtime will not
+		// do (#1672). Advisory — WARN at worst, because a known limitation is
+		// not a broken install.
+		runProbe(runCheckRuntimeGaps)
 		results = append(results, checkDataDir(fixMode))
 		results = append(results, checkDataDirWritable())
 		runProbe(checkDBMigrationVersion)

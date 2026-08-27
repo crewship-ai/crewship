@@ -53,6 +53,34 @@ each candidate socket; the first reachable one wins.
 - **FAIL** — no runtime found. Install one; see [Install — container
   runtime requirement](/guides/install).
 
+### Container runtime gaps
+
+The runtimes Crewship drives are not equivalent, and the differences are
+**measured** — a conformance harness runs the product's own container config
+against a live daemon and records what each one silently declines to apply. This
+check reports what the runtime in use will not honour.
+
+- **PASS** — the runtime honours every crew hardening control.
+- **WARN** — a control is dropped. The row names the control; the hint line
+  names the consequence. The only entry today is **Podman below 5**, which
+  reduces `GroupAdd` to the primary GID: agents never hold gid 1002, so every
+  crew-shared memory read fails with `EACCES`. Upgrading to Podman 5+ is the
+  only remedy — the GID cannot be delivered another way through the Docker
+  compat API.
+- **INFO** — no Docker-API runtime answered (including Apple Containers, which
+  is not one). The *container runtime* check above already owns that finding;
+  this one does not repeat it.
+
+<Note>
+**Advisory by design.** A gap is "this runtime has known limitations", not
+"your install is broken" — crews start, crews run, and every other control is
+applied — so it never exits non-zero. The same finding is emitted as a startup
+`WARN` in the server log and carried on
+[`system info`](/cli/system#known-gaps); a warning nobody can reach after boot
+is why this check exists
+([#1672](https://github.com/crewship-ai/crewship/issues/1672)).
+</Note>
+
 ### Port binding
 
 Confirms the HTTP port (default `8080` or `CREWSHIP_PORT`) is free.
@@ -183,6 +211,7 @@ $ crewship doctor
 crewship v0.1.0-beta.4 · darwin/arm64
 
   [PASS]  container runtime              docker (Docker Desktop 4.35.1) at /var/run/docker.sock
+  [PASS]  container runtime gaps         docker 28.0.4 honours every crew hardening control
   [PASS]  port binding                   :8080 is bindable
   [PASS]  database permissions           ~/.crewship (0700) + crewship.db (0600)
   [PASS]  NEXTAUTH_SECRET                auto-managed in /Users/you/.crewship/secrets.env (64 chars)

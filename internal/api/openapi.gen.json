@@ -85487,6 +85487,20 @@
                     "runtimes": {
                       "items": {
                         "properties": {
+                          "gaps": {
+                            "items": {
+                              "properties": {
+                                "control": {
+                                  "type": "string"
+                                },
+                                "detail": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
                           "in_use": {
                             "type": "boolean"
                           },
