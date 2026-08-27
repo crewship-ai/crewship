@@ -27,6 +27,34 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   port-expose API page and the `expose` CLI page. The unreachability itself
   is unchanged — this is diagnosis, not support for those runtimes.
 
+- **A dead escalation sat under "Waiting on you" forever, as two rows.**
+  `scopeOf` recognised exactly one terminal `payload.state` — `resolved` —
+  but a `peer.escalation` also ends as `expired` (the deadline answered it)
+  and `cancelled` (an operator withdrew it). Both carry the same entry type
+  and the same `refs.escalation_id` as the ask, so each one missed twice: the
+  terminal row was filed as a *fresh* ask, and it closed nothing, leaving the
+  original `pending` row open beside it. Two escalations nobody could still
+  act on produced four permanent entries. The terminal set is now explicit
+  (`resolved`, `expired`, `cancelled`) and a test scans the Go emit sites, so
+  a fifth state cannot be added to the API without this list hearing about it.
+  A state the classifier has never seen is still treated as *open* —
+  unrecognised is not the same as answered.
+
+- **Clicking "Waiting on you 1" opened a list of five.** The Overview card
+  counts open asks over the whole window; the Waiting scope it links to
+  refetched with `entry_type` set to the ask types alone. The *answers* —
+  `approval.granted` / `denied` / `cancelled` / `timeout` and
+  `keeper.decision` — are filed under the Security facet, so they were
+  excluded server-side, and the client-side join that retires an answered ask
+  had nothing to join against. Approvals and keeper requests could therefore
+  never be retired in that scope, and a grant arriving live could not retire
+  one either, because the stream shares the query. The waiting fetch now asks
+  for both halves; the answers never reach the feed, because the same
+  narrowing files them under Completed. Because the journal pages by a fixed
+  row count from the newest end, those extra rows would otherwise have pushed
+  the oldest open asks out of the window — hiding them instead of listing
+  them — so the Waiting scope alone now pages to the API's 500-row ceiling.
+
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and
   `OnboardingHandler.Status` reads a NULL there as "this completion was
