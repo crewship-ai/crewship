@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -160,6 +161,22 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	storageKey, ok := resolveCrewFileKey(crewID, filePath)
 	if !ok {
 		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// #2142: this is the ONE funnel every download reaches, whichever HTTP
+	// door it came in through — AgentFileDownload and CrewFileDownload
+	// (internal/api, a separate process reached over the Unix socket) each
+	// already refuse the six generated per-agent MCP-config files before
+	// calling here, but the crew door used to be the only one that forgot
+	// to. Guarding it here too means a future caller that reaches this
+	// endpoint without replicating that check is covered by construction,
+	// not by remembering to add it on every door. api.IsProtectedCrewConfigPath
+	// resolves the storage key's crewID/<any slug>/... shape against the
+	// same six-path list isProtectedAgentConfigPath uses, so this can never
+	// independently drift from what the agent door denies.
+	if api.IsProtectedCrewConfigPath(crewID, storageKey) {
+		http.Error(w, "file contains protected agent configuration", http.StatusForbidden)
 		return
 	}
 
