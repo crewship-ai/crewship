@@ -18,7 +18,7 @@ import (
 //
 // Three resolution paths:
 //
-//	crewship resume                  no arg → interactive picker over recent CLI sessions
+//	crewship resume                  no arg → interactive picker over recent sessions
 //	crewship resume <chat-id>        continue an explicit chat
 //	crewship resume <run-id>         look up the run, find its chat, continue
 //	crewship resume <pr-url>         find the session that produced the PR
@@ -29,9 +29,10 @@ import (
 var resumeCmd = &cobra.Command{
 	Use:   "resume [chat-id | run-id | pr-url]",
 	Short: "Pick up an existing session",
-	Long: `Resume a previous CLI session by chat-id, run-id, or pull-request URL.
-With no argument, opens an interactive picker over the 10 most recent
-CLI sessions in the current workspace.
+	Long: `Resume a previous session by chat-id, run-id, or pull-request URL.
+With no argument, opens an interactive picker over the 10 most recently
+active sessions in the current workspace — every session, whatever
+started it, not only the ones this CLI started.
 
 Examples:
   crewship resume
@@ -48,7 +49,10 @@ Examples:
 
 		switch {
 		case len(args) == 0:
-			// Interactive: list recent CLI-origin chats, let user pick.
+			// Interactive: list the workspace's recently active chats and
+			// let the user pick. Not filtered by origin — the runs list
+			// this reads has no such filter, so a session started in the
+			// web UI is offered here too, and --help says so.
 			id, slug, err := pickRecentChat(client)
 			if err != nil {
 				return err
@@ -119,6 +123,14 @@ Examples:
 // resumeSessionCount is how many sessions the picker offers.
 const resumeSessionCount = 10
 
+// runsPageMax is the largest `limit` GET /api/v1/runs honours. Out-of-range is
+// not an error there: `if limit < 1 || limit > 100 { limit = 50 }`
+// (internal/api/runs.go), so asking for 200 gets 50 — a SMALLER page than
+// asking for 100. That inverts the over-fetch recentSessions relies on, and it
+// does it silently, at whatever value of resumeSessionCount someone picks
+// next. Clamping here keeps the constant above safe to raise.
+const runsPageMax = 100
+
 // recentSession is one row of the picker: a chat that can be resumed, with
 // the agent that owns it.
 type recentSession struct {
@@ -143,7 +155,13 @@ type recentSession struct {
 //
 // One chat can own several runs — resuming a session twice is two runs of
 // one chat — so ask for more runs than sessions and dedupe, keeping the
-// newest run per chat.
+// newest run per chat. The over-fetch is capped at runsPageMax; past that the
+// server would hand back FEWER rows, not more.
+//
+// The list is not filtered by origin. There is nothing to filter it by here —
+// `origin` is a property of the chat, and this reads runs — so a session
+// started from the web UI is offered alongside one started from this CLI.
+// resumeCmd's --help says so; keep the two in step.
 func recentSessions(client *cli.Client, want int) ([]recentSession, error) {
 	var runs struct {
 		Data []struct {
@@ -154,7 +172,7 @@ func recentSessions(client *cli.Client, want int) ([]recentSession, error) {
 		} `json:"data"`
 	}
 	q := url.Values{}
-	q.Set("limit", strconv.Itoa(want*5))
+	q.Set("limit", strconv.Itoa(min(want*5, runsPageMax)))
 	if err := getJSON(client, "/api/v1/runs?"+q.Encode(), &runs); err != nil {
 		return nil, fmt.Errorf("list recent sessions: %w", err)
 	}

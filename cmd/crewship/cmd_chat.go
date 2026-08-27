@@ -858,16 +858,37 @@ func lookupChatAgentID(client *cli.Client, chatID string) (string, error) {
 	return id, err
 }
 
+// agentChatListLimit mirrors the hard `LIMIT 100` in the handler behind
+// GET /api/v1/agents/{agentId}/chats (internal/api/agent_chats.go). The
+// endpoint takes no page or limit parameter, so this is not a default the CLI
+// can raise — it is the whole window lookupChatAgent can see, and a chat older
+// than an agent's hundredth most recent is simply not in it. Naming the number
+// in the miss message is the difference between "your chat id is wrong" and
+// "that chat has aged out of the only listing that can find its owner".
+const agentChatListLimit = 100
+
 // lookupChatAgent finds which agent owns a chat by walking the agents list
 // and querying each agent's chat list until the chat ID is found, returning
-// both the agent id and its slug. Worst case scales with #agents — fine for
-// the typical workspace size (single-digit to low-tens). Falls back to a
-// clear error so the user knows to pass --agent.
+// both the agent id and its slug. Worst case is 1 + N requests and scales with
+// #agents — fine for the typical workspace size (single-digit to low-tens),
+// and noticeable on a few dozen.
 //
 // This walk is the ONLY way to answer "who owns this chat": a chat is
 // addressable solely under its agent (GET /api/v1/agents/{agentId}/chats),
 // and there is no flat GET /api/v1/chats/{chatId} — `resume` used to call one
 // and got a 404 every time (#2086).
+//
+// TWO WAYS IT RETURNS NOTHING, and they are different errors on purpose:
+//
+//   - the chat is genuinely not in any list the caller can read → a
+//     NotFoundf, so the exit code is ExitNotFound. The message names
+//     agentChatListLimit, because a chat that has aged past an agent's
+//     hundredth most recent is invisible here while still being perfectly
+//     resumable by run-id.
+//   - every agent's list failed (403 on each, or a 500) → the first failure,
+//     wrapped, NOT a not-found. Zero chats were searched, and reporting that
+//     as "chat not found" points the user at their chat id instead of at
+//     their permissions.
 func lookupChatAgent(client *cli.Client, chatID string) (agentID, agentSlug string, err error) {
 	resp, err := client.Get("/api/v1/agents")
 	if err != nil {
@@ -883,13 +904,31 @@ func lookupChatAgent(client *cli.Client, chatID string) (agentID, agentSlug stri
 	if err := cli.ReadJSON(resp, &agents); err != nil {
 		return "", "", err
 	}
+	if len(agents) == 0 {
+		return "", "", cli.NotFoundf("no agents in this workspace, so no chat is addressable here — "+
+			"check you are in the workspace that owns chat %s (`crewship workspace current`)", chatID)
+	}
+
+	// Count what could not be searched, and keep the first reason. Skipping an
+	// unreadable agent is right — one denial must not hide a chat somebody
+	// else owns — but discarding the reason is not: when nothing could be read
+	// the walk has searched zero chats, and "not found" then blames the user's
+	// chat id for what is really a 403 or a 500.
+	var unreadable int
+	var firstErr error
 	for _, a := range agents {
 		var chats []struct {
 			ID string `json:"id"`
 		}
 		if err := getJSON(client, "/api/v1/agents/"+a.ID+"/chats", &chats); err != nil {
-			// Skip agents we can't read rather than aborting — a single
-			// permission-denied shouldn't blow up the whole lookup.
+			unreadable++
+			if firstErr == nil {
+				name := a.Slug
+				if name == "" {
+					name = a.ID
+				}
+				firstErr = fmt.Errorf("agent %s: %w", name, err)
+			}
 			continue
 		}
 		for _, c := range chats {
@@ -898,7 +937,23 @@ func lookupChatAgent(client *cli.Client, chatID string) (agentID, agentSlug stri
 			}
 		}
 	}
-	return "", "", cli.NotFoundf("chat %s not found in any agent's recent sessions", chatID)
+
+	switch {
+	case unreadable == len(agents):
+		// Nothing was searched. Deliberately NOT NotFoundf: exiting as
+		// ExitNotFound would tell a script the chat does not exist when the
+		// truth is that the caller cannot see any of the lists that would say.
+		return "", "", fmt.Errorf("could not read the chat list of any of the %d agents in this workspace, "+
+			"so nothing was searched: %w", len(agents), firstErr)
+	case unreadable > 0:
+		return "", "", cli.NotFoundf("chat %s not found in the %d most recent chats of the %d agents that could be "+
+			"read; %d could not be read (first: %v)",
+			chatID, agentChatListLimit, len(agents)-unreadable, unreadable, firstErr)
+	default:
+		return "", "", cli.NotFoundf("chat %s not found in any agent's %d most recent chats — that listing is "+
+			"the only way to find a chat's owner, so an older chat is invisible to it even though it still "+
+			"exists; resume it by run-id instead (`crewship resume <run-id>`)", chatID, agentChatListLimit)
+	}
 }
 
 // postMultipart issues a multipart/form-data POST without going through

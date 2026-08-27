@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -137,6 +139,69 @@ func TestPickRecentChat_NonTTY(t *testing.T) {
 			t.Errorf("expected TTY error; got %v", err)
 		}
 	})
+}
+
+// The picker reads GET /api/v1/runs, which is every run in the workspace —
+// there is no origin=CLI filter any more (#2086 removed the chats-list path
+// that had one). `--help` promising "CLI sessions" therefore describes a
+// filter that does not exist, and a workspace driven from the web UI offers
+// UI-originated sessions under that promise. docs/cli/resume.mdx was corrected;
+// the command's own help is what a user actually reads.
+func TestResumeHelpDescribesTheListItReallyOffers(t *testing.T) {
+	help := resumeCmd.Long
+	for _, claim := range []string{"CLI sessions", "CLI-origin"} {
+		if strings.Contains(help, claim) {
+			t.Errorf("resume --help still promises %q, but the picker lists every "+
+				"session in the workspace regardless of origin:\n%s", claim, help)
+		}
+	}
+	if !strings.Contains(help, strconv.Itoa(resumeSessionCount)) {
+		t.Errorf("resume --help does not say how many sessions the picker offers (%d):\n%s",
+			resumeSessionCount, help)
+	}
+}
+
+// recentSessions over-fetches (want*5) because one chat can own several runs
+// and the dedupe below keeps the newest run per chat. GET /api/v1/runs clamps
+// a limit outside 1..100 back to 50 rather than erroring, so an over-fetch
+// that asks for more than 100 gets a SMALLER page than one that asks for 100 —
+// the over-fetch silently inverts. At resumeSessionCount = 10 the product is
+// 50 and nothing shows; the trap springs the day somebody raises the constant.
+func TestRecentSessions_LimitStaysWithinServerClamp(t *testing.T) {
+	tests := []struct {
+		name      string
+		want      int
+		wantLimit string
+	}{
+		{"current picker size", resumeSessionCount, "50"},
+		{"just under the ceiling", 20, "100"},
+		{"past the ceiling clamps instead of overflowing", 40, "100"},
+		{"far past the ceiling", 500, "100"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := clitest.NewStubServer()
+			defer stub.Close()
+			covSetupCli8(t, stub.URL())
+			stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{"data": []any{}}))
+
+			if _, err := recentSessions(newAPIClient(), tc.want); err != nil {
+				t.Fatalf("recentSessions: %v", err)
+			}
+			calls := stub.CallsFor("GET", "/api/v1/runs")
+			if len(calls) != 1 {
+				t.Fatalf("expected 1 runs call, got %d", len(calls))
+			}
+			q, err := url.ParseQuery(calls[0].Query)
+			if err != nil {
+				t.Fatalf("parse runs query %q: %v", calls[0].Query, err)
+			}
+			if got := q.Get("limit"); got != tc.wantLimit {
+				t.Errorf("runs limit = %q, want %q — a limit above 100 is not an error, "+
+					"the server quietly serves 50 instead", got, tc.wantLimit)
+			}
+		})
+	}
 }
 
 func TestFindChatForPR_Found(t *testing.T) {
