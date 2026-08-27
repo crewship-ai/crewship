@@ -604,6 +604,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **An agent-created mission dispatched its first task straight into a
+  `FOREIGN KEY constraint failed` (#2139).** `assignments.chat_id` is
+  `NOT NULL REFERENCES chats(id)`, and the mission task dispatcher inserts
+  every assignment with `chat_id` set to the mission's own id —
+  unconditionally, with no fallback. Three of the four mission-creating doors
+  stamp that synthetic `chats` row themselves (`mission_handler_mutate.go`'s
+  `Create`, `issue_handler_workflow.go`'s `Start`, and
+  `internal/cartographer/fork.go`'s `Fork`, fixed independently in #2128,
+  same root cause, different door). `InternalMissionHandler.Create` — the
+  sidecar endpoint an agent uses to plan its own mission — was the one that
+  didn't, so an agent-authored mission's first task hit the FK on every
+  dispatch attempt, and `scheduleReadyTasks` turned that into a silently
+  `FAILED` task rather than surfacing it — a mission whose tasks all failed
+  for a reason nothing in the task list explained.
+
+  Fixed twice, deliberately. `Create` now stamps the chat row itself, in the
+  same transaction as the mission row, mirroring the other three doors. And
+  the dispatcher — the one place every mission's assignments are actually
+  written, regardless of which door created the mission — now creates the
+  row lazily if it is missing, before either assignment insert. Two doors
+  have now independently forgotten this row in production; a per-door insert
+  is correctness at the source but does not close the class, so the
+  dispatcher checks for itself too, at the cost of one indexed lookup per
+  dispatch in the common case where the row already exists.
+
 - **The `admin` family answered from a different database than the server you
   pointed it at.** `openAdminDB()` resolved `~/.crewship/crewship.db` and
   ignored `--server`, `CREWSHIP_SERVER` and `--profile` entirely, while its own
