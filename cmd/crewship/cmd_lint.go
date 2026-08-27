@@ -36,29 +36,73 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		strict, _ := cmd.Flags().GetBool("strict")
 
+		// Findings are collected rather than printed as they are produced.
+		// A linter's whole output is its findings, so under `-f json` this is
+		// the one command where the human rendering is the LEAST useful form:
+		// `crewship lint -f json | jq '.findings[] | select(.severity=="error")'`
+		// is what a CI step wants, and it used to get a wall of ANSI-coloured
+		// text and exit 0.
+		findings := []lintFinding{}
 		errs, warns := 0, 0
 		emit := func(severity, file, msg string) {
-			color := cli.Yellow
 			if severity == "error" {
-				color = cli.Red
 				errs++
 			} else {
 				warns++
 			}
-			fmt.Printf("  %s%-7s%s  %s — %s\n", color, severity, cli.Reset, file, msg)
+			findings = append(findings, lintFinding{Severity: severity, File: file, Message: msg})
 		}
-
-		fmt.Printf("%sLinting local CLI footprint%s\n", cli.Bold, cli.Reset)
 
 		lintConfig(emit)
 		lintPromptLibrary(emit)
 
-		fmt.Printf("\n%sresult:%s %d error(s), %d warning(s)\n", cli.Bold, cli.Reset, errs, warns)
-		if errs > 0 || (strict && warns > 0) {
+		failed := errs > 0 || (strict && warns > 0)
+		result := lintResult{
+			Findings: findings,
+			Errors:   errs,
+			Warnings: warns,
+			Strict:   strict,
+			Passed:   !failed,
+		}
+
+		if err := resolvedFormatter(cmd).AutoHuman(result, func() {
+			fmt.Printf("%sLinting local CLI footprint%s\n", cli.Bold, cli.Reset)
+			for _, fi := range findings {
+				color := cli.Yellow
+				if fi.Severity == "error" {
+					color = cli.Red
+				}
+				fmt.Printf("  %s%-7s%s  %s — %s\n", color, fi.Severity, cli.Reset, fi.File, fi.Message)
+			}
+			fmt.Printf("\n%sresult:%s %d error(s), %d warning(s)\n", cli.Bold, cli.Reset, errs, warns)
+		}); err != nil {
+			return err
+		}
+		if failed {
 			return fmt.Errorf("lint failed")
 		}
 		return nil
 	},
+}
+
+// lintFinding is one problem `crewship lint` found.
+type lintFinding struct {
+	Severity string `json:"severity" yaml:"severity"` // error | warn
+	File     string `json:"file" yaml:"file"`
+	Message  string `json:"message" yaml:"message"`
+}
+
+// lintResult is the machine-readable form of `crewship lint`.
+//
+// `passed` is present even though the exit code carries the same information,
+// because the exit code is lost the moment the output is captured and read
+// later — which is what a CI artifact is.
+type lintResult struct {
+	Findings []lintFinding `json:"findings" yaml:"findings"`
+	Errors   int           `json:"errors" yaml:"errors"`
+	Warnings int           `json:"warnings" yaml:"warnings"`
+	Strict   bool          `json:"strict" yaml:"strict"`
+	Passed   bool          `json:"passed" yaml:"passed"`
 }
 
 // lintConfig validates the YAML config file shape and content.

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -49,12 +48,7 @@ var memorySearchCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		type scopedResult struct {
-			Source string              `json:"source"`
-			Result memory.SearchResult `json:"result"`
-		}
-
-		var allResults []scopedResult
+		allResults := []scopedResult{}
 
 		for _, mp := range paths {
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
@@ -79,25 +73,27 @@ var memorySearchCmd = &cobra.Command{
 			}
 		}
 
-		if len(allResults) == 0 {
-			fmt.Println("No results found.")
-			return nil
-		}
-
-		// JSON output for tooling, table for humans.
-		format, _ := cmd.Flags().GetString("format")
-		if format == "json" {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(allResults)
-		}
-
-		for i, sr := range allResults {
-			fmt.Printf("[%d] [%s] %s (score: %.4f)\n", i+1, sr.Source, sr.Result.File, sr.Result.Score)
-			fmt.Printf("    %s\n\n", sr.Result.Snippet)
-		}
-		return nil
+		// "No results found." used to be printed before the format was
+		// consulted at all, so a `--format json` search that matched nothing
+		// answered a sentence — and a search matching nothing is the case a
+		// caller most needs to handle.
+		return resolvedFormatter(cmd).AutoHuman(allResults, func() {
+			if len(allResults) == 0 {
+				fmt.Println("No results found.")
+				return
+			}
+			for i, sr := range allResults {
+				fmt.Printf("[%d] [%s] %s (score: %.4f)\n", i+1, sr.Source, sr.Result.File, sr.Result.Score)
+				fmt.Printf("    %s\n\n", sr.Result.Snippet)
+			}
+		})
 	},
+}
+
+// scopedResult is one memory search hit, tagged with the scope it came from.
+type scopedResult struct {
+	Source string              `json:"source" yaml:"source"`
+	Result memory.SearchResult `json:"result" yaml:"result"`
 }
 
 var memoryStatusCmd = &cobra.Command{
@@ -119,29 +115,66 @@ var memoryStatusCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		// A scope that will not open is a RESULT, not a failure of the
+		// command — `--scope all` legitimately reaches paths that were never
+		// initialised. It used to be printed as prose and exit 0, so a caller
+		// asking for JSON got a mix of a driver error and, sometimes,
+		// nothing else. Each scope now carries its own error field.
+		scopes := []memoryScopeStatus{}
 		for _, mp := range paths {
+			row := memoryScopeStatus{Scope: mp.scope, Path: mp.path}
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
 			if err != nil {
-				fmt.Printf("[%s] %s — not initialized: %v\n", mp.scope, mp.path, err)
+				row.Error = "not initialized: " + err.Error()
+				scopes = append(scopes, row)
 				continue
 			}
 
 			status, err := eng.Status(ctx)
 			eng.Close()
 			if err != nil {
-				fmt.Printf("[%s] %s — error: %v\n", mp.scope, mp.path, err)
+				row.Error = err.Error()
+				scopes = append(scopes, row)
 				continue
 			}
 
-			fmt.Printf("[%s] %s\n", mp.scope, mp.path)
-			fmt.Printf("  Files:   %d\n", status.TotalFiles)
-			fmt.Printf("  Chunks:  %d\n", status.TotalChunks)
-			fmt.Printf("  Size:    %d KB\n", status.TotalSizeKB)
-			fmt.Printf("  Indexed: %s\n", status.IndexedAt.Format(time.RFC3339))
-			fmt.Printf("  Ready:   %v\n\n", status.SearchReady)
+			row.Initialized = true
+			row.TotalFiles = status.TotalFiles
+			row.TotalChunks = status.TotalChunks
+			row.TotalSizeKB = status.TotalSizeKB
+			row.IndexedAt = status.IndexedAt.Format(time.RFC3339)
+			row.SearchReady = status.SearchReady
+			scopes = append(scopes, row)
 		}
-		return nil
+
+		return resolvedFormatter(cmd).AutoHuman(scopes, func() {
+			for _, s := range scopes {
+				if s.Error != "" {
+					fmt.Printf("[%s] %s — %s\n", s.Scope, s.Path, s.Error)
+					continue
+				}
+				fmt.Printf("[%s] %s\n", s.Scope, s.Path)
+				fmt.Printf("  Files:   %d\n", s.TotalFiles)
+				fmt.Printf("  Chunks:  %d\n", s.TotalChunks)
+				fmt.Printf("  Size:    %d KB\n", s.TotalSizeKB)
+				fmt.Printf("  Indexed: %s\n", s.IndexedAt)
+				fmt.Printf("  Ready:   %v\n\n", s.SearchReady)
+			}
+		})
 	},
+}
+
+// memoryScopeStatus is one scope's index status in `memory status`.
+type memoryScopeStatus struct {
+	Scope       string `json:"scope" yaml:"scope"`
+	Path        string `json:"path" yaml:"path"`
+	Initialized bool   `json:"initialized" yaml:"initialized"`
+	TotalFiles  int    `json:"total_files" yaml:"total_files"`
+	TotalChunks int    `json:"total_chunks" yaml:"total_chunks"`
+	TotalSizeKB int64  `json:"total_size_kb" yaml:"total_size_kb"`
+	IndexedAt   string `json:"indexed_at,omitempty" yaml:"indexed_at,omitempty"`
+	SearchReady bool   `json:"search_ready" yaml:"search_ready"`
+	Error       string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
 var memoryReindexCmd = &cobra.Command{
@@ -207,7 +240,22 @@ func init() {
 	}
 
 	memorySearchCmd.Flags().IntP("limit", "l", 10, "Max results per scope")
-	memorySearchCmd.Flags().StringP("format", "F", "table", "Output format: table, json")
+
+	// This command owned a LOCAL `--format/-F` flag (table|json). Because it
+	// took the NAME "format", it shadowed the root's persistent flag on this
+	// command — and a shadowed persistent flag takes its shorthand with it, so
+	// `crewship memory search … -f json` did not fall back to human output, it
+	// FAILED with `unknown shorthand flag: 'f'` on the one flag the CLI
+	// advertises everywhere (#2086). The help was wrong to match: it printed
+	// "Output format: table, json" where every other command prints the five.
+	//
+	// The alias survives under its own name so `-F json` keeps working, and is
+	// marked deprecated so it stops spreading. Nothing reads it directly —
+	// resolvedFormat folds it into the global resolution below.
+	memorySearchCmd.Flags().StringP("output-format", "F", "", "Deprecated alias for --format/-f")
+	if err := memorySearchCmd.Flags().MarkDeprecated("output-format", "use --format/-f (which now supports table|json|yaml|ndjson|quiet)"); err != nil {
+		panic(err) // programmer error: the flag was just registered
+	}
 
 	memoryCmd.AddCommand(memorySearchCmd)
 	memoryCmd.AddCommand(memoryStatusCmd)

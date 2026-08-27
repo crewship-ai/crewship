@@ -40,27 +40,39 @@ var routinePendingListCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var rows []struct {
-			ID           string `json:"id"`
-			PipelineSlug string `json:"pipeline_slug"`
-			DebounceKey  string `json:"debounce_key"`
-			Priority     int    `json:"priority"`
-			FireAt       string `json:"fire_at"`
-		}
+		var rows []pendingTriggerRow
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		if len(rows) == 0 {
-			fmt.Println("No deferred triggers pending.")
-			return nil
+		// "Nothing pending" is the normal state, so it is also the state a
+		// polling script hits on nearly every run — it must be an empty list,
+		// not the sentence this used to print under `-f json`.
+		var flush tabFlush
+		if err := resolvedFormatter(cmd).AutoHuman(rows, func() {
+			if len(rows) == 0 {
+				fmt.Println("No deferred triggers pending.")
+				return
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "PENDING ID\tROUTINE\tPRIORITY\tDEBOUNCE KEY\tFIRES AT")
+			for _, r := range rows {
+				fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", r.ID, r.PipelineSlug, r.Priority, r.DebounceKey, r.FireAt)
+			}
+			flush.of(w)
+		}); err != nil {
+			return err
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "PENDING ID\tROUTINE\tPRIORITY\tDEBOUNCE KEY\tFIRES AT")
-		for _, r := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", r.ID, r.PipelineSlug, r.Priority, r.DebounceKey, r.FireAt)
-		}
-		return w.Flush()
+		return flush.err
 	},
+}
+
+// pendingTriggerRow is one deferred (delayed/debounced) routine trigger.
+type pendingTriggerRow struct {
+	ID           string `json:"id" yaml:"id"`
+	PipelineSlug string `json:"pipeline_slug" yaml:"pipeline_slug"`
+	DebounceKey  string `json:"debounce_key" yaml:"debounce_key"`
+	Priority     int    `json:"priority" yaml:"priority"`
+	FireAt       string `json:"fire_at" yaml:"fire_at"`
 }
 
 var routinePendingCancelCmd = &cobra.Command{

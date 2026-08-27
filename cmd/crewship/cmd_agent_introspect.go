@@ -216,8 +216,7 @@ var agentSkillsCmd = &cobra.Command{
 		}
 
 		if len(skills) == 0 {
-			fmt.Println("No skills assigned to this agent.")
-			return nil
+			return emptyListNote(cmd, skills, "No skills assigned to this agent.")
 		}
 
 		f := newFormatter()
@@ -348,8 +347,7 @@ var agentCredentialsCmd = &cobra.Command{
 		}
 
 		if len(creds) == 0 {
-			fmt.Println("No credentials assigned to this agent.")
-			return nil
+			return emptyListNote(cmd, creds, "No credentials assigned to this agent.")
 		}
 
 		f := newFormatter()

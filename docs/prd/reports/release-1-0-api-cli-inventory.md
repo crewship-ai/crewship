@@ -13,11 +13,11 @@ Response schema quality: 573 API operations have a concrete 2xx schema; 0 still 
 
 Request schema quality: 251 operations have request bodies; 247 have concrete JSON schemas, 4 use non-JSON media types, and 0 still use a generic JSON fallback.
 
-CLI flag quality: 387 commands define flags; 387 document all of their flags and 0 still have undocumented flag(s).
+CLI flag quality: 386 commands define flags; 386 document all of their flags and 0 still have undocumented flag(s).
 
 Environment variables: 102 discovered, 0 missing documentation. Manifest kinds: 21 discovered, 0 missing documentation.
 
-Docs → code references: 4525 commands, 2197 API paths, 447 environment variables, 231 manifest kinds, and 2173 flags; missing symbols: 0, 0, 0, 0, and 0 respectively.
+Docs → code references: 4532 commands, 2197 API paths, 447 environment variables, 231 manifest kinds, and 2173 flags; missing symbols: 0, 0, 0, 0, and 0 respectively.
 
 ## API operations needing attention
 
