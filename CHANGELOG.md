@@ -26,8 +26,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   CLI↔route contract test is what should have failed years ago, so its
   extractor was hardened first: it now resolves paths assembled into a local
   (including with `+=`), the `api_helpers.go` wrappers, `Do`/`NewRequest`/
-  `StreamSSE`/`StreamNDJSON`, package-level path consts, and forwarders
-  discovered from source rather than listed — 1013 call sites checked against
+  `StreamSSE`/`StreamNDJSON`, package-level path consts, path helpers whose
+  own parameters are filled from the call site (so `proposedPath(id,
+  "approve")` is checked against the route registered for *approve* rather
+  than collapsing to an unregistered `…/{}/{}`), and forwarders discovered
+  from source rather than listed — 1013 call sites checked against
   the router's real registrations, up from ~450, with the vacuity floor moved
   to match. Two bounds this walk carries are now named in the errors and the
   docs rather than left to be discovered: an agent's chat list is a hard 100
