@@ -732,3 +732,32 @@ func TestJSXHostileCodeSpansIgnoresFencedBlocksAndUnrelatedTags(t *testing.T) {
 		t.Fatalf("jsxHostileCodeSpans() = %+v, want none", offenders)
 	}
 }
+
+func TestJSXHostileCodeSpansHandlesANestedFence(t *testing.T) {
+	root := t.TempDir()
+	// docs/guides/skills-authoring.mdx:80/:83 has this shape: a ```yaml sample
+	// opened inside an outer ```markdown block. A prefix toggle flips on the
+	// inner opener and reads the rest of the outer block as prose, so the
+	// wrapped span below gets reported even though it is sample content.
+	//
+	// The inner fence is deliberately left unclosed before the span. With a
+	// closed inner block the naive toggle lands back on "inside" by luck and
+	// the fixture proves nothing — the first version of this test did exactly
+	// that and passed against the very toggle it was written to catch.
+	writeDocsPage(t, root, "docs/guides/nested.mdx", ""+
+		"````markdown\n"+
+		"```yaml\n"+
+		"key: value\n"+
+		"Set it with `crewship routine save --author-agent\n"+
+		"<slug|id>` inside the sample.\n"+
+		"```\n"+
+		"````\n")
+
+	offenders, err := jsxHostileCodeSpans(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("jsxHostileCodeSpans() = %+v, want none — the whole outer fence is sample content", offenders)
+	}
+}

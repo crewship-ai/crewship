@@ -942,14 +942,16 @@ func jsxHostileCodeSpans(root string) ([]wrappedCodeSpan, error) {
 				}
 			}
 		}
-		fenced := false
+		// Shares fenceState with the MDX tag pass rather than toggling on a
+		// "```" prefix. The naive toggle is wrong on a nested fence — an inner
+		// ```yaml inside an outer ```markdown reads as a close, and everything
+		// after it is then treated as prose. docs/guides/skills-authoring.mdx
+		// has exactly that shape at :80/:83. Two fence implementations that
+		// disagree is worse than one, whichever is right.
+		var fence fenceState
 		for i := start; i < len(lines); i++ {
 			line := lines[i]
-			if strings.HasPrefix(strings.TrimSpace(line), "```") {
-				fenced = !fenced
-				continue
-			}
-			if fenced {
+			if fence.feed(line) || fence.inside() {
 				continue
 			}
 			if wrapsOntoTag(line) {
