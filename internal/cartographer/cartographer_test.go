@@ -59,9 +59,9 @@ func newJournal(t *testing.T, db *sql.DB) *journal.Writer {
 
 // emitJournalEntry inserts a journal row directly via SQL. Bypasses the
 // batched writer so tests can control the exact (ts, id) ordering.
-func emitJournalEntry(t *testing.T, db *sql.DB, id, missionID string, ts time.Time) {
+func emitJournalEntry(ctx context.Context, t *testing.T, db *sql.DB, id, missionID string, ts time.Time) {
 	t.Helper()
-	_, err := db.Exec(`INSERT INTO journal_entries
+	_, err := db.ExecContext(ctx, `INSERT INTO journal_entries
 		(id, workspace_id, mission_id, ts, entry_type, actor_type, summary)
 		VALUES (?, 'ws_test', ?, ?, 'peer.conversation', 'agent', 's')`,
 		id, missionID, ts.UTC().Format(time.RFC3339Nano))
@@ -223,8 +223,8 @@ func TestRestoreDivergence(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now().UTC()
-	emitJournalEntry(t, db, "j_1", "mis_1", base)
-	emitJournalEntry(t, db, "j_2", "mis_1", base.Add(time.Second))
+	emitJournalEntry(ctx, t, db, "j_1", "mis_1", base)
+	emitJournalEntry(ctx, t, db, "j_2", "mis_1", base.Add(time.Second))
 
 	id, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
@@ -238,8 +238,8 @@ func TestRestoreDivergence(t *testing.T) {
 	}
 
 	// Two more entries happen AFTER the checkpoint.
-	emitJournalEntry(t, db, "j_3", "mis_1", base.Add(2*time.Second))
-	emitJournalEntry(t, db, "j_4", "mis_1", base.Add(3*time.Second))
+	emitJournalEntry(ctx, t, db, "j_3", "mis_1", base.Add(2*time.Second))
+	emitJournalEntry(ctx, t, db, "j_4", "mis_1", base.Add(3*time.Second))
 
 	res, err := Restore(ctx, db, nil, "ws_test", id)
 	if err != nil {
@@ -308,7 +308,7 @@ func TestForkRemapsTaskDependencies(t *testing.T) {
 		VALUES ('mt_p2', 'mis_1', 'Execute', 'PENDING', 1, '["mt_p1"]')`); err != nil {
 		t.Fatalf("seed mt_p2: %v", err)
 	}
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
@@ -399,7 +399,7 @@ func TestForkCreatesMissionAndCheckpoint(t *testing.T) {
 			t.Fatalf("seed task %s: %v", spec.id, err)
 		}
 	}
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
@@ -498,7 +498,7 @@ func TestForkCreatesChatRow(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_a",
@@ -518,7 +518,7 @@ func TestForkCreatesChatRow(t *testing.T) {
 	// The fork must have a chats row keyed by its own mission id — the
 	// same "synthetic chat" pattern the normal mission-create path uses.
 	var chatAgent, chatWorkspace string
-	err = db.QueryRow(`SELECT agent_id, workspace_id FROM chats WHERE id = ?`, newMission).
+	err = db.QueryRowContext(ctx, `SELECT agent_id, workspace_id FROM chats WHERE id = ?`, newMission).
 		Scan(&chatAgent, &chatWorkspace)
 	if err != nil {
 		t.Fatalf("fork mission has no chats row (assignments.chat_id FK will fail on every dispatch): %v", err)
@@ -529,7 +529,7 @@ func TestForkCreatesChatRow(t *testing.T) {
 
 	// Prove the FK actually clears: insert an assignment the way the
 	// orchestrator does when it schedules a task on the forked mission.
-	_, err = db.Exec(`INSERT INTO assignments
+	_, err = db.ExecContext(ctx, `INSERT INTO assignments
 		(id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth)
 		VALUES ('as_fork', 'ws_test', ?, ?, ?, 'do the thing', 'PENDING', ?, 0)`,
 		newMission, chatAgent, chatAgent, newMission)
@@ -547,7 +547,7 @@ func TestDeleteOrphansForks(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_a",
@@ -642,7 +642,7 @@ func TestCaptureBuildsSnapshot(t *testing.T) {
 		t.Fatalf("wire task: %v", err)
 	}
 
-	emitJournalEntry(t, db, "j_1", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_1", "mis_1", time.Now().UTC())
 
 	snap, cursor, err := Capture(ctx, db, "mis_1")
 	if err != nil {

@@ -56,7 +56,7 @@ func TestFork_DefaultLabelAndMetaClone(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_a",
@@ -107,7 +107,7 @@ func TestFork_BadDependsOnFails(t *testing.T) {
 
 	mustExecSQL(t, db, `INSERT INTO mission_tasks (id, mission_id, title, status, task_order, depends_on)
 		VALUES ('mt_corrupt', 'mis_1', 'Broken', 'PENDING', 0, '{oops')`)
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID: "ws_test", MissionID: "mis_1", JournalCursor: "j_seed",
 	})
