@@ -54,6 +54,14 @@ import (
 //	if archived { path = "/api/v1/inbox/archived" }
 //	resp, err := client.Get(path)
 //
+//	// (c2) …including one accumulated with `+=`, which is read as the
+//	//     `x = x + e` it stands for. Both the value before the append and
+//	//     the value after it are candidates, because the append is usually
+//	//     conditional and both paths are then really reachable.
+//	path := keeperAuxPath
+//	if slot != "" { path += "/" + slot }
+//	deleteJSON(client, path)   // checks …/aux AND …/aux/{}
+//
 //	// (d) package-level path consts, and helper funcs that RETURN a path
 //	const keeperAuxPath = "/api/v1/admin/keeper/aux"
 //	func gdprUserPath(c *cli.Client, id string) string { … }
@@ -63,8 +71,13 @@ import (
 //	//     putBytes / postMultipart / cuidFetch / getByRef are covered and
 //	//     the next one is covered the day it is written.
 //
-// That takes the extractor from ~450 call sites to ~950, and the
+// That takes the extractor from ~450 call sites to ~1010, and the
 // `len(sites) < minCallSites` vacuity guard below moves with it.
+//
+// The guard only reports paths the ROUTER does not register, so an extractor
+// that renders FEWER paths stays green while checking less — which is how (c2)
+// hid. cli_route_contract_extract_test.go asserts the rendering itself, so a
+// regression there fails on its own instead of shrinking this guard in silence.
 //
 // What is still opaque, and why it does not silently pass:
 //
@@ -236,13 +249,38 @@ const maxCandidates = 24
 var sprintfVerb = regexp.MustCompile(`%[-+ #0-9.]*[a-zA-Z]`)
 
 // scope resolves an identifier to the strings it can hold at a call site.
-// `exprs` are the assignments seen in the enclosing function body (every
-// assignment is a candidate — this is flow-insensitive on purpose, so an
-// if/else that picks between two paths yields both); `fixed` is used while
-// discovering forwarders, where a func's own params stand in as `«argN»`.
+// `exprs` are the assignments seen in the enclosing function body, in source
+// order (every assignment is a candidate — this is flow-insensitive on
+// purpose, so an if/else that picks between two paths yields both); `fixed`
+// is used while discovering forwarders, where a func's own params stand in as
+// `«argN»`; `prior` is the scratch binding described on render's Ident case,
+// which is what lets an accumulating assignment read its own left-hand side.
 type scope struct {
 	exprs map[string][]ast.Expr
 	fixed map[string][]string
+	prior map[string][]string
+}
+
+// bindPrior makes `name` render as `vals` for the duration of one render call,
+// and returns the undo. Used for the left operand of an accumulating
+// assignment, where the name stands for what the assignments BEFORE this one
+// left in it.
+func (s *scope) bindPrior(name string, vals []string) func() {
+	if s == nil || vals == nil {
+		return func() {}
+	}
+	if s.prior == nil {
+		s.prior = map[string][]string{}
+	}
+	old, had := s.prior[name]
+	s.prior[name] = vals
+	return func() {
+		if had {
+			s.prior[name] = old
+			return
+		}
+		delete(s.prior, name)
+	}
 }
 
 // pathResolver renders path expressions. It carries the package-level facts
@@ -273,6 +311,17 @@ func (r *pathResolver) render(e ast.Expr, sc *scope, seen map[string]bool) []str
 			if fixed, ok := sc.fixed[v.Name]; ok {
 				return fixed
 			}
+			// An accumulating assignment (`path += seg`, recorded by
+			// bodyScope as `path + seg`) reads the name it writes. Rendering
+			// that left operand through the branch below would re-enter this
+			// case, hit the `seen` guard, and render `{}` — which is exactly
+			// how a `+=`-built path used to lose everything assigned before
+			// it. While such an assignment is being rendered the name is
+			// bound here to the candidates the EARLIER assignments produced,
+			// so the concatenation resolves instead of collapsing.
+			if prior, ok := sc.prior[v.Name]; ok {
+				return prior
+			}
 		}
 		var defs []ast.Expr
 		if sc != nil {
@@ -286,9 +335,13 @@ func (r *pathResolver) render(e ast.Expr, sc *scope, seen map[string]bool) []str
 		}
 		seen[v.Name] = true
 		defer delete(seen, v.Name)
-		var out []string
+		var out, cur []string
 		for _, d := range defs {
-			for _, c := range r.render(d, sc, seen) {
+			unbind := sc.bindPrior(v.Name, cur)
+			rendered := r.render(d, sc, seen)
+			unbind()
+			cur = cur[:0:0]
+			for _, c := range rendered {
 				// A name that can hold "" is a name whose value is
 				// supplied at runtime (`bindingID := ""` then filled
 				// from a flag or a lookup). Letting the empty candidate
@@ -298,8 +351,10 @@ func (r *pathResolver) render(e ast.Expr, sc *scope, seen map[string]bool) []str
 				if c == "" {
 					c = "{}"
 				}
-				out = append(out, c)
+				cur = append(cur, c)
 			}
+			cur = dedupCandidates(cur)
+			out = append(out, cur...)
 		}
 		return dedupCandidates(out)
 
@@ -495,9 +550,10 @@ func (r *pathResolver) sitesOf(call *ast.CallExpr, sc *scope) []struct{ Method, 
 // ─── building the resolver from source ───────────────────────────────────
 
 // bodyScope collects every assignment to a plain identifier in a function
-// body: `x := …`, `x = …`, and in-body `const`/`var` declarations. Nested
-// function literals are included, so a closure can resolve a name its
-// enclosing function built.
+// body: `x := …`, `x = …`, `x += …`, and in-body `const`/`var` declarations.
+// Nested function literals are included, so a closure can resolve a name its
+// enclosing function built. Order is source order, which is what makes an
+// accumulating assignment resolvable — see the ADD_ASSIGN case below.
 func bodyScope(body *ast.BlockStmt) *scope {
 	sc := &scope{exprs: map[string][]ast.Expr{}}
 	record := func(name string, e ast.Expr) {
@@ -511,11 +567,32 @@ func bodyScope(body *ast.BlockStmt) *scope {
 		case *ast.AssignStmt:
 			// Only single-value assignments carry a renderable RHS;
 			// `id, err := f()` leaves id unresolved, which renders `{}`.
-			if len(st.Lhs) == 1 && len(st.Rhs) == 1 {
-				if id, ok := st.Lhs[0].(*ast.Ident); ok {
-					record(id.Name, st.Rhs[0])
-				}
+			if len(st.Lhs) != 1 || len(st.Rhs) != 1 {
+				return true
 			}
+			id, ok := st.Lhs[0].(*ast.Ident)
+			if !ok {
+				return true
+			}
+			switch st.Tok {
+			case token.DEFINE, token.ASSIGN:
+				record(id.Name, st.Rhs[0])
+			case token.ADD_ASSIGN:
+				// `x += e` is `x = x + e`, and recording it as the bare `e`
+				// threw the accumulated prefix away: `path := base` followed
+				// by `path += "/" + slot` yielded only `base` and the
+				// unrenderable `/{}`, so base+segment — the path actually
+				// requested — was never checked against the router at all.
+				// Synthesising the equivalent BinaryExpr puts it through
+				// render's ordinary concatenation rule; the `prior` binding
+				// there is what keeps the left operand from recursing.
+				record(id.Name, &ast.BinaryExpr{X: id, OpPos: st.TokPos, Op: token.ADD, Y: st.Rhs[0]})
+			}
+			// Every other compound operator (`-=`, `*=`, `|=`, …) is
+			// arithmetic on something that is not a path. Recording the RHS
+			// as if it were the whole value — which is what the single
+			// untyped branch used to do — states `n = 1` for `n -= 1`.
+			return true
 		case *ast.DeclStmt:
 			gd, ok := st.Decl.(*ast.GenDecl)
 			if !ok || (gd.Tok != token.CONST && gd.Tok != token.VAR) {
@@ -909,6 +986,11 @@ func collectAPIRoutes(t *testing.T) map[string]apiRoute {
 // dynamicPathExceptions are call sites whose final segment is chosen at
 // runtime, so no single route pattern can be matched statically. Each entry is
 // a normalised "METHOD /path" and must name why it cannot be resolved.
+//
+// Like knownWorkspaceClearingDrift, an entry here is checked from both sides:
+// the test fails if one stops being reached, because an exception nobody needs
+// still absolves whatever drifts onto its key next. Deleting a command, or
+// making its path resolvable, is what retires the entry.
 var dynamicPathExceptions = map[string]string{
 	// postRoutineGovernance (cmd_routine_governance.go) picks `action` at
 	// runtime; all four are registered — router_pipelines.go:69 (approve),
@@ -938,6 +1020,7 @@ func TestCLICallsHitRegisteredRoutes(t *testing.T) {
 	}
 
 	seen := map[string]bool{}
+	usedExceptions := map[string]bool{}
 	for _, s := range sites {
 		key := s.Method + " " + s.Path
 		if seen[key] {
@@ -948,6 +1031,7 @@ func TestCLICallsHitRegisteredRoutes(t *testing.T) {
 			continue
 		}
 		if why, ok := dynamicPathExceptions[key]; ok {
+			usedExceptions[key] = true
 			t.Logf("skipping %s (%s)", key, why)
 			continue
 		}
@@ -966,6 +1050,24 @@ func TestCLICallsHitRegisteredRoutes(t *testing.T) {
 		}
 		t.Errorf("%s calls %s %s (path expression resolves to %q) but the router does not register it — %s",
 			s.Pos, s.Method, s.Path, s.Raw, hint)
+	}
+
+	// An exception is a statement that one specific unresolvable call site is
+	// fine. When no call site renders that key any more the statement is about
+	// nothing, and the entry has quietly turned into a standing permit for
+	// whatever drifts onto the key next — the same reasoning that keeps
+	// knownWorkspaceClearingDrift honest.
+	for key, why := range dynamicPathExceptions {
+		if usedExceptions[key] {
+			continue
+		}
+		reason := "no CLI call site resolves to it any more"
+		if _, registered := routes[key]; registered {
+			reason = "the router now registers that pattern literally, so nothing needs excusing"
+		}
+		t.Errorf("stale exception for %q (%s): %s. It is now hiding nothing and would silently "+
+			"absolve the next call site that lands on this key. Delete it from dynamicPathExceptions.",
+			key, why, reason)
 	}
 }
 
