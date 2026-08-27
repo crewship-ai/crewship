@@ -94,14 +94,16 @@ export type SlashActionClassification =
  *  Hidden entries stay listed on purpose: the reason is the record of why the
  *  row went away, and the contract test asserts they are not rendered. */
 export const CLIENT_ACTION_CONTRACT: Record<string, SlashActionClassification> = {
-  // Creating a session is the chat PAGE's job: it POSTs the chat, refetches
-  // the session list and selects the new row. `router.push("/chat/<slug>")`
-  // does none of that — the page holds the active session in local state and
-  // does not re-read the URL on a client navigation, so the old code changed
-  // the address bar and nothing else.
+  // Creating a session is the chat PAGE's job: it mints the id, selects it and
+  // writes the URL. `router.push("/chat/<slug>")` does none of that — the page
+  // holds the active session in local state and does not re-read the URL on a
+  // client navigation, so the old code changed the address bar and nothing
+  // else. Worse now than when this was written: `/chat/<slug>` with no
+  // `?session=` opens that agent's FRESHEST conversation, so the push would
+  // land the reader back in the thread they were trying to leave.
   "new-session": {
     state: "disabled",
-    reason: "Use New session in the chat header",
+    reason: "Use New conversation in the conversations column",
   },
   clear: { state: "enabled" },
   regenerate: { state: "enabled" },

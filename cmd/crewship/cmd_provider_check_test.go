@@ -37,14 +37,14 @@ func TestBuildCheckProvider(t *testing.T) {
 		name    string
 		opts    checkOptions
 		env     map[string]string
-		want    checkTarget
+		want    CheckTarget
 		wantErr int // 0 = success, otherwise the expected exit code
 	}{
 		{
 			name: "registry openai, key from env",
 			opts: checkOptions{Provider: "openai", Model: "gpt-5.5"},
 			env:  map[string]string{"OPENAI_API_KEY": "sk-test"},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "openai", PricingKey: "openai", Codec: "openai-compat",
 				Endpoint: "https://api.openai.com/v1/chat/completions", Model: "gpt-5.5",
 				KeySource: "$OPENAI_API_KEY",
@@ -54,7 +54,7 @@ func TestBuildCheckProvider(t *testing.T) {
 			name: "an explicit key beats the environment, and is never echoed",
 			opts: checkOptions{Provider: "openai", Model: "gpt-5.5", APIKey: "sk-flag"},
 			env:  map[string]string{"OPENAI_API_KEY": "sk-env"},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "openai", PricingKey: "openai", Codec: "openai-compat",
 				Endpoint: "https://api.openai.com/v1/chat/completions", Model: "gpt-5.5",
 				KeySource: "--api-key",
@@ -65,7 +65,7 @@ func TestBuildCheckProvider(t *testing.T) {
 			// the hosted provider's codec.
 			name: "no key is fine once the endpoint is overridden",
 			opts: checkOptions{Provider: "openai", Model: "qwen2.5:3b", BaseURL: srvURL},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "openai", PricingKey: "openai", Codec: "openai-compat",
 				Endpoint: srvURL, Model: "qwen2.5:3b", KeySource: "unset ($OPENAI_API_KEY)",
 			},
@@ -79,7 +79,7 @@ func TestBuildCheckProvider(t *testing.T) {
 			name: "registry anthropic",
 			opts: checkOptions{Provider: "anthropic", Model: "claude-haiku-4-5"},
 			env:  map[string]string{"ANTHROPIC_API_KEY": "sk-ant"},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "anthropic", PricingKey: "anthropic", Codec: "anthropic-messages",
 				Endpoint: "https://api.anthropic.com/v1/messages", Model: "claude-haiku-4-5",
 				KeySource: "$ANTHROPIC_API_KEY",
@@ -88,7 +88,7 @@ func TestBuildCheckProvider(t *testing.T) {
 		{
 			name: "registry ollama needs no key at all",
 			opts: checkOptions{Provider: "ollama", Model: "qwen2.5:3b"},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "ollama", PricingKey: "ollama", Codec: "ollama-native",
 				Endpoint: "http://localhost:11434", Model: "qwen2.5:3b", KeySource: "none",
 			},
@@ -97,7 +97,7 @@ func TestBuildCheckProvider(t *testing.T) {
 			name: "ollama takes its endpoint from BaseEnv",
 			opts: checkOptions{Provider: "ollama", Model: "qwen2.5:3b"},
 			env:  map[string]string{"KEEPER_OLLAMA_URL": "http://gpu-box:11434"},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "ollama", PricingKey: "ollama", Codec: "ollama-native",
 				Endpoint: "http://gpu-box:11434", Model: "qwen2.5:3b", KeySource: "none",
 			},
@@ -106,7 +106,7 @@ func TestBuildCheckProvider(t *testing.T) {
 			name: "--base-url beats BaseEnv",
 			opts: checkOptions{Provider: "ollama", Model: "qwen2.5:3b", BaseURL: srvURL},
 			env:  map[string]string{"KEEPER_OLLAMA_URL": "http://gpu-box:11434"},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "ollama", PricingKey: "ollama", Codec: "ollama-native",
 				Endpoint: srvURL, Model: "qwen2.5:3b", KeySource: "none",
 			},
@@ -117,7 +117,7 @@ func TestBuildCheckProvider(t *testing.T) {
 			// every local call onto a priced one.
 			name: "ollama-openai preset prices as ollama",
 			opts: checkOptions{Provider: "ollama-openai", Model: "qwen2.5:3b"},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "ollama-openai", PricingKey: "ollama", Codec: "openai-compat",
 				Endpoint: "http://localhost:11434/v1", Model: "qwen2.5:3b", KeySource: "none",
 			},
@@ -125,7 +125,7 @@ func TestBuildCheckProvider(t *testing.T) {
 		{
 			name: "vllm preset prices as local",
 			opts: checkOptions{Provider: "vllm", Model: "Qwen/Qwen3-8B", BaseURL: srvURL},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "vllm", PricingKey: "local", Codec: "openai-compat",
 				Endpoint: srvURL, Model: "Qwen/Qwen3-8B", KeySource: "none",
 			},
@@ -141,7 +141,7 @@ func TestBuildCheckProvider(t *testing.T) {
 			name: "deepseek preset has no key env of its own",
 			opts: checkOptions{Provider: "deepseek", Model: "deepseek-chat"},
 			env:  map[string]string{"OPENAI_API_KEY": "sk-not-this-one"},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "deepseek", PricingKey: "deepseek", Codec: "openai-compat",
 				Endpoint: "https://api.deepseek.com/v1", Model: "deepseek-chat", KeySource: "none",
 			},
@@ -149,7 +149,7 @@ func TestBuildCheckProvider(t *testing.T) {
 		{
 			name: "case and padding are normalized",
 			opts: checkOptions{Provider: "  OLLAMA-OpenAI ", Model: "qwen2.5:3b"},
-			want: checkTarget{
+			want: CheckTarget{
 				Provider: "ollama-openai", PricingKey: "ollama", Codec: "openai-compat",
 				Endpoint: "http://localhost:11434/v1", Model: "qwen2.5:3b", KeySource: "none",
 			},
@@ -344,7 +344,7 @@ func TestRunProviderCheck(t *testing.T) {
 			p := llm.NewOpenAICompat(llm.OpenAICompatConfig{
 				Name: tc.pricingKey, BaseURL: srv.URL + "/v1", NoAuth: true,
 			})
-			target := checkTarget{
+			target := CheckTarget{
 				Provider: tc.pricingKey, PricingKey: tc.pricingKey,
 				Codec: string(llm.CodecOpenAICompat), Endpoint: srv.URL + "/v1",
 				Model: tc.model, KeySource: "none",
@@ -354,8 +354,8 @@ func TestRunProviderCheck(t *testing.T) {
 			if err != nil {
 				t.Fatalf("runProviderCheck: %v", err)
 			}
-			if res.checkTarget != target {
-				t.Errorf("target = %+v, want %+v", res.checkTarget, target)
+			if res.CheckTarget != target {
+				t.Errorf("target = %+v, want %+v", res.CheckTarget, target)
 			}
 			if res.OutputToks != tc.wantOut {
 				t.Errorf("OutputToks = %d, want %d", res.OutputToks, tc.wantOut)
@@ -391,7 +391,7 @@ func TestRunProviderCheck_CostMatchesPaymaster(t *testing.T) {
 	srv := openAIStub(t, `{"choices":[{"message":{"content":"Pong"},"finish_reason":"stop"}],
 	                       "usage":{"prompt_tokens":1000,"completion_tokens":500}}`)
 	p := llm.NewOpenAICompat(llm.OpenAICompatConfig{Name: "openai", BaseURL: srv.URL + "/v1", NoAuth: true})
-	target := checkTarget{Provider: "openai", PricingKey: "openai", Model: "gpt-5.5"}
+	target := CheckTarget{Provider: "openai", PricingKey: "openai", Model: "gpt-5.5"}
 
 	res, err := runProviderCheck(context.Background(), p, target, "")
 	if err != nil {
@@ -412,7 +412,7 @@ func TestRunProviderCheck_UpstreamErrorIsPreserved(t *testing.T) {
 	defer srv.Close()
 
 	p := llm.NewOpenAICompat(llm.OpenAICompatConfig{Name: "openai", BaseURL: srv.URL + "/v1", NoAuth: true})
-	target := checkTarget{Provider: "openai", PricingKey: "openai", Model: "nope"}
+	target := CheckTarget{Provider: "openai", PricingKey: "openai", Model: "nope"}
 
 	_, err := runProviderCheck(context.Background(), p, target, "")
 	if err == nil {
@@ -435,7 +435,7 @@ func TestRunProviderCheck_UnreachableEndpointIsAConnectionError(t *testing.T) {
 
 	p := llm.NewOpenAICompat(llm.OpenAICompatConfig{Name: "openai", BaseURL: url + "/v1", NoAuth: true})
 	_, err := runProviderCheck(context.Background(), p,
-		checkTarget{Provider: "openai", PricingKey: "openai", Model: "gpt-5.5"}, "")
+		CheckTarget{Provider: "openai", PricingKey: "openai", Model: "gpt-5.5"}, "")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -456,7 +456,7 @@ func TestRunProviderCheck_TimeoutIsAConnectionError(t *testing.T) {
 
 	p := llm.NewOpenAICompat(llm.OpenAICompatConfig{Name: "openai", BaseURL: srv.URL + "/v1", NoAuth: true})
 	_, err := runProviderCheck(ctx, p,
-		checkTarget{Provider: "openai", PricingKey: "openai", Model: "gpt-5.5"}, "")
+		CheckTarget{Provider: "openai", PricingKey: "openai", Model: "gpt-5.5"}, "")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -497,7 +497,7 @@ func TestRunProviderCheck_PromptReachesTheWire(t *testing.T) {
 
 			p := llm.NewOpenAICompat(llm.OpenAICompatConfig{Name: "openai", BaseURL: srv.URL + "/v1", NoAuth: true})
 			if _, err := runProviderCheck(context.Background(), p,
-				checkTarget{Provider: "openai", PricingKey: "openai", Model: "gpt-5.5"}, tc.prompt); err != nil {
+				CheckTarget{Provider: "openai", PricingKey: "openai", Model: "gpt-5.5"}, tc.prompt); err != nil {
 				t.Fatalf("runProviderCheck: %v", err)
 			}
 			if len(got.Messages) != 1 || got.Messages[0].Content != tc.want {
@@ -548,14 +548,14 @@ func TestCheckExitCode(t *testing.T) {
 func TestPrintProviderCheck_DoesNotPanic(t *testing.T) {
 	for _, res := range []providerCheckResult{
 		{
-			checkTarget: checkTarget{Provider: "openai", PricingKey: "openai", Codec: "openai-compat",
+			CheckTarget: CheckTarget{Provider: "openai", PricingKey: "openai", Codec: "openai-compat",
 				Endpoint: "https://api.openai.com/v1/chat/completions", Model: "gpt-5.5", KeySource: "$OPENAI_API_KEY"},
 			LatencyMS: 812, StopReason: "end_turn", InputToks: 1000, OutputToks: 500,
 			CostUSD: 0.016, Rates: rateCard{InputPerM: 4}, RateSource: rateFromTable, Reply: "Pong",
 		},
 		{
 			// The zero-usage path, plus a preset whose pricing key differs.
-			checkTarget: checkTarget{Provider: "ollama-openai", PricingKey: "ollama", Codec: "openai-compat",
+			CheckTarget: CheckTarget{Provider: "ollama-openai", PricingKey: "ollama", Codec: "openai-compat",
 				Endpoint: "http://localhost:11434/v1", Model: "qwen2.5:3b", KeySource: "none"},
 			RateSource: rateFromWildcard,
 		},
@@ -729,7 +729,7 @@ func TestRunProviderCheck_AnthropicWireShape(t *testing.T) {
 			p := llm.NewAnthropicWith(llm.AnthropicConfig{
 				BaseURL: srv.URL + "/v1/messages", APIKey: "test-key",
 			})
-			target := checkTarget{
+			target := CheckTarget{
 				Provider: "anthropic", PricingKey: "anthropic",
 				Codec: string(llm.CodecAnthropicMessages), Endpoint: srv.URL + "/v1/messages",
 				Model: "claude-haiku-4-5", KeySource: "--api-key",

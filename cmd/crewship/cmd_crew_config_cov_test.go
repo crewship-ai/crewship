@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -577,7 +578,7 @@ func TestShowCrewConfig_FetchErrors(t *testing.T) {
 	stub := covSetupCli5(t)
 	stub.OnGet("/api/v1/crews/"+covCrewIDCli5, clitest.ErrorResponse(500, "crew wedged"))
 	client := newAPIClient()
-	if err := showCrewConfig(client, covCrewIDCli5); err == nil || !strings.Contains(err.Error(), "crew wedged") {
+	if err := showCrewConfig(&cobra.Command{}, client, covCrewIDCli5); err == nil || !strings.Contains(err.Error(), "crew wedged") {
 		t.Errorf("expected crew error; got %v", err)
 	}
 
@@ -588,7 +589,7 @@ func TestShowCrewConfig_FetchErrors(t *testing.T) {
 	}))
 	stub2.OnGet("/api/v1/crews/"+covCrewIDCli5+"/provision", clitest.ErrorResponse(500, "provision wedged"))
 	client2 := newAPIClient()
-	if err := showCrewConfig(client2, covCrewIDCli5); err == nil || !strings.Contains(err.Error(), "provision wedged") {
+	if err := showCrewConfig(&cobra.Command{}, client2, covCrewIDCli5); err == nil || !strings.Contains(err.Error(), "provision wedged") {
 		t.Errorf("expected provision error; got %v", err)
 	}
 }

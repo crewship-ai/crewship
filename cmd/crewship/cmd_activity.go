@@ -128,7 +128,7 @@ here. For the finer per-run trace (LLM calls, exec, egress) use ` + "`crewship j
 		}
 
 		var body struct {
-			Entries []activityRow `json:"entries"`
+			Entries []ActivityRow `json:"entries"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -222,13 +222,13 @@ here. For the finer per-run trace (LLM calls, exec, egress) use ` + "`crewship j
 	},
 }
 
-// activityRow is one journal entry as the activity feed consumes it. The
+// ActivityRow is one journal entry as the activity feed consumes it. The
 // journal stores ids (actor_id / agent_id) and, for some entry types, slugs
 // in the payload — never the joined display names the old /activity endpoint
 // synthesised. The "from" column is therefore resolved client-side: an
 // assignment entry carries the assigner only as actor_id, so the CLI maps it
 // to a slug via the /api/v1/journal/lookup reference table (see fromSlug).
-type activityRow struct {
+type ActivityRow struct {
 	ID        string         `json:"id" yaml:"id"`
 	TS        string         `json:"ts" yaml:"ts"`
 	EntryType string         `json:"entry_type" yaml:"entry_type"`
@@ -244,7 +244,7 @@ type activityRow struct {
 // an explicit from_slug; assignments carry the assigner only as actor_id, so
 // we fall back to the agents lookup (actor_id, then agent_id). Mirrors the
 // dashboard's journalEntriesToFeedRows resolution so both surfaces agree.
-func (e activityRow) fromSlug(agents map[string]string) string {
+func (e ActivityRow) fromSlug(agents map[string]string) string {
 	if s := payloadString(e.Payload, "from_slug"); s != "" {
 		return s
 	}
@@ -256,7 +256,7 @@ func (e activityRow) fromSlug(agents map[string]string) string {
 
 // toSlug resolves the "to" participant: an explicit target_slug in the
 // payload, else the agents lookup keyed by target_id.
-func (e activityRow) toSlug(agents map[string]string) string {
+func (e ActivityRow) toSlug(agents map[string]string) string {
 	if s := payloadString(e.Payload, "target_slug"); s != "" {
 		return s
 	}
@@ -275,13 +275,13 @@ func payloadString(p map[string]any, key string) string {
 // the resolved participant slugs, so a downstream consumer gets the "from"
 // column without re-doing the actor_id→slug lookup the CLI already did.
 type activityExport struct {
-	activityRow
-	FromSlug string `json:"from_slug"`
-	ToSlug   string `json:"to_slug"`
+	ActivityRow `json:",inline" yaml:",inline"`
+	FromSlug    string `json:"from_slug" yaml:"from_slug"`
+	ToSlug      string `json:"to_slug" yaml:"to_slug"`
 }
 
-func (e activityRow) export(agents map[string]string) activityExport {
-	return activityExport{activityRow: e, FromSlug: e.fromSlug(agents), ToSlug: e.toSlug(agents)}
+func (e ActivityRow) export(agents map[string]string) activityExport {
+	return activityExport{ActivityRow: e, FromSlug: e.fromSlug(agents), ToSlug: e.toSlug(agents)}
 }
 
 // dedupeActivity collapses duplicate-event noise in the feed. The journal is
@@ -294,7 +294,7 @@ func (e activityRow) export(agents map[string]string) activityExport {
 // unique identity and is keyed by its own id, so a stray repeated row (e.g.
 // a stream replay after reconnect) is dropped too, while the distinct
 // assignment lifecycle rows (created/running/completed) all survive.
-func dedupeActivity(entries []activityRow) []activityRow {
+func dedupeActivity(entries []ActivityRow) []ActivityRow {
 	seen := make(map[string]struct{}, len(entries))
 	kept := entries[:0]
 	for _, e := range entries {
@@ -308,7 +308,7 @@ func dedupeActivity(entries []activityRow) []activityRow {
 	return kept
 }
 
-func activityDedupKey(e activityRow) string {
+func activityDedupKey(e ActivityRow) string {
 	if e.EntryType == "peer.conversation" {
 		if cid := payloadString(e.Payload, "thread_id"); cid != "" {
 			return "peer.conversation:" + cid

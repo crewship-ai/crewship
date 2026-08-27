@@ -100,9 +100,21 @@ Show full routine detail including the DSL definition.
 
 ```bash
 crewship routine get summarize-text
+crewship routine get summarize-text -f json | jq '.definition.steps'
+crewship routine get summarize-text -f yaml
 ```
 
 Output: human header (slug, name, author, invocations) + pretty-printed DSL JSON.
+`--format json|yaml|ndjson` returns the routine row exactly as the API sent it.
+
+<Note>
+  This command previously owned a **local** `--format` flag accepting only
+  `human` or `json`. Because the local flag took the name `format` it shadowed
+  the global one and captured its `-f` shorthand, so `-f json` worked while
+  `-f yaml` and `-f ndjson` were rejected outright — on a command whose help
+  advertised all five. The global flag now applies; `--format human` still
+  renders the human report.
+</Note>
 
 ---
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -18,12 +20,24 @@ func resolvedFormat(cmd *cobra.Command) string {
 	if b, err := cmd.Flags().GetBool("json"); err == nil && b {
 		return "json"
 	}
-	// Some older/local commands own a string --format flag (for example
-	// memory search). On an error path exitWithError receives the resolved
-	// Cobra command, not the command's successful formatter, so preserve the
-	// explicitly supplied local value here. Looking only at flagFormat loses
-	// it when the child shadows the persistent root flag.
+	// Some older/local commands own a string --format flag. On an error path
+	// exitWithError receives the resolved Cobra command, not the command's
+	// successful formatter, so preserve the explicitly supplied local value
+	// here. Looking only at flagFormat loses it when the child shadows the
+	// persistent root flag.
+	//
+	// A command that shadows "format" also loses the root flag's `-f`
+	// shorthand — pflag merges by name, so the persistent flag is never added
+	// and `-f json` fails with `unknown shorthand flag` rather than falling
+	// back (#2086). New commands must not do it; the ones that did are being
+	// unwound.
 	if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && f.Value.String() != "" {
+		return f.Value.String()
+	}
+	// --output-format is the deprecated, differently-NAMED alias left behind
+	// when such a shadow is removed: it keeps the old shorthand working
+	// without stealing "format" back and re-breaking `-f`.
+	if f := cmd.Flags().Lookup("output-format"); f != nil && f.Changed && f.Value.String() != "" {
 		return f.Value.String()
 	}
 	return cli.ResolveFormat(flagFormat, cliCfg)
@@ -36,12 +50,75 @@ func resolvedFormatter(cmd *cobra.Command) *cli.Formatter {
 	return cli.NewFormatter(resolvedFormat(cmd))
 }
 
+// emptyListNote renders the "there is nothing here" case of a list command.
+//
+// The shape it replaces was everywhere:
+//
+//	if len(rows) == 0 {
+//	    fmt.Println("No skills assigned to this agent.")
+//	    return nil
+//	}
+//	f := newFormatter()
+//	…
+//
+// which reads as a courtesy and is a contract break: the early return happens
+// BEFORE the format is resolved, so `-f json` on an empty result gets an
+// English sentence and exit 0. Worse, it fails only when the list is empty —
+// so it passes every test written against seeded data and breaks on the fresh
+// install (#2086).
+//
+// `empty` is the (nil or empty) typed slice, which Formatter renders as `[]`;
+// `note` is the sentence, which only a human ever sees.
+func emptyListNote(cmd *cobra.Command, empty any, note string) error {
+	return resolvedFormatter(cmd).AutoHuman(empty, func() { fmt.Println(note) })
+}
+
 // skipConfirm reports whether the operator pre-confirmed a destructive
 // command. --yes is the CLI-wide convention (see confirmAction); a few
 // commands grew --force first and keep it as an alias. Only commands whose
 // --force means "skip the confirmation prompt" route through here — a
 // --force that bypasses a *safety guard* (e.g. memory restore's canonical-
 // path confinement) must NOT be conflated with mere pre-confirmation.
+// tabFlush carries a tabwriter's Flush error out of AutoHuman's human
+// renderer.
+//
+// A tabwriter buffers, so Flush is where a command's whole table either
+// reaches stdout or does not: a redirect to a full disk (ENOSPC) or a closed
+// pipe (EPIPE) fails there and nowhere else. Every list command used to end
+// `return w.Flush()`, which made that the command's exit status.
+//
+// AutoHuman's human renderer is a `func()` and cannot return an error, so
+// moving the rendering inside one turned six of those into `_ = w.Flush()` —
+// output dropped, error discarded, exit 0. Record the failure here and return
+// it after AutoHuman instead:
+//
+//	var flush tabFlush
+//	if err := resolvedFormatter(cmd).AutoHuman(rows, func() {
+//	        w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+//	        …
+//	        flush.of(w)
+//	}); err != nil {
+//	        return err
+//	}
+//	return flush.err
+//
+// The machine formats need none of this — Formatter.JSON and friends return
+// their encoder's error directly.
+type tabFlush struct{ err error }
+
+// flushable is what tabFlush.of accepts: text/tabwriter.Writer, and equally a
+// bufio.Writer, for a renderer that buffers some other way.
+type flushable interface{ Flush() error }
+
+// of flushes w, keeping the FIRST error seen. A renderer that flushes more
+// than once (a table, then a footer) reports the failure that started it
+// rather than the consequent one.
+func (t *tabFlush) of(w flushable) {
+	if err := w.Flush(); err != nil && t.err == nil {
+		t.err = err
+	}
+}
+
 func skipConfirm(cmd *cobra.Command) bool {
 	if b, err := cmd.Flags().GetBool("yes"); err == nil && b {
 		return true

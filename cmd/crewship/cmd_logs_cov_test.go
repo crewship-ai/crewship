@@ -21,9 +21,19 @@ func covLogsAgents() []map[string]any {
 	}
 }
 
+// covStubLogsAgents registers both halves of the agent resolve `logs` does:
+// the LIST a slug scans, and the single-resource GET that a CUID goes to
+// directly and that a resolved slug then reads the crew id out of.
+func covStubLogsAgents(s *clitest.StubServer) {
+	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+	for _, a := range covLogsAgents() {
+		s.OnGet("/api/v1/agents/"+a["id"].(string), clitest.JSONResponse(200, a))
+	}
+}
+
 func TestLogsRunE_PrintsEntries(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+	covStubLogsAgents(s)
 	s.OnGet("/api/v1/agents/cagentaaaaaaaaaaaaaaaa/logs", clitest.JSONResponse(200, []map[string]string{
 		{"ts": "2026-06-10T10:00:00Z", "level": "info", "agent": "viktor", "event": "output", "content": "hello world"},
 		{"ts": "2026-06-10T10:00:01Z", "level": "error", "agent": "viktor", "event": "error", "content": "exploded"},
@@ -58,7 +68,7 @@ func TestLogsRunE_PrintsEntries(t *testing.T) {
 
 func TestLogsRunE_ResolvesByAgentID(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+	covStubLogsAgents(s)
 	s.OnGet("/api/v1/agents/cagentaaaaaaaaaaaaaaaa/logs", clitest.JSONResponse(200, []map[string]string{}))
 
 	_ = covCaptureStdoutCli9(t, func() {
@@ -69,11 +79,18 @@ func TestLogsRunE_ResolvesByAgentID(t *testing.T) {
 	if got := len(s.CallsFor("GET", "/api/v1/agents/cagentaaaaaaaaaaaaaaaa/logs")); got != 1 {
 		t.Errorf("logs endpoint calls = %d, want 1", got)
 	}
+	// A CUID goes straight to /api/v1/agents/{id} and never touches the
+	// LIST, which is the only agent lookup with no page ceiling on it
+	// (#2106). Reading the list here would put the by-id path back behind
+	// the route's default LIMIT 100.
+	if got := len(s.CallsFor("GET", "/api/v1/agents")); got != 0 {
+		t.Errorf("LIST reads = %d, want 0 — a CUID must not go through the paginated scan", got)
+	}
 }
 
 func TestLogsRunE_AgentNotFound(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+	covStubLogsAgents(s)
 
 	err := logsCmd.RunE(logsCmd, []string{"ghost"})
 	if err == nil || !strings.Contains(err.Error(), "agent not found: ghost") {
@@ -83,7 +100,7 @@ func TestLogsRunE_AgentNotFound(t *testing.T) {
 
 func TestLogsRunE_AgentWithoutCrew(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+	covStubLogsAgents(s)
 
 	err := logsCmd.RunE(logsCmd, []string{"nocrew"})
 	if err == nil || !strings.Contains(err.Error(), "agent has no crew") {
@@ -93,7 +110,7 @@ func TestLogsRunE_AgentWithoutCrew(t *testing.T) {
 
 func TestLogsRunE_FollowFailsWithoutWSToken(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+	covStubLogsAgents(s)
 	s.OnGet("/api/v1/agents/cagentaaaaaaaaaaaaaaaa/logs", clitest.JSONResponse(200, []map[string]string{}))
 	s.OnGet("/api/v1/ws-token", clitest.ErrorResponse(500, "no ws for you"))
 	covSetFlagCli9(t, logsCmd, "follow", "true")
@@ -118,6 +135,10 @@ func TestLogsRunE_FollowStreamsEvents(t *testing.T) {
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(covLogsAgents())
+	})
+	mux.HandleFunc("/api/v1/agents/cagentaaaaaaaaaaaaaaaa", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(covLogsAgents()[0])
 	})
 	mux.HandleFunc("/api/v1/agents/cagentaaaaaaaaaaaaaaaa/logs", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -198,7 +219,7 @@ func TestLogsRunE_DecodeErrors(t *testing.T) {
 	})
 	t.Run("logs decode", func(t *testing.T) {
 		s := covStubCli9(t)
-		s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+		covStubLogsAgents(s)
 		s.OnGet("/api/v1/agents/cagentaaaaaaaaaaaaaaaa/logs", clitest.TextResponse(200, "{nope"))
 		if err := logsCmd.RunE(logsCmd, []string{"viktor"}); err == nil {
 			t.Error("expected logs decode error")
@@ -224,7 +245,7 @@ func TestLogsRunE_AuthAndServerErrors(t *testing.T) {
 	})
 	t.Run("logs endpoint fails", func(t *testing.T) {
 		s := covStubCli9(t)
-		s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+		covStubLogsAgents(s)
 		s.OnGet("/api/v1/agents/cagentaaaaaaaaaaaaaaaa/logs", clitest.ErrorResponse(502, "proxy sad"))
 		err := logsCmd.RunE(logsCmd, []string{"viktor"})
 		if err == nil || !strings.Contains(err.Error(), "proxy sad") {
