@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
@@ -121,7 +122,7 @@ func TestRoutineWebhooksListRunE_JSONRedactsToken(t *testing.T) {
 	if !strings.Contains(out, "***abcd") {
 		t.Errorf("redacted token missing: %q", out)
 	}
-	var rows []webhookRow
+	var rows []WebhookRow
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
 		t.Fatalf("--json output not parseable: %v", err)
 	}
@@ -210,6 +211,53 @@ func TestRoutineWebhooksCreateRunE_HappyPath_SecretRevealOnce(t *testing.T) {
 	}
 	if body["enabled"] != true {
 		t.Errorf("enabled = %v, want true", body["enabled"])
+	}
+}
+
+// `routine webhooks create -f yaml` must render, not crash.
+//
+// The result is an anonymous struct embedding the row plus the public URL. The
+// embedded field carried no tag at all, so encoding/json flattened it and
+// yaml.v3 tried to nest it under the type name — and because the row type was
+// UNEXPORTED, yaml.v3 could not reflect into it and the whole command panicked
+// with "cannot return value obtained from unexported field or method".
+//
+// Before the format sweep this was unreachable: the command ignored `--format`
+// and always printed the human block. Making it honour the flag turned a
+// latent shape error into a reachable crash, which is strictly worse than the
+// prose-on-stdout it replaced — the same trade the persona view fix caught.
+func TestRoutineWebhooksCreateRunE_YAMLDoesNotPanicAndInlinesTheRow(t *testing.T) {
+	stub := covSetupCli4(t)
+	created := covWebhookRow("wh-9", "github-prs", "pr-review", "tok_new_9999", true, true)
+	stub.OnPost(covWebhooksPath, clitest.JSONResponse(201, created))
+
+	c := covFreshCmd(routineWebhooksCreateCmd, declareWebhookCreateFlags)
+	covSetFlagsCli4(t, c, map[string]string{
+		"slug":     "pr-review",
+		"base-url": "https://hooks.example.com/",
+	})
+	setFormatCov(t, "yaml")
+
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, nil) })
+	if err != nil {
+		t.Fatalf("RunE under -f yaml: %v", err)
+	}
+
+	var doc map[string]any
+	if uerr := yaml.Unmarshal([]byte(out), &doc); uerr != nil {
+		t.Fatalf("-f yaml output is not YAML: %v\ngot:\n%s", uerr, out)
+	}
+	// Inlined, not nested: the row's fields sit at the top level beside
+	// public_url, exactly as they do under -f json.
+	if doc["id"] != "wh-9" {
+		t.Errorf("id = %v, want wh-9 at the top level — the embedded row nested instead of inlining:\n%s",
+			doc["id"], out)
+	}
+	if _, nested := doc["webhookrow"]; nested {
+		t.Errorf("the embedded row nested under its type name:\n%s", out)
+	}
+	if doc["public_url"] != "https://hooks.example.com/api/v1/webhooks/tok_new_9999" {
+		t.Errorf("public_url = %v", doc["public_url"])
 	}
 }
 

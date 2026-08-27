@@ -47,6 +47,7 @@ func TestMilestoneListRunE_HappyPath(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	covSetupCli8(t, stub.URL())
+	stubProjectDirectory(stub, "proj-1")
 	target := "2026-07-01"
 	stub.OnGet("/api/v1/projects/proj-1/milestones", clitest.JSONResponse(200, []map[string]any{
 		{
@@ -76,11 +77,34 @@ func TestMilestoneListRunE_APIError(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	covSetupCli8(t, stub.URL())
+	// "ghost" resolves — the project exists — and the milestones endpoint is
+	// what fails, which is the error this case is about.
+	stubProjectDirectory(stub, "ghost")
 	stub.OnGet("/api/v1/projects/ghost/milestones", clitest.ErrorResponse(404, "Project not found"))
 
 	err := projectMilestoneListCmd.RunE(projectMilestoneListCmd, []string{"ghost"})
 	if err == nil || !strings.Contains(err.Error(), "Project not found") {
 		t.Errorf("expected not-found error; got %v", err)
+	}
+}
+
+// A project reference that resolves to nothing fails client-side, with the
+// exit code the contract assigns to a miss, and never reaches the server.
+func TestMilestoneListRunE_UnresolvableProject(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli8(t, stub.URL())
+	stubProjectDirectory(stub, "apollo")
+
+	err := projectMilestoneListCmd.RunE(projectMilestoneListCmd, []string{"no-such-project"})
+	if err == nil || !strings.Contains(err.Error(), "project not found: no-such-project") {
+		t.Fatalf("expected a client-side miss; got %v", err)
+	}
+	if got := cli.ExitCodeFor(err); got != cli.ExitNotFound {
+		t.Errorf("exit code = %d, want ExitNotFound (%d)", got, cli.ExitNotFound)
+	}
+	if calls := stub.CallsFor("GET", "/api/v1/projects/no-such-project/milestones"); len(calls) != 0 {
+		t.Errorf("an unresolvable reference still reached the server: %v", calls)
 	}
 }
 
@@ -102,6 +126,7 @@ func TestMilestoneCreateRunE_HappyPath(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	covSetupCli8(t, stub.URL())
+	stubProjectDirectory(stub, "proj-1")
 	stub.OnPost("/api/v1/projects/proj-1/milestones", clitest.JSONResponse(200, map[string]any{
 		"id": "cmilestone012345678901", "name": "Beta", "status": "active",
 	}))
@@ -131,6 +156,7 @@ func TestMilestoneCreateRunE_APIError(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	covSetupCli8(t, stub.URL())
+	stubProjectDirectory(stub, "proj-1")
 	stub.OnPost("/api/v1/projects/proj-1/milestones", clitest.ErrorResponse(409, "milestone name already exists"))
 	covSetFlagCli8(t, projectMilestoneCreateCmd, "name", "Beta")
 

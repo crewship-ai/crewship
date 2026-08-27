@@ -58,9 +58,16 @@ later steps as {{ run.metadata.x }}. Each flag takes a JSON object.`,
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		b, _ := json.MarshalIndent(body.Metadata, "", "  ")
-		fmt.Printf("Updated metadata for %s:\n%s\n", args[0], string(b))
-		return nil
+		// The human form wraps the metadata in a "Updated metadata for X:"
+		// header; the machine form is the run id plus the resulting document,
+		// because a caller applying ops needs to read the result back.
+		return resolvedFormatter(cmd).AutoHuman(struct {
+			RunID    string         `json:"run_id"`
+			Metadata map[string]any `json:"metadata"`
+		}{args[0], body.Metadata}, func() {
+			b, _ := json.MarshalIndent(body.Metadata, "", "  ")
+			fmt.Printf("Updated metadata for %s:\n%s\n", args[0], string(b))
+		})
 	},
 }
 
@@ -86,29 +93,45 @@ var routineTreeCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Nodes []struct {
-				ID           string  `json:"id"`
-				ParentID     string  `json:"parent_id"`
-				PipelineSlug string  `json:"pipeline_slug"`
-				Status       string  `json:"status"`
-				TriggeredVia string  `json:"triggered_via"`
-				CostUSD      float64 `json:"cost_usd"`
-			} `json:"nodes"`
+			Nodes []runTreeNode `json:"nodes"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "RUN ID\tPARENT\tROUTINE\tSTATUS\tVIA\tCOST")
-		for _, n := range body.Nodes {
-			parent := n.ParentID
-			if parent == "" {
-				parent = "(root)"
-			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t$%.4f\n", n.ID, parent, n.PipelineSlug, n.Status, n.TriggeredVia, n.CostUSD)
+		if body.Nodes == nil {
+			body.Nodes = []runTreeNode{}
 		}
-		return w.Flush()
+		// The human table substitutes "(root)" for an empty parent_id; the
+		// machine rows keep the empty string, because "" is how a consumer
+		// already tests for a root and "(root)" is a string it would have to
+		// know to special-case.
+		var flush tabFlush
+		if err := resolvedFormatter(cmd).AutoHuman(body.Nodes, func() {
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "RUN ID\tPARENT\tROUTINE\tSTATUS\tVIA\tCOST")
+			for _, n := range body.Nodes {
+				parent := n.ParentID
+				if parent == "" {
+					parent = "(root)"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t$%.4f\n", n.ID, parent, n.PipelineSlug, n.Status, n.TriggeredVia, n.CostUSD)
+			}
+			flush.of(w)
+		}); err != nil {
+			return err
+		}
+		return flush.err
 	},
+}
+
+// runTreeNode is one run in a `routine tree` result.
+type runTreeNode struct {
+	ID           string  `json:"id" yaml:"id"`
+	ParentID     string  `json:"parent_id" yaml:"parent_id"`
+	PipelineSlug string  `json:"pipeline_slug" yaml:"pipeline_slug"`
+	Status       string  `json:"status" yaml:"status"`
+	TriggeredVia string  `json:"triggered_via" yaml:"triggered_via"`
+	CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
 }
 
 var routineSignalCmd = &cobra.Command{

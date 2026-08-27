@@ -124,7 +124,13 @@ func resolveAgentID(client *cli.Client, slugOrID string) (string, error) {
 		// instead of forwarding a doomed id.
 	}
 
-	resp, err := client.Get("/api/v1/agents")
+	// The route paginates — parseListPagination(r, 100, 500) in
+	// internal/api/agents.go, and the list query ends in LIMIT ? OFFSET ? —
+	// so an unqualified GET scans the first 100 agents and resolves nothing
+	// past them (#2106). 500 is the route's own ceiling; a workspace larger
+	// than that is what the CUID fast path above is for, since a direct
+	// /api/v1/agents/{id} has no ceiling at all.
+	resp, err := client.Get("/api/v1/agents?limit=500")
 	if err != nil {
 		return "", fmt.Errorf("resolve agent: %w", err)
 	}
@@ -175,7 +181,13 @@ func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
 		// slug scan below instead of forwarding a doomed id (#1075).
 	}
 
-	resp, err := client.Get("/api/v1/crews")
+	// Same ceiling as the agent list, for the same reason:
+	// parseListPagination(r, 100, 500) in internal/api/crews_query.go and a
+	// query ending in LIMIT ? OFFSET ?. An unqualified GET scans the first
+	// 100 crews and resolves nothing past them (#2106) — which now reaches
+	// further than it did, since `skill proposed list|approve|reject --crew`
+	// takes a slug through here rather than demanding the CUID.
+	resp, err := client.Get("/api/v1/crews?limit=500")
 	if err != nil {
 		return "", fmt.Errorf("resolve crew: %w", err)
 	}
@@ -197,6 +209,66 @@ func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
 		}
 	}
 	return "", cli.NotFoundf("crew not found: %s", slugOrID)
+}
+
+// resolveProjectID maps a slug or CUID to the project's CUID.
+//
+// Same shape as resolveCrewID, and for the same reason: GET
+// /api/v1/projects/{projectId} keys on the id alone, so `project get`,
+// `project milestone list` and `project milestone create` — all of which
+// advertise `<id-or-slug>` in their help and in docs/cli/project.mdx — used to
+// 404 on a slug that `project list` had just printed (#2086).
+//
+// The CUID fast path is verified rather than trusted: slugify turns spaces
+// into dashes, but a single-word name still slugs to bare lowercase
+// alphanumerics, so a project called "Consolidationpipeline" produces a
+// 21-character slug that satisfies looksLikeCUID. A shape match that misses
+// falls through to the LIST scan instead of forwarding a doomed id (#1075).
+func resolveProjectID(client *cli.Client, slugOrID string) (string, error) {
+	if looksLikeCUID(slugOrID) {
+		ok, err := cuidExists(client, "/api/v1/projects/"+slugOrID)
+		if err != nil {
+			return "", fmt.Errorf("resolve project: %w", err)
+		}
+		if ok {
+			return slugOrID, nil
+		}
+	}
+
+	resp, err := client.Get("/api/v1/projects")
+	if err != nil {
+		return "", fmt.Errorf("resolve project: %w", err)
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return "", err
+	}
+
+	var projects []struct {
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
+	}
+	if err := cli.ReadJSON(resp, &projects); err != nil {
+		return "", err
+	}
+
+	available := make([]string, 0, len(projects))
+	for _, p := range projects {
+		if p.Slug == slugOrID {
+			return p.ID, nil
+		}
+		if p.Slug != "" {
+			available = append(available, p.Slug)
+		}
+	}
+	if len(available) == 0 {
+		return "", cli.NotFoundf("project not found: %s (no projects in this workspace)", slugOrID)
+	}
+	if suggestions := nearestSlugs(slugOrID, available, 3); len(suggestions) > 0 {
+		return "", cli.NotFoundf("project not found: %s. Did you mean: %s?",
+			slugOrID, strings.Join(suggestions, ", "))
+	}
+	return "", cli.NotFoundf("project not found: %s. Available: %s",
+		slugOrID, strings.Join(truncateList(available, 8), ", "))
 }
 
 // resolveIntegrationID maps a name or CUID to the integration's CUID.

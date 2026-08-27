@@ -155,6 +155,36 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
+  ⚠️ **Behaviour change: the left column navigates between conversations, and
+  the per-agent "New session" control it replaced is gone.** The old surface
+  put the roster in the primary navigation and made you pick an agent to reach
+  the thing you came for — seven agents at two lines each, most with nothing to
+  open, in front of the one row anybody wanted. Threads are now the top level,
+  newest first, with the agent's face carrying the attribution its own row used
+  to; agents nobody has talked to fold into a single "not started yet" row. The
+  facets are All / Unread / Live: "Done" is gone because it read `ended_at`,
+  which nothing writes, and "Live" now reads the agent's status off the
+  workspace event stream instead of a column frozen at page load. Deep links
+  are unchanged — `/chat/<slug>?session=` is still the shape every "Open chat"
+  link and `crewship open` builds, and switching threads is a `replaceState`
+  rather than a route change, so the dashboard chrome no longer rebuilds to
+  look at a different name.
+
+  The transcript changed with it: fixed gutters with agent and user avatars,
+  reasoning closed by default, and the hover actions hidden until you want
+  them. Chain of thought is no longer rendered open — it is available, not in
+  the way. The **Files** panel hides internal files behind an explicit toggle,
+  and — the reason it is in this section rather than the next — files it lists
+  now actually open. Agent-written files are owned by the container's UID and
+  crewshipd runs as the host user, so `List` succeeded on the directory while
+  every `Read` took `EACCES`; the panel listed a full tree and answered "file
+  not found" for every entry in it. Downloads now replay through the crew
+  container on a permission error, the way saves have since #922, and a file
+  that exists but cannot be read reports that instead of claiming to be
+  missing. Four published chat guides described the surface this replaces and
+  have been rewritten against the one that ships.
+
 - **⚠️ Proxied agent calls start billing for real (#2051).** ⚠️ **Behaviour
   change: budget warnings and hard stops that have never fired on a crew can
   fire on the first deploy.** Every LLM call an agent made through the sidecar
@@ -263,6 +293,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Agent file downloads no longer expose generated MCP credentials (#2069,
+  #2140).** Crewship writes resolved HTTP headers and process environment
+  values into each CLI's native MCP config with mode `0600`. The Files API's
+  new container-side read fallback could nevertheless read those bytes as the
+  agent UID and return them to any workspace role with read access. Downloads
+  now reject the six exact generated config paths before IPC, while ordinary
+  dotfiles and user-authored skills below `.codex/`, `.gemini/`, and similar
+  directories remain available.
 - **The agent's raw stdout+stderr capture reached the audit journal without
   passing through the credential scrubber (#2133).** `streamOutput`'s
   end-of-stream `exec.output_chunk` emit wrote `captureBuf` — the process's
@@ -713,6 +751,52 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   the text survives, and a test pins that difference rather than leaving it to
   be rediscovered.
 
+- **`crewship agent logs` could not print a log line for any agent.** It kept a
+  second reader of its own that decoded the route's JSON *array* into a
+  `map[string]interface{}`, so every invocation died on `cannot unmarshal array
+  into Go value of type map[string]interface {}`; it also sent its line count as
+  `tail`, a parameter the handler has never read (it is `limit`), and printed
+  the container's stdout unsanitised. The duplicate is gone — the subcommand now
+  delegates to the same `runAgentLogs` behind the top-level `crewship logs`.
+  Consolidating them exposed a shared ceiling: the slug scan behind *every*
+  agent lookup read `GET /api/v1/agents` with no `limit`, so it saw only the
+  route's default first 100 rows and answered "agent not found" for an agent
+  that exists past them. The scan now sends the route's own ceiling (`limit=500`),
+  and a CUID goes back to the single-resource `GET /api/v1/agents/{id}`, which
+  has no ceiling at all — so `agent runs`, `agent get` and `run` are uncapped
+  too, not just the log commands. `GET /api/v1/crews` paginates identically and
+  the crew resolver had the same unqualified read, so it got the same ceiling
+  lifted; a workspace past **500** still needs an id rather than a slug, since
+  500 is where both routes stop. (`GET /api/v1/projects` has no `LIMIT` at all,
+  so the project resolver needs nothing.)
+
+- **`crewship project get`, `project milestone list|create` and
+  `skill proposed list|approve|reject` refused the slug their own help
+  advertised.** Each pasted the argument straight into a route that keys on the
+  id, so the documented invocation came back "not found" while the CUID form
+  worked. All of them now resolve slug-or-id through the shared reader, which
+  costs one request for a CUID and carries the "Did you mean" / "Available:"
+  hints on a miss.
+
+- **`crewship memory status` reported failure as success.** A scope that could
+  not be opened printed SQLite's own `unable to open database file (14)` — a
+  string that names neither the path nor the cause — and the command returned
+  zero regardless, so `crewship memory status || handle_it` was dead code in
+  every script that had it. Failures now exit 3 when no scope could be read, and
+  the message names the directory it tried and which of the causes it was: the
+  path is missing, a file sits where the directory belongs, or the directory is
+  there and unreadable. That last one needed a real probe — `os.Stat` succeeds
+  on a directory the caller cannot enter and reports `IsDir()`, which is exactly
+  the uid-1001 container case the wording describes. `memory reindex` now
+  creates the index directory it is asked to build in, because "build an index
+  with `crewship memory reindex`" was advice that looped back into the identical
+  error; it still refuses to invent a missing *base* path, since that is a typo,
+  and answers 3 there like `status` does. Where it cannot create the directory —
+  a base path that exists but is not writable — it now says so and names the
+  parent, rather than dropping the `mkdir` error and letting the check behind it
+  report the directory as merely missing, which is the wording that advises
+  running `crewship memory reindex`: the command that had just failed.
+
 - **A port-expose URL on Colima returned a bare `502` and explained nothing.**
   The capability-URL proxy dials the crew container on its Docker bridge IP,
   which is reachable only where crewshipd shares a network namespace with
@@ -800,6 +884,124 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   the same skew before anything is written. The drop itself is unchanged —
   what is gone is the silence, which is what made this shape of loss
   (#1437, #1444, #1973) discoverable only months later.
+
+- **44 commands advertised `-f json` and did not honour it.** `--format`/`-f`
+  is a persistent flag on the root command, so every one of the ~800 commands
+  prints `Output format: table|json|yaml|ndjson|quiet` in its help — and the
+  platform's premise is that agents drive this CLI, which means that flag is
+  what the pipelines depend on. A sweep of the whole tree found four ways it
+  was broken, all of them silent and all exiting 0:
+
+  - **34 reporting commands never resolved the format at all** and printed
+    human text — sometimes ANSI-coloured — under `-f json`. Among them
+    `config show`, `config validate`, `notify status`, `telemetry status`,
+    `server current`, `crew status`, `crew config --show`, `persona view`,
+    `persona history`, `lint`, `logs`, `db migration-status`,
+    `admin sessions list`, `memory search`, `memory status`, `backup metrics`,
+    and eleven of the `routine` family.
+  - **Nine more resolved it and wrote prose to stdout first**, so the JSON was
+    real and the *stream* still would not parse. `digest enable` printed nine
+    advisory lines and then handed `AutoHuman` an empty human renderer.
+  - **Empty lists came back as `null`, not `[]`.** Go marshals an unfilled
+    slice as `null`, so a list command answered `[]` on a populated workspace
+    and `null` on an empty one — `crewship prompt list -f json | jq '.[]'`
+    worked in development and failed on a fresh install. Fixed once, in the
+    shared `cli.Formatter`, rather than at each call site.
+  - **Two commands owned a local flag named `format`**, which shadows the root
+    persistent flag *and takes its `-f` shorthand with it*. `crewship memory
+    search … -f json` therefore did not fall back to human output — it failed
+    with `unknown shorthand flag: 'f'`. `routine get` accepted `-f json` and
+    rejected `-f yaml` and `-f ndjson` outright.
+
+  Human output is byte-identical throughout; the machine formats are what
+  changed. Machine payloads also stop inheriting the human view's display
+  truncation, so `routine active -f json` carries the full run id (the table
+  cuts it at 24 characters, and a truncated id fed back to `routine cancel`
+  is a 404) and `routine versions -f json` the full definition hash.
+
+  Four guards keep it from recurring: two walk the entire command tree and
+  fail the build on a new offender, one ratchets the remaining
+  mutation-receipts-on-stdout population downward, and one keeps the exemption
+  table from rotting. (#2086)
+
+- **`crewship memory search -F` is deprecated.** It survives as
+  `--output-format`, a differently-named alias, so existing scripts keep
+  working; taking the name `format` back would re-break `-f` on that command.
+  It warns and will be removed.
+
+- **`crewship routine get --format human|json` is now the global flag.** The
+  local flag is gone, so all five formats work. `--format human` still renders
+  the human report. `--format xml` no longer errors — an unrecognised format
+  renders as human, uniformly, the way it does on every other command.
+
+- **`crewship routine versions show` no longer prints a non-JSON body to
+  stdout and exits 0.** A 200 whose body does not parse is now an error that
+  names the problem, which is what the command's own help ("pipe to jq")
+  promises.
+
+- **The machine error envelope disagreed with itself across formats.** A
+  failing command emits `cli.ErrorEnvelope` on stderr under
+  `-f json|yaml|ndjson` — every command but `crewship wait`, which owns its
+  run-outcome exit codes and prints plain-text `[wait] error:` diagnostics by
+  design — and it carried `json:` tags only, so the same
+  failure came back as `exit_code` under json and `exitcode` under yaml, with
+  `status: 0`, `detail: ""` and `extensions: {}` added on the yaml side
+  because `omitempty` went with the tag. A caller that branches on the exit
+  code found nothing at that key in one of the two formats it was told were
+  the same data. The failure side now matches the success side (#1211).
+
+- **`crewship routine webhooks create -f yaml` crashed.** The result is an
+  anonymous struct embedding the webhook row beside the public URL, and the
+  embedded field carried no tag: `encoding/json` flattens that, yaml.v3 nests
+  it under the type name — and because the row type was unexported, yaml.v3
+  could not reflect into it at all and the command panicked with a stack
+  trace. Making the command honour `--format` is what turned a latent shape
+  error into a reachable crash. Four more of the same shape (`activity`
+  export, `model price`, `notifychannel create`, `provider check`) are fixed
+  with it: each embedded type is now exported and inlined in both formats. The
+  static guard that caught the first instance only looked at embedded fields
+  that *already* declared `json:",inline"`, so an untagged one — the actual
+  failure mode — was invisible to it; it now checks every embedded field in a
+  json-tagged struct.
+
+- **`digest enable --crew <slug> -f json` emitted prose before the document.**
+  The routine-creation path prints a server-side dry-run progress line, and it
+  went straight to stdout, so on the one invocation that creates the routine
+  the machine output was a sentence followed by an object. It goes through the
+  same note buffer as the rest of the command's human output now.
+
+- **`server current -f json` could return terminal escape codes in a value.**
+  `directory_override_hint` became a machine field in this change while still
+  being built with the colour codes the human line wants around it. The field
+  is plain text now and the colour is applied by the renderer.
+
+- **Four commands rounded large numbers into their own machine output.**
+  `backup metrics`, `backup canary`, `integration tools refresh` and
+  `routine versions show` decoded the server's document into
+  `any`/`map[string]any` before re-encoding it, and `encoding/json` makes
+  every number a `float64` on the way in — so anything past 53 bits (a
+  nanosecond timestamp, an id) came back rounded, and the command silently
+  edited the document it was asked to relay. `routine versions show` is the
+  one that matters most: it returns a routine's stored DSL, and a limit or an
+  id that comes back subtly different is a definition that no longer matches
+  the hash it was stored under. They pass `cli.RawJSON` through instead, which
+  is byte-identical under json/ndjson and decodes via `json.Number` under
+  yaml. `crew config --show` took the same treatment for the stored config
+  blobs it echoes.
+
+- **`-f yaml` named fields after Go identifiers on the payloads this sweep
+  newly reaches.** Exporting the embedded types above stopped `-f yaml`
+  crashing on `provider check`, `model price`, `notifychannel add`,
+  `activity` export and `routine webhooks create` — which promoted their keys
+  from unreachable to part of the machine contract, and yaml.v3 was deriving
+  each one from the lowercased Go field name (`pricing_key` as `pricingkey`,
+  `input_tokens` as `inputtoks`, `per_mtok` as `permtok`). Every field on
+  those payloads now carries a matching `yaml:` tag. Two result payloads that
+  were anonymous structs (`routine webhooks create` and `url`) are named types
+  now, and `notifychannel add`'s too, because the key-parity guard cannot
+  cover a type it cannot name — and that guard now fails the build when an
+  inlining payload is missing from its list, which is how these were found to
+  be missing from it in the first place.
 
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and

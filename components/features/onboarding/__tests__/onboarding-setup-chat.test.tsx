@@ -40,6 +40,10 @@ vi.mock("@/hooks/use-chat", async () => {
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ session: { user: { id: "user-1" } }, signOut: vi.fn() }),
   useSession: () => ({ data: { user: { id: "user-1" } } }),
+  // The transcript draws the reader's own face beside their messages and reads
+  // the session through the provider-tolerant variant, so the mock has to
+  // carry it too — without it every user turn lands in its error boundary.
+  useSessionSafe: () => ({ data: { user: { id: "user-1" } }, status: "authenticated" }),
 }))
 
 // Global module-level store (no provider needed) — stubbed to a fixed id so

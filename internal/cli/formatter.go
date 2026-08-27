@@ -191,7 +191,50 @@ func glamourStyleForEnv() string {
 	return "dark"
 }
 
+// emptySlice replaces a nil slice with an empty one of the same type, and
+// leaves everything else alone.
+//
+// Go marshals a nil slice as `null` and an empty slice as `[]`, and which one
+// a command produces depends on whether its accumulator loop ran — `var rows
+// []row` with no matching entries stays nil. So a list command answers `[]`
+// when the workspace has items and `null` when it does not, which is the one
+// case a caller most needs to survive: `crewship prompt list -f json | jq
+// '.[]'` fails with "Cannot iterate over null" on a fresh install and works
+// everywhere else, so the pipeline that breaks is the one nobody tested.
+//
+// Fixing it at each call site is a fix the next list command reintroduces by
+// default — three commands had grown the `if rows == nil { rows = []T{} }`
+// line and forty had not. Deciding it here, in the encoder every command's
+// machine output already goes through, is what makes forgetting impossible.
+//
+// internal/api settled the same question on the server side; see
+// TestListUsers_EmptyIsArray. This is the CLI half of that contract.
+//
+// A nil MAP is deliberately left as `null`. `{}` and `null` mean different
+// things for an object-shaped field — "no properties" versus "absent" — and
+// no pipeline iterates a map the way `.[]` iterates an array.
+func emptySlice(v interface{}) interface{} {
+	if v == nil {
+		return v
+	}
+	rv := reflect.ValueOf(v)
+	// A typed nil pointer to a slice would panic on Elem(); only unwrap when
+	// there is something to unwrap.
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return v
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() == reflect.Slice && rv.IsNil() {
+		return reflect.MakeSlice(rv.Type(), 0, 0).Interface()
+	}
+	return v
+}
+
 // JSON prints data as indented JSON.
+//
+// A nil slice is encoded as `[]`, never `null` — see emptySlice.
 //
 // The renderers below name themselves on failure, and they do it here at the
 // leaf rather than at their call sites. Most of what reaches these returns is
@@ -203,15 +246,19 @@ func glamourStyleForEnv() string {
 func (f *Formatter) JSON(v interface{}) error {
 	enc := json.NewEncoder(f.Writer)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
+	if err := enc.Encode(emptySlice(v)); err != nil {
 		return fmt.Errorf("render JSON: %w", err)
 	}
 	return nil
 }
 
 // YAML prints data as YAML.
+//
+// A nil slice is encoded as `[]`, never `null` — see emptySlice. YAML has the
+// same hazard as JSON and the same fix: `null` is not a sequence, so a
+// consumer that iterates the document breaks only when the list is empty.
 func (f *Formatter) YAML(v interface{}) error {
-	if err := yaml.NewEncoder(f.Writer).Encode(v); err != nil {
+	if err := yaml.NewEncoder(f.Writer).Encode(emptySlice(v)); err != nil {
 		return fmt.Errorf("render YAML: %w", err)
 	}
 	return nil
@@ -276,6 +323,36 @@ func (f *Formatter) WriteNDJSONRow(v interface{}) error {
 		return fmt.Errorf("write NDJSON row: %w", err)
 	}
 	return nil
+}
+
+// WriteStreamRow writes one row of an unbounded stream in the caller's
+// requested machine format.
+//
+// A stream cannot be a single JSON array or a single YAML document: the
+// closing bracket, or the end of the document, arrives when the stream ends —
+// which for a --follow is never. Each format therefore has a streaming shape,
+// and they are not interchangeable:
+//
+//	json, ndjson  one JSON object per line
+//	yaml          one YAML document per row, separated by `---`
+//
+// It exists because `--follow` routed every machine format to
+// WriteNDJSONRow, so `-f yaml` silently emitted JSON — the same
+// asked-for-one-format-got-another defect the format sweep was closing,
+// surviving on the one path the sweep's guard cannot drive, because a follow
+// does not terminate.
+func (f *Formatter) WriteStreamRow(v interface{}) error {
+	if f.Format != "yaml" {
+		return f.WriteNDJSONRow(v)
+	}
+	// yaml.v3 writes the `---` separator itself for each Encode call after the
+	// first, so a single encoder per row would emit none. Write it explicitly
+	// and keep every row self-contained, matching WriteNDJSONRow's contract of
+	// no buffering between calls.
+	if _, err := io.WriteString(f.Writer, "---\n"); err != nil {
+		return err
+	}
+	return yaml.NewEncoder(f.Writer).Encode(v)
 }
 
 // Auto routes to the correct format based on f.Format.

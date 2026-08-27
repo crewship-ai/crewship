@@ -102,7 +102,7 @@ func writeAgentSkills(
 		}
 		for _, root := range folderRoots {
 			rel := path.Join(root, skill.Slug, "SKILL.md")
-			if err := writeFileViaContainer(ctx, container, containerID, workDir, rel, skill.Content, logger); err != nil {
+			if err := writeFileViaContainer(ctx, container, containerID, workDir, rel, skill.Content, containerFileReadable, logger); err != nil {
 				if firstWriteErr == nil {
 					firstWriteErr = err
 				}
@@ -118,7 +118,7 @@ func writeAgentSkills(
 		// rule parser is forgiving of unknown frontmatter keys, so the
 		// SKILL.md body lands without conversion.
 		mdcPath := path.Join(".cursor/rules", skill.Slug+".mdc")
-		if err := writeFileViaContainer(ctx, container, containerID, workDir, mdcPath, skill.Content, logger); err != nil {
+		if err := writeFileViaContainer(ctx, container, containerID, workDir, mdcPath, skill.Content, containerFileReadable, logger); err != nil {
 			if firstWriteErr == nil {
 				firstWriteErr = err
 			}
