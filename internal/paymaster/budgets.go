@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -169,6 +170,23 @@ func Enforce(ctx context.Context, db *sql.DB, j journal.Emitter, scope Scope) er
 					Summary: fmt.Sprintf("budget exceeded: %s/%s at %.1f%% ($%.2f / $%.2f)",
 						s.Budget.ScopeKind, s.Budget.Window, s.UtilPct, s.SpentUSD, s.Budget.LimitUSD),
 					Payload: budgetPayload(s),
+				})
+			}
+			// on_budget_exceeded: fire-and-forget, same shape as
+			// on_approval_requested in orchestrator_run.go — a hard/tiered
+			// budget breach is exactly the "a human needs to know about
+			// this" moment that hook exists to notify (Slack, PagerDuty,
+			// ...), and Enforce already has db + j in hand for every call.
+			// Skipped when WorkspaceID is empty rather than dispatched
+			// against a scope hooks.Dispatch would reject outright.
+			if scope.WorkspaceID != "" {
+				_ = hooks.Dispatch(ctx, db, j, hooks.EventOnBudgetExceeded, hooks.EventContext{
+					WorkspaceID: scope.WorkspaceID,
+					CrewID:      scope.CrewID,
+					AgentID:     scope.AgentID,
+					MissionID:   scope.MissionID,
+					Severity:    "error",
+					Payload:     budgetPayload(s),
 				})
 			}
 		}

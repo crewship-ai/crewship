@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -455,6 +456,34 @@ func (h *AssignmentHandler) runAssignment(
 	body createAssignmentBody,
 	target targetAgentInfo,
 ) {
+	// pre_task_delegation: the one point every delegation door (sidecar
+	// /assign's Create, its dispatch-pump retry, the mission engine's
+	// DispatchAssignment, and the @mention DispatchMention) converges on
+	// before a delegated task actually starts running — the assignment row
+	// already exists by the time we get here, but nothing has been spent on
+	// it yet (no container exec, no LLM call). A blocking hook can refuse
+	// the hand-off here; a non-blocking one just observes it. Dispatched
+	// before runID exists, so a block is reported through finishAssignment
+	// the same way the "orchestrator not available" early-bail below is:
+	// runID="" skips the run.* terminal entry (no run ever started) but
+	// still lands the assignment.* terminal entry and status update.
+	if hookErr := hooks.Dispatch(ctx, h.db, h.journal, hooks.EventPreTaskDelegation, hooks.EventContext{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID,
+		AgentID:     target.ID,
+		Payload: map[string]any{
+			"assignment_id": assignmentID,
+			"target_slug":   body.TargetSlug,
+			"chat_id":       body.ChatID,
+		},
+	}); hookErr != nil {
+		h.logger.Info("assignment refused: pre_task_delegation hook blocked",
+			"assignment_id", assignmentID, "target", body.TargetSlug, "error", hookErr)
+		h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "",
+			fmt.Sprintf("pre_task_delegation hook blocked: %v", hookErr), nil)
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Session provenance for the terminal run record, filled in once the CLI
@@ -519,6 +548,23 @@ func (h *AssignmentHandler) runAssignment(
 	if missionID != "" {
 		ctx = journal.WithMission(ctx, missionID)
 	}
+
+	// post_task_delegation: the hand-off itself is done — the assignment
+	// exists, the run record is journaled, and the target is about to
+	// execute. Fire-and-forget like post_agent_stop below: a hook here
+	// observes that delegation happened, it does not gate what already
+	// has a runID.
+	_ = hooks.Dispatch(ctx, h.db, h.journal, hooks.EventPostTaskDelegation, hooks.EventContext{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID,
+		AgentID:     target.ID,
+		Payload: map[string]any{
+			"assignment_id": assignmentID,
+			"target_slug":   body.TargetSlug,
+			"chat_id":       body.ChatID,
+			"run_id":        runID,
+		},
+	})
 
 	// Mark assignment as RUNNING
 	if _, err := h.db.ExecContext(ctx,

@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -159,6 +160,28 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		replyInternalError(w, h.logger, "lookup target agent", err)
+		return
+	}
+
+	// pre_peer_conversation: fires before the peer_conversations row exists
+	// and before the target agent runs — this is the one place every
+	// `curl localhost:9119/query` call converges on (Create is the
+	// synchronous handler behind the sidecar's /query, and there is no
+	// second entry point the way task delegation has three). A blocking
+	// hook can refuse the whole peer question here.
+	if hookErr := hooks.Dispatch(r.Context(), h.db, h.journal, hooks.EventPrePeerConversation, hooks.EventContext{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID,
+		AgentID:     target.ID,
+		Payload: map[string]any{
+			"from_slug":   body.FromSlug,
+			"target_slug": body.TargetSlug,
+			"chat_id":     body.ChatID,
+		},
+	}); hookErr != nil {
+		h.logger.Info("peer query refused: pre_peer_conversation hook blocked",
+			"from_slug", body.FromSlug, "target_slug", body.TargetSlug, "error", hookErr)
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": hookErr.Error()})
 		return
 	}
 
@@ -440,6 +463,21 @@ func (h *QueryHandler) finishQuery(
 	if errMsg != "" {
 		status = "FAILED"
 	}
+
+	// post_peer_conversation: fire-and-forget, mirroring the answer journal
+	// entry below — the peer question has been answered (or failed), and
+	// this is the single place every peer query's completion converges on.
+	_ = hooks.Dispatch(ctx, h.db, h.journal, hooks.EventPostPeerConversation, hooks.EventContext{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		AgentID:     targetAgentID,
+		Payload: map[string]any{
+			"from_slug":   fromSlug,
+			"target_slug": targetSlug,
+			"status":      status,
+			"duration_ms": durationMs,
+		},
+	})
 
 	var responseVal interface{}
 	if result != "" {

@@ -42,35 +42,27 @@ func TestEveryOfferedEventHasADispatchSite(t *testing.T) {
 	root := repoRootForTest(t)
 	files := collectScanFiles(t, root)
 
-	// preExistingGaps: events that already had zero production dispatch
-	// site before this test was written, discovered by the same
-	// investigation that removed pre_tool_call from AllEvents. Fixing
-	// eleven independently-dead events at once is out of scope for that
-	// change, so they are logged rather than failed here — but they are
-	// not swept under the rug: every one of them is named below, with the
-	// same "no dispatch site" finding this test would otherwise report as
-	// a failure. Removing an event from this map is part of the diff that
-	// wires up its dispatch, the same discipline this test applies to
-	// every event added from here on.
-	preExistingGaps := map[Event]bool{
-		EventPreTaskDelegation:    true,
-		EventPostTaskDelegation:   true,
-		EventPreLLMCall:           true,
-		EventPostLLMCall:          true,
-		EventPreMemoryWrite:       true,
-		EventPostMemoryWrite:      true,
-		EventPrePeerConversation:  true,
-		EventPostPeerConversation: true,
-		EventOnBudgetExceeded:     true,
-	}
-
+	// No escape hatch: every event in AllEvents is required to have a real
+	// dispatch site. This test used to carry a preExistingGaps allowlist —
+	// nine events (pre/post_task_delegation, pre/post_llm_call,
+	// pre/post_memory_write, pre/post_peer_conversation,
+	// on_budget_exceeded) found undispatched by the same investigation
+	// that removed pre_tool_call, logged rather than failed because fixing
+	// all of them was out of scope for that change. That follow-up
+	// landed: every one of the nine now has a genuine Dispatch call
+	// (runAssignment, llm.Middleware's hooksCaller, Consolidator.Run,
+	// QueryHandler.Create/finishQuery, paymaster.Enforce), and
+	// post_tool_call — declared covered by the heuristic all along
+	// because internal/server referenced the EventPostToolCall constant
+	// as a struct field without ever calling Dispatch — now has a real
+	// one too (postToolCallObserver.Observe). Removing the allowlist is
+	// what turns "we know about these gaps" into "these gaps cannot
+	// recur without a red test": a future event added to AllEvents with
+	// no Dispatch call now fails here immediately, the same as it would
+	// have for pre_tool_call had this test existed sooner.
 	var undispatched []string
 	for _, ev := range AllEvents {
 		if eventHasDispatchSite(ev, files) {
-			continue
-		}
-		if preExistingGaps[ev] {
-			t.Logf("known pre-existing gap (not introduced by this test, not fixed by it either): %q has no dispatch site outside internal/hooks", ev)
 			continue
 		}
 		undispatched = append(undispatched, string(ev))
@@ -105,6 +97,18 @@ func eventHasDispatchSite(ev Event, files []scannedFile) bool {
 	return false
 }
 
+// initialisms are the snake_case segments the Event constants spell fully
+// upper-case, per Go's own initialism convention (the same list style
+// golint/staticcheck ship) — a plain "capitalize the first letter" pass
+// gets "pre_llm_call" to "PreLlmCall", but the real constant is
+// EventPreLLMCall. Extend this map if a future event's segment needs the
+// same treatment; the failure mode of forgetting to is a false-negative
+// "no dispatch site" from this test even when one exists, so it's easy to
+// notice and cheap to fix here rather than by hand-listing a gap.
+var initialisms = map[string]string{
+	"llm": "LLM",
+}
+
 // snakeToPascal turns "on_guardrail_triggered" into "OnGuardrailTriggered"
 // — the same convention the Event constants above already follow, derived
 // rather than hand-listed so a newly added event needs no parallel entry
@@ -114,6 +118,10 @@ func snakeToPascal(snake string) string {
 	var b strings.Builder
 	for _, p := range parts {
 		if p == "" {
+			continue
+		}
+		if up, ok := initialisms[p]; ok {
+			b.WriteString(up)
 			continue
 		}
 		b.WriteString(strings.ToUpper(p[:1]))

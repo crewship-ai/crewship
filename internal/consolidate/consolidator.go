@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 )
@@ -229,11 +230,43 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 		return c.writeProposal(ctx, cfg, now, rules, len(filtered))
 	}
 
+	// pre_memory_write: this is the automated, unsupervised half of memory
+	// writing — the LLM summarizer above proposed these rules and, absent
+	// ProposalMode, they land in the canonical learned-*.md that every
+	// future run of this crew reads as fact, with no human in the loop. A
+	// blocking hook here is the seam a write-approval gate for agent
+	// memory would use. c.DB / c.Journal are always set on a production
+	// Consolidator (Run already uses c.DB unconditionally above, for the
+	// journal.List call), so this costs one more indexed lookup per tick,
+	// not new plumbing.
+	if hookErr := hooks.Dispatch(ctx, c.DB, c.Journal, hooks.EventPreMemoryWrite, hooks.EventContext{
+		WorkspaceID: cfg.WorkspaceID,
+		CrewID:      cfg.CrewID,
+		Payload: map[string]any{
+			"rules_count": len(rules),
+			"output_dir":  cfg.OutputDir,
+		},
+	}); hookErr != nil {
+		return ConsolidationResult{EntriesScanned: len(filtered)},
+			fmt.Errorf("consolidate: pre_memory_write hook: %w", hookErr)
+	}
+
 	outPath, outContent, err := c.appendRules(cfg.OutputDir, now, rules)
 	if err != nil {
 		return ConsolidationResult{EntriesScanned: len(filtered)},
 			fmt.Errorf("consolidate: write rules: %w", err)
 	}
+	// post_memory_write: fire-and-forget, mirroring the EntryMemoryConsolidated
+	// journal emit a few lines down — this hook observes that the write
+	// already landed, it doesn't gate anything past this point.
+	_ = hooks.Dispatch(context.Background(), c.DB, c.Journal, hooks.EventPostMemoryWrite, hooks.EventContext{
+		WorkspaceID: cfg.WorkspaceID,
+		CrewID:      cfg.CrewID,
+		Payload: map[string]any{
+			"rules_count": len(rules),
+			"output_path": outPath,
+		},
+	})
 	// Pass the in-memory content captured during the appendRules
 	// flock window. recordCanonicalVersion would otherwise re-read
 	// from disk and risk capturing a sibling tick's changes against

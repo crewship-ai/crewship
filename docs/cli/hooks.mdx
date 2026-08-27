@@ -178,21 +178,20 @@ Same auth and audit semantics as enable.
 
 ## Currently-dispatched events
 
-<Accordion title="Which events actually fire (as of PR #210)">
-  Dispatched:
+<Accordion title="Which events actually fire">
+  All 14 events in the `--event` catalog now dispatch from a real call
+  site — see the
+  [Hooks guide coverage table](/guides/hooks#coverage-status) for the
+  call site behind each one. `internal/hooks/dispatch_site_test.go`
+  enforces this as an invariant: a source-scan test fails CI if an event
+  is ever added to `AllEvents` without a matching `hooks.Dispatch` call
+  reachable from outside the hooks package.
 
-  - `pre_agent_start`, `post_agent_stop`
-  - `on_approval_requested`
-
-  The other events are defined but not yet dispatched at their call
-  sites — see the
-  [Hooks guide coverage table](/guides/hooks#coverage-status-as-of-pr-%23210).
-  Registering a hook on an undispatched event is legal but nothing will
-  fire it. `pre_tool_call` used to be exactly this trap with no way out
-  (an undispatched event that also had no "wire it up" path on the
-  roadmap) and was removed from the valid event list rather than left
-  there — it is the one undispatched-looking event that is now also a
-  400, not just a silently-dead 201.
+  `pre_tool_call` used to be exactly the opposite trap — an event that
+  registered cleanly and never fired, with no "wire it up" path on the
+  roadmap — and was removed from the valid event list rather than left
+  there: it is the one event name that is now a 400, not a silently-dead
+  201.
 </Accordion>
 
 ## Related

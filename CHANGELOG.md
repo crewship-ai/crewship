@@ -280,6 +280,38 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   ⚠️ **Behaviour change:** a script or manifest that registers a
   `pre_tool_call` hook now gets a 400 instead of a silently-dead 201.
 
+- **Ten more hook events registered cleanly and never fired — the same
+  defect class `pre_tool_call` was, minus the one that had no possible
+  fix.** `pre_task_delegation`, `post_task_delegation`, `post_tool_call`,
+  `pre_llm_call`, `post_llm_call`, `pre_memory_write`, `post_memory_write`,
+  `pre_peer_conversation`, `post_peer_conversation`, and
+  `on_budget_exceeded` were all declared in `hooks.AllEvents`, accepted by
+  `crewship hooks create` / `POST /api/v1/hooks`, and reached by zero
+  `hooks.Dispatch` calls anywhere in the tree — a registered hook listed,
+  toggled, and looked healthy while never once running. Unlike
+  `pre_tool_call`, a real dispatch point existed for every one of these
+  ten; each is now wired to it:
+
+  - `pre_task_delegation` / `post_task_delegation` — `AssignmentHandler.runAssignment`, the one function every delegation door (sidecar `/assign`, its retry pump, the mission engine, and `@mention`) converges on.
+  - `post_tool_call` — `postToolCallObserver.Observe`, decoupled from the built-in behavior monitor's governance/sampling gate so a user's own hook fires on every observed tool call regardless of that monitor's settings.
+  - `pre_llm_call` / `post_llm_call` — a new outermost layer in `llm.Middleware`'s caller chain, wrapping every `Complete` and `Stream` call.
+  - `pre_memory_write` / `post_memory_write` — `Consolidator.Run`, around the automated `learned-*.md` write the background consolidator makes with no human in the loop (an agent's own `memory.write` tool call runs inside the sidecar container, which has no database connection to dispatch from, so that path is not covered — see the [Hooks guide](/guides/hooks#coverage-status)).
+  - `pre_peer_conversation` / `post_peer_conversation` — `QueryHandler.Create` / `finishQuery`, the sidecar's `/query` peer-question path.
+  - `on_budget_exceeded` — `paymaster.Enforce`, alongside the `budget.exceeded` journal entry it already wrote on a hard/tiered budget breach.
+
+  `internal/hooks/dispatch_site_test.go`'s `TestEveryOfferedEventHasADispatchSite`
+  — added by the `pre_tool_call` fix as a source-scan invariant, but left
+  logging rather than failing on these ten known gaps — now fails CI if
+  any offered event ever loses its dispatch site again.
+
+  ⚠️ **Behaviour change:** a `Blocking: true` hook registered against any
+  of these ten events previously had no effect no matter what its handler
+  returned. It can now actually refuse the operation it's attached to
+  (`pre_task_delegation` refuses the delegation, `pre_llm_call` refuses
+  the LLM call, `pre_peer_conversation` refuses the peer question,
+  `pre_memory_write` refuses the consolidator's write) — a workspace with
+  such a hook already registered will see it start enforcing on upgrade.
+
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
   reverse-foreign-key chain from each table to `workspaces` and built a `WHERE`
