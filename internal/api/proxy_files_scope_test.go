@@ -93,3 +93,45 @@ func TestResolveAgentFilePath(t *testing.T) {
 		})
 	}
 }
+
+func TestIsProtectedAgentConfigPath(t *testing.T) {
+	const (
+		crew = "crew123"
+		slug = "riley"
+	)
+
+	protected := []string{
+		".mcp.json",
+		".cursor/mcp.json",
+		".factory/mcp.json",
+		".gemini/settings.json",
+		"opencode.json",
+		".codex/config.toml",
+	}
+	for _, relative := range protected {
+		for _, path := range []string{relative, crew + "/" + slug + "/" + relative} {
+			t.Run(path, func(t *testing.T) {
+				if !isProtectedAgentConfigPath(crew, slug, path) {
+					t.Fatalf("isProtectedAgentConfigPath(%q) = false, want true", path)
+				}
+			})
+		}
+	}
+
+	allowed := []string{
+		"docs/.mcp.json",
+		".codex/skills/reviewer/SKILL.md",
+		".gemini/skills/reviewer/SKILL.md",
+		".factory/notes.md",
+		crew + "/report.md",
+		crew + "/" + slug + "/docs/opencode.json",
+		crew + "/other-agent/.mcp.json",
+	}
+	for _, path := range allowed {
+		t.Run("allowed/"+path, func(t *testing.T) {
+			if isProtectedAgentConfigPath(crew, slug, path) {
+				t.Fatalf("isProtectedAgentConfigPath(%q) = true, want false", path)
+			}
+		})
+	}
+}

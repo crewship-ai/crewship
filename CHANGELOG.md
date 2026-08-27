@@ -293,6 +293,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Agent file downloads no longer expose generated MCP credentials (#2069,
+  #2140).** Crewship writes resolved HTTP headers and process environment
+  values into each CLI's native MCP config with mode `0600`. The Files API's
+  new container-side read fallback could nevertheless read those bytes as the
+  agent UID and return them to any workspace role with read access. Downloads
+  now reject the six exact generated config paths before IPC, while ordinary
+  dotfiles and user-authored skills below `.codex/`, `.gemini/`, and similar
+  directories remain available.
+
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
   reverse-foreign-key chain from each table to `workspaces` and built a `WHERE`

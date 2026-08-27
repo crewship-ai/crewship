@@ -125,6 +125,36 @@ func resolveAgentFilePath(crewID, slug, cleanPath string) (string, bool) {
 	return prefix + cleanPath, true
 }
 
+// isProtectedAgentConfigPath identifies the exact per-agent files Crewship
+// generates with resolved MCP credentials. The files are deliberately mode
+// 0600 inside the container; the file API must not turn its container fallback
+// into a way to read those bytes back over HTTP. Keep this list exact rather
+// than hiding whole dot-directories: .codex/skills, .gemini/skills, and similar
+// user-authored content remain legitimate artefacts.
+func isProtectedAgentConfigPath(crewID, slug, cleanPath string) bool {
+	relative := cleanPath
+	prefix := crewID + "/" + slug + "/"
+	if strings.HasPrefix(cleanPath, prefix) {
+		relative = strings.TrimPrefix(cleanPath, prefix)
+	} else if strings.HasPrefix(cleanPath, crewID+"/") {
+		// A crew-root file or a sibling namespace is not this agent's generated
+		// config. The normal scope resolver handles sibling access separately.
+		return false
+	}
+
+	switch relative {
+	case ".mcp.json",
+		".cursor/mcp.json",
+		".factory/mcp.json",
+		".gemini/settings.json",
+		"opencode.json",
+		".codex/config.toml":
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentFileDownload streams a file from an agent's working directory.
 //
 // The FE may send EITHER a relative path (e.g. "workspace/demo/config/x.toml")
@@ -162,6 +192,10 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 	cleanPath, ok := normalizeRequestPath(filePath)
 	if !ok {
 		replyError(w, http.StatusBadRequest, "Invalid file path")
+		return
+	}
+	if isProtectedAgentConfigPath(crewID.String, slug.String, cleanPath) {
+		replyError(w, http.StatusForbidden, "File contains protected agent configuration")
 		return
 	}
 
