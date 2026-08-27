@@ -153,6 +153,34 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   seed ships four pages, one per producer door (script, routine, agent,
   webhook) instead of showing one door of the four.
 
+- **The wake-time system prompt now shows its own memory budget (#2135).** Every
+  tier injected into a session's opening prompt — `Pins`, `Crew`,
+  `Workspace`, `Agent` — now reports how many bytes of its allotted
+  slice it used and what percent that is, plus a `Total` line, in a new
+  `[MEMORY BUDGET]` block placed right before `[MEMORY INSTRUCTIONS]`. The
+  wording matches `memory.write`'s existing overflow-guidance usage string
+  byte for byte, unit included (`<used> of <cap> bytes, <pct>%`): both
+  meters count `len(string)` bytes, and the budget these tiers are
+  actually enforced against is itself byte-denominated, so "bytes" is the
+  only label that describes what is measured and capped — an earlier
+  draft of this meter said "chars" while still counting and enforcing
+  bytes, which reads as accurate for pure-ASCII content but is wrong for
+  anything else (this product carries Czech text throughout). A
+  percentage that would round down to 0% for real, non-zero usage now
+  floors to 1% instead. When the budget forced a tier's trailing content
+  to be dropped — previously silent — the meter now says so by name
+  (`Truncated to fit: Agent — trailing content in it was dropped, not
+  just hidden.`), and truncation itself is now rune-aligned so a cut can
+  never sever a multi-byte UTF-8 character and hand the model invalid
+  text. A separate `Read incomplete: Workspace` clause covers a distinct
+  failure the truncation notice can't: a stalled or slow workspace
+  filesystem read that times out mid-scan, which previously came back
+  indistinguishable from "there just wasn't much workspace memory" — the
+  model is now told the read did not finish rather than being left to
+  assume it saw everything. The default 15,000-byte budget, the per-tier
+  allocation ratios, and the truncation policy itself are unchanged; this
+  only makes the existing behaviour visible to the model, honestly.
+
 ### Changed
 
 - **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
@@ -293,6 +321,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The crew-scoped file download served the exact bytes the agent door had
+  just been taught to refuse (#2142).** #2069 added a check to
+  `GET /agents/{agentId}/files/download` denying the six generated per-agent
+  files that hold resolved MCP credentials, but that check had exactly one
+  call site. `GET /crews/{crewId}/files/download` reads the identical
+  crewshipd storage — the same `<crewID>/<agentSlug>/.mcp.json` key resolves
+  on either door — and forwarded it unguarded, so the same 0600 credential
+  bytes any workspace role with read access was refused on one URL were
+  served whole on the other. The check now also runs in crewshipd's single
+  download funnel, which both HTTP doors proxy through, so a future caller
+  that reaches it inherits the denial rather than needing to remember to add
+  it again.
+
 - **Agent file downloads no longer expose generated MCP credentials (#2069,
   #2140).** Crewship writes resolved HTTP headers and process environment
   values into each CLI's native MCP config with mode `0600`. The Files API's
@@ -316,6 +357,43 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   same raw output. `total_bytes` and `truncated` still describe the raw
   stream and are computed before scrubbing, since redaction changes the
   string's length.
+- **`pre_tool_call` was a hook event you could register that would never
+  fire.** `crewship hooks create --event pre_tool_call` (and the matching
+  `POST /api/v1/hooks`) returned 201 and listed the hook as enabled and
+  healthy, but nothing in the platform ever called `hooks.Dispatch` with
+  that event — Crewship drives agent work by parsing the stream a driven
+  CLI (Claude Code, Cursor, ...) emits, so by the time a tool call is
+  observable the tool has already run; there is no "before the tool runs"
+  interception point to hook. (`post_tool_call` fires after the tool runs
+  in principle, but as of this change nothing dispatches it for
+  user-registered hooks either — see the Hooks guide's coverage table.)
+  `pre_tool_call` is no longer a valid `--event` / `event` — the CLI and
+  the API now reject it the same way they reject any other unknown event
+  name, echoing the same list of legal ones. The `hooks.EventPreToolCall`
+  Go constant stays defined so a `hooks_config` row created before this
+  change still lists, toggles, and can be edited via `PATCH` for any
+  field other than `event` — the store only re-validates `event` when a
+  write actually changes it, so a legacy row isn't frozen out of every
+  edit just because its event predates this change. (That check reads the
+  row's current event first, so the `UPDATE` it guards now also matches on
+  that event — a concurrent write that moves a legacy row onto a valid
+  event can no longer be undone by a stale update putting the retired one
+  back.) It still never dispatches.
+
+  ⚠️ **Behaviour change:** a script or manifest that registers a
+  `pre_tool_call` hook now gets a 400 instead of a silently-dead 201.
+
+- **A forked mission could never run a task.** `Fork` wrote the mission, its
+  tasks and its checkpoint, but not the synthetic `chats` row that
+  `assignments.chat_id NOT NULL REFERENCES chats(id)` requires — the row the
+  normal mission-create path stamps in the same transaction. The fork itself
+  reported success; the failure surfaced later, as a `FOREIGN KEY constraint
+  failed` the first time the orchestrator tried to dispatch one of the copied
+  tasks. It went unnoticed for the feature's whole life because the package's
+  tests built their own fixture schema with no `chats` table at all, so the
+  constraint could not fire. Those tests now run against the real migration
+  chain, which also surfaced a second case seeding an assignment against a
+  chat that did not exist.
 - **Erasing an operator model reported success while leaving a readable copy
   behind (#2131).** The user model is stored per crew, at
   `crews/{crewID}/shared/.memory/users/{slug}.md`, but its index row is keyed
@@ -701,6 +779,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 <!-- End of the #2086 backfill. Entries below were written with their PRs. -->
 
 ### Fixed
+
+- **An agent-created mission dispatched its first task straight into a
+  `FOREIGN KEY constraint failed` (#2139).** `assignments.chat_id` is
+  `NOT NULL REFERENCES chats(id)`, and the mission task dispatcher inserts
+  every assignment with `chat_id` set to the mission's own id —
+  unconditionally, with no fallback. Three of the four mission-creating doors
+  stamp that synthetic `chats` row themselves (`mission_handler_mutate.go`'s
+  `Create`, `issue_handler_workflow.go`'s `Start`, and
+  `internal/cartographer/fork.go`'s `Fork`, fixed independently in #2128,
+  same root cause, different door). `InternalMissionHandler.Create` — the
+  sidecar endpoint an agent uses to plan its own mission — was the one that
+  didn't, so an agent-authored mission's first task hit the FK on every
+  dispatch attempt, and `scheduleReadyTasks` turned that into a silently
+  `FAILED` task rather than surfacing it — a mission whose tasks all failed
+  for a reason nothing in the task list explained.
+
+  Fixed twice, deliberately. `Create` now stamps the chat row itself, in the
+  same transaction as the mission row, mirroring the other three doors. And
+  the dispatcher — the one place every mission's assignments are actually
+  written, regardless of which door created the mission — now creates the
+  row lazily if it is missing, before either assignment insert. Two doors
+  have now independently forgotten this row in production; a per-door insert
+  is correctness at the source but does not close the class, so the
+  dispatcher checks for itself too, at the cost of one indexed lookup per
+  dispatch in the common case where the row already exists.
 
 - **The `admin` family answered from a different database than the server you
   pointed it at.** `openAdminDB()` resolved `~/.crewship/crewship.db` and
@@ -2629,6 +2732,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `Thinking`, and a budget-truncated answer reports `max_tokens` instead of
   `end_turn`, so callers can tell "the model said nothing" from "the model
   reasoned and never reached an answer".
+
+- **A transient database hiccup during hook dispatch was reported to users as
+  "a hook blocked this run".** `hooks.Dispatch` looks up the hooks registered
+  for an event before evaluating any of them; when that lookup itself failed
+  (a closed connection, a busy SQLite file), the error came back wrapped in
+  the same plain `error` that a genuine blocking hook's `*BlockedError`
+  travels in, and every call site — `pre_agent_start` in the orchestrator
+  chief among them — treated any non-nil `Dispatch` error as a block. An
+  infrastructure blip cancelled the agent run and printed "pre_agent_start
+  hook blocked", which was false: no hook ever ran. Registry and handler
+  failures now return a typed `*hooks.DispatchError`; an explicit policy
+  refusal remains `*hooks.BlockedError`. The `pre_agent_start` gate fails
+  closed for either condition but reports "dispatch failed" for infrastructure
+  instead of inventing a policy block. Lookup failures are also logged
+  unconditionally and, when a journal emitter is wired, recorded as a new
+  `hook.dispatch_error` entry so the outage stays observable.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

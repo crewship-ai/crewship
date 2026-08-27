@@ -214,6 +214,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "fork.created",
       "hook.fired",
       "hook.blocked",
+      "hook.dispatch_error",
       "eval.run_started",
       "eval.metric",
       "eval.regression_detected",

@@ -98,7 +98,7 @@ func TestRegisterGetRoundtrip(t *testing.T) {
 	h := Hook{
 		WorkspaceID: "ws_test",
 		CrewID:      "crew_a",
-		Event:       EventPreToolCall,
+		Event:       EventPreAgentStart,
 		Matcher:     Matcher{Tools: []string{"Bash"}},
 		HandlerKind: HandlerKindHTTP,
 		HandlerConfig: map[string]any{
@@ -126,7 +126,7 @@ func TestRegisterGetRoundtrip(t *testing.T) {
 	if got.WorkspaceID != "ws_test" || got.CrewID != "crew_a" {
 		t.Errorf("scope mismatch: %+v", got)
 	}
-	if got.Event != EventPreToolCall {
+	if got.Event != EventPreAgentStart {
 		t.Errorf("event: %q", got.Event)
 	}
 	if got.HandlerKind != HandlerKindHTTP {
@@ -150,7 +150,7 @@ func TestRegisterShellNotAllowed(t *testing.T) {
 
 	h := Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindShell,
 		HandlerConfig: map[string]any{"command": "echo hi"},
 		Enabled:       true,
@@ -177,7 +177,7 @@ func TestEnableDisable(t *testing.T) {
 
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://x"},
 		Enabled:       true,
@@ -213,7 +213,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	// Workspace-wide hook (crew_id nil).
 	wsID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://ws"},
 		Enabled:       true,
@@ -225,7 +225,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	aID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_a",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://a"},
 		Enabled:       true,
@@ -237,7 +237,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	bID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_b",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://b"},
 		Enabled:       true,
@@ -249,7 +249,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	disID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_a",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://dis"},
 		Enabled:       false,
@@ -259,7 +259,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	}
 
 	// List for crew_a: expect ws-wide + crew_a only.
-	got, err := ListByEvent(ctx, db, "ws_test", "crew_a", EventPreToolCall)
+	got, err := ListByEvent(ctx, db, "ws_test", "crew_a", EventPreAgentStart)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	}
 
 	// Empty crewID returns only ws-wide.
-	got, err = ListByEvent(ctx, db, "ws_test", "", EventPreToolCall)
+	got, err = ListByEvent(ctx, db, "ws_test", "", EventPreAgentStart)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestShellHandlerPass(t *testing.T) {
 		},
 	}
 	res, err := shellHandler(context.Background(), h, EventContext{
-		Event:       EventPreToolCall,
+		Event:       EventPreAgentStart,
 		WorkspaceID: "ws_test",
 	})
 	if err != nil {
@@ -439,7 +439,7 @@ func TestHTTPHandlerPass(t *testing.T) {
 		},
 	}
 	res, err := httpHandler(context.Background(), nil, h, EventContext{
-		Event:       EventPreToolCall,
+		Event:       EventPreAgentStart,
 		WorkspaceID: "ws_test",
 	})
 	if err != nil {
@@ -590,7 +590,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 	orderAnchor := time.Now().UTC()
 	aID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": tsBlock.URL},
 		Blocking:      true,
@@ -602,7 +602,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 	}
 	_, err = Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": tsPass.URL},
 		Blocking:      true,
@@ -614,7 +614,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 	}
 
 	rec := &recordingEmitter{}
-	err = Dispatch(ctx, db, rec, EventPreToolCall, EventContext{
+	err = Dispatch(ctx, db, rec, EventPreAgentStart, EventContext{
 		WorkspaceID: "ws_test",
 	})
 	if err == nil {
@@ -708,7 +708,7 @@ func TestDispatcherMatcherFilter(t *testing.T) {
 	// Hook only fires on Bash tool calls.
 	_, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		Matcher:       Matcher{Tools: []string{"^Bash$"}},
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": ts.URL},
@@ -721,7 +721,7 @@ func TestDispatcherMatcherFilter(t *testing.T) {
 
 	rec := &recordingEmitter{}
 	// Read → should NOT fire.
-	if err := Dispatch(ctx, db, rec, EventPreToolCall, EventContext{
+	if err := Dispatch(ctx, db, rec, EventPreAgentStart, EventContext{
 		WorkspaceID: "ws_test",
 		ToolName:    "Read",
 	}); err != nil {
@@ -734,7 +734,7 @@ func TestDispatcherMatcherFilter(t *testing.T) {
 	mu.Unlock()
 
 	// Bash → should fire.
-	if err := Dispatch(ctx, db, rec, EventPreToolCall, EventContext{
+	if err := Dispatch(ctx, db, rec, EventPreAgentStart, EventContext{
 		WorkspaceID: "ws_test",
 		ToolName:    "Bash",
 	}); err != nil {
@@ -958,4 +958,169 @@ func TestSubagentHandlerConfigured(t *testing.T) {
 	if res.Outcome != OutcomePass {
 		t.Errorf("outcome: %s", res.Outcome)
 	}
+}
+
+// ---------------------------------------------------------------------
+// Dispatch: ListByEvent (infra) failure must be distinguishable from both
+// "no hooks registered" and "a hook blocked this".
+// ---------------------------------------------------------------------
+
+// TestDispatchDistinguishesInfraErrorFromBlock is table-driven across the
+// two causes Dispatch can return a non-nil verdict for: a broken
+// hook lookup (infrastructure) and a blocking hook actually saying Block
+// (policy). A caller — orchestrator_run.go's pre_agent_start gate chief
+// among them — must abort on either error but report the cause honestly.
+func TestDispatchDistinguishesInfraErrorFromBlock(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
+
+	t.Run("ListByEvent failure returns a typed error and is journaled", func(t *testing.T) {
+		db := openTestDB(t)
+		// Close the DB so the lookup itself fails the way a real infra
+		// hiccup would — QueryContext returns sql.ErrConnDone rather
+		// than a normal "no rows" result.
+		if err := db.Close(); err != nil {
+			t.Fatalf("close db: %v", err)
+		}
+
+		rec := &recordingEmitter{}
+		err := Dispatch(context.Background(), db, rec, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		if err == nil {
+			t.Fatal("infra error was swallowed")
+		}
+		var de *DispatchError
+		if !errors.As(err, &de) {
+			t.Fatalf("infra error = %T, want *DispatchError: %v", err, err)
+		}
+		var be *BlockedError
+		if errors.As(err, &be) {
+			t.Fatalf("infra error also presents as *BlockedError: %v", err)
+		}
+
+		// It must still be observable — not silently swallowed.
+		var sawDispatchError bool
+		for _, e := range rec.entries {
+			if e.Type == journal.EntryHookDispatchError {
+				sawDispatchError = true
+				if e.Severity != journal.SeverityWarn {
+					t.Errorf("dispatch error entry severity = %s, want warn", e.Severity)
+				}
+			}
+		}
+		if !sawDispatchError {
+			t.Errorf("expected a hook.dispatch_error journal entry, got types=%v", rec.typesSeen())
+		}
+	})
+
+	t.Run("blocking handler failure is typed infrastructure, not policy", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+		id, err := Register(context.Background(), db, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": "://invalid"},
+			Blocking:      true,
+			Enabled:       true,
+		}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = Dispatch(context.Background(), db, &recordingEmitter{}, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		var dispatchErr *DispatchError
+		if !errors.As(err, &dispatchErr) {
+			t.Fatalf("handler error = %T, want *DispatchError: %v", err, err)
+		}
+		if dispatchErr.HookID != id {
+			t.Fatalf("DispatchError.HookID = %q, want %q", dispatchErr.HookID, id)
+		}
+		var blockedErr *BlockedError
+		if errors.As(err, &blockedErr) {
+			t.Fatalf("handler failure masquerades as a policy block: %v", err)
+		}
+	})
+
+	t.Run("a genuine blocking hook still stops the caller", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+		ctx := context.Background()
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(503)
+		}))
+		defer ts.Close()
+
+		if _, err := Register(ctx, db, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": ts.URL},
+			Blocking:      true,
+			Enabled:       true,
+		}, false); err != nil {
+			t.Fatal(err)
+		}
+
+		rec := &recordingEmitter{}
+		err := Dispatch(ctx, db, rec, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		if err == nil {
+			t.Fatal("expected a *BlockedError, got nil")
+		}
+		var be *BlockedError
+		if !errors.As(err, &be) {
+			t.Fatalf("expected *BlockedError, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("a caller can tell the two apart programmatically", func(t *testing.T) {
+		// Infra error: errors.As recovers DispatchError, never BlockedError.
+		db := openTestDB(t)
+		if err := db.Close(); err != nil {
+			t.Fatalf("close db: %v", err)
+		}
+		infraErr := Dispatch(context.Background(), db, &recordingEmitter{}, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		var be *BlockedError
+		if errors.As(infraErr, &be) {
+			t.Fatal("an infra lookup error must never present as *BlockedError")
+		}
+		var de *DispatchError
+		if !errors.As(infraErr, &de) {
+			t.Fatalf("an infra lookup error must present as *DispatchError, got: %T: %v", infraErr, infraErr)
+		}
+
+		// Block: Dispatch returns non-nil and errors.As recovers the
+		// concrete *BlockedError — this is the one case a call site
+		// should treat as "stop".
+		db2 := openTestDB(t)
+		defer db2.Close()
+		ctx := context.Background()
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(503)
+		}))
+		defer ts.Close()
+		if _, err := Register(ctx, db2, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": ts.URL},
+			Blocking:      true,
+			Enabled:       true,
+		}, false); err != nil {
+			t.Fatal(err)
+		}
+		blockErr := Dispatch(ctx, db2, &recordingEmitter{}, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		if !errors.As(blockErr, &be) {
+			t.Fatalf("expected *BlockedError, got %T: %v", blockErr, blockErr)
+		}
+	})
 }

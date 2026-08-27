@@ -125,12 +125,32 @@ func resolveAgentFilePath(crewID, slug, cleanPath string) (string, bool) {
 	return prefix + cleanPath, true
 }
 
-// isProtectedAgentConfigPath identifies the exact per-agent files Crewship
-// generates with resolved MCP credentials. The files are deliberately mode
-// 0600 inside the container; the file API must not turn its container fallback
+// protectedAgentConfigRelPaths lists the exact per-agent files Crewship
+// generates with resolved MCP credentials, relative to an agent's own
+// namespace (<crewID>/<slug>/...). The files are deliberately mode 0600
+// inside the container; the file API must not turn its container fallback
 // into a way to read those bytes back over HTTP. Keep this list exact rather
-// than hiding whole dot-directories: .codex/skills, .gemini/skills, and similar
-// user-authored content remain legitimate artefacts.
+// than hiding whole dot-directories: .codex/skills, .gemini/skills, and
+// similar user-authored content remain legitimate artefacts.
+//
+// This is the ONE list. isProtectedAgentConfigPath (the agent door, which
+// knows a single slug) and IsProtectedCrewConfigPath (the crew door, which
+// does not) both resolve their candidate path to this same relative form and
+// check it here, so the two doors can never independently drift on which six
+// files are denied — which is exactly the shape of the defect (#2142) that
+// let the crew door serve what the agent door refused.
+var protectedAgentConfigRelPaths = map[string]bool{
+	".mcp.json":             true,
+	".cursor/mcp.json":      true,
+	".factory/mcp.json":     true,
+	".gemini/settings.json": true,
+	"opencode.json":         true,
+	".codex/config.toml":    true,
+}
+
+// isProtectedAgentConfigPath identifies the exact per-agent files Crewship
+// generates with resolved MCP credentials, for a caller that knows exactly
+// one agent's slug (the agent-scoped door).
 func isProtectedAgentConfigPath(crewID, slug, cleanPath string) bool {
 	relative := cleanPath
 	prefix := crewID + "/" + slug + "/"
@@ -141,18 +161,36 @@ func isProtectedAgentConfigPath(crewID, slug, cleanPath string) bool {
 		// config. The normal scope resolver handles sibling access separately.
 		return false
 	}
+	return protectedAgentConfigRelPaths[relative]
+}
 
-	switch relative {
-	case ".mcp.json",
-		".cursor/mcp.json",
-		".factory/mcp.json",
-		".gemini/settings.json",
-		"opencode.json",
-		".codex/config.toml":
-		return true
-	default:
+// IsProtectedCrewConfigPath is isProtectedAgentConfigPath generalized for a
+// door that has no single agent in context. The crew-scoped file routes
+// (CrewFileDownload here, and the crewshipd daemon's shared download funnel
+// in internal/server/routes_files.go) can be asked for a path under ANY
+// agent in the crew, not just one — so the check cannot key off one known
+// slug the way the agent door does.
+//
+// It treats the first path segment after the crew id as that agent's slug,
+// whatever it is, and checks the remainder against the same
+// protectedAgentConfigRelPaths list. A crew-root file (no further segment)
+// and a deeper nested file (matches no relative entry) both correctly fall
+// through as unprotected — this only denies the exact six generated files,
+// under any agent.
+//
+// Exported because internal/server (the crewshipd sidecar, reached over the
+// Unix socket in proxy.go — a separate process from this one) imports this
+// package to call it directly rather than keeping its own copy of the list.
+func IsProtectedCrewConfigPath(crewID, cleanPath string) bool {
+	rest, ok := strings.CutPrefix(cleanPath, crewID+"/")
+	if !ok {
 		return false
 	}
+	_, relative, found := strings.Cut(rest, "/")
+	if !found {
+		return false
+	}
+	return protectedAgentConfigRelPaths[relative]
 }
 
 // AgentFileDownload streams a file from an agent's working directory.
@@ -367,6 +405,17 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
+
+	// #2142: this door has no single agent in context, so a path can name
+	// ANY agent's generated MCP config — isProtectedAgentConfigPath (built
+	// for the agent-scoped door, which knows one slug) cannot be used
+	// directly here. IsProtectedCrewConfigPath is the same six-path list,
+	// generalized to discover the slug from the path itself.
+	if IsProtectedCrewConfigPath(crewID, cleanPath) {
+		replyError(w, http.StatusForbidden, "File contains protected agent configuration")
+		return
+	}
+
 	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", url.PathEscape(crewID), url.QueryEscape(cleanPath))
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {

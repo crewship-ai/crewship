@@ -8,7 +8,7 @@ package api
 // hand-written INSERT. These endpoints are that missing caller, and the
 // tests below pin the three things that make them safe to expose:
 //
-//   - an event outside the declared 15 is refused, with a message that
+//   - an event outside the declared 14 is refused, with a message that
 //     names the legal ones (a bad event inserts fine and then never fires);
 //   - a shell handler needs OWNER, on create AND on update — an http hook
 //     PATCHed into a shell hook is the same host-execution grant by a
@@ -18,7 +18,6 @@ package api
 //     nothing, which is the failure mode the whole track exists to fix.
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -67,11 +66,44 @@ func TestHooksCreate_UnknownEventIsRejectedAndListsTheValidOnes(t *testing.T) {
 	}
 
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
 		t.Errorf("rejected hook was persisted anyway (%d rows)", n)
+	}
+}
+
+// TestHooksCreate_PreToolCallIsRejected pins the specific regression this
+// track closes: pre_tool_call used to be a legal event that Register
+// accepted and Dispatch never fired. It is no longer in hooks.AllEvents,
+// so it must fail the exact same way any other made-up event name does —
+// a 400 naming the events that ARE legal — rather than silently accepting
+// a hook that can never run.
+func TestHooksCreate_PreToolCallIsRejected(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewHooksHandler(db, newTestLogger())
+
+	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
+		"event":          string(hooks.EventPreToolCall),
+		"handler_kind":   "http",
+		"handler_config": map[string]any{"url": "https://example.test/hook"},
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "pre_tool_call") {
+		t.Errorf("error should echo the rejected event: %s", rr.Body.String())
+	}
+
+	var n int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("pre_tool_call hook was persisted anyway (%d rows)", n)
 	}
 }
 
@@ -82,7 +114,7 @@ func TestHooksCreate_ShellHandlerRequiresOwner(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	shell := map[string]any{
-		"event":          string(hooks.EventPreToolCall),
+		"event":          string(hooks.EventPostToolCall),
 		"handler_kind":   "shell",
 		"handler_config": map[string]any{"command": "echo hi"},
 	}
@@ -97,7 +129,7 @@ func TestHooksCreate_ShellHandlerRequiresOwner(t *testing.T) {
 		t.Errorf("403 should say which role is required: %s", rr.Body.String())
 	}
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
@@ -118,7 +150,7 @@ func TestHooksCreate_UnknownHandlerKindIsRejected(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
-		"event":        string(hooks.EventPreToolCall),
+		"event":        string(hooks.EventPostToolCall),
 		"handler_kind": "carrier-pigeon",
 	})
 	if rr.Code != http.StatusBadRequest {
@@ -138,7 +170,7 @@ func TestHooksCreate_MissingHandlerConfigIsRejected(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
-		"event":        string(hooks.EventPreToolCall),
+		"event":        string(hooks.EventPostToolCall),
 		"handler_kind": "http", // no url
 	})
 	if rr.Code != http.StatusBadRequest {
@@ -174,7 +206,13 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
-		"event":          string(hooks.EventPreToolCall),
+		// pre_agent_start, not post_tool_call: it is the one event on this
+		// branch with a real production hooks.Dispatch call site (see
+		// internal/orchestrator/orchestrator_run.go). Asserting this test
+		// with an event nothing dispatches in production would let an
+		// API-created hook go silently dead the same way this whole track
+		// exists to catch.
+		"event":          string(hooks.EventPreAgentStart),
 		"handler_kind":   "http",
 		"handler_config": map[string]any{"url": target.URL},
 		"matcher":        map[string]any{"tools": []string{"Bash"}},
@@ -194,9 +232,12 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 		t.Error("hook should default to enabled — a hook nobody enables never fires")
 	}
 
-	// Now drive the real dispatcher over the real table.
+	// Now drive the real dispatcher over the real table. ToolName/matcher
+	// still apply here even though pre_agent_start carries no ToolName in
+	// production — Matches evaluates EventContext fields independently of
+	// Event, so this still pins that the stored matcher round-trips.
 	ec := hooks.EventContext{WorkspaceID: wsID, ToolName: "Bash"}
-	if err := hooks.Dispatch(context.Background(), db, nil, hooks.EventPreToolCall, ec); err != nil {
+	if err := hooks.Dispatch(t.Context(), db, nil, hooks.EventPreAgentStart, ec); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
 	if got := fired.Load(); got != 1 {
@@ -204,7 +245,7 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 	}
 
 	// And the matcher round-tripped: a tool the matcher excludes must not fire.
-	if err := hooks.Dispatch(context.Background(), db, nil, hooks.EventPreToolCall,
+	if err := hooks.Dispatch(t.Context(), db, nil, hooks.EventPreAgentStart,
 		hooks.EventContext{WorkspaceID: wsID, ToolName: "Read"}); err != nil {
 		t.Fatalf("Dispatch (non-matching): %v", err)
 	}
@@ -220,7 +261,7 @@ func TestHooksCreate_DisabledOnRequestStaysDisabled(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
-		"event":          string(hooks.EventPreToolCall),
+		"event":          string(hooks.EventPostToolCall),
 		"handler_kind":   "http",
 		"handler_config": map[string]any{"url": "https://example.test/h"},
 		"enabled":        false,
@@ -241,14 +282,14 @@ func TestHooksCreate_CrossTenantCrewIs404(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
 		t.Fatalf("seed other ws: %v", err)
 	}
 	otherCrew := seedCrewRow(t, db, "crew-other", "ws-other", "Other Crew", "other-crew")
 
 	h := NewHooksHandler(db, newTestLogger())
 	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
-		"event":          string(hooks.EventPreToolCall),
+		"event":          string(hooks.EventPostToolCall),
 		"handler_kind":   "http",
 		"handler_config": map[string]any{"url": "https://example.test/h"},
 		"crew_id":        otherCrew,
@@ -265,7 +306,7 @@ func TestHooksCreate_WritesAnAuditRow(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
-		"event":          string(hooks.EventPreToolCall),
+		"event":          string(hooks.EventPostToolCall),
 		"handler_kind":   "http",
 		"handler_config": map[string]any{"url": "https://example.test/h"},
 	})
@@ -295,7 +336,7 @@ func TestHooksUpdate_PatchLeavesOmittedFieldsAlone(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
-		"event":          string(hooks.EventPreToolCall),
+		"event":          string(hooks.EventPreAgentStart),
 		"handler_kind":   "http",
 		"handler_config": map[string]any{"url": "https://old.test"},
 		"matcher":        map[string]any{"tools": []string{"Bash"}},
@@ -332,6 +373,60 @@ func TestHooksUpdate_PatchLeavesOmittedFieldsAlone(t *testing.T) {
 	}
 }
 
+// TestHooksUpdate_LegacyPreToolCallRowSurvivesUnrelatedPatch pins the claim
+// the PR body, CHANGELOG, and docs/api-reference/hooks.mdx all make: a hook
+// row registered under pre_tool_call before it was retired from AllEvents
+// still "lists, toggles, and reads back fine". PATCHing a field that has
+// nothing to do with event must not resurrect the retired-event rejection.
+//
+// The row is seeded with a raw INSERT rather than hooks.Register, because
+// Register itself now (correctly) refuses event=pre_tool_call — the same
+// way a row from before the retirement would already be sitting in
+// hooks_config, untouched by the migration that removed the event from
+// AllEvents.
+func TestHooksUpdate_LegacyPreToolCallRowSurvivesUnrelatedPatch(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewHooksHandler(db, newTestLogger())
+
+	const id = "hk_legacy_pretool"
+	_, err := db.ExecContext(t.Context(), `INSERT INTO hooks_config
+		(id, workspace_id, event, matcher, handler_kind, handler_config, blocking, enabled)
+		VALUES (?, ?, 'pre_tool_call', '{}', 'http', ?, 0, 1)`,
+		id, wsID, `{"url":"https://legacy.test"}`)
+	if err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	// PATCH only blocking — the request body never mentions event.
+	rr := patchHook(t, h, userID, wsID, "OWNER", id, map[string]any{
+		"blocking": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got hookRow
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Event != "pre_tool_call" {
+		t.Errorf("event = %q, want it left unchanged at %q", got.Event, "pre_tool_call")
+	}
+	if !got.Blocking {
+		t.Error("blocking not applied by the patch")
+	}
+
+	var event string
+	if err := db.QueryRowContext(t.Context(), `SELECT event FROM hooks_config WHERE id = ?`, id).Scan(&event); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if event != "pre_tool_call" {
+		t.Errorf("stored event = %q, want it left unchanged at pre_tool_call", event)
+	}
+}
+
 func TestHooksUpdate_NonOwnerCannotConvertAHookToShell(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
@@ -339,7 +434,7 @@ func TestHooksUpdate_NonOwnerCannotConvertAHookToShell(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	rr := postHook(t, h, userID, wsID, "ADMIN", map[string]any{
-		"event":          string(hooks.EventPreToolCall),
+		"event":          string(hooks.EventPostToolCall),
 		"handler_kind":   "http",
 		"handler_config": map[string]any{"url": "https://ok.test"},
 	})
@@ -358,7 +453,7 @@ func TestHooksUpdate_NonOwnerCannotConvertAHookToShell(t *testing.T) {
 	}
 
 	var kind string
-	if err := db.QueryRow(`SELECT handler_kind FROM hooks_config WHERE id = ?`, created.ID).Scan(&kind); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT handler_kind FROM hooks_config WHERE id = ?`, created.ID).Scan(&kind); err != nil {
 		t.Fatalf("read back: %v", err)
 	}
 	if kind != "http" {
@@ -377,7 +472,7 @@ func TestHooksUpdate_UnknownEventIsRejected(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), string(hooks.EventPreToolCall)) {
+	if !strings.Contains(rr.Body.String(), string(hooks.EventPostToolCall)) {
 		t.Errorf("error should list the valid events: %s", rr.Body.String())
 	}
 }
@@ -386,7 +481,7 @@ func TestHooksUpdate_CrossTenantIs404(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
 		t.Fatalf("seed other ws: %v", err)
 	}
 	foreign := seedHook(t, db, "ws-other", "")
@@ -423,7 +518,7 @@ func TestHooksDelete_RemovesTheRowThenIs404(t *testing.T) {
 		t.Fatalf("delete status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config WHERE id = ?`, id).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config WHERE id = ?`, id).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
@@ -439,7 +534,7 @@ func TestHooksDelete_CrossTenantIs404AndLeavesTheRow(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
 		t.Fatalf("seed other ws: %v", err)
 	}
 	foreign := seedHook(t, db, "ws-other", "")
@@ -449,7 +544,7 @@ func TestHooksDelete_CrossTenantIs404AndLeavesTheRow(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rr.Code)
 	}
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config WHERE id = ?`, foreign).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config WHERE id = ?`, foreign).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 1 {

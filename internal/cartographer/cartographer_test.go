@@ -11,125 +11,31 @@ import (
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
-
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/testutil"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
-// schemaSQL is a minimal mirror of the production schema at migration
-// 52 — enough tables and columns that cartographer can build, read,
-// and fork. Kept in one string so the test doesn't pull in the whole
-// migrate package.
-const schemaSQL = `
-CREATE TABLE workspaces (id TEXT PRIMARY KEY);
-CREATE TABLE crews (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL);
-CREATE TABLE agents (id TEXT PRIMARY KEY, crew_id TEXT);
-
-CREATE TABLE missions (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    crew_id TEXT NOT NULL,
-    lead_agent_id TEXT NOT NULL,
-    trace_id TEXT NOT NULL UNIQUE,
-    title TEXT NOT NULL,
-    description TEXT,
-    status TEXT NOT NULL DEFAULT 'PLANNING',
-    plan TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE assignments (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    chat_id TEXT NOT NULL,
-    assigned_by_id TEXT NOT NULL,
-    assigned_to_id TEXT NOT NULL,
-    task TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'PENDING'
-);
-
-CREATE TABLE mission_tasks (
-    id TEXT PRIMARY KEY,
-    mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
-    assigned_agent_id TEXT,
-    title TEXT NOT NULL,
-    description TEXT,
-    status TEXT NOT NULL DEFAULT 'PENDING',
-    task_order INTEGER NOT NULL DEFAULT 0,
-    depends_on TEXT DEFAULT '[]',
-    assignment_id TEXT
-);
-
-CREATE TABLE journal_entries (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    crew_id TEXT,
-    agent_id TEXT,
-    mission_id TEXT,
-    ts TEXT NOT NULL,
-    entry_type TEXT NOT NULL,
-    severity TEXT NOT NULL DEFAULT 'info',
-    priority TEXT NOT NULL DEFAULT 'normal',
-    actor_type TEXT NOT NULL,
-    actor_id TEXT,
-    summary TEXT NOT NULL,
-    payload TEXT NOT NULL DEFAULT '{}',
-    refs TEXT NOT NULL DEFAULT '{}',
-    trace_id TEXT,
-    span_id TEXT,
-    expires_at TEXT,
-    seq INTEGER NOT NULL DEFAULT 0,
-    prev_hash TEXT NOT NULL DEFAULT '',
-    entry_hash TEXT NOT NULL DEFAULT '',
-    -- v166: immutable priority the hash-chain commits to; the writer
-    -- INSERTs it unconditionally, so a fixture missing it drops every row.
-    priority_at_emit TEXT
-);
-
-CREATE TABLE checkpoints (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    crew_id TEXT,
-    mission_id TEXT REFERENCES missions(id) ON DELETE CASCADE,
-    label TEXT,
-    journal_cursor TEXT NOT NULL,
-    state_snapshot TEXT NOT NULL DEFAULT '{}',
-    fork_of TEXT REFERENCES checkpoints(id) ON DELETE SET NULL,
-    created_by TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-`
-
-// openTestDB spins up an in-memory sqlite DB, applies the minimal schema,
-// and seeds one workspace/crew/mission so the cartographer APIs have
+// openTestDB returns a database built from the real migration chain
+// (testutil.MigratedSQLDB — see internal/testutil/migrateddb.go), then
+// seeds one workspace/crew/agent/mission so the cartographer APIs have
 // something to bind to. Individual tests layer their own fixtures on
 // top (journal entries, tasks, assignments).
+//
+// This used to run against a hand-written schema mirror that omitted
+// the chats table entirely, which hid a real bug: Fork inserted a
+// mission but never the synthetic chat row assignments.chat_id
+// requires (NOT NULL REFERENCES chats(id)). Running against the
+// actual migrated schema is what catches that.
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	// :memory: gives each connection a *fresh* database in modernc.org's
-	// driver. Pin the pool to one connection so schema/data stay visible
-	// across the journal writer goroutine, Fork's transactions, and the
-	// test's own queries. Production uses a file-backed DB, so this is a
-	// test-only workaround.
-	db.SetMaxOpenConns(1)
-	// Enable foreign key enforcement so ON DELETE SET NULL actually
-	// fires — sqlite defaults it off per-connection.
-	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
-		t.Fatalf("pragma: %v", err)
-	}
-	if _, err := db.Exec(schemaSQL); err != nil {
-		t.Fatalf("schema: %v", err)
-	}
+	db := testutil.MigratedSQLDB(t)
 	seed := []string{
-		`INSERT INTO workspaces (id) VALUES ('ws_test')`,
-		`INSERT INTO workspaces (id) VALUES ('ws_other')`,
-		`INSERT INTO crews (id, workspace_id) VALUES ('crew_a', 'ws_test')`,
-		`INSERT INTO agents (id, crew_id) VALUES ('agent_lead', 'crew_a')`,
+		`INSERT INTO workspaces (id, name, slug) VALUES ('ws_test', 'Test Workspace', 'test-workspace')`,
+		`INSERT INTO workspaces (id, name, slug) VALUES ('ws_other', 'Other Workspace', 'other-workspace')`,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew_a', 'ws_test', 'Crew A', 'crew-a')`,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug, agent_role)
+			VALUES ('agent_lead', 'crew_a', 'ws_test', 'Lead', 'lead', 'LEAD')`,
 		`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title)
 			VALUES ('mis_1', 'ws_test', 'crew_a', 'agent_lead', 'tr_1', 'Demo mission')`,
 	}
@@ -154,12 +60,21 @@ func newJournal(t *testing.T, db *sql.DB) *journal.Writer {
 
 // emitJournalEntry inserts a journal row directly via SQL. Bypasses the
 // batched writer so tests can control the exact (ts, id) ordering.
-func emitJournalEntry(t *testing.T, db *sql.DB, id, missionID string, ts time.Time) {
+//
+// ts goes through tsformat.Format rather than the stdlib nano layout:
+// restore.go and snapshot.go both ORDER BY ts on this column, and the
+// stdlib layout truncates trailing zeros in the fractional second, so
+// two timestamps inside the same second can render at different widths
+// and sort in the wrong order (see internal/tsformat). These tests order
+// entries a second apart, so the fixture must write the same fixed-width
+// form the production writer does, or it is not exercising the ordering
+// the package actually relies on.
+func emitJournalEntry(ctx context.Context, t *testing.T, db *sql.DB, id, missionID string, ts time.Time) {
 	t.Helper()
-	_, err := db.Exec(`INSERT INTO journal_entries
+	_, err := db.ExecContext(ctx, `INSERT INTO journal_entries
 		(id, workspace_id, mission_id, ts, entry_type, actor_type, summary)
 		VALUES (?, 'ws_test', ?, ?, 'peer.conversation', 'agent', 's')`,
-		id, missionID, ts.UTC().Format(time.RFC3339Nano))
+		id, missionID, tsformat.Format(ts))
 	if err != nil {
 		t.Fatalf("emit entry %s: %v", id, err)
 	}
@@ -318,8 +233,8 @@ func TestRestoreDivergence(t *testing.T) {
 	ctx := context.Background()
 
 	base := time.Now().UTC()
-	emitJournalEntry(t, db, "j_1", "mis_1", base)
-	emitJournalEntry(t, db, "j_2", "mis_1", base.Add(time.Second))
+	emitJournalEntry(ctx, t, db, "j_1", "mis_1", base)
+	emitJournalEntry(ctx, t, db, "j_2", "mis_1", base.Add(time.Second))
 
 	id, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
@@ -333,8 +248,8 @@ func TestRestoreDivergence(t *testing.T) {
 	}
 
 	// Two more entries happen AFTER the checkpoint.
-	emitJournalEntry(t, db, "j_3", "mis_1", base.Add(2*time.Second))
-	emitJournalEntry(t, db, "j_4", "mis_1", base.Add(3*time.Second))
+	emitJournalEntry(ctx, t, db, "j_3", "mis_1", base.Add(2*time.Second))
+	emitJournalEntry(ctx, t, db, "j_4", "mis_1", base.Add(3*time.Second))
 
 	res, err := Restore(ctx, db, nil, "ws_test", id)
 	if err != nil {
@@ -403,7 +318,7 @@ func TestForkRemapsTaskDependencies(t *testing.T) {
 		VALUES ('mt_p2', 'mis_1', 'Execute', 'PENDING', 1, '["mt_p1"]')`); err != nil {
 		t.Fatalf("seed mt_p2: %v", err)
 	}
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
@@ -494,7 +409,7 @@ func TestForkCreatesMissionAndCheckpoint(t *testing.T) {
 			t.Fatalf("seed task %s: %v", spec.id, err)
 		}
 	}
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
@@ -574,6 +489,65 @@ func TestForkCreatesMissionAndCheckpoint(t *testing.T) {
 	}
 }
 
+// TestForkCreatesChatRow proves a forked mission is complete enough to
+// actually run: the orchestrator assigns tasks by inserting into
+// assignments with chat_id set to the mission id (see
+// internal/api/mission_handler_mutate.go's "synthetic chat" and
+// internal/orchestrator/mission_tasks.go's scheduleTask, both of which
+// use the mission id as chat_id). assignments.chat_id is NOT NULL
+// REFERENCES chats(id), so if Fork doesn't also create a chats row for
+// the new mission, every assignment on a forked mission fails with a
+// foreign key violation the moment the orchestrator tries to dispatch
+// a task — even though Fork itself reports success.
+//
+// This only surfaces against the real migrated schema: a hand-rolled
+// test fixture without a chats table can't fail this FK no matter what
+// Fork does.
+func TestForkCreatesChatRow(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
+	srcID, err := Create(ctx, db, nil, Checkpoint{
+		WorkspaceID:   "ws_test",
+		CrewID:        "crew_a",
+		MissionID:     "mis_1",
+		JournalCursor: "j_seed",
+		Label:         "pre-fork",
+	})
+	if err != nil {
+		t.Fatalf("create src: %v", err)
+	}
+
+	newMission, _, err := Fork(ctx, db, nil, "ws_test", srcID, "branch", "user_x")
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+
+	// The fork must have a chats row keyed by its own mission id — the
+	// same "synthetic chat" pattern the normal mission-create path uses.
+	var chatAgent, chatWorkspace string
+	err = db.QueryRowContext(ctx, `SELECT agent_id, workspace_id FROM chats WHERE id = ?`, newMission).
+		Scan(&chatAgent, &chatWorkspace)
+	if err != nil {
+		t.Fatalf("fork mission has no chats row (assignments.chat_id FK will fail on every dispatch): %v", err)
+	}
+	if chatWorkspace != "ws_test" {
+		t.Errorf("chat workspace_id: got %q want ws_test", chatWorkspace)
+	}
+
+	// Prove the FK actually clears: insert an assignment the way the
+	// orchestrator does when it schedules a task on the forked mission.
+	_, err = db.ExecContext(ctx, `INSERT INTO assignments
+		(id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth)
+		VALUES ('as_fork', 'ws_test', ?, ?, ?, 'do the thing', 'PENDING', ?, 0)`,
+		newMission, chatAgent, chatAgent, newMission)
+	if err != nil {
+		t.Fatalf("assignment on forked mission violated chat_id FK: %v", err)
+	}
+}
+
 // TestDeleteOrphansForks proves the migration's ON DELETE SET NULL
 // behaviour: deleting the parent checkpoint drops fork_of to NULL on
 // its children rather than removing them. The forked mission row and
@@ -583,7 +557,7 @@ func TestDeleteOrphansForks(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_a",
@@ -658,6 +632,12 @@ func TestCaptureBuildsSnapshot(t *testing.T) {
 		t.Fatalf("seed tasks: %v", err)
 	}
 
+	// Assignments require a chat row to satisfy chat_id's FK.
+	if _, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, title, mode, status)
+		VALUES ('ch_1', 'agent_lead', 'ws_test', 'Chat', 'MISSION', 'ACTIVE')`); err != nil {
+		t.Fatalf("seed chat: %v", err)
+	}
+
 	// Two assignments: one RUNNING attached to mt_open, one COMPLETED attached to mt_done.
 	_, err = db.Exec(`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status) VALUES
 		('as_run', 'ws_test', 'ch_1', 'agent_lead', 'agent_lead', 't', 'RUNNING'),
@@ -672,7 +652,7 @@ func TestCaptureBuildsSnapshot(t *testing.T) {
 		t.Fatalf("wire task: %v", err)
 	}
 
-	emitJournalEntry(t, db, "j_1", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_1", "mis_1", time.Now().UTC())
 
 	snap, cursor, err := Capture(ctx, db, "mis_1")
 	if err != nil {

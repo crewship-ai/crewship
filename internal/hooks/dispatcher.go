@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -25,13 +26,23 @@ import (
 // can log them without losing the Block short-circuit signal.
 func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Event, ec EventContext) error {
 	if ec.WorkspaceID == "" {
-		return errors.New("hooks: Dispatch requires workspace_id")
+		return &DispatchError{Event: event, Cause: errors.New("workspace_id required")}
 	}
 	ec.Event = event
+	if db == nil {
+		err := errors.New("nil database")
+		dispatchLookupFailed(ctx, emitter, event, ec, err)
+		return &DispatchError{Event: event, Cause: err}
+	}
 
 	hooks, err := ListByEvent(ctx, db, ec.WorkspaceID, ec.CrewID, event)
 	if err != nil {
-		return fmt.Errorf("hooks: dispatch: %w", err)
+		// No policy decision happened: the registry could not be read.
+		// Preserve that distinction in the returned type and in telemetry.
+		// Gate call sites can fail closed without falsely claiming a hook
+		// rejected the operation; observation call sites may log and continue.
+		dispatchLookupFailed(ctx, emitter, event, ec, err)
+		return &DispatchError{Event: event, Cause: err}
 	}
 
 	// Apply the Matcher filter once up-front so we can cheaply iterate the
@@ -49,9 +60,8 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 	var errs []error
 
 	// Blocking pass: sequential, stop on first Block. A blocking hook that
-	// returns OutcomeError is logged but does NOT short-circuit — we treat
-	// "handler broken" as "fail open" so a buggy webhook can't wedge the
-	// platform. Operators see the error in the journal.
+	// returns OutcomeError does not masquerade as an explicit Block. It is
+	// accumulated as DispatchError so the caller can apply the correct policy.
 	for _, h := range filtered {
 		if !h.Blocking {
 			continue
@@ -59,7 +69,7 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 		res, runErr := runHandler(ctx, db, h, ec)
 		emitFired(ctx, emitter, h, ec, res, runErr)
 		if runErr != nil {
-			errs = append(errs, fmt.Errorf("hook %s: %w", h.ID, runErr))
+			errs = append(errs, &DispatchError{Event: event, HookID: h.ID, Cause: runErr})
 			continue
 		}
 		if res.Outcome == OutcomeBlock {
@@ -115,6 +125,38 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+// dispatchLookupFailed records a ListByEvent failure. The slog line is
+// unconditional so the failure is observable even when emitter is nil or
+// the journal write itself can't land (e.g. the DB that just failed the
+// lookup is the same DB the journal would write to). The journal entry is
+// best-effort on top of that, for operators who watch the journal feed
+// rather than server logs.
+func dispatchLookupFailed(ctx context.Context, emitter journal.Emitter, event Event, ec EventContext, lookupErr error) {
+	slog.Default().Error("hooks: dispatch: hook lookup failed",
+		"event", string(event),
+		"workspace_id", ec.WorkspaceID,
+		"crew_id", ec.CrewID,
+		"err", lookupErr,
+	)
+	if emitter == nil {
+		return
+	}
+	_, _ = emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: ec.WorkspaceID,
+		CrewID:      ec.CrewID,
+		AgentID:     ec.AgentID,
+		MissionID:   ec.MissionID,
+		Type:        journal.EntryHookDispatchError,
+		Severity:    journal.SeverityWarn,
+		ActorType:   journal.ActorSystem,
+		Summary:     fmt.Sprintf("hook lookup failed for %s", event),
+		Payload: map[string]any{
+			"event": string(event),
+			"error": lookupErr.Error(),
+		},
+	})
 }
 
 // runHandler dispatches to the correct backend based on HandlerKind.

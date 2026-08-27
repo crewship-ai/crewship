@@ -56,7 +56,8 @@ func covMissionDB(t *testing.T) *sql.DB {
 			started_at TEXT, finished_at TEXT, result_summary TEXT, error_message TEXT,
 			group_id TEXT, created_at TEXT,
 			depth INTEGER NOT NULL DEFAULT 0, parent_assignment_id TEXT);
-		CREATE TABLE chats (id TEXT PRIMARY KEY, agent_id TEXT, workspace_id TEXT);
+		CREATE TABLE chats (id TEXT PRIMARY KEY, agent_id TEXT, workspace_id TEXT,
+			title TEXT, mode TEXT, status TEXT, started_at TEXT, created_at TEXT, updated_at TEXT);
 		CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, email TEXT);
 		CREATE TABLE crew_connections (id TEXT PRIMARY KEY, from_crew_id TEXT, to_crew_id TEXT,
 			status TEXT, direction TEXT);

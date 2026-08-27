@@ -70,6 +70,7 @@ export const JOURNAL_ENTRY_TYPES = [
   // Hooks
   "hook.fired",
   "hook.blocked",
+  "hook.dispatch_error",
   // Eval
   "eval.run_started",
   "eval.metric",

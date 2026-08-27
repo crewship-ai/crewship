@@ -29,16 +29,24 @@ var hooksCmd = &cobra.Command{
 	Aliases: []string{"hook"},
 	Short:   "Lifecycle hooks registry (list/create/update/delete/enable/disable)",
 	Long: `Manage the lifecycle-hook registry — shell commands, HTTP webhooks, or
-subagents that fire on platform lifecycle events (pre_tool_call,
-post_agent_stop, on_approval_requested, …).
+subagents that fire on platform lifecycle events (post_agent_stop,
+on_approval_requested, on_guardrail_triggered, …).
+
+pre_tool_call is not a valid --event: there is no interception point before
+a tool executes, so nothing could ever fire it. Note that post_tool_call IS
+accepted but is not dispatched to user-registered hooks either — only
+pre_agent_start, post_agent_stop, on_approval_requested and
+on_guardrail_triggered have live dispatch sites today. Registering on any
+other event is legal and silently does nothing — see the Hooks guide's
+coverage table before picking one.
 
 Examples:
   crewship hooks list
   crewship hooks list --crew backend-team
   crewship hooks create --event on_budget_exceeded --handler http \
       --url https://hooks.slack.test/services/XXX
-  crewship hooks create --event pre_tool_call --handler shell \
-      --command /usr/local/bin/gate.sh --matcher-tools Bash --blocking
+  crewship hooks create --event pre_agent_start --handler shell \
+      --command /usr/local/bin/gate.sh --crew backend-team --blocking
   crewship hooks update hk_abc --disabled
   crewship hooks delete hk_abc --yes
   crewship hooks enable hk_abc
@@ -60,7 +68,7 @@ var hookHandlerKinds = []string{
 }
 
 // validateHookEvent rejects an unknown event locally. The server rejects it
-// too, but a client-side check keeps the fix ("you meant pre_tool_call")
+// too, but a client-side check keeps the fix ("you meant pre_agent_start")
 // in the same message as the mistake instead of behind an HTTP 400 — the
 // same reasoning as validateCSV on `crewship journal`.
 func validateHookEvent(event string) error {
@@ -253,11 +261,11 @@ New hooks are enabled unless you pass --disabled.
 Examples:
   crewship hooks create --event on_approval_requested --handler http \
       --url https://hooks.slack.test/services/XXX
-  crewship hooks create --event pre_tool_call --handler shell \
-      --command /usr/local/bin/gate.sh --matcher-tools 'Bash,Write' --blocking
+  crewship hooks create --event pre_agent_start --handler shell \
+      --command /usr/local/bin/gate.sh --crew backend-team --blocking
   crewship hooks create --event post_agent_stop --handler subagent \
       --subagent oncall-router --crew backend-team
-  crewship hooks create --event pre_llm_call --handler http \
+  crewship hooks create --event on_guardrail_triggered --handler http \
       --handler-config '{"url":"https://x.test/h","method":"PUT"}'`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {

@@ -242,6 +242,20 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// assignments.chat_id is NOT NULL REFERENCES chats(id), and the mission
+	// task dispatcher inserts assignments with chat_id = this mission's id —
+	// see mission_handler_mutate.go's Create and issue_handler_workflow.go's
+	// Start, which stamp this same synthetic row for the same reason. This
+	// door was the one path that didn't: a mission an agent planned here
+	// dispatched its first task straight into a FOREIGN KEY constraint
+	// failure. In the transaction so a rollback (e.g. a failed task insert
+	// below) does not leave an orphaned chat with no mission.
+	if err := ensureMissionChat(r.Context(), tx, id, req.WorkspaceID, req.LeadAgentID, req.Title); err != nil {
+		h.logger.Error("create synthetic chat for mission", "error", err, "mission_id", id)
+		replyError(w, http.StatusInternalServerError, "failed to create mission")
+		return
+	}
+
 	// Create tasks if provided (batch creation)
 	// Task IDs are generated server-side; depends_on references use temp IDs
 	// that map to task_order for resolution.

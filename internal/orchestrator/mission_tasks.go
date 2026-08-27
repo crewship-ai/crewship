@@ -380,6 +380,48 @@ func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState
 	return nil
 }
 
+// ensureMissionChat guarantees a chats row exists at ms.ID before this
+// engine writes an assignment against it (assignments.chat_id is
+// NOT NULL REFERENCES chats(id), and every assignment this engine inserts
+// uses the mission's own id as chat_id).
+//
+// Mission creation is supposed to stamp this row itself — three of the four
+// mission-creating doors do (api/mission_handler_mutate.go's Create,
+// api/issue_handler_workflow.go's Start, internal/cartographer/fork.go's
+// Fork). But two of those three learned it the hard way, as a FOREIGN KEY
+// constraint failure on the mission's first task dispatch, because nothing
+// here required it: api/missions_internal.go's Create (the door an agent
+// uses to plan its own mission) and cartographer's Fork each independently
+// forgot the row before this fix and #2128 respectively. A per-path
+// eager insert is correctness at the source but does not close the class —
+// a fifth door can forget it just as easily. This is that class fix: the
+// one place every mission's assignments are actually written checks for
+// itself rather than trusting whoever created the mission.
+//
+// Idempotent (SELECT-then-INSERT OR IGNORE), so a mission that already has
+// its chat row — the common case — pays one indexed lookup and nothing
+// else, and a second task dispatched into the same tick never double-inserts.
+func (e *MissionEngine) ensureMissionChat(ctx context.Context, ms *missionState) error {
+	var exists int
+	if err := e.db.QueryRowContext(ctx, `SELECT 1 FROM chats WHERE id = ?`, ms.ID).Scan(&exists); err == nil {
+		return nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("look up mission chat: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	title := ms.Title
+	if title == "" {
+		title = ms.ID
+	}
+	if _, err := e.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		ms.ID, ms.LeadAgentID, ms.WorkspaceID, "Mission: "+title, now, now, now); err != nil {
+		return fmt.Errorf("create synthetic chat for mission: %w", err)
+	}
+	return nil
+}
+
 // scheduleTask transitions a task to IN_PROGRESS and creates an assignment.
 // It resolves the target agent's crew (which may differ from the mission's
 // crew for cross-crew tasks) and dispatches the work via the TaskDispatcher.
@@ -496,6 +538,9 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	// Everything that is not one of these two writes stays OUTSIDE: SQLite
 	// has a single database-wide writer, so the brief build above and the
 	// dispatch below must never be inside this window.
+	if err := e.ensureMissionChat(ctx, ms); err != nil {
+		return fmt.Errorf("ensure mission chat: %w", err)
+	}
 	assignmentID := generateID()
 	if err := database.WithTx(ctx, e.db, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `

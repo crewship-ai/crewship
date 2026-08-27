@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
@@ -30,9 +32,8 @@ func (noopJournalForAdapter) Flush(_ context.Context) error { return nil }
 // ---- hooksAdapter.Dispatch ----
 
 func TestHooksAdapter_Dispatch_RequiresWorkspaceID(t *testing.T) {
-	// Source contract on hooks.Dispatch: empty workspace_id returns
-	// "hooks: Dispatch requires workspace_id" — guarantee the adapter
-	// forwards the EventContext faithfully so that validation fires.
+	// Guarantee the adapter forwards EventContext faithfully so the typed
+	// workspace validation error fires.
 	db := openTestDB(t)
 	a := newHooksAdapter(db, noopJournalForAdapter{})
 	err := a.Dispatch(context.Background(), "pre_agent", orchestrator.HookEventContext{
@@ -40,6 +41,30 @@ func TestHooksAdapter_Dispatch_RequiresWorkspaceID(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error from hooks.Dispatch when WorkspaceID is empty")
+	}
+	var de *hooks.DispatchError
+	if !errors.As(err, &de) {
+		t.Fatalf("error = %T, want *hooks.DispatchError: %v", err, err)
+	}
+}
+
+func TestHooksAdapter_Dispatch_RegistryFailureStaysTyped(t *testing.T) {
+	db := openTestDB(t)
+	a := newHooksAdapter(db, noopJournalForAdapter{})
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	err := a.Dispatch(context.Background(), "pre_agent_start", orchestrator.HookEventContext{
+		WorkspaceID: "ws_adapter_hooks",
+	})
+	var de *hooks.DispatchError
+	if !errors.As(err, &de) {
+		t.Fatalf("registry error = %T, want *hooks.DispatchError: %v", err, err)
+	}
+	var be *hooks.BlockedError
+	if errors.As(err, &be) {
+		t.Fatalf("registry error masquerades as *hooks.BlockedError: %v", err)
 	}
 }
 
