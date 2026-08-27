@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/testutil"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // openTestDB returns a database built from the real migration chain
@@ -59,12 +60,21 @@ func newJournal(t *testing.T, db *sql.DB) *journal.Writer {
 
 // emitJournalEntry inserts a journal row directly via SQL. Bypasses the
 // batched writer so tests can control the exact (ts, id) ordering.
+//
+// ts goes through tsformat.Format rather than the stdlib nano layout:
+// restore.go and snapshot.go both ORDER BY ts on this column, and the
+// stdlib layout truncates trailing zeros in the fractional second, so
+// two timestamps inside the same second can render at different widths
+// and sort in the wrong order (see internal/tsformat). These tests order
+// entries a second apart, so the fixture must write the same fixed-width
+// form the production writer does, or it is not exercising the ordering
+// the package actually relies on.
 func emitJournalEntry(ctx context.Context, t *testing.T, db *sql.DB, id, missionID string, ts time.Time) {
 	t.Helper()
 	_, err := db.ExecContext(ctx, `INSERT INTO journal_entries
 		(id, workspace_id, mission_id, ts, entry_type, actor_type, summary)
 		VALUES (?, 'ws_test', ?, ?, 'peer.conversation', 'agent', 's')`,
-		id, missionID, ts.UTC().Format(time.RFC3339Nano))
+		id, missionID, tsformat.Format(ts))
 	if err != nil {
 		t.Fatalf("emit entry %s: %v", id, err)
 	}
