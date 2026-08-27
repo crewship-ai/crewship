@@ -92,8 +92,22 @@ crewship.db.pre-migrate-*
 # reached main in #1480 — an enumerated list only covers the binaries someone
 # remembered. Ignore every root-level build output for the tools under
 # scripts/ instead.
-/lint-migrations
+#
+# That last sentence was the right conclusion and it was never carried out:
+# the list below stayed at two entries, and a third binary — 10.5 MB of
+# docs-surface-check — reached main the same way in #2123. The list is now
+# complete against every `package main` under cmd/ and scripts/, and
+# scripts/no-root-binaries.sh fails the build if a compiled file is ever
+# committed at the root again, because the next tool added here will not
+# remember to update this list either.
+/agents-invariants
+/docker-api-surface
+/docs-inventory
+/docs-surface-check
 /gen-openapi
+/lint-migrations
+/lint-tsformat
+/memory-retrieval-bench
 *.exe
 *.dll
 *.so
