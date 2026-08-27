@@ -187,6 +187,12 @@ That note goes to **stderr**, along with the "which database" note on the
 `--local` path. Stdout carries the table and nothing else, so
 `crewship admin list-users | awk 'NR>1 {print $1}'` yields addresses.
 
+That holds for an empty workspace too: stdout is the header row alone and
+`(no users in this workspace)` is printed on stderr, so the same pipe yields
+nothing rather than a line of prose. (The `--local` listing keeps its own
+`(no users — run 'crewship seed' …)` on stdout — it is the example output
+shown in the [admin CLI guide](/guides/admin-cli).)
+
 ---
 
 ## `crewship admin promote`
