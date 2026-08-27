@@ -14,7 +14,9 @@ name: Changelog Guard
 # limiter). A human gate that only fires when a human looks is not a gate.
 #
 # The rule: a PR that changes the three surfaces a user can actually see —
-# the HTTP API, the CLI, the web app — must also touch `CHANGELOG.md`.
+# the HTTP API, the CLI, the web app — must also change `CHANGELOG.md`'s
+# `## [Unreleased]` section. That section specifically, not the file: it is the
+# only one `RELEASING.md` cuts release notes from.
 #
 # The escape hatch is deliberate and must stay easy, because a gate that
 # cannot be bypassed gets bypassed by disabling it:
@@ -170,16 +172,61 @@ jobs:
           fi
           echo ""
 
-          changelog="$(git diff --name-only --diff-filter=ACMRD \
-              "origin/$BASE_REF...HEAD" -- 'CHANGELOG.md')"
-          if [ -n "$changelog" ]; then
-            echo "CHANGELOG.md is touched by this PR. ✓"
+          # Touching `CHANGELOG.md` is not the same as writing a release note.
+          # This used to accept any change to the file at all, so a typo fix in
+          # a shipped version's section — or a stray blank line at the bottom —
+          # satisfied the gate while `## [Unreleased]`, the only section
+          # `RELEASING.md` actually cuts release notes from, stayed empty.
+          #
+          # The section is compared on both sides rather than reconstructed
+          # from the diff: a hunk header does not reliably say which `##`
+          # section its added lines landed in, and deriving that is the kind of
+          # cleverness that fails quietly the first time a heading moves.
+          #
+          # `|| true` on the two `git show` calls does NOT reopen the fail-open
+          # hole above: an unresolvable `origin/$BASE_REF` has already killed
+          # the step at `watched_raw`, which runs before this and unconditionally.
+          # What it tolerates is the narrow, legitimate case of a base commit
+          # that has no `CHANGELOG.md` yet — there, base reads empty, head does
+          # not, and the PR correctly counts as adding one.
+          unreleased_section() {
+            awk '
+              /^## \[Unreleased\]/ { inside = 1; next }
+              inside && /^## /     { exit }
+              inside               { print }
+            '
+          }
+
+          base_changelog="$(git show "origin/$BASE_REF:CHANGELOG.md" 2>/dev/null || true)"
+          head_changelog="$(git show "HEAD:CHANGELOG.md" 2>/dev/null || true)"
+
+          # The heading is load-bearing. Without it every PR looks like it
+          # changed nothing, and a gate that cannot see the section it checks
+          # must say so rather than hand out a verdict it did not reach.
+          if ! printf '%s\n' "$head_changelog" | grep -q '^## \[Unreleased\]'; then
+            echo "::error::CHANGELOG.md has no '## [Unreleased]' heading (or the file is gone)."
+            echo "::error::RELEASING.md cuts release notes from that section, so this guard cannot verify an entry without it. Restore the heading."
+            exit 1
+          fi
+
+          base_unreleased="$(printf '%s\n' "$base_changelog" | unreleased_section)"
+          head_unreleased="$(printf '%s\n' "$head_changelog" | unreleased_section)"
+
+          if [ "$base_unreleased" != "$head_unreleased" ]; then
+            echo "CHANGELOG.md's '## [Unreleased]' section is changed by this PR. ✓"
             exit 0
           fi
 
           if [ "$HAS_SKIP_LABEL" = "true" ]; then
             echo "::notice::No CHANGELOG.md entry, but the 'skip-changelog' label is applied."
             exit 0
+          fi
+
+          if [ -n "$(git diff --name-only --diff-filter=ACMRD \
+              "origin/$BASE_REF...HEAD" -- 'CHANGELOG.md')" ]; then
+            echo "::error::This PR edits CHANGELOG.md but leaves '## [Unreleased]' unchanged."
+            echo "::error::Release notes are cut from that section only — an edit anywhere else is not a release note."
+            exit 1
           fi
 
           echo "::error::This PR changes a user-visible surface but does not touch CHANGELOG.md."

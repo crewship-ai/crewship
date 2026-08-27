@@ -88,7 +88,7 @@ git -C "$FIXTURE" config user.name "Guard Test"
 
 mkdir -p "$FIXTURE"/{internal/api,cmd/crewship,app,components/__tests__,lib,hooks/__tests__,stores,docs}
 for f in \
-  README.md CHANGELOG.md docs/guide.mdx \
+  README.md docs/guide.mdx \
   internal/api/handler.go internal/api/handler_test.go \
   cmd/crewship/main.go \
   app/page.tsx \
@@ -99,6 +99,27 @@ for f in \
 do
   echo "base" > "$FIXTURE/$f"
 done
+
+# A CHANGELOG shaped like the real one: an `## [Unreleased]` section holding
+# `###` sub-headings, and a shipped version below it. The `##`-vs-`###`
+# distinction matters — `### Fixed` must NOT terminate the Unreleased section,
+# and `## [0.1.0]` must.
+cat > "$FIXTURE/CHANGELOG.md" <<'CHANGELOG'
+# Changelog
+
+## [Unreleased]
+
+### Fixed
+
+- **An existing unreleased entry.** Details.
+
+## [0.1.0] — 2026-01-01
+
+### Added
+
+- **A shipped entry.** Details.
+CHANGELOG
+
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" commit -qm "base"
 # A real remote-tracking ref: `origin/$BASE_REF` is what the guard resolves.
@@ -110,6 +131,22 @@ scenario() { git -C "$FIXTURE" checkout -q -B pr refs/remotes/origin/main; }
 touch_file() { echo "changed $RANDOM" >> "$FIXTURE/$1"; }
 remove_file() { git -C "$FIXTURE" rm -q "$1"; }
 commit_pr() { git -C "$FIXTURE" add -A; git -C "$FIXTURE" commit -qm "pr"; }
+
+# A real release note: a bullet added under `## [Unreleased]`.
+add_unreleased_entry() {
+  sed -i '/^### Fixed$/a\
+\
+- **A new unreleased entry.** What changed and why.' "$FIXTURE/CHANGELOG.md"
+}
+# An edit that is NOT a release note: it lands in the shipped section at the
+# bottom of the file, which is what "any change to CHANGELOG.md" used to accept.
+edit_released_section() { echo "- **Another shipped entry.** Details." >> "$FIXTURE/CHANGELOG.md"; }
+# Whitespace at the bottom of the file — the cheapest way to fake the old gate.
+append_blank_line() { printf '\n' >> "$FIXTURE/CHANGELOG.md"; }
+# Remove the heading the guard reads.
+break_unreleased_heading() {
+  sed -i 's/^## \[Unreleased\]$/## [0.2.0] — 2026-02-02/' "$FIXTURE/CHANGELOG.md"
+}
 
 GUARD_OUT=""
 GUARD_RC=0
@@ -167,11 +204,34 @@ expect "a test-only PR inside watched trees needs no entry" 0 main someone false
 # ---------------------------------------------------------------------------
 echo "verdict:"
 
-scenario; touch_file components/thing.tsx; touch_file CHANGELOG.md; commit_pr
-expect "a user-visible PR that touches CHANGELOG.md passes" 0 main someone false
+scenario; touch_file components/thing.tsx; add_unreleased_entry; commit_pr
+expect "a user-visible PR with an entry under ## [Unreleased] passes" 0 main someone false
 
 scenario; touch_file components/thing.tsx; commit_pr
 expect "a user-visible PR with no entry fails" 1 main someone false
+
+# Touching the file is not writing a release note. Both of these satisfied the
+# gate before — the first is a plausible drive-by edit, the second is one
+# keystroke.
+scenario; touch_file components/thing.tsx; edit_released_section; commit_pr
+expect "an edit to a shipped version's section is not a release note" 1 main someone false
+
+scenario; touch_file components/thing.tsx; append_blank_line; commit_pr
+expect "a whitespace-only change outside ## [Unreleased] is not a release note" 1 main someone false
+
+# …and the label still overrides it, so the tightening cannot wedge anyone.
+scenario; touch_file components/thing.tsx; edit_released_section; commit_pr
+expect "the label still clears a CHANGELOG edit outside ## [Unreleased]" 0 main someone true
+
+# A guard that cannot find the section it checks must say so, not return a
+# verdict it never reached — the same rule as the broken base ref below.
+scenario; touch_file components/thing.tsx; break_unreleased_heading; commit_pr
+expect "a missing ## [Unreleased] heading fails loudly" 1 main someone false
+if ! printf '%s\n' "$GUARD_OUT" | grep -q "no '## \[Unreleased\]' heading"; then
+  fail "…and it must name the missing heading rather than blaming the author for a missing entry"
+else
+  pass "…and it names the missing heading rather than blaming the author"
+fi
 
 scenario; remove_file app/page.tsx; commit_pr
 expect "deleting a watched file counts as user-visible" 1 main someone false
@@ -201,10 +261,10 @@ if [ "$GUARD_RC" -eq 0 ] && printf '%s\n' "$GUARD_OUT" | grep -q "nothing to chr
   echo "       ^ this is the fail-open: a dead 'git diff' read as an empty diff." >&2
 fi
 
-# Same, with a user-visible change AND the CHANGELOG touched: the step must
-# still fail rather than reaching the "CHANGELOG.md is touched ✓" happy path on
-# a diff that never ran.
-scenario; touch_file components/thing.tsx; touch_file CHANGELOG.md; commit_pr
+# Same, with a user-visible change AND a real entry: the step must still fail
+# rather than reaching the "Unreleased section is changed ✓" happy path on a
+# diff that never ran.
+scenario; touch_file components/thing.tsx; add_unreleased_entry; commit_pr
 expect "a broken base ref fails even when CHANGELOG.md is touched" nonzero nonexistent-branch someone false
 
 echo

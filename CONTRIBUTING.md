@@ -272,6 +272,14 @@ fix lands in `hooks/use-chat.ts`, retry and error copy in
 `lib/api-error.ts`. Test files inside any of those trees don't count as
 user-visible, and Dependabot is exempt by actor.
 
+**The entry has to be under `## [Unreleased]`, and the guard checks that**,
+not merely that you touched the file. It compares that one section between
+your base and your head, because `RELEASING.md` cuts release notes from it
+and nowhere else — a typo fix in a shipped version's section, or a stray
+blank line at the bottom, is not a release note and no longer passes. What
+it still cannot judge is entry *quality*; `- fix bug` satisfies it. The
+guard buys the reviewer that conversation, it does not replace them.
+
 The guard's own logic is unit-tested by
 `scripts/changelog-guard-test.sh`, which extracts the step's script
 verbatim from the workflow and runs it against a throwaway repository —
