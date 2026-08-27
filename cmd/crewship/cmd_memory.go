@@ -244,11 +244,10 @@ var memoryReindexCmd = &cobra.Command{
 			// the directory to build it in — otherwise `status`'s advice to
 			// "build an index with `crewship memory reindex`" landed right
 			// back on the gate below and reproduced the identical error, one
-			// exit code lower (#2106).
-			// A mkdir that FAILS is reported here rather than left to the
-			// gate below, which would describe an unwritable parent as a
-			// directory that "does not exist" and advise running this very
-			// command again.
+			// exit code lower (#2106). A mkdir that FAILS is reported here
+			// for the same reason: left to the gate, an unwritable parent
+			// reads as a directory that "does not exist", which is the
+			// message that advises running this very command again.
 			if err := createMemoryDir(mp.path); err != nil {
 				fmt.Fprintf(os.Stderr, "[%s] %v\n", mp.scope, memoryCreateError(mp.path, err))
 				gateFailed++
