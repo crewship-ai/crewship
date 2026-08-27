@@ -177,6 +177,8 @@ deterministic layer is the part that is actually enforced:
 | OpenAPI spec freshness | `Go Lint` → *OpenAPI spec is up to date* | yes |
 | Documentation completeness | `Go Lint` → *API and CLI documentation is complete* (`go run ./scripts/docs-inventory -strict`) | yes |
 | Navigation targets and inline links | `Documentation surface` → *Verify the contextual surface and navigation* (`go run ./scripts/docs-surface-check`) | yes |
+| Navigation **reachability** (file→nav) | `Documentation surface`, same job as the row above — `orphanedPages`, since #2086 | yes |
+| Published spec statistics | `Go` → `go test ./...` → `TestOpenAPIReferenceQuotesTheCurrentSpec` in `scripts/docs-inventory` — since #2086 | yes |
 | Schemathesis live layers | `ci.yml` → *Run deterministic API contract gate*; the same ephemeral seeded server/build as the PR harness | yes |
 | CLI runtime golden smoke | `ci.yml` → Harness PR subset + CLI command breadth smoke | yes |
 
@@ -187,13 +189,61 @@ generic JSON request schemas, CLI commands with no page, and CLI commands with
 undocumented flags. `make docs-inventory` remains the non-failing form for
 regenerating the reports locally; `make docs-inventory:strict` is what CI runs.
 
-`docs-surface-check` runs three hermetic passes over the tree: the contextual
-surface and description quality, the page ids `docs/docs.json` declares, and —
-since #1774 — every internal link written *inside* a page body, in both the
-Markdown `](/guides/routines)` and the JSX `href="/guides/routines"` form. Links
-inside fenced blocks are transcripts, not navigation, and are skipped. A dead
-link names the page and the target it points at — and, for a dead anchor, the
-anchor the page actually publishes — so the fix does not start with a search.
+`docs-surface-check` runs six hermetic passes over the tree, in the order it
+prints them: description quality, stability labels, navigation reachability in
+*both* directions (nav→file, and file→nav since #2086), every internal link
+written *inside* a page body — in both the Markdown `](/guides/routines)` and
+the JSX `href="/guides/routines"` form, since #1774 — deprecated terminology,
+and the contextual surface. Links inside fenced blocks are transcripts, not
+navigation, and are skipped. A dead link names the page and the target it points
+at — and, for a dead anchor, the anchor the page actually publishes — so the fix
+does not start with a search.
+
+**Both navigation directions are now gated, and only one of them used to be.**
+The declared-id pass asks "does this nav entry have a file?"; nothing asked
+"does this file have a nav entry?", so a page could be published and reachable
+from nothing. Three were: `cli/onboarding` (hiding all seven `onboarding`
+commands), `api-reference/onboarding` and `manifest/page`. The gap was
+structural rather than three oversights — `scripts/docs-inventory` even declared
+`docsNavigation = "docs/docs.json"` and never read it, which is why its report
+said *"0 missing"* throughout: it matches operations against page **files**, so
+a page nothing links to counts as documented.
+
+The cost of an orphan is larger than a missing sidebar entry, because
+**`llms.txt` is generated from the navigation**. An unlisted page is absent from
+the agent-readable index as well as the human one, and it is invisible to
+`checkServed`'s own `llms.txt` assertion by construction: that comparison counts
+what the navigation declares, so the deployed index can equal `docs.json`
+exactly while a published page is reachable from neither. `orphanedPages` is the
+only thing in the pipeline that can see it.
+
+Its allowlist (`unnavigatedPages`, `unnavigatedPrefixes`) is enumerated rather
+than inferred — `prd/` and `audit-methodology`, the two trees written for the
+repository rather than the site. An inferred rule ("anything under a directory
+with no nav entries") would have excused the three orphans too.
+
+**Published statistics are derived, not typed.** `docs/api-reference/openapi.mdx`
+quoted *"513 of 536 operations … 184 request bodies"* against a spec that had
+reached 588, while the generated report in `docs/prd/reports/` carried the right
+numbers — two answers to one question in one tree, and the published one was the
+wrong one, because it was the one a human had typed. `schemaStats` in
+`scripts/docs-inventory` now derives all eight figures, and
+`TestOpenAPIReferenceQuotesTheCurrentSpec` re-reads the page on every run,
+failing with the replacement sentence rather than a diff.
+
+The predicates are **shared, not merely matching**. Both the per-operation rows
+of the report and the published figures go through one `classifySchemas`, so
+"these two agree" is a property of the code rather than a claim in a comment —
+a second implementation that happens to agree today is the same defect one level
+up, and it is what the first draft of this change had. The refactor is verified
+by the report regenerating byte-identically.
+
+The tradeoff is deliberate and worth stating: a PR that adds a route and
+regenerates the spec must now also update that one sentence. That is real
+friction on top of the gates a new endpoint already trips, and it is the price
+of the number being true — the alternative that was tried was trusting a human
+to re-count, and it drifted by 52 operations. The failure message is
+copy-pasteable precisely so the friction stays mechanical.
 
 **Fragments are verified, not resolved away** (#1794). `/guides/routines#cross-run-state`
 must name a page that exists *and* an anchor that page publishes, because a link

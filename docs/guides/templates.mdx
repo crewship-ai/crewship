@@ -37,13 +37,29 @@ hire path, the onboarding wizard -- resolves to the workspace's version, and
 `template list` shows the slug once, as the workspace's version. The more
 specific definition wins.
 
-This is what lets you customise a shipped template in place: adjust the roster
-or the prompts, save it under the same slug, and every existing reference to
-that slug picks up your version. Renaming would break those references
-instead. Other workspaces are unaffected -- they keep seeing the built-in.
+Shadowing is why a customised template can keep the built-in's slug: every
+existing reference to that slug picks up the workspace's version, where
+renaming would break those references instead. Other workspaces are
+unaffected -- they keep seeing the built-in, which is never modified, only
+hidden.
 
-To get the built-in back, delete the workspace template; nothing about the
-built-in was modified, it was only hidden.
+<Warning>
+  **There is no supported way to author a workspace-owned template yet.** The
+  read path resolves and shadows them correctly, but the only crew-template
+  routes are `GET /api/v1/crew-templates`, `GET /api/v1/crew-templates/{slug}`
+  and `POST /api/v1/crew-templates/{slug}/deploy` -- all read or deploy, none
+  of them a write -- and the only thing that writes the `crew_templates` table
+  is the built-in seeder (`internal/database/seed_crew_templates.go`), which
+  only ever writes `is_builtin = 1` rows. No CLI command creates one either,
+  and the manifest pipeline explicitly cannot: `kind: CrewTemplate` is
+  deploy-only, see
+  [the manifest reference](/manifest/crew_template).
+
+  So today a workspace-owned template is created out of band -- a direct
+  insert into `crew_templates` carrying that workspace's `workspace_id` -- and
+  removed the same way. Deploy the built-in and edit the resulting crew and
+  agents instead, unless you are the operator of the instance.
+</Warning>
 
 ### Seed Data Crews
 

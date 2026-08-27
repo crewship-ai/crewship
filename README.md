@@ -289,7 +289,8 @@ a shell script *or* hand to an agent to drive safely.
 ```bash
 crewship crew list --format json | jq '.[].slug'
 crewship ask --agent viktor "scaffold a Go HTTP service with a /health endpoint"
-crewship mission run "ship the auth refactor" --crew eng
+crewship mission create --crew eng --title "ship the auth refactor"
+crewship mission start <mission-id>     # the id `mission create` printed
 crewship approvals list                 # what's waiting on a human
 crewship cost --workspace demo          # token + dollar ledger
 ```
