@@ -153,6 +153,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   seed ships four pages, one per producer door (script, routine, agent,
   webhook) instead of showing one door of the four.
 
+- **The wake-time system prompt now shows its own memory budget.** Every
+  tier injected into a session's opening prompt — `Pins`, `Crew`,
+  `Workspace`, `Agent` — now reports how many characters of its allotted
+  slice it used and what percent that is, plus a `Total` line, in a new
+  `[MEMORY BUDGET]` block placed right before `[MEMORY INSTRUCTIONS]`. The
+  wording matches `memory.write`'s existing overflow-guidance usage string
+  (`<used> of <cap> bytes, <pct>%`) so the model reads one consistent
+  format whether it's checking a write it just made or the snapshot it
+  woke up with. When the budget forced a tier's trailing content to be
+  dropped — previously silent — the meter now says so by name
+  (`Truncated to fit: Agent — trailing content in it was dropped, not
+  just hidden.`). The default 15,000-char budget, the per-tier allocation
+  ratios, and the truncation policy itself are unchanged; this only makes
+  the existing behaviour visible to the model.
+
 ### Changed
 
 - **⚠️ Proxied agent calls start billing for real (#2051).** ⚠️ **Behaviour
