@@ -332,8 +332,13 @@ func (h *UserPeerPrivacyHandler) purgeUserModel(r *http.Request, userID, wsID, r
 		return 0, nil
 	}
 	if h.outputBasePath != "" {
-		if err := memory.DeleteUserModelBySlug(
-			userModelPathsFor(h.outputBasePath, row.crewID), row.userSlug); err != nil {
+		// Deletes from EVERY crew directory on disk, not just row.crewID.
+		// A prior sweep's crew reassignment moves the row's crew_id
+		// forward without removing the file it left behind in the crew
+		// the operator has since left, and a purge that reconstructed a
+		// single "expected" path from row.crewID would miss exactly that
+		// orphan (#1701).
+		if _, err := memory.DeleteUserModelEverywhere(h.outputBasePath, row.userSlug); err != nil {
 			// Fall through: the index row still goes, so a "show me what
 			// you have" answers nothing.
 			h.logger.Warn("user model file delete failed",
