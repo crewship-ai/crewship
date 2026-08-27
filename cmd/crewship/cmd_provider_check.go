@@ -73,32 +73,32 @@ type checkOptions struct {
 type CheckTarget struct {
 	// Provider is what the operator typed, normalized. It may be a registry id
 	// or an openai-compat preset name.
-	Provider string `json:"provider"`
+	Provider string `json:"provider" yaml:"provider"`
 	// PricingKey is Provider.Name() — the "<provider>/" half of the paymaster
 	// rate-card key, which is NOT always the flag value: the ollama-openai
 	// preset prices as "ollama" and vllm as "local".
-	PricingKey string `json:"pricing_key"`
-	Codec      string `json:"codec"`
-	Endpoint   string `json:"endpoint"`
-	Model      string `json:"model"`
+	PricingKey string `json:"pricing_key" yaml:"pricing_key"`
+	Codec      string `json:"codec" yaml:"codec"`
+	Endpoint   string `json:"endpoint" yaml:"endpoint"`
+	Model      string `json:"model" yaml:"model"`
 	// KeySource says where the credential came from: "--api-key", "$ENVVAR",
 	// or "none". Never the key itself.
-	KeySource string `json:"key_source"`
+	KeySource string `json:"key_source" yaml:"key_source"`
 }
 
 // providerCheckResult is the JSON contract an agent parses.
 type providerCheckResult struct {
 	CheckTarget       `json:",inline" yaml:",inline"`
-	LatencyMS         int64      `json:"latency_ms"`
-	StopReason        string     `json:"stop_reason"`
-	InputToks         int        `json:"input_tokens"`
-	OutputToks        int        `json:"output_tokens"`
-	CachedInputToks   int        `json:"cached_input_tokens"`
-	CacheCreationToks int        `json:"cache_creation_tokens"`
-	CostUSD           float64    `json:"cost_usd"`
-	Rates             rateCard   `json:"rates"`
-	RateSource        rateSource `json:"rate_source"`
-	Reply             string     `json:"reply"`
+	LatencyMS         int64      `json:"latency_ms" yaml:"latency_ms"`
+	StopReason        string     `json:"stop_reason" yaml:"stop_reason"`
+	InputToks         int        `json:"input_tokens" yaml:"input_tokens"`
+	OutputToks        int        `json:"output_tokens" yaml:"output_tokens"`
+	CachedInputToks   int        `json:"cached_input_tokens" yaml:"cached_input_tokens"`
+	CacheCreationToks int        `json:"cache_creation_tokens" yaml:"cache_creation_tokens"`
+	CostUSD           float64    `json:"cost_usd" yaml:"cost_usd"`
+	Rates             rateCard   `json:"rates" yaml:"rates"`
+	RateSource        rateSource `json:"rate_source" yaml:"rate_source"`
+	Reply             string     `json:"reply" yaml:"reply"`
 }
 
 // The "provider" group itself, and canonProviderID, live in cmd_provider.go —

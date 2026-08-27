@@ -33,10 +33,10 @@ import (
 // be named outside the package, so it cannot be a struct field or a JSON
 // document on its own. Copying the four floats across is the whole conversion.
 type rateCard struct {
-	InputPerM       float64 `json:"input_per_mtok"`
-	OutputPerM      float64 `json:"output_per_mtok"`
-	CachedInputPerM float64 `json:"cached_input_per_mtok"`
-	CacheWritePerM  float64 `json:"cache_write_per_mtok"`
+	InputPerM       float64 `json:"input_per_mtok" yaml:"input_per_mtok"`
+	OutputPerM      float64 `json:"output_per_mtok" yaml:"output_per_mtok"`
+	CachedInputPerM float64 `json:"cached_input_per_mtok" yaml:"cached_input_per_mtok"`
+	CacheWritePerM  float64 `json:"cache_write_per_mtok" yaml:"cache_write_per_mtok"`
 }
 
 // cardFor asks paymaster what it would bill for this pair — the real lookup,
@@ -101,19 +101,19 @@ const priceProbeModel = "\x00crewship-price-probe"
 // the package by comparing values, which mislabelled two whole classes of rate —
 // see the ExplainRate comment for what that cost.
 type PriceExplain struct {
-	Provider string     `json:"provider"`
-	Model    string     `json:"model"`
-	Rates    rateCard   `json:"rates"`
-	Source   rateSource `json:"rate_source"`
-	Detail   string     `json:"rate_source_detail"`
+	Provider string     `json:"provider" yaml:"provider"`
+	Model    string     `json:"model" yaml:"model"`
+	Rates    rateCard   `json:"rates" yaml:"rates"`
+	Source   rateSource `json:"rate_source" yaml:"rate_source"`
+	Detail   string     `json:"rate_source_detail" yaml:"rate_source_detail"`
 	// Catalog is the snapshot's rate for this pair when it has one, whether or
 	// not it won. A shadowed catalog row is worth printing: it is how an
 	// operator sees that the hand-written table disagrees with upstream.
-	Catalog *rateCard `json:"catalog_rates,omitempty"`
+	Catalog *rateCard `json:"catalog_rates,omitempty" yaml:"catalog_rates,omitempty"`
 	// UnknownModel is what this provider bills for a model nothing prices —
 	// the wildcard or the ceiling. Printing it gives the resolved number a
 	// scale to be read against.
-	UnknownModel rateCard `json:"unknown_model_rates"`
+	UnknownModel rateCard `json:"unknown_model_rates" yaml:"unknown_model_rates"`
 }
 
 // explainRate resolves (provider, model) and reports which step of paymaster's
@@ -184,10 +184,10 @@ func cardOfCatalogModel(m modelcatalog.Model) (rateCard, bool) {
 // priceChannel is one billed channel of a call: what it costs per million
 // tokens, how many of them there were, and the product.
 type priceChannel struct {
-	Name    string  `json:"channel"`
-	Tokens  int64   `json:"tokens"`
-	PerMTok float64 `json:"per_mtok"`
-	CostUSD float64 `json:"cost_usd"`
+	Name    string  `json:"channel" yaml:"channel"`
+	Tokens  int64   `json:"tokens" yaml:"tokens"`
+	PerMTok float64 `json:"per_mtok" yaml:"per_mtok"`
+	CostUSD float64 `json:"cost_usd" yaml:"cost_usd"`
 }
 
 // modelPriceResult is the JSON contract an agent parses.

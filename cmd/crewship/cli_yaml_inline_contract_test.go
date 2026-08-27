@@ -57,6 +57,21 @@ func TestEmbeddedJSONInlineIsAlsoYAMLSafe(t *testing.T) {
 			t.Fatalf("parse %s: %v", path, err)
 		}
 
+		// Which named type each struct literal belongs to, so a finding can
+		// name it and so the registration check below has something to look
+		// up. A struct with no entry here is an anonymous one.
+		owner := map[*ast.StructType]string{}
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
+				return true
+			}
+			if st, ok := ts.Type.(*ast.StructType); ok {
+				owner[st] = ts.Name.Name
+			}
+			return true
+		})
+
 		ast.Inspect(f, func(n ast.Node) bool {
 			st, ok := n.(*ast.StructType)
 			if !ok || st.Fields == nil {
@@ -105,6 +120,25 @@ func TestEmbeddedJSONInlineIsAlsoYAMLSafe(t *testing.T) {
 						"add `yaml:\",inline\"` (and `json:\",inline\"` to say so out loud).",
 						path, pos.Line, name)
 				}
+
+				// An inline wrapper is a machine payload by construction, so
+				// its keys are a contract and something has to check them.
+				// yamlParityTypes is that something, and it is a hand-kept
+				// list — which is only safe if forgetting to add a type is
+				// caught here rather than noticed in a review.
+				outer, named := owner[st]
+				if !named {
+					t.Errorf("%s:%d: an ANONYMOUS struct inlines %s into machine output. "+
+						"Give it a name and add it to yamlParityTypes — the key-parity guard "+
+						"cannot cover a type it cannot name.", path, pos.Line, name)
+					continue
+				}
+				if !registeredForParity[outer] {
+					t.Errorf("%s:%d: %s inlines %s into machine output but is not in "+
+						"yamlParityTypes — nothing checks that its -f json and -f yaml keys "+
+						"agree. Add it to the list in cli_yaml_key_parity_test.go.",
+						path, pos.Line, outer, name)
+				}
 			}
 			return true
 		})
@@ -117,6 +151,17 @@ func TestEmbeddedJSONInlineIsAlsoYAMLSafe(t *testing.T) {
 	}
 	t.Logf("checked %d embedded field(s) in json-serialized structs", checked)
 }
+
+// registeredForParity is the set of type names yamlParityTypes covers, by the
+// name the AST sees. Built once, from the list itself, so the two files cannot
+// drift: renaming a type in the list renames it here.
+var registeredForParity = func() map[string]bool {
+	m := map[string]bool{}
+	for _, v := range yamlParityTypes() {
+		m[reflect.TypeOf(v).Name()] = true
+	}
+	return m
+}()
 
 // hasJSONTaggedField reports whether any field of st carries a `json:` tag,
 // which is how this file tells a serialization shape from an ordinary struct

@@ -875,15 +875,33 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   being built with the colour codes the human line wants around it. The field
   is plain text now and the colour is applied by the renderer.
 
-- **Three commands rounded large numbers into their own machine output.**
-  `backup metrics`, `backup canary` and `integration tools refresh` decoded
-  the server's document into `any`/`map[string]any` before re-encoding it, and
-  `encoding/json` makes every number a `float64` on the way in — so anything
-  past 53 bits (a nanosecond timestamp, an id) came back rounded, and the
-  command silently edited the document it was asked to relay. They pass
-  `cli.RawJSON` through instead, which is byte-identical under json/ndjson and
-  decodes via `json.Number` under yaml. `crew config --show` took the same
-  treatment for the stored config blobs it echoes.
+- **Four commands rounded large numbers into their own machine output.**
+  `backup metrics`, `backup canary`, `integration tools refresh` and
+  `routine versions show` decoded the server's document into
+  `any`/`map[string]any` before re-encoding it, and `encoding/json` makes
+  every number a `float64` on the way in — so anything past 53 bits (a
+  nanosecond timestamp, an id) came back rounded, and the command silently
+  edited the document it was asked to relay. `routine versions show` is the
+  one that matters most: it returns a routine's stored DSL, and a limit or an
+  id that comes back subtly different is a definition that no longer matches
+  the hash it was stored under. They pass `cli.RawJSON` through instead, which
+  is byte-identical under json/ndjson and decodes via `json.Number` under
+  yaml. `crew config --show` took the same treatment for the stored config
+  blobs it echoes.
+
+- **`-f yaml` named fields after Go identifiers on the payloads this sweep
+  newly reaches.** Exporting the embedded types above stopped `-f yaml`
+  crashing on `provider check`, `model price`, `notifychannel add`,
+  `activity` export and `routine webhooks create` — which promoted their keys
+  from unreachable to part of the machine contract, and yaml.v3 was deriving
+  each one from the lowercased Go field name (`pricing_key` as `pricingkey`,
+  `input_tokens` as `inputtoks`, `per_mtok` as `permtok`). Every field on
+  those payloads now carries a matching `yaml:` tag. Two result payloads that
+  were anonymous structs (`routine webhooks create` and `url`) are named types
+  now, and `notifychannel add`'s too, because the key-parity guard cannot
+  cover a type it cannot name — and that guard now fails the build when an
+  inlining payload is missing from its list, which is how these were found to
+  be missing from it in the first place.
 
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and

@@ -43,6 +43,26 @@ type WebhookRow struct {
 	UpdatedAt             string                 `json:"updated_at" yaml:"updated_at"`
 }
 
+// webhookCreateResult is `routine webhooks create`'s machine payload: the
+// whole row (this is the one moment the signing secret exists in plaintext)
+// plus the URL a sender is configured with.
+//
+// A NAMED type rather than an anonymous struct so cli_yaml_key_parity_test.go
+// can hold it to the json/yaml contract — a payload the guard cannot name is a
+// payload the guard cannot check.
+type webhookCreateResult struct {
+	WebhookRow `json:",inline" yaml:",inline"`
+	PublicURL  string `json:"public_url" yaml:"public_url"`
+}
+
+// webhookURLResult is `routine webhooks url`'s machine payload. The human form
+// is the bare URL, because this command exists so you can paste it into a
+// sender's config; a machine caller gets a document.
+type webhookURLResult struct {
+	WebhookID string `json:"webhook_id" yaml:"webhook_id"`
+	URL       string `json:"url" yaml:"url"`
+}
+
 var routineWebhooksCmd = &cobra.Command{
 	Use:   "webhooks",
 	Short: "Manage event-driven webhook triggers",
@@ -243,10 +263,7 @@ var routineWebhooksCreateCmd = &cobra.Command{
 		// reflect into it at all and `-f yaml` panics rather than printing
 		// anything. This wrapper did exactly that until the format sweep made
 		// the command honour `-f yaml` and turned it into a reachable crash.
-		result := struct {
-			WebhookRow `json:",inline" yaml:",inline"`
-			PublicURL  string `json:"public_url" yaml:"public_url"`
-		}{WebhookRow: w, PublicURL: publicURL}
+		result := webhookCreateResult{WebhookRow: w, PublicURL: publicURL}
 		return newFormatter().AutoHuman(result, func() {
 			fmt.Println("Webhook created.")
 			fmt.Printf("  ID:        %s\n", w.ID)
@@ -319,10 +336,9 @@ var routineWebhooksUrlCmd = &cobra.Command{
 				// around it would be in the way. Under a machine format it
 				// becomes an object, because a bare URL on stdout is not a
 				// document and `-f json` promises one.
-				return resolvedFormatter(cmd).AutoHuman(struct {
-					WebhookID string `json:"webhook_id"`
-					URL       string `json:"url"`
-				}{w.ID, full}, func() {
+				return resolvedFormatter(cmd).AutoHuman(webhookURLResult{
+					WebhookID: w.ID, URL: full,
+				}, func() {
 					fmt.Println(full)
 				})
 			}

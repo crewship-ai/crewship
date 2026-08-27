@@ -251,6 +251,37 @@ func TestRoutineVersionsShowCmd(t *testing.T) {
 			t.Fatalf("expected 404, got %v", err)
 		}
 	})
+
+	// A number past 53 bits must come back the number the server sent.
+	//
+	// Routing this command through the formatter meant decoding the body into
+	// `any` first, and encoding/json makes every JSON number a float64 on the
+	// way in — so re-encoding rounded. A routine definition is the last
+	// document that can afford it: a limit or an id inside the DSL coming back
+	// subtly different is a definition that no longer matches the hash it was
+	// stored under. The bytes are relayed now, not re-encoded.
+	t.Run("large integers are not rounded", func(t *testing.T) {
+		const exact = "9007199254740993" // 2^53 + 1, the first casualty of float64
+		stub := covStub(t)
+		covResetFlags(t, routineVersionsShowCmd)
+		stub.OnGet(showPath, clitest.TextResponse(200,
+			`{"version":3,"definition":{"max_tokens":`+exact+`}}`))
+		covSetFlags(t, routineVersionsShowCmd, map[string]string{"version": "3"})
+
+		for _, format := range []string{"json", "yaml", "ndjson"} {
+			t.Run(format, func(t *testing.T) {
+				setFormatCov(t, format)
+				out := covCaptureStdoutCli3(t, func() {
+					if err := routineVersionsShowCmd.RunE(routineVersionsShowCmd, []string{"my-routine"}); err != nil {
+						t.Errorf("RunE: %v", err)
+					}
+				})
+				if !strings.Contains(out, exact) {
+					t.Errorf("-f %s rounded the value: want %s in\n%s", format, exact, out)
+				}
+			})
+		}
+	})
 }
 
 // ─── active ─────────────────────────────────────────────────────────────

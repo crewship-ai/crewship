@@ -158,6 +158,12 @@ Examples:
 		// AutoHuman) — the Long help tells people to pipe it to jq and that
 		// keeps working with no flag. What changes is that `-f yaml` and
 		// `-f ndjson` are now honoured instead of silently answering JSON.
+		// Parsed to VALIDATE, then thrown away: what gets rendered is the
+		// server's own bytes. Decoding into `any` and re-encoding would run
+		// every number through a float64 — and a routine definition is the
+		// last document to round, since a timeout, a limit or an id inside
+		// the DSL coming back subtly different is a definition that no longer
+		// matches the hash it was stored under.
 		var doc any
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			// The previous behaviour here was to print the raw bytes and
@@ -167,7 +173,7 @@ Examples:
 			// broken server; say so.
 			return fmt.Errorf("server returned a %d with a body that is not JSON: %w", resp.StatusCode, err)
 		}
-		return resolvedFormatter(cmd).Machine(doc)
+		return resolvedFormatter(cmd).Machine(cli.RawJSON(raw))
 	},
 }
 

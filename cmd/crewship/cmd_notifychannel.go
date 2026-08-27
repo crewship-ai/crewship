@@ -53,21 +53,29 @@ Examples:
   crewship notifychannel rm nch_abc123 --yes`,
 }
 
+// notifyChannelCreateResult is `notifychannel add`'s machine payload: the row
+// plus the shown-once secret. Named rather than anonymous so the json/yaml key
+// parity guard can cover it.
+type notifyChannelCreateResult struct {
+	NotifyChannelRow `json:",inline" yaml:",inline"`
+	Secret           string `json:"secret,omitempty" yaml:"secret,omitempty"`
+}
+
 // NotifyChannelRow mirrors the rendered/JSON columns.
 type NotifyChannelRow struct {
-	ID          string   `json:"id"`
-	Type        string   `json:"type"`
-	Provider    string   `json:"provider,omitempty"`
-	URL         string   `json:"url,omitempty"`
-	To          string   `json:"to,omitempty"`
-	Events      []string `json:"events,omitempty"`
-	Enabled     bool     `json:"enabled"`
-	CreatedBy   string   `json:"created_by,omitempty"`
-	CreatedAt   string   `json:"created_at,omitempty"`
-	Scope       string   `json:"scope,omitempty"`
-	OwnerUserID string   `json:"owner_user_id,omitempty"`
-	Categories  []string `json:"categories,omitempty"`
-	MinPriority string   `json:"min_priority,omitempty"`
+	ID          string   `json:"id" yaml:"id"`
+	Type        string   `json:"type" yaml:"type"`
+	Provider    string   `json:"provider,omitempty" yaml:"provider,omitempty"`
+	URL         string   `json:"url,omitempty" yaml:"url,omitempty"`
+	To          string   `json:"to,omitempty" yaml:"to,omitempty"`
+	Events      []string `json:"events,omitempty" yaml:"events,omitempty"`
+	Enabled     bool     `json:"enabled" yaml:"enabled"`
+	CreatedBy   string   `json:"created_by,omitempty" yaml:"created_by,omitempty"`
+	CreatedAt   string   `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	Scope       string   `json:"scope,omitempty" yaml:"scope,omitempty"`
+	OwnerUserID string   `json:"owner_user_id,omitempty" yaml:"owner_user_id,omitempty"`
+	Categories  []string `json:"categories,omitempty" yaml:"categories,omitempty"`
+	MinPriority string   `json:"min_priority,omitempty" yaml:"min_priority,omitempty"`
 }
 
 var notifyChannelListCmd = &cobra.Command{
@@ -215,10 +223,7 @@ categories. Omit for "every category".
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var created struct {
-			NotifyChannelRow `json:",inline" yaml:",inline"`
-			Secret           string `json:"secret,omitempty" yaml:"secret,omitempty"`
-		}
+		var created notifyChannelCreateResult
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
 		}

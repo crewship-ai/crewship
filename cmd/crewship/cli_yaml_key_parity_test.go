@@ -102,6 +102,28 @@ func yamlParityTypes() []any {
 		waitpointRow{},
 		// cmd_routine_webhooks.go
 		WebhookRow{},
+		webhookCreateResult{},
+		webhookURLResult{},
+		// Payloads this change turned from "panics under -f yaml" into
+		// "renders under -f yaml". Exporting the embedded type fixed the
+		// crash; that is what put their KEYS on the machine contract, so
+		// they belong here rather than in #2119 — the guard has to be able
+		// to see every type the sweep newly reaches, or the next --format
+		// widening reintroduces the same drift silently.
+		// cmd_activity.go
+		ActivityRow{},
+		activityExport{},
+		// cmd_model_price.go
+		PriceExplain{},
+		rateCard{},
+		priceChannel{},
+		modelPriceResult{},
+		// cmd_notifychannel.go
+		NotifyChannelRow{},
+		notifyChannelCreateResult{},
+		// cmd_provider_check.go
+		CheckTarget{},
+		providerCheckResult{},
 		// internal/cli/errors.go — the failure-side counterpart of every
 		// struct above. Not a cmd/crewship type, but it is emitted by every
 		// command in every machine format, which makes it the one this list
