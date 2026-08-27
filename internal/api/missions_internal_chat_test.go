@@ -34,7 +34,7 @@ func TestInternalMissionCreate_StampsSyntheticChatRow(t *testing.T) {
 	}
 
 	var n int
-	if err := f.db.QueryRow(`SELECT COUNT(*) FROM chats WHERE id = ?`, resp.ID).Scan(&n); err != nil {
+	if err := f.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM chats WHERE id = ?`, resp.ID).Scan(&n); err != nil {
 		t.Fatalf("count chats: %v", err)
 	}
 	if n != 1 {

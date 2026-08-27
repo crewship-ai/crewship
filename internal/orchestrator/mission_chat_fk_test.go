@@ -38,7 +38,7 @@ import (
 
 func fkMissionExec(t *testing.T, db *sql.DB, q string, args ...any) {
 	t.Helper()
-	if _, err := db.Exec(q, args...); err != nil {
+	if _, err := db.ExecContext(t.Context(), q, args...); err != nil {
 		t.Fatalf("exec %.80s: %v", q, err)
 	}
 }
@@ -102,7 +102,7 @@ func TestScheduleTask_MissionWithNoChatRow_DispatchesInsteadOfFKFailure(t *testi
 	// Precondition: exactly the state missions_internal.go's Create leaves —
 	// a mission with no chats row at its id.
 	var exists int
-	if err := db.QueryRow(`SELECT 1 FROM chats WHERE id = ?`, ms.ID).Scan(&exists); !errors.Is(err, sql.ErrNoRows) {
+	if err := db.QueryRowContext(t.Context(), `SELECT 1 FROM chats WHERE id = ?`, ms.ID).Scan(&exists); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("precondition: mission %s must have no chats row yet, got err=%v", ms.ID, err)
 	}
 
@@ -114,7 +114,7 @@ func TestScheduleTask_MissionWithNoChatRow_DispatchesInsteadOfFKFailure(t *testi
 
 	var status string
 	var errMsg sql.NullString
-	if err := db.QueryRow(`SELECT status, error_message FROM mission_tasks WHERE id = ?`, "t-fk-1").
+	if err := db.QueryRowContext(t.Context(), `SELECT status, error_message FROM mission_tasks WHERE id = ?`, "t-fk-1").
 		Scan(&status, &errMsg); err != nil {
 		t.Fatalf("read task: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestScheduleTask_MissionWithNoChatRow_DispatchesInsteadOfFKFailure(t *testi
 	}
 
 	var chatCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM chats WHERE id = ?`, ms.ID).Scan(&chatCount); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM chats WHERE id = ?`, ms.ID).Scan(&chatCount); err != nil {
 		t.Fatalf("count chats: %v", err)
 	}
 	if chatCount != 1 {
@@ -148,7 +148,7 @@ func TestDispatchLeadPlanning_MissionWithNoChatRow_DispatchesInsteadOfFKFailure(
 	}
 
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM assignments WHERE group_id = ?`, ms.ID).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM assignments WHERE group_id = ?`, ms.ID).Scan(&n); err != nil {
 		t.Fatalf("count assignments: %v", err)
 	}
 	if n != 1 {
@@ -156,7 +156,7 @@ func TestDispatchLeadPlanning_MissionWithNoChatRow_DispatchesInsteadOfFKFailure(
 	}
 
 	var chatCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM chats WHERE id = ?`, ms.ID).Scan(&chatCount); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM chats WHERE id = ?`, ms.ID).Scan(&chatCount); err != nil {
 		t.Fatalf("count chats: %v", err)
 	}
 	if chatCount != 1 {
