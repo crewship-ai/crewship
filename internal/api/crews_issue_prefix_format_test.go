@@ -56,6 +56,17 @@ func TestIssuePrefixFormat_RejectedOnUpdate(t *testing.T) {
 		{"empty-ish whitespace", " ", "not empty, so it does not mean clear"},
 		{"too long", strings.Repeat("X", 17), "17 chars, over the 16 limit"},
 		{"non-ascii", "ÉNG", "outside the ASCII rule"},
+		// Anchors. Go's regexp is RE2 and compiles `$` as \z (OneLine), not as
+		// Perl's "end of text or before a final newline" — so "ENG\n" is
+		// refused. That is the behaviour the guard depends on, and it is one
+		// flag away from the Perl reading, so it is pinned rather than assumed:
+		// a prefix ending in a newline would reopen the bug with an identifier
+		// that looks addressable and is not.
+		{"trailing newline", "ENG\n", `Go's $ is \z — a trailing newline must not slip past the anchor`},
+		{"leading newline", "\nENG", "the ^ anchor, from the other side"},
+		{"embedded newline", "A\nB", "splits the identifier across two lines"},
+		{"tab", "A\tB", "whitespace that is not a space"},
+		{"nul byte", "A\x00B", "truncates the segment at the first NUL for anything reading it as a C string"},
 	}
 
 	for _, tc := range cases {
