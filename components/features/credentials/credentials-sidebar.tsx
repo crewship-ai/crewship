@@ -12,6 +12,13 @@
  * ends up taller than the list, and the list itself is nowhere in the rail
  * at all. /routines faced the same choice and made it the other way.
  *
+ * The panel behind that button is the SHARED one (`SidebarFilterPopover` in
+ * sidebar-kit), not a local copy. It used to be a local copy, and it was the
+ * worst of the five: every pick called `setFilterOpen(false)`, so combining a
+ * brand with a scope meant reopening the menu between them, and each facet held
+ * exactly one value. Both behaviours now come from the kit and the facets are
+ * lists — see `CredentialFilters` (#1776).
+ *
  * STATUS stays in the rail rather than moving into the dropdown. It is the
  * question asked most often about a vault ("what is broken?"), it is
  * single-select, and its three rows are bounded — which Category and Scope,
@@ -37,7 +44,9 @@ import { AnimatePresence, motion } from "motion/react"
 
 import {
   SidebarCollapseButton,
-  SidebarFilterButton,
+  SidebarFacet,
+  SidebarFacetOption,
+  SidebarFilterPopover,
   SidebarRow,
   SidebarSearch,
   SidebarSection,
@@ -122,6 +131,29 @@ const SORT_LABELS: Record<CredentialSortKey, string> = {
   created: "Added",
 }
 
+/**
+ * One group inside the Filter panel.
+ *
+ * `onChange` rather than a `keyof CredentialFilters` the caller writes back
+ * through: a computed key over a union widens the patch to `{ [x: string]:
+ * string[] }`, which type-checks against nothing useful. A closure per group
+ * keeps each write pinned to the one field it belongs to.
+ */
+interface FilterFacetGroup {
+  /** React key, and the field this group owns — for reading, not for writing. */
+  key: string
+  label: string
+  resetLabel: string
+  /** Fallback glyph for a row with no mark of its own. */
+  icon: React.ComponentType<{ className?: string }>
+  options: CredentialFacetOption[]
+  selected: string[]
+  onChange: (next: string[]) => void
+  /** How a group draws its rows with the real thing — a brand mark, a crew
+   *  tile, an agent's avatar. */
+  renderIcon?: (opt: CredentialFacetOption) => React.ReactNode
+}
+
 const dropdownAnim = {
   initial: { opacity: 0, y: -4 },
   animate: { opacity: 1, y: 0, transition: { duration: 0.14, ease: "easeOut" as const } },
@@ -150,7 +182,6 @@ export function CredentialsSidebar({
   selectedCredentialId = null,
   onSelectCredential,
 }: CredentialsSidebarProps) {
-  const [filterOpen, setFilterOpen] = React.useState(false)
   const [sortOpen, setSortOpen] = React.useState(false)
   const [statusOpen, setStatusOpen] = React.useState(true)
   const [tierOpen, setTierOpen] = React.useState(true)
@@ -161,12 +192,92 @@ export function CredentialsSidebar({
   // sections, so counting them here would badge the Filter button for a choice
   // already on screen. The badge exists to explain a short list; a selection the
   // rail is still showing as pressed explains itself.
+  //
+  // It sums LENGTHS now that a facet holds several values, so "two brands and a
+  // scope" badges 3. It could only ever read 0–5 before, and in practice 0 or 1,
+  // because the panel shut after the first pick.
   const activeFilterCount =
-    (filters.brand ? 1 : 0) +
-    (filters.shape ? 1 : 0) +
-    (filters.scope ? 1 : 0) +
-    (filters.tag ? 1 : 0) +
-    (filters.agentId ? 1 : 0)
+    filters.brand.length +
+    filters.shape.length +
+    filters.scope.length +
+    filters.tag.length +
+    filters.agentId.length
+
+  /** Add or drop one value. Never touches another facet — that is the promise
+   *  `SidebarFilterPopover` is built around, and it is the consumer's to keep. */
+  const toggle = (list: string[], value: string) =>
+    list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
+
+  // One descriptor per group, so the divider logic ("no rule above the first
+  // one") stays right even when the workspace has no shapes, no agents or no
+  // tags — an empty facet is dropped here rather than returning null from
+  // inside, where it would still count as the first.
+  //
+  // Every group draws its rows with the thing they are ABOUT — the brand marks
+  // in a category, the crew's own tile, the agent's own avatar. An earlier
+  // version repeated one lucide glyph down each group, which is the same as no
+  // icon at all: three rows that look identical are three rows you have to read.
+  const allFacetGroups: FilterFacetGroup[] = [
+    {
+      key: "brand",
+      label: "Brand",
+      resetLabel: "All brands",
+      icon: Shapes,
+      options: brands,
+      selected: filters.brand,
+      onChange: (next) => set({ brand: next }),
+      renderIcon: (opt) => <CategoryMarks providers={opt.providers} />,
+    },
+    {
+      key: "shape",
+      label: "Shape",
+      resetLabel: "Any shape",
+      icon: KeyRound,
+      options: shapes,
+      selected: filters.shape,
+      onChange: (next) => set({ shape: next }),
+    },
+    {
+      key: "scope",
+      label: "Scope",
+      resetLabel: "All scopes",
+      icon: Layers,
+      options: scopes,
+      selected: filters.scope,
+      onChange: (next) => set({ scope: next }),
+      renderIcon: (opt) => <ScopeMark value={opt.value} crews={crewsById} />,
+    },
+    {
+      key: "agentId",
+      label: "Assigned to",
+      resetLabel: "All agents",
+      icon: Bot,
+      options: agents,
+      selected: filters.agentId,
+      onChange: (next) => set({ agentId: next }),
+      // AgentAvatar, not a background-image. DiceBear returns an unencoded
+      // `data:image/svg+xml,<svg …>` URI, and the quotes inside the SVG make
+      // Chromium's CSSOM reject the whole declaration — the element keeps its
+      // box and paints nothing. Every other avatar in the product is an <img>
+      // for that reason; this is the same component they use, so the face here
+      // is the face everywhere else.
+      renderIcon: (opt) => (
+        <AgentAvatar seed={opt.value} data-agent-id={opt.value} className="h-4 w-4 shrink-0" />
+      ),
+    },
+    {
+      key: "tag",
+      label: "Tag",
+      resetLabel: "Any tag",
+      icon: Hash,
+      options: tags,
+      selected: filters.tag,
+      onChange: (next) => set({ tag: next }),
+    },
+  ]
+  // A facet with nothing behind it is dropped, not rendered as a bare heading —
+  // and dropped HERE, so `first` below still means "the first one on screen".
+  const facetGroups = allFacetGroups.filter((group) => group.options.length > 0)
 
   const statusRows: {
     key: CredentialFilters["status"]
@@ -204,127 +315,54 @@ export function CredentialsSidebar({
             aria-label="Search credentials"
           />
         </div>
-        <div className="relative shrink-0">
-          <SidebarFilterButton
-            activeCount={activeFilterCount}
-            aria-expanded={filterOpen}
-            onClick={() => setFilterOpen(!filterOpen)}
-          />
-          <AnimatePresence>
-            {filterOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setFilterOpen(false)} />
-                <motion.div
-                  {...dropdownAnim}
-                  className="absolute right-0 top-9 z-50 max-h-[360px] min-w-[210px] overflow-y-auto rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl"
-                >
-                  {/* Every group draws its rows with the thing they are ABOUT
-                      — the brand marks in a category, the crew's own tile, the
-                      agent's own avatar. The previous version repeated one
-                      lucide glyph down each group, which is the same as no icon
-                      at all: three rows that look identical are three rows you
-                      have to read. */}
-                  <FacetGroup
-                    label="Brand"
-                    icon={Shapes}
-                    options={brands}
-                    selected={filters.brand}
-                    renderIcon={(opt) => <CategoryMarks providers={opt.providers} />}
-                    onSelect={(value) => {
-                      set({ brand: value })
-                      setFilterOpen(false)
-                    }}
-                  />
-                  <FacetGroup
-                    label="Shape"
-                    icon={KeyRound}
-                    options={shapes}
-                    selected={filters.shape}
-                    onSelect={(value) => {
-                      set({ shape: value })
-                      setFilterOpen(false)
-                    }}
-                  />
-                  <FacetGroup
-                    label="Scope"
-                    icon={Layers}
-                    options={scopes}
-                    selected={filters.scope}
-                    renderIcon={(opt) => <ScopeMark value={opt.value} crews={crewsById} />}
-                    onSelect={(value) => {
-                      set({ scope: value })
-                      setFilterOpen(false)
-                    }}
-                  />
-                  {agents.length > 0 && (
-                    <FacetGroup
-                      label="Assigned to"
-                      icon={Bot}
-                      options={agents}
-                      selected={filters.agentId}
-                      // AgentAvatar, not a background-image. DiceBear returns
-                      // an unencoded `data:image/svg+xml,<svg …>` URI, and the
-                      // quotes inside the SVG make Chromium's CSSOM reject the
-                      // whole declaration — the element keeps its box and paints
-                      // nothing. Every other avatar in the product is an <img>
-                      // for that reason; this is the same component they use, so
-                      // the face here is the face everywhere else.
-                      renderIcon={(opt) => (
-                        <AgentAvatar
-                          seed={opt.value}
-                          data-agent-id={opt.value}
-                          className="h-4 w-4 shrink-0"
-                        />
-                      )}
-                      onSelect={(value) => {
-                        set({ agentId: value })
-                        setFilterOpen(false)
-                      }}
-                    />
-                  )}
-                  {tags.length > 0 && (
-                    <FacetGroup
-                      label="Tag"
-                      icon={Hash}
-                      options={tags}
-                      selected={filters.tag}
-                      onSelect={(value) => {
-                        set({ tag: value })
-                        setFilterOpen(false)
-                      }}
-                    />
-                  )}
-                  {activeFilterCount > 0 && (
-                    <>
-                      <div className="mt-1 border-t border-white/[0.06]" />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Search, status and tier survive: a user who typed a
-                          // query and then clears the facets is narrowing, not
-                          // starting over — and status and tier were both
-                          // chosen in the rail, which is still showing them as
-                          // pressed. Undoing a selection the user can see is
-                          // not "clear filters", it is a surprise.
-                          onFiltersChange({
-                            ...EMPTY_CREDENTIAL_FILTERS,
-                            search: filters.search,
-                            status: filters.status,
-                            tier: filters.tier,
-                          })
-                          setFilterOpen(false)
-                        }}
-                        className="w-full px-3 py-1.5 text-left text-xs text-primary-hover hover:bg-white/[0.06]"
-                      >
-                        Clear filters
-                      </button>
-                    </>
-                  )}
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-        </div>
+        <SidebarFilterPopover
+          label="Filter credentials"
+          activeCount={activeFilterCount}
+          panelClassName="min-w-[210px]"
+          onClear={() =>
+            // Search, status and tier survive: a user who typed a query and then
+            // clears the facets is narrowing, not starting over — and status and
+            // tier were both chosen in the rail, which is still showing them as
+            // pressed. Undoing a selection the user can see is not "clear
+            // filters", it is a surprise.
+            onFiltersChange({
+              ...EMPTY_CREDENTIAL_FILTERS,
+              search: filters.search,
+              status: filters.status,
+              tier: filters.tier,
+            })
+          }
+        >
+          {facetGroups.map((group, i) => {
+            const Icon = group.icon
+            return (
+              <SidebarFacet
+                key={group.key}
+                label={group.label}
+                resetLabel={group.resetLabel}
+                resetActive={group.selected.length === 0}
+                onReset={() => group.onChange([])}
+                first={i === 0}
+              >
+                {group.options.map((opt) => (
+                  <SidebarFacetOption
+                    key={opt.value}
+                    active={group.selected.includes(opt.value)}
+                    onToggle={() => group.onChange(toggle(group.selected, opt.value))}
+                  >
+                    {group.renderIcon?.(opt) ?? (
+                      <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{opt.label}</span>
+                    <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground-soft">
+                      {opt.count}
+                    </span>
+                  </SidebarFacetOption>
+                ))}
+              </SidebarFacet>
+            )
+          })}
+        </SidebarFilterPopover>
         <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
       </SidebarToolbar>
 
@@ -550,58 +588,6 @@ export function CredentialsSidebar({
         </div>
       </div>
     </div>
-  )
-}
-
-/** One labelled group inside the Filter dropdown. Clicking the selected
- *  option again clears it, so the dropdown needs no separate "any" row.
- *
- *  `renderIcon` is how a group draws its rows with the real thing — a brand
- *  mark, a crew tile, an agent's avatar. `icon` stays as the fallback for a row
- *  that has nothing of its own, and as the group's own glyph. */
-function FacetGroup({
-  label,
-  icon: Icon,
-  options,
-  selected,
-  onSelect,
-  renderIcon,
-}: {
-  label: string
-  icon: React.ComponentType<{ className?: string }>
-  options: CredentialFacetOption[]
-  selected: string | null
-  onSelect: (value: string | null) => void
-  renderIcon?: (opt: CredentialFacetOption) => React.ReactNode
-}) {
-  if (options.length === 0) return null
-  return (
-    <>
-      <div className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground-soft">
-        {label}
-      </div>
-      {options.map((opt) => {
-        const mark = renderIcon?.(opt)
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => onSelect(selected === opt.value ? null : opt.value)}
-            className={cn(
-              "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
-              selected === opt.value ? "text-primary-hover" : "text-muted-foreground/80",
-            )}
-          >
-            {mark ?? <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />}
-            <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-            <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground-soft">
-              {opt.count}
-            </span>
-            {selected === opt.value && <Check className="h-3 w-3 shrink-0" aria-hidden="true" />}
-          </button>
-        )
-      })}
-    </>
   )
 }
 

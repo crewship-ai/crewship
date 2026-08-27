@@ -60,6 +60,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   id in `automations.created_by`, a user-attribution column with no foreign
   key to catch it.
 
+- **The Credentials filter panel shut itself after every pick.** Each facet
+  called `setFilterOpen(false)` on select, so combining a brand with a scope
+  meant reopening the menu between them, and a facet held exactly one value —
+  a switch wearing a filter's clothes. The rail now uses the shared
+  `SidebarFilterPopover` from the sidebar kit, the same panel Issues runs on:
+  the panel stays open, each facet carries its own reset row, and Escape
+  closes it. `CredentialFilters` facets are lists, so values inside a group OR
+  and the groups AND — "any Anthropic or GitHub certificate this crew can
+  reach" is now one pass through the panel.
+
 ### Added
 
 - `crewship onboarding proposal create --agent "Name:Role"` (repeatable)

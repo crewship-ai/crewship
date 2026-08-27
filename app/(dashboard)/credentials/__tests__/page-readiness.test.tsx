@@ -227,8 +227,15 @@ describe("left rail filtering", () => {
     expect(list().getByText("GH_TOKEN")).toBeInTheDocument()
     expect(list().queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
 
-    await openFilter()
-    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }))
+    // This used to reopen the panel here, because the pick above closed it —
+    // the defect of #1776 written down as a specification. The panel stays open
+    // now, so reopening would TOGGLE IT SHUT. Assert what it should have been
+    // asserting all along.
+    expect(screen.getByRole("button", { name: /filter/i })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    )
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }))
     expect(list().getByText("ANTHROPIC_API_KEY")).toBeInTheDocument()
   })
 
