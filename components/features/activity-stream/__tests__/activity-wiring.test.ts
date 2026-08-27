@@ -83,6 +83,23 @@ describe("the shell's chain wiring", () => {
     expect(branch).not.toMatch(/\?\s*sourceEntryTypes\("human"\)/)
   })
 
+  it("pages the waiting scope deeper than the rest, to pay for the answers", () => {
+    // #2036. The window is a fixed ROW count from the newest end, and the
+    // waiting fetch now spends part of it on answer rows. At the shared page
+    // size it would reach back less far in ASKS than the pre-fix query did,
+    // and an open ask pushed past the boundary vanishes from "Waiting on you"
+    // — the opposite of this join's bias, which is to over-report rather than
+    // hide something a person is blocking on.
+    const limitArg = /limit:\s*([^,\n]+)/.exec(source)?.[1] ?? ""
+    expect(limitArg, "the journal list no longer takes a limit").not.toBe("")
+    expect(limitArg).toContain('facets.scope === "waiting"')
+
+    const waiting = Number(/const WAITING_PAGE_SIZE = ([\d_]+)/.exec(source)?.[1]?.replace(/_/g, ""))
+    const base = Number(/const PAGE_SIZE = ([\d_]+)/.exec(source)?.[1]?.replace(/_/g, ""))
+    expect(waiting).toBeGreaterThan(base)
+    expect(waiting, "the journal API rejects limit > 500").toBeLessThanOrEqual(500)
+  })
+
   it("hands the drill-downs an id, never a display label, as the key they match on", () => {
     // `stop.label` is `identifier || title || id`, so on a workspace without
     // issue identifiers it is the TITLE — nothing matched, and the deep link

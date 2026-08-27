@@ -516,8 +516,8 @@ function idFrom(entry: JournalEntry, ...keys: string[]): string | undefined {
 }
 
 /**
- * Every `payload.state` an escalation is DEAD in, from the four Go emit
- * sites that write one:
+ * Every `payload.state` an escalation is DEAD in — four states across the
+ * five Go emit sites that write one:
  *
  *   pending    escalation_handler.go:287    — the ask itself
  *   resolved   escalation_handler.go:658    — a person answered
@@ -527,8 +527,10 @@ function idFrom(entry: JournalEntry, ...keys: string[]): string | undefined {
  *
  * Listed explicitly rather than as `state !== "pending"` so that a future
  * non-terminal state (say `escalated_further`) does not silently retire a
- * question nobody has answered. A backend-parity test scans those Go files
- * and fails when a state appears here that this set has never heard of.
+ * question nobody has answered. A backend-parity test discovers every
+ * internal/api file that emits `journal.EntryPeerEscalation` — it does not
+ * take the list above on trust — and fails when a state appears there that
+ * this set has never heard of.
  */
 export const ESCALATION_TERMINAL_STATES: readonly string[] = ["resolved", "expired", "cancelled"]
 
@@ -555,7 +557,7 @@ function escalationIsTerminal(entry: JournalEntry): boolean {
  *
  *   approval.requested   refs.approval_id        (harbormaster/store_mutate.go:83)
  *   keeper.request       refs.keeper_request_id  (api/keeper_request.go:235)
- *   peer.escalation      refs.escalation_id      (api/escalation_handler.go:255)
+ *   peer.escalation      refs.escalation_id      (api/escalation_handler.go:289)
  */
 export function askRef(entry: JournalEntry): AskRef | null {
   switch (entry.entry_type) {

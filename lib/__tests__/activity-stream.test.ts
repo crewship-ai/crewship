@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { resolve } from "node:path"
 
 import {
@@ -421,11 +421,21 @@ describe("scopeCounts / entriesInScope — the rail counts what the card counts"
   })
 
   it("agrees with the overview card, which is the number that was right", () => {
-    // One question, one answer. This equality IS the bug's absence.
+    // Read this for what it is: today both sides route through
+    // `entriesInScope(_, "waiting")`, so the equality holds for ANY
+    // implementation of `scopeOf` and cannot go red for a classification bug.
+    // It is not the guard against #1876 or #2036 — the id-list assertions
+    // below and in the #2036 blocks are. What it ratchets is the STRUCTURE:
+    // the day somebody gives `openAsks` a second join of its own, which is
+    // how the rail came to read "Waiting 4" beside this card reading 0, this
+    // goes red. Kept for that, not for the arithmetic.
     expect(scopeCounts(feed).waiting).toBe(openAsks(feed).length)
   })
 
   it("keeps the four buckets mutually exclusive and complete", () => {
+    // Also structural: `scopeOf` returns exactly one of four, so the sum is
+    // `feed.length` for any implementation. It goes red if a fifth bucket is
+    // added without `scopeCounts` learning to count it.
     const c = scopeCounts(feed)
     expect(c.active + c.waiting + c.failed + c.done).toBe(feed.length)
   })
@@ -508,12 +518,31 @@ describe("terminal escalations are answers, not fresh asks (#2036)", () => {
     // Backend parity, same argument as the EntryType scan below: a set
     // maintained by hand against a backend that grew a fourth state is a set
     // that silently stops matching.
-    const src = ["escalation_handler.go", "escalation_lifecycle.go", "escalation_autoresolve.go"]
-      .map((f) => readFileSync(resolve(process.cwd(), "internal/api", f), "utf8"))
-      .join("\n")
+    //
+    // The files are DISCOVERED, not listed. A hand-written list of three
+    // filenames goes green the day a fifth emit site lands in a file the list
+    // has never heard of — which is exactly the shape of this bug, one level
+    // up. Every non-test file under internal/api that mentions
+    // `journal.EntryPeerEscalation` is scanned.
+    const apiDir = resolve(process.cwd(), "internal/api")
+    const emitters = readdirSync(apiDir)
+      .filter((f) => f.endsWith(".go") && !f.endsWith("_test.go"))
+      .map((f) => [f, readFileSync(resolve(apiDir, f), "utf8")] as const)
+      .filter(([, src]) => src.includes("journal.EntryPeerEscalation"))
+    // Guards against the whole package moving: an empty scan must not read as
+    // "the backend emits no states".
+    expect(emitters.length, "no internal/api file emits EntryPeerEscalation").toBeGreaterThan(0)
+
+    const src = emitters.map(([, s]) => s).join("\n")
     const states = new Set([...src.matchAll(/"state":\s*"([^"]+)"/g)].map((m) => m[1]))
-    expect(states.size).toBeGreaterThan(1) // guards against a moved file
     expect([...states].sort()).toEqual(["cancelled", "expired", "pending", "resolved"])
+
+    // The scan can only see STRING LITERALS. `"state": escalationStatusFoo`
+    // would be invisible and this test would stay green, so every `"state":`
+    // key in those files must be followed by one.
+    const keys = [...src.matchAll(/"state":/g)].length
+    const literals = [...src.matchAll(/"state":\s*"[^"]+"/g)].length
+    expect(literals, '`"state":` written as something other than a string literal').toBe(keys)
 
     const unknown = [...states].filter(
       (s) => s !== "pending" && !ESCALATION_TERMINAL_STATES.includes(s),
@@ -545,14 +574,32 @@ describe("waitingEntryTypes — the fetch that feeds the waiting join", () => {
   })
 
   it("covers every non-ask type answerRef can close an ask with", () => {
-    // Derived from `answerRef`, not from a second hand-written list: a fifth
-    // answer type added there must arrive in the window too, or it retires
-    // nothing.
+    // Derived from `answerRef` itself, by probing the whole entry-type
+    // vocabulary — NOT from `ANSWER_ENTRY_TYPES`, which is the hand-written
+    // list under test. Comparing the fetch to that list only proves the list
+    // agrees with itself; the failure worth catching is a fifth `case` added
+    // to `answerRef` that nobody added to the fetch, which is #2036 again.
+    //
+    // The vocabulary is complete by construction: "backend parity" below
+    // pins JOURNAL_ENTRY_TYPES against internal/journal/types.go.
     const asks = new Set(sourceEntryTypes("human"))
-    const missing = ANSWER_ENTRY_TYPES.filter(
-      (t) => !asks.has(t) && !waitingEntryTypes().includes(t),
-    )
-    expect(missing).toEqual([])
+    const fetched = new Set(waitingEntryTypes())
+    const missing = JOURNAL_ENTRY_TYPES.filter((t) => {
+      const probe = entry({ entry_type: t, payload: {}, refs: {} })
+      // Ask-shaped types arrive via `sourceEntryTypes("human")` already;
+      // `peer.escalation` is both halves and is covered there.
+      if (askRef(probe) !== null || asks.has(t)) return false
+      return answerRef(probe) !== null && !fetched.has(t)
+    })
+    expect(missing, "answerRef can close an ask with a type the fetch never asks for").toEqual([])
+
+    // And the hand-written list is exactly what the probe found, so it cannot
+    // drift into naming a type `answerRef` does not act on.
+    const answersByProbe = JOURNAL_ENTRY_TYPES.filter((t) => {
+      const probe = entry({ entry_type: t, payload: {}, refs: {} })
+      return askRef(probe) === null && answerRef(probe) !== null
+    })
+    expect([...ANSWER_ENTRY_TYPES].sort()).toEqual([...answersByProbe].sort())
   })
 
   it("names only types answerRef or askRef actually recognises, once each", () => {

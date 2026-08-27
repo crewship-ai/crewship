@@ -119,6 +119,25 @@ function LiveBadge({ status }: { status: string }) {
 const MAX_BUFFERED = 2_000
 const PAGE_SIZE = 300
 
+/**
+ * The waiting scope pages deeper — the backend's ceiling (#2036).
+ *
+ * The window is a fixed ROW count taken from the newest end (`ORDER BY ts
+ * DESC LIMIT n`), and the waiting fetch now spends part of it on the ANSWERS
+ * it needs to retire a row. At the same 300 it therefore reaches back less
+ * far in asks than it used to, and an open ask pushed past the boundary
+ * disappears from "Waiting on you" entirely — the opposite of the bias this
+ * join is built on, which is to over-report a row rather than hide something
+ * a person is blocking on.
+ *
+ * A row cap cannot make that impossible, but 500 restores well over the ask
+ * depth the pre-#2036 query had: the answers are a minority of the rows, so
+ * 500 mixed rows hold more asks than 300 ask-only ones did. Only this scope
+ * pays the larger response, and 500 is both the API's documented maximum and
+ * `useJournalList`'s own default.
+ */
+const WAITING_PAGE_SIZE = 500
+
 export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const isMobile = useIsMobile()
   const lookup = useJournalLookup()
@@ -260,7 +279,12 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   }, [facets, pinned, focus, range.ms, debouncedSearch])
 
   const { entries, loading, loadingMore, error, nextCursor, refresh, loadMore, prependLive } =
-    useJournalList({ workspaceId, params, limit: PAGE_SIZE, maxEntries: MAX_BUFFERED })
+    useJournalList({
+      workspaceId,
+      params,
+      limit: facets.scope === "waiting" ? WAITING_PAGE_SIZE : PAGE_SIZE,
+      maxEntries: MAX_BUFFERED,
+    })
 
   // The workflow index. Independent of the journal query on purpose: the rail
   // must answer "where can I go" even when the current filters answer nothing,

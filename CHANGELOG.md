@@ -50,7 +50,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   never be retired in that scope, and a grant arriving live could not retire
   one either, because the stream shares the query. The waiting fetch now asks
   for both halves; the answers never reach the feed, because the same
-  narrowing files them under Completed.
+  narrowing files them under Completed. Because the journal pages by a fixed
+  row count from the newest end, those extra rows would otherwise have pushed
+  the oldest open asks out of the window — hiding them instead of listing
+  them — so the Waiting scope alone now pages to the API's 500-row ceiling.
 
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and
