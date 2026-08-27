@@ -4287,6 +4287,9 @@
       },
       "FinalAdminPlatformBackupRestore": {
         "properties": {
+          "columns_dropped": {
+            "type": "integer"
+          },
           "crews_count": {
             "type": "integer"
           },
@@ -4295,6 +4298,23 @@
           },
           "docker_phase_skipped": {
             "type": "boolean"
+          },
+          "dropped_columns": {
+            "items": {
+              "properties": {
+                "column": {
+                  "type": "string"
+                },
+                "rows": {
+                  "type": "integer"
+                },
+                "table": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
           },
           "dropped_crew_filesystems": {
             "items": {
@@ -4310,7 +4330,7 @@
             "type": "string"
           },
           "restored_ws": {
-            "type": "boolean"
+            "type": "string"
           },
           "rows_inserted": {
             "type": "integer"

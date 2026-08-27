@@ -763,6 +763,14 @@ type RestoreStats struct {
 	// an admin to go and re-tier them by hand, capped so a wildly
 	// malformed bundle cannot make the restore result unbounded.
 	SecurityLevelClamps []SecurityLevelClamp
+	// ColumnsDropped counts every value the restore threw away because the
+	// target has no such column — one per (row, column), so a column
+	// missing on 500 rows counts 500. See dropped_columns.go for why this
+	// is counted at all.
+	ColumnsDropped int
+	// DroppedColumns is the bounded per-(table, column) breakdown of the
+	// above, in the order the insert loop met them.
+	DroppedColumns []DroppedColumn
 }
 
 // RestoreDumpTx is RestoreDump with a caller-supplied preflight hook
@@ -856,6 +864,14 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		}
 	}
 
+	// Bundle columns the target schema does not have are dropped from the
+	// INSERT below. That is deliberate (see RestoreDump's doc comment), but
+	// doing it in silence is what made #1437, #1444, #1973 and #2034 quiet
+	// data loss instead of a loud failure — dropping the key column of a
+	// re-keyed table degenerates the statement into a NOT NULL violation
+	// that OR IGNORE then swallows. Counted here, reported to the operator
+	// by the caller. See dropped_columns.go.
+	var dropped droppedColumnTally
 	for _, table := range BackupTables {
 		rows, ok := dump.Tables[table]
 		if !ok || len(rows) == 0 {
@@ -902,6 +918,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				keys = append(keys, k)
 			}
 			sortStrings(keys)
+			tallyDroppedColumns(&dropped, table, keys, allowed)
 			for _, k := range keys {
 				if !allowed[k] {
 					continue
@@ -957,6 +974,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			}
 		}
 	}
+	// Settled once the insert pass is done, so the caller sees one number
+	// for the whole restore. On an early error return above, the tx rolls
+	// back and there is no restore to report skew about.
+	stats.ColumnsDropped, stats.DroppedColumns = dropped.result()
 	// Force-resolve deferred FK violations BEFORE preCommit. preCommit
 	// is the docker-restore closure that mutates container filesystems;
 	// without this scan a bad bundle (or schema-skew leaving an orphan

@@ -195,6 +195,13 @@ from being written over the source crew's live data.
 A dry-run leaves only the audit row — no DB rows, no docker changes.
 Use it to prove a bundle is restorable before cutover.
 
+Restore also warns when the bundle carries columns this instance's schema
+does not have — they are dropped, and any row that needed one of them to
+satisfy a `NOT NULL` or a primary key is dropped with them, silently, by
+`INSERT OR IGNORE`. The warning names each `table.column` and how many
+rows carried it; `--dry-run` reports the same thing before anything is
+written. See [Backup & restore](/guides/backup#columns-your-schema-does-not-have-are-reported-not-just-dropped).
+
 ---
 
 ## `crewship backup rotate`
