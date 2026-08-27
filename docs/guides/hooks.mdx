@@ -173,7 +173,11 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
 
 ### Event names are validated on write
 
-`hooks_config` has a `CHECK` constraint on `handler_kind` but **not** on `event`. A misspelled event therefore used to insert cleanly, never match `ListByEvent`'s predicate, and silently never fire — the hook listed, toggled, and looked healthy. `hooks.Register` and `hooks.Update` now reject any event outside the fourteen above (including `pre_tool_call`, which is no longer one of them), and the error message enumerates the legal values. The CLI checks the same list client-side before it sends anything.
+`hooks_config` has a `CHECK` constraint on `handler_kind` but **not** on `event`. A misspelled event therefore used to insert cleanly, never match `ListByEvent`'s predicate, and silently never fire — the hook listed, toggled, and looked healthy. `hooks.Register` now rejects any event outside the fourteen above (including `pre_tool_call`, which is no longer one of them), and the error message enumerates the legal values. The CLI checks the same list client-side before it sends anything.
+
+`hooks.Update` applies the same check, but **only when the write actually changes `event`**. It re-reads the row's current event from the database and compares — it does not trust the caller to say whether `event` was touched. A `PATCH` that omits `event`, or sends the value the row already has, skips event validation entirely, which is what keeps a legacy `pre_tool_call` row editable for every other field instead of frozen behind a permanent `unknown event` error. An update that *changes* `event` to something outside the fourteen is rejected exactly as `Register` would reject it. (Pinned by `TestUpdate_LegacyEventRowStaysEditableForOtherFields` and `TestUpdate_LegacyEventRowRejectsChangingToAnotherUnknownEvent` in `internal/hooks/store_write_test.go`.)
+
+Because that read and the `UPDATE` are two statements, the `UPDATE` also carries `AND event = <the value just read>`: if another writer changes the row's event in between, this update matches no rows and returns "not found" rather than writing a stale (and unvalidated) event back over the new one.
 
 ## Endpoints
 

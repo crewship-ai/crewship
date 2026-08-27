@@ -333,8 +333,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   change still lists, toggles, and can be edited via `PATCH` for any
   field other than `event` — the store only re-validates `event` when a
   write actually changes it, so a legacy row isn't frozen out of every
-  edit just because its event predates this change. It still never
-  dispatches.
+  edit just because its event predates this change. (That check reads the
+  row's current event first, so the `UPDATE` it guards now also matches on
+  that event — a concurrent write that moves a legacy row onto a valid
+  event can no longer be undone by a stale update putting the retired one
+  back.) It still never dispatches.
 
   ⚠️ **Behaviour change:** a script or manifest that registers a
   `pre_tool_call` hook now gets a 400 instead of a silently-dead 201.
