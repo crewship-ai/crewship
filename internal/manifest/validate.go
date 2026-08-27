@@ -336,6 +336,18 @@ var envVarNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // only fires for non-zero values that fall short.
 const minAutoCredentialBytes = 16
 
+// maxAutoCredentialBytes is the ceiling for AutoCredential.Length.
+// The byte count is manifest-supplied and reaches make([]byte, n) in
+// generateAutoCredentialValue, so without a ceiling a crew manifest
+// is a remote allocation primitive — `length: 9999999999` asks the
+// server for ~10 GB, per auto_credential, before anything is even
+// persisted. 512 bytes (4096 bits, 1024 hex chars) is far past any
+// real secret: the strongest thing anything here consumes is a
+// 32-byte sidecar password, the repo's most generous documented
+// example is 48, and the value travels literally through container
+// env and argv, where multi-KB entries start hitting exec limits.
+const maxAutoCredentialBytes = 512
+
 func (v *validator) checkServices(scope string, services []Service, creds map[string]Credential) {
 	seen := map[string]bool{}
 	for i := range services {
@@ -441,6 +453,10 @@ func (v *validator) checkAutoCredentials(scope string, s *Service, creds map[str
 		if ac.Length > 0 && ac.Length < minAutoCredentialBytes {
 			v.errf("%s service %q: auto_credential %q length %d is below the %d-byte minimum",
 				scope, s.Name, ac.Name, ac.Length, minAutoCredentialBytes)
+		}
+		if ac.Length > maxAutoCredentialBytes {
+			v.errf("%s service %q: auto_credential %q length %d is above the %d-byte maximum",
+				scope, s.Name, ac.Name, ac.Length, maxAutoCredentialBytes)
 		}
 	}
 }

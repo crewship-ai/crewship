@@ -418,7 +418,8 @@ type AutoCredential struct {
 
 	// Length is the number of random bytes Crewship generates
 	// before hex-encoding. Default 32 bytes (64 hex chars).
-	// Minimum 16 bytes; below that the validator refuses the row.
+	// Minimum 16 bytes, maximum 512; outside that range the
+	// validator refuses the row.
 	Length int `yaml:"length,omitempty" json:"length,omitempty"`
 
 	// Description is shown in the UI when the operator hovers the
@@ -448,7 +449,8 @@ func (a *AutoCredential) EffectiveInjectToAgents() bool {
 
 // EffectiveLength returns the resolved byte count, applying the
 // 32-byte default when Length is zero. Caller is responsible for
-// rejecting positive values below 16 (validate.go does that).
+// rejecting positive values below 16 or above 512 (validate.go does
+// that; generateAutoCredentialValue clamps the ceiling as well).
 func (a *AutoCredential) EffectiveLength() int {
 	if a.Length <= 0 {
 		return 32

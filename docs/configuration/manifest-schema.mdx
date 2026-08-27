@@ -212,7 +212,7 @@ Sidecar container that runs alongside the agent on the crew's bridge network. Ag
 | `name` | string | (required) | Workspace-unique credential name **and** the default env-var name on the sidecar + every crew agent. Use `SCREAMING_SNAKE_CASE`. |
 | `inject_as_env` | string | `name` | Overrides the env-var name the sidecar receives (e.g. `MARIADB_ROOT_PASSWORD`). |
 | `inject_to_agents` | bool | `true` | When `false`, the sidecar uses the secret internally but no agent picks it up. |
-| `length` | int | `32` bytes (64 hex chars) | Random bytes generated before hex-encoding. Minimum `16`; below that the validator refuses the row. |
+| `length` | int | `32` bytes (64 hex chars) | Random bytes generated before hex-encoding. Minimum `16`, maximum `512`; outside that range the validator refuses the row. |
 | `description` | string | — | Shown in the UI on the "Created by \<agent\>" row. |
 
 ### `ServiceVolume`
