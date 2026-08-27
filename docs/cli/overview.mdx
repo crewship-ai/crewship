@@ -703,8 +703,9 @@ The orchestration surfaces answer four related operational questions:
   manages workspace rules that enqueue routines from journal events. Automations
   enqueue deferred work; they do not execute routines inline. See the
   [`automation` reference](/cli/automation) and [automations guide](/guides/automations).
-- **Does the crew match its declared runtime?** `crewship crew container-status
-  <slug-or-id>` compares configured and effective container limits and explains
+- **Does the crew match its declared runtime?**
+  `crewship crew container-status <slug-or-id>`
+  compares configured and effective container limits and explains
   whether an operator needs to act. Use `--format json` for scripts. See the
   [crew reference](/cli/crew#crewship-crew-container-status).
 

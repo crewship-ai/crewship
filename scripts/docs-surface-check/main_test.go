@@ -675,3 +675,60 @@ func writeDocsPage(t *testing.T, root, rel, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestJSXHostileCodeSpansCatchesTheWrappedTag(t *testing.T) {
+	root := t.TempDir()
+	// The exact shape that failed the Mintlify deploy on docs/guides/routines.mdx:
+	// the span opens on one line and the continuation starts with `<`.
+	writeDocsPage(t, root, "docs/guides/routines.mdx", ""+
+		"Set it with `crewship routine save --author-agent\n"+
+		"<slug|id>` (the agent must belong to the crew).\n")
+
+	offenders, err := jsxHostileCodeSpans(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []wrappedCodeSpan{{
+		page: "docs/guides/routines.mdx",
+		line: 2,
+		text: "<slug|id>` (the agent must belong to the crew).",
+	}}
+	if !slices.Equal(offenders, want) {
+		t.Fatalf("jsxHostileCodeSpans() = %+v\nwant %+v", offenders, want)
+	}
+}
+
+func TestJSXHostileCodeSpansAcceptsTheSpanKeptOnOneLine(t *testing.T) {
+	root := t.TempDir()
+	// Same sentence, same characters, wrapped somewhere MDX can parse.
+	writeDocsPage(t, root, "docs/guides/routines.mdx", ""+
+		"Set it with\n"+
+		"`crewship routine save --author-agent <slug|id>`\n"+
+		"(the agent must belong to the crew).\n")
+
+	offenders, err := jsxHostileCodeSpans(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("jsxHostileCodeSpans() = %+v, want none — the span never wraps onto the `<`", offenders)
+	}
+}
+
+func TestJSXHostileCodeSpansIgnoresFencedBlocksAndUnrelatedTags(t *testing.T) {
+	root := t.TempDir()
+	// A fenced block may contain anything, and a tag-shaped line that no open
+	// span reaches is ordinary prose the deploy parses without complaint.
+	writeDocsPage(t, root, "docs/cli/overview.mdx", ""+
+		"```bash\ncrewship crew container-status\n<slug-or-id>\n```\n\n"+
+		"A sentence with a `closed span`.\n\n"+
+		"<Note>Not a continuation.</Note>\n")
+
+	offenders, err := jsxHostileCodeSpans(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("jsxHostileCodeSpans() = %+v, want none", offenders)
+	}
+}
