@@ -270,12 +270,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   that event — Crewship drives agent work by parsing the stream a driven
   CLI (Claude Code, Cursor, ...) emits, so by the time a tool call is
   observable the tool has already run; there is no "before the tool runs"
-  interception point to hook (see `post_tool_call`, which fires after).
+  interception point to hook. (`post_tool_call` fires after the tool runs
+  in principle, but as of this change nothing dispatches it for
+  user-registered hooks either — see the Hooks guide's coverage table.)
   `pre_tool_call` is no longer a valid `--event` / `event` — the CLI and
   the API now reject it the same way they reject any other unknown event
   name, echoing the same list of legal ones. The `hooks.EventPreToolCall`
   Go constant stays defined so a `hooks_config` row created before this
-  change still lists and toggles normally; it just still never dispatches.
+  change still lists, toggles, and can be edited via `PATCH` for any
+  field other than `event` — the store only re-validates `event` when a
+  write actually changes it, so a legacy row isn't frozen out of every
+  edit just because its event predates this change. It still never
+  dispatches.
 
   ⚠️ **Behaviour change:** a script or manifest that registers a
   `pre_tool_call` hook now gets a 400 instead of a silently-dead 201.

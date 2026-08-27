@@ -228,6 +228,95 @@ func TestUpdate_RejectsUnknownEvent(t *testing.T) {
 	}
 }
 
+// TestUpdate_LegacyEventRowStaysEditableForOtherFields reproduces the
+// scenario the docs and CHANGELOG promise for a row that predates
+// pre_tool_call's removal from AllEvents: it must still "list, toggle, and
+// read back fine". Toggle is covered by SetEnabled already; this covers
+// the PATCH path (hooks_write.go's Update handler), which loads the
+// existing row, overlays only the fields present in the request body, and
+// calls Update with the FULL merged struct — so merged.Event stays
+// "pre_tool_call" even though the caller's request never mentioned event.
+//
+// Before the fix, Update ran the same event check Register applies on
+// insert against that merged struct, so a PATCH touching only `blocking`
+// on a legacy row failed with "hooks: unknown event: \"pre_tool_call\"".
+func TestUpdate_LegacyEventRowStaysEditableForOtherFields(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// Register itself would reject event=pre_tool_call today (it's no
+	// longer in AllEvents), so simulate the pre-existing row the way
+	// TestScanHook_CorruptJSONColumns does: a raw INSERT bypassing
+	// Register's ValidateEvent gate, standing in for a row created before
+	// pre_tool_call was retired.
+	const id = "hk_legacy"
+	_, err := db.ExecContext(ctx, `INSERT INTO hooks_config
+		(id, workspace_id, event, matcher, handler_kind, handler_config, blocking, enabled)
+		VALUES (?, 'ws_test', 'pre_tool_call', '{}', 'http', ?, 0, 1)`,
+		id, `{"url":"https://old.test"}`)
+	if err != nil {
+		t.Fatalf("raw insert: %v", err)
+	}
+
+	before, err := Get(ctx, db, "ws_test", id)
+	if err != nil || before == nil {
+		t.Fatalf("Get before: %v (hook=%v)", err, before)
+	}
+	if before.Event != EventPreToolCall {
+		t.Fatalf("setup: event = %q, want %q", before.Event, EventPreToolCall)
+	}
+
+	// PATCH-shaped update: only blocking changes. next is the full merged
+	// struct a real Update caller would build — event untouched.
+	next := *before
+	next.Blocking = true
+	if err := Update(ctx, db, "ws_test", next, false); err != nil {
+		t.Fatalf("Update on legacy pre_tool_call row (unrelated field only) = %v, want nil", err)
+	}
+
+	got, err := Get(ctx, db, "ws_test", id)
+	if err != nil || got == nil {
+		t.Fatalf("Get after: %v (hook=%v)", err, got)
+	}
+	if !got.Blocking {
+		t.Errorf("blocking = %v, want true", got.Blocking)
+	}
+	if got.Event != EventPreToolCall {
+		t.Errorf("event = %q, want it left unchanged at %q", got.Event, EventPreToolCall)
+	}
+}
+
+// TestUpdate_LegacyEventRowRejectsChangingToAnotherUnknownEvent makes sure
+// the fix for the case above doesn't overcorrect into never validating
+// event on a legacy row: an explicit change away from the retired event is
+// still validated, same as any other event change.
+func TestUpdate_LegacyEventRowRejectsChangingToAnotherUnknownEvent(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	const id = "hk_legacy2"
+	_, err := db.ExecContext(ctx, `INSERT INTO hooks_config
+		(id, workspace_id, event, matcher, handler_kind, handler_config)
+		VALUES (?, 'ws_test', 'pre_tool_call', '{}', 'http', ?)`,
+		id, `{"url":"https://old.test"}`)
+	if err != nil {
+		t.Fatalf("raw insert: %v", err)
+	}
+
+	before, err := Get(ctx, db, "ws_test", id)
+	if err != nil || before == nil {
+		t.Fatalf("Get before: %v (hook=%v)", err, before)
+	}
+
+	next := *before
+	next.Event = "on_run_finished" // an actual change, still not a real event
+	if err := Update(ctx, db, "ws_test", next, false); !errors.Is(err, ErrUnknownEvent) {
+		t.Fatalf("Update changing a legacy event to another unknown one = %v, want ErrUnknownEvent", err)
+	}
+}
+
 func TestUpdate_RequiresAnID(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()

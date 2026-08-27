@@ -193,8 +193,8 @@ See [Hooks API](/api-reference/hooks) for schemas.
 ```bash
 crewship hooks list
 crewship hooks list --crew backend-team
-crewship hooks create --event post_tool_call --handler shell \
-    --command /usr/local/bin/gate.sh --matcher-tools 'Bash,Write' --blocking
+crewship hooks create --event pre_agent_start --handler shell \
+    --command /usr/local/bin/gate.sh --crew backend-team --blocking
 crewship hooks update hk_abc --url https://new.test/hook
 crewship hooks delete hk_abc --yes
 crewship hooks enable hk_abc
