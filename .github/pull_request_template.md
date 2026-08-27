@@ -24,6 +24,19 @@
 - [ ] Lint passes (`pnpm lint`)
 - [ ] Go tests pass (`go test ./...`) *(if Go changes)*
 
+## Changelog (enforced by the `Changelog Guard` workflow)
+
+A PR touching `internal/api/`, `cmd/crewship/`, `app/`, `components/`,
+`lib/`, `hooks/` or `stores/` needs an entry under `## [Unreleased]` in
+`CHANGELOG.md` — `RELEASING.md` cuts release notes from that section, so
+an omission ships silently.
+
+- [ ] Entry added under `## [Unreleased]`, marked `⚠️ **Behaviour change:**`
+      if something that used to work can now fail. The guard compares that
+      section specifically — an edit elsewhere in the file does not count
+- [ ] …or the `skip-changelog` label is applied because this change has no
+      user-visible effect (chore / internal refactor / test-only)
+
 ## Security Checklist
 
 - [ ] No plaintext credentials or API keys in code

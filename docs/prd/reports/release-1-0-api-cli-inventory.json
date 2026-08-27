@@ -48911,6 +48911,7 @@
         "docs/api-reference/journal.mdx",
         "docs/api-reference/pages.mdx",
         "docs/api-reference/runs.mdx",
+        "docs/changelog/overview.mdx",
         "docs/cli/activity.mdx",
         "docs/cli/credential.mdx",
         "docs/cli/export.mdx",
@@ -49203,11 +49204,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4453,
+    "command_references": 4462,
     "api_path_references": 2185,
     "environment_references": 432,
     "manifest_kind_references": 231,
-    "flag_references": 2095,
+    "flag_references": 2096,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

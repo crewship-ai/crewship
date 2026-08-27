@@ -1,13 +1,138 @@
 ---
 title: "Changelog"
-description: "What's new in Crewship — features, updates, and fixes shipped each week."
+description: "What's new in Crewship — selected release highlights, with the upgrade notes that go with them."
 icon: "rss"
 mode: "center"
 stability: experimental
 tag: Experimental
 ---
 
-<Update label="August 26, 2026" tags={["fixes"]}>
+<Note>
+  **This page is a highlights reel, not a complete log.** Each entry covers a
+  release window, and it carries what a user or an operator would want to know
+  about: new capabilities, anything that changes behaviour on upgrade, and
+  anything that needs a decision before deploying. Plenty of good work is
+  deliberately not here — a gap between two dates means nothing was worth your
+  attention, not that nothing shipped.
+
+  The complete, per-change record is
+  [`CHANGELOG.md`](https://github.com/crewship-ai/crewship/blob/main/CHANGELOG.md)
+  in the repository. That file is the release-note source of truth and every
+  user-visible pull request is required to add to it.
+</Note>
+
+<Update label="August 26, 2026" tags={["features", "updates", "fixes"]}>
+
+## A provider is now a credential
+
+The sidecar's LLM proxy routed on a hardcoded three-arm switch. It now routes
+on a descriptor table, and a credential carries its provider end to end — so
+adding a backend is a row rather than a branch. Two arrive with it:
+**OpenRouter** and **OpenAI-compatible** endpoints (LiteLLM, vLLM, anything
+serving the OpenAI wire format), both created like any other credential.
+`crewship credential create` gains `--base-url` for the compatible kind and
+`--auth-token-stdin` so a token never reaches the process table, and
+`crewship provider route list` shows the whole routing table with no server
+running. The three existing paths — `/v1`, `/openai`, `/gemini` — are
+byte-for-byte unchanged. See [Credentials](/api-reference/credentials) and
+[Multi-provider LLM configuration](/guides/multi-provider-llm).
+
+<Warning>
+  **A credential PATCH that re-interprets the stored value is now refused.**
+  An endpoint-backed credential holds a `{baseURL, apiKey, headers}` object;
+  every other kind holds an opaque value. Moving a credential across that line
+  — changing `provider` to or from `OPENAI_COMPAT`, or `type` between
+  `ENDPOINT_URL` and `API_KEY` — now returns **400** unless `value` is sent in
+  the same request, instead of silently re-reading bytes it was never given. A
+  PATCH that carries a `value` also validates the endpoint URL for the first
+  time, so one that used to accept a link-local or metadata address now
+  refuses it.
+
+  Two smaller edges: `provider` is normalised to its canonical uppercase
+  spelling on write (a client that sends `github` reads back `GITHUB`), and
+  several `crewship credential create` argument errors moved from exit 1 to
+  **exit 2**. A script that branches on exit 1 needs updating.
+</Warning>
+
+## One shell for every create surface
+
+The twelve create dialogs that had each grown their own layout are now one
+kit — consistent widths, a bottom sheet on a phone, ⌘↵ to submit, and a
+discard guard so Esc never throws away typed input. Three things became
+possible from the browser for the first time: **importing a crew manifest**
+into New crew, granting **per-agent tools and notification channels** on New
+agent, and **creating a label** from the issue modal. The crew wizard is four
+steps instead of five.
+
+<Warning>
+  **New crew now pre-selects `free` network mode, not `restricted`.** Only the
+  wizard's default selection moved — anything that creates a crew without
+  stating a mode (a manifest, the API, a seed) still gets `restricted`. If you
+  rely on operators being handed the restricted default in the UI, say so in
+  your own onboarding, or set the crew's network policy explicitly. See
+  [Container isolation](/security/container-isolation).
+</Warning>
+
+## Start and stop a crew on purpose
+
+`crewship crew start <crew>` builds the image if needed and brings the
+container up, verifying it actually came up rather than assuming; `crewship
+crew stop <crew>` takes it and its sidecars down, keeping volumes and the
+image. Until now the remedy several error messages recommended was `crewship
+crew provision`, which only builds the image and starts nothing — so following
+the advice reproduced the error. Those messages now name `crew start`, and say
+what `provision` does and does not do. `crewship apply` also stops claiming
+success on a
+failed run — it now names the item that failed and everything after it that
+was never attempted — and gains `--no-delete`, which refuses any run whose
+plan would destroy something. See [`crewship crew`](/cli/crew) and
+[`crewship apply`](/cli/apply).
+
+## Run a routine from a slash command
+
+A routine can opt in to appearing as `/<slug>` in chat and in `crewship
+shell`, with a typed form built from the inputs it declares. A new
+`routine.run` capability lets a MEMBER invoke routines without being promoted
+to MANAGER. The run is synchronous and its output goes to the run records, not
+to the chat. See [Slash commands](/cli/slash) and [Routines](/guides/routines).
+
+## Onboarding builds working things, owned by the crew they belong to
+
+First-run setup is now a conversation with a permanent Crewship Guide crew.
+The important part is invisible: a routine or page the Guide builds for you is
+now **attributed to your crew, not to the Guide** — which decides whose egress
+policy gates it, whose container runs it, and whose roster its panels can see.
+See [Onboarding](/guides/onboarding).
+
+<Warning>
+  **Backups taken before this release may be missing rows.** The backup's
+  workspace scope was derived by walking foreign keys without checking whether
+  the column it landed on was nullable, and a filter on a nullable column
+  omits every row where it is NULL. Unclaimed mission tasks, crew-owned MCP
+  servers, human-saved page versions and several binding tables were affected —
+  and because the walk depended on Go map order, two runs of the same binary
+  against the same schema could omit different tables.
+
+  It is fixed, but **`crewship backup verify` cannot detect a short bundle**:
+  it checks the payload checksum, and the manifest records no per-table row
+  counts. Treat bundles taken before this release as unverified, and take a
+  fresh one. `crewship backup restore --replace` was deleting through the same
+  faulty filter, so restoring an old bundle over a live workspace was doubly
+  affected. See [Backup](/guides/backup).
+</Warning>
+
+<Warning>
+  **A crew whose mise shims do not resolve will now fail to provision.**
+  `mise reshim` exits 0 whether or not the shims point at anything, and a
+  dangling symlink is skipped silently by PATH lookup — so a crew pinned to
+  `terraform 1.9` could run whatever the base image shipped, with nothing
+  logged. Provisioning now verifies the shims and fails loudly instead.
+
+  Crews created before 2026-08-07 carry stale shims and **do not self-heal**.
+  Expect their next provision to fail; re-provision them from a current image.
+  Crews that declare no mise tools are unaffected. See
+  [Devcontainers](/guides/devcontainers).
+</Warning>
 
 ## An integration's audience is stored, not counted
 
@@ -18,6 +143,63 @@ An MCP server used to be available to every agent for exactly as long as **no** 
 </Warning>
 
 Same pass: `mcp_tool_bindings` had no referential integrity, so deleting an integration stranded its per-tool toggles forever. They now follow their server, an insert naming a server that does not exist is rejected, and the rows already orphaned are swept. See [Integrations](/guides/integrations#who-gets-which-server) and [`crewship integration`](/cli/integration).
+
+## Updates
+
+- **An evaluator slot follows the key you actually have.** Auxiliary slots now
+  default to the first provider whose API key is set, instead of six slots
+  hardcoded to Anthropic that each failed at first use on an OpenAI-only
+  instance. See [Keeper](/guides/keeper).
+- **Two Keeper aux controls that did nothing now do what the console claimed.**
+  Memory consolidation reads the `curator` slot — it was hardwired to Ollama at
+  boot, so an instance with an Anthropic key and no Ollama silently ran no
+  consolidation at all while the card showed the slot healthy. And
+  `run_summary`'s timeout now actually bounds the verdict call; its shipped
+  default moves 15s → 20s so the first real deadline is not tighter than what
+  those calls had been running under.
+- **Crew template names are unique per workspace.** Two workspaces can each
+  have a `backend-team` template. A workspace template shadows the built-in of
+  the same name, for that workspace only — and a built-in whose slug a user had
+  taken can be seeded again, which it previously never could.
+- **An OpenAI-compatible credential can be tested.** It was the only LLM
+  provider with no connectivity test, and it returned a green tick without
+  dialling anything. The probe checks reachability, not authentication — it
+  deliberately never sends the stored key, because whoever can edit the
+  credential can also repoint its URL.
+- **Pages can be published, webhooked, exported, imported and deleted from the
+  browser.** All of that was CLI-only. See [Pages](/guides/pages).
+
+## Fixes
+
+- **A page's public panels were silently unpublished by reading them.** The
+  `public` flag was not echoed on any read path, so `crewship page export |
+  crewship apply`, a hand-edited `page get -f json`, or the editor's own save
+  cleared it. The published link kept resolving and rendered an empty page,
+  and the next `page publish` then blamed the page for having no public panels.
+- **The mission timeline's "Restore" restored nothing and said it had.** The
+  endpoint computes a preview by design — it rewinds nothing — and the UI
+  reported success and discarded the response, including the list of later
+  events a real restore would have to abandon. The action is now labelled
+  **Preview restore** and says what it found.
+- **The Add-MCP wizard's "Test" could not fail.** It was a timer that returned
+  success, with no failure path at any input. It is gone; connectivity is
+  tested on the server's row after it exists, or with `crewship integration
+  crew test`.
+- **One unrenderable chat message no longer takes down the page.** A single bad
+  turn used to replace the whole conversation with an error screen, discard
+  every turn's state, lose a half-typed draft and drop the live WebSocket. Now
+  only that message is replaced, and it heals itself as the next token arrives.
+- **Pinned memory could be read empty.** `pins.md` and the day's learned rules
+  were created before they were written, so an agent reading its own rules in
+  that window saw nothing rather than the previous contents — reproducibly, on
+  a tick that runs every six hours. They are written atomically now.
+- **Forking a mission from the timeline 404'd**, and the 404 was rendered as
+  "not yet wired to backend" — so a broken call looked like an unbuilt feature.
+- **Accessibility.** Page tabs are now linked to the panels they reveal and the
+  strip is keyboard-navigable with arrow keys; crew and agent canvas tabs are a
+  real tab set rather than buttons claiming to be one; the admin console's
+  content pane can be scrolled by keyboard; New routine has a Cancel button on
+  every screen.
 
 </Update>
 

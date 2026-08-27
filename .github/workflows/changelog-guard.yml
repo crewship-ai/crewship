@@ -1,0 +1,271 @@
+name: Changelog Guard
+
+# Catches the failure mode the #2086 audit found: 18 user-visible PRs merged
+# in one window and left no changelog trace anywhere — the audit counted
+# fifteen, and reading the window's merges back against the file turned up
+# three more, one of which merged 19 minutes after the audit was filed and
+# silently invalidated an entry the backfill had already written.
+# `RELEASING.md` makes
+# `CHANGELOG.md`'s `## [Unreleased]` section the release-note source of truth,
+# so a missing entry is not untidiness — it is a release note that does not
+# exist. #2051 renamed the provider model to credentials across 117 files and
+# broke a CLI command family with zero bytes in `CHANGELOG.md`; cutting a tag
+# that week would have shipped a breaking change silently.
+#
+# Nothing enforced it. CONTRIBUTING.md makes the entry a review obligation and
+# review is exactly where it was missed — two PRs in that window merged with no
+# review at all (#2049 hit CodeRabbit's 100-file cap, #2025 hit its rate
+# limiter). A human gate that only fires when a human looks is not a gate.
+#
+# The rule: a PR that changes the three surfaces a user can actually see —
+# the HTTP API, the CLI, the web app — must also change `CHANGELOG.md`'s
+# `## [Unreleased]` section. That section specifically, not the file: it is the
+# only one `RELEASING.md` cuts release notes from.
+#
+# The escape hatch is deliberate and must stay easy, because a gate that
+# cannot be bypassed gets bypassed by disabling it:
+#
+#   * add the `skip-changelog` label (chores, refactors with no user-visible
+#     effect, test-only changes, revert pairs). The label is checked from the
+#     event payload, and `labeled`/`unlabeled` are trigger types, so applying
+#     it re-runs this check within seconds — no push needed.
+#   * Dependabot is exempt by actor. Its PRs are grouped bumps that carry
+#     their own release notes, and it cannot be asked to write prose.
+#
+# Deliberately NOT enforced here:
+#   * `docs/changelog/overview.mdx`. That page is a curated highlights reel
+#     (see the note at the top of it), not a per-PR log. Gating on it would
+#     train contributors to pad it, which is the failure mode the page's own
+#     scope note exists to prevent.
+#   * entry *quality*. No CI check can tell a real entry from "- fix bug".
+#     This guard buys the reviewer the conversation, it does not replace them.
+#
+# Runs on every PR — no `paths:` filter — so the check always reports a
+# conclusion and can be made a required status check without leaving
+# unrelated PRs pending forever. The path decision happens in the script.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+# PR runs supersede each other. Unlike the other guards this one never runs on
+# `main`, so the `github.sha` special-case those workflows carry (see the
+# long-form note in ci.yml) has nothing to guard against here.
+concurrency:
+  group: changelog-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: User-visible change needs a changelog entry
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # fetch-depth: 0 so the PR's base ref is locally resolvable.
+      # persist-credentials: false drops the GITHUB_TOKEN from the local git
+      # config — this job only reads files, so the token would be a liability
+      # for any later step that re-runs git from the checked-out workspace.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check for a changelog entry
+        env:
+          # GitHub expressions are never interpolated straight into a shell
+          # script — that is the CodeQL js/actions/code-injection pattern the
+          # migration-lint workflow calls out. Everything crosses via env.
+          BASE_REF: ${{ github.base_ref }}
+          PR_ACTOR: ${{ github.event.pull_request.user.login }}
+          HAS_SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
+        run: |
+          set -euo pipefail
+
+          # Dependabot first: it can neither write an entry nor apply a label.
+          # The brackets are quoted: unquoted, `dependabot[bot]` is a glob
+          # whose `[bot]` is a one-of-b,o,t character class and the literal
+          # login would never match.
+          case "$PR_ACTOR" in
+            "dependabot[bot]"|"dependabot-preview[bot]")
+              echo "Actor is $PR_ACTOR — dependency bumps are exempt."
+              exit 0
+              ;;
+          esac
+
+          # The surfaces a user can observe. `internal/` at large is not here
+          # on purpose: an internal refactor with no reachable effect is
+          # exactly what the label is for, and a guard that fires on every Go
+          # file teaches people to reach for the label reflexively.
+          #
+          # `app/**` and `components/**` are both listed — #2056 shipped a new
+          # `/design` route across 120 files and #2076 fixed a missing Cancel
+          # button; the UI half of a user-visible change routinely lands in
+          # `components/` with barely a line under `app/`.
+          #
+          # `lib/`, `hooks/` and `stores/` are on the list for the same reason,
+          # and they are peer top-level trees rather than sub-directories of the
+          # two above, so nothing else covers them. A #2024-shaped chat fix
+          # lands in `hooks/use-chat.ts`; retry and error copy live in
+          # `lib/api-error.ts`; `stores/` holds client state a user watches
+          # behave. Leaving them out let exactly the class of change this guard
+          # exists for walk through reporting "nothing to chronicle".
+          #
+          # `D` is in the filter as well as `ACMR`: deleting a route, a command
+          # or a screen is as user-visible as adding one, and a PR that only
+          # removes files would otherwise walk straight through.
+          #
+          # Materialised into a variable rather than piped into `mapfile` from a
+          # process substitution. A command inside `< <(…)` has its exit status
+          # discarded, so `set -euo pipefail` never sees this `git diff` fail —
+          # an unresolvable `origin/$BASE_REF` (a trimmed `fetch-depth`, a base
+          # branch renamed mid-flight, any git error at all) produced an empty
+          # list, and the step printed "nothing to chronicle" and exited 0. A
+          # green check reporting a skip as a verdict is the one outcome this
+          # workflow must never produce. A bare assignment propagates the
+          # command substitution's status, so `set -e` kills the step instead;
+          # `scripts/changelog-guard-test.sh` pins it.
+          watched_raw="$(git diff --name-only --diff-filter=ACMRD \
+              "origin/$BASE_REF...HEAD" -- \
+              'internal/api' \
+              'cmd/crewship' \
+              'app' \
+              'components' \
+              'lib' \
+              'hooks' \
+              'stores')"
+
+          # `<<< ""` yields one empty element, not none — and an empty filename
+          # matches no arm of the test-file filter below, so it would be counted
+          # as a user-visible file. Guard the split rather than the filter.
+          watched=()
+          if [ -n "$watched_raw" ]; then
+            mapfile -t watched <<< "$watched_raw"
+          fi
+
+          # Test-only diffs inside those trees are not user-visible. A PR that
+          # touches nothing but `*_test.go` / `*.test.tsx` / `__tests__/`
+          # passes without needing the label.
+          visible=()
+          for f in ${watched[@]+"${watched[@]}"}; do
+            case "$f" in
+              *_test.go|*.test.ts|*.test.tsx|*/__tests__/*|*/testdata/*) continue ;;
+            esac
+            visible+=("$f")
+          done
+
+          if [ "${#visible[@]}" -eq 0 ]; then
+            echo "No user-visible source files changed — nothing to chronicle."
+            exit 0
+          fi
+
+          # Printed with a counter rather than `| head -40`: under `pipefail`,
+          # head closing the pipe early SIGPIPEs printf and fails the step.
+          echo "User-visible files changed (${#visible[@]}):"
+          shown=0
+          for f in "${visible[@]}"; do
+            if [ "$shown" -ge 40 ]; then break; fi
+            echo "  $f"
+            shown=$(( shown + 1 ))
+          done
+          if [ "${#visible[@]}" -gt "$shown" ]; then
+            echo "  … and $(( ${#visible[@]} - shown )) more"
+          fi
+          echo ""
+
+          # Touching `CHANGELOG.md` is not the same as writing a release note.
+          # This used to accept any change to the file at all, so a typo fix in
+          # a shipped version's section — or a stray blank line at the bottom —
+          # satisfied the gate while `## [Unreleased]`, the only section
+          # `RELEASING.md` actually cuts release notes from, stayed empty.
+          #
+          # The section is compared on both sides rather than reconstructed
+          # from the diff: a hunk header does not reliably say which `##`
+          # section its added lines landed in, and deriving that is the kind of
+          # cleverness that fails quietly the first time a heading moves.
+          #
+          # The base side is read at the MERGE BASE, not at the tip of
+          # `origin/$BASE_REF`. The tip moves under an open PR, and because this
+          # guard works, what it moves by is release notes: every user-visible
+          # merge into `main` adds to `## [Unreleased]`. Read the tip at run
+          # time and those entries land on the base side of a comparison the PR
+          # had nothing to do with, the two sides differ, and a PR that touches
+          # `CHANGELOG.md` zero times is waved through with
+          # "'## [Unreleased]' section is changed by this PR. ✓". Reproduced in
+          # the shape CI actually runs — `HEAD` is `refs/pull/N/merge`, a merge
+          # into the base tip as it stood when that ref was built, while
+          # `origin/$BASE_REF` is fetched fresh and is newer. The guard grew
+          # more wrong the better it worked, which is the worst way for a gate
+          # to fail.
+          #
+          # `...` in the two `git diff` calls already means "against the merge
+          # base"; this names the same commit explicitly so both halves of the
+          # step agree on what "base" is. Bare assignment, so `set -e` kills the
+          # step if it cannot be resolved — fail-closed, like `watched_raw`.
+          merge_base="$(git merge-base "origin/$BASE_REF" HEAD)"
+
+          # `|| true` on the two `git show` calls does NOT reopen the fail-open
+          # hole above: an unresolvable `origin/$BASE_REF` has already killed
+          # the step at `watched_raw`, which runs before this and unconditionally.
+          # What it tolerates is the narrow, legitimate case of a base commit
+          # that has no `CHANGELOG.md` yet — there, base reads empty, head does
+          # not, and the PR correctly counts as adding one.
+          # One pass that both extracts the section and reports whether the
+          # heading exists, via `exit 3` at END. It deliberately does NOT `exit`
+          # the moment the section ends, and the heading is NOT probed with a
+          # separate `grep -q`: either would close the pipe on the first match,
+          # `printf` would take SIGPIPE on the ~190 KB still queued, and
+          # `pipefail` would turn a successful match into status 141. That is
+          # the same trap the file-list printer above sidesteps with a counter,
+          # and a small fixture never reproduces it — the pipe buffer swallows
+          # the whole file, printf finishes, and the bug only appears against a
+          # real CHANGELOG.
+          unreleased_section() {
+            awk '
+              /^## \[Unreleased\]/ { inside = 1; found = 1; next }
+              inside && /^## /     { inside = 0 }
+              inside               { print }
+              END                  { if (!found) exit 3 }
+            '
+          }
+
+          base_changelog="$(git show "$merge_base:CHANGELOG.md" 2>/dev/null || true)"
+          head_changelog="$(git show "HEAD:CHANGELOG.md" 2>/dev/null || true)"
+
+          # A base with no heading is legitimate — the PR is adding the file.
+          base_unreleased="$(printf '%s\n' "$base_changelog" | unreleased_section)" \
+            || base_unreleased=""
+
+          # A head with no heading is not. Without it every PR looks like it
+          # changed nothing, and a gate that cannot see the section it checks
+          # must say so rather than hand out a verdict it did not reach.
+          if ! head_unreleased="$(printf '%s\n' "$head_changelog" | unreleased_section)"; then
+            echo "::error::CHANGELOG.md has no '## [Unreleased]' heading (or the file is gone)."
+            echo "::error::RELEASING.md cuts release notes from that section, so this guard cannot verify an entry without it. Restore the heading."
+            exit 1
+          fi
+
+          if [ "$base_unreleased" != "$head_unreleased" ]; then
+            echo "CHANGELOG.md's '## [Unreleased]' section is changed by this PR. ✓"
+            exit 0
+          fi
+
+          if [ "$HAS_SKIP_LABEL" = "true" ]; then
+            echo "::notice::No CHANGELOG.md entry, but the 'skip-changelog' label is applied."
+            exit 0
+          fi
+
+          if [ -n "$(git diff --name-only --diff-filter=ACMRD \
+              "origin/$BASE_REF...HEAD" -- 'CHANGELOG.md')" ]; then
+            echo "::error::This PR edits CHANGELOG.md but leaves '## [Unreleased]' unchanged."
+            echo "::error::Release notes are cut from that section only — an edit anywhere else is not a release note."
+            exit 1
+          fi
+
+          echo "::error::This PR changes a user-visible surface but does not touch CHANGELOG.md."
+          echo "::error::Add an entry under '## [Unreleased]' — RELEASING.md cuts release notes from that section, so an omission ships silently."
+          echo "::error::If the change genuinely has no user-visible effect (chore, refactor, test-only), apply the 'skip-changelog' label; this check re-runs on label change."
+          exit 1
