@@ -6,6 +6,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -214,9 +215,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 
 	// Hooks: fire pre_agent_start. Blocking hooks can abort the run;
 	// non-blocking hooks run in goroutines and don't affect latency.
-	// The dispatcher returns *hooks.BlockedError for blocking-hook
-	// refusal; we surface that to the caller as-is so the UI can
-	// render the block reason.
+	// Explicit policy refusal and an inability to evaluate hook policy both
+	// abort this gate, but they are different operator incidents. The hooks
+	// package exposes the former through a structural marker so orchestrator
+	// stays decoupled from its concrete error types.
 	if hookErr := o.getHooks().Dispatch(ctx, "pre_agent_start", HookEventContext{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
@@ -229,7 +231,11 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			"chat_id":    req.ChatID,
 		},
 	}); hookErr != nil {
-		return fmt.Errorf("pre_agent_start hook blocked: %w", hookErr)
+		var blocked interface{ HookBlocked() bool }
+		if errors.As(hookErr, &blocked) && blocked.HookBlocked() {
+			return fmt.Errorf("pre_agent_start hook blocked: %w", hookErr)
+		}
+		return fmt.Errorf("pre_agent_start hook dispatch failed: %w", hookErr)
 	}
 
 	// P1 (HIGH, 2026-06 audit): bound concurrent agent-run exec fan-outs.

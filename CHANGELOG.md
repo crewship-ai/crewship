@@ -2586,6 +2586,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `end_turn`, so callers can tell "the model said nothing" from "the model
   reasoned and never reached an answer".
 
+- **A transient database hiccup during hook dispatch was reported to users as
+  "a hook blocked this run".** `hooks.Dispatch` looks up the hooks registered
+  for an event before evaluating any of them; when that lookup itself failed
+  (a closed connection, a busy SQLite file), the error came back wrapped in
+  the same plain `error` that a genuine blocking hook's `*BlockedError`
+  travels in, and every call site — `pre_agent_start` in the orchestrator
+  chief among them — treated any non-nil `Dispatch` error as a block. An
+  infrastructure blip cancelled the agent run and printed "pre_agent_start
+  hook blocked", which was false: no hook ever ran. Registry and handler
+  failures now return a typed `*hooks.DispatchError`; an explicit policy
+  refusal remains `*hooks.BlockedError`. The `pre_agent_start` gate fails
+  closed for either condition but reports "dispatch failed" for infrastructure
+  instead of inventing a policy block. Lookup failures are also logged
+  unconditionally and, when a journal emitter is wired, recorded as a new
+  `hook.dispatch_error` entry so the outage stays observable.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security

@@ -39,14 +39,23 @@ type covHooks struct {
 	mu      sync.Mutex
 	events  []string
 	blockOn string
+	failOn  string
 }
+
+type covHookBlockedError struct{}
+
+func (covHookBlockedError) Error() string     { return "blocked by policy hook" }
+func (covHookBlockedError) HookBlocked() bool { return true }
 
 func (h *covHooks) Dispatch(_ context.Context, event string, _ HookEventContext) error {
 	h.mu.Lock()
 	h.events = append(h.events, event)
 	h.mu.Unlock()
 	if h.blockOn != "" && event == h.blockOn {
-		return errors.New("blocked by policy hook")
+		return covHookBlockedError{}
+	}
+	if h.failOn != "" && event == h.failOn {
+		return errors.New("hook registry offline")
 	}
 	return nil
 }
@@ -344,6 +353,19 @@ func TestRunAgent_PreAgentStartHookBlocks(t *testing.T) {
 	err := o.RunAgent(context.Background(), covRunReq(), nil)
 	if err == nil || !strings.Contains(err.Error(), "pre_agent_start hook blocked") {
 		t.Fatalf("expected hook block, got %v", err)
+	}
+}
+
+func TestRunAgent_PreAgentStartDispatchFailureIsNotReportedAsBlock(t *testing.T) {
+	t.Parallel()
+	o := New(covNewRunContainer(covRunOpts{}), newMemState(), covQuietLogger())
+	o.SetHooksDispatcher(&covHooks{failOn: "pre_agent_start"})
+	err := o.RunAgent(context.Background(), covRunReq(), nil)
+	if err == nil || !strings.Contains(err.Error(), "pre_agent_start hook dispatch failed") {
+		t.Fatalf("expected honest dispatch failure, got %v", err)
+	}
+	if strings.Contains(err.Error(), "hook blocked") {
+		t.Fatalf("infrastructure error was mislabeled as a policy block: %v", err)
 	}
 }
 
