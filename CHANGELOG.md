@@ -55,6 +55,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   the oldest open asks out of the window — hiding them instead of listing
   them — so the Waiting scope alone now pages to the API's 500-row ceiling.
 
+- **An exec on Apple Containers could be reported as running forever.** Both
+  exec paths spool the CLI's output into memory, so `os/exec` gives the child
+  a pipe and copies out of it in a goroutine — and `cmd.Wait` blocks on that
+  goroutine until every write end of the pipe is closed. A descendant the
+  `container` CLI leaves behind holds one, so a single orphan wedged `Wait`
+  for its whole lifetime. Nothing recovered from that on its own: the exec
+  entry is marked finished only after `Wait` returns, so `ExecInspect`
+  answered "still running" indefinitely and the sweeper never reclaimed the
+  entry. Waiting on the pipes is now bounded, and the command's real exit
+  status is still what the caller sees.
+
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and
   `OnboardingHandler.Status` reads a NULL there as "this completion was
