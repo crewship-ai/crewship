@@ -26,6 +26,18 @@ Two changes:
 So the recovery commands in this guide carry `--local`. It costs one word and it is the difference between resetting the password you meant to reset and resetting one in a database nobody was looking at.
 
 <Warning>
+**`list-users` needs `--local` on a fresh host too**, and it is the one command here where that is not conditional on a server being named. The other verbs are *gated*: they refuse only when `--server` / `--profile` / `CREWSHIP_SERVER` / a `crewship login` names a target, and run against the file unchanged when nothing does. `list-users` has a route, so it takes it — and `requireAuthAndWorkspace()` then fails with "not logged in" on a machine that has no CLI config at all, where the old build printed the table.
+
+That is on purpose. Falling back to the local file whenever the login failed would answer "who exists on the server" from a file that may belong to a different instance — [#2086](https://github.com/crewship-ai/crewship/issues/2086) with an extra step, in exactly the situation (locked out, server down, login broken) where the wrong answer costs the most. The failure carries the hint, and the fix is one word:
+
+```bash
+crewship admin list-users --local
+```
+
+Scripts that ran bare `crewship admin list-users` for host-side recovery need that flag added, whether or not the box has ever seen a server URL.
+</Warning>
+
+<Warning>
 Because the write happens straight against SQLite, an admin-CLI action does **not** produce a `journal_entries` row the way HTTP-fronted actions do — it never passes through the audit middleware. Treat these commands as out-of-band operator actions and record them in your own change log if you need an audit trail.
 </Warning>
 

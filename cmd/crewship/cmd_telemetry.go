@@ -145,6 +145,15 @@ var telemetryStatusCmd = &cobra.Command{
 			fmt.Println("Telemetry: DISABLED")
 			fmt.Println("  to enable:  crewship telemetry on")
 		}
+		// Consent is a row in a database, so the answer above is only as
+		// meaningful as the file it came from. Say which file, and how it was
+		// resolved — the read-only route has no gate to refuse with, so naming
+		// is the whole guard against reporting a stale decoy (#2086). Printed
+		// even when there is no database: "which file is missing" is exactly
+		// what the "not yet configured" line leaves open.
+		if target, terr := resolveLocalDBTarget(); terr == nil {
+			fmt.Printf("  database:   %s (%s)\n", target.Path, target.Origin)
+		}
 		return nil
 	},
 }
@@ -291,6 +300,26 @@ var errNoLocalDB = errors.New("database not found")
 // openLocalDBReadOnly is the diagnostic counterpart to openLocalDB: it reads an
 // existing database and REFUSES to bring one into existence.
 //
+// WHICH database, and why there is no gate here. It resolves through
+// resolveLocalDBTarget, so DATABASE_URL wins exactly as it does for the gated
+// commands and for crewshipd itself. That was not always true: this helper
+// went straight to ResolveDefaultDataDir, so `crewship doctor` and
+// `crewship telemetry status` reported on ~/.crewship/crewship.db on every host
+// whose server runs with its own DATABASE_URL — every dev clone
+// (`file:./crewship.db`), every container, every multi-instance box. #2086's
+// defect, surviving in the command an operator runs to diagnose #2086.
+//
+// What it deliberately does NOT do is call requireLocalDB. The gate refuses
+// when the operator has named a server, because "the file I found" and "the
+// server you named" are different targets and only a write knows which one it
+// meant. A diagnostic is not a write: `crewship doctor` reports on THIS host —
+// its disk, its schema, its consent row — and refusing to do that because the
+// shell exports CREWSHIP_SERVER would disarm the command precisely when
+// something is wrong. The obligation the gate discharges by refusing, this
+// route discharges by naming: checkDBMigrationVersion and `telemetry status`
+// print the resolved path and its origin, so a file nobody meant is visible in
+// the output rather than three months later.
+//
 // openLocalDB creates and, on a fresh install, migrates — deliberately, because
 // `crewship telemetry on` has to have somewhere to write consent before the
 // first `crewship start`. Handing that same helper to `crewship doctor` was
@@ -351,15 +380,16 @@ var errNoLocalDB = errors.New("database not found")
 // that matters — never bring a DATABASE into existence — is upheld by the stat
 // above, which is why this helper refuses before it ever reaches sqlite.
 func openLocalDBReadOnly(ctx context.Context) (*sql.DB, error) {
-	// ResolveDefaultDataDir, not DefaultDataDir: the latter creates the root
-	// and output/chats/logs/skills on the way to telling us where they are, so
-	// this helper's refusal to create a database was undermined one call up —
+	// resolveLocalDBTarget: DATABASE_URL first, then ResolveDefaultDataDir —
+	// which, unlike DefaultDataDir, creates the root and
+	// output/chats/logs/skills on the way to telling us where they are, so this
+	// helper's refusal to create a database was undermined one call up and
 	// doctor still materialised the tree on a box that had never run crewshipd.
-	dataDir, err := database.ResolveDefaultDataDir()
+	target, err := resolveLocalDBTarget()
 	if err != nil {
-		return nil, fmt.Errorf("resolve data directory: %w", err)
+		return nil, fmt.Errorf("resolve local database: %w", err)
 	}
-	dbPath := dataDir.DatabasePath()
+	dbPath := target.Path
 	if _, err := os.Stat(dbPath); err != nil {
 		// Only ENOENT means "not initialised" — mirroring openGatedLocalDB, a
 		// permission error or symlink loop must surface verbatim so the
@@ -369,7 +399,7 @@ func openLocalDBReadOnly(ctx context.Context) (*sql.DB, error) {
 		}
 		return nil, fmt.Errorf("stat database path %s: %w", dbPath, err)
 	}
-	db, err := sql.Open("sqlite", dataDir.DatabaseURL()+"?mode=ro&_pragma=busy_timeout(5000)")
+	db, err := sql.Open("sqlite", readOnlySQLiteURI(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("open database read-only: %w", err)
 	}
@@ -385,6 +415,21 @@ func openLocalDBReadOnly(ctx context.Context) (*sql.DB, error) {
 		return nil, fmt.Errorf("open database read-only: %w", err)
 	}
 	return db, nil
+}
+
+// readOnlySQLiteURI renders a plain filesystem path as the read-only "file:"
+// URI the comment above depends on.
+//
+// Built from the PATH rather than from the DSN resolveLocalDBTarget returned,
+// because that DSN may already carry a query string — `DATABASE_URL=
+// file:./crewship.db?_pragma=busy_timeout(30000)` is an ordinary way to set
+// it — and appending a second "?" yields a DSN whose mode=ro is part of the
+// first parameter's value. modernc.org/sqlite would then open it read-WRITE
+// with SQLITE_OPEN_CREATE, which is the B-02 hazard the mode=ro is here to
+// close. dsnFilePath has already stripped the query, so this rebuilds exactly
+// the two parameters this route wants and nothing else.
+func readOnlySQLiteURI(path string) string {
+	return "file:" + path + "?mode=ro&_pragma=busy_timeout(5000)"
 }
 
 // walIndexUnbuildable reports whether a failed read-only open is the WAL-index

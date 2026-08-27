@@ -684,7 +684,13 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 	}
 	// Say what this view does NOT cover, so nobody reads a clean table as
 	// "nobody is locked out".
-	fmt.Fprintln(cmd.OutOrStdout(),
+	//
+	// On stderr, like every other note this command family prints. Every
+	// endpoint's CLI command is the contract agents drive, and prose in the
+	// middle of stdout breaks it: on stdout this blank line and this sentence
+	// came back from `crewship admin list-users | awk 'NR>1 {print $1}'` as if
+	// they were two more user rows.
+	fmt.Fprintln(cmd.ErrOrStderr(),
 		"\n(workspace-scoped; lockout state lives on the database host — `crewship admin list-users --local`)")
 	return nil
 }

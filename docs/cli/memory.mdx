@@ -199,6 +199,24 @@ does not hand out on-disk blob locations.
 
 Empty result prints `no versions for <ws> @ <path>` to stderr and exits 0.
 
+<Note>
+**Partial results on a very busy workspace.** The route filters by path
+*prefix* while this command wants one *exact* path, and rows come back ordered
+by `(written_at, id)` across the whole workspace rather than per path. So a
+rarely-written file can sit behind a long run of unrelated versions. The CLI
+walks at most 200 pages of 500 rows; if it stops there it prints the matches it
+found and warns on stderr:
+
+```
+warning: stopped after 200 pages of /api/v1/admin/memory/versions without
+exhausting the prefix "crew:c1/notes.md", so this answer is partial …
+```
+
+Exit code stays `0` and stdout still carries only rows, so `--format json | jq`
+is unaffected — check stderr before treating a short list as the whole chain.
+`--local` has no ceiling: it queries the file directly.
+</Note>
+
 ### show
 
 Print the raw content of one historical version to stdout. The canonical file on disk is **not** touched — this is the "preview without restoring" path.
@@ -226,6 +244,12 @@ Stdout = raw blob bytes (pipe-friendly). Stderr carries status/errors. Exit code
 - `0` — blob found and streamed
 - `1` — version not found or read error
 - `2` — invalid usage
+
+A sha that is not in the chain always runs the resolving walk to its end, so on
+a very busy workspace it can hit the 200-page ceiling described under
+[`log`](#log). That is still `1` / `version not found` — the ceiling's stderr
+warning prints first, so a not-found that might be a truncation artefact says
+so rather than masquerading as a different error.
 
 ### restore
 

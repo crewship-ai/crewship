@@ -37,10 +37,18 @@ and exited **0**.
 The rule now:
 
 - **`list-users` uses `GET /api/v1/admin/users`** on the targeted server,
-  scoped to the current workspace. It needs a login.
+  scoped to the current workspace. It needs a login — **always**, not only when
+  something names a server. It is the one verb here that is not gated: it
+  branches on `--local` alone, so on a host with no CLI config and no
+  `CREWSHIP_SERVER` it still goes to the server and still fails with "not
+  logged in", where the pre-#2086 build printed the table. Deliberate — a
+  fallback to the local file on a failed login would answer the server's
+  question from a file that may belong to another instance. `--local` is the
+  old behaviour, asked for explicitly, and both failure paths say so.
 - **Every other local-only subcommand refuses to run when a server is named**,
   unless you pass `--local`. The refusal names the server, names the file it
-  would otherwise have touched, and names the flag.
+  would otherwise have touched, and names the flag. With nothing naming a
+  server they run unchanged.
 - **A server on `localhost` is not an exemption.** crewshipd routinely runs
   with its own `DATABASE_URL` — every dev clone uses `file:./crewship.db` —
   so "same host" tells you nothing about "same database".
@@ -172,8 +180,12 @@ Lockout state lives only in the database file: `locked_until` and
 `failed_login_count` are not fields on `GET /api/v1/admin/users`. So the
 canonical "unlock this user" pair is run on the database host —
 `list-users --locked-only --local` followed by `reset-password --local`. The
-server-backed listing prints a footer saying as much, so a clean table is
+server-backed listing prints a note saying as much, so a clean table is
 never mistaken for "nobody is locked out".
+
+That note goes to **stderr**, along with the "which database" note on the
+`--local` path. Stdout carries the table and nothing else, so
+`crewship admin list-users | awk 'NR>1 {print $1}'` yields addresses.
 
 ---
 

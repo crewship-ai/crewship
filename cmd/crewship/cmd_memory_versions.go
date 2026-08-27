@@ -220,6 +220,11 @@ func memoryShowOverAPI(cmd *cobra.Command, workspaceID, path, sha string) error 
 			break
 		}
 	}
+	// A walk that found nothing and a walk that hit the page ceiling land in
+	// the same place, and both are "version not found: exit 1" as documented.
+	// They are not indistinguishable to the operator: the ceiling prints its
+	// own "this answer is partial" warning on stderr first, so a not-found
+	// that might be a truncation artefact says so.
 	if id == "" {
 		return memoryVersionNotFound(workspaceID, path, sha)
 	}
@@ -312,8 +317,13 @@ func runMemoryRestore(cmd *cobra.Command, args []string) error {
 	res, err := memory.Restore(ctx, db.DB, canonicalPath, workspaceID, path, sha, user, blobRoot, tier)
 	if err != nil {
 		if errors.Is(err, memory.ErrVersionNotFound) {
-			fmt.Fprintf(os.Stderr, "version not found: workspace=%s path=%s sha=%s\n", workspaceID, path, sha)
-			os.Exit(1)
+			// The shared helper, not os.Exit: restore is the path that
+			// actually holds something to unwind — the SQLite handle two
+			// defers up and the 30s context one up — and os.Exit runs
+			// neither. It also skipped the CLI's own error path, so an agent
+			// running --format json got a bare prose line where every other
+			// failure emits an envelope.
+			return memoryVersionNotFound(workspaceID, path, sha)
 		}
 		return fmt.Errorf("restore: %w", err)
 	}
@@ -384,7 +394,20 @@ func memoryVersionsClient() (*cli.Client, error) {
 // endpoint filters by path PREFIX and this command wants one exact path, so a
 // workspace with thousands of sibling rows under a shared prefix could
 // otherwise keep the CLI paging forever. 200 pages x 500 rows is far past any
-// real audit chain; hitting it is reported, never silently truncated.
+// real audit chain.
+//
+// Hitting it TRUNCATES — it does not fail. The ceiling used to return an
+// error, which threw away every match the walk had already collected and told
+// the operator to "narrow the path" for an argument that is already an exact
+// path. Worse for `memory show`, which walks with limit=0 + matchSha: a sha
+// that is genuinely absent always runs to the ceiling, so the documented
+// "version not found" (exit 1) was replaced by advice nobody can act on.
+//
+// The rows come back ordered by (written_at, id) across the WHOLE workspace,
+// not per path, so this is not an exotic case: one rarely-written file in an
+// active workspace sits behind an unbounded run of unrelated rows. Truncation
+// is announced on stderr so a partial list is never mistaken for a complete
+// one; stdout keeps carrying only rows.
 const memoryVersionsPageCeiling = 200
 
 // memoryVersionsFromAPI walks GET /api/v1/admin/memory/versions and returns
@@ -420,9 +443,13 @@ func memoryVersionsFromAPI(client *cli.Client, workspaceID, path string, limit i
 	cursor := ""
 	for page := 0; ; page++ {
 		if page >= memoryVersionsPageCeiling {
-			return nil, fmt.Errorf(
-				"gave up after %d pages of /api/v1/admin/memory/versions without exhausting the path prefix %q — narrow the path",
-				memoryVersionsPageCeiling, path)
+			fmt.Fprintf(os.Stderr,
+				"warning: stopped after %d pages of /api/v1/admin/memory/versions without exhausting "+
+					"the prefix %q, so this answer is partial (%d matching row(s) so far). "+
+					"Versions are ordered workspace-wide, not per path, so an old or rarely-written "+
+					"file can sit behind more unrelated rows than the CLI will walk.\n",
+				memoryVersionsPageCeiling, path, len(out))
+			return out, nil
 		}
 		var body apiPage
 		q := queryString("workspace_id", workspaceID, "path_prefix", path, "limit", "500", "cursor", cursor)

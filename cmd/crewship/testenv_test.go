@@ -21,10 +21,16 @@ import (
 // The scrub is wholesale rather than a fixed list: any new CREWSHIP_* knob
 // is hermetic by default, and tests that need one set it themselves with
 // t.Setenv after TestMain has run.
+//
+// DATABASE_URL is scrubbed alongside them despite the different prefix. It
+// steers resolveLocalDBTarget — and, since #2109, openLocalDBReadOnly and so
+// every read-only doctor probe — ahead of CREWSHIP_DATA_DIR, so a shell that
+// exports it points the same ~180 tests at a database the test did not write.
+// It is the same failure as #1305 through a variable the prefix rule misses.
 func scrubAmbientCrewshipEnv() {
 	for _, kv := range os.Environ() {
 		name, _, ok := strings.Cut(kv, "=")
-		if ok && strings.HasPrefix(name, "CREWSHIP_") {
+		if ok && (strings.HasPrefix(name, "CREWSHIP_") || name == "DATABASE_URL") {
 			os.Unsetenv(name)
 		}
 	}
@@ -36,8 +42,8 @@ func scrubAmbientCrewshipEnv() {
 func TestNoAmbientCrewshipEnv(t *testing.T) {
 	for _, kv := range os.Environ() {
 		name, _, ok := strings.Cut(kv, "=")
-		if ok && strings.HasPrefix(name, "CREWSHIP_") {
-			t.Errorf("ambient %s leaked into the test process; TestMain must scrub CREWSHIP_* before m.Run", name)
+		if ok && (strings.HasPrefix(name, "CREWSHIP_") || name == "DATABASE_URL") {
+			t.Errorf("ambient %s leaked into the test process; TestMain must scrub CREWSHIP_* and DATABASE_URL before m.Run", name)
 		}
 	}
 }

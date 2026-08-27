@@ -414,13 +414,22 @@ func checkDataDirWritable() checkResult {
 // internal/database/migrate_registry.go.
 func checkDBMigrationVersion(ctx context.Context) checkResult {
 	expectedLatest := database.MaxKnownMigrationVersion()
-	// Resolved first, and without creating anything, purely to keep an
-	// unusable data dir (root exists but is a file, unreadable parent, …) a
-	// FAIL: that is an environment fault the operator must fix, not the
-	// transient-lock WARN the open failures below describe.
-	if _, err := database.ResolveDefaultDataDir(); err != nil {
+	// Resolved first, and without creating anything, for two reasons. An
+	// unresolvable target (no DATABASE_URL and a data dir root that is a file,
+	// or an unreadable parent) stays a FAIL: that is an environment fault the
+	// operator must fix, not the transient-lock WARN the open failures below
+	// describe. And a version number is only meaningful next to the file it
+	// was read from — see `where` below.
+	target, err := resolveLocalDBTarget()
+	if err != nil {
 		return checkResult{name: "db migration version", status: "FAIL", detail: err.Error()}
 	}
+	// The row reports on one specific file, and until #2109 it did not say
+	// which — so on a dev clone (DATABASE_URL=file:./crewship.db) doctor
+	// reported a months-stale ~/.crewship/crewship.db as the instance's schema
+	// and nothing in the output gave it away. openLocalDBReadOnly has no gate
+	// to refuse with, deliberately, so naming the file is the guard.
+	where := fmt.Sprintf(" — %s (%s)", target.Path, target.Origin)
 	// Through openLocalDBReadOnly rather than a hand-rolled sql.Open, so this
 	// probe behaves like the three telemetry probes under a live server. Its
 	// own DSN omitted _pragma=busy_timeout(5000) and never Pinged, so a
@@ -441,7 +450,7 @@ func checkDBMigrationVersion(ctx context.Context) checkResult {
 		return checkResult{
 			name:   "db migration version",
 			status: "WARN",
-			detail: "database file does not exist (crewshipd has never run)",
+			detail: "database file does not exist (crewshipd has never run)" + where,
 			hint:   "run 'crewship start' to initialise the database",
 		}
 	}
@@ -449,7 +458,7 @@ func checkDBMigrationVersion(ctx context.Context) checkResult {
 		return checkResult{
 			name:   "db migration version",
 			status: "WARN",
-			detail: fmt.Sprintf("could not open DB: %v", err),
+			detail: fmt.Sprintf("could not open DB: %v", err) + where,
 			hint:   "ensure crewshipd is not holding an exclusive lock",
 		}
 	}
@@ -461,7 +470,7 @@ func checkDBMigrationVersion(ctx context.Context) checkResult {
 		return checkResult{
 			name:   "db migration version",
 			status: "WARN",
-			detail: fmt.Sprintf("could not read _migrations: %v", err),
+			detail: fmt.Sprintf("could not read _migrations: %v", err) + where,
 			hint:   "crewshipd may not have run against this DB yet",
 		}
 	}
@@ -470,20 +479,20 @@ func checkDBMigrationVersion(ctx context.Context) checkResult {
 		return checkResult{
 			name:   "db migration version",
 			status: "PASS",
-			detail: fmt.Sprintf("v%d (latest)", v),
+			detail: fmt.Sprintf("v%d (latest)", v) + where,
 		}
 	case v > expectedLatest:
 		return checkResult{
 			name:   "db migration version",
 			status: "WARN",
-			detail: fmt.Sprintf("v%d (newer than CLI knows about — expected ≤ v%d)", v, expectedLatest),
+			detail: fmt.Sprintf("v%d (newer than CLI knows about — expected ≤ v%d)", v, expectedLatest) + where,
 			hint:   "upgrade the CLI binary to match the server",
 		}
 	default:
 		return checkResult{
 			name:   "db migration version",
 			status: "WARN",
-			detail: fmt.Sprintf("v%d (CLI expects v%d)", v, expectedLatest),
+			detail: fmt.Sprintf("v%d (CLI expects v%d)", v, expectedLatest) + where,
 			hint:   "start crewshipd to apply pending migrations",
 		}
 	}
