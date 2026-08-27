@@ -47,6 +47,96 @@ func renderedSites(t *testing.T, src string) []string {
 	return dedupMethods(out)
 }
 
+// renderedSitesIn is renderedSites for a snippet that needs declarations of its
+// own — a path helper next to the `target` func that calls it.
+func renderedSitesIn(t *testing.T, src string) []string {
+	t.Helper()
+	return renderedSites(t, src)
+}
+
+// A path helper that takes the last segment as a PARAMETER is the shape
+// `proposedPath(id, "approve")` uses, and it is common: one helper, one
+// registered route per verb, the verb fixed at each call site.
+//
+// Rendering the helper once with every parameter opaque collapses that verb to
+// `{}` and yields `…/proposed/{}/{}`, which no router registers — so CORRECT
+// code is reported as drift. The only shapes that may render `{}` in a segment
+// the router spells out are the ones where the value really is chosen at
+// runtime; those get a dynamicPathExceptions entry naming their routes.
+//
+// A helper is therefore learned as a TEMPLATE whose string params are holes,
+// exactly like a forwarder, and the call site's own arguments fill them.
+func TestExtractorFillsPathHelperArgumentsFromTheCallSite(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			// The false positive itself: a literal verb must survive into the
+			// rendered path so it can match the route registered for it.
+			name: "literal verb argument reaches the path",
+			src: `package main
+
+func proposedPath(id, verb string) string {
+	return "/api/v1/consolidate/proposed/" + url.PathEscape(id) + "/" + verb
+}
+
+func target() {
+	getJSON(client, proposedPath(pid, "explain"), &out)
+	client.Post(proposedPath(pid, "approve"), nil)
+}
+`,
+			want: []string{
+				"GET /api/v1/consolidate/proposed/{}/explain",
+				"POST /api/v1/consolidate/proposed/{}/approve",
+			},
+		},
+		{
+			// A helper whose segment really is a runtime value still renders
+			// `{}` — filling a hole with an unresolvable argument must not
+			// invent a literal.
+			name: "runtime verb argument stays opaque",
+			src: `package main
+
+func proposedPath(id, verb string) string {
+	return "/api/v1/consolidate/proposed/" + id + "/" + verb
+}
+
+func target() {
+	getJSON(client, proposedPath(pid, chosen), &out)
+}
+`,
+			want: []string{"GET /api/v1/consolidate/proposed/{}/{}"},
+		},
+		{
+			// Pre-existing behaviour that must survive: a helper with no
+			// string params of its own is still a fixed path.
+			name: "parameterless helper is unchanged",
+			src: `package main
+
+func auxPath() string {
+	return "/api/v1/admin/keeper/aux"
+}
+
+func target() {
+	deleteJSON(client, auxPath())
+}
+`,
+			want: []string{"DELETE /api/v1/admin/keeper/aux"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderedSitesIn(t, tc.src)
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Errorf("rendered call sites =\n  %v\nwant\n  %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExtractorRendersAccumulatedPaths(t *testing.T) {
 	const header = "package main\n\n"
 

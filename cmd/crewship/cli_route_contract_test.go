@@ -62,9 +62,13 @@ import (
 //	if slot != "" { path += "/" + slot }
 //	deleteJSON(client, path)   // checks …/aux AND …/aux/{}
 //
-//	// (d) package-level path consts, and helper funcs that RETURN a path
+//	// (d) package-level path consts, and helper funcs that RETURN a path.
+//	//     A helper's own string params are holes its CALL SITE fills, so a
+//	//     segment the caller spells out is checked as that segment and not
+//	//     collapsed to `{}` — one helper, one route per verb.
 //	const keeperAuxPath = "/api/v1/admin/keeper/aux"
 //	func gdprUserPath(c *cli.Client, id string) string { … }
+//	proposedPath(id, "approve")   // → /api/v1/consolidate/proposed/{}/approve
 //
 //	// (e) forwarders — a func that hands one of its own string params to
 //	//     any of the above. Discovered from source, not listed here, so
@@ -289,8 +293,13 @@ func (s *scope) bindPrior(name string, vals []string) func() {
 // forwarder discovered in the tree).
 type pathResolver struct {
 	globals map[string][]ast.Expr // package-level const/var
-	helpers map[string][]string   // func name → paths it can return
-	shapes  map[string]callShape  // func name → how it issues a request
+	// helpers maps a path-returning func to the path TEMPLATES it can
+	// return. Templates, not finished paths: a helper's own string params
+	// stand in as `«argN»` holes so the CALL SITE's arguments fill them —
+	// `proposedPath(id, "approve")` must render the verb it was handed, not
+	// collapse it to `{}` and report correct code as drift.
+	helpers map[string][]string
+	shapes  map[string]callShape // func name → how it issues a request
 }
 
 // render turns an expression into every path string it can produce.
@@ -392,12 +401,19 @@ func (r *pathResolver) render(e ast.Expr, sc *scope, seen map[string]bool) []str
 				return dedupCandidates(out)
 			}
 		}
-		// A helper whose whole job is to build a path.
+		// A helper whose whole job is to build a path. Its templates carry a
+		// hole for each of its string params, so this call's own arguments
+		// decide the segments the helper was parameterised on — a literal
+		// verb renders as that verb, a runtime one still renders `{}`.
 		if id, ok := v.Fun.(*ast.Ident); ok {
-			if paths, ok := r.helpers[id.Name]; ok && !seen["func:"+id.Name] {
+			if tmpls, ok := r.helpers[id.Name]; ok && !seen["func:"+id.Name] {
 				seen["func:"+id.Name] = true
 				defer delete(seen, "func:"+id.Name)
-				return paths
+				var out []string
+				for _, t := range tmpls {
+					out = append(out, r.substitute(t, v.Args, sc)...)
+				}
+				return dedupCandidates(out)
 			}
 		}
 		return []string{"{}"}
@@ -676,8 +692,38 @@ func newPathResolver(files []*ast.File) *pathResolver {
 	return r
 }
 
+// stringParamHoles binds each of a func's string parameters to its `«argN»`
+// hole, so a body rendered under it describes the SHAPE of what the func
+// builds rather than one collapsed instance of it. The index counts every
+// parameter, not only the string ones, because it indexes into the call's own
+// argument list.
+func stringParamHoles(params *ast.FieldList) map[string][]string {
+	fixed := map[string][]string{}
+	if params == nil {
+		return fixed
+	}
+	idx := 0
+	for _, field := range params.List {
+		id, isString := field.Type.(*ast.Ident)
+		for _, name := range field.Names {
+			if isString && id.Name == "string" && name.Name != "_" {
+				fixed[name.Name] = []string{hole(idx)}
+			}
+			idx++
+		}
+		if len(field.Names) == 0 {
+			idx++
+		}
+	}
+	return fixed
+}
+
 // learnPathHelper registers a func whose first result is a string and whose
-// returns render to an /api/ path (gdprUserPath, chatStreamPath, …).
+// returns render to an /api/ path (gdprUserPath, chatStreamPath, proposedPath,
+// …). What is stored is a TEMPLATE: the helper's own string params are holes,
+// filled by whatever each call site passes. Rendering the helper once with its
+// params opaque instead would turn a segment the caller spells out literally
+// into `{}` and report a registered route as drift.
 func (r *pathResolver) learnPathHelper(fn *ast.FuncDecl) bool {
 	if fn.Recv != nil || fn.Type.Results == nil || len(fn.Type.Results.List) == 0 {
 		return false
@@ -686,6 +732,7 @@ func (r *pathResolver) learnPathHelper(fn *ast.FuncDecl) bool {
 		return false
 	}
 	sc := bodyScope(fn.Body)
+	sc.fixed = stringParamHoles(fn.Type.Params)
 	var found []string
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		ret, ok := n.(*ast.ReturnStmt)
@@ -725,20 +772,7 @@ func (r *pathResolver) learnForwarder(fn *ast.FuncDecl) bool {
 		return false
 	}
 	sc := bodyScope(fn.Body)
-	sc.fixed = map[string][]string{}
-	idx := 0
-	for _, field := range fn.Type.Params.List {
-		id, isString := field.Type.(*ast.Ident)
-		for _, name := range field.Names {
-			if isString && id.Name == "string" && name.Name != "_" {
-				sc.fixed[name.Name] = []string{hole(idx)}
-			}
-			idx++
-		}
-		if len(field.Names) == 0 {
-			idx++
-		}
-	}
+	sc.fixed = stringParamHoles(fn.Type.Params)
 	if len(sc.fixed) == 0 {
 		return false
 	}
