@@ -20,7 +20,7 @@ func TestRegister_ValidationBranches(t *testing.T) {
 	}{
 		{
 			name:    "missing workspace",
-			hook:    Hook{Event: "pre_tool_call", HandlerKind: HandlerKindHTTP, HandlerConfig: map[string]any{"url": "https://x"}},
+			hook:    Hook{Event: "post_tool_call", HandlerKind: HandlerKindHTTP, HandlerConfig: map[string]any{"url": "https://x"}},
 			wantSub: "workspace_id required",
 		},
 		{
@@ -30,24 +30,24 @@ func TestRegister_ValidationBranches(t *testing.T) {
 		},
 		{
 			name:         "shell not allowed for non-owner",
-			hook:         Hook{WorkspaceID: "ws1", Event: "pre_tool_call", HandlerKind: HandlerKindShell, HandlerConfig: map[string]any{"command": "echo hi"}},
+			hook:         Hook{WorkspaceID: "ws1", Event: "post_tool_call", HandlerKind: HandlerKindShell, HandlerConfig: map[string]any{"command": "echo hi"}},
 			allowedShell: false,
 			wantSub:      ErrShellHookNotAllowed.Error(),
 		},
 		{
 			name:         "shell missing command",
-			hook:         Hook{WorkspaceID: "ws1", Event: "pre_tool_call", HandlerKind: HandlerKindShell, HandlerConfig: map[string]any{}},
+			hook:         Hook{WorkspaceID: "ws1", Event: "post_tool_call", HandlerKind: HandlerKindShell, HandlerConfig: map[string]any{}},
 			allowedShell: true,
 			wantSub:      "handler_config.command",
 		},
 		{
 			name:    "http missing url",
-			hook:    Hook{WorkspaceID: "ws1", Event: "pre_tool_call", HandlerKind: HandlerKindHTTP, HandlerConfig: map[string]any{}},
+			hook:    Hook{WorkspaceID: "ws1", Event: "post_tool_call", HandlerKind: HandlerKindHTTP, HandlerConfig: map[string]any{}},
 			wantSub: "handler_config.url",
 		},
 		{
 			name:    "unknown handler kind",
-			hook:    Hook{WorkspaceID: "ws1", Event: "pre_tool_call", HandlerKind: HandlerKind("carrier-pigeon")},
+			hook:    Hook{WorkspaceID: "ws1", Event: "post_tool_call", HandlerKind: HandlerKind("carrier-pigeon")},
 			wantSub: ErrUnknownHandlerKind.Error(),
 		},
 	}
@@ -65,7 +65,7 @@ func TestRegister_ValidationBranches(t *testing.T) {
 
 	// Subagent kind enforces no extra shape — must insert cleanly.
 	id, err := Register(ctx, db, Hook{
-		WorkspaceID: "ws1", Event: "pre_tool_call", HandlerKind: HandlerKindSubagent,
+		WorkspaceID: "ws1", Event: "post_tool_call", HandlerKind: HandlerKindSubagent,
 	}, false)
 	if err != nil {
 		t.Fatalf("Register subagent hook: %v", err)
@@ -84,7 +84,7 @@ func TestRegister_ShellHookLintsAndPersists(t *testing.T) {
 	// must still register (lint is advisory, not a gate).
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws1",
-		Event:         "pre_tool_call",
+		Event:         "post_tool_call",
 		HandlerKind:   HandlerKindShell,
 		HandlerConfig: map[string]any{"command": "echo $CREWSHIP_PAYLOAD"},
 		Blocking:      true,
@@ -117,7 +117,7 @@ func TestRegister_PreservesProvidedIDAndTimestamps(t *testing.T) {
 	id, err := Register(ctx, db, Hook{
 		ID:            "hk_explicit",
 		WorkspaceID:   "ws1",
-		Event:         "pre_tool_call",
+		Event:         "post_tool_call",
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://example.com/hook"},
 		CreatedAt:     created,
@@ -152,7 +152,7 @@ func TestListByEvent_CrewScoping(t *testing.T) {
 	mk := func(id, crew string) {
 		t.Helper()
 		_, err := Register(ctx, db, Hook{
-			ID: id, WorkspaceID: "ws1", CrewID: crew, Event: "pre_tool_call",
+			ID: id, WorkspaceID: "ws1", CrewID: crew, Event: "post_tool_call",
 			HandlerKind:   HandlerKindHTTP,
 			HandlerConfig: map[string]any{"url": "https://x/" + id},
 			Enabled:       true,
@@ -166,7 +166,7 @@ func TestListByEvent_CrewScoping(t *testing.T) {
 	mk("hk_crew2", "crew2")
 
 	// Crew-bound call: workspace-wide + own crew, never the other crew.
-	got, err := ListByEvent(ctx, db, "ws1", "crew1", "pre_tool_call")
+	got, err := ListByEvent(ctx, db, "ws1", "crew1", "post_tool_call")
 	if err != nil {
 		t.Fatalf("ListByEvent crew1: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestListByEvent_CrewScoping(t *testing.T) {
 	}
 
 	// Crew-less call: only the workspace-wide hook.
-	got, err = ListByEvent(ctx, db, "ws1", "", "pre_tool_call")
+	got, err = ListByEvent(ctx, db, "ws1", "", "post_tool_call")
 	if err != nil {
 		t.Fatalf("ListByEvent ws-wide: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestListByEvent_CrewScoping(t *testing.T) {
 	}
 
 	// Missing workspace is a hard error, not an empty result.
-	if _, err := ListByEvent(ctx, db, "", "crew1", "pre_tool_call"); err == nil {
+	if _, err := ListByEvent(ctx, db, "", "crew1", "post_tool_call"); err == nil {
 		t.Error("ListByEvent accepted empty workspace_id")
 	}
 }
@@ -206,7 +206,7 @@ func TestListByEvent_SkipsDisabledHooks(t *testing.T) {
 	ctx := context.Background()
 
 	id, err := Register(ctx, db, Hook{
-		WorkspaceID: "ws1", Event: "pre_tool_call",
+		WorkspaceID: "ws1", Event: "post_tool_call",
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://x"},
 		Enabled:       true,
@@ -217,7 +217,7 @@ func TestListByEvent_SkipsDisabledHooks(t *testing.T) {
 	if err := Disable(ctx, db, "ws1", id); err != nil {
 		t.Fatalf("Disable: %v", err)
 	}
-	got, err := ListByEvent(ctx, db, "ws1", "", "pre_tool_call")
+	got, err := ListByEvent(ctx, db, "ws1", "", "post_tool_call")
 	if err != nil {
 		t.Fatalf("ListByEvent: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestGet_RoundTripsMatcherAndConfig(t *testing.T) {
 
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID: "ws1",
-		Event:       "pre_tool_call",
+		Event:       "post_tool_call",
 		Matcher:     Matcher{Tools: []string{"^Bash$"}, AgentIDs: []string{"ag1"}},
 		HandlerKind: HandlerKindHTTP,
 		HandlerConfig: map[string]any{
@@ -269,6 +269,11 @@ func TestScanHook_CorruptJSONColumns(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
+	// Deliberately 'pre_tool_call': a raw INSERT bypasses Register's
+	// ValidateEvent gate the same way a row from before pre_tool_call was
+	// removed from AllEvents would have. Get() must still read it back
+	// (and hit the corrupt-JSON branches below) rather than choke on an
+	// event no longer offered for new writes.
 	insert := func(id, matcher, cfg string) {
 		t.Helper()
 		_, err := db.ExecContext(ctx, `INSERT INTO hooks_config
@@ -327,7 +332,7 @@ func TestStoreOps_ClosedDBSurfaceErrors(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := Register(ctx, db, Hook{
-		WorkspaceID: "ws1", Event: "pre_tool_call",
+		WorkspaceID: "ws1", Event: "post_tool_call",
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://x"},
 	}, false)
@@ -342,7 +347,7 @@ func TestStoreOps_ClosedDBSurfaceErrors(t *testing.T) {
 		!strings.Contains(err.Error(), "hooks: set enabled") {
 		t.Errorf("SetEnabled closed-db err = %v", err)
 	}
-	if _, err := ListByEvent(ctx, db, "ws1", "", "pre_tool_call"); err == nil ||
+	if _, err := ListByEvent(ctx, db, "ws1", "", "post_tool_call"); err == nil ||
 		!strings.Contains(err.Error(), "hooks: list by event") {
 		t.Errorf("ListByEvent closed-db err = %v", err)
 	}

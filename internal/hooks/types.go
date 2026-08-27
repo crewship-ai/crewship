@@ -47,6 +47,20 @@ const (
 	EventPostAgentStop Event = "post_agent_stop"
 
 	// Tool invocation inside an agent — e.g. Bash, Read, Edit, MCP tools.
+	//
+	// EventPreToolCall is intentionally absent from AllEvents (see below):
+	// nothing in the tree ever calls Dispatch with it, and there is no
+	// cheap place to add that call. Crewship drives agent work by parsing
+	// the stream a driven CLI (Claude Code, Cursor, ...) emits as it runs;
+	// by the time a tool_call event reaches the orchestrator the tool has
+	// already executed (see internal/server/post_tool_call_adapter.go's
+	// EventPostToolCall path), so a real "before the tool runs" hook would
+	// need a wire-protocol interception point none of the driven CLIs
+	// expose today — not a small addition. The constant stays defined —
+	// existing hooks_config rows may still carry it, and the rejection
+	// path needs a real Event value to assert against — but ValidateEvent
+	// now refuses it for new writes rather than accepting a registration
+	// that will never fire.
 	EventPreToolCall  Event = "pre_tool_call"
 	EventPostToolCall Event = "post_tool_call"
 
@@ -73,12 +87,16 @@ const (
 // AllEvents is the stable iteration order used by the registration UI and
 // by audit exports. Tests also use it to verify Event constants stay in
 // sync with the dispatcher's switch statements.
+//
+// EventPreToolCall is deliberately NOT listed here — see its doc comment
+// above. Leaving it out of AllEvents is what makes ValidateEvent reject it
+// and EventNames() stop advertising it to the CLI/API, without touching
+// the constant itself.
 var AllEvents = []Event{
 	EventPreTaskDelegation,
 	EventPostTaskDelegation,
 	EventPreAgentStart,
 	EventPostAgentStop,
-	EventPreToolCall,
 	EventPostToolCall,
 	EventPreLLMCall,
 	EventPostLLMCall,

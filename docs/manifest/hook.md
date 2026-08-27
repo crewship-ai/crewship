@@ -7,7 +7,7 @@ flips the `enabled` boolean on a hook that already exists; it can
 **never create a new hook**.
 
 Hooks are part of the runtime control plane — they fire on lifecycle
-events (`pre_tool_call`, `post_agent_stop`, …) and can run shell
+events (`post_tool_call`, `post_agent_stop`, …) and can run shell
 commands, dispatch sub-agents, or call HTTP endpoints. Because that
 surface is sensitive (arbitrary shell, third-party network egress),
 registration is kept out of the manifest and behind an explicit
