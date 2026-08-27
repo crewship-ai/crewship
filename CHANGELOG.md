@@ -263,6 +263,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Erasing an operator model reported success while leaving a readable copy
+  behind.** The user model is stored per crew, at
+  `crews/{crewID}/shared/.memory/users/{slug}.md`, but its index row is keyed
+  `UNIQUE(workspace_id, user_slug)` with `crew_id` merely informational — and
+  the consolidation sweep recomputes that `crew_id` as the operator's
+  *most-active* crew. So a crew change moved the row's pointer forward and
+  wrote a fresh file, without ever removing the one it left behind. Both
+  erasure paths — the self-service `DELETE /api/v1/users/me/user-model`
+  (`crewship privacy user-model delete`) and the admin GDPR subject-access
+  cascade — then reconstructed a single expected path from that current
+  `crew_id`, so each reached only the newest copy and reported deletion while
+  every prior crew's copy stayed on disk and readable by that crew's agents.
+  Erasure now enumerates the crew directories that actually exist and removes
+  the slug's file from each, rather than trusting one row's idea of where the
+  file should be.
+
+  Not changed: an operator moving to a new crew still starts from an empty
+  model there. Carrying content across would cross the same per-crew boundary
+  the erasure fix deliberately does not treat as one address space, and that
+  is an isolation decision to make explicitly, not a side effect of a
+  deletion fix.
+
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
   reverse-foreign-key chain from each table to `workspaces` and built a `WHERE`
