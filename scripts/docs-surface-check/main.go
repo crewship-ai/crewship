@@ -178,6 +178,19 @@ func main() {
 	}
 	fmt.Printf("docs-surface-check: deprecated terminology 0 uses across %d denied spelling(s)\n", len(deprecatedTerms))
 
+	wrapped, err := jsxHostileCodeSpans(*root)
+	if err != nil {
+		fail(err)
+	}
+	if len(wrapped) > 0 {
+		offenders := make([]string, 0, len(wrapped))
+		for _, w := range wrapped {
+			offenders = append(offenders, fmt.Sprintf("%s:%d: %s — keep the whole code span on one line; MDX reads the wrapped `<` as a JSX tag", w.page, w.line, w.text))
+		}
+		fail(fmt.Errorf("inline code spans wrapped onto a line starting with `<`:\n  %s", strings.Join(offenders, "\n  ")))
+	}
+	fmt.Printf("docs-surface-check: no inline code span wraps onto a `<` continuation\n")
+
 	served, err := checkServed(*baseURL, len(declared))
 	if err != nil {
 		fail(err)
@@ -726,6 +739,115 @@ func deprecatedTerminologyInDocs(root string) ([]deprecatedTermUse, error) {
 			return offenders[i].page < offenders[j].page
 		}
 		return offenders[i].spelling < offenders[j].spelling
+	})
+	return offenders, nil
+}
+
+type wrappedCodeSpan struct {
+	page string
+	line int
+	text string
+}
+
+// wrapsOntoTag reports whether a line is the tail of an inline code span that
+// wrapped onto a `<`.
+//
+// The test is the shape itself — a tag-like token at the very start of the
+// line, immediately closed by a backtick — rather than tracking whether a span
+// is open across lines. Backtick parity cannot do this job: a legitimate
+// ``` “ ` “ ``` (a backtick shown as code) makes any naive count odd, and
+// docs/guides/keeper.mdx has exactly that, so a parity-based check reports its
+// `</Step>` as an offender. A closing JSX tag never has a backtick welded to
+// its `>`, so this rule ignores it without needing an exception.
+func wrapsOntoTag(line string) bool {
+	trimmed := strings.TrimLeft(line, " \t")
+	for _, marker := range []string{"- ", "* ", "+ "} {
+		trimmed = strings.TrimPrefix(trimmed, marker)
+	}
+	if !strings.HasPrefix(trimmed, "<") {
+		return false
+	}
+	close := strings.Index(trimmed, ">")
+	if close < 0 {
+		return false
+	}
+	return strings.HasPrefix(trimmed[close+1:], "`")
+}
+
+// jsxHostileCodeSpans finds an inline code span opened on one line and closed
+// on the next, where the continuation line begins with `<`.
+//
+// Markdown renders that fine, MDX does not: the parser reaches the `<` before
+// the span is resolved and reads it as the start of a JSX tag, so
+// `crewship routine save --author-agent\n<slug|id>` fails with "Unexpected
+// character `|` in name". A tag-shaped continuation like `<id>` is just as
+// broken — it parses as an unclosed element rather than erroring on a
+// character, which is harder to read in the log, not safer.
+//
+// Why this is a gate and not a one-time fix (#1794 fallout): Mintlify only
+// re-parses a page some commit actually touched, so a wrapped span sits
+// silently for months and then fails the deploy for whoever next edits that
+// file — as it did for three pages here, none of them authored by the PR that
+// surfaced them. The cost lands on the wrong person, which is exactly the
+// shape a cheap static check should absorb.
+func jsxHostileCodeSpans(root string) ([]wrappedCodeSpan, error) {
+	docsRoot := filepath.Join(root, "docs")
+	offenders := []wrappedCodeSpan{}
+	err := filepath.Walk(docsRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if path == filepath.Join(docsRoot, "prd") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".mdx") && !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		page := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		// Keep the raw lines so a reported position is the one an editor will
+		// jump to; stripping frontmatter first shifts every number by the size
+		// of a block that varies per page.
+		lines := strings.Split(string(body), "\n")
+		start := 0
+		if len(lines) > 0 && strings.TrimSpace(lines[0]) == "---" {
+			for i := 1; i < len(lines); i++ {
+				if strings.TrimSpace(lines[i]) == "---" {
+					start = i + 1
+					break
+				}
+			}
+		}
+		fenced := false
+		for i := start; i < len(lines); i++ {
+			line := lines[i]
+			if strings.HasPrefix(strings.TrimSpace(line), "```") {
+				fenced = !fenced
+				continue
+			}
+			if fenced {
+				continue
+			}
+			if wrapsOntoTag(line) {
+				offenders = append(offenders, wrappedCodeSpan{page: page, line: i + 1, text: strings.TrimSpace(line)})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(offenders, func(i, j int) bool {
+		if offenders[i].page != offenders[j].page {
+			return offenders[i].page < offenders[j].page
+		}
+		return offenders[i].line < offenders[j].line
 	})
 	return offenders, nil
 }
