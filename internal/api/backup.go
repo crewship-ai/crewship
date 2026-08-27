@@ -457,7 +457,21 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		"rows_inserted":          result.RowsInserted,
 		"dry_run":                req.DryRun,
 		"security_level_clamped": result.SecurityLevelClamped,
+		// Recorded on the restore event itself rather than as its own
+		// action: unlike a clamped credential, schema skew is a property of
+		// THIS restore and of nothing else. The pair is what makes the
+		// audit row answer "was this restore complete?" — which
+		// rows_inserted alone cannot, because a row that failed a NOT NULL
+		// after its key column was dropped is not counted anywhere else.
+		"columns_dropped": result.ColumnsDropped,
+		"dropped_columns": result.DroppedColumns,
 	})
+	if result.ColumnsDropped > 0 {
+		h.logger.Warn("backup restore dropped columns the target schema does not have",
+			"count", result.ColumnsDropped, "columns", result.DroppedColumns,
+			"path", req.Path, "workspace_id", workspaceID, "user", user.ID,
+			"dry_run", req.DryRun)
+	}
 
 	// A credential whose tier the restore had to rewrite gets its own
 	// journal entry, not just a field on the backup.restore one (#1603).
@@ -499,6 +513,14 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		"dropped_crew_filesystems": result.DroppedCrewFilesystems,
 		"security_level_clamped":   result.SecurityLevelClamped,
 		"security_level_clamps":    result.SecurityLevelClamps,
+		// Schema skew: values the bundle carried in columns this instance's
+		// schema does not have, which the restore discarded (#2034). A
+		// non-zero count means the restore was incomplete in a way
+		// `rows_inserted` cannot show — a row whose dropped column was part
+		// of its primary key never landed at all, and INSERT OR IGNORE
+		// reported nothing.
+		"columns_dropped": result.ColumnsDropped,
+		"dropped_columns": result.DroppedColumns,
 	})
 }
 

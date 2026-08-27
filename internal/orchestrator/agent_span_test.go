@@ -21,9 +21,146 @@ func TestDeriveSpanKind(t *testing.T) {
 		"SomethingUnknown":                     "tool",
 	}
 	for tool, want := range cases {
-		if got := DeriveSpanKind(tool); got != want {
-			t.Errorf("DeriveSpanKind(%q) = %q, want %q", tool, got, want)
+		if got := DeriveSpanKind(tool, nil); got != want {
+			t.Errorf("DeriveSpanKind(%q, nil) = %q, want %q", tool, got, want)
 		}
+	}
+}
+
+// TestDeriveSpanKind_DatabaseCalls pins the "db" kind (#848 pillar 2.4): a
+// datastore CLI must not render as an anonymous `bash` span next to an `ls`.
+// The negative half matters as much as the positive one — the classifier reads
+// a shell string, so anything that merely MENTIONS psql must stay `bash`, and
+// an unrecognised datastore CLI must degrade to `bash` rather than vanish.
+func TestDeriveSpanKind_DatabaseCalls(t *testing.T) {
+	cases := []struct {
+		name string
+		tool string
+		cmd  string
+		want string
+	}{
+		// ── the point of the feature ──────────────────────────────────
+		{"psql", "Bash", `psql -c "select 1" mydb`, "db"},
+		{"redis-cli", "Bash", "redis-cli SET k v", "db"},
+		{"mysql", "Bash", "mysql -u root -e 'show tables'", "db"},
+		{"mongosh", "Bash", `mongosh --eval "db.users.find()"`, "db"},
+		{"pg_dump piped", "Bash", "pg_dump mydb | gzip > dump.sql.gz", "db"},
+		{"sqlite3", "Bash", "sqlite3 app.db .tables", "db"},
+		{"absolute path", "Bash", "/usr/bin/redis-cli PING", "db"},
+		{"env assignment prefix", "Bash", `PGPASSWORD=hunter2 psql -h db -c "select 1"`, "db"},
+		{"two env assignments", "Bash", "PGHOST=db PGPORT=5432 psql -l", "db"},
+		{"bare sudo wrapper", "Bash", "sudo psql -l", "db"},
+		{"quoted executable", "Bash", `"psql" -l`, "db"},
+		{"leading whitespace", "Bash", "   psql -l", "db"},
+		{"codex shell tool", "shell", "psql -c 'select 1'", "db"},
+
+		// ── plain shell work stays plain ──────────────────────────────
+		{"ls", "Bash", "ls -la", "bash"},
+		{"echo mentioning psql", "Bash", `echo "psql is great"`, "bash"},
+		{"grep for psql", "Bash", "grep psql history.txt", "bash"},
+		{"ls of a db binary", "Bash", "ls -l /usr/bin/mysqldump", "bash"},
+		{"which psql", "Bash", "which psql", "bash"},
+		{"cat a .sql file", "Bash", "cat migrations/001_redis-cli.sql", "bash"},
+		{"empty command", "Bash", "", "bash"},
+		{"flag-only command", "Bash", "--version", "bash"},
+
+		// ── documented under-classification (degrade, never drop) ─────
+		{"unknown db cli", "Bash", "cockroach sql -e 'select 1'", "bash"},
+		{"sudo with flags", "Bash", "sudo -u postgres psql -l", "bash"},
+		{"psql after &&", "Bash", "cd /app && psql -c 'select 1'", "bash"},
+
+		// ── a command arg on a non-shell tool is not a shell string ───
+		{"non-bash tool", "Write", "psql -l", "write"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := map[string]any{"command": tc.cmd}
+			if got := DeriveSpanKind(tc.tool, in); got != tc.want {
+				t.Errorf("DeriveSpanKind(%q, {command: %q}) = %q, want %q", tc.tool, tc.cmd, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeriveSpanKind_DatabaseMCPServers covers the other half of pillar 2.4:
+// an MCP server that IS a datastore reads as "db", while every other MCP tool
+// keeps the "mcp_tool" kind it has always had.
+func TestDeriveSpanKind_DatabaseMCPServers(t *testing.T) {
+	cases := map[string]string{
+		"mcp__postgres__query":                 "db",
+		"mcp__redis__get":                      "db",
+		"mcp__postgres-mcp__list_tables":       "db",
+		"mcp__mongodb__aggregate":              "db",
+		"mcp__crewship-routines__save_routine": "mcp_tool",
+		"mcp__slack__post_message":             "mcp_tool",
+		"mcp__prod-db__query":                  "mcp_tool", // datastore we cannot name
+		"mcp__short":                           "mcp_tool",
+	}
+	for tool, want := range cases {
+		if got := DeriveSpanKind(tool, nil); got != want {
+			t.Errorf("DeriveSpanKind(%q, nil) = %q, want %q", tool, got, want)
+		}
+	}
+}
+
+// TestDeriveSpanAttributes_DBEngine — a db span names its engine in
+// `attributes.tool` so the trace renders the Postgres elephant / Redis cube
+// instead of the GNU bash logo the harness tool name would resolve to.
+func TestDeriveSpanAttributes_DBEngine(t *testing.T) {
+	cases := []struct {
+		tool, cmd, wantTool string
+	}{
+		{"Bash", `psql -c "select 1"`, "postgres"},
+		{"Bash", "redis-cli PING", "redis"},
+		{"Bash", "mysqldump mydb", "mysql"},
+		{"Bash", "clickhouse-client --query 'select 1'", "clickhouse"},
+		{"Bash", "ls -la", "Bash"}, // untouched for non-db spans
+	}
+	for _, tc := range cases {
+		in := map[string]any{"command": tc.cmd}
+		kind := DeriveSpanKind(tc.tool, in)
+		attrs := deriveSpanAttributes(tc.tool, kind, "", in)
+		if attrs["tool"] != tc.wantTool {
+			t.Errorf("attributes[tool] for %q = %q, want %q", tc.cmd, attrs["tool"], tc.wantTool)
+		}
+	}
+
+	attrs := deriveSpanAttributes("mcp__postgres__query", DeriveSpanKind("mcp__postgres__query", nil), "", map[string]any{})
+	if attrs["tool"] != "postgres" {
+		t.Errorf("attributes[tool] for a postgres MCP call = %q, want %q", attrs["tool"], "postgres")
+	}
+}
+
+// TestAgentSpanRecorder_DatabaseSpan drives the classifier through the real
+// event path — a Bash tool_call whose command is a psql invocation must reach
+// the sink as a "db" span with its detail and engine intact.
+func TestAgentSpanRecorder_DatabaseSpan(t *testing.T) {
+	var got []RunAgentSpan
+	rec := NewAgentSpanRecorder("run_db", "step_db", func(s RunAgentSpan) { got = append(got, s) })
+	t0 := time.Date(2026, 8, 26, 9, 0, 0, 0, time.UTC)
+
+	rec.Observe(makeToolCall("t1", "Bash", map[string]any{"command": `psql -c "insert into audit values (1)"`}, t0))
+	rec.Observe(makeToolResult("t1", false, t0.Add(120*time.Millisecond)))
+	rec.Observe(makeToolCall("t2", "Bash", map[string]any{"command": "ls -la /tmp"}, t0))
+	rec.Observe(makeToolResult("t2", false, t0.Add(130*time.Millisecond)))
+
+	if len(got) != 2 {
+		t.Fatalf("got %d spans, want 2", len(got))
+	}
+	if got[0].Kind != "db" {
+		t.Errorf("psql span kind = %q, want %q", got[0].Kind, "db")
+	}
+	if got[0].Name != "Bash" {
+		t.Errorf("psql span name = %q, want %q — the harness tool is still the name", got[0].Name, "Bash")
+	}
+	if got[0].Attributes["tool"] != "postgres" {
+		t.Errorf("psql span attributes[tool] = %q, want %q", got[0].Attributes["tool"], "postgres")
+	}
+	if !strings.Contains(got[0].Detail, "insert into audit") {
+		t.Errorf("psql span detail = %q, want the command", got[0].Detail)
+	}
+	if got[1].Kind != "bash" {
+		t.Errorf("ls span kind = %q, want %q", got[1].Kind, "bash")
 	}
 }
 

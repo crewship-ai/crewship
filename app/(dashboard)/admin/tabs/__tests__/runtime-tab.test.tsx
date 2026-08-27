@@ -151,3 +151,58 @@ describe("RuntimeTab — the runtime inventory", () => {
     expect(screen.queryByTestId("runtime-install-podman")).toBeNull()
   })
 })
+
+// The runtimes this panel lists are not equivalent, and until #1672 the panel
+// said nothing about it: the endpoint knew podman below 5 silently drops the
+// supplementary GID that grants access to crew-shared memory, and the only
+// place it said so was a WARN in the server log at boot. An operator watching
+// their agents "forget things" has no route from that symptom to this cause.
+const PODMAN_WITH_GAP: RuntimeEntry[] = [
+  {
+    runtime: "podman",
+    version: "4.9.3",
+    socket: "/run/user/501/podman/podman.sock",
+    in_use: true,
+    gaps: [
+      {
+        control: "GroupAdd",
+        detail:
+          "podman 4.9.3 drops supplementary GIDs that have no /etc/group entry; agents will not hold gid 1002 and crew-shared memory reads will fail with EACCES.",
+      },
+    ],
+  },
+]
+
+describe("RuntimeTab — known runtime gaps", () => {
+  it("names the dropped control and what it costs, on the runtime in use", () => {
+    renderTab({ allRuntimes: PODMAN_WITH_GAP })
+    const gaps = screen.getByTestId("runtime-gaps-podman")
+    expect(gaps).toHaveTextContent("GroupAdd")
+    // The consequence, not just the control: "GroupAdd is not honoured"
+    // connects to nothing an operator can observe.
+    expect(gaps).toHaveTextContent(/crew-shared memory/i)
+  })
+
+  it("shows nothing at all for a runtime that honours everything", () => {
+    renderTab()
+    expect(screen.queryByTestId(/^runtime-gaps-/)).toBeNull()
+  })
+
+  it("does not warn about an idle runtime — the server only reports gaps for the one in use", () => {
+    renderTab({
+      allRuntimes: [
+        { runtime: "docker", version: "28.0.4", socket: "/var/run/docker.sock", in_use: true },
+        { runtime: "podman", version: "4.9.3", socket: "/run/user/501/podman/podman.sock", in_use: false },
+      ],
+    })
+    expect(screen.queryByTestId(/^runtime-gaps-/)).toBeNull()
+  })
+
+  // An older server has no `gaps` key at all. The panel must render exactly as
+  // it did before rather than crash on an absent array.
+  it("tolerates a server that does not send the field", () => {
+    renderTab({ allRuntimes: THREE.map(({ gaps: _gaps, ...rt }) => rt) })
+    expect(screen.getAllByTestId(/^runtime-row-/)).toHaveLength(3)
+    expect(screen.queryByTestId(/^runtime-gaps-/)).toBeNull()
+  })
+})

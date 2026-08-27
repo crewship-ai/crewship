@@ -70,6 +70,80 @@ func TestCollectFinishedExecs_CollectsAfterGracePeriod(t *testing.T) {
 	}
 }
 
+// A `container` invocation can leave a descendant behind, and that descendant
+// inherits the exec's stdout and stderr. Both are an execSpool here — an
+// io.Writer, not an *os.File — so os/exec gives the child a real pipe and
+// copies out of it in a goroutine, and cmd.Wait blocks on that goroutine until
+// EVERY write end of the pipe is closed. The orphan holds one.
+//
+// So Wait blocked for as long as the orphan lived, and nothing downstream
+// recovered: registerExec closes entry.done only after Wait returns, so
+// ExecInspect answered "running" forever and collectFinishedExecs never
+// reclaimed the entry (#2037).
+//
+// The fake CLI backgrounds a sleep far longer than this test is willing to
+// wait, so an exec that finishes here can only have finished because Wait is
+// bounded.
+func TestExec_OrphanHoldingOutputPipesDoesNotPinTheEntryForever(t *testing.T) {
+	installFakeContainer(t, `
+sleep 60 &
+echo hi
+exit 0`)
+	p := newTestProvider(Config{})
+
+	res, err := p.Exec(context.Background(), provider.ExecConfig{
+		ContainerID: "cid-1",
+		Cmd:         []string{"true"},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+
+	// Deliberately not draining the reader first: the spool exists so the
+	// process finishes whether or not anyone reads, and draining here would
+	// hide a wedged Wait behind a blocked Read.
+	started := time.Now()
+	deadline := started.Add(execWaitDelay + 5*time.Second)
+	var code int
+	for {
+		running, c, err := p.ExecInspect(context.Background(), res.ExecID)
+		if err != nil {
+			t.Fatalf("ExecInspect: %v", err)
+		}
+		if !running {
+			code = c
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("exec still reported as running %s after the CLI exited: a descendant holding the output pipes is pinning cmd.Wait, so the entry never finishes and never becomes collectable", time.Since(started).Round(time.Millisecond))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Unblocking Wait must not cost us the status the kernel already gave us:
+	// the CLI exited 0 and that is what the caller has to see, not the -1 of
+	// "no usable status".
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+
+	out, err := io.ReadAll(res.Reader)
+	if err != nil {
+		t.Fatalf("read exec output: %v", err)
+	}
+	if !strings.Contains(string(out), "hi") {
+		t.Errorf("output = %q, want the CLI's output to survive", out)
+	}
+
+	// The entry is a real collection candidate now, not one the sweeper has to
+	// skip forever.
+	p.collectFinishedExecs(time.Now().Add(execRetention + time.Second))
+	if _, _, err := p.ExecInspect(context.Background(), res.ExecID); err == nil {
+		t.Error("entry survived past its retention window; a wedged exec is never reclaimed")
+	}
+}
+
 // An exec that is still running is never a collection candidate, whatever the
 // clock says.
 func TestCollectFinishedExecs_KeepsRunningEntry(t *testing.T) {

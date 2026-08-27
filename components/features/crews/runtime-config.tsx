@@ -1428,19 +1428,29 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
               : "none pinned — only needed for an exact version"
           }
         >
-          {/* No claim here about what happens if the same tool is picked in
-              BOTH sections. Features contribute their bin dirs to PATH via
-              the Dockerfile's merged `ENV PATH` and /etc/profile.d; mise
-              installs to ~/.local/share/mise and reshims, but nothing found
-              in this repo puts that shims directory on PATH —
-              scripts/entrypoint.sh prepends /opt/crew-tools/bin and
-              /home/agent/.local/bin only. Until that is settled in a
-              container, the honest copy is the one that does not say. */}
+          {/* This comment used to say the opposite, and was wrong.
+           *
+           * It claimed "nothing found in this repo puts that shims directory
+           * on PATH", reasoning from scripts/entrypoint.sh — which prepends
+           * /opt/crew-tools/bin and /home/agent/.local/bin only. That is the
+           * wrong file: entrypoint runs `exec sleep infinity` as PID 1 and
+           * `docker exec` does not inherit its environment. The agent's PATH
+           * comes from the IMAGE, and the image has the shims dir ahead of
+           * /usr/local/bin:
+           *
+           *   PATH=…:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:…
+           *
+           * Measured, not reasoned: replaying InstallMise + InstallMiseTools
+           * on a clean devcontainers/javascript-node:22-bookworm and pinning
+           * jq 1.7 serves jq-1.7 over the system's jq-1.6. So the question the
+           * old copy dodged — what happens when the same tool is picked in
+           * both sections — has an answer, and the copy below now gives it. */}
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             Use this when a version matters — <span className="text-foreground/85">Node 22.11.0</span>,
             not just &ldquo;Node&rdquo;. Anything you only need <em>present</em> belongs in Preinstalled
             tooling above, which also installs faster: its result is cached with the image, this runs
-            on every build. Capped at 20.
+            on every build. Pick the same thing in both and the pinned version is what the agent
+            gets. Capped at 20.
           </p>
           {runtimesPaneSections}
         </CreateSurfaceDisclosure>

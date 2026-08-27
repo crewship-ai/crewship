@@ -272,15 +272,28 @@ export function buildScopeFacet(
 
 export type CredentialStatusFilter = "all" | "attention" | "missing-tool"
 
+/**
+ * The facets behind the rail's Filter button.
+ *
+ * Every one of them is a LIST, and an empty list means "not narrowed by this".
+ * They used to be single values, which made the panel a switch wearing a
+ * filter's clothes: "GitHub or Anthropic" was not a question the vault could be
+ * asked, and picking the second brand silently dropped the first. Values inside
+ * one facet OR together; the facets themselves AND (#1776).
+ *
+ * `status` and `tier` stay single-select on purpose. Both live in their own
+ * always-visible rail section rather than in this panel, both are bounded, and
+ * both already offer an explicit "All"/"Any" row — see the sidebar's docstring.
+ */
 export interface CredentialFilters {
   status: CredentialStatusFilter
-  /** Provider key — "GITHUB". What the brand picker sets and what the icon on
-   *  every row already shows. Replaced the old derived `category`. */
-  brand: string | null
-  /** Credential shape — "CERTIFICATE". The wizard's first question. */
-  shape: string | null
-  scope: string | null
-  tag: string | null
+  /** Provider keys — ["GITHUB"]. What the brand picker sets and what the icon
+   *  on every row already shows. Replaced the old derived `category`. */
+  brand: string[]
+  /** Credential shapes — ["CERTIFICATE"]. The wizard's first question. */
+  shape: string[]
+  scope: string[]
+  tag: string[]
   /**
    * Keeper tier as a facet value — "1".."4", or "unclassified" for the rows a
    * server too old to send `security_level` returned. A string rather than a
@@ -288,20 +301,33 @@ export interface CredentialFilters {
    * without the 0-is-falsy trap.
    */
   tier: string | null
-  /** Agent id — "show me what this agent can read". Null means every agent. */
-  agentId: string | null
+  /** Agent ids — "show me what these agents can read". Empty means every agent. */
+  agentId: string[]
   search: string
 }
 
 export const EMPTY_CREDENTIAL_FILTERS: CredentialFilters = {
   status: "all",
-  brand: null,
-  shape: null,
-  scope: null,
-  tag: null,
+  brand: [],
+  shape: [],
+  scope: [],
+  tag: [],
   tier: null,
-  agentId: null,
+  agentId: [],
   search: "",
+}
+
+/**
+ * One scope value against one credential.
+ *
+ * Pulled out of `applyCredentialFilters` when scope became a list: the three
+ * cases (workspace-wide · crew-scoped but unlinked · a named crew) have to be
+ * asked once per selected value, not once per credential.
+ */
+function matchesScope(c: CredentialLike, scope: string): boolean {
+  if (scope === "WORKSPACE") return c.scope !== "CREW"
+  if (scope === "CREW") return c.scope === "CREW" && (c.crew_ids ?? []).length === 0
+  return (c.crew_ids ?? []).includes(scope.slice("crew:".length))
 }
 
 /**
@@ -318,19 +344,15 @@ export function applyCredentialFilters<T extends CredentialLike>(
   return credentials.filter((c) => {
     if (filters.status === "attention" && !needsAttention(c)) return false
     if (filters.status === "missing-tool" && !missingToolIds.has(c.id)) return false
-    if (filters.brand && c.provider !== filters.brand) return false
-    if (filters.shape && (c.type ?? "") !== filters.shape) return false
-    if (filters.scope) {
-      if (filters.scope === "WORKSPACE") {
-        if (c.scope === "CREW") return false
-      } else if (filters.scope === "CREW") {
-        if (c.scope !== "CREW" || (c.crew_ids ?? []).length > 0) return false
-      } else {
-        const crewId = filters.scope.slice("crew:".length)
-        if (!(c.crew_ids ?? []).includes(crewId)) return false
-      }
+    // Values inside a facet OR; the facets AND. `some` over an empty list is
+    // false, so each of these is guarded on the list being non-empty — an
+    // untouched facet must narrow nothing.
+    if (filters.brand.length > 0 && !filters.brand.includes(c.provider)) return false
+    if (filters.shape.length > 0 && !filters.shape.includes(c.type ?? "")) return false
+    if (filters.scope.length > 0 && !filters.scope.some((s) => matchesScope(c, s))) return false
+    if (filters.tag.length > 0 && !filters.tag.some((t) => (c.tags ?? []).includes(t))) {
+      return false
     }
-    if (filters.tag && !(c.tags ?? []).includes(filters.tag)) return false
     if (filters.tier) {
       const level = tierOf(c)
       if (filters.tier === GUARDED_TIER) {
@@ -340,7 +362,12 @@ export function applyCredentialFilters<T extends CredentialLike>(
         if (key !== filters.tier) return false
       }
     }
-    if (filters.agentId && !(c.agent_ids ?? []).includes(filters.agentId)) return false
+    if (
+      filters.agentId.length > 0 &&
+      !filters.agentId.some((id) => (c.agent_ids ?? []).includes(id))
+    ) {
+      return false
+    }
     if (q) {
       // Agent names are searchable too: "which secrets does the deploy bot
       // hold" is asked as often by typing the agent's name as by opening a

@@ -11,6 +11,94 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **A port-expose URL on Colima returned a bare `502` and explained nothing.**
+  The capability-URL proxy dials the crew container on its Docker bridge IP,
+  which is reachable only where crewshipd shares a network namespace with
+  dockerd — true for Docker Engine on Linux and for OrbStack, false for
+  Colima, Rancher Desktop and Docker Desktop, where the bridge exists only
+  inside a VM. Every request timed out and rendered as `bad gateway`, leaving
+  the one useful fact — the target address — visible only in the server log,
+  which is not where a self-hoster debugging their own setup looks. The 502
+  now names the target, and when a *dial* into a private address was
+  blackholed it offers VM routing as one of the two situations that look
+  identical from the proxy's side; a refused connection proves routing works,
+  so the runtime is not blamed there, and neither is a slow response, which
+  is no longer classified at all. The constraint is now documented on the
+  port-expose API page and the `expose` CLI page. The unreachability itself
+  is unchanged — this is diagnosis, not support for those runtimes.
+
+- **A dead escalation sat under "Waiting on you" forever, as two rows.**
+  `scopeOf` recognised exactly one terminal `payload.state` — `resolved` —
+  but a `peer.escalation` also ends as `expired` (the deadline answered it)
+  and `cancelled` (an operator withdrew it). Both carry the same entry type
+  and the same `refs.escalation_id` as the ask, so each one missed twice: the
+  terminal row was filed as a *fresh* ask, and it closed nothing, leaving the
+  original `pending` row open beside it. Two escalations nobody could still
+  act on produced four permanent entries. The terminal set is now explicit
+  (`resolved`, `expired`, `cancelled`) and a test scans the Go emit sites, so
+  a fifth state cannot be added to the API without this list hearing about it.
+  A state the classifier has never seen is still treated as *open* —
+  unrecognised is not the same as answered.
+
+- **Clicking "Waiting on you 1" opened a list of five.** The Overview card
+  counts open asks over the whole window; the Waiting scope it links to
+  refetched with `entry_type` set to the ask types alone. The *answers* —
+  `approval.granted` / `denied` / `cancelled` / `timeout` and
+  `keeper.decision` — are filed under the Security facet, so they were
+  excluded server-side, and the client-side join that retires an answered ask
+  had nothing to join against. Approvals and keeper requests could therefore
+  never be retired in that scope, and a grant arriving live could not retire
+  one either, because the stream shares the query. The waiting fetch now asks
+  for both halves; the answers never reach the feed, because the same
+  narrowing files them under Completed. Because the journal pages by a fixed
+  row count from the newest end, those extra rows would otherwise have pushed
+  the oldest open asks out of the window — hiding them instead of listing
+  them — so the Waiting scope alone now pages to the API's 500-row ceiling.
+
+- **An exec on Apple Containers could be reported as running forever.** Both
+  exec paths spool the CLI's output into memory, so `os/exec` gives the child
+  a pipe and copies out of it in a goroutine — and `cmd.Wait` blocks on that
+  goroutine until every write end of the pipe is closed. A descendant the
+  `container` CLI leaves behind holds one, so a single orphan wedged `Wait`
+  for its whole lifetime. Nothing recovered from that on its own: the exec
+  entry is marked finished only after `Wait` returns, so `ExecInspect`
+  answered "still running" indefinitely and the sweeper never reclaimed the
+  entry. Waiting on the pipes is now bounded, and the command's real exit
+  status is still what the caller sees.
+
+- **A crew's issue prefix could mint an issue at an address no route can
+  reach (#2035).** `crews.issue_prefix` had no charset or length check on any
+  write path — `PATCH /api/v1/crews/{crewId}` stored it verbatim, and the only
+  branch was `""` → `NULL`. The prefix becomes the leading half of the issue
+  identifier, and that identifier is a **single URL path segment** on around
+  twenty routes: get, patch, delete, comments, attachments, relations. So
+  `--issue-prefix "A/B"` filed `A/B-1`, an issue that exists, lists, and can
+  never be opened, and a space, `%`, `#` or `?` each broke the same segment
+  their own way. The prefix must now match `^[A-Za-z0-9_-]{1,16}$` on write,
+  with a 400 that names the field and states the rule; `""` still means "clear
+  it". Validated on the API rather than in the CLI, so the web UI is covered
+  by the same guard. **Prefixes already stored are not migrated and not
+  refused on read** — they keep minting exactly what they mint today — but a
+  prefix outside the rule cannot be written again, so a crew holding one has
+  to move to a valid prefix the next time it changes.
+
+- **A restore dropped columns your schema does not have, and said nothing.**
+  Applying only the columns the target has is what lets a bundle from a newer
+  Crewship restore onto an older instance, and every migration this project
+  had written was additive, so the dropped column was always one the target
+  genuinely did not need. A migration that *re-keys* a table breaks that
+  assumption: a bundle taken before `issue_counters` moved from `crew_id` to
+  `(workspace_id, prefix)` carries a key column the new table does not have,
+  the statement degenerates to `INSERT OR IGNORE INTO issue_counters
+  (next_number) VALUES (?)`, and the `NOT NULL` violation that follows is
+  swallowed by `OR IGNORE`. No error, no row, and `rows_inserted` counts a
+  row that never landed as nothing at all — indistinguishable from a bundle
+  that never carried it. Restore now counts every discarded value, names each
+  `table.column` and how many rows carried it, and warns; `--dry-run` reports
+  the same skew before anything is written. The drop itself is unchanged —
+  what is gone is the silence, which is what made this shape of loss
+  (#1437, #1444, #1973) discoverable only months later.
+
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and
   `OnboardingHandler.Status` reads a NULL there as "this completion was
@@ -60,7 +148,83 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   id in `automations.created_by`, a user-attribution column with no foreign
   key to catch it.
 
+- **The Credentials filter panel shut itself after every pick.** Each facet
+  called `setFilterOpen(false)` on select, so combining a brand with a scope
+  meant reopening the menu between them, and a facet held exactly one value —
+  a switch wearing a filter's clothes. The rail now uses the shared
+  `SidebarFilterPopover` from the sidebar kit, the same panel Issues runs on:
+  the panel stays open, each facet carries its own reset row, and Escape
+  closes it. `CredentialFilters` facets are lists, so values inside a group OR
+  and the groups AND — "any Anthropic or GitHub certificate this crew can
+  reach" is now one pass through the panel.
+
 ### Added
+
+- **A database write looked exactly like `ls` in the run trace.** Sub-span
+  kinds were derived from the tool NAME alone, and every shell call is the
+  same tool — so `psql -c "delete from orders"` and a directory listing both
+  rendered as an anonymous `bash` row, and the one question a trace exists to
+  answer ("what did this run touch?") had no answer for infrastructure. Shell
+  calls and MCP calls that reach a datastore now carry their own `db` kind and
+  name the engine (`postgres`, `redis`, `mysql`, `mongodb`, and a dozen more)
+  in `attributes.tool`, so the row shows the store's own mark rather than a
+  terminal glyph.
+
+  Classification reads the first executable of the command — past leading
+  `VAR=value` assignments, a bare `sudo`, quotes and any directory prefix —
+  and stops there. It deliberately does not split on `&&`, `|` or `;`, or
+  descend into subshells and here-docs: doing that correctly means
+  implementing shell quoting, and doing it *incorrectly* is how
+  `echo "psql is great"` becomes a database span. Anything the shallow parse
+  misses — `cd /app && psql …`, an engine not on the list, an MCP server
+  called `prod-db` — keeps its old `bash` / `mcp_tool` kind. Under-classifying
+  is the designed failure: a span that renders as a shell call is recoverable,
+  a span that lies about what it touched is not.
+
+- **The Go toolchain pins are now checked against each other on every PR, and
+  the image can no longer download a compiler behind their back (#2064,
+  partial).** Thirteen files name a Go version and nothing verified they
+  agreed. One of the thirteen is the root `Dockerfile`, which is built by
+  `release.yml` and `nightly.yml` and by nothing that runs on a pull request —
+  so `FROM golang:<ver>`, the compiler for the shipped binary and a line
+  Dependabot bumps on its own, was the one pin structurally beyond reach of
+  the checks meant to catch it. #2060 was that bump: taken alone it would have
+  released binaries built by 1.27.0 while every CI pin and the vuln gate
+  stayed on 1.26.6. It was caught by hand.
+
+  `scripts/go-toolchain-pin.sh` parses `go.mod`'s `toolchain` directive, the
+  Dockerfile's `FROM` tag, `GO_VERSION` in ten workflows and the literal
+  `go-version` in `codeql.yml`, and fails naming the file and line of every
+  disagreement. It runs in CI's `Shell` job, which a Dockerfile-only PR does
+  reach — `paths-ignore` never covered `Dockerfile`. `GO_VERSION` is in the
+  set deliberately: `golangci-lint` and `govulncheck` are pinned *to* it, so a
+  CI toolchain that drifts from the image is the vuln gate grading a compiler
+  that is not the one shipping. `go.mod`'s `go` directive is deliberately
+  outside it — the language floor is a separate promise and stays at 1.26.
+
+  The Dockerfile now states `ENV GOTOOLCHAIN=local` in its Go stage. The
+  official golang-alpine images already default to it, so nothing changes
+  today; the point is that an inherited upstream default is a fact that
+  happens to hold rather than an invariant, and written down it survives a
+  base-image swap and can be checked. `local` and not a version literal:
+  `local` makes the `FROM` tag the sole authority and never downloads, where
+  the default `auto` fetches whatever `go.mod`'s `toolchain` line names, and a
+  literal `GOTOOLCHAIN=go1.27.0` would be one more copy to keep in sync that
+  fails backwards — a forgotten update would silently *download* the old
+  toolchain and undo a base-image bump with every check still green.
+
+  Worth stating because it is the reason the check is static: under `local`
+  the `toolchain` directive is ignored outright, so `toolchain go1.27.1`
+  against a `golang:1.27.0-alpine` base builds with 1.27.0 and exits 0. Only
+  the `go` directive can fail a build, and that one stays at 1.26. No image
+  build, not even nightly's, would ever report this drift — it has to be read
+  off the source.
+
+  This closes the specific hazard from #2060, not the general one. A
+  PR-triggered image build — the other half of #2064 — remains open, so
+  breakage that only an actual `docker build` can surface (a missing `COPY`
+  as in #849/#886, a `pnpm prisma generate` regression, the `web/out` release
+  gate from #1567) is still first caught by nightly.
 
 - `crewship onboarding proposal create --agent "Name:Role"` (repeatable)
   names a bespoke roster, so the CLI can finally reach the branch the Guide

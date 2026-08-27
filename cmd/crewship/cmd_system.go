@@ -189,6 +189,23 @@ type systemRuntimeEntry struct {
 	// installed and in-use are different facts (#1696); the CLI dropped it and
 	// so could not answer the one question the endpoint exists for (#1707).
 	InUse bool `json:"in_use"`
+	// Gaps are the crew hardening controls this runtime is measured not to
+	// deliver. The server sets them on the `in_use` entry only, so this is
+	// populated on at most one element (#1672).
+	//
+	// A local twin of docker.Gap rather than the type itself: cmd_system.go
+	// carries no build tag and must keep linking in the `clionly` build, which
+	// deliberately excludes the container provider.
+	Gaps []systemRuntimeGap `json:"gaps,omitempty"`
+}
+
+// systemRuntimeGap is one control the runtime in use will not honour —
+// `control` names it, `detail` says what breaks. Both come from the server
+// verbatim; the CLI never composes the wording, so a gap added server-side
+// reaches an already-installed CLI unchanged.
+type systemRuntimeGap struct {
+	Control string `json:"control"`
+	Detail  string `json:"detail"`
 }
 
 // redacted reports whether the server answered with the availability-only
@@ -233,6 +250,7 @@ func printRuntimeDetail(runtime systemRuntimeInfo) {
 			fmt.Printf("  Socket:     %s\n", runtime.Socket)
 		}
 	}
+	printRuntimeGaps(inUseRuntimeGaps(runtime))
 	// One runtime that is also the one in use is already fully described by the
 	// three lines above; listing it again is noise. Everything else — several
 	// installed, or none in use — needs the inventory.
@@ -253,6 +271,40 @@ func printRuntimeDetail(runtime systemRuntimeInfo) {
 	}
 	fmt.Printf("  %sNot selectable by name — Crewship drives the first socket that answers.\n", cli.Dim)
 	fmt.Printf("  Point DOCKER_HOST at another one, or stop the daemon that wins.%s\n", cli.Reset)
+}
+
+// inUseRuntimeGaps returns the gaps hung on the entry the server marked
+// `in_use`. The flag is the selector rather than position: the driven entry
+// need not be first, and a server that drives nothing marks none.
+func inUseRuntimeGaps(runtime systemRuntimeInfo) []systemRuntimeGap {
+	for _, rt := range runtime.Runtimes {
+		if rt.InUse {
+			return rt.Gaps
+		}
+	}
+	return nil
+}
+
+// printRuntimeGaps names the crew hardening controls the runtime in use does
+// not deliver (#1672).
+//
+// This is the first surface an operator can reach on demand. The same facts
+// were already emitted as a startup WARN, which is no help at all to somebody
+// debugging hours later — and the failure it describes does not look like a
+// runtime problem from the outside: an agent that cannot hold gid 1002 reads
+// nothing from the crew's shared memory and presents as one that forgot things.
+//
+// Nothing is printed when there are no gaps. An empty heading reads as a
+// finding, and a surface that cries wolf on a clean host is one people learn to
+// skip past on the host where it matters.
+func printRuntimeGaps(gaps []systemRuntimeGap) {
+	if len(gaps) == 0 {
+		return
+	}
+	fmt.Printf("  %sKnown gaps:%s\n", cli.Yellow, cli.Reset)
+	for _, g := range gaps {
+		fmt.Printf("    %s%s%s — %s\n", cli.Yellow, g.Control, cli.Reset, g.Detail)
+	}
 }
 
 // printInstallLinks renders the server's install_links map. Sorted, so two runs

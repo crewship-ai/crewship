@@ -177,7 +177,7 @@ Three optional keys shape the page rather than its permissions:
 | Key | What it does |
 |---|---|
 | `icon:` | The panel's glyph, from a closed set of thirteen. A name outside it is refused locally, and the refusal lists the whole set. |
-| `tab:` | The tab this panel renders under. One word on the panel and no `tabs:` block: bar order is first appearance, a panel naming no tab lands on the first one, and a page where nothing names a tab has no bar. At most 8 tabs, 32 characters each. See [Pages → tabs](/guides/pages#tabs--several-screens-one-page). |
+| `tab:` | The tab this panel renders under. One word on the panel and no `tabs:` block: bar order is first appearance, a panel naming no tab lands on the first one, and a page where nothing names a tab has no bar. At most 8 tabs, 32 characters each. See [Pages → tabs](/guides/pages#tabs-—-several-screens-one-page). |
 | `public:` | Opts this one panel into a published page. Default deny, per panel, and only a human may set it. |
 
 `span:` is 1–12 and defaults to 12, the full width of the grid. A page holds at
@@ -271,7 +271,7 @@ server refuses a `refresh:` whose producer is not a `routine/` (it cannot run a
 script, call a webhook producer, or dispatch an agent), an `on:wake` on a page
 that declares no gate, and an `on:wake` on a panel that declares its own gate —
 which is a loop. Like a gate, it compiles to a row `crewship automation list`
-shows. See [Pages → `refresh`](/guides/pages#refresh--the-panel-that-pulls-itself).
+shows. See [Pages → `refresh`](/guides/pages#refresh-—-the-panel-that-pulls-itself).
 
 Backed by `POST /api/v1/pages`.
 
@@ -701,7 +701,7 @@ crewship page export fleet-201 > fleet-201.page.yaml
 Produces a portable bundle: workspace-specific ids are stripped, and every
 external reference the page needs (crews, producers) is declared so an
 importer can see what it must bind before installing. This is the same
-export/import mechanism [`crewship routine export`](/cli/routine#crewship-routine-export-slug)
+export/import mechanism [`crewship routine export`](/cli/routine#crewship-routine-export-%3Cslug%3E)
 uses for the marketplace — a "page template" is not a separate object, it is
 an exported page spec.
 
@@ -905,7 +905,7 @@ cannot answer it.
 
 ## Exit codes
 
-Standard [CLI exit codes](/cli/overview#exit-codes). What a producer script
+Standard [CLI exit codes](/cli/overview#exit-codes-&-machine-readable-errors). What a producer script
 needs to branch on:
 
 | Code | When | What to do |

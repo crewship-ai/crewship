@@ -464,11 +464,30 @@ func (s *Store) ReadTail(ctx context.Context, sessionID string, maxMessages int)
 	return out, nil
 }
 
-// Close closes all open session file handles.
+// Flush fsyncs every open session file. Append keeps one handle per
+// session and writes through it, which reaches the page cache but not
+// stable storage — so without this the "the JSONL above is the durable
+// source of truth" contract Append documents was not actually true of
+// any turn still sitting in cache (#1999). Mirrors
+// logcollector.Writer.Flush.
+func (s *Store) Flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, f := range s.files {
+		_ = f.Sync()
+	}
+}
+
+// Close fsyncs and then closes all open session file handles. The Sync
+// is what makes Close a durability boundary rather than just a handle
+// release: closing an fd does not flush the page cache, so a session's
+// last turns could be lost to a power failure that arrived after the
+// user saw them ACKed.
 func (s *Store) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, f := range s.files {
+		_ = f.Sync()
 		_ = f.Close()
 		delete(s.files, key)
 	}

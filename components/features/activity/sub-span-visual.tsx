@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  Database,
   Eye,
   FileText,
   Globe,
@@ -15,6 +16,8 @@ import { brandIconForType, BrandGlyph } from "@/components/features/routines/bra
 // sub-span-visual — maps a SubSpan kind to its generic lucide glyph +
 // tint, and renders the real brand logo (Ansible/Terraform/Docker/…)
 // when the span's `attributes.tool` resolves to a known Simple Icon.
+// A `db` span carries its engine there ("postgres", "redis", …) rather
+// than the harness tool, which is what puts the elephant on a psql row.
 // Reuses the same BrandGlyph + brandIconForType the routine flow uses
 // so a Postgres elephant / Ansible logo reads identically everywhere.
 
@@ -29,6 +32,11 @@ interface KindVisual {
 
 const KIND_VISUAL: Record<SubSpanKind, KindVisual> = {
   bash: { Icon: Terminal, tint: "text-success", tile: "bg-success/10 border-success/30", label: "bash" },
+  // Datastore work is a shell/MCP call the backend named — tinted apart from
+  // `bash` so "wrote to Postgres" and "ran ls" don't read as the same action.
+  // Engines with a real logo (Postgres/Redis/MySQL/Mongo) resolve it from
+  // `attributes.tool`; the rest fall back to this generic Database glyph.
+  db: { Icon: Database, tint: "text-cyan-300", tile: "bg-cyan-500/10 border-cyan-500/30", label: "db" },
   write: { Icon: FileText, tint: "text-warn", tile: "bg-warn/10 border-warn/30", label: "write" },
   edit: { Icon: FileText, tint: "text-warn", tile: "bg-warn/10 border-warn/30", label: "edit" },
   read: { Icon: Eye, tint: "text-sky-300", tile: "bg-sky-500/10 border-sky-500/30", label: "read" },

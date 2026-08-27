@@ -24,7 +24,7 @@ import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
-import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useAutomations } from "@/hooks/use-automations"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
@@ -256,18 +256,43 @@ export function IssueDetailSurface({
     }
   }, [projectId, workspaceId, qs])
 
-  useRealtimeEvent(
-    "mission.updated",
-    React.useCallback(
-      (payload: unknown) => {
-        const id = (payload as { id?: string } | null)?.id
-        if (id && issue?.id && id !== issue.id) return
-        void fetchIssue()
-        void fetchSubResources()
-      },
-      [fetchIssue, fetchSubResources, issue?.id],
-    ),
+  // Two event types, and they are not redundant.
+  //
+  //   issue.updated    every issue handler and the internal agent-facing
+  //                    routes: a code link attached by `crewship issue link`,
+  //                    a comment, a status move, a relation, a PATCH.
+  //   mission.updated  the mission ENGINE. `POST /issues/{id}/start` hands
+  //                    the row to `missionEngine.StartMission`, and from then
+  //                    on it is `broadcastMissionStatus` — not any issue
+  //                    handler — that says the agent finished, failed or
+  //                    timed out.
+  //
+  // Only the second was subscribed, so an agent's write reached no open tab:
+  // our own writes refetch directly, which is why clicking in the UI always
+  // looked fine and only somebody else's change went missing.
+  const onIssueEvent = React.useCallback(
+    (event: RealtimeEvent) => {
+      // Off the PAYLOAD, not the envelope. Reading `event.id` finds
+      // undefined every time, which silently disables the filter below and
+      // makes a busy workspace refetch this issue for every other issue's
+      // traffic.
+      //
+      // Every emitter keys the payload on the mission id, so this filter is
+      // safe against all of them. The one thing it cannot see is a relation
+      // added FROM another issue: the server broadcasts only the source's id
+      // (internal/api/issue_handler_relations.go, issues_internal_relations.go),
+      // so a tab open on the target still will not repaint. That is a payload
+      // gap on the server, not a filter bug here, and it is left alone
+      // deliberately rather than by widening the filter to match everything.
+      const id = (event.payload as { id?: string } | undefined)?.id
+      if (id && issue?.id && id !== issue.id) return
+      void fetchIssue()
+      void fetchSubResources()
+    },
+    [fetchIssue, fetchSubResources, issue?.id],
   )
+  useRealtimeEvent("issue.updated", onIssueEvent)
+  useRealtimeEvent("mission.updated", onIssueEvent)
 
   /* ---------------------------------------------------------------- *
    *  Writes                                                           *

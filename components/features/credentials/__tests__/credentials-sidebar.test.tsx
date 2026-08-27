@@ -4,6 +4,7 @@
 // that facet, clicking it again clears it, and a facet with nothing behind it
 // is not offered at all (a zero row is a dead end that looks like a filter).
 
+import * as React from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { EMPTY_CREDENTIAL_FILTERS, type CredentialFilters } from "@/lib/credentials/facets"
@@ -118,10 +119,10 @@ describe("brand, shape and scope facets", () => {
 
   it("selects a brand, and clicking the selected one clears it", () => {
     const onFiltersChange = vi.fn()
-    renderSidebar({ onFiltersChange, filters: { brand: "ANTHROPIC" } })
+    renderSidebar({ onFiltersChange, filters: { brand: ["ANTHROPIC"] } })
     openFilter()
     fireEvent.click(screen.getByRole("button", { name: /anthropic/i }))
-    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ brand: null }))
+    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ brand: [] }))
   })
 
   // The wizard's first question, and until now the only answer it collected
@@ -132,14 +133,14 @@ describe("brand, shape and scope facets", () => {
     })
     openFilter()
     fireEvent.click(screen.getByRole("button", { name: /^cert 2$/ }))
-    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ shape: "CERTIFICATE" }))
+    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ shape: ["CERTIFICATE"] }))
   })
 
   it("selects a crew scope by its composite value", () => {
     const { onFiltersChange } = renderSidebar()
     openFilter()
     fireEvent.click(screen.getByRole("button", { name: /crew · engineering/i }))
-    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ scope: "crew:c1" }))
+    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ scope: ["crew:c1"] }))
   })
 
   it("omits an empty facet section rather than showing a bare heading", () => {
@@ -160,7 +161,114 @@ describe("brand, shape and scope facets", () => {
     const { onFiltersChange } = renderSidebar({ tags: ["prod", "billing"] })
     openFilter()
     fireEvent.click(screen.getByRole("button", { name: /^prod 1$/ }))
-    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ tag: "prod" }))
+    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ tag: ["prod"] }))
+  })
+})
+
+// The rail used to hand-roll its own filter panel, and it was the worst of the
+// five (#1776): every pick called setFilterOpen(false), so reaching a second
+// facet meant reopening the menu, and a facet could hold exactly one value.
+// These tests drive the panel the way a person does — pick, then pick again —
+// which is the only way the closing shows up at all.
+//
+// NO FAKE TIMERS here on purpose: a guard test that advances timers by hand
+// never flushes the component state these assertions read, so it passes against
+// the very implementation it exists to catch.
+describe("the shared filter panel", () => {
+  const BRANDS = [
+    { value: "ANTHROPIC", label: "Anthropic", count: 3, providers: ["ANTHROPIC"] },
+    { value: "GITHUB", label: "GitHub", count: 2, providers: ["GITHUB"] },
+  ]
+  const SCOPES = [
+    { value: "WORKSPACE", label: "Workspace", count: 4 },
+    { value: "crew:c1", label: "Crew · engineering", count: 3 },
+  ]
+
+  /** Stateful, because the second pick has to see what the first one set.
+   *  A vi.fn() spy would answer the first click and then forget it. */
+  function Harness() {
+    const [filters, setFilters] = React.useState<CredentialFilters>(EMPTY_CREDENTIAL_FILTERS)
+    return (
+      <CredentialsSidebar
+        filters={filters}
+        onFiltersChange={setFilters}
+        counts={{ all: 9, attention: 2, missingTool: 1 }}
+        brands={BRANDS}
+        scopes={SCOPES}
+        tags={[]}
+        onToggleCollapse={() => {}}
+      />
+    )
+  }
+
+  const trigger = () => screen.getByRole("button", { name: /filter/i })
+  const panel = () => screen.queryByRole("group", { name: /filter credentials/i })
+
+  it("stays open after a pick, so a second facet is one click away", () => {
+    render(<Harness />)
+    fireEvent.click(trigger())
+    expect(panel()).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: /^Anthropic 3$/ }))
+
+    // aria-expanded, not the panel node: the panel plays an exit animation and
+    // lingers in the DOM for a frame, so querying for it passes even against an
+    // implementation that closes on every pick. aria-expanded flips at once.
+    expect(trigger().getAttribute("aria-expanded")).toBe("true")
+    expect(panel()).toBeTruthy()
+  })
+
+  it("keeps two different facets active across consecutive picks", () => {
+    render(<Harness />)
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole("button", { name: /^Anthropic 3$/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Workspace 4$/ }))
+
+    expect(screen.getByRole("button", { name: /^Anthropic 3$/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    expect(screen.getByRole("button", { name: /^Workspace 4$/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    expect(trigger()).toHaveTextContent("2")
+  })
+
+  it("holds several values inside one facet, rather than replacing the last", () => {
+    render(<Harness />)
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole("button", { name: /^Anthropic 3$/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^GitHub 2$/ }))
+
+    expect(screen.getByRole("button", { name: /^Anthropic 3$/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    expect(screen.getByRole("button", { name: /^GitHub 2$/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    expect(trigger()).toHaveTextContent("2")
+  })
+
+  // The way back to "every brand" without touching the scope beside it.
+  it("gives each facet a reset row that leaves its neighbours alone", () => {
+    render(<Harness />)
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole("button", { name: /^Anthropic 3$/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^Workspace 4$/ }))
+    fireEvent.click(screen.getByRole("button", { name: /all brands/i }))
+
+    expect(screen.getByRole("button", { name: /^Anthropic 3$/ })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    )
+    expect(screen.getByRole("button", { name: /^Workspace 4$/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    expect(trigger()).toHaveTextContent("1")
   })
 })
 
@@ -175,12 +283,12 @@ describe("search", () => {
 })
 
 describe("clearing", () => {
-  it("offers Clear filters only while something is filtered, and resets everything but the search", () => {
+  it("offers Clear all only while something is filtered, and resets everything but the search", () => {
     const { onFiltersChange } = renderSidebar({
-      filters: { brand: "ANTHROPIC", scope: "WORKSPACE", search: "gh", status: "attention" },
+      filters: { brand: ["ANTHROPIC"], scope: ["WORKSPACE"], search: "gh", status: "attention" },
     })
     openFilter()
-    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }))
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }))
     // Status survives alongside the search: both were chosen somewhere other
     // than this dropdown, and clearing the dropdown's facets should not
     // silently undo a selection the rail is still showing as pressed.
@@ -191,9 +299,10 @@ describe("clearing", () => {
     })
   })
 
-  it("does not offer Clear filters when nothing is filtered", () => {
+  it("does not offer Clear all when nothing is filtered", () => {
     renderSidebar()
-    expect(screen.queryByRole("button", { name: /clear filters/i })).not.toBeInTheDocument()
+    openFilter()
+    expect(screen.queryByRole("button", { name: /clear all/i })).not.toBeInTheDocument()
   })
 })
 
@@ -270,7 +379,7 @@ describe("routines-shaped rail", () => {
   })
 
   it("badges the Filter button with how many facets are narrowing the list", () => {
-    renderSidebar({ credentials: CREDS, filters: { brand: "ANTHROPIC", scope: "WORKSPACE" } })
+    renderSidebar({ credentials: CREDS, filters: { brand: ["ANTHROPIC"], scope: ["WORKSPACE"] } })
     // Status lives in its own section, so it must not inflate the badge.
     expect(screen.getByRole("button", { name: /filter/i })).toHaveTextContent("2")
   })
@@ -352,11 +461,11 @@ describe("tier facet", () => {
     const { onFiltersChange } = renderSidebar({
       credentials: CREDS,
       tiers: TIERS,
-      filters: { tier: "4", brand: "ANTHROPIC" },
+      filters: { tier: "4", brand: ["ANTHROPIC"] },
     })
     openFilter()
-    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }))
-    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ tier: "4", brand: null }))
+    fireEvent.click(screen.getByRole("button", { name: /clear all/i }))
+    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ tier: "4", brand: [] }))
   })
 
   it("does not inflate the Filter button badge — it is already on screen", () => {
@@ -483,22 +592,22 @@ describe("the agent facet", () => {
     const { onFiltersChange } = renderSidebar({ credentials: CREDS, agents: AGENTS })
     openFilter()
     fireEvent.click(screen.getByRole("button", { name: /Deploy bot/ }))
-    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ agentId: "ag_1" }))
+    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ agentId: ["ag_1"] }))
   })
 
   it("clears the agent when the selected one is clicked again", () => {
     const { onFiltersChange } = renderSidebar({
       credentials: CREDS,
       agents: AGENTS,
-      filters: { agentId: "ag_1" },
+      filters: { agentId: ["ag_1"] },
     })
     openFilter()
     fireEvent.click(screen.getByRole("button", { name: /Deploy bot/ }))
-    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ agentId: null }))
+    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ agentId: [] }))
   })
 
   it("counts toward the Filter button badge, since it is not visible in the rail", () => {
-    renderSidebar({ credentials: CREDS, agents: AGENTS, filters: { agentId: "ag_1" } })
+    renderSidebar({ credentials: CREDS, agents: AGENTS, filters: { agentId: ["ag_1"] } })
     expect(screen.getByRole("button", { name: /filter/i })).toHaveTextContent("1")
   })
 })

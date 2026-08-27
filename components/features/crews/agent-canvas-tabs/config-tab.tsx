@@ -28,8 +28,11 @@ import type { AgentRecord } from "./types"
 // and agents_create.go. Fields the schema carries but no handler exposes
 // (temperature, max_tokens, the delegation limits) are deliberately absent:
 // rendering a control that silently fails to save is worse than not offering
-// it. The container and network rows are read-only because they belong to the
-// crew, and editing them from here would let two screens fight over one value.
+// it. The create-agent dialog's "Not editable here" note says the same thing;
+// it used to send people to this tab instead (#1781), so if that ever changes
+// it changes in both places. The container and network rows are read-only
+// because they belong to the crew, and editing them from here would let two
+// screens fight over one value.
 // =============================================================================
 
 const PROVIDERS = [

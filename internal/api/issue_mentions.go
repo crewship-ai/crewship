@@ -597,7 +597,10 @@ func mentionNoticeTarget(mc mentionContext) (string, bool) {
 // Both values that reach these notices are attacker-chosen: agents.name is
 // written by whoever created the agent — which, under guided autonomy, is
 // another agent — and the identifier's prefix is crews.issue_prefix, which
-// crews_update.go stores verbatim with no charset validation. body_md is
+// crews_update.go has constrained to ^[A-Za-z0-9_-]{1,16}$ since #2035 but
+// only on WRITE: rows stored before that rule are neither migrated nor
+// refused on read, so a prefix reaching this function is still arbitrary and
+// still has to be escaped. body_md is
 // rendered as Markdown in /inbox (inbox-detail.tsx feeds it to
 // MarkdownContent), so an agent named `[approve here](https://evil.example)`
 // rendered a live link in every recipient's inbox, and `[@admin](crewship:agent/
@@ -889,9 +892,10 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 //	             the agent that created it.
 //	issue title  missions.title — an agent files issues.
 //	target name  agents.name again, for the agent being woken.
-//	identifier   crews.issue_prefix + "-" + n, and crews_update.go stores that
-//	             prefix verbatim with no charset or length validation, so the
-//	             "ENG-1" in a brief is not server vocabulary either.
+//	identifier   crews.issue_prefix + "-" + n. #2035 constrains that prefix to
+//	             ^[A-Za-z0-9_-]{1,16}$ on write only — prefixes stored before
+//	             the rule are left alone — so the "ENG-1" in a brief is not
+//	             server vocabulary either.
 //
 // Before this, the first four were interpolated ahead of the fence, which made
 // this function an unfenced instruction channel into the prompt of an agent

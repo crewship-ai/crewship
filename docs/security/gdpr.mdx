@@ -78,8 +78,8 @@ The export only covers tables that carry a `data_subject_id` foreign key:
 
 Content the operator may also need to surface manually:
 
-- **`lessons.md` entries** that mention the subject by `user_slug` — agents append to a per-crew lessons file with free-form text; the cascade logs a warning naming the subject when its slug is found in any `lessons.md` but does not modify the file. Operators are responsible for redacting if the lesson text contains personal data. See [Lessons memory tier](/guides/agent-memory#lessons-tier).
-- **Chat conversation history** — the `chats` table is workspace-scoped not subject-scoped; if the subject's user_id is `user_id` on a chat row, the operator filters those rows separately. Covered by [Chat sessions retention](/guides/chat-sessions#retention).
+- **`lessons.md` entries** that mention the subject by `user_slug` — agents append to a per-crew lessons file with free-form text; the cascade logs a warning naming the subject when its slug is found in any `lessons.md` but does not modify the file. Operators are responsible for redacting if the lesson text contains personal data. See [Memory tiers](/guides/agent-memory#memory-tiers).
+- **Chat conversation history** — the `chats` table is workspace-scoped not subject-scoped; if the subject's user_id is `user_id` on a chat row, the operator filters those rows separately. Covered by [Chat sessions](/guides/chat-sessions#sessions).
 - **Audit logs from `internal/journal`** — operator-facing operations the subject performed are tracked in the journal; the operator queries by `actor_user_id` rather than `data_subject_id` because the journal is for *what the operator did*, not *what was done to a subject*.
 
 ## Article 17 — cascade delete
@@ -110,7 +110,7 @@ curl -X DELETE \
 | `user_models` (disk file) | `/crew/shared/.memory/users/{user_slug}.md` **and its `.lock` sentinel** in the subject's most-active crew | Best-effort — `outputBasePath` must be configured. Failures logged but do not block the DB delete. |
 | `keeper_requests` | All rows | **Excluded** — these record sidecar decisions and don't carry user-attributable content beyond the agent_id |
 | `lessons.md` content scan | Per-crew lessons files | **Manual** — the handler logs a warning naming the subject when it finds the user_slug in any lessons.md; operator decides whether to edit the file by hand |
-| `chats` | All rows owned by subject | **NOT** auto-deleted — operator runs a separate query if the data subject was also a Crewship user; see [Chat sessions retention](/guides/chat-sessions#retention) |
+| `chats` | All rows owned by subject | **NOT** auto-deleted — operator runs a separate query if the data subject was also a Crewship user; see [Chat sessions](/guides/chat-sessions#sessions) |
 
 <Note>
 **No per-subject marker survives the erasure.** Each peer card and operator
@@ -278,5 +278,5 @@ Crewship intentionally does NOT provide:
 - [Threat model — Tenant isolation on internal-auth handlers](/security/threat-model#tenant-isolation-on-internal-auth-handlers) — how the GDPR cascade endpoints fit into Crewship's tenant-isolation surface area
 - [Audit logging](/security/audit) — broader audit log shape; `gdpr_actions` is a specialized table for the GDPR cascade subset
 - [Encryption at rest](/security/encryption) — operator-side encryption that protects `gdpr_actions` rows in backups + filesystem snapshots
-- [Agent memory — peer cards](/guides/agent-memory#peer-cards) — how peer cards get created and what `data_subject_id` they end up with
+- [Agent memory — the operator model](/guides/agent-memory#2a-operator-model-per-user) — how peer cards get created and what `data_subject_id` they end up with
 - [Admin API](/api-reference/admin) — schemas for the two endpoints

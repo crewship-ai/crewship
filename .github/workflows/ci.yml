@@ -313,6 +313,24 @@ jobs:
       - name: onboarding journey is gated on PRs
         run: bash scripts/onboarding-gate-test.sh
 
+      # The same "a green check that never ran" shape as the two steps above,
+      # applied to the one file no PR check can reach at all: the root
+      # Dockerfile is built by release.yml and nightly.yml only, so its `FROM
+      # golang:<ver>` — the compiler for the shipped binary, and a line
+      # Dependabot bumps by itself — is first exercised by nightly at the
+      # earliest (#2064). On #2060 that bump alone would have shipped release
+      # binaries built by a toolchain no CI pin and no vuln scan had graded.
+      #
+      # This does not build the image; it reads the pins. It belongs in THIS
+      # job because it is pure bash over the source tree, and it runs on every
+      # PR on purpose — ci.yml's paths-ignore does not cover `Dockerfile`, so a
+      # Dockerfile-only Dependabot PR reaches this step. That is the entire
+      # point: the drift has to be catchable on the PR that introduces it.
+      - name: Go toolchain pins agree (Dockerfile / go.mod / GO_VERSION)
+        run: bash scripts/go-toolchain-pin.sh
+      - name: Go toolchain pin guard negative test
+        run: bash scripts/go-toolchain-pin-test.sh
+
   # ── Per-PR control-plane harness ──
   # This is intentionally a small, explicit subset. Runtime suites that need
   # a provider key remain in nightly-harness.yml; they are listed there with

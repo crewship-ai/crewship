@@ -226,14 +226,36 @@ describe("applyCredentialFilters", () => {
   })
 
   it("filters by brand", () => {
-    const out = applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, brand: "GITHUB" }, new Set())
+    const out = applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, brand: ["GITHUB"] }, new Set())
     expect(out.map((c) => c.id)).toEqual(["gh"])
+  })
+
+  // Values inside one facet OR together. Until #1776 a facet held a single
+  // value, so "GitHub or Anthropic" was not a question the vault could be
+  // asked — picking the second brand silently dropped the first.
+  it("ORs the values inside one facet", () => {
+    const out = applyCredentialFilters(
+      rows,
+      { ...EMPTY_CREDENTIAL_FILTERS, brand: ["GITHUB", "ANTHROPIC"] },
+      new Set(),
+    )
+    expect(out.map((c) => c.id)).toEqual(["gh", "an"])
+  })
+
+  it("ORs several scopes, including a crew alongside the workspace", () => {
+    expect(
+      applyCredentialFilters(
+        rows,
+        { ...EMPTY_CREDENTIAL_FILTERS, scope: ["WORKSPACE", "crew:crew1"] },
+        new Set(),
+      ).map((c) => c.id),
+    ).toEqual(["gh", "aws", "an"])
   })
 
   it("filters by shape", () => {
     const out = applyCredentialFilters(
       [cred({ id: "cert", type: "CERTIFICATE" }), cred({ id: "key", type: "API_KEY" })],
-      { ...EMPTY_CREDENTIAL_FILTERS, shape: "CERTIFICATE" },
+      { ...EMPTY_CREDENTIAL_FILTERS, shape: ["CERTIFICATE"] },
       new Set(),
     )
     expect(out.map((c) => c.id)).toEqual(["cert"])
@@ -241,15 +263,15 @@ describe("applyCredentialFilters", () => {
 
   it("filters by workspace scope and by one crew", () => {
     expect(
-      applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, scope: "WORKSPACE" }, new Set()).map((c) => c.id),
+      applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, scope: ["WORKSPACE"] }, new Set()).map((c) => c.id),
     ).toEqual(["aws", "an"])
     expect(
-      applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, scope: "crew:crew1" }, new Set()).map((c) => c.id),
+      applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, scope: ["crew:crew1"] }, new Set()).map((c) => c.id),
     ).toEqual(["gh"])
   })
 
   it("filters by tag", () => {
-    const out = applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, tag: "prod" }, new Set())
+    const out = applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, tag: ["prod"] }, new Set())
     expect(out.map((c) => c.id)).toEqual(["an"])
   })
 
@@ -272,7 +294,7 @@ describe("applyCredentialFilters", () => {
   it("combines filters rather than letting the last one win", () => {
     const out = applyCredentialFilters(
       rows,
-      { ...EMPTY_CREDENTIAL_FILTERS, scope: "WORKSPACE", brand: "ANTHROPIC" },
+      { ...EMPTY_CREDENTIAL_FILTERS, scope: ["WORKSPACE"], brand: ["ANTHROPIC"] },
       new Set(),
     )
     expect(out.map((c) => c.id)).toEqual(["an"])
@@ -348,7 +370,7 @@ describe("applyCredentialFilters", () => {
           cred({ id: "a", security_level: 4, tags: ["prod"] }),
           cred({ id: "b", security_level: 4, tags: [] }),
         ],
-        { ...EMPTY_CREDENTIAL_FILTERS, tier: "4", tag: "prod" },
+        { ...EMPTY_CREDENTIAL_FILTERS, tier: "4", tag: ["prod"] },
         new Set(),
       )
       expect(out.map((c) => c.id)).toEqual(["a"])
@@ -425,7 +447,7 @@ describe("the agent filter", () => {
 
   it("keeps only the credentials that agent holds", () => {
     expect(
-      applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, agentId: "ag1" }, new Set()).map(
+      applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, agentId: ["ag1"] }, new Set()).map(
         (c) => c.id,
       ),
     ).toEqual(["held"])
@@ -433,7 +455,7 @@ describe("the agent filter", () => {
 
   it("matches nothing for an agent that holds nothing", () => {
     expect(
-      applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, agentId: "ghost" }, new Set()),
+      applyCredentialFilters(rows, { ...EMPTY_CREDENTIAL_FILTERS, agentId: ["ghost"] }, new Set()),
     ).toEqual([])
   })
 

@@ -10,6 +10,8 @@
 #   - `keeper threshold <N>` sets the DENY-notify risk, rejects out-of-range
 #   - `keeper watch set/get/clear` round-trip the free-form rules (#1001 M1)
 #   - `keeper watch preset add/remove/list` toggle presets; a bogus key is rejected
+#   - `keeper sampling set/default` round-trip the review cadence and refuse both
+#     0 (which is not an off switch) and a value past the ceiling (#1001 M3)
 #   - the settings round-trip: what we set is what `status` reads back
 #
 # This is a control-plane test (governance config), not a full escalation-flow
@@ -164,6 +166,51 @@ else
   # Restore the original watch state (best-effort, matches the enable/contact restore).
   if [[ -n "$ORIG_SPEC" ]]; then cs keeper watch set "$ORIG_SPEC" >/dev/null 2>&1 || true; fi
   if [[ "$ORIG_HAS_CRED" == "true" ]]; then cs keeper watch preset add credentials >/dev/null 2>&1 || true; fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "6. sampling cadence: round-trip + the two bounds (#1001 M3)"
+# ─────────────────────────────────────────────────────────────────────────────
+if ! cs keeper sampling --help >/dev/null 2>&1; then
+  skip "keeper sampling present" "installed crewship predates the sampling command (#1001 M3)"
+else
+  ORIG_EVERY="$(cs keeper status --format json 2>/dev/null | jq -r '.governance.behavior_sample_every // 0' 2>/dev/null || echo 0)"
+
+  if cs keeper sampling set 7 >/dev/null 2>&1; then _pass "keeper sampling set 7 exits 0"
+  else _fail "keeper sampling set 7 exits 0" "sampling set errored"; fi
+  if have jq; then
+    assert_eq "sampling round-trips to 7" "7" \
+      "$(cs keeper status --format json 2>/dev/null | jq -r '.governance.behavior_sample_every // empty')"
+  fi
+
+  # 0 is the one an operator types when they mean "stop". It must be refused,
+  # or the row reads "watchdog enabled" while nothing is ever reviewed — the
+  # off switch is `keeper disable`.
+  if cs keeper sampling set 0 >/dev/null 2>&1; then
+    _fail "keeper sampling set 0 rejected" "expected non-zero exit — 0 is not an off switch"
+  else
+    _pass "keeper sampling set 0 rejected (use keeper disable)"
+  fi
+
+  # Past the ceiling the counter would never reach the threshold inside a run.
+  if cs keeper sampling set 5000 >/dev/null 2>&1; then
+    _fail "keeper sampling set 5000 rejected" "expected non-zero exit for out-of-range"
+  else
+    _pass "keeper sampling set 5000 rejected (range 1-100)"
+  fi
+
+  # `default` returns to the built-in cadence.
+  if cs keeper sampling default >/dev/null 2>&1 && have jq; then
+    assert_eq "sampling default restores 5" "5" \
+      "$(cs keeper status --format json 2>/dev/null | jq -r '.governance.behavior_sample_every // empty')"
+  else
+    skip "sampling default" "default errored or jq missing"
+  fi
+
+  # Restore (best-effort, matching the enable/contact/watch restores above).
+  if [[ -n "$ORIG_EVERY" && "$ORIG_EVERY" != "0" ]]; then
+    cs keeper sampling set "$ORIG_EVERY" >/dev/null 2>&1 || true
+  fi
 fi
 
 finish

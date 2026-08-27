@@ -147,10 +147,26 @@ delegation still work" until then.
 **Never run in CI, on purpose:** `test-realworld-github.sh`,
 `test-secretless-github.sh`, `test-notifications-shoutrrr.sh`,
 `test-ollama-local.sh`, `test-datastore-redis-auth.sh`,
-`test-gitlink-realworld.sh` and `test-redteam-insider.sh` — each needs a
-secret, an external service, a provisioned crew, or a shared dev slot it is
-allowed to mutate. The reasons are spelled out per suite in the workflow
-header.
+`test-crew-lifecycle.sh`, `test-gitlink-realworld.sh` and
+`test-redteam-insider.sh` — each needs a secret, an external service, a
+provisioned crew, or a shared dev slot it is allowed to mutate. The reasons are
+spelled out per suite in the workflow header, and the coverage guard fails if
+one of them is silenced without a reason being written there.
+
+> `test-crew-lifecycle.sh` needs more than Docker: it needs a crew whose
+> container has already **run**. Its 409-on-a-stopped-crew pair only reproduces
+> on a shared-tree file the container runtime owns (uid 1001), which is why the
+> suite drives an existing seeded crew instead of creating one. `crewship seed
+> --wait-provision` does not produce that state — provisioning builds an image
+> and starts nothing — so neither nightly tier's fixture satisfies it, and every
+> step is an `assert_ok` with no runtime-absent SKIP, so a CI square would be
+> red rather than yellow. It is provider-free, so `harness-runtime` would also
+> be the wrong home twice over: the job is gated on a secret this repository
+> does not have, and a suite parked there is reported as covered by a tier it
+> never runs in. Unlike `test-datastore-redis-auth.sh` it **is** in
+> `run-all.sh`, so it does get exercised on a dev slot — where mutating a
+> shared crew's tree (and leaving its file behind when the §5 xfail path trips)
+> is an acceptable liberty.
 
 > `test-gitlink-realworld.sh` is *safe* in CI — with no forge token it SKIPs
 > and exits 0 before it contacts the server or any forge — but it would prove
@@ -180,9 +196,23 @@ second copy of them to drift — so adding a suite to a matrix is all the
 bookkeeping there is. A new `test-*.sh` that nobody wired up turns the nightly
 red instead of silently getting zero coverage.
 
+The reason is enforced too. `EXCLUDED_SUITES` is the cheapest of the three
+tiers to reach for — one word and a suite is silent forever — so the guard also
+fails when a name on that list appears nowhere in the "Suites deliberately NOT
+run here" header block. Excluding a suite costs you a paragraph saying why,
+which is the only part of the decision a future reader cannot reconstruct.
+
 So: add the file, then put it in a matrix (with a per-suite timeout) or in
 `EXCLUDED_SUITES` with the reason in the header block. There is no third option
 the guard will accept.
+
+Note that `run-all.sh` is **not** one of the three tiers and the guard does not
+read it. A suite can be in `run-all.sh` and in `EXCLUDED_SUITES` at the same
+time without contradiction — that combination means "runs on a dev slot, never
+in CI", which is exactly right for the suites that need a live crew container
+(`test-crew-lifecycle.sh`). The lists answer different questions: `run-all.sh`
+is what a human on a dev VM should run, `EXCLUDED_SUITES` is what a hosted
+runner must not.
 
 ### A green run states what it did not verify
 
@@ -301,10 +331,10 @@ The provider-dependent suites (`test-memory.sh`, `test-delegation.sh`,
 `test-crew-links.sh`, `test-notifications.sh`, `test-orchestration.sh`,
 `test-determinism.sh`, `test-credentials.sh`, `test-keeper-audit-integrity.sh`,
 and `test-keeper-load.sh`) remain nightly because they require an LLM/provider
-credential. GitHub, Ollama, Redis, Shoutrrr, and insider suites remain nightly
-or opt-in because they require external services, Docker, or destructive/shared
-fixture access. The nightly workflow's coverage guard keeps those exclusions
-explicit; none are silently dropped.
+credential. GitHub, Ollama, Redis, Shoutrrr, crew-lifecycle and insider suites
+remain nightly or opt-in because they require external services, a live crew
+container, or destructive/shared fixture access. The nightly workflow's
+coverage guard keeps those exclusions explicit; none are silently dropped.
 
 ```bash
 cd scripts/test-harness
@@ -348,6 +378,7 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 | `test-memory.sh` | agent recalls a nonce fact in a **fresh session**; a **crew-tier** fact is readable by a peer in the same crew; it does **not** leak cross-crew; **pins** are always available; `memory search`/`status` corroborate. `--soak N` re-checks durability over N minutes. |
 | `test-delegation.sh` | a **lead delegates** a subtask to a peer and reports the result back (corroborated by a new peer chat session); a lead **hires an ephemeral** specialist (or it lands as an approval waitpoint under guided autonomy). |
 | `test-crew-links.sh` | a **crew link** is real: the graph lists no links to deleted crews, a lead's sidecar reports the crews it can reach, delegation **across** a live link lands in the other crew, and the same delegation is **refused** once the link is removed (then restored). |
+| `test-crew-lifecycle.sh` | the **crew container lifecycle** a definitions deploy walks: `crew start` is **idempotent** and `container-status` then reports **running**; a running crew accepts an **overwrite** of a shared-tree file it owns (byte-for-byte, not just "the name is listed"); `crew stop` genuinely stops it and is idempotent; a stopped crew **refuses** the overwrite and the refusal **names `crewship crew start`** rather than the wrong turn (`crew provision`, which builds an image and starts nothing). §5 restores the crew and is **xfail**: `stop → stop → refused-write → start` reproducibly leaves the container `exited` (143). Needs a crew whose container has already run — **dev-VM only**, and in `run-all.sh` but in no nightly tier. |
 | `test-notifications.sh` | a routine **run completes** (exit code + records status); the **completion event** is observable via `routine watch --once`; a **failed run** surfaces a `failed_run` inbox item (best-effort). |
 | `test-inbox.sh` | the **inbox as a decision surface**: fires `approval-gate-demo` to mint a REAL waitpoint, asserts the row carries the fields the UI renders (`timeout_at` for the countdown, `pipeline_run_id` for run progress, `blocking`, `target_role`), approves it through the **source** endpoint and proves the row is `resolved` server-side — the cascade the UI depends on and must never duplicate. Also dismisses a message and checks `resolved_action` + `resolved_by_user_id` are recorded, and that the kind vocabulary the UI codes against is the one in the data. |
 | `test-notifications-shoutrrr.sh` | **#1412 category preference matrix**: a fake local webhook receiver gets **exactly ONE** delivery from a personal channel with `chat.replies=immediate`, and **ZERO** from a channel muted via the `*` category, for the SAME triggering event (an `ask` reply); the delivery-log entry shows `status=sent` (admin-only, best-effort). Opt-in: `WITH_NOTIFICATIONS_SHOUTRRR=1 ./run-all.sh` — see the script header for why it uses `chat.replies` rather than `runs.failed`, and the network-reachability note when `SERVER` is a remote devN. |

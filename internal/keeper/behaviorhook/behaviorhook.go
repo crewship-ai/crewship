@@ -16,8 +16,12 @@
 // MaybeEvaluate is the sampling gate: it returns (nil, false) for
 // most calls (the bulk of tool calls are NOT sampled) and only fires
 // the LLM when the per-crew counter wraps around the sampling
-// interval. The default sampling rate is 1 in 5 (configurable via
-// SetSampleEvery).
+// interval. The default sampling rate is 1 in DefaultSampleEvery.
+//
+// A caller that knows the workspace's own cadence — the post-tool-call
+// observer, which reads the governance row per observation anyway —
+// passes it in via MaybeEvaluateEvery instead, so an operator's edit
+// applies to the next tool call rather than the next restart.
 //
 // Concurrency: Hook is safe for concurrent use. The per-crew counter
 // is keyed by crew_id; a sync.Map is good enough for the hot path
@@ -44,10 +48,15 @@ import (
 	"github.com/crewship-ai/crewship/internal/policy"
 )
 
-// defaultSampleEvery: fire the evaluator every Nth tool call per
-// crew. PRD §6 F4.2 specifies "default every 5th call". Tunable per
-// crew via SetSampleEvery (future); MVP keeps it global.
-const defaultSampleEvery = 5
+// DefaultSampleEvery: fire the evaluator every Nth tool call per crew.
+// PRD §6 F4.2 specifies "default every 5th call". This is the cadence a
+// caller gets when it has no per-workspace setting to hand in; the
+// workspace-level override arrives per call via MaybeEvaluateEvery.
+//
+// Exported so the config layer can render "5 (default)" and pin its own
+// governance.DefaultBehaviorSampleEvery against it — two copies of this
+// number that can drift is how a setting starts lying about what it does.
+const DefaultSampleEvery = 5
 
 // Hook bundles the evaluator + policy resolver + sampling state.
 type Hook struct {
@@ -72,13 +81,19 @@ func New(ev *gatekeeper.BehaviorEvaluator, policyResolver *policy.Resolver, logg
 		logger:   logger,
 		counters: map[string]*atomic.Int64{},
 	}
-	h.sampleEvery.Store(defaultSampleEvery)
+	h.sampleEvery.Store(DefaultSampleEvery)
 	return h
 }
 
-// SetSampleEvery overrides the per-crew sampling cadence. Pass <=0 to
-// disable sampling entirely (the hook becomes a no-op). Useful for
-// load tests + the future per-crew tuning surface.
+// SetSampleEvery overrides the INSTANCE-WIDE fallback cadence — the one
+// used when a call arrives without a workspace cadence of its own. Pass
+// <=0 to disable sampling entirely (the hook becomes a no-op). Useful
+// for load tests and for embedded wirings with no governance row.
+//
+// This is deliberately not the workspace surface: the hook is a
+// process-wide singleton shared by every workspace, so a value stored
+// here would apply one workspace's policy to all of them. The
+// per-workspace cadence is passed per call — see MaybeEvaluateEvery.
 func (h *Hook) SetSampleEvery(every int64) {
 	if every < 0 {
 		every = 0
@@ -107,10 +122,33 @@ var ErrNotConfigured = errors.New("behaviorhook: evaluator or policy resolver no
 // without a parallel error type — keeps the "what does the agent see"
 // surface uniform across operator-authored hooks and platform hooks.
 func (h *Hook) MaybeEvaluate(ctx context.Context, ec hooks.EventContext) (*hooks.BlockedError, bool) {
+	return h.MaybeEvaluateEvery(ctx, ec, 0)
+}
+
+// MaybeEvaluateEvery is MaybeEvaluate with the sampling cadence supplied
+// by the caller — the per-workspace setting (#1001 M3).
+//
+// The cadence is a PARAMETER, not state on the Hook, for two reasons:
+//
+//   - The Hook is a process-wide singleton shared by every workspace, so
+//     any cadence stored on it is one workspace's policy applied to all.
+//   - A value captured at construction is a value that needs a restart.
+//     That is #1556 exactly — the aux provider copied by value into the
+//     executors at boot — one subsystem over. The one production caller
+//     already reads the governance row per observation (it must, to know
+//     the watchdog is on at all), so passing the cadence out of that same
+//     read costs nothing and cannot go stale.
+//
+// every <= 0 means "the caller has no workspace cadence": the hook's own
+// instance-wide fallback applies (DefaultSampleEvery unless SetSampleEvery
+// changed it, and a fallback of <=0 still disables the hook).
+func (h *Hook) MaybeEvaluateEvery(ctx context.Context, ec hooks.EventContext, every int64) (*hooks.BlockedError, bool) {
 	if h.ev == nil || h.policy == nil {
 		return nil, false
 	}
-	every := h.sampleEvery.Load()
+	if every <= 0 {
+		every = h.sampleEvery.Load()
+	}
 	if every <= 0 {
 		return nil, false
 	}

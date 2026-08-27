@@ -585,6 +585,162 @@ else
     "expected 2 of 5 (1 mutating + 1 auth-UI + 1 non-JSON excluded); got: $(cat "$TMP_ROOT/runner.out")"
 fi
 
+# ---------------------------------------------------------------------------
+# Part 5 — every deliberately non-JSON route is out of the JSON probe
+# ---------------------------------------------------------------------------
+# NON_JSON_PATH_REGEX exists because these handlers return bytes, SVG, ZIP,
+# Markdown or a stream, while the generated catalog gives their media types a
+# generic JSON-object schema. Probing one reports a contract failure for the
+# wrong reason — and the list is hand-maintained, so it goes stale silently
+# every time a route is added or renamed.
+#
+# It had gone stale twice (#1815):
+#
+#   - `/api/v1/admin/memory/versions/{id}/content` was entered without its
+#     `admin/` prefix, so the entry matched NO path in the shipped document
+#     and the real route 5xx'd the gate on every run;
+#   - `/api/v1/chats/{chatId}/stream` (the NDJSON run stream, added by #1822
+#     after this list was written) was never entered at all, though it is the
+#     same never-ending-stream case as `/api/v1/journal/stream` beside it.
+#
+# So the entries are asserted against the path shapes the router actually
+# registers, not eyeballed. A stale entry is now a named failure here.
+#
+# `selected` is the COMPLEMENT of the exclusions, so with a two-route document
+# it reads directly: 1 means the route under test was excluded, 2 means the
+# gate still probes it.
+probe_scope() {
+  local path="$1"
+  cat >"$DOCROOT/openapi.json" <<JSON
+{"openapi":"3.0.3","paths":{
+  "/api/v1/control":{"get":{"responses":{"200":{"description":"ok"}}}},
+  "$path":{"get":{"responses":{"200":{"description":"ok"}}}}
+}}
+JSON
+  run_runner "$TMP_ROOT/argv-scope" STUB_EXIT=0 >/dev/null
+  grep -o '"selected":[0-9]*' "$TMP_ROOT/runner.out" | head -1
+}
+
+expect_excluded() {
+  local path="$1" why="$2" got
+  got="$(probe_scope "$path")"
+  if [[ "$got" == '"selected":1' ]]; then
+    pass "not probed as JSON: $path"
+  else
+    fail "not probed as JSON: $path" \
+      "$why; summary said ${got:-<none>}, wanted \"selected\":1"
+  fi
+}
+
+expect_probed() {
+  local path="$1" got
+  got="$(probe_scope "$path")"
+  if [[ "$got" == '"selected":2' ]]; then
+    pass "still probed as JSON: $path"
+  else
+    fail "still probed as JSON: $path" \
+      "the exclusion list has grown to cover an ordinary JSON route; summary said ${got:-<none>}, wanted \"selected\":2"
+  fi
+}
+
+expect_excluded "/api/v1/admin/memory/versions/{id}/content" \
+  "the admin memory-version body is declared text/markdown + octet-stream"
+expect_excluded "/api/v1/chats/{chatId}/stream" \
+  "the run stream is declared application/x-ndjson and follow=true holds it open"
+expect_excluded "/api/v1/memory/versions/{sha}" \
+  "a memory version body is declared application/octet-stream"
+expect_excluded "/api/v1/journal/stream" \
+  "the journal stream is declared text/event-stream"
+expect_excluded "/api/v1/memory/export" \
+  "a memory export is declared application/zip"
+expect_excluded "/api/v1/admin/backups/download" \
+  "a backup download is declared application/zstd"
+expect_excluded "/api/v1/agents/{agentId}/avatar" \
+  "an avatar is declared image/svg+xml"
+
+# The guard on the guard. Excluding everything would satisfy every check
+# above, so the routes that must STAY in scope are pinned too — including the
+# two the exclusion list is most likely to be over-extended to cover, since
+# both look binary and neither finding is about media placeholders.
+expect_probed "/api/v1/workspaces"
+# Sibling of the excluded {sha} route: the LIST is ordinary JSON.
+expect_probed "/api/v1/memory/versions"
+expect_probed "/api/v1/admin/memory/versions"
+# Answers its 4xx with http.Error's text/plain while the generated document
+# says application/json — an undeclared media type, so a real violation.
+expect_probed "/api/v1/oauth/callback"
+# Binary download, but its finding is an undocumented status code.
+expect_probed "/api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}"
+# Not a download. `PipelineHandler.ExportPipeline` ends in `writeJSON` and the
+# document gives it a real JSON schema; it shares only the word "export" with
+# the ZIP one. It sat on the exclusion list from #1769 until #1815.
+expect_probed "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/export"
+
+# ---------------------------------------------------------------------------
+# Part 6 — the entry criterion, checked instead of asserted
+# ---------------------------------------------------------------------------
+# Part 5 pins the entries someone remembered to write a case for. That is not
+# the same as the criterion holding, and the entries nobody wrote a case for
+# are exactly the ones that rot: #1769 shipped ten entries in one pass, and by
+# #1815 one matched no path at all while another covered an ordinary JSON
+# route. Neither shape is visible from reading the regex.
+#
+# So read the patterns back out of run.sh and check each against the shipped
+# document, both ways:
+#
+#   - a pattern matching NO path is dead — the route was renamed or was never
+#     spelled the way the entry guesses (`memory/versions/{sha}/content` for
+#     what is really `admin/memory/versions/{id}/content`);
+#   - a pattern whose paths declare nothing but application/json on their 2xx
+#     responses fails the stated entry criterion — the document does not
+#     agree that this route is non-JSON, so excluding it drops a real probe
+#     (`workspaces/{workspaceId}/pipelines/{slug}/export`).
+#
+# The document is the right oracle for both: it is generated from the router
+# and CI already fails when it drifts from the handlers.
+SPEC="$REPO_ROOT/internal/api/openapi.gen.json"
+mapfile -t NON_JSON_PATTERNS < <(
+  sed -n "/^NON_JSON_PATH_PATTERNS=(/,/^)/{s/^[[:space:]]*'\([^']*\)'.*/\1/p;}" "$RUNNER"
+)
+
+if [[ ! -f "$SPEC" ]]; then
+  fail "the exclusion list is checked against the generated document" \
+    "no $SPEC to check against"
+elif [[ "${#NON_JSON_PATTERNS[@]}" -eq 0 ]]; then
+  fail "the exclusion list is checked against the generated document" \
+    "no NON_JSON_PATH_PATTERNS array found in $RUNNER — did the list go back to being one regex string?"
+else
+  for pattern in "${NON_JSON_PATTERNS[@]}"; do
+    mapfile -t matched < <(
+      jq -r --arg re "^/api/v1/($pattern)\$" '.paths | keys[] | select(test($re))' "$SPEC"
+    )
+    if [[ "${#matched[@]}" -eq 0 ]]; then
+      fail "exclusion entry matches a real route: $pattern" \
+        "it matches no path in internal/api/openapi.gen.json, so it excludes nothing and the route it was written for is still probed"
+      continue
+    fi
+    offenders=()
+    for path in "${matched[@]}"; do
+      if ! jq -e --arg p "$path" '
+        [ .paths[$p] | to_entries[]
+          | select(.key | IN("get","head","options","trace","post","put","patch","delete"))
+          | .value.responses // {} | to_entries[]
+          | select(.key | test("^2"))
+          | (.value.content // {} | keys[]) ]
+        | any(. != "application/json")
+      ' "$SPEC" >/dev/null; then
+        offenders+=("$path")
+      fi
+    done
+    if [[ "${#offenders[@]}" -eq 0 ]]; then
+      pass "exclusion entry is a declared non-JSON route: $pattern"
+    else
+      fail "exclusion entry is a declared non-JSON route: $pattern" \
+        "the document declares only application/json on the 2xx responses of ${offenders[*]} — by the list's own entry criterion this is an ordinary JSON route and excluding it drops a real probe"
+    fi
+  done
+fi
+
 printf '\n'
 if [[ "$FAILURES" -eq 0 ]]; then
   echo "api-contract gate: all checks passed"

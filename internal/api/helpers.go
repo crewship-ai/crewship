@@ -323,6 +323,40 @@ func validSlugFormat(slug string) bool {
 	return validSlugRe.MatchString(slug)
 }
 
+// validIssuePrefixRe is the format rule for crews.issue_prefix (#2035). The
+// prefix becomes the leading half of missions.identifier (issue_create_core.go:
+// crewIssuePrefix), and the identifier is a SINGLE URL path segment on the ~20
+// issue routes in router_orchestration.go — `{identifier}` in get, patch,
+// delete, comments, attachments and relations. So a prefix carrying "/" mints
+// an issue at an address no route can match, and " ", "%", "#" and "?" each
+// break the same segment their own way. Restricting the charset to what is
+// literally safe in a path segment is what keeps a stored prefix addressable.
+//
+// The upper bound is 16: the identifier also has to stay readable in a
+// mention, a branch name and a commit subject, and nothing legitimate needs
+// more.
+//
+// This is a guard on WRITES ONLY. Rows that already hold an odd prefix are not
+// migrated and not refused on read — they keep minting exactly what they mint
+// today. See issuePrefixFormatRule for the wording the 400 carries.
+var validIssuePrefixRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,16}$`)
+
+// issuePrefixFormatRule is the human half of validIssuePrefixRe, used verbatim
+// in the 400 so the operator learns the rule from the rejection rather than
+// from the source.
+const issuePrefixFormatRule = `issue_prefix must match ^[A-Za-z0-9_-]{1,16}$ ` +
+	`(letters, digits, underscore or hyphen; 1-16 characters) — it becomes part ` +
+	`of the issue identifier, which is a single URL path segment. ` +
+	`Send "" to clear it and fall back to the crew slug.`
+
+// validIssuePrefixFormat reports whether a non-empty issue_prefix is storable.
+// The empty string is NOT accepted here: "" means "clear it" on the write path
+// and is handled before this call, so letting it through would silently store a
+// prefix the identifier generator would then have to guess about.
+func validIssuePrefixFormat(prefix string) bool {
+	return validIssuePrefixRe.MatchString(prefix)
+}
+
 // writeJSON serializes v as JSON and writes it to the response with the given HTTP status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")

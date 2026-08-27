@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 type config struct {
@@ -48,6 +52,20 @@ var proseLink = regexp.MustCompile(`\]\((/[^)\s]*)\)|href=["'](/[^"']*)["']`)
 // codeFence matches the opening or closing line of a fenced block, indented or
 // not. Mintlify accepts both fence characters.
 var codeFence = regexp.MustCompile("^\\s*(?:```|~~~)")
+
+// The constructs that put an anchor on a page, or that stand between a heading's
+// Markdown source and the text Mintlify slugs.
+var (
+	atxHeading      = regexp.MustCompile(`^#{1,6}\s+(.*?)\s*$`)
+	customHeadingID = regexp.MustCompile(`\s*\{#([A-Za-z0-9_-]+)\}\s*$`)
+	openingTag      = regexp.MustCompile(`<([A-Za-z][A-Za-z0-9]*)\b[^>]*>`)
+	attributeID     = regexp.MustCompile(`\bid=(?:"([^"]*)"|'([^']*)')`)
+	attributeTitle  = regexp.MustCompile(`\btitle=(?:"([^"]*)"|'([^']*)')`)
+	markdownLink    = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	jsxTag          = regexp.MustCompile(`</?[A-Za-z][^>]*>`)
+	mdxExpression   = regexp.MustCompile(`\{[^{}]*\}`)
+	backslashEscape = regexp.MustCompile(`\\(.)`)
+)
 
 type deprecatedTerm struct {
 	spelling    string
@@ -179,18 +197,27 @@ func main() {
 	// Third pass: the links written inside the pages, not just the ids
 	// docs.json declares. Hermetic like the two above — it reads the same
 	// tree — so it belongs on every pull request.
-	dead, checkedLinks, err := brokenProseLinks(*root)
+	dead, audit, err := brokenProseLinks(*root)
 	if err != nil {
 		fail(err)
 	}
-	if len(dead) > 0 {
-		offenders := make([]string, 0, len(dead))
-		for _, d := range dead {
-			offenders = append(offenders, fmt.Sprintf("%s links to %s", d.page, d.target))
+	// The two failures need different edits — one moves the link to another
+	// page, the other rewrites the fragment — so they are reported apart.
+	missingPages, missingAnchors := []string{}, []string{}
+	for _, d := range dead {
+		if d.reason == "" {
+			missingPages = append(missingPages, fmt.Sprintf("%s links to %s", d.page, d.target))
+			continue
 		}
-		fail(fmt.Errorf("dead internal links in prose (no such page in the docs tree):\n  %s", strings.Join(offenders, "\n  ")))
+		missingAnchors = append(missingAnchors, fmt.Sprintf("%s links to %s: %s", d.page, d.target, d.reason))
 	}
-	fmt.Printf("docs-surface-check: internal prose links %d checked, 0 dead\n", checkedLinks)
+	if len(missingPages) > 0 {
+		fail(fmt.Errorf("dead internal links in prose (no such page in the docs tree):\n  %s", strings.Join(missingPages, "\n  ")))
+	}
+	if len(missingAnchors) > 0 {
+		fail(fmt.Errorf("internal links whose heading anchor does not exist on the target page:\n  %s", strings.Join(missingAnchors, "\n  ")))
+	}
+	fmt.Printf("docs-surface-check: internal prose links %d checked, %d of them anchored, 0 dead\n", audit.links, audit.anchors)
 
 	deprecated, err := deprecatedTerminologyInDocs(*root)
 	if err != nil {
@@ -430,11 +457,333 @@ func documentationStability(root string) ([]string, int, error) {
 	return issues, pages, err
 }
 
-// deadLink is one internal link whose target is not a page in the docs tree:
-// the page that has to be edited, and the target as it is written there.
+// deadLink is one internal link that does not land where it says: the page that
+// has to be edited, and the target as it is written there.
 type deadLink struct {
 	page   string
 	target string
+	// reason is empty when the target names no page in the tree. Otherwise the
+	// page exists and this says why the fragment does not resolve — the two
+	// failures need different edits, so the report keeps them apart.
+	reason string
+}
+
+// linkAudit is what the prose-link pass looked at, so a green run can say how
+// much it actually verified rather than just that nothing was wrong.
+type linkAudit struct {
+	links   int // internal links resolved against the tree
+	anchors int // of those, the ones that also named a heading anchor
+}
+
+// mintlifySlugKeep is the ASCII punctuation Mintlify keeps verbatim in a heading
+// anchor. This is NOT github-slugger, which strips all of it: the deployed site
+// publishes `#get-/api/v1/admin/memory/config`, `#runtime-bash-|-python-|-go`,
+// `#api-+-cli`, `#archive-layer-pr-#212` and `#4-codex-config-in-$home`. Any
+// rune outside ASCII is kept too (`—`, `’`, `→`, `…` all survive).
+const mintlifySlugKeep = "_-/&+|<>=#$"
+
+// mintlifySlug turns a heading's RENDERED text into the id Mintlify publishes.
+//
+// Pinned against docs.crewship.ai rather than against a slugger's source: every
+// heading id on the 72 pages this tree links into was fetched and compared, and
+// this function reproduces all of them. The rules that fall out:
+//
+//   - lowercase, then split on spaces and rejoin with "-", so a run of dropped
+//     characters between two spaces leaves an empty token and therefore a
+//     doubled dash: `Secrets ({{ secrets.<type> }})` publishes as
+//     `#secrets--secrets-<type>-`, and the trailing dash is real.
+//   - inside a token, "." becomes "-" (`routine.state` → `routine-state`) and
+//     leading/trailing dashes are trimmed (`1. Writing memory` → `1-writing…`).
+//   - letters, digits, anything non-ASCII and mintlifySlugKeep survive;
+//     everything else is dropped.
+//
+// The angle brackets are the case worth remembering: the heading
+// "## `crewship routine result <run_id>`" publishes
+// `#crewship-routine-result-<run_id>`, and
+// Mintlify's own table of contents links to it as
+// `#crewship-routine-result-%3Crun_id%3E`. Both `#crewship-routine-result-run_id`
+// and `#crewship-routine-result-run-id` are written in this tree and both are
+// dead — the underscore was never the whole story.
+func mintlifySlug(text string) string {
+	tokens := strings.Split(strings.TrimSpace(strings.ToLower(text)), " ")
+	out := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		var slug strings.Builder
+		for _, r := range token {
+			switch {
+			case r >= utf8.RuneSelf || unicode.IsLetter(r) || unicode.IsDigit(r):
+				slug.WriteRune(r)
+			case strings.ContainsRune(mintlifySlugKeep, r):
+				slug.WriteRune(r)
+			case r == '.':
+				slug.WriteByte('-')
+			}
+		}
+		out = append(out, strings.Trim(slug.String(), "-"))
+	}
+	return strings.Join(out, "-")
+}
+
+// anchorKey reduces an anchor to the form the comparison uses. It is where this
+// gate is deliberately conservative, and it ignores exactly two things — the two
+// the deployed output could not pin.
+//
+//  1. How many dashes a run of dropped punctuation leaves. The heading
+//     "Server installs (systemd): `self-update --systemd`" publishes
+//     `#server-installs-systemd--self-update-systemd` while the structurally
+//     identical "Contract: `GET …`" publishes a single dash. Nothing in the
+//     rendered text distinguishes them, and no reader distinguishes two anchors
+//     by dash count either.
+//  2. Quotation marks. Mintlify's smart typography curls them unpredictably:
+//     `"Run this routine every day at 9 AM"` publishes
+//     `#”run-this-routine-every-day-at-9-am` — opening mark curled, closing one
+//     dropped — while `"Validate routine DSL in CI before committing"` on the
+//     same page publishes the mirror image. Nobody can write that from the
+//     source, so a heading in quotes is a heading this gate cannot address
+//     exactly; give it a `{#custom-id}` if it has to be linkable.
+//
+// The APOSTROPHE is not in that second class and is not ignored: `'` between
+// two alphanumerics always becomes `’`, on every page checked. renderProseSegment
+// applies it, and `#what’s-next` is compared character for character.
+//
+// Everything else is exact too: word content, the punctuation Mintlify keeps,
+// and the -2/-3 suffix on repeated headings.
+func anchorKey(anchor string) string {
+	if decoded, err := url.PathUnescape(anchor); err == nil {
+		anchor = decoded
+	}
+	var key strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(anchor) {
+		switch r {
+		case '"', '\'', '‘', '“', '”':
+			continue
+		case '-':
+			if dash {
+				continue
+			}
+			dash = true
+		default:
+			dash = false
+		}
+		key.WriteRune(r)
+	}
+	return strings.Trim(key.String(), "-")
+}
+
+// anchorsOf returns every anchor a page body publishes, in document order.
+//
+// Headings are most of it, but not all of it: an explicit `{#custom-id}` wins
+// over the slug, `<Accordion title=…>` publishes its title as an id, and a
+// literal `<a id=…>` publishes whatever it says. Repeated headings get the
+// -2/-3 suffix Mintlify appends, which is why this returns an ordered list
+// rather than a set — `### Response` appears 40 times on one API page and each
+// one is addressable.
+func anchorsOf(body string) []string {
+	body = stripFrontmatter(body)
+	anchors := []string{}
+	used := map[string]int{}
+	fenced := false
+	for _, line := range strings.Split(body, "\n") {
+		if codeFence.MatchString(line) {
+			fenced = !fenced
+			continue
+		}
+		if fenced {
+			continue
+		}
+		if match := atxHeading.FindStringSubmatch(line); match != nil {
+			anchors = append(anchors, headingAnchor(match[1], used))
+		}
+		if anchor, ok := tagAnchor(line); ok {
+			anchors = append(anchors, anchor)
+		}
+	}
+	return anchors
+}
+
+// tagAnchor returns the anchor an opening tag publishes: an explicit `id=`
+// wherever one is written, and otherwise an `<Accordion title=…>`'s title.
+//
+// The explicit id has to win. `docs/api-reference/internal.mdx` carries
+// `<Accordion title="Resolved exception: …" id="tenant-isolation-on-internal-auth-handlers">`
+// and the deployed page uses the id, not the title — reading the title alone
+// would report the one link pointing there as dead and send someone to "fix" a
+// link that works.
+func tagAnchor(line string) (string, bool) {
+	tag := openingTag.FindStringSubmatch(line)
+	if tag == nil {
+		return "", false
+	}
+	if id := attributeID.FindStringSubmatch(tag[0]); id != nil {
+		return firstNonEmpty(id[1:]), true
+	}
+	if tag[1] != "Accordion" {
+		return "", false
+	}
+	if title := attributeTitle.FindStringSubmatch(tag[0]); title != nil {
+		return componentSlug(firstNonEmpty(title[1:])), true
+	}
+	return "", false
+}
+
+// componentSlug is the id a Mintlify component derives from its title, and it is
+// NOT mintlifySlug. A component keeps nothing: every run of characters outside
+// [a-z0-9] collapses to a single dash, underscores included. The accordion
+// titled `Run returns 500 "pipeline: concurrency_key rendered to empty value"`
+// publishes `#run-returns-500-pipeline-concurrency-key-rendered-to-empty-value`
+// — dash, not underscore — while the heading "`crewship routine result
+// <run_id>`" keeps both the underscore and the angle brackets. Two slugs on one
+// page, verified against all 66 accordions the fetched pages publish.
+func componentSlug(title string) string {
+	var slug strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(html.UnescapeString(title)) {
+		if r < utf8.RuneSelf && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			slug.WriteRune(r)
+			dash = false
+			continue
+		}
+		if !dash {
+			slug.WriteByte('-')
+			dash = true
+		}
+	}
+	return strings.Trim(slug.String(), "-")
+}
+
+// headingAnchor is the anchor one heading publishes. used carries the
+// duplicate counter for the page; pass an empty map to slug a heading alone.
+func headingAnchor(text string, used map[string]int) string {
+	if match := customHeadingID.FindStringSubmatch(text); match != nil {
+		return match[1]
+	}
+	base := mintlifySlug(renderHeadingText(text))
+	used[base]++
+	if n := used[base]; n > 1 {
+		return fmt.Sprintf("%s-%d", base, n)
+	}
+	return base
+}
+
+// renderHeadingText rebuilds the text Mintlify renders for a heading, because
+// the slug is computed from that and not from the Markdown source.
+//
+// Inline code is literal — `<run_id>` inside backticks is two angle brackets,
+// while outside them it is a JSX tag that renders as nothing. That asymmetry is
+// why the segments are handled separately rather than with one pass of
+// substitutions.
+func renderHeadingText(text string) string {
+	var rendered strings.Builder
+	for i, segment := range splitCodeSpans(text) {
+		if i%2 == 1 {
+			rendered.WriteString(segment)
+			continue
+		}
+		rendered.WriteString(renderProseSegment(segment))
+	}
+	return html.UnescapeString(rendered.String())
+}
+
+// renderProseSegment renders the non-code part of a heading: link text without
+// its target, no JSX tags, no MDX expressions, escapes resolved.
+//
+// `## PUT /api/v1/admin/rate-limits/{key}` publishes
+// `#put-/api/v1/admin/rate-limits/` because MDX evaluates `{key}` and it renders
+// as nothing, while `## GET /api/v1/admin/users/\{userId\}/data` escapes the
+// braces and publishes `#get-/api/v1/admin/users/userid/data`. Both spellings
+// are in this tree.
+func renderProseSegment(segment string) string {
+	segment = markdownLink.ReplaceAllString(segment, "$1")
+	segment = jsxTag.ReplaceAllString(segment, "")
+	// Park the escaped braces so the expression sweep cannot see them.
+	segment = strings.ReplaceAll(segment, `\{`, "\x01")
+	segment = strings.ReplaceAll(segment, `\}`, "\x02")
+	for {
+		stripped := mdxExpression.ReplaceAllString(segment, "")
+		if stripped == segment {
+			break
+		}
+		segment = stripped
+	}
+	segment = strings.ReplaceAll(segment, "\x01", "{")
+	segment = strings.ReplaceAll(segment, "\x02", "}")
+	segment = backslashEscape.ReplaceAllString(segment, "$1")
+	segment = strings.ReplaceAll(segment, "**", "")
+	return smartApostrophe(segment)
+}
+
+// smartApostrophe applies the one part of Mintlify's typography that is
+// predictable: an apostrophe between two alphanumerics curls, every time. `What's
+// next` publishes `#what’s-next`, and the curled form is in the anchor, so a
+// checker that skipped this would have to ignore apostrophes entirely and go
+// blind to a whole class of renames.
+//
+// Quotation marks get no such treatment — see anchorKey for why.
+func smartApostrophe(segment string) string {
+	if !strings.Contains(segment, "'") {
+		return segment
+	}
+	runes := []rune(segment)
+	for i := 1; i < len(runes)-1; i++ {
+		if runes[i] != '\'' {
+			continue
+		}
+		if isAlphanumeric(runes[i-1]) && isAlphanumeric(runes[i+1]) {
+			runes[i] = '’'
+		}
+	}
+	return string(runes)
+}
+
+func isAlphanumeric(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+
+// splitCodeSpans returns alternating prose and inline-code segments: even
+// indexes are prose, odd indexes are code.
+func splitCodeSpans(text string) []string {
+	segments := []string{}
+	var current strings.Builder
+	for i := 0; i < len(text); {
+		if text[i] == '`' {
+			for i < len(text) && text[i] == '`' {
+				i++
+			}
+			segments = append(segments, current.String())
+			current.Reset()
+			continue
+		}
+		current.WriteByte(text[i])
+		i++
+	}
+	return append(segments, current.String())
+}
+
+// stripFrontmatter removes a leading `---` block. It anchors on the start of the
+// file rather than on any line, so a `---` horizontal rule in the prose cannot
+// swallow half a page.
+func stripFrontmatter(body string) string {
+	if !strings.HasPrefix(body, "---\n") {
+		return body
+	}
+	rest := body[len("---\n"):]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return body
+	}
+	rest = rest[end+len("\n---"):]
+	if line := strings.IndexByte(rest, '\n'); line >= 0 {
+		return rest[line+1:]
+	}
+	return ""
+}
+
+func firstNonEmpty(values []string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type deprecatedTermUse struct {
@@ -491,7 +840,7 @@ func deprecatedTerminologyInDocs(root string) ([]deprecatedTermUse, error) {
 }
 
 // brokenProseLinks resolves every internal link written inside a page body
-// against the docs tree, and returns the ones that do not land on a file.
+// against the docs tree, and returns the ones that do not land where they say.
 //
 // docs.json's navigation is gated; the links inside the prose were not, so
 // `](/guides/does-not-exist)` passed every check this repository had and
@@ -499,20 +848,18 @@ func deprecatedTerminologyInDocs(root string) ([]deprecatedTermUse, error) {
 // links and they were verified by a shell loop pasted into a review comment,
 // which is a check that exists only while someone remembers to run it (#1774).
 //
-// Fragments are dropped before resolution: `/guides/routines#cross-run-state`
-// addresses a position inside a page, and the page is what must exist. Whether
-// the *heading* behind that fragment still exists is deliberately NOT checked
-// here — see the note in docs/prd/documentation-contract-testing.md. It needs a
-// slugger that agrees with Mintlify's character-for-character, and the real
-// tree shows both failure directions: `#crewship-routine-result-run_id` is the
-// live anchor for the heading "crewship routine result <run_id>", so a slugger
-// that drops the underscore reports the working link and blesses the dead
-// `#crewship-routine-result-run-id` written two pages over. A gate that lands
-// with a pile of ambiguous offenders is a gate someone turns off.
-func brokenProseLinks(root string) ([]deadLink, int, error) {
+// A fragment is verified, not resolved away. `/guides/routines#cross-run-state`
+// addresses a position inside a page, and a link that lands on the right page
+// and the wrong place is broken for the reader — a renamed heading used to ship
+// green here (#1794). The page must exist AND the anchor must be one the page
+// publishes; see anchorsOf and mintlifySlug for how that namespace is derived,
+// and anchorKey for the two things the comparison deliberately ignores.
+func brokenProseLinks(root string) ([]deadLink, linkAudit, error) {
 	docs := filepath.Join(root, "docs")
-	checked := 0
+	audit := linkAudit{}
 	dead := []deadLink{}
+	// One page is the target of many links; parse each one once.
+	published := map[string][]string{}
 	err := filepath.Walk(docs, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -526,18 +873,36 @@ func brokenProseLinks(root string) ([]deadLink, int, error) {
 		}
 		page := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
 		for _, target := range internalLinks(string(body)) {
-			checked++
+			audit.links++
 			resolved := strings.TrimPrefix(pageOf(target), "/")
-			if fileExists(filepath.Join(docs, filepath.FromSlash(resolved)+".mdx")) ||
-				fileExists(filepath.Join(docs, filepath.FromSlash(resolved)+".md")) {
+			targetPath, ok := docsPage(docs, resolved)
+			if !ok {
+				dead = append(dead, deadLink{page: page, target: target})
 				continue
 			}
-			dead = append(dead, deadLink{page: page, target: target})
+			fragment := fragmentOf(target)
+			if fragment == "" {
+				continue
+			}
+			audit.anchors++
+			anchors, ok := published[targetPath]
+			if !ok {
+				targetBody, err := os.ReadFile(targetPath)
+				if err != nil {
+					return err
+				}
+				anchors = anchorsOf(string(targetBody))
+				published[targetPath] = anchors
+			}
+			if hasAnchor(anchors, fragment) {
+				continue
+			}
+			dead = append(dead, deadLink{page: page, target: target, reason: noSuchAnchor(fragment, anchors)})
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, checked, err
+		return nil, audit, err
 	}
 	sort.Slice(dead, func(i, j int) bool {
 		if dead[i].page != dead[j].page {
@@ -545,7 +910,75 @@ func brokenProseLinks(root string) ([]deadLink, int, error) {
 		}
 		return dead[i].target < dead[j].target
 	})
-	return dead, checked, nil
+	return dead, audit, nil
+}
+
+// docsPage returns the file backing a page id, trying both extensions Mintlify
+// accepts.
+func docsPage(docs, resolved string) (string, bool) {
+	for _, ext := range []string{".mdx", ".md"} {
+		path := filepath.Join(docs, filepath.FromSlash(resolved)+ext)
+		if fileExists(path) {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// fragmentOf returns the anchor a link target names, with any trailing query
+// stripped. An empty result means the link addresses the page as a whole.
+func fragmentOf(target string) string {
+	_, fragment, ok := strings.Cut(target, "#")
+	if !ok {
+		return ""
+	}
+	fragment, _, _ = strings.Cut(fragment, "?")
+	return fragment
+}
+
+func hasAnchor(anchors []string, fragment string) bool {
+	want := anchorKey(fragment)
+	// `page#` and `page#top` both address the top of the document — the second
+	// by the HTML fragment-navigation rules, which fall back to the start of the
+	// document when nothing carries that id. Neither needs a heading.
+	if want == "" || strings.EqualFold(want, "top") {
+		return true
+	}
+	for _, anchor := range anchors {
+		if anchorKey(anchor) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// noSuchAnchor explains a dead fragment and, where one is obvious, names the
+// anchor that was probably meant. "27 dead anchors" sends the reader back to
+// the hand-rolled loop this gate replaces; "you wrote X, the page publishes Y"
+// is a diff someone can apply.
+func noSuchAnchor(fragment string, anchors []string) string {
+	want := anchorKey(fragment)
+	best, bestScore := "", 0
+	for _, anchor := range anchors {
+		score := commonPrefixLen(want, anchorKey(anchor))
+		if score > bestScore {
+			best, bestScore = anchor, score
+		}
+	}
+	// Half the written fragment has to agree before a suggestion is more help
+	// than noise.
+	if best != "" && bestScore*2 >= len(want) {
+		return fmt.Sprintf("no heading publishes #%s — nearest is #%s", fragment, best)
+	}
+	return fmt.Sprintf("no heading publishes #%s", fragment)
+}
+
+func commonPrefixLen(a, b string) int {
+	n := 0
+	for n < len(a) && n < len(b) && a[n] == b[n] {
+		n++
+	}
+	return n
 }
 
 // internalLinks returns every absolute internal target a page body points at,
