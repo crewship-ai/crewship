@@ -592,11 +592,16 @@ export const PARITY: ParityRow[] = [
   {
     surface: "Crews → New agent",
     capability: "Granting one agent revokes it from the rest",
-    where: "api",
+    where: "both",
     ref: "agent_config.go:1234-1246 · :1291-1293",
-    ui: "none",
+    cli: "integration access",
+    ui: "detail",
     severity: "blocker",
     note: "A server with zero bindings is handed to EVERY agent. The moment one agent binds it, every agent without its own binding loses it — so the first grant is a silent workspace-wide revocation. No surface warns about this, and it is the single most surprising rule in the integration model.",
+    fixed: {
+      on: "2026-08-27",
+      how: "The audience is a stored column (default_access: all | bound-only) on both server tables, so a binding is purely additive and cannot change what any other agent resolves. Fixed in BOTH cascades — the read-only resolver and resolveAgentMCPServers in agent_config.go, which is what the container actually gets; the runtime copy was worse, its binding count was not workspace-scoped, so a binding in a DIFFERENT workspace could revoke a server. The migration backfills every server that already carries a binding to bound-only, so nobody's effective access moves on upgrade — verified against a real database, before and after are identical.",
+    },
   },
   {
     surface: "Crews → New agent",
