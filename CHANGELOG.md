@@ -316,6 +316,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   same raw output. `total_bytes` and `truncated` still describe the raw
   stream and are computed before scrubbing, since redaction changes the
   string's length.
+- **A forked mission could never run a task.** `Fork` wrote the mission, its
+  tasks and its checkpoint, but not the synthetic `chats` row that
+  `assignments.chat_id NOT NULL REFERENCES chats(id)` requires — the row the
+  normal mission-create path stamps in the same transaction. The fork itself
+  reported success; the failure surfaced later, as a `FOREIGN KEY constraint
+  failed` the first time the orchestrator tried to dispatch one of the copied
+  tasks. It went unnoticed for the feature's whole life because the package's
+  tests built their own fixture schema with no `chats` table at all, so the
+  constraint could not fire. Those tests now run against the real migration
+  chain, which also surfaced a second case seeding an assignment against a
+  chat that did not exist.
 
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
