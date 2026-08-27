@@ -20524,6 +20524,7 @@
         "cmd/crewship/cmd_admin_stats_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
         "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
@@ -20549,6 +20550,7 @@
             "cmd/crewship/cmd_admin_stats_test.go",
             "cmd/crewship/cmd_system_cov_test.go",
             "cmd/crewship/cmd_system_format_test.go",
+            "cmd/crewship/cmd_system_gaps_test.go",
             "cmd/crewship/cmd_system_inuse_test.go",
             "cmd/crewship/cmd_system_runtime_test.go",
             "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
@@ -20574,12 +20576,12 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
         "cmd/gen-openapi/param_inference_test.go",
         "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/admin_authz_floor_test.go",
-        "internal/api/route_read_scope_invariant_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -20601,12 +20603,12 @@
           "test_signals": [
             "cmd/crewship/cmd_system_cov_test.go",
             "cmd/crewship/cmd_system_format_test.go",
+            "cmd/crewship/cmd_system_gaps_test.go",
             "cmd/crewship/cmd_system_inuse_test.go",
             "cmd/crewship/cmd_system_runtime_test.go",
             "cmd/gen-openapi/param_inference_test.go",
             "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/admin_authz_floor_test.go",
-            "internal/api/route_read_scope_invariant_test.go",
             "…"
           ]
         }
@@ -31243,8 +31245,8 @@
         "cmd/crewship/cmd_doctor_legacy_test.go",
         "cmd/crewship/cmd_doctor_migration_expectation_test.go",
         "cmd/crewship/cmd_doctor_nocreate_test.go",
+        "cmd/crewship/cmd_doctor_runtime_gaps_test.go",
         "cmd/crewship/cmd_doctor_security_test.go",
-        "cmd/crewship/cmd_doctor_test.go",
         "…"
       ],
       "flags": [
@@ -39267,6 +39269,7 @@
         "cmd/crewship/cmd_nuke_test.go",
         "cmd/crewship/cmd_runtimes_cov_test.go",
         "cmd/crewship/cmd_runtimes_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_runtime_test.go"
       ]
@@ -42525,10 +42528,10 @@
         "cmd/crewship/cmd_apply_honesty_test.go",
         "cmd/crewship/cmd_capacity_test.go",
         "cmd/crewship/cmd_doctor_nocreate_test.go",
+        "cmd/crewship/cmd_doctor_runtime_gaps_test.go",
         "cmd/crewship/cmd_doctor_test.go",
         "cmd/crewship/cmd_eval_compare_cov_test.go",
         "cmd/crewship/cmd_inspect_cov_test.go",
-        "cmd/crewship/cmd_integration_tools_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44641,6 +44644,7 @@
       "test_signals": [
         "cmd/crewship/cmd_runtimes_cov_test.go",
         "cmd/crewship/cmd_runtimes_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_runtime_test.go"
       ]
@@ -45818,11 +45822,11 @@
         "cmd/crewship/cli_route_contract_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
-        "cmd/crewship/cmd_system_runtime_test.go",
         "…"
       ]
     },
@@ -45843,10 +45847,10 @@
         "cmd/crewship/cmd_project_cov_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
-        "cmd/crewship/cmd_system_openapi_test.go",
         "…"
       ]
     },
@@ -45913,12 +45917,12 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
         "…"
       ]
     },
@@ -45969,12 +45973,12 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
         "…"
       ]
     },
@@ -45993,12 +45997,12 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
         "…"
       ]
     },
@@ -46017,12 +46021,12 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
         "…"
       ],
       "flags": [
@@ -46088,12 +46092,12 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
         "…"
       ],
       "flags": [
@@ -46120,11 +46124,11 @@
         "cmd/crewship/cmd_project_cov_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_gaps_test.go",
         "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
-        "cmd/crewship/cmd_system_runtime_test.go",
         "…"
       ]
     },
@@ -49182,7 +49186,7 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4442,
+    "command_references": 4448,
     "api_path_references": 2179,
     "environment_references": 432,
     "manifest_kind_references": 230,
