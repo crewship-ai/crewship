@@ -31817,6 +31817,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_contract_extract_test.go",
         "cmd/crewship/cmd_explain_cov_test.go",
         "cmd/crewship/cmd_explain_test.go",
         "cmd/crewship/cmd_run_id_namespace_test.go"
@@ -45554,14 +45555,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_contract_extract_test.go",
+        "cmd/crewship/cli_route_contract_test.go",
         "cmd/crewship/cmd_approvals_test.go",
         "cmd/crewship/cmd_escalation_cov_test.go",
         "cmd/crewship/cmd_inbox_cov_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go",
         "cmd/crewship/cmd_pipeline_wait_test.go",
         "cmd/crewship/cmd_routine_governance_test.go",
-        "cmd/crewship/cmd_skill_authoring_cov_test.go",
-        "cmd/crewship/cmd_skill_cov2_test.go",
         "…"
       ],
       "flags": [
