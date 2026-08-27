@@ -429,6 +429,7 @@
               "cli/consolidate",
               "cli/self-update",
               "cli/credential",
+              "cli/oauth",
               "cli/seed",
               "cli/nuke"
               ,"cli/db"

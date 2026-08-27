@@ -19,8 +19,12 @@ crewship consolidate <subcommand> [flags]
 | Command | Description |
 |---|---|
 | `run` | Force an immediate consolidation run. |
+| `proposed explain <id>` | Why a staged proposal was raised: rules, evidence, scores. |
+| `proposed diff <id>` | The exact bytes approving it would append. |
+| `proposed approve <id>` | Merge it into the crew's canonical `learned-*.md`. |
+| `proposed reject <id>` | Discard it; canonical memory untouched. |
 
-`consolidate run` honours the global `--format` flag (`json`/`yaml`/`ndjson`) — see
+Every subcommand honours the global `--format` flag (`json`/`yaml`/`ndjson`) — see
 [Output Formats](/cli/overview#output-formats).
 
 ---
@@ -52,6 +56,102 @@ Accepted, but skipped: no summarizer configured, skipping
 ```
 
 `accepted=true` on a triggered run confirms the request was genuinely accepted (not just that a 202 came back). `Accepted, but skipped` (202) with a note means the consolidator is wired but lacks a summarizer client -- set `OLLAMA_HOST` and install a chat model.
+
+---
+
+## `crewship consolidate proposed`
+
+The human-in-the-loop half. When the consolidator runs with
+`CREWSHIP_CONSOLIDATE_HITL=1` it does **not** write extracted rules straight
+into a crew's canonical `learned-*.md`. It stages them in `.proposed/`, records
+a pending row, and raises an inbox item — and these four verbs are the decision
+side of that.
+
+<Warning>
+`CREWSHIP_CONSOLIDATE_HITL` is **unset by default**, and with it unset nothing
+is ever staged: the consolidator writes directly and these commands can only
+ever return `404`. That is a configuration answer, not a fault. See
+[Environment](/configuration/environment).
+</Warning>
+
+### Finding a proposal id
+
+There is **no list endpoint** — proposals are addressed by id and nothing
+enumerates them. The id travels on the inbox item the proposal raises:
+
+```bash
+crewship inbox list --kind memory_consolidation
+```
+
+The id is on the item's `payload.proposal_id`, and looks like
+`mp_20260826T101500-abcdef0123456789`.
+
+### Reviewing one
+
+```bash
+crewship consolidate proposed explain <id>   # why
+crewship consolidate proposed diff <id>      # what
+crewship consolidate proposed approve <id> --diff
+crewship consolidate proposed reject <id> --reason "over-fitted to one incident"
+```
+
+`explain` reports the crew, the rule count, how many journal entries were
+scanned, the evidence the rules rest on and the scores the consolidator
+assigned. Under `--format json` the `evidence` and `scores` blobs stay JSON
+rather than being flattened to strings.
+
+`diff` prints the unified diff between the crew's canonical file and what it
+would become. The server builds this preview through the same code path
+`approve` writes through, so it is byte-for-byte what lands.
+
+```
+…/.proposed/proposal-20260826T210000-….md → …/memory/learned-2026-08-26.md (new file)
+2 rules, +17/-0 lines
+
+--- canonical (current)
++++ canonical (post-merge)
+@@ -1 +1,18 @@
++# Learned rules — 2026-08-26
+…
+```
+
+### Approving and rejecting
+
+| Flag | Command | Description |
+|---|---|---|
+| `--diff` | `approve` | Print the exact change before asking to confirm. |
+| `--yes` | `approve`, `reject` | Skip the confirmation prompt. |
+| `--reason` | `reject` | Why it is being rejected. |
+
+Approving merges the staged rules into the canonical file and records a new
+memory version, so it prompts first. With `--diff` the preview is fetched
+**before** the prompt — a preview shown after the decision would not be one.
+
+Under `--format json`/`yaml`/`ndjson` the preview is not printed alongside the
+result — it travels **inside** it, on a `preview` key, so stdout stays a single
+parseable document.
+
+<Note>
+`--reason` is sent and echoed back, but the server does not persist it:
+`memory_proposals` has no reason column yet. The command says so rather than
+implying an audit trail that is not there. Put anything you need to keep in the
+crew's journal instead.
+</Note>
+
+### Requirements and errors
+
+| Command | Role |
+|---|---|
+| `explain`, `diff` | `MEMBER`+ |
+| `approve`, `reject` | `OWNER` or `ADMIN` |
+
+| Exit | Meaning |
+|---|---|
+| `3` | No such proposal in this workspace. A proposal in another workspace answers the same way, so existence never leaks. |
+| `5` | Already approved or rejected. Decisions are not reversible from here. |
+| `1` | `410` — the row outlived its `.proposed` markdown; `413` — the markdown or the canonical file exceeds the 8 MiB diff cap. |
+
+---
 
 ## Requirements
 

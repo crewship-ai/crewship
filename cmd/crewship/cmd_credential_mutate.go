@@ -212,6 +212,51 @@ var credCreateCmd = &cobra.Command{
 			return fmt.Errorf("--type is required (SECRET, API_KEY, AI_CLI_TOKEN, or CLI_TOKEN)")
 		}
 
+		// An OAuth app and a value are two different ways to fill the same
+		// column, and only one of them can win. Rather than pick — and silently
+		// discard a token the operator explicitly passed — refuse the pair.
+		//
+		// Decided on the flags being NAMED, and decided here, above every stdin
+		// read, for one reason: --value-stdin and --oauth-client-secret-stdin
+		// both consume os.Stdin and there is only one stream. Checked further
+		// down against the resolved `value` — as it was — the pair escaped
+		// entirely: the secret read the piped line first, `value` stayed "",
+		// and the conflict the operator had been warned about never fired. The
+		// row was created with the app details and no token, which is a
+		// legal-looking OAUTH2 row that nobody asked for.
+		if anyOAuthAppFlagSet(flags) && (flags.Changed("value") || valueStdin) {
+			return cli.WithExitCode(fmt.Errorf(
+				"--value/--value-stdin cannot be combined with the --oauth-* flags: an OAuth credential's "+
+					"value is the access token the flow fetches, and the row is created empty so "+
+					"`crewship oauth connect` can fill it. Drop one of the two"), cli.ExitValidation)
+		}
+
+		// #2086: an OAUTH2 credential is created empty — the row exists so the
+		// connect flow has somewhere to put the tokens it fetches. It carries
+		// the OAuth *app* details instead of a value, so the two checks that
+		// assume a value (--value required, and the provider key probe) are
+		// skipped for it below. Resolved here, before anything is sent, so a
+		// typo'd provider slug never becomes a credential with no authorize URL.
+		oauthApp, oauthErr := readOAuthAppFlags(flags, credType)
+		if oauthErr != nil {
+			return oauthErr
+		}
+		if strings.EqualFold(credType, "OAUTH2") {
+			// readOAuthAppFlags matches the type case-insensitively; the server
+			// compares req.Type == "OAUTH2" exactly (credentials_mutate.go:248).
+			// Without this, `--type oauth2` skipped the server's OAUTH2 branch
+			// and came back `400 value is required` — an error naming a flag the
+			// operator deliberately omitted rather than the spelling that
+			// actually caused it.
+			//
+			// Gated on the type, not on oauthApp != nil: the legacy form
+			// `--type oauth2 --value <token>` sets no --oauth-* flag, so
+			// readOAuthAppFlags returns nil by design and the lowercase
+			// spelling used to reach the server unchanged — leaving exactly
+			// the confusing 400 this block exists to prevent.
+			credType = "OAUTH2"
+		}
+
 		if valueStdin {
 			scanner := bufio.NewScanner(os.Stdin)
 			if scanner.Scan() {
@@ -302,11 +347,10 @@ var credCreateCmd = &cobra.Command{
 			value = v
 		}
 
-		if value == "" {
+		if value == "" && oauthApp == nil {
 			return cli.WithExitCode(
 				fmt.Errorf("--value or --value-stdin is required"), cli.ExitValidation)
 		}
-
 		// Normalize the provider to the registry's spelling before it is
 		// stored: the sidecar looks the provider column up case-sensitively,
 		// so a credential created as "openai_compat" would be routed by nothing.
@@ -324,9 +368,17 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		body := map[string]interface{}{
-			"name":  name,
-			"type":  credType,
-			"value": value,
+			"name": name,
+			"type": credType,
+		}
+		if oauthApp == nil {
+			body["value"] = value
+		} else {
+			// No "value" key at all rather than an empty one: the server
+			// substitutes its own PENDING sentinel for an OAUTH2 row with no
+			// value, and inventing a placeholder here would put a second
+			// spelling of "not configured yet" into the column.
+			oauthApp.apply(body)
 		}
 		if provider != "" {
 			body["provider"] = provider
@@ -383,11 +435,18 @@ var credCreateCmd = &cobra.Command{
 		// is an SSRF surface the probe path is not built for. Saying so is the
 		// honest answer; running no check and printing "validated successfully"
 		// would be a green tick over a test that never happened.
-		if providerCarriesEndpoint {
+		switch {
+		case oauthApp != nil:
+			// Nothing to probe: the row holds an OAuth app's client id, not a
+			// token. The token arrives when the flow completes, and the probe
+			// that would check it has nothing to send until then.
+
+		case providerCarriesEndpoint:
 			cli.PrintWarning(fmt.Sprintf(
 				"%s is not validated on create — Crewship does not dial an operator-supplied endpoint. The first agent call through the sidecar is the test.",
 				endpointSpec.ID))
-		} else {
+
+		default:
 			valid, errMsg := testCredentialValue(client, provider, credType, value)
 			if valid {
 				cli.PrintSuccess("Key validated successfully")
@@ -421,6 +480,13 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		cli.PrintSuccess(fmt.Sprintf("Credential created: %s (%s)", created.Name, created.ID))
+		if oauthApp != nil {
+			// The row exists and holds nothing yet. Saying "created" and
+			// stopping would leave an operator with a credential that fails
+			// every agent run until they discover the second half themselves.
+			fmt.Printf("Status is PENDING until the OAuth flow completes. Finish it with:\n"+
+				"  crewship oauth connect %s\n", created.Name)
+		}
 		return nil
 	},
 }
