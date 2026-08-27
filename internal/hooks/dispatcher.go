@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -31,7 +32,20 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 
 	hooks, err := ListByEvent(ctx, db, ec.WorkspaceID, ec.CrewID, event)
 	if err != nil {
-		return fmt.Errorf("hooks: dispatch: %w", err)
+		// This is an infrastructure failure — the lookup of "which hooks
+		// exist for this event" didn't complete — not a policy decision
+		// by any hook. It must never be indistinguishable from a real
+		// *BlockedError: every call site treats a non-nil Dispatch error
+		// as "a hook blocked this", and a transient DB error is not that.
+		//
+		// We apply the same fail-open the blocking pass below already
+		// documents for a broken handler ("we treat 'handler broken' as
+		// 'fail open' so a buggy webhook can't wedge the platform") one
+		// step earlier: a broken lookup can't wedge the platform either.
+		// The failure is still surfaced — logged unconditionally and
+		// journaled best-effort — so it's observable, not swallowed.
+		dispatchLookupFailed(ctx, emitter, event, ec, err)
+		return nil
 	}
 
 	// Apply the Matcher filter once up-front so we can cheaply iterate the
@@ -115,6 +129,38 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+// dispatchLookupFailed records a ListByEvent failure. The slog line is
+// unconditional so the failure is observable even when emitter is nil or
+// the journal write itself can't land (e.g. the DB that just failed the
+// lookup is the same DB the journal would write to). The journal entry is
+// best-effort on top of that, for operators who watch the journal feed
+// rather than server logs.
+func dispatchLookupFailed(ctx context.Context, emitter journal.Emitter, event Event, ec EventContext, lookupErr error) {
+	slog.Default().Error("hooks: dispatch: hook lookup failed, failing open",
+		"event", string(event),
+		"workspace_id", ec.WorkspaceID,
+		"crew_id", ec.CrewID,
+		"err", lookupErr,
+	)
+	if emitter == nil {
+		return
+	}
+	_, _ = emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: ec.WorkspaceID,
+		CrewID:      ec.CrewID,
+		AgentID:     ec.AgentID,
+		MissionID:   ec.MissionID,
+		Type:        journal.EntryHookDispatchError,
+		Severity:    journal.SeverityWarn,
+		ActorType:   journal.ActorSystem,
+		Summary:     fmt.Sprintf("hook lookup failed for %s, failing open", event),
+		Payload: map[string]any{
+			"event": string(event),
+			"error": lookupErr.Error(),
+		},
+	})
 }
 
 // runHandler dispatches to the correct backend based on HandlerKind.

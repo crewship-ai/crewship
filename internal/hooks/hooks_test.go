@@ -959,3 +959,135 @@ func TestSubagentHandlerConfigured(t *testing.T) {
 		t.Errorf("outcome: %s", res.Outcome)
 	}
 }
+
+// ---------------------------------------------------------------------
+// Dispatch: ListByEvent (infra) failure must be indistinguishable from
+// "no hooks registered", never from "a hook blocked this".
+// ---------------------------------------------------------------------
+
+// TestDispatchDistinguishesInfraErrorFromBlock is table-driven across the
+// two causes Dispatch can return a non-nil-vs-nil verdict for: a broken
+// hook lookup (infrastructure) and a blocking hook actually saying Block
+// (policy). A caller — orchestrator_run.go's pre_agent_start gate chief
+// among them — treats any non-nil Dispatch error as "a hook blocked this
+// run". Before the fix, a closed/broken DB during ListByEvent produced a
+// plain wrapped error here too, so a transient SQLite hiccup was reported
+// to users as a hook blocking their run, which is false.
+func TestDispatchDistinguishesInfraErrorFromBlock(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
+
+	t.Run("ListByEvent failure fails open and is journaled, not swallowed", func(t *testing.T) {
+		db := openTestDB(t)
+		// Close the DB so the lookup itself fails the way a real infra
+		// hiccup would — QueryContext returns sql.ErrConnDone rather
+		// than a normal "no rows" result. This must NOT stop the
+		// caller: Dispatch must fail open like the documented handler
+		// fail-open below it in the same function.
+		if err := db.Close(); err != nil {
+			t.Fatalf("close db: %v", err)
+		}
+
+		rec := &recordingEmitter{}
+		err := Dispatch(context.Background(), db, rec, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		if err != nil {
+			t.Fatalf("infra error must fail open (nil), got: %v", err)
+		}
+
+		// It must still be observable — not silently swallowed.
+		var sawDispatchError bool
+		for _, e := range rec.entries {
+			if e.Type == journal.EntryHookDispatchError {
+				sawDispatchError = true
+				if e.Severity != journal.SeverityWarn {
+					t.Errorf("dispatch error entry severity = %s, want warn", e.Severity)
+				}
+			}
+		}
+		if !sawDispatchError {
+			t.Errorf("expected a hook.dispatch_error journal entry, got types=%v", rec.typesSeen())
+		}
+	})
+
+	t.Run("a genuine blocking hook still stops the caller", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+		ctx := context.Background()
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(503)
+		}))
+		defer ts.Close()
+
+		if _, err := Register(ctx, db, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": ts.URL},
+			Blocking:      true,
+			Enabled:       true,
+		}, false); err != nil {
+			t.Fatal(err)
+		}
+
+		rec := &recordingEmitter{}
+		err := Dispatch(ctx, db, rec, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		if err == nil {
+			t.Fatal("expected a *BlockedError, got nil")
+		}
+		var be *BlockedError
+		if !errors.As(err, &be) {
+			t.Fatalf("expected *BlockedError, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("a caller can tell the two apart programmatically", func(t *testing.T) {
+		// Infra error: Dispatch returns nil, so `err != nil` (the check
+		// every call site uses) is false — the caller proceeds. No
+		// *BlockedError is ever produced from a lookup failure.
+		db := openTestDB(t)
+		if err := db.Close(); err != nil {
+			t.Fatalf("close db: %v", err)
+		}
+		infraErr := Dispatch(context.Background(), db, &recordingEmitter{}, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		var be *BlockedError
+		if errors.As(infraErr, &be) {
+			t.Fatal("an infra lookup error must never present as *BlockedError")
+		}
+		if infraErr != nil {
+			t.Fatalf("an infra lookup error must present as nil, got: %v", infraErr)
+		}
+
+		// Block: Dispatch returns non-nil and errors.As recovers the
+		// concrete *BlockedError — this is the one case a call site
+		// should treat as "stop".
+		db2 := openTestDB(t)
+		defer db2.Close()
+		ctx := context.Background()
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(503)
+		}))
+		defer ts.Close()
+		if _, err := Register(ctx, db2, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": ts.URL},
+			Blocking:      true,
+			Enabled:       true,
+		}, false); err != nil {
+			t.Fatal(err)
+		}
+		blockErr := Dispatch(ctx, db2, &recordingEmitter{}, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		if !errors.As(blockErr, &be) {
+			t.Fatalf("expected *BlockedError, got %T: %v", blockErr, blockErr)
+		}
+	})
+}

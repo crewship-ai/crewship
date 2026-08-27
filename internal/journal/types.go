@@ -245,6 +245,13 @@ const (
 	// Hooks
 	EntryHookFired   EntryType = "hook.fired"
 	EntryHookBlocked EntryType = "hook.blocked"
+	// EntryHookDispatchError fires when Dispatch's lookup of the hooks
+	// registered for an event fails before any hook could even be
+	// evaluated — a DB error, not a policy decision. Kept distinct from
+	// hook.fired/hook.blocked so operators (and the journal feed) can
+	// tell "we couldn't check for hooks" apart from "a hook fired" or "a
+	// hook blocked this". Severity is warn. Payload: event, error.
+	EntryHookDispatchError EntryType = "hook.dispatch_error"
 
 	// Automations — workspace-scoped rules that turn a journal event into a
 	// deferred routine run (`automations` table, internal/automation). Both
