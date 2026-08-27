@@ -349,6 +349,16 @@ func TestRestoreBackup_PreRekeyBundleSurfacesTheSkew(t *testing.T) {
 // bundle taken and restored on the CURRENT schema must report zero. If this
 // ever goes non-zero, some table is losing a column on an ordinary restore
 // today and the name in the failure message is where to look.
+//
+// Read it for what it is, though, and do not over-trust it. DumpWorkspace
+// emits `SELECT *`, so on a target carrying the same migrations the column
+// sets match by construction — this cannot fail unless the DUMP side starts
+// synthesising a key that is not a real column (a computed field, a rename
+// applied at dump time). That is a genuine regression to guard, and it is the
+// only one this guards. It is not a survey of the schema: only the tables
+// seedCovWorkspace populates carry rows, and a table with no rows is never
+// walked. "Zero drops today" is therefore a statement about the dumper, not
+// evidence that every table in BackupTables round-trips cleanly.
 func TestRestoreBackup_SameSchemaRoundTripDropsNothing(t *testing.T) {
 	ctx := context.Background()
 

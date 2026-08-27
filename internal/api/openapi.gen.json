@@ -4330,7 +4330,7 @@
             "type": "string"
           },
           "restored_ws": {
-            "type": "boolean"
+            "type": "string"
           },
           "rows_inserted": {
             "type": "integer"

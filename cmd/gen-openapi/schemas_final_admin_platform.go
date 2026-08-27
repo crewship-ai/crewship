@@ -48,7 +48,11 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	}), "error": str()})
 	backupCreate := object(map[string]any{"path": str(), "size_bytes": integer(), "payload_sha256": str(), "format_version": integer(), "scope": str(), "scope_level": str(), "created_at": str(), "encrypted": boolean()})
 	backupRotate := object(map[string]any{"deleted": array(str()), "dry_run": boolean()})
-	backupRestore := object(map[string]any{"manifest": object(map[string]any{}), "restored_ws": boolean(), "restored_workspace_id": str(), "crews_count": integer(), "crews_restored": integer(), "rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": array(str()), "security_level_clamped": integer(), "security_level_clamps": array(object(map[string]any{})),
+	// restored_ws is the restored workspace's SLUG — it is what the CLI
+	// prints as `workspace=`, and RestoreResult.RestoredWs is a string.
+	// It was declared boolean here, so every client generated from this
+	// spec typed the one field an operator actually reads wrong.
+	backupRestore := object(map[string]any{"manifest": object(map[string]any{}), "restored_ws": str(), "restored_workspace_id": str(), "crews_count": integer(), "crews_restored": integer(), "rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": array(str()), "security_level_clamped": integer(), "security_level_clamps": array(object(map[string]any{})),
 		// Schema skew: values discarded because the bundle named a column
 		// this instance's schema does not have (#2034). Spelled out rather
 		// than left as a bare object — the whole point of the field is that
