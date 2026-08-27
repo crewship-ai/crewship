@@ -137,6 +137,51 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   is the designed failure: a span that renders as a shell call is recoverable,
   a span that lies about what it touched is not.
 
+- **The Go toolchain pins are now checked against each other on every PR, and
+  the image can no longer download a compiler behind their back (#2064,
+  partial).** Thirteen files name a Go version and nothing verified they
+  agreed. One of the thirteen is the root `Dockerfile`, which is built by
+  `release.yml` and `nightly.yml` and by nothing that runs on a pull request —
+  so `FROM golang:<ver>`, the compiler for the shipped binary and a line
+  Dependabot bumps on its own, was the one pin structurally beyond reach of
+  the checks meant to catch it. #2060 was that bump: taken alone it would have
+  released binaries built by 1.27.0 while every CI pin and the vuln gate
+  stayed on 1.26.6. It was caught by hand.
+
+  `scripts/go-toolchain-pin.sh` parses `go.mod`'s `toolchain` directive, the
+  Dockerfile's `FROM` tag, `GO_VERSION` in ten workflows and the literal
+  `go-version` in `codeql.yml`, and fails naming the file and line of every
+  disagreement. It runs in CI's `Shell` job, which a Dockerfile-only PR does
+  reach — `paths-ignore` never covered `Dockerfile`. `GO_VERSION` is in the
+  set deliberately: `golangci-lint` and `govulncheck` are pinned *to* it, so a
+  CI toolchain that drifts from the image is the vuln gate grading a compiler
+  that is not the one shipping. `go.mod`'s `go` directive is deliberately
+  outside it — the language floor is a separate promise and stays at 1.26.
+
+  The Dockerfile now states `ENV GOTOOLCHAIN=local` in its Go stage. The
+  official golang-alpine images already default to it, so nothing changes
+  today; the point is that an inherited upstream default is a fact that
+  happens to hold rather than an invariant, and written down it survives a
+  base-image swap and can be checked. `local` and not a version literal:
+  `local` makes the `FROM` tag the sole authority and never downloads, where
+  the default `auto` fetches whatever `go.mod`'s `toolchain` line names, and a
+  literal `GOTOOLCHAIN=go1.27.0` would be one more copy to keep in sync that
+  fails backwards — a forgotten update would silently *download* the old
+  toolchain and undo a base-image bump with every check still green.
+
+  Worth stating because it is the reason the check is static: under `local`
+  the `toolchain` directive is ignored outright, so `toolchain go1.27.1`
+  against a `golang:1.27.0-alpine` base builds with 1.27.0 and exits 0. Only
+  the `go` directive can fail a build, and that one stays at 1.26. No image
+  build, not even nightly's, would ever report this drift — it has to be read
+  off the source.
+
+  This closes the specific hazard from #2060, not the general one. A
+  PR-triggered image build — the other half of #2064 — remains open, so
+  breakage that only an actual `docker build` can surface (a missing `COPY`
+  as in #849/#886, a `pnpm prisma generate` regression, the `web/out` release
+  gate from #1567) is still first caught by nightly.
+
 - `crewship onboarding proposal create --agent "Name:Role"` (repeatable)
   names a bespoke roster, so the CLI can finally reach the branch the Guide
   actually takes. `--template-slug` is no longer required — give one or the
