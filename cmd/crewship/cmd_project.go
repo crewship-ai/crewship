@@ -160,13 +160,14 @@ var projectGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/projects/" + args[0])
+		// getByRef issues ONE request when args[0] is a real CUID (the
+		// existence check IS the fetch) and falls back to the LIST scan for
+		// the slug this command's help has always advertised (#2086).
+		resp, _, err := getByRef(client, "/api/v1/projects/", args[0], resolveProjectID)
 		if err != nil {
 			return err
 		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
-		}
+		// cli.ReadJSON closes the body — same as every other getByRef caller.
 
 		var p projectItem
 		if err := cli.ReadJSON(resp, &p); err != nil {

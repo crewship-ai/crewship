@@ -697,6 +697,52 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   the text survives, and a test pins that difference rather than leaving it to
   be rediscovered.
 
+- **`crewship agent logs` could not print a log line for any agent.** It kept a
+  second reader of its own that decoded the route's JSON *array* into a
+  `map[string]interface{}`, so every invocation died on `cannot unmarshal array
+  into Go value of type map[string]interface {}`; it also sent its line count as
+  `tail`, a parameter the handler has never read (it is `limit`), and printed
+  the container's stdout unsanitised. The duplicate is gone — the subcommand now
+  delegates to the same `runAgentLogs` behind the top-level `crewship logs`.
+  Consolidating them exposed a shared ceiling: the slug scan behind *every*
+  agent lookup read `GET /api/v1/agents` with no `limit`, so it saw only the
+  route's default first 100 rows and answered "agent not found" for an agent
+  that exists past them. The scan now sends the route's own ceiling (`limit=500`),
+  and a CUID goes back to the single-resource `GET /api/v1/agents/{id}`, which
+  has no ceiling at all — so `agent runs`, `agent get` and `run` are uncapped
+  too, not just the log commands. `GET /api/v1/crews` paginates identically and
+  the crew resolver had the same unqualified read, so it got the same ceiling
+  lifted; a workspace past **500** still needs an id rather than a slug, since
+  500 is where both routes stop. (`GET /api/v1/projects` has no `LIMIT` at all,
+  so the project resolver needs nothing.)
+
+- **`crewship project get`, `project milestone list|create` and
+  `skill proposed list|approve|reject` refused the slug their own help
+  advertised.** Each pasted the argument straight into a route that keys on the
+  id, so the documented invocation came back "not found" while the CUID form
+  worked. All of them now resolve slug-or-id through the shared reader, which
+  costs one request for a CUID and carries the "Did you mean" / "Available:"
+  hints on a miss.
+
+- **`crewship memory status` reported failure as success.** A scope that could
+  not be opened printed SQLite's own `unable to open database file (14)` — a
+  string that names neither the path nor the cause — and the command returned
+  zero regardless, so `crewship memory status || handle_it` was dead code in
+  every script that had it. Failures now exit 3 when no scope could be read, and
+  the message names the directory it tried and which of the causes it was: the
+  path is missing, a file sits where the directory belongs, or the directory is
+  there and unreadable. That last one needed a real probe — `os.Stat` succeeds
+  on a directory the caller cannot enter and reports `IsDir()`, which is exactly
+  the uid-1001 container case the wording describes. `memory reindex` now
+  creates the index directory it is asked to build in, because "build an index
+  with `crewship memory reindex`" was advice that looped back into the identical
+  error; it still refuses to invent a missing *base* path, since that is a typo,
+  and answers 3 there like `status` does. Where it cannot create the directory —
+  a base path that exists but is not writable — it now says so and names the
+  parent, rather than dropping the `mkdir` error and letting the check behind it
+  report the directory as merely missing, which is the wording that advises
+  running `crewship memory reindex`: the command that had just failed.
+
 - **A port-expose URL on Colima returned a bare `502` and explained nothing.**
   The capability-URL proxy dials the crew container on its Docker bridge IP,
   which is reachable only where crewshipd shares a network namespace with

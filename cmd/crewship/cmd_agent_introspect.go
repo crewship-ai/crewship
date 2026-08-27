@@ -94,51 +94,17 @@ var agentStopCmd = &cobra.Command{
 	},
 }
 
+// agentLogsCmd is an alias for the top-level `crewship logs`, not a second
+// implementation of it. It kept its own reader until #2086, which decoded the
+// route's array response into a map and therefore failed on every agent; see
+// runAgentLogs in cmd_logs.go for what the duplicate was getting wrong.
 var agentLogsCmd = &cobra.Command{
 	Use:   "logs <slug-or-id>",
 	Short: "Show agent container logs",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		if err := requireWorkspace(); err != nil {
-			return err
-		}
-
-		client := newAPIClient()
-		agentID, err := resolveAgentID(client, args[0])
-		if err != nil {
-			return err
-		}
-
 		tail, _ := cmd.Flags().GetInt("tail")
-		path := "/api/v1/agents/" + agentID + "/logs"
-		if tail > 0 {
-			path += fmt.Sprintf("?tail=%d", tail)
-		}
-
-		resp, err := client.Get(path)
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
-		}
-
-		var result map[string]interface{}
-		if err := cli.ReadJSON(resp, &result); err != nil {
-			return err
-		}
-
-		f := newFormatter()
-		return f.AutoHuman(result, func() {
-			if logs, ok := result["logs"].(string); ok {
-				fmt.Print(logs)
-			} else {
-				fmt.Println("No logs available.")
-			}
-		})
+		return runAgentLogs(cmd, args[0], tail, false)
 	},
 }
 

@@ -41,7 +41,9 @@ func TestLogsFollow_MachineFormatIsNDJSONNotArray(t *testing.T) {
 	for _, format := range []string{"json", "ndjson", "yaml"} {
 		t.Run(format, func(t *testing.T) {
 			s := covStubCli9(t)
-			s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+			// Both halves of the resolve: the LIST a slug scans, and the
+			// single-resource GET the crew id is read from (#2106).
+			covStubLogsAgents(s)
 			s.OnGet("/api/v1/agents/cagentaaaaaaaaaaaaaaaa/logs", clitest.JSONResponse(200, backlog))
 
 			covSetFlagCli9(t, logsCmd, "lines", "25")
@@ -121,7 +123,9 @@ func TestLogsFollow_MachineFormatIsNDJSONNotArray(t *testing.T) {
 // is correct and must not regress into NDJSON.
 func TestLogs_NoFollow_MachineFormatStaysAnArray(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, covLogsAgents()))
+	// Both halves of the resolve: the LIST a slug scans, and the
+	// single-resource GET the crew id is read from (#2106).
+	covStubLogsAgents(s)
 	s.OnGet("/api/v1/agents/cagentaaaaaaaaaaaaaaaa/logs", clitest.JSONResponse(200, []map[string]string{
 		{"ts": "2026-06-10T10:00:00Z", "level": "info", "agent": "viktor", "event": "output", "content": "only"},
 	}))
