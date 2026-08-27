@@ -62,12 +62,20 @@ that one case, on your word that no crewshipd is running. It does not override
 a database that is definitely in use.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dd, err := database.DefaultDataDir()
+		// Same gate as the rest of `db`: this rewrites the migration ledger in
+		// place, and doing that to the wrong database is not something a
+		// stderr note makes recoverable.
+		target, err := requireLocalDB(cmd, "crewship db repair-ledger", "")
 		if err != nil {
-			return fmt.Errorf("resolve data dir: %w", err)
+			return err
 		}
-		dbPath := dd.DatabasePath()
-		warnDBLocalOnly(dbPath)
+		dbPath := target.Path
+		// Same reason as migration-status: the resolver creates nothing, so a
+		// path inside a missing data dir must be reported as "no Crewship
+		// database here", not as the driver's "unable to open database file".
+		if err := target.mustExist(noCrewshipDatabaseAt(dbPath)); err != nil {
+			return err
+		}
 
 		// Read-only inspection is safe against a live server; writing is not.
 		// The guard therefore sits between the plan and the apply, so
@@ -84,10 +92,7 @@ a database that is definitely in use.`,
 		if errors.Is(err, database.ErrNoLedger) {
 			// Almost always the wrong directory rather than a corrupt file, so
 			// lead with that instead of the driver's "no such table".
-			return fmt.Errorf(
-				"there is no Crewship database at %s (no migration ledger in it) — "+
-					"check CREWSHIP_DATA_DIR, or run this on the host that owns the database",
-				dbPath)
+			return errors.New(noCrewshipDatabaseAt(dbPath))
 		}
 		if err != nil {
 			return err

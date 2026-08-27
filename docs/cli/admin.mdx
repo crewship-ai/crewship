@@ -1,6 +1,6 @@
 ---
 title: "Admin"
-description: "Host-only operator commands that bypass the HTTP API and write directly to the local SQLite database. The recovery surface for when a user (typically you) cannot log in."
+description: "Host-side operator commands on the database file on this machine. The recovery surface for when a user (typically you) cannot log in — plus list-users, which reads the server the CLI targets."
 icon: "key-round"
 stability: experimental
 tag: Experimental
@@ -9,33 +9,84 @@ tag: Experimental
 {/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 # crewship admin
 
-`cmd/crewship/cmd_admin.go` exposes the **operator-on-the-host recovery surface**. Every subcommand under `admin` opens the local SQLite database directly (no HTTP, no auth token) — the server doesn't even need to be running. Use these when a user is locked out of the UI.
+`cmd/crewship/cmd_admin.go` exposes the **operator-on-the-host recovery surface**. The write subcommands under `admin` open the SQLite database file on this machine directly (no HTTP, no auth token) — the server doesn't even need to be running. Use these when a user is locked out of the UI.
 
-The "credential" for these commands is **shell access to the host**. That matches what GitLab (`gitlab-rake gitlab:password:reset`), Gitea (`gitea admin user change-password`), Nextcloud (`occ user:resetpassword`), and Mattermost (`mmctl user change-password`) all do — if you can SSH to the box, you ARE the admin.
+The "credential" for those commands is **shell access to the host**. That matches what GitLab (`gitlab-rake gitlab:password:reset`), Gitea (`gitea admin user change-password`), Nextcloud (`occ user:resetpassword`), and Mattermost (`mmctl user change-password`) all do — if you can SSH to the box, you ARE the admin.
 
 ```bash
 crewship admin <subcommand> [flags]
 ```
 
-<Note>
-  **The credential for these commands is shell access to the host** — there
-  is no `crewship login` token. Requirements:
+## Which database am I talking to?
 
-  - Read+write access to the data directory (default `~/.crewship`). The
-    binary opens `~/.crewship/crewship.db` directly via `openAdminDB`.
-  - The `crewship` binary must run on the **same host** as the data directory.
+`admin list-users` reads the **server** the CLI targets. Everything else in
+the local-only group reads or writes the **database file on this host**.
+
+Those are two different things, and until [#2086](https://github.com/crewship-ai/crewship/issues/2086)
+the CLI conflated them: it resolved `~/.crewship/crewship.db` and ignored
+`--server` / `CREWSHIP_SERVER` / `--profile` entirely, so pointing the CLI at
+a populated server and running `admin list-users` printed
+
+```
+EMAIL  NAME  CREATED  LOCKED  FAILS  ROLES
+(no users — run `crewship seed` or hit POST /api/v1/bootstrap)
+```
+
+and exited **0**.
+
+The rule now:
+
+- **`list-users` uses `GET /api/v1/admin/users`** on the targeted server,
+  scoped to the current workspace. It needs a login — **always**, not only when
+  something names a server. It is the one verb here that is not gated: it
+  branches on `--local` alone, so on a host with no CLI config and no
+  `CREWSHIP_SERVER` it still goes to the server and still fails with "not
+  logged in", where the pre-#2086 build printed the table. Deliberate — a
+  fallback to the local file on a failed login would answer the server's
+  question from a file that may belong to another instance. `--local` is the
+  old behaviour, asked for explicitly, and both failure paths say so.
+- **Every other local-only subcommand refuses to run when a server is named**,
+  unless you pass `--local`. The refusal names the server, names the file it
+  would otherwise have touched, and names the flag. With nothing naming a
+  server they run unchanged.
+- **A server on `localhost` is not an exemption.** crewshipd routinely runs
+  with its own `DATABASE_URL` — every dev clone uses `file:./crewship.db` —
+  so "same host" tells you nothing about "same database".
+
+```bash
+# You mean the file on this host. Say so.
+crewship admin reset-password --email admin@example.com --local
+
+# Instance-wide user list with the lockout columns, read from the file.
+crewship admin list-users --local
+```
+
+<Note>
+  **The credential for the local-only commands is shell access to the host** —
+  there is no `crewship login` token. Requirements:
+
+  - Read+write access to the database file: `DATABASE_URL` when set, otherwise
+    `<data dir>/crewship.db` (default `~/.crewship`).
+  - The `crewship` binary must run on the **same host** as that file.
   - The host's filesystem permissions are the authentication.
+
+  `--local` is what tells the CLI you mean that file rather than the server it
+  is configured for. Every command prints the path it resolved.
 </Note>
+
+| Flag | Applies to | Description |
+|---|---|---|
+| `--local` | every `admin` subcommand (persistent) | Act on the database file on this host, not the server the CLI targets. |
 
 ## Subcommands
 
 | Command | Purpose |
 |---|---|
-| `reset-password` | Reset a user's password (interactive prompt or `--password` / `--password-stdin`). |
-| `list-users` | List every user in the local database. |
-| `promote` | Promote a user to a workspace role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). |
-| `invalidate-sessions` | Force-logout every active session for a user (no password change). |
-| `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. |
+| `reset-password` | Reset a user's password (interactive prompt or `--password` / `--password-stdin`). Local-only; needs `--local` when a server is named. |
+| `list-users` | List the users of the current workspace on the server the CLI targets. `--local` lists every user in the instance from the database file, with the lockout columns. |
+| `promote` | Promote a user to a workspace role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). Local-only; needs `--local` when a server is named. The server-side equivalent is `crewship workspace member role`. |
+| `invalidate-sessions` | Force-logout every active session for a user (no password change). Local-only; needs `--local` when a server is named. |
+| `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. Local-only; needs `--local` when a server is named. |
 | `prune-legacy` | Remove orphaned pre-C1 crew docker resources that block agents from starting. **HTTP-backed — needs a running server + login** (the one exception in this group). |
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
 | `health` | Instance vitals: uptime, database liveness, disk headroom on the data volume, live log level, and where the encryption key came from. **HTTP-backed — needs a running server + login.** |
@@ -78,13 +129,13 @@ Rotate a user's password.
 
 ```bash
 # Interactive: stdin prompt with hidden input (no shell-history leak)
-crewship admin reset-password --email admin@example.com
+crewship admin reset-password --email admin@example.com --local
 
 # Scripted: pipe the new password on stdin (CI-friendly)
-echo 's3cret!' | crewship admin reset-password --email admin@example.com --password-stdin
+echo 's3cret!' | crewship admin reset-password --email admin@example.com --password-stdin --local
 
 # Argv (NOT recommended — visible in shell history and ps output)
-crewship admin reset-password --email admin@example.com --password 's3cret!'
+crewship admin reset-password --email admin@example.com --password 's3cret!' --local
 ```
 
 | Flag | Required | Description |
@@ -103,18 +154,44 @@ crewship admin reset-password --email admin@example.com --password 's3cret!'
 
 ## `crewship admin list-users`
 
-Dump every row in the `users` table, ordered by `created_at ASC`. Output columns: EMAIL, NAME, CREATED (`created_at`), LOCKED (derived from `locked_until`), FAILS (`failed_login_count`), ROLES (`role@workspace-slug`, comma-joined across workspaces).
+Two different answers, deliberately:
+
+**Default — the server.** `GET /api/v1/admin/users` on the server the CLI
+targets, scoped to the current workspace (ADMIN+). Columns: EMAIL, NAME,
+CREATED, ROLE (`role@workspace-slug`). Requires a login.
+
+**`--local` — the database file on this host.** Every row in `users` ordered
+by `created_at ASC`, across every workspace. Columns: EMAIL, NAME, CREATED,
+LOCKED (derived from `locked_until`), FAILS (`failed_login_count`), ROLES
+(`role@workspace-slug`, comma-joined across workspaces).
 
 ```bash
-crewship admin list-users
-crewship admin list-users --locked-only
+crewship admin list-users                        # the server's workspace
+crewship admin list-users --local                # this host's database file
+crewship admin list-users --locked-only --local  # who is stuck?
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--locked-only` | `false` | Filter to currently locked-out accounts only. Useful when triaging "who's stuck?" after a brute-force probe. |
+| `--locked-only` | `false` | Filter to currently locked-out accounts only. Useful when triaging "who's stuck?" after a brute-force probe. **Requires `--local`** — the API does not return lockout state, and filtering on a field we do not have would print "no locked-out users" for a workspace full of them. Without `--local` the command exits 2 and says so. |
+| `--local` | `false` | Read the database file on this host instead of the server. |
 
-The lockout column reflects the `users.locked_until` timestamp set by the failed-login throttle — `list-users --locked-only` followed by `reset-password` is the canonical "unlock this user" pair.
+Lockout state lives only in the database file: `locked_until` and
+`failed_login_count` are not fields on `GET /api/v1/admin/users`. So the
+canonical "unlock this user" pair is run on the database host —
+`list-users --locked-only --local` followed by `reset-password --local`. The
+server-backed listing prints a note saying as much, so a clean table is
+never mistaken for "nobody is locked out".
+
+That note goes to **stderr**, along with the "which database" note on the
+`--local` path. Stdout carries the table and nothing else, so
+`crewship admin list-users | awk 'NR>1 {print $1}'` yields addresses.
+
+That holds for an empty workspace too: stdout is the header row alone and
+`(no users in this workspace)` is printed on stderr, so the same pipe yields
+nothing rather than a line of prose. (The `--local` listing keeps its own
+`(no users — run 'crewship seed' …)` on stdout — it is the example output
+shown in the [admin CLI guide](/guides/admin-cli).)
 
 ---
 
@@ -123,9 +200,15 @@ The lockout column reflects the `users.locked_until` timestamp set by the failed
 Grant a workspace role to an existing user. Roles ascend `VIEWER` < `MEMBER` < `MANAGER` < `ADMIN` < `OWNER`; the command updates the user's existing row in `workspace_members` (the user must already be a member — a non-member errors with `user is not a member of workspace`).
 
 ```bash
-crewship admin promote --email admin@example.com --role OWNER
-crewship admin promote --email lead@example.com --role ADMIN --workspace acme
+crewship admin promote --email admin@example.com --role OWNER --local
+crewship admin promote --email lead@example.com --role ADMIN --workspace acme --local
 ```
+
+This is not a duplicate of `crewship workspace member role`, which is the
+server-side way to do the same thing. That path enforces the role ladder
+against *your* role and needs a session — so it cannot mint the first OWNER,
+and it is unavailable to the operator who is locked out. When the CLI names a
+server, `admin promote` refuses and points at both options.
 
 | Flag | Required | Description |
 |---|---|---|
@@ -142,7 +225,7 @@ This is the post-`init` step for bootstrapping a second admin: the first user fr
 Force-logout every active session for one user **without** changing their password. The user can still sign in normally afterwards — they just have to re-authenticate on every device they were already on.
 
 ```bash
-crewship admin invalidate-sessions --email user@example.com
+crewship admin invalidate-sessions --email user@example.com --local
 ```
 
 | Flag | Required | Description |
@@ -164,9 +247,9 @@ Each revoked row is stamped `revoked_reason='admin_invalidate'` so the audit tra
 Forensic read of `user_sessions` for one user — mirrors [`crewship session list`](/cli/session) but for **arbitrary** users (the user-side command is self-only). Admin-only via direct DB access.
 
 ```bash
-crewship admin sessions list --email user@example.com
-crewship admin sessions list --email user@example.com --active-only
-crewship admin sessions list --email user@example.com --limit 200
+crewship admin sessions list --email user@example.com --local
+crewship admin sessions list --email user@example.com --active-only --local
+crewship admin sessions list --email user@example.com --limit 200 --local
 ```
 
 | Flag | Required | Default | Description |
@@ -174,6 +257,7 @@ crewship admin sessions list --email user@example.com --limit 200
 | `--email` | yes | | Email of the user whose sessions to list. |
 | `--active-only` | no | `false` | Filter to non-revoked, non-expired rows (matches what `crewship session list` shows the user themselves). |
 | `--limit` | no | `50` | Row cap. Useful for users with hundreds of historic sessions. |
+| `--local` | when a server is named | `false` | Read the database file on this host. There is no HTTP route for this: an endpoint that enumerates any user's session inventory would be a new surface on the exact table an attacker wants, and this command's audience already has shell access. |
 
 Output columns: ID, STATUS (derived from `revoked_at` + `expires_at`; revoked rows show `revoked:<reason>`), CREATED, LAST USED (`last_used_at`), EXPIRES, IP, UA (`user_agent`). Sorted `created_at DESC`. A typo'd email reports `no user with email <addr>` rather than silently returning zero rows.
 

@@ -63,6 +63,9 @@ func newAdminCovCmd(runE func(*cobra.Command, []string) error) (*cobra.Command, 
 	c.Flags().Bool("locked-only", false, "")
 	c.Flags().String("role", "", "")
 	c.Flags().String("workspace", "", "")
+	// Declared on `admin` persistently in production; declared here because a
+	// bare test command has no parent to inherit it from.
+	c.Flags().Bool("local", false, "")
 	buf := new(bytes.Buffer)
 	c.SetOut(buf)
 	c.SetErr(new(bytes.Buffer))
@@ -240,20 +243,23 @@ func TestAdminInvalidateSessions_UnknownEmail(t *testing.T) {
 	}
 }
 
-// ─── openAdminDB resolution ─────────────────────────────────────────
+// ─── local-database resolution (resolveLocalDBTarget + openGatedLocalDB) ───
 
-func TestOpenAdminDB_MissingDatabaseFile(t *testing.T) {
+func TestLocalDBResolution_MissingDatabaseFile(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
 
 	cmd, _ := newAdminCovCmd(runAdminListUsers)
+	// --local: list-users reads the SERVER by default now, and this case is
+	// about how the local file is resolved.
+	cmd.SetArgs([]string{"--local"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "database not found at") {
 		t.Errorf("expected database-not-found error, got %v", err)
 	}
 }
 
-func TestOpenAdminDB_DataDirResolutionError(t *testing.T) {
+func TestLocalDBResolution_DataDirResolutionError(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	// Point the data dir under a regular FILE so MkdirAll fails.
 	dir := t.TempDir()
@@ -264,6 +270,7 @@ func TestOpenAdminDB_DataDirResolutionError(t *testing.T) {
 	t.Setenv("CREWSHIP_DATA_DIR", filepath.Join(blocker, "sub"))
 
 	cmd, _ := newAdminCovCmd(runAdminListUsers)
+	cmd.SetArgs([]string{"--local"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "resolve data dir") {
 		t.Errorf("expected resolve-data-dir error, got %v", err)
@@ -286,6 +293,9 @@ func TestAdminListUsers_TableAndLockoutFooter(t *testing.T) {
 	)
 
 	cmd, buf := newAdminCovCmd(runAdminListUsers)
+	// The lockout columns only exist on the local path — the API does not
+	// return locked_until / failed_login_count.
+	cmd.SetArgs([]string{"--local"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -313,6 +323,7 @@ func TestAdminListUsers_LockedOnlyAndEmpty(t *testing.T) {
 
 	// Empty DB → bootstrap hint.
 	cmd, buf := newAdminCovCmd(runAdminListUsers)
+	cmd.SetArgs([]string{"--local"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute empty: %v", err)
 	}
@@ -324,7 +335,7 @@ func TestAdminListUsers_LockedOnlyAndEmpty(t *testing.T) {
 		`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'fine@b.c', 'Fine', 'x')`,
 	)
 	cmd2, buf2 := newAdminCovCmd(runAdminListUsers)
-	cmd2.SetArgs([]string{"--locked-only"})
+	cmd2.SetArgs([]string{"--locked-only", "--local"})
 	if err := cmd2.Execute(); err != nil {
 		t.Fatalf("execute locked-only: %v", err)
 	}
@@ -535,7 +546,7 @@ func TestAdminSessionsList_LongUserAgentTruncated(t *testing.T) {
 
 func TestAdminCommands_OpenDBErrorPropagates(t *testing.T) {
 	// Broken data dir + no DATABASE_URL → every admin verb fails in
-	// openAdminDB with the same resolve error.
+	// openGatedLocalDB with the same resolve error.
 	t.Setenv("DATABASE_URL", "")
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "blocker")
@@ -565,9 +576,9 @@ func TestAdminCommands_OpenDBErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestOpenAdminDB_DefaultPathOpensExistingDB(t *testing.T) {
+func TestLocalDBResolution_DefaultPathOpensExistingDB(t *testing.T) {
 	// DATABASE_URL unset; a crewship.db exists under CREWSHIP_DATA_DIR →
-	// openAdminDB opens it via the default path. The empty schema then
+	// the gate resolves it via the default path. The empty schema then
 	// surfaces as a query error from list-users, proving the open ran.
 	t.Setenv("DATABASE_URL", "")
 	dataDir := t.TempDir()
@@ -576,6 +587,7 @@ func TestOpenAdminDB_DefaultPathOpensExistingDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd, _ := newAdminCovCmd(runAdminListUsers)
+	cmd.SetArgs([]string{"--local"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "list users") {
 		t.Errorf("expected list-users query error against empty schema, got %v", err)

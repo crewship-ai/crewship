@@ -326,9 +326,13 @@ before you replace it:
 2. **Restore the matching pre-migration snapshot** with the current binary:
 
 ```bash
-crewship db restore-snapshot --list     # show snapshots (newest first, with v<from>→v<to>)
-crewship db restore-snapshot            # restore the most recent, or
-crewship db restore-snapshot <file>.bak # restore a specific one
+crewship db restore-snapshot --list --local     # show snapshots (newest first, with v<from>→v<to>)
+crewship db restore-snapshot --local            # restore the most recent, or
+crewship db restore-snapshot <file>.bak --local # restore a specific one
+<Note>
+If your CLI is configured for a server (`--server`, `CREWSHIP_SERVER`, a profile, or a previous `crewship login`), `crewship db` refuses to run until you add **`--local`** — it acts on the database file on this host and cannot tell whether that server uses it. See [CLI: db](/cli/db).
+</Note>
+
 ```
 
 The restore **prompts for confirmation** before touching the database; pass

@@ -14,6 +14,10 @@ The scheduled runner ticks every 6h regardless; the trigger endpoint exists so o
   All endpoints require authentication and workspace scope. The trigger, approve, and reject endpoints require `OWNER` or `ADMIN`; the read-only diff and explain endpoints accept `MEMBER` or higher.
 </Note>
 
+<Note>
+  Each of these has a CLI form: [`crewship consolidate run`](/cli/consolidate) and [`crewship consolidate proposed explain|diff|approve|reject`](/cli/consolidate#crewship-consolidate-proposed). Note that no endpoint *lists* proposals — the id comes from `crewship inbox list --kind memory_consolidation`.
+</Note>
+
 ## Endpoints
 
 | Method | Endpoint | Purpose |

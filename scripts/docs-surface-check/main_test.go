@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -572,6 +573,98 @@ func TestBrokenProseLinksAcceptsRootAndTrailingSlash(t *testing.T) {
 	}
 }
 
+// Both directions have to be gated, and only one of them was. The nav→file pass
+// proves a declared id has a file behind it; a file nobody declared is
+// unreachable from the sidebar AND absent from llms.txt, so neither a reader
+// nor an agent can find it — and no gate said a word. `cli/onboarding`,
+// `api-reference/onboarding` and `manifest/page` shipped published and orphaned,
+// with the CLI page hiding all seven `onboarding` commands (#2086).
+func TestOrphanedPagesReportsFilesTheNavigationDoesNotDeclare(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/cli/page.mdx", "---\ntitle: Page\n---\n")
+	writeDocsPage(t, root, "docs/cli/onboarding.mdx", "---\ntitle: Onboarding\n---\n")
+	writeDocsPage(t, root, "docs/manifest/page.md", "# kind: Page\n")
+
+	orphans, reachable, err := orphanedPages(root, []string{"cli/page"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reachable != 3 {
+		t.Errorf("reachable = %d, want 3 — every non-allowlisted page must be required to appear in the navigation", reachable)
+	}
+	want := []string{"cli/onboarding", "manifest/page"}
+	if !slices.Equal(orphans, want) {
+		t.Errorf("orphanedPages() = %v, want %v", orphans, want)
+	}
+}
+
+// The allowlist is the whole reason the gate is enforceable: `prd/` and the
+// audit methodology are written for the repository, not the published site, so
+// a check that reported them would be turned off within a week.
+func TestOrphanedPagesExcusesTheDeliberatelyUnlistedTrees(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/audit-methodology.md", "# How the audits run\n")
+	writeDocsPage(t, root, "docs/prd/pages.md", "# Pages PRD\n")
+	writeDocsPage(t, root, "docs/prd/reports/release-1-0.md", "# Report\n")
+
+	orphans, reachable, err := orphanedPages(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orphans) != 0 {
+		t.Errorf("orphanedPages() = %v, want none — these are unlisted on purpose", orphans)
+	}
+	if reachable != 0 {
+		t.Errorf("reachable = %d, want 0 — allowlisted pages are not counted as navigation obligations", reachable)
+	}
+}
+
+// `foo.md` and `foo.mdx` are one page id, not two. Counting files rather than
+// ids reported the same orphan twice and inflated the population it claimed to
+// have checked — a gate that cannot count what it looked at is hard to believe
+// about what it found.
+func TestOrphanedPagesCountsPageIdsNotFiles(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/guides/dual.md", "# Dual\n")
+	writeDocsPage(t, root, "docs/guides/dual.mdx", "---\ntitle: Dual\n---\n")
+
+	orphans, required, err := orphanedPages(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if required != 1 {
+		t.Errorf("required = %d, want 1 — two files, one page id", required)
+	}
+	if !slices.Equal(orphans, []string{"guides/dual"}) {
+		t.Errorf("orphanedPages() = %v, want the id reported exactly once", orphans)
+	}
+}
+
+// The gate has to hold on the tree it ships with, like every other check here.
+// This is the assertion that was red before the three navigation entries were
+// added, and it is what keeps the next orphan from shipping.
+func TestRepositoryDocsHaveNoOrphanedPages(t *testing.T) {
+	root := filepath.Join("..", "..")
+	data, err := os.ReadFile(filepath.Join(root, "docs/docs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	orphans, reachable, err := orphanedPages(root, navigationPages(cfg.Navigation))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reachable == 0 {
+		t.Fatal("no pages examined; the walk did not reach the docs tree")
+	}
+	for _, page := range orphans {
+		t.Errorf("docs/%s is published but declared nowhere in docs/docs.json — unreachable from the sidebar and absent from llms.txt", page)
+	}
+}
+
 func writeDocsPage(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
@@ -637,5 +730,34 @@ func TestJSXHostileCodeSpansIgnoresFencedBlocksAndUnrelatedTags(t *testing.T) {
 	}
 	if len(offenders) != 0 {
 		t.Fatalf("jsxHostileCodeSpans() = %+v, want none", offenders)
+	}
+}
+
+func TestJSXHostileCodeSpansHandlesANestedFence(t *testing.T) {
+	root := t.TempDir()
+	// docs/guides/skills-authoring.mdx:80/:83 has this shape: a ```yaml sample
+	// opened inside an outer ```markdown block. A prefix toggle flips on the
+	// inner opener and reads the rest of the outer block as prose, so the
+	// wrapped span below gets reported even though it is sample content.
+	//
+	// The inner fence is deliberately left unclosed before the span. With a
+	// closed inner block the naive toggle lands back on "inside" by luck and
+	// the fixture proves nothing — the first version of this test did exactly
+	// that and passed against the very toggle it was written to catch.
+	writeDocsPage(t, root, "docs/guides/nested.mdx", ""+
+		"````markdown\n"+
+		"```yaml\n"+
+		"key: value\n"+
+		"Set it with `crewship routine save --author-agent\n"+
+		"<slug|id>` inside the sample.\n"+
+		"```\n"+
+		"````\n")
+
+	offenders, err := jsxHostileCodeSpans(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("jsxHostileCodeSpans() = %+v, want none — the whole outer fence is sample content", offenders)
 	}
 }

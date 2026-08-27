@@ -2,6 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -238,15 +242,42 @@ func TestDocsToCodeAcceptsCommandAliasesAndVariableAPIPaths(t *testing.T) {
 	}
 }
 
+// Both comment spellings have to suppress, and only one of them is safe to
+// write on a published page: Mintlify parses `.mdx` as JSX, where `<!--` is a
+// syntax error that fails the whole deployment. Every live marker in the docs
+// tree is therefore `{/* ... */}`, and nothing pinned that the parser accepts
+// it — the suppression is a `strings.Contains` on the directive text, so it
+// works by not caring, which is exactly the kind of thing a later tightening
+// ("anchor the regexp to the comment delimiters") breaks without a failing
+// test. `.md` files keep the HTML spelling and are covered here too.
 func TestDocsToCodeExplicitIgnoreConvention(t *testing.T) {
-	checks := inventoryDocsToCode(
-		openAPIDocument{Paths: map[string]map[string]json.RawMessage{}},
-		commandManifest{},
-		[]docFile{{Path: "docs/architecture.mdx", Text: "<!-- docs-inventory: ignore --> `crewship illustrative-command` /api/v1/retired\n"}},
-		nil, nil,
-	)
-	if len(checks.Missing) != 0 {
-		t.Fatalf("explicit docs-inventory ignore marker did not suppress illustrative symbols: %+v", checks.Missing)
+	for _, tc := range []struct {
+		name string
+		path string
+		text string
+	}{
+		{
+			name: "MDX expression comment, the only spelling Mintlify can parse",
+			path: "docs/architecture.mdx",
+			text: "{/* docs-inventory: ignore */} `crewship illustrative-command` /api/v1/retired\n",
+		},
+		{
+			name: "HTML comment, still valid in plain Markdown",
+			path: "docs/architecture.md",
+			text: "<!-- docs-inventory: ignore --> `crewship illustrative-command` /api/v1/retired\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checks := inventoryDocsToCode(
+				openAPIDocument{Paths: map[string]map[string]json.RawMessage{}},
+				commandManifest{},
+				[]docFile{{Path: tc.path, Text: tc.text}},
+				nil, nil,
+			)
+			if len(checks.Missing) != 0 {
+				t.Fatalf("explicit docs-inventory ignore marker did not suppress illustrative symbols: %+v", checks.Missing)
+			}
+		})
 	}
 }
 
@@ -299,5 +330,83 @@ func TestManifestKindsRefuseToReportAnEmptyRosterAsADocsGap(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), manifestKindSourcePath) {
 		t.Errorf("the error must name where the roster was looked for, got: %v", err)
+	}
+}
+
+// openapiReferencePage is the one published page that quotes the spec's
+// schema-quality figures in prose.
+const openapiReferencePage = "docs/api-reference/openapi.mdx"
+
+// openapiStatsSentence locates the wording that page carries. Keeping the shape
+// in one regexp is what makes the numbers checkable at all: prose is where they
+// went stale, because nothing read prose.
+//
+// No capture groups: the comparison is against the whole rendered sentence, not
+// number by number, and eight unused groups would advertise an extraction that
+// does not happen. `\s+` rather than literal spaces so that hard-wrapping the
+// paragraph — which this tree does elsewhere — reflows the prose without
+// reddening the gate.
+var openapiStatsSentence = regexp.MustCompile(
+	`\d+\s+of\s+\d+\s+operations\s+return\s+a\s+named\s+2xx\s+schema,\s+\d+\s+fall\s+back\s+to\s+an\s+unconstrained\s+` + "`object`" +
+		`,\s+and\s+\d+\s+have\s+no\s+success\s+body\s+at\s+all\.\s+\d+\s+operations\s+carry\s+a\s+request\s+body:\s+\d+\s+with\s+a\s+named\s+JSON\s+schema,\s+\d+\s+with\s+a\s+non-JSON\s+media\s+type,\s+and\s+\d+\s+with\s+a\s+generic\s+JSON\s+fallback\.`)
+
+// whitespaceRun collapses the page's line breaks and indentation before the
+// comparison, so the assertion is about the words and numbers rather than about
+// where the paragraph happens to wrap.
+var whitespaceRun = regexp.MustCompile(`\s+`)
+
+// mdxComment matches an MDX expression comment. Those are stripped before the
+// match, because this gate is about what the page PUBLISHES: a sentence that
+// has been commented out renders nothing, and a matcher reading raw source
+// would keep passing on it. The page carries such a comment immediately above
+// the sentence, so this is a live hole rather than a hypothetical one.
+var mdxComment = regexp.MustCompile(`(?s)\{/\*.*?\*/\}`)
+
+// The figures in docs/api-reference/openapi.mdx were 52 operations out of date
+// — "513 of 536 … 184 request bodies" against a spec that had reached 588 —
+// and the generated report sitting in the same tree carried the right ones. Two
+// numbers for one fact, and the wrong one was the published one, because the
+// published one was typed by a human and nothing re-read it (#2086).
+//
+// This is that missing reader. When the spec moves, it fails with the sentence
+// to paste, so the fix is mechanical rather than another hand count.
+func TestOpenAPIReferenceQuotesTheCurrentSpec(t *testing.T) {
+	doc, err := readOpenAPI(filepath.Join("..", "..", filepath.FromSlash(openAPIPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := schemaStats(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Operations == 0 {
+		t.Fatalf("%s parsed to zero operations; the spec was not read", openAPIPath)
+	}
+
+	want := fmt.Sprintf(
+		"%d of %d operations return a named 2xx schema, %d fall back to an unconstrained `object`, and %d have no success body at all. "+
+			"%d operations carry a request body: %d with a named JSON schema, %d with a non-JSON media type, and %d with a generic JSON fallback.",
+		stats.NamedResponses, stats.Operations, stats.GenericResponses, stats.NoSuccessBody,
+		stats.RequestBodies, stats.ConcreteJSONRequests, stats.NonJSONRequestBodies, stats.GenericJSONRequests)
+
+	body, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(openapiReferencePage)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every occurrence, not the first. FindString would let a page carrying a
+	// correct sentence followed by a stale duplicate pass on the strength of the
+	// correct one — the published figure would still be wrong on screen.
+	published := whitespaceRun.ReplaceAllString(mdxComment.ReplaceAllString(string(body), " "), " ")
+	found := openapiStatsSentence.FindAllString(published, -1)
+	if len(found) == 0 {
+		t.Fatalf("%s no longer carries the schema-quality sentence in the shape this test reads (MDX comments do not count — the page has to publish it).\nEither restore it or update openapiStatsSentence. It should read:\n\n  %s", openapiReferencePage, want)
+	}
+	if len(found) > 1 {
+		t.Errorf("%s states the schema-quality figures %d times; one page should answer this once.\n  %s", openapiReferencePage, len(found), strings.Join(found, "\n  "))
+	}
+	for _, got := range found {
+		if got != want {
+			t.Errorf("%s quotes figures the generated spec does not support.\n  page: %s\n  spec: %s\nReplace the sentence in the page with the second line.", openapiReferencePage, got, want)
+		}
 	}
 }

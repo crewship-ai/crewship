@@ -27,11 +27,24 @@ server remains the authority for authorization; a CLI-side permission hint does
 not grant access. `keeper status` includes both instance server status and the
 workspace governance overlay.
 
-`keeper eval` is different: it opens the local Crewship SQLite database
-read-only, dials models from the machine running the CLI, and does not call the
-server or require CLI authentication. Pass `--endpoint` and `--incumbent` when
-the server's judge is configured only through environment variables, because
-those server settings are not automatically available to the local replay.
+`keeper eval` is different: it opens the Crewship SQLite database **file on
+this host** read-only, dials models from the machine running the CLI, and does
+not call the server or require CLI authentication. Pass `--endpoint` and
+`--incumbent` when the server's judge is configured only through environment
+variables, because those server settings are not automatically available to the
+local replay.
+
+Because that corpus is a local file and not the server's, `keeper eval`
+**refuses to run when `--server` / `CREWSHIP_SERVER` / `--profile` names a
+server**, unless you pass `--local`. It is read-only, but replaying the wrong
+instance's decision history produces a confident ranking of the wrong thing at
+real token cost. It also now honours `DATABASE_URL`, so pointing it at the file
+a given `crewshipd` actually uses is how you evaluate that instance
+([#2086](https://github.com/crewship-ai/crewship/issues/2086)).
+
+```bash
+crewship keeper eval --candidate qwen2.5:7b --local
+```
 
 All commands also accept the normal global CLI flags, including `--server`,
 `--workspace`, `--format`, and `--no-color`. See [CLI overview](/cli/overview)

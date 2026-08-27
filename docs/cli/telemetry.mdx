@@ -64,7 +64,22 @@ Telemetry: ENABLED
   install_id: c0be498f4cbe63e52ab4a5dfd8fa7a8b
   endpoint:   o4511387688108032.ingest.de.sentry.io (vendor default (compiled in))
   to disable: crewship telemetry off
+  database:   /Users/you/.crewship/crewship.db (the default data directory)
 ```
+
+Consent is a row in a database, so the answer is only as meaningful as the file
+it came from. The `database` line names that file and how it was resolved —
+`DATABASE_URL` → `CREWSHIP_DATA_DIR` → `~/.crewship`, the same order the server
+uses. It prints on every branch, including "not yet configured", where *which*
+file is missing is the useful half of the answer.
+
+<Note>
+Until [#2109](https://github.com/crewship-ai/crewship/pull/2109) this command
+ignored `DATABASE_URL` and always read `~/.crewship/crewship.db`, so on a host
+whose `crewshipd` runs with its own database — every development clone uses
+`file:./crewship.db` — it reported a consent row the running server had never
+seen.
+</Note>
 
 Or when off:
 

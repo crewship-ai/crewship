@@ -192,15 +192,29 @@ func glamourStyleForEnv() string {
 }
 
 // JSON prints data as indented JSON.
+//
+// The renderers below name themselves on failure, and they do it here at the
+// leaf rather than at their call sites. Most of what reaches these returns is
+// a write error — a closed pipe, a full disk — whose text ("write |1: broken
+// pipe") says nothing about what was being written, and the routers above
+// (AutoHuman, Auto, Machine, AutoDetail) plus ~110 direct callers would each
+// have to restate the context. One owner, so a `--format json` failure reads
+// the same whichever door it came through.
 func (f *Formatter) JSON(v interface{}) error {
 	enc := json.NewEncoder(f.Writer)
 	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		return fmt.Errorf("render JSON: %w", err)
+	}
+	return nil
 }
 
 // YAML prints data as YAML.
 func (f *Formatter) YAML(v interface{}) error {
-	return yaml.NewEncoder(f.Writer).Encode(v)
+	if err := yaml.NewEncoder(f.Writer).Encode(v); err != nil {
+		return fmt.Errorf("render YAML: %w", err)
+	}
+	return nil
 }
 
 // NDJSON prints data as newline-delimited JSON.
@@ -231,17 +245,23 @@ func (f *Formatter) NDJSON(v interface{}) error {
 		// raw JSON or a string; emitting one byte per line would be
 		// nonsense. Treat as a single record.
 		if rv.Type().Elem().Kind() == reflect.Uint8 {
-			return enc.Encode(v)
+			if err := enc.Encode(v); err != nil {
+				return fmt.Errorf("render NDJSON: %w", err)
+			}
+			return nil
 		}
 		n := rv.Len()
 		for i := 0; i < n; i++ {
 			if err := enc.Encode(rv.Index(i).Interface()); err != nil {
-				return err
+				return fmt.Errorf("render NDJSON row %d: %w", i, err)
 			}
 		}
 		return nil
 	}
-	return enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		return fmt.Errorf("render NDJSON: %w", err)
+	}
+	return nil
 }
 
 // WriteNDJSONRow writes one v as a JSON object followed by "\n" to f.Writer.
@@ -252,7 +272,10 @@ func (f *Formatter) NDJSON(v interface{}) error {
 func (f *Formatter) WriteNDJSONRow(v interface{}) error {
 	enc := json.NewEncoder(f.Writer)
 	enc.SetIndent("", "")
-	return enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		return fmt.Errorf("write NDJSON row: %w", err)
+	}
+	return nil
 }
 
 // Auto routes to the correct format based on f.Format.
@@ -278,6 +301,25 @@ func (f *Formatter) Auto(v interface{}, tableHeaders []string, tableRows [][]str
 	}
 }
 
+// RoutesToHuman reports whether AutoHuman would hand this format to the human
+// renderer rather than a structured one. `quiet` and the empty default are
+// human: they are terminal presentation choices, not serialization formats.
+//
+// It exists because the rule was being restated at call sites that cannot use
+// AutoHuman — paths that emit a machine envelope and a human line from
+// different branches. Two such copies had already drifted apart, classifying
+// `quiet` differently in `oauth connect` and `oauth auto-connect`, so the same
+// flag produced an envelope in one command and not the other. Ask the
+// formatter instead of restating its rule.
+func (f *Formatter) RoutesToHuman() bool {
+	switch f.Format {
+	case "json", "yaml", "ndjson":
+		return false
+	default:
+		return true
+	}
+}
+
 // AutoHuman routes machine formats (json/yaml/ndjson) to the structured
 // renderers and everything else (table/quiet/empty) to the hand-crafted human
 // renderer. For commands whose human output is prose/sections rather than a
@@ -285,16 +327,17 @@ func (f *Formatter) Auto(v interface{}, tableHeaders []string, tableRows [][]str
 // while --format json/yaml/ndjson becomes actually machine-readable — those
 // commands used to leak ANSI-colored text onto stdout regardless of format.
 func (f *Formatter) AutoHuman(v interface{}, human func()) error {
+	if f.RoutesToHuman() {
+		human()
+		return nil
+	}
 	switch f.Format {
 	case "json":
 		return f.JSON(v)
 	case "yaml":
 		return f.YAML(v)
-	case "ndjson":
-		return f.NDJSON(v)
 	default:
-		human()
-		return nil
+		return f.NDJSON(v)
 	}
 }
 

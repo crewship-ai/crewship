@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -17,7 +18,7 @@ import (
 //
 // Three resolution paths:
 //
-//	crewship resume                  no arg → interactive picker over recent CLI sessions
+//	crewship resume                  no arg → interactive picker over recent sessions
 //	crewship resume <chat-id>        continue an explicit chat
 //	crewship resume <run-id>         look up the run, find its chat, continue
 //	crewship resume <pr-url>         find the session that produced the PR
@@ -28,9 +29,10 @@ import (
 var resumeCmd = &cobra.Command{
 	Use:   "resume [chat-id | run-id | pr-url]",
 	Short: "Pick up an existing session",
-	Long: `Resume a previous CLI session by chat-id, run-id, or pull-request URL.
-With no argument, opens an interactive picker over the 10 most recent
-CLI sessions in the current workspace.
+	Long: `Resume a previous session by chat-id, run-id, or pull-request URL.
+With no argument, opens an interactive picker over the 10 most recently
+active sessions in the current workspace — every session, whatever
+started it, not only the ones this CLI started.
 
 Examples:
   crewship resume
@@ -47,7 +49,10 @@ Examples:
 
 		switch {
 		case len(args) == 0:
-			// Interactive: list recent CLI-origin chats, let user pick.
+			// Interactive: list the workspace's recently active chats and
+			// let the user pick. Not filtered by origin — the runs list
+			// this reads has no such filter, so a session started in the
+			// web UI is offered here too, and --help says so.
 			id, slug, err := pickRecentChat(client)
 			if err != nil {
 				return err
@@ -84,17 +89,18 @@ Examples:
 			return fmt.Errorf("could not resolve a session to resume")
 		}
 
-		// If we don't know the agent slug yet, look it up via /chats/{id}.
+		// If we don't know the agent slug yet, ask which agent owns the
+		// chat. A chat is only addressable under its agent, so this is the
+		// agents walk — the flat GET /api/v1/chats/{id} this used to call
+		// has never been a route and 404'd on every resume (#2086).
 		if agentSlug == "" {
-			var chat struct {
-				AgentSlug string `json:"agent_slug"`
-				AgentID   string `json:"agent_id"`
+			agentID, slug, err := lookupChatAgent(client, chatID)
+			if err != nil {
+				return fmt.Errorf("could not determine agent for chat %s: %w", chatID, err)
 			}
-			if err := getJSON(client, "/api/v1/chats/"+url.PathEscape(chatID), &chat); err == nil {
-				agentSlug = chat.AgentSlug
-				if agentSlug == "" {
-					agentSlug = chat.AgentID
-				}
+			agentSlug = slug
+			if agentSlug == "" {
+				agentSlug = agentID
 			}
 		}
 		if agentSlug == "" {
@@ -114,77 +120,105 @@ Examples:
 	},
 }
 
-// pickRecentChat lists the user's recent CLI-origin chats with huh.
+// resumeSessionCount is how many sessions the picker offers.
+const resumeSessionCount = 10
+
+// runsPageMax is the largest `limit` GET /api/v1/runs honours. Out-of-range is
+// not an error there: `if limit < 1 || limit > 100 { limit = 50 }`
+// (internal/api/runs.go), so asking for 200 gets 50 — a SMALLER page than
+// asking for 100. That inverts the over-fetch recentSessions relies on, and it
+// does it silently, at whatever value of resumeSessionCount someone picks
+// next. Clamping here keeps the constant above safe to raise.
+const runsPageMax = 100
+
+// recentSession is one row of the picker: a chat that can be resumed, with
+// the agent that owns it.
+type recentSession struct {
+	ChatID    string
+	AgentSlug string
+	Title     string
+	UpdatedAt string
+}
+
+// recentSessions lists the workspace's most recently active resumable
+// sessions, newest first.
+//
+// It reads the RUNS list, not a chat list, because there is no
+// workspace-wide chat list to read: a chat is addressable only under the
+// agent that owns it (GET /api/v1/agents/{agentId}/chats), so a flat listing
+// would be an N+1 walk over every agent. GET /api/v1/runs is workspace-
+// scoped, ordered started_at DESC, and each row already carries chat_id and
+// agent_slug — exactly what the picker shows. (This was already the only
+// code path that ever ran: the flat GET /api/v1/chats it used to try first
+// has never been registered, so every resume 404'd into this fallback —
+// #2086.)
+//
+// One chat can own several runs — resuming a session twice is two runs of
+// one chat — so ask for more runs than sessions and dedupe, keeping the
+// newest run per chat. The over-fetch is capped at runsPageMax; past that the
+// server would hand back FEWER rows, not more.
+//
+// The list is not filtered by origin. There is nothing to filter it by here —
+// `origin` is a property of the chat, and this reads runs — so a session
+// started from the web UI is offered alongside one started from this CLI.
+// resumeCmd's --help says so; keep the two in step.
+func recentSessions(client *cli.Client, want int) ([]recentSession, error) {
+	var runs struct {
+		Data []struct {
+			ID        string  `json:"id"`
+			AgentSlug *string `json:"agent_slug"`
+			ChatID    *string `json:"chat_id"`
+			CreatedAt string  `json:"created_at"`
+		} `json:"data"`
+	}
+	q := url.Values{}
+	q.Set("limit", strconv.Itoa(min(want*5, runsPageMax)))
+	if err := getJSON(client, "/api/v1/runs?"+q.Encode(), &runs); err != nil {
+		return nil, fmt.Errorf("list recent sessions: %w", err)
+	}
+	seen := map[string]bool{}
+	out := make([]recentSession, 0, want)
+	for _, r := range runs.Data {
+		if r.ChatID == nil || *r.ChatID == "" || seen[*r.ChatID] {
+			continue
+		}
+		seen[*r.ChatID] = true
+		out = append(out, recentSession{
+			ChatID:    *r.ChatID,
+			AgentSlug: deref(r.AgentSlug),
+			Title:     "run " + r.ID,
+			UpdatedAt: r.CreatedAt,
+		})
+		if len(out) == want {
+			break
+		}
+	}
+	return out, nil
+}
+
+// pickRecentChat lists the user's recent sessions with huh.
 // Non-TTY → error rather than picking arbitrarily.
 func pickRecentChat(client *cli.Client) (chatID, agentSlug string, err error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stderr.Fd())) {
 		return "", "", fmt.Errorf("interactive picker requires a TTY; pass a chat-id or run-id")
 	}
-	q := url.Values{}
-	q.Set("origin", "CLI")
-	q.Set("limit", "10")
-	var body struct {
-		Data []struct {
-			ID        string `json:"id"`
-			AgentSlug string `json:"agent_slug"`
-			Title     string `json:"title"`
-			UpdatedAt string `json:"updated_at"`
-		} `json:"data"`
+	sessions, err := recentSessions(client, resumeSessionCount)
+	if err != nil {
+		return "", "", err
 	}
-	// Try /chats; fall back to /runs if the endpoint shape differs.
-	if err := getJSON(client, "/api/v1/chats?"+q.Encode(), &body); err != nil {
-		var runs struct {
-			Data []struct {
-				ID        string  `json:"id"`
-				AgentSlug *string `json:"agent_slug"`
-				ChatID    *string `json:"chat_id"`
-				CreatedAt string  `json:"created_at"`
-			} `json:"data"`
-		}
-		if err2 := getJSON(client, "/api/v1/runs?limit=10", &runs); err2 != nil {
-			// Surface BOTH errors — without %w-chaining the user only
-			// sees the /chats failure and never learns that /runs
-			// also failed (which is the more informative one when
-			// /chats is simply a 404 endpoint mismatch).
-			return "", "", fmt.Errorf("list recent: chats endpoint: %w; fallback runs: %v", err, err2)
-		}
-		for _, r := range runs.Data {
-			if r.ChatID == nil || *r.ChatID == "" {
-				continue
-			}
-			body.Data = append(body.Data, struct {
-				ID        string `json:"id"`
-				AgentSlug string `json:"agent_slug"`
-				Title     string `json:"title"`
-				UpdatedAt string `json:"updated_at"`
-			}{
-				ID:        *r.ChatID,
-				AgentSlug: deref(r.AgentSlug),
-				Title:     "run " + r.ID,
-				UpdatedAt: r.CreatedAt,
-			})
-		}
-	}
-	if len(body.Data) == 0 {
+	if len(sessions) == 0 {
 		return "", "", fmt.Errorf("no recent sessions to resume")
 	}
-	type pick struct {
-		ID    string
-		Slug  string
-		Label string
-	}
-	picks := make([]pick, 0, len(body.Data))
-	options := make([]huh.Option[string], 0, len(body.Data))
-	for _, c := range body.Data {
-		label := c.ID
-		if c.Title != "" {
-			label = fmt.Sprintf("%s — %s", c.AgentSlug, c.Title)
+	options := make([]huh.Option[string], 0, len(sessions))
+	for _, s := range sessions {
+		label := s.ChatID
+		if s.Title != "" {
+			label = fmt.Sprintf("%s — %s", s.AgentSlug, s.Title)
 		}
-		if c.UpdatedAt != "" {
-			label = label + "  (" + c.UpdatedAt + ")"
+		if s.UpdatedAt != "" {
+			label = label + "  (" + s.UpdatedAt + ")"
 		}
-		picks = append(picks, pick{ID: c.ID, Slug: c.AgentSlug, Label: label})
-		options = append(options, huh.NewOption(label, c.ID))
+		options = append(options, huh.NewOption(label, s.ChatID))
 	}
 	var pickedID string
 	if err := huh.NewSelect[string]().
@@ -197,9 +231,9 @@ func pickRecentChat(client *cli.Client) (chatID, agentSlug string, err error) {
 		// run, missing terminfo) instead of seeing a flat "aborted".
 		return "", "", fmt.Errorf("picker aborted: %w", err)
 	}
-	for _, p := range picks {
-		if p.ID == pickedID {
-			return p.ID, p.Slug, nil
+	for _, s := range sessions {
+		if s.ChatID == pickedID {
+			return s.ChatID, s.AgentSlug, nil
 		}
 	}
 	return pickedID, "", nil

@@ -11,6 +11,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// noCrewshipDatabaseAt is the one wording for "this path is not a Crewship
+// database", shared by the two ways of finding that out: the file is not there
+// at all, and the file is there but holds no migration ledger. They used to
+// differ, and the first of them used to be the driver's
+// "unable to open database file (14)".
+func noCrewshipDatabaseAt(dbPath string) string {
+	return fmt.Sprintf(
+		"there is no Crewship database at %s — check DATABASE_URL / CREWSHIP_DATA_DIR, "+
+			"or run this on the host that owns the database", dbPath)
+}
+
 var migrationStatusCmd = &cobra.Command{
 	Use:   "migration-status",
 	Short: "Show the schema version and any outstanding post-deployment work",
@@ -26,15 +37,31 @@ Two kinds of pending work look different and matter differently:
   outstanding the schema change is only partly applied; that is by design and
   the running code tolerates it. If one is stuck, this is where you find out.
 
-Reads the local database directly, so it works with the server down.`,
+Reads the database file on this host directly, so it works with the server
+down. That also means it cannot answer for a remote instance: with a server
+named, it refuses unless you pass --local.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dd, err := database.DefaultDataDir()
+		// Previously this resolved the data dir and nothing else — it did not
+		// even honour DATABASE_URL, so on a clone whose server runs against
+		// file:./crewship.db it reported a completely unrelated schema version
+		// under the heading "Database:" (#2086). requireLocalDB does both:
+		// resolves the file the operator's environment actually names, and
+		// refuses when that file is not plausibly the targeted server's.
+		target, err := requireLocalDB(cmd, "crewship db migration-status", "")
 		if err != nil {
-			return fmt.Errorf("resolve data dir: %w", err)
+			return err
 		}
-		dbPath := dd.DatabasePath()
-		warnDBLocalOnly(dbPath)
+		dbPath := target.Path
+		// Before sql.Open, because the resolver no longer creates the data
+		// directory: on a box that has never run crewshipd, opening a path
+		// inside a missing directory answers with the driver's
+		// "unable to open database file (14)" instead of the message below,
+		// and this command is one an operator runs precisely when the box is
+		// in that state.
+		if err := target.mustExist(noCrewshipDatabaseAt(dbPath)); err != nil {
+			return err
+		}
 
 		db, err := sql.Open("sqlite", dbPath)
 		if err != nil {
@@ -45,10 +72,7 @@ Reads the local database directly, so it works with the server down.`,
 
 		applied, err := database.ReadLedger(ctx, db)
 		if errors.Is(err, database.ErrNoLedger) {
-			return fmt.Errorf(
-				"there is no Crewship database at %s (no migration ledger in it) — "+
-					"check CREWSHIP_DATA_DIR, or run this on the host that owns the database",
-				dbPath)
+			return errors.New(noCrewshipDatabaseAt(dbPath))
 		}
 		if err != nil {
 			return err

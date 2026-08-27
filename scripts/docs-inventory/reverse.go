@@ -64,7 +64,7 @@ var (
 // is written, which teaches people to route around the gate — the failure mode
 // this whole inventory exists to prevent.
 //
-// The per-line `<!-- docs-inventory: ignore -->` escape stays for the user-
+// The per-line `{/* docs-inventory: ignore */}` escape stays for the user-
 // facing tree, where an unbacked reference IS a defect and each exception
 // should cost a visible annotation. Whole-directory exclusion is reserved for
 // directories whose genre makes the check meaningless.
@@ -75,8 +75,12 @@ func reverseGateApplies(path string) bool {
 // inventoryDocsToCode scans executable-looking documentation contexts:
 // fenced code blocks and inline code spans. Ordinary prose mentioning the
 // product name is not a command invocation. A line containing
-// "<!-- docs-inventory: ignore -->" is an explicit exception for placeholders
-// or illustrative commands that intentionally are not product surfaces.
+// "docs-inventory: ignore" is an explicit exception for placeholders or
+// illustrative commands that intentionally are not product surfaces. Write it
+// as `{/* docs-inventory: ignore */}` on a `.mdx` page — Mintlify parses those
+// as JSX and an HTML comment is a syntax error that fails the deployment for
+// the whole site. `<!-- ... -->` is fine in a plain `.md` file. The match is on
+// the directive text, so both spellings suppress.
 func inventoryDocsToCode(openAPI openAPIDocument, manifest commandManifest, docs []docFile, environment, manifestKinds []surfaceRecord) reverseChecks {
 	commands, flags := commandInventory(manifest)
 	apiPaths := make(map[string]bool, len(openAPI.Paths))

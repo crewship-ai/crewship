@@ -1224,6 +1224,10 @@ Returns the workspace's MCP tool-invocation audit trail — one row per tool cal
 
 OAuth 2.0 flow for connecting external services (GitHub, Slack, Google, etc.) and storing tokens as credentials.
 
+<Note>
+  Every endpoint below except `/callback` — which is a browser redirect target and has no CLI form — is driveable headlessly with [`crewship oauth`](/cli/oauth). `crewship oauth connect` runs the loopback leg and waits for the credential to reach `ACTIVE`, since none of these endpoints reports completion on its own.
+</Note>
+
 ### List OAuth Providers
 
 ```

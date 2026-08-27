@@ -417,13 +417,14 @@ is how you produce varied cases to rule on instead of waiting for them to happen
 candidate may name a hosted provider:
 
 ```bash
-crewship keeper eval --candidate qwen3.5:9b --candidate anthropic/claude-haiku-4-5
+crewship keeper eval --candidate qwen3.5:9b --candidate anthropic/claude-haiku-4-5 --local
 ```
 
 A bare name is Ollama; `anthropic/` and `openai/` prefixes are hosted, and the
 key comes from your own environment (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`)
-rather than the vault — this command reads a local database and dials from your
-machine.
+rather than the vault — this command reads the database file on your host and
+dials from your machine. `--local` is how you confirm you mean that file when
+your CLI is configured for a server; see [CLI: keeper](/cli/keeper).
 
 Two things the numbers will not tell you, so decide them yourself:
 

@@ -554,8 +554,8 @@ is simply wrong, and moving it fixes the boot without touching a single
 table:
 
 ```bash
-crewship db repair-ledger --dry-run   # show the plan, change nothing
-crewship db repair-ledger             # apply it (stop crewshipd first)
+crewship db repair-ledger --dry-run --local   # show the plan, change nothing
+crewship db repair-ledger --local             # apply it (stop crewshipd first)
 ```
 
 The repair refuses if the database names a migration this binary does not
