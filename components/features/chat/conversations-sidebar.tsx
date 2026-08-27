@@ -264,16 +264,35 @@ export function ConversationsSidebar({
   // Counts describe what the facet WOULD show, so they are computed without
   // the active-row pin — otherwise "Unread 0" could sit above a list with a
   // row in it, and the number would stop meaning anything.
-  const unreadTotal = rows.reduce((n, r) => n + (r.thread.unread_count ?? 0), 0)
+  // ROWS, not messages. `All` counts rows and `Live` counts rows, and this one
+  // used to sum `unread_count` across them — so "Unread 9" sat above a
+  // two-row list and the middle number in the strip meant something different
+  // from its neighbours. The facet keeps rows with any unread (see
+  // `filterConversationRows`), so the count is how many rows that is.
+  const unreadTotal = rows.filter((r) => (r.thread.unread_count ?? 0) > 0).length
   const liveTotal = live.size
-  // An agent whose fan-out failed is NOT idle. Listing it under "not started
-  // yet" is the per-agent form of the same lie the column-wide one tells, and
-  // it is the more dangerous of the two: clicking that row starts a second
-  // conversation on top of a history the page simply could not read.
+  /**
+   * Agents we KNOW have nothing, which is not the same as agents with no rows.
+   *
+   * `threadsByAgent` only gains a key when that agent's request came back, so
+   * a present-and-empty list is the only evidence that an agent has never been
+   * talked to. Three states are absent instead, and none of them is idle:
+   *
+   *   · the fan-out has not settled yet — every agent would be filed here, and
+   *     the section would sit under a column still saying "Loading…";
+   *   · that agent's request failed — `threadErrors` says so and it gets a
+   *     failure row of its own;
+   *   · the agent is past `AGENT_FANOUT_CAP` and was never asked about. It has
+   *     no list and no error, and this is the one that does not resolve on its
+   *     own: agent 13 would sit permanently under "not started yet".
+   *
+   * All three end the same way if we guess: the row is offered as a fresh
+   * start, and clicking it mints a draft on top of a history nobody read. That
+   * is the wrong write `ensureSlug` exists to prevent on the URL path, reached
+   * here through the column instead.
+   */
   const failedAgentIds = threadErrors ?? {}
-  const idle = roster.filter(
-    (a) => !failedAgentIds[a.id] && (threadsByAgent[a.id] ?? []).length === 0,
-  )
+  const idle = roster.filter((a) => threadsByAgent[a.id]?.length === 0)
   const failedAgents = roster.filter((a) => failedAgentIds[a.id])
 
   return (

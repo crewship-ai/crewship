@@ -129,9 +129,48 @@ describe("<ConversationsSidebar> — an agent whose list failed is not idle", ()
 
   it("keeps agents that genuinely have no threads in 'Not started yet'", () => {
     renderSidebar({
-      threadsByAgent: { "a-morgan": [morganThread] },
+      threadsByAgent: { "a-morgan": [morganThread], "a-riley": [] },
       threadErrors: {},
     })
     expect(screen.getByText("Not started yet")).toBeInTheDocument()
+  })
+})
+
+describe("<ConversationsSidebar> — 'Not started yet' means we asked and got nothing", () => {
+  // Three ways an agent can have no rows without having no history. All three
+  // end the same way if the column guesses: the row is offered as a fresh
+  // start and clicking it writes a second conversation over the first.
+
+  it("files nobody under it while the fan-out is still in flight", () => {
+    renderSidebar({ threadsByAgent: {}, threadsLoaded: false })
+    expect(screen.getByText("Loading…")).toBeInTheDocument()
+    expect(screen.queryByText("Not started yet")).not.toBeInTheDocument()
+  })
+
+  it("does not file an agent the fan-out never asked about", () => {
+    // Past AGENT_FANOUT_CAP: no list and no error, and unlike the two other
+    // absences this one never resolves on its own.
+    renderSidebar({ threadsByAgent: { "a-morgan": [morganThread] }, threadErrors: {} })
+    expect(screen.queryByText("Not started yet")).not.toBeInTheDocument()
+  })
+
+  it("files an agent whose list came back empty", () => {
+    renderSidebar({ threadsByAgent: { "a-morgan": [morganThread], "a-riley": [] } })
+    expect(screen.getByText("Not started yet")).toBeInTheDocument()
+  })
+})
+
+describe("<ConversationsSidebar> — the facet strip counts one kind of thing", () => {
+  it("counts unread CONVERSATIONS, not unread messages", () => {
+    const noisy = { ...morganThread, id: "morgan-1", unread_count: 7 }
+    const quieter = { ...morganThread, id: "morgan-2", unread_count: 2 }
+    renderSidebar({ threadsByAgent: { "a-morgan": [noisy, quieter] } })
+
+    // `All` counts rows and `Live` counts rows; summing message counts here
+    // put "Unread 9" above a two-row list and made the middle number in the
+    // strip mean something different from its neighbours.
+    const unread = screen.getByRole("tab", { name: /unread/i })
+    expect(unread.textContent).toContain("2")
+    expect(unread.textContent).not.toContain("9")
   })
 })
