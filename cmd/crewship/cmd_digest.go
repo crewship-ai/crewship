@@ -112,7 +112,7 @@ Examples:
 			if crewSlug == "" {
 				return fmt.Errorf("workspace-digest routine does not exist yet — --crew <slug> is required to create it (the crew that will own it)")
 			}
-			if err := createDigestRoutine(client, ws, crewSlug); err != nil {
+			if err := createDigestRoutine(client, ws, crewSlug, note); err != nil {
 				return fmt.Errorf("create workspace-digest routine: %w", err)
 			}
 			result.RoutineCreated = true
@@ -214,7 +214,13 @@ func digestRoutineExists(client *cli.Client, ws string) (bool, error) {
 // flow (see cmd_pipeline.go) rather than any privileged skip-gate path —
 // the digest template is deterministic and agentless, so it passes the
 // real server-side test-run gate like any other routine save.
-func createDigestRoutine(client *cli.Client, ws, crewSlug string) error {
+//
+// note receives the progress line rather than stdout taking it directly: this
+// runs before `digest enable` renders its result, so an fmt.Println here is
+// prose in front of the JSON document under `-f json` — the exact defect the
+// rest of this change removes. Routing it through the caller's note buffer
+// puts it in the human transcript and leaves the machine formats alone.
+func createDigestRoutine(client *cli.Client, ws, crewSlug string, note func(string, ...any)) error {
 	crewID, err := resolveCrewID(client, crewSlug)
 	if err != nil {
 		return fmt.Errorf("resolve --crew: %w", err)
@@ -224,7 +230,7 @@ func createDigestRoutine(client *cli.Client, ws, crewSlug string) error {
 		return fmt.Errorf("marshal digest definition: %w", err)
 	}
 
-	fmt.Println("Validating workspace-digest routine (server-side dry-run)...")
+	note("Validating workspace-digest routine (server-side dry-run)...")
 	testResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), map[string]any{
 		"definition":     json.RawMessage(definitionRaw),
 		"author_crew_id": crewID,

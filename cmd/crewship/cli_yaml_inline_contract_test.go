@@ -62,16 +62,32 @@ func TestEmbeddedJSONInlineIsAlsoYAMLSafe(t *testing.T) {
 			if !ok || st.Fields == nil {
 				return true
 			}
+			// Only structs that are serialized at all: at least one field
+			// carries a json tag. Without this the check would sweep every
+			// embedding in the package, most of which never meets a
+			// formatter.
+			if !hasJSONTaggedField(st) {
+				return true
+			}
 			for _, field := range st.Fields.List {
 				// Embedded fields have no name.
-				if len(field.Names) != 0 || field.Tag == nil {
+				if len(field.Names) != 0 {
 					continue
 				}
-				tag, err := strconv.Unquote(field.Tag.Value)
-				if err != nil {
-					continue
+				var tag string
+				if field.Tag != nil {
+					unquoted, err := strconv.Unquote(field.Tag.Value)
+					if err != nil {
+						continue
+					}
+					tag = unquoted
 				}
-				if !strings.Contains(reflect.StructTag(tag).Get("json"), "inline") {
+				jsonTag := reflect.StructTag(tag).Get("json")
+				// A tag that renames the field ends the flattening, and with
+				// it the whole problem — the field becomes an ordinary named
+				// key in both formats.
+				if jsonTag != "" && !strings.Contains(jsonTag, "inline") &&
+					!strings.HasPrefix(jsonTag, ",") {
 					continue
 				}
 				checked++
@@ -85,8 +101,8 @@ func TestEmbeddedJSONInlineIsAlsoYAMLSafe(t *testing.T) {
 						path, pos.Line, name)
 				}
 				if !strings.Contains(reflect.StructTag(tag).Get("yaml"), "inline") {
-					t.Errorf("%s:%d: embedded %s has `json:\",inline\"` but no `yaml:\",inline\"`; "+
-						"under `-f yaml` its fields nest under the type name instead of inlining.",
+					t.Errorf("%s:%d: embedded %s is flattened into -f json but nested by -f yaml; "+
+						"add `yaml:\",inline\"` (and `json:\",inline\"` to say so out loud).",
 						path, pos.Line, name)
 				}
 			}
@@ -97,9 +113,28 @@ func TestEmbeddedJSONInlineIsAlsoYAMLSafe(t *testing.T) {
 	// Anti-vacuity: this file is worthless if the extractor stops finding the
 	// shape it guards. personaView is the known instance.
 	if checked == 0 {
-		t.Fatal("found no embedded `json:\",inline\"` fields at all — the extractor has gone blind")
+		t.Fatal("found no embedded fields in json-tagged structs at all — the extractor has gone blind")
 	}
-	t.Logf("checked %d embedded json-inline field(s)", checked)
+	t.Logf("checked %d embedded field(s) in json-serialized structs", checked)
+}
+
+// hasJSONTaggedField reports whether any field of st carries a `json:` tag,
+// which is how this file tells a serialization shape from an ordinary struct
+// that merely embeds something.
+func hasJSONTaggedField(st *ast.StructType) bool {
+	for _, f := range st.Fields.List {
+		if f.Tag == nil {
+			continue
+		}
+		tag, err := strconv.Unquote(f.Tag.Value)
+		if err != nil {
+			continue
+		}
+		if _, ok := reflect.StructTag(tag).Lookup("json"); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // embeddedTypeName returns the type name of an embedded field, unwrapping a

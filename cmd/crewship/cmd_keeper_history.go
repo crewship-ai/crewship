@@ -12,19 +12,19 @@ import (
 // /api/v1/admin/keeper/requests/{requestId}/events — the append-only keeper
 // transition ledger (issue #1369).
 type keeperRequestEvent struct {
-	Seq         int     `json:"seq"`
-	State       string  `json:"state"`
-	RequestType *string `json:"request_type,omitempty"`
-	AgentName   string  `json:"agent_name,omitempty"`
-	CredName    string  `json:"credential_name,omitempty"`
-	Intent      *string `json:"intent,omitempty"`
-	Command     *string `json:"command,omitempty"`
-	Reason      *string `json:"reason,omitempty"`
-	RiskScore   *int    `json:"risk_score,omitempty"`
-	ExitCode    *int    `json:"exit_code,omitempty"`
-	ActorType   string  `json:"actor_type"`
-	ActorID     *string `json:"actor_id,omitempty"`
-	RecordedAt  string  `json:"recorded_at"`
+	Seq         int     `json:"seq" yaml:"seq"`
+	State       string  `json:"state" yaml:"state"`
+	RequestType *string `json:"request_type,omitempty" yaml:"request_type,omitempty"`
+	AgentName   string  `json:"agent_name,omitempty" yaml:"agent_name,omitempty"`
+	CredName    string  `json:"credential_name,omitempty" yaml:"credential_name,omitempty"`
+	Intent      *string `json:"intent,omitempty" yaml:"intent,omitempty"`
+	Command     *string `json:"command,omitempty" yaml:"command,omitempty"`
+	Reason      *string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	RiskScore   *int    `json:"risk_score,omitempty" yaml:"risk_score,omitempty"`
+	ExitCode    *int    `json:"exit_code,omitempty" yaml:"exit_code,omitempty"`
+	ActorType   string  `json:"actor_type" yaml:"actor_type"`
+	ActorID     *string `json:"actor_id,omitempty" yaml:"actor_id,omitempty"`
+	RecordedAt  string  `json:"recorded_at" yaml:"recorded_at"`
 }
 
 var keeperHistoryCmd = &cobra.Command{

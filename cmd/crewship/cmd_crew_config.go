@@ -295,13 +295,19 @@ func derefOrEmpty(s *string) string {
 // parsedOrRaw turns a stored JSON string into a document, or hands back the
 // raw string when it does not parse. nil for empty, so an unconfigured crew
 // reads as `null` rather than `""`.
+//
+// cli.RawJSON rather than a decode into `any`: these are opaque documents
+// (devcontainer.json, mise.toml-as-JSON) that this CLI only carries, and
+// decoding one turns every number into a float64 — so a value past 53 bits
+// would be re-emitted rounded, silently editing a config the caller asked to
+// see. RawJSON is byte-identical under json/ndjson and decodes through
+// json.Number under yaml.
 func parsedOrRaw(s string) any {
 	if s == "" {
 		return nil
 	}
-	var parsed any
-	if err := json.Unmarshal([]byte(s), &parsed); err == nil {
-		return parsed
+	if json.Valid([]byte(s)) {
+		return cli.RawJSON(s)
 	}
 	return s
 }

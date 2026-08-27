@@ -85,6 +85,23 @@ func yamlParityTypes() []any {
 		PersonaResponse{},
 		// cmd_digest.go
 		digestEnableResult{},
+		// Row types this change newly renders as YAML. They predate it, but
+		// the commands that emit them are among the 44 it fixed, so `-f yaml`
+		// on them went from "prints human text" to "prints a document with
+		// the wrong keys" — which is this PR's defect, not #2119's backlog.
+		// cmd_credential_field.go
+		credFieldRow{},
+		// cmd_keeper_history.go
+		keeperRequestEvent{},
+		// cmd_routine_extra.go
+		pipelineVersionRow{},
+		versionDiffRow{},
+		// cmd_routine_schedules.go
+		scheduleRow{},
+		// cmd_routine_waitpoints.go
+		waitpointRow{},
+		// cmd_routine_webhooks.go
+		WebhookRow{},
 		// internal/cli/errors.go — the failure-side counterpart of every
 		// struct above. Not a cmd/crewship type, but it is emitted by every
 		// command in every machine format, which makes it the one this list

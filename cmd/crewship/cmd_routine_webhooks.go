@@ -22,25 +22,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type webhookRow struct {
-	ID                    string                 `json:"id"`
-	WorkspaceID           string                 `json:"workspace_id"`
-	Name                  string                 `json:"name"`
-	TargetPipelineID      string                 `json:"target_pipeline_id"`
-	TargetPipelineSlug    string                 `json:"target_pipeline_slug,omitempty"`
-	TargetPipelineVersion *int                   `json:"target_pipeline_version,omitempty"`
-	Token                 string                 `json:"token"`
-	SigningSecretSet      bool                   `json:"signing_secret_set"`
-	SigningSecret         string                 `json:"signing_secret,omitempty"`
-	InputsTemplate        map[string]interface{} `json:"inputs_template"`
-	Enabled               bool                   `json:"enabled"`
-	RateLimitPerMin       int                    `json:"rate_limit_per_min"`
-	LastFiredAt           *string                `json:"last_fired_at,omitempty"`
-	LastStatus            *string                `json:"last_status,omitempty"`
-	LastRunID             *string                `json:"last_run_id,omitempty"`
-	FireCount             int64                  `json:"fire_count"`
-	CreatedAt             string                 `json:"created_at"`
-	UpdatedAt             string                 `json:"updated_at"`
+type WebhookRow struct {
+	ID                    string                 `json:"id" yaml:"id"`
+	WorkspaceID           string                 `json:"workspace_id" yaml:"workspace_id"`
+	Name                  string                 `json:"name" yaml:"name"`
+	TargetPipelineID      string                 `json:"target_pipeline_id" yaml:"target_pipeline_id"`
+	TargetPipelineSlug    string                 `json:"target_pipeline_slug,omitempty" yaml:"target_pipeline_slug,omitempty"`
+	TargetPipelineVersion *int                   `json:"target_pipeline_version,omitempty" yaml:"target_pipeline_version,omitempty"`
+	Token                 string                 `json:"token" yaml:"token"`
+	SigningSecretSet      bool                   `json:"signing_secret_set" yaml:"signing_secret_set"`
+	SigningSecret         string                 `json:"signing_secret,omitempty" yaml:"signing_secret,omitempty"`
+	InputsTemplate        map[string]interface{} `json:"inputs_template" yaml:"inputs_template"`
+	Enabled               bool                   `json:"enabled" yaml:"enabled"`
+	RateLimitPerMin       int                    `json:"rate_limit_per_min" yaml:"rate_limit_per_min"`
+	LastFiredAt           *string                `json:"last_fired_at,omitempty" yaml:"last_fired_at,omitempty"`
+	LastStatus            *string                `json:"last_status,omitempty" yaml:"last_status,omitempty"`
+	LastRunID             *string                `json:"last_run_id,omitempty" yaml:"last_run_id,omitempty"`
+	FireCount             int64                  `json:"fire_count" yaml:"fire_count"`
+	CreatedAt             string                 `json:"created_at" yaml:"created_at"`
+	UpdatedAt             string                 `json:"updated_at" yaml:"updated_at"`
 }
 
 var routineWebhooksCmd = &cobra.Command{
@@ -85,7 +85,7 @@ var routineWebhooksListCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var rows []webhookRow
+		var rows []WebhookRow
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
@@ -109,7 +109,7 @@ var routineWebhooksListCmd = &cobra.Command{
 			// `url` subcommand when they explicitly need it. IDs stay
 			// full-length so scripts can feed them to delete/update —
 			// the human table below truncates them via shortID.
-			redacted := make([]webhookRow, len(rows))
+			redacted := make([]WebhookRow, len(rows))
 			for i, r := range rows {
 				redacted[i] = r
 				if redacted[i].Token != "" {
@@ -210,7 +210,7 @@ var routineWebhooksCreateCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var w webhookRow
+		var w WebhookRow
 		if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
 			// Server returned 2xx but we can't parse the body —
 			// don't claim "Webhook created" because the user has
@@ -234,13 +234,19 @@ var routineWebhooksCreateCmd = &cobra.Command{
 		// on machine output since it can be re-run any time), `create`
 		// is the ONE moment the signing secret exists in plaintext — a
 		// script capturing it via --format json needs the full,
-		// unredacted webhookRow, not a stripped-down view. AutoHuman
+		// unredacted WebhookRow, not a stripped-down view. AutoHuman
 		// keeps the human "shown once, copy now" block byte-identical
 		// for table/quiet/default (#1195).
+		// The embedded row is EXPORTED and carries both inline tags. An
+		// untagged embedded field is flattened by encoding/json and nested by
+		// yaml.v3 — and when the embedded type is unexported, yaml.v3 cannot
+		// reflect into it at all and `-f yaml` panics rather than printing
+		// anything. This wrapper did exactly that until the format sweep made
+		// the command honour `-f yaml` and turned it into a reachable crash.
 		result := struct {
-			webhookRow
-			PublicURL string `json:"public_url"`
-		}{webhookRow: w, PublicURL: publicURL}
+			WebhookRow `json:",inline" yaml:",inline"`
+			PublicURL  string `json:"public_url" yaml:"public_url"`
+		}{WebhookRow: w, PublicURL: publicURL}
 		return newFormatter().AutoHuman(result, func() {
 			fmt.Println("Webhook created.")
 			fmt.Printf("  ID:        %s\n", w.ID)
@@ -283,7 +289,7 @@ var routineWebhooksUrlCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var rows []webhookRow
+		var rows []WebhookRow
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
@@ -364,7 +370,7 @@ var routineWebhooksDeleteCmd = &cobra.Command{
 // routineSlugOrPlaceholder names the routine to re-create a webhook against.
 // The list response usually carries the slug; when it does not, the message
 // still has to be copy-pasteable, so it says what to fill in.
-func routineSlugOrPlaceholder(w webhookRow) string {
+func routineSlugOrPlaceholder(w WebhookRow) string {
 	if w.TargetPipelineSlug != "" {
 		return w.TargetPipelineSlug
 	}

@@ -6,6 +6,7 @@ package main
 // schedule fires it, idempotently.
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -90,6 +91,63 @@ func TestDigestEnable_CreatesRoutineAndSchedule(t *testing.T) {
 	}
 	if schedBody["cron_expr"] != "0 8 * * *" {
 		t.Errorf("cron_expr = %v, want default", schedBody["cron_expr"])
+	}
+}
+
+// `digest enable --crew <slug> -f json` must emit ONLY the JSON document.
+//
+// The routine-creation path prints a server-side dry-run progress line, and it
+// went straight to stdout — so on the one invocation that creates the routine,
+// the machine output was a sentence followed by an object, and `jq` failed on
+// the whole thing. That is the same defect this change removes everywhere
+// else, surviving on the branch its own test for `digest enable` did not take:
+// the other cases arrange a routine that already exists.
+func TestDigestEnable_CreateUnderJSON_EmitsOnlyTheDocument(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	routinePath := "/api/v1/workspaces/" + covWS + "/pipelines/workspace-digest"
+	testRunPath := "/api/v1/workspaces/" + covWS + "/pipelines/test_run"
+	savePath := "/api/v1/workspaces/" + covWS + "/pipelines/save"
+	schedulesPath := "/api/v1/workspaces/" + covWS + "/pipeline-schedules"
+
+	stub.OnGet(routinePath, clitest.ErrorResponse(404, "pipeline not found"))
+	stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{
+		{"id": "ccrew_ops", "slug": "ops"},
+	}))
+	stub.OnPost(testRunPath, clitest.JSONResponse(200, map[string]any{
+		"status": "DRY_RUN_OK", "save_token": "tok123",
+	}))
+	stub.OnPost(savePath, clitest.JSONResponse(201, map[string]any{
+		"slug": "workspace-digest", "id": "pln_digest",
+	}))
+	stub.OnGet(schedulesPath, clitest.JSONResponse(200, []scheduleRow{}))
+	stub.OnPost(schedulesPath, clitest.JSONResponse(201, scheduleRow{
+		ID: "sch_digest", TargetPipelineSlug: "workspace-digest", CronExpr: "0 8 * * *", Timezone: "UTC",
+	}))
+	setStubCLI(t, stub.URL())
+	covResetFlags(t, digestEnableCmd)
+	covSetFlags(t, digestEnableCmd, map[string]string{"crew": "ops"})
+	setFormatCov(t, "json")
+
+	out := captureStdoutCovCli2(t, func() {
+		if err := digestEnableCmd.RunE(digestEnableCmd, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+
+	// Decode the WHOLE of stdout. A substring search for `{` would call
+	// "prose, then a valid object" a pass, which is exactly the bug.
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("digest enable -f json stdout is not a single JSON document: %v\ngot:\n%s", err, out)
+	}
+	if doc["routine_created"] != true {
+		t.Errorf("routine_created = %v, want true (this is the create path)", doc["routine_created"])
+	}
+	// The progress line still has to exist for a person — it just belongs in
+	// the human transcript, not in front of the document.
+	if strings.Contains(out, "Validating workspace-digest") {
+		t.Errorf("the dry-run progress line reached machine stdout:\n%s", out)
 	}
 }
 

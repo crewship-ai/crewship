@@ -132,6 +132,22 @@ func TestTabwriterFlushErrorsReachTheExitStatus(t *testing.T) {
 			},
 			run: func() error { return routineErrorsCmd.RunE(routineErrorsCmd, nil) },
 		},
+		{
+			// The eighth site. The hand review of this PR counted seven and
+			// this one was not among them: `routine get` renders a detail
+			// header rather than a list, so it does not look like the others.
+			name:    "routine get",
+			command: "crewship routine get <slug>",
+			arrange: func(stub *clitest.StubServer) {
+				stub.OnGet(wsPath+"/pipelines/email-fetch", clitest.JSONResponse(200, map[string]any{
+					"id": "pl_1", "slug": "email-fetch", "name": "Email fetch",
+					"dsl_version": "1", "definition_hash": "abc123",
+					"definition": map[string]any{"steps": []any{}},
+					"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+				}))
+			},
+			run: func() error { return pipelineGetCmd.RunE(pipelineGetCmd, []string{"email-fetch"}) },
+		},
 	}
 
 	for _, tc := range cases {

@@ -232,7 +232,8 @@ var pipelineGetCmd = &cobra.Command{
 		// implemented two. Routing through the shared formatter gives all of
 		// them; `--format human` still lands in AutoHuman's default branch, so
 		// the value the old flag documented keeps working.
-		return resolvedFormatter(cmd).AutoHuman(p, func() {
+		var flush tabFlush
+		if err := resolvedFormatter(cmd).AutoHuman(p, func() {
 			// Pretty-print: human header on top, full DSL JSON below.
 			// Tabwriter for the header keeps the layout aligned even when
 			// fields wrap.
@@ -260,7 +261,7 @@ var pipelineGetCmd = &cobra.Command{
 			}
 			fmt.Fprintf(w, "Created:\t%s\n", p.CreatedAt)
 			fmt.Fprintf(w, "Updated:\t%s\n", p.UpdatedAt)
-			_ = w.Flush()
+			flush.of(w)
 			fmt.Println("\nDefinition:")
 			var pretty bytes.Buffer
 			if err := json.Indent(&pretty, p.Definition, "  ", "  "); err != nil {
@@ -268,7 +269,10 @@ var pipelineGetCmd = &cobra.Command{
 			} else {
 				fmt.Println("  " + pretty.String())
 			}
-		})
+		}); err != nil {
+			return err
+		}
+		return flush.err
 	},
 }
 

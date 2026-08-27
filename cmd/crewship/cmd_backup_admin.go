@@ -123,11 +123,13 @@ var backupMetricsCmd = &cobra.Command{
 		// already scrapes it breaks. What changes is that `-f yaml` and
 		// `-f ndjson` now do what the global flag's help says instead of
 		// being silently ignored.
-		var doc any
-		if err := json.Unmarshal(raw, &doc); err != nil {
-			return fmt.Errorf("decode response: %w", err)
-		}
-		return resolvedFormatter(cmd).Machine(doc)
+		//
+		// cli.RawJSON rather than a decode into `any`: encoding/json turns
+		// every number into a float64 on the way in, so re-encoding rounds
+		// anything past 53 bits — and a metrics document is all numbers.
+		// RawJSON hands the bytes back verbatim for json/ndjson and decodes
+		// through json.Number for yaml.
+		return resolvedFormatter(cmd).Machine(cli.RawJSON(raw))
 	},
 }
 
@@ -240,11 +242,13 @@ returns the canary result with an "ok" boolean and per-stage timing.`,
 		// already scrapes it breaks. What changes is that `-f yaml` and
 		// `-f ndjson` now do what the global flag's help says instead of
 		// being silently ignored.
-		var doc any
-		if err := json.Unmarshal(raw, &doc); err != nil {
-			return fmt.Errorf("decode response: %w", err)
-		}
-		return resolvedFormatter(cmd).Machine(doc)
+		//
+		// cli.RawJSON rather than a decode into `any`: encoding/json turns
+		// every number into a float64 on the way in, so re-encoding rounds
+		// anything past 53 bits — and a metrics document is all numbers.
+		// RawJSON hands the bytes back verbatim for json/ndjson and decodes
+		// through json.Number for yaml.
+		return resolvedFormatter(cmd).Machine(cli.RawJSON(raw))
 	},
 }
 

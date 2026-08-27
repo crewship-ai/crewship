@@ -67,10 +67,10 @@ type checkOptions struct {
 	APIKey   string
 }
 
-// checkTarget records how the provider was built. It is resolved BEFORE the
+// CheckTarget records how the provider was built. It is resolved BEFORE the
 // call and printed even when the call fails, because "which endpoint did it
 // actually dial, and did it find a key" is most of the diagnosis.
-type checkTarget struct {
+type CheckTarget struct {
 	// Provider is what the operator typed, normalized. It may be a registry id
 	// or an openai-compat preset name.
 	Provider string `json:"provider"`
@@ -88,7 +88,7 @@ type checkTarget struct {
 
 // providerCheckResult is the JSON contract an agent parses.
 type providerCheckResult struct {
-	checkTarget
+	CheckTarget       `json:",inline" yaml:",inline"`
 	LatencyMS         int64      `json:"latency_ms"`
 	StopReason        string     `json:"stop_reason"`
 	InputToks         int        `json:"input_tokens"`
@@ -183,16 +183,16 @@ Examples:
 // then the spec's env var, then the spec's default. What differs here, and
 // deliberately, is that a missing key is fatal only when the endpoint was NOT
 // overridden — see the note on the command.
-func buildCheckProvider(o checkOptions, getenv func(string) string) (llm.Provider, checkTarget, error) {
+func buildCheckProvider(o checkOptions, getenv func(string) string) (llm.Provider, CheckTarget, error) {
 	id := canonProviderID(o.Provider)
 	model := strings.TrimSpace(o.Model)
 	base := strings.TrimSpace(o.BaseURL)
 	if id == "" {
-		return nil, checkTarget{}, cli.WithExitCode(
+		return nil, CheckTarget{}, cli.WithExitCode(
 			fmt.Errorf("--provider is required (%s)", strings.Join(checkProviderNames(), ", ")), cli.ExitValidation)
 	}
 	if model == "" {
-		return nil, checkTarget{}, cli.WithExitCode(
+		return nil, CheckTarget{}, cli.WithExitCode(
 			fmt.Errorf("--model is required (try 'crewship model list --provider %s')", id), cli.ExitValidation)
 	}
 
@@ -204,7 +204,7 @@ func buildCheckProvider(o checkOptions, getenv func(string) string) (llm.Provide
 	}
 	// NotFoundf, not a bare error: an unknown id is exit 3, and the list of
 	// known ones is generated so it cannot become a fifth hardcoded copy.
-	return nil, checkTarget{}, cli.NotFoundf("unknown provider %q (known: %s)", o.Provider, strings.Join(checkProviderNames(), ", "))
+	return nil, CheckTarget{}, cli.NotFoundf("unknown provider %q (known: %s)", o.Provider, strings.Join(checkProviderNames(), ", "))
 }
 
 // buildFromSpec constructs a registry provider. It dispatches on Codec rather
@@ -212,7 +212,7 @@ func buildCheckProvider(o checkOptions, getenv func(string) string) (llm.Provide
 // discards the base URL for the two hosted providers — that is right for a slot
 // dialling our own API with the server's key, and wrong for a diagnostic whose
 // entire job is to prove which endpoint answers.
-func buildFromSpec(spec llm.ProviderSpec, o checkOptions, base, model string, getenv func(string) string) (llm.Provider, checkTarget, error) {
+func buildFromSpec(spec llm.ProviderSpec, o checkOptions, base, model string, getenv func(string) string) (llm.Provider, CheckTarget, error) {
 	baseOverridden := base != ""
 	if base == "" && spec.BaseEnv != "" {
 		base = strings.TrimSpace(getenv(spec.BaseEnv))
@@ -223,12 +223,12 @@ func buildFromSpec(spec llm.ProviderSpec, o checkOptions, base, model string, ge
 
 	key, keySource := resolveCheckKey(o.APIKey, spec.KeyEnv, getenv)
 	if key == "" && spec.KeyEnv != "" && !baseOverridden {
-		return nil, checkTarget{}, cli.WithExitCode(fmt.Errorf(
+		return nil, CheckTarget{}, cli.WithExitCode(fmt.Errorf(
 			"%s is not set (required to reach the %s API — pass --api-key, or --base-url to reach a keyless endpoint)",
 			spec.KeyEnv, spec.DisplayName), cli.ExitValidation)
 	}
 
-	target := checkTarget{
+	target := CheckTarget{
 		Provider:   spec.ID,
 		PricingKey: spec.ID,
 		Codec:      string(spec.Codec),
@@ -262,7 +262,7 @@ func buildFromSpec(spec llm.ProviderSpec, o checkOptions, base, model string, ge
 	}
 	// Unreachable while every registered Codec has an arm. A new codec landing
 	// without one must say so rather than silently checking the wrong wire.
-	return nil, checkTarget{}, cli.WithExitCode(
+	return nil, CheckTarget{}, cli.WithExitCode(
 		fmt.Errorf("provider %q speaks codec %q, which this command cannot construct", spec.ID, spec.Codec), cli.ExitGeneric)
 }
 
@@ -271,7 +271,7 @@ func buildFromSpec(spec llm.ProviderSpec, o checkOptions, base, model string, ge
 // The preset's own Name is kept: it is the pricing key, and ollama-openai
 // prices as "ollama" while vllm prices as "local". Overwriting it with the
 // flag value the operator typed would silently move both off their free rows.
-func buildFromPreset(id string, preset llm.OpenAICompatConfig, o checkOptions, base, model string, getenv func(string) string) (llm.Provider, checkTarget, error) {
+func buildFromPreset(id string, preset llm.OpenAICompatConfig, o checkOptions, base, model string, getenv func(string) string) (llm.Provider, CheckTarget, error) {
 	if base != "" {
 		preset.BaseURL = base
 	}
@@ -280,7 +280,7 @@ func buildFromPreset(id string, preset llm.OpenAICompatConfig, o checkOptions, b
 		// Leaving it empty would let withDefaults resolve it to
 		// api.openai.com and send the operator's traffic — with whatever key
 		// they passed — somewhere they did not ask for.
-		return nil, checkTarget{}, cli.WithExitCode(
+		return nil, CheckTarget{}, cli.WithExitCode(
 			fmt.Errorf("--base-url is required for the %q preset (it ships no default endpoint)", id), cli.ExitValidation)
 	}
 
@@ -305,7 +305,7 @@ func buildFromPreset(id string, preset llm.OpenAICompatConfig, o checkOptions, b
 		preset.NoAuth = false
 	}
 
-	return llm.NewOpenAICompat(preset), checkTarget{
+	return llm.NewOpenAICompat(preset), CheckTarget{
 		Provider:   id,
 		PricingKey: preset.Name,
 		Codec:      string(llm.CodecOpenAICompat),
@@ -354,7 +354,7 @@ func checkProviderNames() []string {
 // arrives already constructed so the tests can drive a real codec against an
 // httptest server — the command's own network call is the only thing that is
 // not exercised, and it is the one line that cannot be.
-func runProviderCheck(ctx context.Context, p llm.Provider, target checkTarget, prompt string) (providerCheckResult, error) {
+func runProviderCheck(ctx context.Context, p llm.Provider, target CheckTarget, prompt string) (providerCheckResult, error) {
 	if strings.TrimSpace(prompt) == "" {
 		prompt = defaultCheckPrompt
 	}
@@ -376,7 +376,7 @@ func runProviderCheck(ctx context.Context, p llm.Provider, target checkTarget, p
 
 	ex := explainRate(target.PricingKey, target.Model)
 	return providerCheckResult{
-		checkTarget:       target,
+		CheckTarget:       target,
 		LatencyMS:         elapsed.Milliseconds(),
 		StopReason:        string(resp.StopReason),
 		InputToks:         resp.InputToks,

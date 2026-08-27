@@ -16,15 +16,15 @@ import (
 )
 
 type waitpointRow struct {
-	Token          string `json:"token"`
-	PipelineRunID  string `json:"pipeline_run_id"`
-	StepID         string `json:"step_id"`
-	Kind           string `json:"kind"`
-	Prompt         string `json:"prompt"`
-	InvokingCrewID string `json:"invoking_crew_id,omitempty"`
-	TimeoutAt      string `json:"timeout_at"`
-	CreatedAt      string `json:"created_at"`
-	CallbackURL    string `json:"callback_url,omitempty"`
+	Token          string `json:"token" yaml:"token"`
+	PipelineRunID  string `json:"pipeline_run_id" yaml:"pipeline_run_id"`
+	StepID         string `json:"step_id" yaml:"step_id"`
+	Kind           string `json:"kind" yaml:"kind"`
+	Prompt         string `json:"prompt" yaml:"prompt"`
+	InvokingCrewID string `json:"invoking_crew_id,omitempty" yaml:"invoking_crew_id,omitempty"`
+	TimeoutAt      string `json:"timeout_at" yaml:"timeout_at"`
+	CreatedAt      string `json:"created_at" yaml:"created_at"`
+	CallbackURL    string `json:"callback_url,omitempty" yaml:"callback_url,omitempty"`
 }
 
 var routineWaitpointsCmd = &cobra.Command{

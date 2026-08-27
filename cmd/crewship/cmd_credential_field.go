@@ -55,11 +55,11 @@ var credentialFieldKeyRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 // and is null for every secret field — that is the server's contract, not a
 // client-side redaction, so there is no way for this struct to hold a secret.
 type credFieldRow struct {
-	Key       string  `json:"key"`
-	IsSecret  bool    `json:"is_secret"`
-	Ordinal   int     `json:"ordinal"`
-	Value     *string `json:"value"`
-	UpdatedAt string  `json:"updated_at"`
+	Key       string  `json:"key" yaml:"key"`
+	IsSecret  bool    `json:"is_secret" yaml:"is_secret"`
+	Ordinal   int     `json:"ordinal" yaml:"ordinal"`
+	Value     *string `json:"value" yaml:"value"`
+	UpdatedAt string  `json:"updated_at" yaml:"updated_at"`
 }
 
 var credFieldListCmd = &cobra.Command{

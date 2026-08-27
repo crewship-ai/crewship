@@ -23,14 +23,14 @@ import (
 // ---- versions ----
 
 type pipelineVersionRow struct {
-	Version        int    `json:"version"`
-	IsHead         bool   `json:"is_head"`
-	ParentVersion  *int   `json:"parent_version,omitempty"`
-	DefinitionHash string `json:"definition_hash"`
-	AuthorType     string `json:"author_type"`
-	AuthorID       string `json:"author_id"`
-	ChangeSummary  string `json:"change_summary,omitempty"`
-	CreatedAt      string `json:"created_at"`
+	Version        int    `json:"version" yaml:"version"`
+	IsHead         bool   `json:"is_head" yaml:"is_head"`
+	ParentVersion  *int   `json:"parent_version,omitempty" yaml:"parent_version,omitempty"`
+	DefinitionHash string `json:"definition_hash" yaml:"definition_hash"`
+	AuthorType     string `json:"author_type" yaml:"author_type"`
+	AuthorID       string `json:"author_id" yaml:"author_id"`
+	ChangeSummary  string `json:"change_summary,omitempty" yaml:"change_summary,omitempty"`
+	CreatedAt      string `json:"created_at" yaml:"created_at"`
 }
 
 var routineVersionsCmd = &cobra.Command{
@@ -243,13 +243,13 @@ type activeRunRow struct {
 
 // versionDiffRow mirrors internal/api.versionDiffResponse.
 type versionDiffRow struct {
-	Slug        string `json:"slug"`
-	FromVersion int    `json:"from_version"`
-	ToVersion   int    `json:"to_version"`
-	FromHash    string `json:"from_hash"`
-	ToHash      string `json:"to_hash"`
-	Identical   bool   `json:"identical"`
-	UnifiedDiff string `json:"unified_diff"`
+	Slug        string `json:"slug" yaml:"slug"`
+	FromVersion int    `json:"from_version" yaml:"from_version"`
+	ToVersion   int    `json:"to_version" yaml:"to_version"`
+	FromHash    string `json:"from_hash" yaml:"from_hash"`
+	ToHash      string `json:"to_hash" yaml:"to_hash"`
+	Identical   bool   `json:"identical" yaml:"identical"`
+	UnifiedDiff string `json:"unified_diff" yaml:"unified_diff"`
 }
 
 // fetchVersionDiff calls GET .../pipelines/{slug}/diff?from=N&to=M. Shared

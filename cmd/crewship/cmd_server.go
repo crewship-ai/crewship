@@ -136,9 +136,9 @@ var serverListCmd = &cobra.Command{
 				fmt.Printf("\n%s! active profile %q has no definition%s — run 'crewship server add %s --server <url>'\n",
 					cli.Yellow, active, cli.Reset, active)
 			}
-			if hint := directoryOverrideHint(cfg, source); hint != "" {
+			if line := directoryOverrideLine(directoryOverrideHint(cfg, source)); line != "" {
 				fmt.Println()
-				fmt.Println(hint)
+				fmt.Println(line)
 			}
 		})
 	},
@@ -312,8 +312,8 @@ var serverCurrentCmd = &cobra.Command{
 				DirectoryOverrideHint: hint,
 			}, func() {
 				fmt.Printf("Active profile %q is selected but not defined (see 'crewship server list').\n", name)
-				if hint != "" {
-					fmt.Println(hint)
+				if line := directoryOverrideLine(hint); line != "" {
+					fmt.Println(line)
 				}
 			})
 		}
@@ -331,8 +331,8 @@ var serverCurrentCmd = &cobra.Command{
 		}, func() {
 			fmt.Printf("Active profile: %s\nServer:         %s\nWorkspace:      %s\nToken:          %s\n",
 				name, p.Server, valueOrDefault(p.Workspace, "(none)"), auth)
-			if hint != "" {
-				fmt.Println(hint)
+			if line := directoryOverrideLine(hint); line != "" {
+				fmt.Println(line)
 			}
 		})
 	},
@@ -358,6 +358,14 @@ type serverCurrentResult struct {
 // CLI's own output, making `server use` look silently broken from inside
 // a directory-mapped clone). Returns "" when source isn't a directory
 // override, so callers can print it unconditionally.
+//
+// The text is PLAIN. It became a field of serverCurrentResult in the format
+// sweep, and `!` plus a colour are presentation: a caller reading
+// .directory_override_hint out of `server current -f json` should not have to
+// strip terminal control bytes to compare or log it. Colour is added by
+// directoryOverrideLine, which is what the human renderers print. (Colours are
+// already empty when stdout is not a TTY — but an agent harness running the
+// CLI under a PTY is a TTY, so that is not the guarantee it looks like.)
 func directoryOverrideHint(cfg *cli.CLIConfig, source cli.ProfileSource) string {
 	if source != cli.ProfileSourceDirectory || cfg == nil {
 		return ""
@@ -367,8 +375,17 @@ func directoryOverrideHint(cfg *cli.CLIConfig, source cli.ProfileSource) string 
 	if persisted == "" {
 		persisted = "(none)"
 	}
-	return fmt.Sprintf("%s! directory override for %s — persisted default (`server use`) is %q%s",
-		cli.Yellow, dir, persisted, cli.Reset)
+	return fmt.Sprintf("directory override for %s — persisted default (`server use`) is %q",
+		dir, persisted)
+}
+
+// directoryOverrideLine is directoryOverrideHint dressed for a terminal.
+// Empty in, empty out, so callers can print it unconditionally.
+func directoryOverrideLine(hint string) string {
+	if hint == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s! %s%s", cli.Yellow, hint, cli.Reset)
 }
 
 func init() {

@@ -195,6 +195,85 @@ func TestServerCurrentSurfacesDirectoryOverride(t *testing.T) {
 	}
 }
 
+// The machine field carries the hint's TEXT, never its terminal dressing.
+//
+// directory_override_hint became a field of serverCurrentResult in the format
+// sweep, and the hint string was built with cli.Yellow/cli.Reset around it. So
+// `server current -f json` could answer a value with ANSI escapes inside it —
+// a caller comparing or logging .directory_override_hint would have to strip
+// control bytes first. Colours are already empty when stdout is not a TTY,
+// which hides this in a pipeline and not in an agent harness that allocates a
+// PTY, so the guard forces the colours ON and asserts the field stays clean.
+func TestServerCurrentMachineHintCarriesNoANSI(t *testing.T) {
+	guardCLIState(t)
+	redirectConfigHome(t)
+	oldProfile := flagProfile
+	flagProfile = ""
+	t.Cleanup(func() { flagProfile = oldProfile })
+	t.Setenv("CREWSHIP_PROFILE", "")
+
+	// Force colours on regardless of how this test's stdout is wired.
+	oldYellow, oldReset := cli.Yellow, cli.Reset
+	cli.Yellow, cli.Reset = "\033[33m", "\033[0m"
+	t.Cleanup(func() { cli.Yellow, cli.Reset = oldYellow, oldReset })
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cfg.Current = "dev3-test"
+	cfg.Servers = map[string]*cli.ServerProfile{
+		"dev3":      {Server: "https://dev3.example", Token: "t"},
+		"dev3-test": {Server: "https://dev3-test.example", Token: "t2"},
+	}
+	cfg.DirectoryProfiles = map[string]string{"/work/crewship_3": "dev3"}
+	if err := cli.SaveConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	cli.SetWorkingDir("/work/crewship_3/sub")
+	t.Cleanup(func() { cli.SetWorkingDir("") })
+
+	setFormatCov(t, "json")
+	out, err := captureStdout(t, func() error {
+		return serverCurrentCmd.RunE(serverCurrentCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("current -f json: %v", err)
+	}
+
+	var doc struct {
+		Hint string `json:"directory_override_hint"`
+	}
+	if uerr := json.Unmarshal([]byte(out), &doc); uerr != nil {
+		t.Fatalf("-f json output is not JSON: %v\ngot:\n%s", uerr, out)
+	}
+	if doc.Hint == "" {
+		t.Fatal("expected a directory_override_hint on a directory-overridden config")
+	}
+	if strings.Contains(doc.Hint, "\033") {
+		t.Errorf("directory_override_hint carries ANSI escapes: %q", doc.Hint)
+	}
+	// The facts still have to be in there — a hint stripped to nothing would
+	// pass the check above and tell the caller less than the prose did.
+	for _, want := range []string{"/work/crewship_3", "dev3-test"} {
+		if !strings.Contains(doc.Hint, want) {
+			t.Errorf("hint %q lost %q", doc.Hint, want)
+		}
+	}
+
+	// And the human rendering keeps its colour.
+	setFormatCov(t, "")
+	human, err := captureStdout(t, func() error {
+		return serverCurrentCmd.RunE(serverCurrentCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("current: %v", err)
+	}
+	if !strings.Contains(human, "\033[33m") {
+		t.Errorf("human output lost the colour on the override hint: %q", human)
+	}
+}
+
 // Outside any directory-mapped clone, `server current` should show the
 // persisted default plainly, with no directory-override hint.
 func TestServerCurrentPlainWhenNoDirectoryOverride(t *testing.T) {

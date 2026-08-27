@@ -53,8 +53,8 @@ Examples:
   crewship notifychannel rm nch_abc123 --yes`,
 }
 
-// notifyChannelRow mirrors the rendered/JSON columns.
-type notifyChannelRow struct {
+// NotifyChannelRow mirrors the rendered/JSON columns.
+type NotifyChannelRow struct {
 	ID          string   `json:"id"`
 	Type        string   `json:"type"`
 	Provider    string   `json:"provider,omitempty"`
@@ -89,7 +89,7 @@ var notifyChannelListCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Channels []notifyChannelRow `json:"channels"`
+			Channels []NotifyChannelRow `json:"channels"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -216,8 +216,8 @@ categories. Omit for "every category".
 			return err
 		}
 		var created struct {
-			notifyChannelRow
-			Secret string `json:"secret,omitempty"`
+			NotifyChannelRow `json:",inline" yaml:",inline"`
+			Secret           string `json:"secret,omitempty" yaml:"secret,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err

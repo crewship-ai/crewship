@@ -39,7 +39,7 @@ import (
 // and a substring search would have called that a pass.
 func jsonOut(t *testing.T, fn func() error) any {
 	t.Helper()
-	flagFormat = "json"
+	setFormatCov(t, "json")
 	var err error
 	out := covCaptureStdoutCli5(t, func() { err = fn() })
 	if err != nil {
@@ -57,7 +57,7 @@ func jsonOut(t *testing.T, fn func() error) any {
 // output by degrading the terminal one is not a fix.
 func humanOut(t *testing.T, fn func() error) string {
 	t.Helper()
-	flagFormat = ""
+	setFormatCov(t, "")
 	var err error
 	out := covCaptureStdoutCli5(t, func() { err = fn() })
 	if err != nil {
@@ -69,7 +69,7 @@ func humanOut(t *testing.T, fn func() error) string {
 // emptyJSONArray fails unless stdout under -f json is exactly `[]`.
 func emptyJSONArray(t *testing.T, fn func() error) {
 	t.Helper()
-	flagFormat = "json"
+	setFormatCov(t, "json")
 	var err error
 	out := covCaptureStdoutCli5(t, func() { err = fn() })
 	if err != nil {
@@ -310,7 +310,7 @@ func TestLint_JSONContract(t *testing.T) {
 	covSetupCli5(t)
 	// lint reads the local config + prompt library; whatever it finds, the
 	// document shape is the contract.
-	flagFormat = "json"
+	setFormatCov(t, "json")
 	var err error
 	out := covCaptureStdoutCli5(t, func() { err = lintCmd.RunE(lintCmd, nil) })
 	// A non-nil error is legitimate (findings exist); the stdout contract

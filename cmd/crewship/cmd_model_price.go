@@ -93,14 +93,14 @@ func (s rateSource) describe() string {
 // catalog steps both miss — the wildcard, or the ceiling below it.
 const priceProbeModel = "\x00crewship-price-probe"
 
-// priceExplain is the resolved rate plus enough of its neighbourhood to explain
+// PriceExplain is the resolved rate plus enough of its neighbourhood to explain
 // the resolution.
 //
 // The source is paymaster's own answer, not an inference: ExplainRate walks the
 // same tables lookupPrice bills from. This file used to deduce it from outside
 // the package by comparing values, which mislabelled two whole classes of rate —
 // see the ExplainRate comment for what that cost.
-type priceExplain struct {
+type PriceExplain struct {
 	Provider string     `json:"provider"`
 	Model    string     `json:"model"`
 	Rates    rateCard   `json:"rates"`
@@ -120,7 +120,7 @@ type priceExplain struct {
 // lookup produced the rate, plus enough of the neighbourhood to read it against:
 // the catalogue's own figure when it has one (shadowed or not), and what an
 // unknown model of the same provider would bill.
-func explainRate(provider, model string) priceExplain {
+func explainRate(provider, model string) PriceExplain {
 	// Normalized the same way paymaster.lookupPrice normalizes, so the pair
 	// this reports on is the pair that would be billed.
 	prov := canonProviderID(provider)
@@ -130,7 +130,7 @@ func explainRate(provider, model string) priceExplain {
 	unknown := cardFor(prov, priceProbeModel)
 	cat, hasCat := catalogCard(prov, mod)
 
-	ex := priceExplain{
+	ex := PriceExplain{
 		Provider:     prov,
 		Model:        mod,
 		Rates:        resolved,
@@ -192,9 +192,9 @@ type priceChannel struct {
 
 // modelPriceResult is the JSON contract an agent parses.
 type modelPriceResult struct {
-	priceExplain
-	Channels []priceChannel `json:"channels"`
-	TotalUSD float64        `json:"total_usd"`
+	PriceExplain `json:",inline" yaml:",inline"`
+	Channels     []priceChannel `json:"channels" yaml:"channels"`
+	TotalUSD     float64        `json:"total_usd" yaml:"total_usd"`
 }
 
 // priceUsage is the token count for each of the four channels.
@@ -218,7 +218,7 @@ func priceCall(provider, model string, u priceUsage) modelPriceResult {
 		return priceChannel{Name: name, Tokens: toks, PerMTok: rate, CostUSD: float64(toks) * rate / perM}
 	}
 	return modelPriceResult{
-		priceExplain: ex,
+		PriceExplain: ex,
 		Channels: []priceChannel{
 			channel("input", u.In, ex.Rates.InputPerM),
 			channel("output", u.Out, ex.Rates.OutputPerM),

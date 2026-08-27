@@ -839,14 +839,51 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   names the problem, which is what the command's own help ("pipe to jq")
   promises.
 
-- **The machine error envelope disagreed with itself across formats.** Every
-  command emits `cli.ErrorEnvelope` on stderr when it fails under
-  `-f json|yaml|ndjson`, and it carried `json:` tags only — so the same
+- **The machine error envelope disagreed with itself across formats.** A
+  failing command emits `cli.ErrorEnvelope` on stderr under
+  `-f json|yaml|ndjson` — every command but `crewship wait`, which owns its
+  run-outcome exit codes and prints plain-text `[wait] error:` diagnostics by
+  design — and it carried `json:` tags only, so the same
   failure came back as `exit_code` under json and `exitcode` under yaml, with
   `status: 0`, `detail: ""` and `extensions: {}` added on the yaml side
   because `omitempty` went with the tag. A caller that branches on the exit
   code found nothing at that key in one of the two formats it was told were
   the same data. The failure side now matches the success side (#1211).
+
+- **`crewship routine webhooks create -f yaml` crashed.** The result is an
+  anonymous struct embedding the webhook row beside the public URL, and the
+  embedded field carried no tag: `encoding/json` flattens that, yaml.v3 nests
+  it under the type name — and because the row type was unexported, yaml.v3
+  could not reflect into it at all and the command panicked with a stack
+  trace. Making the command honour `--format` is what turned a latent shape
+  error into a reachable crash. Four more of the same shape (`activity`
+  export, `model price`, `notifychannel create`, `provider check`) are fixed
+  with it: each embedded type is now exported and inlined in both formats. The
+  static guard that caught the first instance only looked at embedded fields
+  that *already* declared `json:",inline"`, so an untagged one — the actual
+  failure mode — was invisible to it; it now checks every embedded field in a
+  json-tagged struct.
+
+- **`digest enable --crew <slug> -f json` emitted prose before the document.**
+  The routine-creation path prints a server-side dry-run progress line, and it
+  went straight to stdout, so on the one invocation that creates the routine
+  the machine output was a sentence followed by an object. It goes through the
+  same note buffer as the rest of the command's human output now.
+
+- **`server current -f json` could return terminal escape codes in a value.**
+  `directory_override_hint` became a machine field in this change while still
+  being built with the colour codes the human line wants around it. The field
+  is plain text now and the colour is applied by the renderer.
+
+- **Three commands rounded large numbers into their own machine output.**
+  `backup metrics`, `backup canary` and `integration tools refresh` decoded
+  the server's document into `any`/`map[string]any` before re-encoding it, and
+  `encoding/json` makes every number a `float64` on the way in — so anything
+  past 53 bits (a nanosecond timestamp, an id) came back rounded, and the
+  command silently edited the document it was asked to relay. They pass
+  `cli.RawJSON` through instead, which is byte-identical under json/ndjson and
+  decodes via `json.Number` under yaml. `crew config --show` took the same
+  treatment for the stored config blobs it echoes.
 
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and

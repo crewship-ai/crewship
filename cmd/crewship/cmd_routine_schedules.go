@@ -22,36 +22,36 @@ import (
 )
 
 type scheduleRow struct {
-	ID                    string                 `json:"id"`
-	WorkspaceID           string                 `json:"workspace_id"`
-	Name                  string                 `json:"name"`
-	TargetPipelineID      string                 `json:"target_pipeline_id"`
-	TargetPipelineSlug    string                 `json:"target_pipeline_slug,omitempty"`
-	TargetPipelineVersion *int                   `json:"target_pipeline_version,omitempty"`
-	CronExpr              string                 `json:"cron_expr"`
-	Timezone              string                 `json:"timezone"`
-	Inputs                map[string]interface{} `json:"inputs"`
-	Enabled               bool                   `json:"enabled"`
-	LastRunAt             *string                `json:"last_run_at,omitempty"`
-	LastStatus            *string                `json:"last_status,omitempty"`
-	LastRunID             *string                `json:"last_run_id,omitempty"`
-	NextRunAt             *string                `json:"next_run_at,omitempty"`
-	WakePipelineID        string                 `json:"wake_pipeline_id,omitempty"`
-	WakePipelineSlug      string                 `json:"wake_pipeline_slug,omitempty"`
-	WakeInputs            map[string]interface{} `json:"wake_inputs,omitempty"`
-	WakeFailClosed        bool                   `json:"wake_fail_closed,omitempty"`
-	WakeCheckCount        int                    `json:"wake_check_count,omitempty"`
-	WakeFireCount         int                    `json:"wake_fire_count,omitempty"`
-	LastWakeAt            *string                `json:"last_wake_at,omitempty"`
-	LastWakeStatus        string                 `json:"last_wake_status,omitempty"`
-	CatchupPolicy         string                 `json:"catchup_policy,omitempty"`
-	LastMissedCount       int                    `json:"last_missed_count,omitempty"`
+	ID                    string                 `json:"id" yaml:"id"`
+	WorkspaceID           string                 `json:"workspace_id" yaml:"workspace_id"`
+	Name                  string                 `json:"name" yaml:"name"`
+	TargetPipelineID      string                 `json:"target_pipeline_id" yaml:"target_pipeline_id"`
+	TargetPipelineSlug    string                 `json:"target_pipeline_slug,omitempty" yaml:"target_pipeline_slug,omitempty"`
+	TargetPipelineVersion *int                   `json:"target_pipeline_version,omitempty" yaml:"target_pipeline_version,omitempty"`
+	CronExpr              string                 `json:"cron_expr" yaml:"cron_expr"`
+	Timezone              string                 `json:"timezone" yaml:"timezone"`
+	Inputs                map[string]interface{} `json:"inputs" yaml:"inputs"`
+	Enabled               bool                   `json:"enabled" yaml:"enabled"`
+	LastRunAt             *string                `json:"last_run_at,omitempty" yaml:"last_run_at,omitempty"`
+	LastStatus            *string                `json:"last_status,omitempty" yaml:"last_status,omitempty"`
+	LastRunID             *string                `json:"last_run_id,omitempty" yaml:"last_run_id,omitempty"`
+	NextRunAt             *string                `json:"next_run_at,omitempty" yaml:"next_run_at,omitempty"`
+	WakePipelineID        string                 `json:"wake_pipeline_id,omitempty" yaml:"wake_pipeline_id,omitempty"`
+	WakePipelineSlug      string                 `json:"wake_pipeline_slug,omitempty" yaml:"wake_pipeline_slug,omitempty"`
+	WakeInputs            map[string]interface{} `json:"wake_inputs,omitempty" yaml:"wake_inputs,omitempty"`
+	WakeFailClosed        bool                   `json:"wake_fail_closed,omitempty" yaml:"wake_fail_closed,omitempty"`
+	WakeCheckCount        int                    `json:"wake_check_count,omitempty" yaml:"wake_check_count,omitempty"`
+	WakeFireCount         int                    `json:"wake_fire_count,omitempty" yaml:"wake_fire_count,omitempty"`
+	LastWakeAt            *string                `json:"last_wake_at,omitempty" yaml:"last_wake_at,omitempty"`
+	LastWakeStatus        string                 `json:"last_wake_status,omitempty" yaml:"last_wake_status,omitempty"`
+	CatchupPolicy         string                 `json:"catchup_policy,omitempty" yaml:"catchup_policy,omitempty"`
+	LastMissedCount       int                    `json:"last_missed_count,omitempty" yaml:"last_missed_count,omitempty"`
 	// Circuit breaker (#1405).
-	ConsecutiveFailures    int    `json:"consecutive_failures"`
-	MaxConsecutiveFailures int    `json:"max_consecutive_failures"`
-	DisabledReason         string `json:"disabled_reason,omitempty"`
-	CreatedAt              string `json:"created_at"`
-	UpdatedAt              string `json:"updated_at"`
+	ConsecutiveFailures    int    `json:"consecutive_failures" yaml:"consecutive_failures"`
+	MaxConsecutiveFailures int    `json:"max_consecutive_failures" yaml:"max_consecutive_failures"`
+	DisabledReason         string `json:"disabled_reason,omitempty" yaml:"disabled_reason,omitempty"`
+	CreatedAt              string `json:"created_at" yaml:"created_at"`
+	UpdatedAt              string `json:"updated_at" yaml:"updated_at"`
 }
 
 // routineCell renders the ROUTINE column for trigger lists: the target
