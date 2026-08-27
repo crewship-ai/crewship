@@ -13,7 +13,7 @@ Response schema quality: 573 API operations have a concrete 2xx schema; 0 still 
 
 Request schema quality: 251 operations have request bodies; 247 have concrete JSON schemas, 4 use non-JSON media types, and 0 still use a generic JSON fallback.
 
-CLI flag quality: 385 commands define flags; 384 document all of their flags and 1 still have undocumented flag(s).
+CLI flag quality: 385 commands define flags; 385 document all of their flags and 0 still have undocumented flag(s).
 
 Environment variables: 102 discovered, 0 missing documentation. Manifest kinds: 21 discovered, 0 missing documentation.
 
@@ -34,7 +34,6 @@ These are missing a resource-level API reference page or have no exact route men
 | `connector get` | `get <id>` | `documented_exact` | docs/cli/connector.mdx | — | missing flags: — |
 | `connector install` | `install <id>` | `documented_exact` | docs/cli/connector.mdx | — | missing flags: — |
 | `connector verify` | `verify <id>` | `documented_exact` | docs/cli/connector.mdx | — | missing flags: — |
-| `credential create` | `create` | `documented_exact` | docs/cli/credential.mdx, docs/cli/issue.mdx, docs/cli/oauth.mdx, docs/cli/provider.mdx | cmd/crewship/acceptance_credential_openrouter_test.go, cmd/crewship/acceptance_oauth_connect_test.go, cmd/crewship/cmd_admin_extras_test.go, cmd/crewship/cmd_audit_test.go, cmd/crewship/cmd_chat_create_test.go, cmd/crewship/cmd_checkpoint_cov_test.go, cmd/crewship/cmd_checkpoint_test.go, cmd/crewship/cmd_credential_assignment_cov_test.go, … | missing flags: oauth-client-secret-stdin |
 | `logout` | `logout` | `documented_exact` | docs/cli/login.mdx, docs/cli/logout.mdx, docs/cli/overview.mdx | — | missing flags: — |
 | `recipe` | `recipe` | `documented_exact` | docs/cli/connector.mdx, docs/cli/recipe.mdx | — | missing flags: — |
 | `recipe get` | `get <slug>` | `documented_exact` | docs/cli/recipe.mdx | — | missing flags: — |

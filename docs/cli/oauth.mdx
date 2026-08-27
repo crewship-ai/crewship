@@ -79,13 +79,19 @@ Both legs operate on a credential that already carries the OAuth **app**
 details. Create it with `crewship credential create --type OAUTH2`:
 
 ```bash
-crewship credential create \
+printf '%s' "$CLIENT_SECRET" | crewship credential create \
   --name my-linear-cred \
   --type OAUTH2 \
   --oauth-provider linear \
   --oauth-client-id <client-id> \
-  --oauth-client-secret <client-secret>
+  --oauth-client-secret-stdin
 ```
+
+An app's client secret outlives every token it issues, so keep it out of
+`argv` — an argument is readable by anything that can see the process table
+for as long as the command runs, and lands in shell history besides.
+`--oauth-client-secret <value>` still works for a throwaway or a public
+client.
 
 `--oauth-provider` fills the authorize URL, token URL and default scopes from
 the same catalogue `crewship oauth providers` prints. For a provider the
@@ -107,7 +113,8 @@ and fails every agent run that resolves it, until the flow below completes.
 |---|---|---|
 | `--oauth-provider` | `string` | Fill endpoints from the built-in catalogue. |
 | `--oauth-client-id` | `string` | OAuth app client ID. Required for `--type OAUTH2`. |
-| `--oauth-client-secret` | `string` | Client secret; stored encrypted. Omit for a public (PKCE-only) client. |
+| `--oauth-client-secret` | `string` | Client secret; stored encrypted. Omit for a public (PKCE-only) client. Prefer `--oauth-client-secret-stdin`. |
+| `--oauth-client-secret-stdin` | `bool` | Read the client secret from stdin, so it never appears in `argv`. Mutually exclusive with `--oauth-client-secret`. |
 | `--oauth-auth-url` | `string` | Authorization endpoint. Overrides `--oauth-provider`; required without it. |
 | `--oauth-token-url` | `string` | Token endpoint. Overrides `--oauth-provider`; required without it. |
 | `--oauth-scopes` | `string` | Space-separated scopes. Defaults to the catalogue's. |
