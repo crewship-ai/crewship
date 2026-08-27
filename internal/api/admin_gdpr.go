@@ -507,6 +507,18 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 				if _, delErr := memory.DeleteUserModelEverywhere(h.outputBasePath, m.slug); delErr != nil {
 					h.logger.Warn("gdpr delete: on-disk user model delete failed",
 						"action_id", actionID, "err", delErr)
+					if firstErr == nil {
+						firstErr = delErr
+					}
+					// Do NOT delete the index row when a copy could not be
+					// removed. This loop is reached by walking user_models
+					// WHERE user_id/workspace_id — the only enumerator that
+					// ever revisits this slug — so deleting the row here
+					// would make the surviving copy permanently unfindable
+					// by a future retry of this same cascade, while the
+					// response still has to admit the failure (207) rather
+					// than report the erasure as complete.
+					continue
 				}
 			}
 			res, delErr := h.db.ExecContext(r.Context(),

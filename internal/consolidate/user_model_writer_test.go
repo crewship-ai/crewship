@@ -66,7 +66,7 @@ func TestSyncUserModel_Write(t *testing.T) {
 			MessageCount: 12, SessionDuration: time.Minute,
 		},
 		"Prefers concise answers.",
-		paths, time.Now(),
+		paths, dir, time.Now(),
 	)
 	if out.Err != nil {
 		t.Fatalf("write outcome err: %v", out.Err)
@@ -100,9 +100,9 @@ func TestSyncUserModel_WriteIsUpsert(t *testing.T) {
 		MessageCount: 12, SessionDuration: time.Minute,
 	}
 	SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
-		cand, "v1 content", paths, time.Now())
+		cand, "v1 content", paths, dir, time.Now())
 	SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
-		cand, "v2 longer content here", paths, time.Now())
+		cand, "v2 longer content here", paths, dir, time.Now())
 
 	var cnt int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM user_models`).Scan(&cnt); err != nil {
@@ -129,7 +129,7 @@ func TestSyncUserModel_SkipThreshold(t *testing.T) {
 			WorkspaceID: wsID, UserID: userID,
 			MessageCount: 2, SessionDuration: 30 * time.Second,
 		},
-		"would be content", paths, time.Now(),
+		"would be content", paths, dir, time.Now(),
 	)
 	if out.Action != "skip_threshold" {
 		t.Errorf("expected skip_threshold; got %q (%+v)", out.Action, out)
@@ -145,21 +145,26 @@ func TestSyncUserModel_SkipThreshold(t *testing.T) {
 func TestSyncUserModel_OptOutPurges(t *testing.T) {
 	db, wsID, userID := userModelTestDB(t)
 	dir := t.TempDir()
-	paths := memory.UserModelPaths{SharedDir: dir}
+	// Mirror production: the write path resolves its directory via
+	// UserModelPathsFor(basePath, crewID), and the opt-out delete path
+	// now enumerates basePath directly (DeleteUserModelEverywhere), so
+	// the fixture must use the same basePath-rooted layout or the two
+	// wouldn't agree on where the file lives.
+	paths := UserModelPathsFor(dir, "")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cand := UserModelCandidate{
 		WorkspaceID: wsID, UserID: userID,
 		MessageCount: 30, SessionDuration: 10 * time.Minute,
 	}
 	SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
-		cand, "Pavel notes", paths, time.Now())
+		cand, "Pavel notes", paths, dir, time.Now())
 
 	if _, err := db.Exec(`INSERT INTO user_peer_consent (user_id, workspace_id, opted_out, opted_out_at)
 		VALUES (?, ?, 1, ?)`, userID, wsID, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		t.Fatalf("set opt out: %v", err)
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
-		cand, "fresh would-be content", paths, time.Now())
+		cand, "fresh would-be content", paths, dir, time.Now())
 	if out.Action != "delete_opt_out" {
 		t.Errorf("expected delete_opt_out; got %q", out.Action)
 	}
@@ -195,7 +200,7 @@ func TestSyncUserModel_SkipEmptyContent(t *testing.T) {
 			WorkspaceID: wsID, UserID: userID,
 			MessageCount: 100, SessionDuration: time.Hour,
 		},
-		"   \n\t", paths, time.Now(),
+		"   \n\t", paths, dir, time.Now(),
 	)
 	if out.Action != "skip_empty_content" {
 		t.Errorf("expected skip_empty_content; got %q", out.Action)
@@ -291,7 +296,7 @@ func TestSyncUserModel_ConsentProbeError(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, time.Now())
+		"body", paths, dir, time.Now())
 	if out.Action != "skip_opt_out" || out.Err == nil {
 		t.Errorf("expected skip_opt_out with error; got %+v", out)
 	}
@@ -302,7 +307,9 @@ func TestSyncUserModel_ConsentProbeError(t *testing.T) {
 func TestSyncUserModel_OptOutDeleteFileError(t *testing.T) {
 	db, wsID, userID := userModelTestDB(t)
 	dir := t.TempDir()
-	paths := memory.UserModelPaths{SharedDir: dir}
+	// UserModelPathsFor(dir, "") matches how DeleteUserModelEverywhere
+	// resolves the crew-less workspace fallback under basePath=dir.
+	paths := UserModelPathsFor(dir, "")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Make the model path a NON-EMPTY directory so os.Remove fails.
@@ -320,7 +327,7 @@ func TestSyncUserModel_OptOutDeleteFileError(t *testing.T) {
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, time.Now())
+		"body", paths, dir, time.Now())
 	if out.Action != "delete_opt_out" || out.Err == nil {
 		t.Errorf("expected delete_opt_out with error; got %+v", out)
 	}
@@ -331,9 +338,9 @@ func TestSyncUserModel_OptOutDeleteFileError(t *testing.T) {
 func TestSyncUserModel_OptOutIndexDeleteError(t *testing.T) {
 	db, wsID, userID := userModelTestDB(t)
 	dir := t.TempDir()
-	paths := memory.UserModelPaths{SharedDir: dir}
+	paths := UserModelPathsFor(dir, "")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	// A model file exists on disk so DeleteUserModel succeeds...
+	// A model file exists on disk so DeleteUserModelEverywhere succeeds...
 	if err := memory.WriteUserModel(paths, userID, wsID, "- tone: terse"); err != nil {
 		t.Fatalf("seed model: %v", err)
 	}
@@ -347,7 +354,7 @@ func TestSyncUserModel_OptOutIndexDeleteError(t *testing.T) {
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, time.Now())
+		"body", paths, dir, time.Now())
 	if out.Action != "delete_opt_out" || out.Err == nil {
 		t.Errorf("expected delete_opt_out with index error; got %+v", out)
 	}
@@ -357,7 +364,7 @@ func TestSyncUserModel_OptOutIndexDeleteError(t *testing.T) {
 func TestSyncUserModel_OptOutNoExistingCard(t *testing.T) {
 	db, wsID, userID := userModelTestDB(t)
 	dir := t.TempDir()
-	paths := memory.UserModelPaths{SharedDir: dir}
+	paths := UserModelPathsFor(dir, "")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if _, err := db.Exec(`INSERT INTO user_peer_consent (user_id, workspace_id, opted_out)
 		VALUES (?, ?, 1)`, userID, wsID); err != nil {
@@ -365,9 +372,55 @@ func TestSyncUserModel_OptOutNoExistingCard(t *testing.T) {
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, time.Now())
+		"body", paths, dir, time.Now())
 	if out.Action != "delete_opt_out" || out.Err != nil {
 		t.Errorf("expected clean delete_opt_out; got %+v", out)
+	}
+}
+
+// Opt-out after the operator's most-active crew has changed since the
+// model was last written: the daily sweep resolves `paths` for the
+// CURRENT crew (cr2 here), but a file left behind in the PRIOR crew
+// (cr1) must be deleted too. Before the fix, SyncUserModel's opt-out
+// branch called the single-path memory.DeleteUserModel(paths, ...),
+// which only ever looks at `paths` — cr2's now-empty directory — and
+// left cr1's copy exactly as orphaned as it was before #1701 was fixed
+// for the two API surfaces. This is the same bug through the third
+// erasure trigger the original fix never reached.
+func TestSyncUserModel_OptOutPurgesOrphanFromPriorCrew(t *testing.T) {
+	db, wsID, userID := userModelTestDB(t)
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// A model was written while cr1 was the operator's most-active crew.
+	oldPaths := UserModelPathsFor(dir, "cr1")
+	if err := memory.WriteUserModel(oldPaths, userID, wsID, "- role: runs the platform team"); err != nil {
+		t.Fatalf("seed old crew model: %v", err)
+	}
+
+	// The operator's most-active crew has since moved to cr2 — this is
+	// what the candidate's CrewID carries into today's sweep.
+	newPaths := UserModelPathsFor(dir, "cr2")
+	cand := UserModelCandidate{
+		WorkspaceID: wsID, CrewID: "cr2", UserID: userID,
+		MessageCount: 20,
+	}
+
+	if _, err := db.Exec(`INSERT INTO user_peer_consent (user_id, workspace_id, opted_out)
+		VALUES (?, ?, 1)`, userID, wsID); err != nil {
+		t.Fatalf("set opt out: %v", err)
+	}
+	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
+		cand, "would-be content", newPaths, dir, time.Now())
+	if out.Action != "delete_opt_out" || out.Err != nil {
+		t.Errorf("expected clean delete_opt_out; got %+v", out)
+	}
+
+	if body, _ := memory.LoadUserModel(oldPaths, userID, wsID); body != "" {
+		t.Errorf("cr1's orphaned copy survived the opt-out purge: %q", body)
+	}
+	if body, _ := memory.LoadUserModel(newPaths, userID, wsID); body != "" {
+		t.Errorf("cr2's copy survived the opt-out purge: %q", body)
 	}
 }
 
@@ -383,7 +436,7 @@ func TestSyncUserModel_UpsertError(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, time.Now())
+		"body", paths, dir, time.Now())
 	if out.Action != "write" || out.Err == nil {
 		t.Errorf("expected write action with upsert error; got %+v", out)
 	}
@@ -402,7 +455,7 @@ func TestSyncUserModel_DiskWriteError(t *testing.T) {
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, time.Now())
+		"body", paths, dir, time.Now())
 	if out.Action != "write" || out.Err == nil {
 		t.Errorf("expected write action with disk error; got %+v", out)
 	}
@@ -420,7 +473,7 @@ func TestSyncUserModel_WriteWithCrewID(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, CrewID: "cr1", UserID: userID, MessageCount: 20},
-		"body", paths, time.Now())
+		"body", paths, dir, time.Now())
 	if out.Action != "write" || out.Err != nil {
 		t.Errorf("expected clean write; got %+v", out)
 	}

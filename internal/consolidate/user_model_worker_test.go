@@ -291,6 +291,72 @@ func TestRunUserModelSync_PurgeOptOutCounter(t *testing.T) {
 	}
 }
 
+// The daily sweep's opt-out purge must not miss a file left behind in a
+// crew the operator is no longer most-active in.
+//
+// loadUserModelCandidates recomputes CrewID on every sweep from the
+// current message counts, so a model written while cr1 was the
+// operator's most-active crew and later abandoned for cr2 leaves cr1's
+// copy an orphan the moment the sweep's candidate starts naming cr2
+// instead. Before the fix, SyncUserModel's opt-out branch deleted only
+// `paths` — resolved for TODAY's crew (cr2) — via the single-path
+// memory.DeleteUserModel, so cr1's copy survived the purge exactly the
+// way #1701 documented for the two API-surface deletes. Opt-out is a
+// user-initiated erasure trigger like those two, so it must reach every
+// crew directory the same way.
+func TestRunUserModelSync_PurgeOptOutReachesOrphanFromPriorCrew(t *testing.T) {
+	db := userModelWorkerDB(t)
+	seedUserModelFixture(t, db) // ws1 + crew cr1 + user u1 + chat ch1 (20 msgs)
+
+	// A second crew whose chat has MORE messages than cr1's, so this
+	// sweep's candidate query resolves the operator's most-active crew
+	// to cr2 instead of cr1.
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr2','ws1','Crew2','crew2')`); err != nil {
+		t.Fatalf("seed crew2: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, slug, name, agent_role)
+		VALUES ('a2','ws1','cr2','dev2','Dev2','AGENT')`); err != nil {
+		t.Fatalf("seed agent2: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, created_by, message_count, started_at, ended_at)
+		VALUES ('ch2','a2','ws1','u1',40,?,?)`,
+		time.Now().UTC().Add(-30*time.Minute).Format(time.RFC3339),
+		time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed chat2: %v", err)
+	}
+
+	base := t.TempDir()
+	// The model was written earlier, back when cr1 was most-active.
+	oldPaths := memory.UserModelPaths{SharedDir: base + "/crews/cr1/shared/.memory"}
+	if err := memory.WriteUserModel(oldPaths, "u1", "ws1", "- tone: terse"); err != nil {
+		t.Fatalf("seed old crew model: %v", err)
+	}
+	newPaths := memory.UserModelPaths{SharedDir: base + "/crews/cr2/shared/.memory"}
+
+	if _, err := db.Exec(`INSERT INTO user_peer_consent (user_id, workspace_id, opted_out)
+		VALUES ('u1','ws1',1)`); err != nil {
+		t.Fatalf("opt out: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	sum, err := RunUserModelSync(context.Background(), db, logger, "ws1", UserModelSyncOptions{
+		OutputBasePath: base,
+		Extractor:      fixedExtractor{body: "- tone: warm"},
+	})
+	if err != nil {
+		t.Fatalf("RunUserModelSync: %v", err)
+	}
+	if sum.PurgedOptOut != 1 {
+		t.Errorf("expected 1 purged_opt_out; got %+v", sum)
+	}
+	if body, _ := memory.LoadUserModel(oldPaths, "u1", "ws1"); body != "" {
+		t.Errorf("cr1's orphaned copy survived the opt-out sweep: %q", body)
+	}
+	if body, _ := memory.LoadUserModel(newPaths, "u1", "ws1"); body != "" {
+		t.Errorf("cr2's copy survived the opt-out sweep: %q", body)
+	}
+}
+
 // A chat opened against an agent with NULL crew_id → candidate has an
 // empty CrewID → UserModelPathsFor falls back to the workspace-level
 // shared dir.

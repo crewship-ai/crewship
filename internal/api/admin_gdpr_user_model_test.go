@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -167,6 +168,65 @@ func TestGDPRCascade_RemovesOrphanFromPriorCrew(t *testing.T) {
 	}
 	if cnt != 0 {
 		t.Errorf("user_models rows remaining for the subject = %d, want 0", cnt)
+	}
+}
+
+// Same shape as TestDeleteMyUserModel_PartialFileFailureIsNotReportedAsSuccess,
+// through the admin SAR cascade: a failure to delete ONE of several crew
+// copies must surface as a partial failure (207) — not the flat 202 the
+// handler used to return while silently DELETE-ing the index row anyway,
+// which reported the erasure complete with a readable copy still on disk
+// and no row left for a retry of this same cascade to ever find it again.
+func TestGDPRCascade_PartialFileFailureIsNotReportedAsFullSuccess(t *testing.T) {
+	r := gdprTestSetup(t)
+	r.seedAll(t)
+	if _, err := r.db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, network_mode, allowed_domains)
+		VALUES ('crew2','ws1','C2','c2','free','[]')`); err != nil {
+		t.Fatalf("seed crew2: %v", err)
+	}
+	// A real, deletable copy in crew1 (r.crewID), the row's current crew.
+	r.seedUserModel(t, "- role: runs the platform team")
+
+	// An undeletable copy in crew2: the model path is occupied by a
+	// non-empty directory, so os.Remove fails. "crew1" < "crew2"
+	// lexicographically, so the directory walk clears crew1 before
+	// hitting this one — a genuine partial failure.
+	slug := memory.UserSlug(r.targetID, r.wsID)
+	poisoned := filepath.Join(r.output, "crews", "crew2", "shared", ".memory", "users", slug+".md")
+	if err := os.MkdirAll(poisoned, 0o755); err != nil {
+		t.Fatalf("mkdir model-as-dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(poisoned, "child"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed child: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	r.h.DeleteUserData(rec, r.adminReq(t, http.MethodDelete,
+		`{"reason":"GDPR SAR ticket #1234"}`, r.targetID, "ADMIN"))
+	if rec.Code != http.StatusMultiStatus {
+		t.Fatalf("a partial on-disk failure must surface as 207; got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// crew1's deletable copy was still cleared — partial progress isn't
+	// undone just because crew2 failed.
+	crew1Paths := memory.UserModelPaths{SharedDir: filepath.Join(r.output, "crews", r.crewID, "shared", ".memory")}
+	if body, _ := memory.LoadUserModel(crew1Paths, r.targetID, r.wsID); body != "" {
+		t.Errorf("the deletable crew1 copy was not removed: %q", body)
+	}
+	if _, err := os.Stat(poisoned); err != nil {
+		t.Fatalf("expected the poisoned crew2 directory to still exist: %v", err)
+	}
+	// The index row must survive a partial failure: this cascade finds
+	// the model by walking user_models WHERE user_id/workspace_id, so
+	// deleting the row here would make the crew2 leftover permanently
+	// unfindable by any retry.
+	var cnt int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM user_models
+		WHERE workspace_id=? AND user_id=?`, r.wsID, r.targetID).Scan(&cnt); err != nil {
+		t.Fatalf("count user_models: %v", err)
+	}
+	if cnt != 1 {
+		t.Errorf("index row was deleted despite a file-delete failure (%d rows); a retry can no longer find this model", cnt)
 	}
 }
 
