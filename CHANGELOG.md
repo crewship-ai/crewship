@@ -66,6 +66,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   entry. Waiting on the pipes is now bounded, and the command's real exit
   status is still what the caller sees.
 
+- **A crew's issue prefix could mint an issue at an address no route can
+  reach (#2035).** `crews.issue_prefix` had no charset or length check on any
+  write path — `PATCH /api/v1/crews/{crewId}` stored it verbatim, and the only
+  branch was `""` → `NULL`. The prefix becomes the leading half of the issue
+  identifier, and that identifier is a **single URL path segment** on around
+  twenty routes: get, patch, delete, comments, attachments, relations. So
+  `--issue-prefix "A/B"` filed `A/B-1`, an issue that exists, lists, and can
+  never be opened, and a space, `%`, `#` or `?` each broke the same segment
+  their own way. The prefix must now match `^[A-Za-z0-9_-]{1,16}$` on write,
+  with a 400 that names the field and states the rule; `""` still means "clear
+  it". Validated on the API rather than in the CLI, so the web UI is covered
+  by the same guard. **Prefixes already stored are not migrated and not
+  refused on read** — they keep minting exactly what they mint today — but a
+  prefix outside the rule cannot be written again, so a crew holding one has
+  to move to a valid prefix the next time it changes.
+
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and
   `OnboardingHandler.Status` reads a NULL there as "this completion was
