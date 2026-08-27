@@ -198,6 +198,13 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 		// only from tests to drive the schedule deterministically.
 		"sleepFn":  "test-only retry-clock override; production uses real time",
 		"jitterFn": "test-only retry-jitter override; production uses math/rand",
+		// Test-only rendezvous with the resume retry loop: fires after a
+		// failed concurrency-slot Acquire so a test can order an edit
+		// against the wait window it is asserting on, instead of guessing
+		// when the window opens (#1597). Not a dependency — nothing in
+		// production reads or needs it, and wiring it in the factory
+		// would mean shipping a hook that fires on every busy resume.
+		"onResumeSlotBusy": "test-only resume-retry rendezvous; production never sets it",
 	}
 	v := reflect.ValueOf(exec).Elem()
 	typ := v.Type()

@@ -397,6 +397,13 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 		case errors.Is(err, ErrConcurrencyLimitReached):
 			logger.Info("pipeline resume: concurrency slot busy; will retry",
 				"run_id", rec.ID, "retry_in", backoff)
+			// Test rendezvous (nil in production): the run is now
+			// demonstrably parked on the slot, and no Run attempt is
+			// in flight, so anything the hook does lands strictly
+			// before the next iteration's reload + drift re-check.
+			if e.onResumeSlotBusy != nil {
+				e.onResumeSlotBusy(rec.ID)
+			}
 			select {
 			case <-ctx.Done():
 				// Shutdown while queued on the slot. Leave the row in
