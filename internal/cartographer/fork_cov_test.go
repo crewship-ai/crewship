@@ -36,7 +36,7 @@ func TestFork_ParentMissionNotFound(t *testing.T) {
 	defer db.Close()
 
 	// Mission in ws_other, checkpoint row claiming ws_test scope.
-	mustExecSQL(t, db, `INSERT INTO crews (id, workspace_id) VALUES ('crew_o', 'ws_other')`)
+	mustExecSQL(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew_o', 'ws_other', 'Crew O', 'crew-o')`)
 	mustExecSQL(t, db, `INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title)
 		VALUES ('mis_foreign', 'ws_other', 'crew_o', 'agent_lead', 'tr_f', 'Foreign')`)
 	mustExecSQL(t, db, `INSERT INTO checkpoints (id, workspace_id, mission_id, journal_cursor, state_snapshot)

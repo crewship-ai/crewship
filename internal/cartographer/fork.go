@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -19,6 +20,11 @@ import (
 //   - title prefixed with "Fork: "
 //   - status reset to PLANNING
 //   - the same workspace_id, crew_id, lead_agent_id, description, plan as the parent
+//
+// A synthetic chats row is stamped alongside it (same id as the mission,
+// same convention the normal mission-create path uses) so the fork's task
+// assignments have a chat_id to satisfy the FK — without it the fork looks
+// fine right up until the orchestrator tries to dispatch its first task.
 //
 // All mission_tasks that existed on the parent at fork time are copied
 // onto the new mission — we snapshot the whole task list because "fork"
@@ -82,6 +88,23 @@ func Fork(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, fromC
 		newMissionID, workspaceID, parentCrew, parentLead, newTraceID, newTitle, parentDesc, parentPlan)
 	if err != nil {
 		return "", "", fmt.Errorf("cartographer: insert fork mission: %w", err)
+	}
+
+	// Every mission needs a synthetic chat row so its task assignments have
+	// somewhere to point: assignments.chat_id is NOT NULL REFERENCES
+	// chats(id), and the orchestrator dispatches a task by inserting an
+	// assignment with chat_id = mission id. The normal mission-create path
+	// (internal/api/mission_handler_mutate.go) stamps this chat in the same
+	// transaction as the mission row; Fork has to do the same or every
+	// assignment on the forked mission fails its foreign key the moment the
+	// orchestrator tries to schedule a task.
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = tx.ExecContext(ctx, `INSERT INTO chats
+		(id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		newMissionID, parentLead, workspaceID, "Mission: "+newTitle, now, now, now)
+	if err != nil {
+		return "", "", fmt.Errorf("cartographer: insert fork chat: %w", err)
 	}
 
 	// Copy tasks verbatim but with new IDs and mission_id pointed at fork.
