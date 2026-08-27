@@ -100,6 +100,15 @@ func TestMachineResultStructsHaveMatchingJSONAndYAMLKeys(t *testing.T) {
 			checked += checkYAMLKeyParity(t, rt, rt.Name(), map[reflect.Type]bool{})
 		})
 	}
+
+	// Anti-vacuity, the count the walker returns for exactly this purpose: if
+	// the tag lookup or the struct walk ever stops finding fields, every
+	// subtest above passes while checking nothing. One field per listed type
+	// is a floor no real result struct falls below.
+	if checked < len(types) {
+		t.Errorf("walked %d tagged field(s) across %d result types — the walker has gone blind",
+			checked, len(types))
+	}
 }
 
 // checkYAMLKeyParity walks rt and every struct reachable from it, reporting
