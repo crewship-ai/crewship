@@ -135,10 +135,11 @@ export function MCPDetailSheet({
   // it performs no discovery — and the only code that really speaks
   // `tools/list` is the sidecar's gateway (internal/sidecar/mcp_gateway.go:348),
   // whose catalogue never leaves the container. `crewship integration tools
-  // refresh` hard-codes an empty array for the same reason
-  // (cmd_integration_tools.go:144, under TODO(#1884)), so calling the endpoint
-  // from here would trade a working re-read for a guaranteed no-op — and for a
-  // 403, since the route is ADMIN+ while viewing this tab is not.
+  // refresh` now carries a real tool list (#1884), but only one its CALLER
+  // discovered and passed on --tool/--tools-file; this sheet has no such list,
+  // so posting from here would trade a working re-read for an empty payload
+  // the server no-ops — and for a 403, since the route is ADMIN+ while viewing
+  // this tab is not.
   //
   // The re-read is still worth having: it picks up toggles another admin made.
   // So the button stays and the wording stops lying.
@@ -249,9 +250,10 @@ export function MCPDetailSheet({
                 ) : totalCount === 0 ? (
                   <div className="rounded-md border border-white/10 bg-background p-4 text-xs text-muted-foreground">
                     No tools recorded here yet, and this screen cannot discover them &mdash; nothing in
-                    Crewship currently writes an MCP server&rsquo;s catalogue back to the database
-                    (TODO #1884). The server still exposes whatever the upstream publishes, all enabled
-                    by default; this list only records tools somebody has explicitly toggled.
+                    Crewship probes an MCP server&rsquo;s catalogue for you. You can record one you
+                    already have with <code>crewship integration tools refresh</code>. The server
+                    still exposes whatever the upstream publishes, all enabled by default; this list
+                    only records tools somebody has explicitly toggled or refreshed in.
                   </div>
                 ) : (
                   <ul className="space-y-1.5">

@@ -113,8 +113,49 @@ These commands apply only to crew-scoped integrations.
 | `integration tools disable <crew-slug> <integration-id> <tool-name>` | `Tool <tool> on <crew>/<integration-id> disabled.` | No structured output. |
 | `integration tools refresh <crew-slug> <integration-id>` | If the server returns an empty body: `Tool bindings refresh requested for <crew>/<integration-id>.`; otherwise the server result is printed as JSON. | The server result when it returns one. |
 
-`tools refresh` currently sends an empty tool list. The server treats that as a
-no-op; it does not perform live MCP discovery from the CLI.
+#### Supplying the discovered tools to `tools refresh`
+
+`tools refresh` does not perform live MCP discovery itself — you hand it the
+tool list a probe (or the dashboard's test-connection round-trip) already
+found, and it reconciles the bindings:
+
+| Flag | Meaning |
+| --- | --- |
+| `--tool NAME` / `--tool NAME=DESCRIPTION` | One discovered tool. Repeatable. The description is everything after the **first** `=`, so it may itself contain `=` and `,`. Omit the `=` part when the probe found no description. |
+| `--tools-file PATH` | Read the tools from a file. `-` reads standard input. |
+
+`--tools-file` accepts either a bare JSON array of `{"name", "description"}`
+objects or an MCP `tools/list` result verbatim (`{"tools": [...]}`); extra keys
+such as `inputSchema` are ignored. When both flags are given the file is read
+first and a `--tool` with the same name overrides that entry.
+
+```bash
+# From a captured probe result
+crewship integration tools refresh backend intg_123 --tools-file tools.json
+
+# Straight off a pipe
+mcp-probe list-tools | crewship integration tools refresh backend intg_123 --tools-file -
+
+# Ad hoc
+crewship integration tools refresh backend intg_123 \
+  --tool search="Full-text search over the issue tracker" \
+  --tool create_issue
+```
+
+Reconciliation rules, enforced server-side:
+
+- A tool the workspace has not seen before is created **enabled**.
+- A tool that already has a binding keeps its enabled/disabled state — a
+  refresh never silently re-enables something an operator turned off.
+- An entry without a description leaves the stored description alone.
+- A tool **absent** from the payload is left in place. A refresh never
+  auto-revokes; use `tools disable` for that.
+
+At least one of `--tool` or `--tools-file` is required. Running with neither
+exits `2` (validation) rather than posting an empty list: the server treats an
+empty list as a no-op, so the command would otherwise report success while
+changing nothing. If a probe legitimately discovered zero tools, say so
+explicitly with a `--tools-file` whose content is `[]`.
 
 ### Composio managed integrations
 
@@ -433,7 +474,8 @@ Lists tool bindings for a crew-scoped integration.
 
 ### `crewship integration tools refresh <crew-slug> <integration-id>`
 
-Requests a refresh of tool bindings.
+Reconciles tool bindings with a discovered tool list supplied on `--tool` or
+`--tools-file`. See [Per-tool controls](#per-tool-controls).
 
 ### `crewship integration unbind`
 

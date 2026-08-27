@@ -771,5 +771,6 @@ func init() {
 
 	registerIntegrationWorkspaceFlags()
 	registerIntegrationCrewFlags()
+	registerIntegrationToolsFlags()
 	registerIntegrationAgentFlags()
 }
