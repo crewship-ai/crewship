@@ -100,15 +100,45 @@ jobs:
           # button; the UI half of a user-visible change routinely lands in
           # `components/` with barely a line under `app/`.
           #
+          # `lib/`, `hooks/` and `stores/` are on the list for the same reason,
+          # and they are peer top-level trees rather than sub-directories of the
+          # two above, so nothing else covers them. A #2024-shaped chat fix
+          # lands in `hooks/use-chat.ts`; retry and error copy live in
+          # `lib/api-error.ts`; `stores/` holds client state a user watches
+          # behave. Leaving them out let exactly the class of change this guard
+          # exists for walk through reporting "nothing to chronicle".
+          #
           # `D` is in the filter as well as `ACMR`: deleting a route, a command
           # or a screen is as user-visible as adding one, and a PR that only
           # removes files would otherwise walk straight through.
-          mapfile -t watched < <(git diff --name-only --diff-filter=ACMRD \
+          #
+          # Materialised into a variable rather than piped into `mapfile` from a
+          # process substitution. A command inside `< <(…)` has its exit status
+          # discarded, so `set -euo pipefail` never sees this `git diff` fail —
+          # an unresolvable `origin/$BASE_REF` (a trimmed `fetch-depth`, a base
+          # branch renamed mid-flight, any git error at all) produced an empty
+          # list, and the step printed "nothing to chronicle" and exited 0. A
+          # green check reporting a skip as a verdict is the one outcome this
+          # workflow must never produce. A bare assignment propagates the
+          # command substitution's status, so `set -e` kills the step instead;
+          # `scripts/changelog-guard-test.sh` pins it.
+          watched_raw="$(git diff --name-only --diff-filter=ACMRD \
               "origin/$BASE_REF...HEAD" -- \
               'internal/api' \
               'cmd/crewship' \
               'app' \
-              'components')
+              'components' \
+              'lib' \
+              'hooks' \
+              'stores')"
+
+          # `<<< ""` yields one empty element, not none — and an empty filename
+          # matches no arm of the test-file filter below, so it would be counted
+          # as a user-visible file. Guard the split rather than the filter.
+          watched=()
+          if [ -n "$watched_raw" ]; then
+            mapfile -t watched <<< "$watched_raw"
+          fi
 
           # Test-only diffs inside those trees are not user-visible. A PR that
           # touches nothing but `*_test.go` / `*.test.tsx` / `__tests__/`

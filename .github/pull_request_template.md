@@ -26,9 +26,10 @@
 
 ## Changelog (enforced by the `Changelog Guard` workflow)
 
-A PR touching `internal/api/`, `cmd/crewship/`, `app/` or `components/`
-needs an entry under `## [Unreleased]` in `CHANGELOG.md` — `RELEASING.md`
-cuts release notes from that section, so an omission ships silently.
+A PR touching `internal/api/`, `cmd/crewship/`, `app/`, `components/`,
+`lib/`, `hooks/` or `stores/` needs an entry under `## [Unreleased]` in
+`CHANGELOG.md` — `RELEASING.md` cuts release notes from that section, so
+an omission ships silently.
 
 - [ ] Entry added under `## [Unreleased]`, marked `⚠️ **Behaviour change:**`
       if something that used to work can now fail

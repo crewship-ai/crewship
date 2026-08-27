@@ -263,10 +263,20 @@ trigger. Both must be green for review.
 `## [Unreleased]` section. That makes a missing entry not untidiness but
 a release note that does not exist — and a change nobody is told about.
 
-**A PR that touches `internal/api/`, `cmd/crewship/`, `app/` or
-`components/` must add an entry under `## [Unreleased]`.** The
-**Changelog Guard** workflow enforces it. Test files inside those trees
-don't count as user-visible, and Dependabot is exempt by actor.
+**A PR that touches `internal/api/`, `cmd/crewship/`, `app/`,
+`components/`, `lib/`, `hooks/` or `stores/` must add an entry under
+`## [Unreleased]`.** The **Changelog Guard** workflow enforces it. The
+last three are peer top-level trees, not sub-directories of the two
+above, and they carry as much user-visible behaviour: a chat or socket
+fix lands in `hooks/use-chat.ts`, retry and error copy in
+`lib/api-error.ts`. Test files inside any of those trees don't count as
+user-visible, and Dependabot is exempt by actor.
+
+The guard's own logic is unit-tested by
+`scripts/changelog-guard-test.sh`, which extracts the step's script
+verbatim from the workflow and runs it against a throwaway repository —
+including the case that matters most, a `git diff` that dies. That used
+to be reported as an empty diff and a green check.
 
 If the change genuinely has no user-visible effect — a chore, an
 internal refactor, a test-only fix — apply the **`skip-changelog`**

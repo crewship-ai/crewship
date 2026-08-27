@@ -256,6 +256,13 @@ jobs:
         run: bash scripts/dev-sh-test.sh
       - name: security.yml alert-issue + govulncheck allowlist logic
         run: bash scripts/security-yml-test.sh
+      # The same shape one workflow over: a gate written in YAML, running only
+      # on a pull request, whose wrong answer is a green check. Its watched-path
+      # list shipped with a `mapfile < <(git diff …)` that swallowed the diff's
+      # exit status, so a dead `git diff` read as "nothing changed" and the step
+      # passed. This runs the step's real script against a throwaway repo.
+      - name: changelog-guard.yml verdict (and that it fails closed)
+        run: bash scripts/changelog-guard-test.sh
       - name: deploy-dev.sh push_branch
         run: bash scripts/deploy-dev-test.sh
       - name: test-harness lib (binary resolution + preflight)
