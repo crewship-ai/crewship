@@ -140,6 +140,12 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
   const hiddenCount = files.length - visibleFiles.length
 
   useEffect(() => {
+    // Rebuilding the tree throws away every loaded child, so the record of
+    // which directories have already been fetched has to go with them.
+    // Otherwise the lazy-load effect below skips a directory that is still
+    // expanded but now empty, and it stays empty until the panel resets on an
+    // agent change. Toggling `Show internals` is the way a reader hits this.
+    fetchedDirsRef.current = new Set()
     setTree(buildTopLevelTree(visibleFiles))
     if (files.length > 0) {
       // basePrefix is derived from the UNFILTERED list on purpose: it is the

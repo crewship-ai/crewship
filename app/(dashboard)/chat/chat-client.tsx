@@ -175,14 +175,34 @@ export function ChatClient() {
   // router push, for the reason the classic page documents at length — a
   // route change tears down and rebuilds the dashboard chrome to look at a
   // different name, and the user feels every one of those.
+  /**
+   * The agent the URL last named, which is NOT the same as `agentSlug`.
+   *
+   * `agentSlug` also moves when the reader picks a row, so comparing against it
+   * would read an in-page selection as a navigation and throw the selection
+   * away. This only ever changes when the address bar does.
+   */
+  const urlAgentRef = useRef<string | null>(null)
   useEffect(() => {
     // The path segment is authoritative when there is one: `/chat/riley` is a
     // stronger statement about which agent you want than a leftover `?agent=`
     // in the same URL could be.
     const a = pathAgentSlug ?? searchParams.get("agent")
     const s = searchParams.get("session")
-    if (a) setAgentSlug(a)
+    // A URL that names a DIFFERENT agent and no session drops the old
+    // selection. Without this the auto-open effect below sees a `sessionId`
+    // that is still set, returns early, and the page renders the previous
+    // agent's conversation under the new agent's name — reachable with the
+    // Back button, which is exactly what the popstate listener exists to
+    // support. Only on a change: clearing whenever the session is merely
+    // absent would wipe the reader's own pick on any incidental re-render.
+    const namedAnotherAgent = !!a && urlAgentRef.current !== null && a !== urlAgentRef.current
+    if (a) {
+      urlAgentRef.current = a
+      setAgentSlug(a)
+    }
     if (s) setSessionId(s)
+    else if (namedAnotherAgent) setSessionId(null)
   }, [searchParams, pathAgentSlug])
 
   /**
@@ -203,6 +223,28 @@ export function ChatClient() {
     handoffConsumedRef.current = true
     setHandoffPrompt(p)
   }, [searchParams])
+
+  /**
+   * The conversation the handoff belongs to.
+   *
+   * Reading the URL once is not enough on its own. `ChatPanel` is keyed on the
+   * session, so picking another thread REMOUNTS it, and a mount is exactly what
+   * `autoSendInitial` fires on — the routine-authoring prompt would be sent a
+   * second time, into a conversation the reader chose for something else. That
+   * is a message nobody typed.
+   *
+   * Pinned to the first session the prompt is rendered against, and assigned
+   * during render rather than in an effect on purpose: `initialInput` and
+   * `autoSendInitial` are read by the panel ON MOUNT, so a ref that settled one
+   * render later would arrive after the only moment it is consulted. The write
+   * is idempotent — same session, same value — so a double render is safe.
+   */
+  const handoffSessionRef = useRef<string | null>(null)
+  if (handoffPrompt !== null && handoffSessionRef.current === null && sessionId) {
+    handoffSessionRef.current = sessionId
+  }
+  const handoffForThisSession =
+    handoffPrompt !== null && handoffSessionRef.current === sessionId
 
   const agent = useMemo(
     () => tree.roster?.find((a) => a.slug === agentSlug) ?? null,
@@ -506,8 +548,8 @@ export function ChatClient() {
           // rather than by a person.
           sessionOrigin={activeThread?.origin ?? null}
           sessionId={sessionId}
-          initialInput={handoffPrompt ?? undefined}
-          autoSendInitial={!!handoffPrompt}
+          initialInput={handoffForThisSession ? handoffPrompt ?? undefined : undefined}
+          autoSendInitial={handoffForThisSession}
           mobilePanel={isMobile ? mobilePanel : undefined}
           onSend={handleSend}
           onReplySettled={handleReplySettled}
