@@ -47,6 +47,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { isImeComposing } from "@/lib/ime"
 import { relTime } from "@/lib/time"
 import { DetailCard, Pill } from "@/components/ui/detail"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -349,7 +350,7 @@ function AttachCodeLinkPicker({ edit }: { edit: CodeLinkEdit }) {
             // Enter confirms an IME candidate before it means "submit". Firing
             // mid-composition posts a half-composed URL and answers with a
             // parse failure for something the reader never finished typing.
-            if (e.nativeEvent.isComposing) return
+            if (isImeComposing(e)) return
             if (e.key === "Enter") void submit()
           }}
           placeholder="https://github.com/acme/thing/pull/7"

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // ProgressWriter appends structured JSONL events to a mission's progress file.
@@ -63,18 +65,38 @@ func (pw *ProgressWriter) WriteEvent(traceID, crewSlug string, event ProgressEve
 		return // best-effort, don't fail the mission
 	}
 
-	path := filepath.Join(dir, "progress.jsonl")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
 	data, err := json.Marshal(event)
 	if err != nil {
 		return
 	}
-	f.Write(append(data, '\n'))
+	line := append(data, '\n')
+
+	// Read-modify-write through the durable helper rather than O_APPEND
+	// (#1999, same shape as #1807). The old form was
+	// os.OpenFile(O_APPEND|O_CREATE) followed by a bare, un-synced
+	// f.Write: O_CREATE and the first write are two syscalls, so between
+	// them progress.jsonl exists at zero bytes and any concurrent reader
+	// observes an EMPTY mission history. That reader is right here in
+	// this file — ReadProgress feeds BuildProgressContext, whose output
+	// is injected into the agent's system prompt, so a reader landing in
+	// that window doesn't get a stale log, it gets "nothing has happened
+	// in this mission yet" and the agent redoes completed work.
+	//
+	// The cost objection that kept appends in place elsewhere does not
+	// apply: progress.jsonl holds one line per mission task event
+	// (tens, not thousands), the whole write is already serialised by
+	// pw.mu, and WriteEvent was re-opening the file per event anyway.
+	// WriteFileDurable gives the reader all-or-nothing content plus the
+	// fsync the bare f.Write never had.
+	path := filepath.Join(dir, "progress.jsonl")
+	prev, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return // best-effort, don't fail the mission
+	}
+	// Best-effort by contract (WriteEvent returns nothing), but the
+	// durable helper leaves the previous content untouched on failure
+	// rather than half-appending.
+	_ = memory.WriteFileDurable(path, append(prev, line...), 0644)
 }
 
 // ReadProgress reads the progress JSONL file for a mission.

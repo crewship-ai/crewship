@@ -246,6 +246,16 @@ type Executor struct {
 	resumeRetryBase time.Duration
 	resumeRetryMax  time.Duration
 
+	// onResumeSlotBusy fires on the resume goroutine each time a
+	// re-entered run loses the concurrency-slot race, after the failed
+	// Acquire and before the backoff wait — i.e. at a point where no
+	// Run attempt is in flight for that run. Tests use it as a
+	// rendezvous: it is the only observable proof that the run really
+	// is parked in the retry loop (rather than about to sail through
+	// the drift gate), so a test can order an edit against the wait
+	// window instead of guessing at it. Nil in production.
+	onResumeSlotBusy func(runID string)
+
 	// sleepFn / jitterFn make the per-step retry backoff (runStepWithRetry)
 	// injectable so tests drive the retry schedule deterministically without
 	// real wall-clock delays. Nil = production behaviour (real timer sleep,

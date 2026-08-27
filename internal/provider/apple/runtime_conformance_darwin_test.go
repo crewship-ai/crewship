@@ -84,12 +84,55 @@ func TestAppleRuntimeConformance(t *testing.T) {
 	}
 
 	base := t.TempDir()
-	sidecar := filepath.Join(base, "crewship-sidecar")
+
+	// Where the crew's mandatory binds come FROM. Default: a sibling of the
+	// data dir, which is what this harness always did. That default is exactly
+	// why it could not reproduce #1724 as written — both paths sat in the same
+	// t.TempDir(), so the install prefix was never the awkward one.
+	//
+	// CREWSHIP_CONFORMANCE_INSTALL_PREFIX pins it instead, so the reported
+	// scenario runs verbatim rather than approximated — the docker harness's
+	// knob of the same name (runtime_binds_conformance_test.go), for the same
+	// reason:
+	//
+	//	CREWSHIP_CONFORMANCE_INSTALL_PREFIX=/opt/homebrew/libexec \
+	//	  go test -tags conformance -run TestAppleRuntimeConformance -v ./internal/provider/apple/
+	//
+	// A prefix outside $HOME is the interesting one: that is where Homebrew and
+	// install.sh actually put these files, and whether an Apple container VM can
+	// bind out of it is the open question #1724 exists to answer.
+	//
+	// Always a subdirectory of whatever is configured, never the directory
+	// itself: pointed at a real /opt/homebrew/libexec, writing crewship-sidecar
+	// straight into it would overwrite the operator's actual install.
+	installBase := os.Getenv("CREWSHIP_CONFORMANCE_INSTALL_PREFIX")
+	if installBase == "" {
+		installBase = base
+	}
+	installPrefix := filepath.Join(installBase, "crewship-1724-install")
+	if err := os.MkdirAll(installPrefix, 0o755); err != nil {
+		t.Fatalf("create install prefix %s: %v", installPrefix, err)
+	}
+	defer os.RemoveAll(installPrefix)
+	t.Logf("install prefix: %s", installPrefix)
+
+	sidecar := filepath.Join(installPrefix, "crewship-sidecar")
 	// verifySidecarIsLinuxELF reads exactly the magic; nothing here execs the
 	// binary (that is runByoiSidecarCheck's job on a path this harness does not
 	// take), so a stub keeps the harness independent of `make build:sidecar`.
 	if err := os.WriteFile(sidecar, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1, 0}, 0o755); err != nil {
 		t.Fatalf("write sidecar stub: %v", err)
+	}
+	// The entrypoint has to live beside it, or the install prefix is only half
+	// exercised: it is the second mandatory bind and the one the container
+	// actually executes.
+	entrypoint := filepath.Join(installPrefix, "entrypoint.sh")
+	entrypointSrc, err := os.ReadFile(repoFile(t, "scripts", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read scripts/entrypoint.sh: %v", err)
+	}
+	if err := os.WriteFile(entrypoint, entrypointSrc, 0o755); err != nil {
+		t.Fatalf("write entrypoint to the install prefix: %v", err)
 	}
 
 	cfg := Config{
@@ -97,13 +140,22 @@ func TestAppleRuntimeConformance(t *testing.T) {
 		OutputBasePath:    filepath.Join(base, "output"),
 		ContainerPrefix:   "crewship-conf",
 		SidecarBinaryPath: sidecar,
-		EntrypointPath:    repoFile(t, "scripts", "entrypoint.sh"),
+		EntrypointPath:    entrypoint,
 	}
 	p, err := New(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("apple container runtime unavailable: %v — run `container system start` first", err)
 	}
 	defer p.Close()
+
+	// New() stages both artifacts under the data dir (#1724). Assert it here
+	// rather than trusting it: if the crew below comes up, this is what says
+	// whether it came up because the bind sources moved or in spite of it.
+	if p.cfg.SidecarBinaryPath == sidecar || p.cfg.EntrypointPath == entrypoint {
+		t.Fatalf("New() left a mandatory bind at its install path (sidecar=%s entrypoint=%s); the crew below would not be testing #1724 at all",
+			p.cfg.SidecarBinaryPath, p.cfg.EntrypointPath)
+	}
+	t.Logf("bind sources after staging: %s, %s", p.cfg.SidecarBinaryPath, p.cfg.EntrypointPath)
 
 	crew := provider.CrewConfig{
 		ID:       "conformanceapple",

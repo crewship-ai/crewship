@@ -289,7 +289,7 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `allowed_domains` | string[] | Allowed domains (restricted mode) |
 | `mcp_config_json` | string | Raw MCP server config JSON (must contain `mcpServers` object) |
 | `escalation_config` | string | Escalation policy config JSON (thresholds 0-1, `auto_approve_threshold` > `require_approval_below`) |
-| `issue_prefix` | string | Issue identifier prefix (e.g., `"ENG"`); empty string clears |
+| `issue_prefix` | string | Issue identifier prefix (e.g., `"ENG"`); must match `^[A-Za-z0-9_-]{1,16}$` — letters, digits, underscore or hyphen, 1-16 characters — because it becomes part of the issue identifier, which is a single URL path segment. Empty string clears it (identifiers then use the first three letters of the crew slug upper-cased). Prefixes stored before this rule existed are left alone and keep working; they are refused on the next write |
 | `runtime_image` | string | Custom runtime image (empty string clears; existence validated) |
 | `devcontainer_config` | string | Raw devcontainer.json (empty string clears; max 100 KB) |
 | `mise_config` | string | Raw mise config TOML (empty string clears; max 10 KB) |

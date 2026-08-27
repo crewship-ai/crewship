@@ -36,6 +36,48 @@ const MaxAutoLeaseSeconds = 30 * 24 * 60 * 60
 // injection point — a self-inflicted outage dressed up as a security control.
 const MinAutoLeaseSeconds = 60
 
+// The behaviour monitor's sampling cadence (#1001 M3): the watchdog reviews
+// every Nth tool call per crew rather than all of them, because each review is a
+// governance-model call.
+//
+// The bounds are what keeps a *rate* from becoming a disguised off switch at
+// either end:
+//
+//   - MinBehaviorSampleEvery is 1, not 2. "Review every tool call" is a real
+//     posture and the hook already implements it; what must never be settable
+//     here is 0, because behaviorhook.SetSampleEvery(<=0) makes the hook a
+//     no-op — a workspace would read "watchdog enabled" while nothing was ever
+//     evaluated. Off is the enabled toggle (`crewship keeper disable`). A tight
+//     cadence is expensive rather than broken, so it is allowed with an advisory
+//     (WarnBehaviorSampleEveryBelow) instead of a rejection.
+//   - MaxBehaviorSampleEvery is 100. The per-crew counter lives in memory and
+//     starts at zero each boot, so a cadence larger than the number of tool
+//     calls a crew makes in a run means the monitor never fires at all — the
+//     same silent-off failure the floor rules out, arrived at from the other
+//     side. At 100 a long run still gets sampled.
+const (
+	// DefaultBehaviorSampleEvery is the cadence a workspace that has never set
+	// one runs on. Must match behaviorhook.DefaultSampleEvery — pinned by a test
+	// in cmd/crewship, since this package cannot import the hook.
+	DefaultBehaviorSampleEvery = 5
+	MinBehaviorSampleEvery     = 1
+	MaxBehaviorSampleEvery     = 100
+	// WarnBehaviorSampleEveryBelow is the cadence STRICTLY BELOW which the API
+	// returns a non-blocking cost advisory — i.e. 1 and 2, where at least half
+	// of the workspace's tool calls each carry a judge round-trip.
+	WarnBehaviorSampleEveryBelow = 3
+)
+
+// EffectiveBehaviorSampleEvery maps the stored value to the cadence actually in
+// force: 0 is the "never configured" sentinel, and resolves to the built-in
+// default rather than to "off". The single place that mapping is written.
+func EffectiveBehaviorSampleEvery(stored int) int {
+	if stored <= 0 {
+		return DefaultBehaviorSampleEvery
+	}
+	return stored
+}
+
 // Settings is the per-workspace watchdog configuration.
 type Settings struct {
 	// Enabled gates the behavioral watchdog layer (behavior monitoring,
@@ -86,6 +128,17 @@ type Settings struct {
 	// gates), not here — this package only resolves the setting.
 	AutoLeaseSeconds int `json:"auto_lease_seconds"`
 
+	// BehaviorSampleEvery is how often the behaviour monitor reviews a tool call
+	// (#1001 M3): the evaluator fires on every Nth call per crew. 0 is the
+	// "never configured" sentinel and means the built-in default — see
+	// EffectiveBehaviorSampleEvery, which is the only place that mapping lives.
+	// A written value is bounded by [MinBehaviorSampleEvery,
+	// MaxBehaviorSampleEvery]; both ends stop the rate becoming a silent off
+	// switch (see the const block). Consumed by the post-tool-call observer,
+	// which reads this row per observation and hands the cadence to the hook —
+	// so an edit applies to the next tool call, not the next restart (#1556).
+	BehaviorSampleEvery int `json:"behavior_sample_every"`
+
 	// GovModelCredentialID optionally points the provider at a vault credential
 	// (ENDPOINT_URL / API_KEY) for its endpoint/key. Empty = no credential.
 	// Revoke-safety (§4.4): a revoke is a soft delete (credentials.deleted_at),
@@ -109,10 +162,10 @@ func Get(ctx context.Context, db *sql.DB, workspaceID string) (Settings, bool, e
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets, require_second_approver,
-		       gov_model_provider, gov_model_id, gov_model_credential_id, auto_lease_seconds
+		       gov_model_provider, gov_model_id, gov_model_credential_id, auto_lease_seconds, behavior_sample_every
 		FROM keeper_governance_settings WHERE workspace_id = ?`, workspaceID).
 		Scan(&enabled, &contact, &s.DenyNotifyMinRisk, &s.WatchSpec, &presets, &secondApprov,
-			&s.GovModelProvider, &s.GovModelID, &govCredID, &s.AutoLeaseSeconds)
+			&s.GovModelProvider, &s.GovModelID, &govCredID, &s.AutoLeaseSeconds, &s.BehaviorSampleEvery)
 	if err == sql.ErrNoRows {
 		return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, nil
 	}
@@ -155,6 +208,19 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 	if s.AutoLeaseSeconds > MaxAutoLeaseSeconds {
 		s.AutoLeaseSeconds = MaxAutoLeaseSeconds
 	}
+	// Sampling cadence: clamp for the same reason the lease TTL is clamped —
+	// Upsert is a shared sink and a nonsensical value from a non-HTTP writer must
+	// degrade to a usable one. Negative → 0, which is the unset sentinel (the
+	// built-in default), NOT "off": a stored value that silenced the monitor
+	// while the workspace still read "watchdog enabled" is the one outcome this
+	// setting must never produce. The API rejects rather than clamps, so an
+	// operator still hears about it.
+	if s.BehaviorSampleEvery < 0 {
+		s.BehaviorSampleEvery = 0
+	}
+	if s.BehaviorSampleEvery > MaxBehaviorSampleEvery {
+		s.BehaviorSampleEvery = MaxBehaviorSampleEvery
+	}
 	// Marshal presets to a JSON array; empty → "" for a stable default that
 	// round-trips back to a nil slice in Get.
 	presets := ""
@@ -169,8 +235,8 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO keeper_governance_settings
 			(workspace_id, enabled, security_contact_user_id, deny_notify_min_risk, watch_spec, watch_presets, require_second_approver,
-			 gov_model_provider, gov_model_id, gov_model_credential_id, auto_lease_seconds, updated_by, created_at, updated_at)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?)
+			 gov_model_provider, gov_model_id, gov_model_credential_id, auto_lease_seconds, behavior_sample_every, updated_by, created_at, updated_at)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			security_contact_user_id = excluded.security_contact_user_id,
@@ -182,11 +248,12 @@ func Upsert(ctx context.Context, db *sql.DB, workspaceID string, s Settings, upd
 			gov_model_id = excluded.gov_model_id,
 			gov_model_credential_id = excluded.gov_model_credential_id,
 			auto_lease_seconds = excluded.auto_lease_seconds,
+			behavior_sample_every = excluded.behavior_sample_every,
 			updated_by = excluded.updated_by,
 			updated_at = excluded.updated_at`,
 		workspaceID, boolToInt(s.Enabled), s.SecurityContactUserID, s.DenyNotifyMinRisk,
 		s.WatchSpec, presets, boolToInt(s.RequireSecondApprover),
-		s.GovModelProvider, s.GovModelID, s.GovModelCredentialID, s.AutoLeaseSeconds,
+		s.GovModelProvider, s.GovModelID, s.GovModelCredentialID, s.AutoLeaseSeconds, s.BehaviorSampleEvery,
 		updatedBy, now, now)
 	if err != nil {
 		return fmt.Errorf("governance: upsert: %w", err)

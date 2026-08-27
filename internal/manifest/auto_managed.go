@@ -433,10 +433,29 @@ type plannedAutoCredential struct {
 // (not base64) so the resulting env var is safe to embed in shell
 // scripts, container env files, and Docker --env arg lists without
 // quoting concerns. The length parameter is in bytes; the hex output
-// is 2× that many characters.
+// is 2× that many characters. Non-positive input falls back to the
+// 32-byte default and anything above maxAutoCredentialBytes is
+// clamped down to it.
 func generateAutoCredentialValue(bytes int) (string, error) {
 	if bytes <= 0 {
 		bytes = 32
+	}
+	// Clamp independently of the validator — and this is load-bearing,
+	// not belt-and-braces. checkAutoManagedCollisions (validate.go)
+	// runs the expander as a probe from *inside* Validate, and it runs
+	// after checkAutoCredentials has merely *recorded* the ceiling
+	// error: the validator accumulates every failure and never returns
+	// early. So an over-ceiling `length` still reaches this function on
+	// the ordinary validate path — including the agent-facing
+	// validate_manifest MCP tool (internal/sidecar/routine_mcp.go),
+	// which validates attacker-supplied YAML and applies nothing.
+	// Remove this clamp and `length: 67108864` costs that endpoint
+	// ~335 MB per call, with no crew ever created.
+	// TestValidate_OverCeilingLengthDoesNotAllocate pins it.
+	// maxAutoCredentialBytes is already far past any real credential,
+	// so clamping still yields a strong value.
+	if bytes > maxAutoCredentialBytes {
+		bytes = maxAutoCredentialBytes
 	}
 	buf := make([]byte, bytes)
 	if _, err := rand.Read(buf); err != nil {

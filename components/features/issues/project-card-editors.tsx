@@ -16,6 +16,7 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { isImeComposing } from "@/lib/ime"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
@@ -312,6 +313,9 @@ export function ProjectNameEditor({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => setEditing(false)}
         onKeyDown={(e) => {
+          // Enter confirms an IME candidate before it means "save"; Escape
+          // cancels the candidate, not the edit. Same guard as TitleEditor.
+          if (isImeComposing(e)) return
           if (e.key === "Enter") {
             e.preventDefault()
             const next = draft.trim()

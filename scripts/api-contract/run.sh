@@ -113,7 +113,67 @@ AUTH_UI_PATH_REGEX='^/api/auth(/|$)'
 # placeholders, so probing them would report a schema failure for the wrong
 # reason. Keep this list explicit and review it when a new non-JSON route is
 # added.
-NON_JSON_PATH_REGEX='^/api/v1/(admin/backups/download|agents/[^/]+/avatar|agents/[^/]+/files/download|crews/[^/]+/files/download|users/[^/]+/avatar|workspaces/[^/]+/pipelines/[^/]+/export|memory/(export|versions/[^/]+/content)|journal/stream)$'
+#
+# The entry test is narrow, because a route that merely LOOKS non-JSON is
+# where this list does damage (#1815): exclude a path only when the generated
+# document already DECLARES its non-JSON media type, i.e. the bytes are the
+# intended contract and only the placeholder schema under them is wrong. A
+# route that emits a media type the document does NOT declare is a genuine
+# contract violation and has to stay in scope — `GET /api/v1/oauth/callback`
+# answers its 4xx branches with `http.Error`'s text/plain while the generator
+# documents every error response as application/json, and that is the finding
+# doing its job, not a false positive to be silenced here. Likewise, an
+# undocumented STATUS CODE on an otherwise-binary route (the issue-attachment
+# download) is a real finding about statuses, not about media.
+#
+# Three entries were stale when #1815 re-measured the gate — the whole list
+# was written in one pass in #1769 by reading route names, and route names is
+# exactly what it got wrong:
+#
+#   - `memory/versions/[^/]+/content` matched NO path in the shipped
+#     document. The route it was written for is the admin one, which has
+#     carried its `admin/` prefix since #414 — so the real endpoint was
+#     probed as JSON on every run and answered 5xx, while the entry meant to
+#     cover it quietly matched nothing;
+#   - `chats/[^/]+/stream` and `memory/versions/[^/]+` were never entered.
+#     The first is the NDJSON run stream added by #1822, the same
+#     never-ending-stream case as `journal/stream` beside it (and with
+#     `follow=true` it burns a full request-timeout per generated example);
+#     the second returns raw version bytes as application/octet-stream;
+#   - `workspaces/[^/]+/pipelines/[^/]+/export` was stale in the direction
+#     that costs findings. It is not a download:
+#     `PipelineHandler.ExportPipeline` ends in `writeJSON`, and the document
+#     declares it `application/json`
+#     with a real `WorkspacePipelineExportResponseV1` schema rather than a
+#     placeholder. Sharing the word "export" with `memory/export` (a ZIP) is
+#     the whole of the resemblance. Removed — it is an ordinary JSON route
+#     and the gate should probe it.
+#
+# One pattern per route, relative to `/api/v1/`, with the media type that
+# earns it the entry. scripts/api-contract-gate-test.sh reads this array back
+# out of this file and checks every entry against the shipped
+# internal/api/openapi.gen.json, both ways: an entry matching no path fails by
+# name, and so does an entry whose paths declare nothing but application/json.
+# That is the prose criterion above turned into a check, because the prose on
+# its own is what rotted.
+NON_JSON_PATH_PATTERNS=(
+  'admin/backups/download'              # application/zstd
+  'admin/memory/versions/[^/]+/content' # text/markdown, application/octet-stream
+  'agents/[^/]+/avatar'                 # image/svg+xml
+  'agents/[^/]+/files/download'          # application/octet-stream
+  'chats/[^/]+/stream'                  # application/x-ndjson, never-ending
+  'crews/[^/]+/files/download'          # application/octet-stream
+  'users/[^/]+/avatar'                  # image/{svg+xml,png,jpeg,webp}
+  'memory/export'                       # application/zip
+  'memory/versions/[^/]+'               # application/octet-stream
+  'journal/stream'                      # text/event-stream, never-ending
+)
+NON_JSON_PATH_REGEX=''
+for _non_json_pattern in "${NON_JSON_PATH_PATTERNS[@]}"; do
+  NON_JSON_PATH_REGEX+="${NON_JSON_PATH_REGEX:+|}$_non_json_pattern"
+done
+unset _non_json_pattern
+NON_JSON_PATH_REGEX="^/api/v1/($NON_JSON_PATH_REGEX)\$"
 
 count_operations() {
   jq -r --arg auth "$AUTH_UI_PATH_REGEX" --arg nonjson "$NON_JSON_PATH_REGEX" '

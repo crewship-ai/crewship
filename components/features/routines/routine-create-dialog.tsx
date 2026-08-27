@@ -267,6 +267,13 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
 
   // The buffer as it was handed to the editor. Anything else means there is
   // input to lose, which is what the shell's discard guard asks about.
+  //
+  // It has to MOVE with the buffer, not just be captured at mount: picking a
+  // starter template and switching YAML↔JSON both replace the document
+  // wholesale, and against a baseline frozen at mount either one left the
+  // editor reporting input that nobody had typed. `replaceBuffer` re-baselines
+  // it — except for a fork, which is the one wholesale replacement that IS
+  // work (see there).
   const pristineText = useRef(liveText)
 
   // Reset to the entry screen each time the dialog opens. (Field state is
@@ -377,11 +384,22 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     return r.parsed
   }
 
-  /** Replace the buffer wholesale — template, format switch, fork. */
-  const replaceBuffer = (next: string) => {
+  /**
+   * Replace the buffer wholesale — template, format switch, fork.
+   *
+   * `baseline` says whether the new text counts as untouched. It does for a
+   * starter template (the editor already opens on one; picking another is
+   * choosing a starting point, not authoring) and for a format switch (same
+   * document, other notation — that path re-baselines the OLD baseline through
+   * the same converter and so passes `false` here). It does not for a fork,
+   * which loads somebody's real routine on purpose and is exactly the kind of
+   * work the guard exists to protect.
+   */
+  const replaceBuffer = (next: string, { baseline = true }: { baseline?: boolean } = {}) => {
     setDslText(next)
     setLiveText(next)
     bufferRef.current = next
+    if (baseline) pristineText.current = next
     setEditorKey((k) => k + 1)
     setTestResult(null)
     setSaveToken(null)
@@ -403,8 +421,17 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       toast.error(`Fix the ${dslFormat.toUpperCase()} error before switching`)
       return
     }
+    // Carry the baseline across the switch instead of re-taking it from the
+    // converted buffer. Re-taking it would forget every edit made before the
+    // switch (the converted text IS the edited document, so it would match its
+    // own new baseline); leaving the old one alone would call an untouched
+    // buffer dirty, because a YAML baseline never equals a JSON buffer.
+    // Converting the baseline the same way keeps both answers honest, and a
+    // baseline that will not convert falls back to "dirty", which asks.
+    const convertedBaseline = convertDsl(pristineText.current, dslFormat, next)
     setDslFormat(next)
-    replaceBuffer(converted.text)
+    replaceBuffer(converted.text, { baseline: false })
+    if (convertedBaseline.ok) pristineText.current = convertedBaseline.text
   }
 
   // Returns both the pass verdict AND the freshly-minted save_token so a
@@ -556,7 +583,13 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       // Rename the fork so it doesn't collide with the source slug on save.
       const forkName = `${item.slug}-copy`
       const nextDef = { ...def, name: forkName }
-      replaceBuffer(dslFormat === "yaml" ? toYaml(nextDef) : JSON.stringify(nextDef, null, 2))
+      // Not baselined: a fork is content you asked for, and losing it silently
+      // is the same defect as losing a typed goal. The source description
+      // usually keeps the surface dirty on its own; a routine without one
+      // would have had nothing else to go on.
+      replaceBuffer(dslFormat === "yaml" ? toYaml(nextDef) : JSON.stringify(nextDef, null, 2), {
+        baseline: false,
+      })
       setName("")
       setDescription(item.description ?? detail.description ?? "")
       setParseError(null)
@@ -599,14 +632,26 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
           : "Three ways in. All three land on the same routine — pick the one you have inputs for."
 
   // The shell's discard guard — Esc and an overlay click ask before throwing
-  // input away, and the header's × asks too. The starter template the editor
-  // opens with is not input, so an untouched buffer is not dirty.
+  // input away, and the header's × and the footer's Cancel ask too. The
+  // starter template the editor opens with is not input, so an untouched
+  // buffer is not dirty.
+  //
+  // It describes the DRAFT, not the screen. Keyed on `mode` it had an
+  // entry/fork arm of literal `false`, and nothing clears these fields when
+  // the mode changes — so the header's back arrow, which is navigation rather
+  // than a discard, moved a typed goal onto a screen that reported nothing to
+  // lose, and every exit from there closed silently. The state that survives
+  // the arrow is the state the guard has to look at.
+  //
+  // The entry tiles and the fork list still cost nothing when there is nothing
+  // typed, which is the case #2076 measured: land on the tiles, press Cancel,
+  // and no prompt appears. `forkSearch` is deliberately absent — it filters a
+  // list rather than composing anything.
   const dirty =
-    mode === "describe"
-      ? goal.trim() !== ""
-      : mode === "advanced"
-        ? name.trim() !== "" || description.trim() !== "" || liveText !== pristineText.current
-        : false
+    goal.trim() !== "" ||
+    name.trim() !== "" ||
+    description.trim() !== "" ||
+    liveText !== pristineText.current
 
   // ⌘↵ / Ctrl↵, wired once by the shell. It does whatever the mode's primary
   // does, and nothing on the two modes whose actions are their list rows.
@@ -703,10 +748,11 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
             Guarded by default, and deliberately not opted out of: unlike a
             picker panel's "Cancel", this one closes the whole dialog, so it
             is the header ×'s twin and has to behave like it. Nothing on this
-            screen is input, so `dirty` is false here and the guard costs
-            nothing today — but if the entry screen ever learns about the goal
-            or buffer carried back from another mode, Cancel gets the prompt
-            for free instead of being the one exit that skipped it.
+            screen is input, so on a fresh dialog the guard costs nothing —
+            and now that `dirty` reads the draft rather than the mode, Cancel
+            gets the prompt for free when the arrow has carried a goal or a
+            buffer back here, instead of being one of four exits that all
+            skipped it.
 
             The hint names Esc alone. There is no primary, so ⌘↵ has nothing
             to confirm — `handleKeyboardSubmit` returns without doing anything
@@ -880,10 +926,10 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
             an arrow that keeps you inside.
 
             The search box is the only thing typed here and it filters a list
-            rather than composing anything, so it does not make the surface
-            dirty and the guard stays inert — the same judgement the shell
-            asks for, reached from what the screen holds rather than copied
-            from the surface next door.
+            rather than composing anything, so it stays out of `dirty` — the
+            same judgement the shell asks for, reached from what the screen
+            holds rather than copied from the surface next door. A draft
+            carried in from another mode does count, which is the point.
 
             Cancel is not disabled while a fork is loading. `forking` locks
             the tiles because picking a second routine mid-load races the

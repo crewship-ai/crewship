@@ -374,6 +374,11 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		return nil, fmt.Errorf("apple container runtime: %w", err)
 	}
 
+	// Repoint the mandatory sidecar/entrypoint binds at copies under the crew
+	// data dir, so the runtime only has to be able to see ONE host subtree
+	// instead of two (#1724). See runtime_binds.go.
+	cfg = stageRuntimeArtifacts(cfg, logger)
+
 	p := &Provider{
 		cfg:    cfg,
 		logger: logger,

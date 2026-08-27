@@ -269,6 +269,15 @@ func extractRetentionDays(memCfg string) int {
 // SweepAllWorkspaces every `interval`. Returns immediately; the
 // goroutine exits when ctx is cancelled.
 //
+// The returned channel is closed when that goroutine has returned —
+// i.e. after any sweep still in flight at cancellation time has
+// finished. Callers that need shutdown to be observable (a lifecycle
+// owner that must not tear the DB down under a running DELETE, or a
+// test asserting the loop stopped) receive on it; callers that don't
+// care may ignore it. Without this handle "has it stopped?" can only
+// be answered by waiting a while and hoping, which is exactly the
+// wall-clock guess that made the sweeper test flaky (#1597).
+//
 // The first sweep fires immediately (before the first ticker beat) so
 // a freshly started server starts cleaning history without waiting a
 // full day. Subsequent sweeps fire on the ticker. Mirrors the
@@ -311,11 +320,13 @@ func StartRetentionSweeper(
 	db *sql.DB,
 	emitter journal.Emitter,
 	interval time.Duration,
-) {
+) <-chan struct{} {
 	if interval <= 0 {
 		interval = 24 * time.Hour
 	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		// Immediate first tick: operators restarting a long-lived
 		// server want the sweep to fire on boot rather than waiting
 		// 24h for the first cadence beat. Failure is logged and
@@ -336,4 +347,5 @@ func StartRetentionSweeper(
 			}
 		}
 	}()
+	return done
 }

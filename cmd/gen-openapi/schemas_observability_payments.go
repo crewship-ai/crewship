@@ -155,9 +155,18 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"agents":   array(object(map[string]any{"id": str(), "name": str(), "slug": str(), "crew_id": nullableString(), "avatar_seed": nullableString(), "avatar_style": nullableString()})),
 		"missions": array(object(map[string]any{"id": str(), "title": str(), "status": str()})),
 	})
+	// `gaps` is the crew hardening controls the runtime will not honour
+	// (#1672) — `control` names the control, `detail` says what breaks. Carried
+	// on the `in_use` entry only, and omitted when there are none, which is
+	// every runtime but podman below 5. Optional rather than an always-empty
+	// array: a client that sees the key at all is looking at a real finding.
+	runtimeGap := object(map[string]any{"control": str(), "detail": str()})
 	runtime := object(map[string]any{
 		"available": boolean(), "runtime": nullableString(), "version": nullableString(), "socket": nullableString(),
-		"runtimes":      array(object(map[string]any{"runtime": str(), "version": str(), "socket": str(), "in_use": boolean()})),
+		"runtimes": array(object(map[string]any{
+			"runtime": str(), "version": str(), "socket": str(), "in_use": boolean(),
+			"gaps": array(runtimeGap),
+		})),
 		"install_links": stringMap(),
 	})
 	capacity := object(map[string]any{

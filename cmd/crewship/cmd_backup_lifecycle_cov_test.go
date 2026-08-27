@@ -325,6 +325,81 @@ func TestBackupRestoreRunE_SecurityLevelClampWarning(t *testing.T) {
 	}
 }
 
+// Schema skew is the second warning a dry run must not suppress, and for a
+// harder reason than the clamp: a clamped credential is still restored,
+// whereas a row that needed a dropped column to satisfy a NOT NULL or a
+// primary key was not restored at all — and `rows=` counts what landed, so
+// nothing else in this output says a thing about it (#2034).
+func TestBackupRestoreRunE_DroppedColumnsWarning(t *testing.T) {
+	guardCLIState(t)
+	for _, tc := range []struct {
+		name   string
+		dryRun string
+		want   string
+	}{
+		{"committed restore", "false", "were dropped"},
+		{"dry run", "true", "would be dropped"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := covSetupCli5(t)
+			covResetBackupRestoreFlags(t)
+			covSetFlagCli5(t, backupRestoreCmd, "dry-run", tc.dryRun)
+			stub.OnPost("/api/v1/admin/backups/restore", clitest.JSONResponse(200, map[string]any{
+				"restored_ws": "acme", "crews_count": 1, "rows_inserted": 10,
+				// 4 values reported, 3 of them itemised: the count is exact
+				// while the per-column sample is bounded.
+				"columns_dropped": 4,
+				"dropped_columns": []map[string]any{
+					{"table": "issue_counters", "column": "crew_id", "rows": 2},
+					{"table": "crews", "column": "retired_at", "rows": 1},
+				},
+			}))
+
+			var err error
+			out := covCaptureAll(t, func() {
+				err = backupRestoreCmd.RunE(backupRestoreCmd, []string{"/b.tar"})
+			})
+			if err != nil {
+				t.Fatalf("RunE: %v", err)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("missing schema-skew warning %q; got:\n%s", tc.want, out)
+			}
+			// Naming the table is what makes the warning actionable — it is
+			// where the operator has to go and look.
+			if !strings.Contains(out, "issue_counters.crew_id (2 row(s))") ||
+				!strings.Contains(out, "crews.retired_at (1 row(s))") {
+				t.Errorf("warning must name each table.column and its row count; got:\n%s", out)
+			}
+			if !strings.Contains(out, "(+1 more)") {
+				t.Errorf("warning must account for the values beyond the sample; got:\n%s", out)
+			}
+		})
+	}
+}
+
+// The counterpart: a restore with no skew must not print a schema-skew
+// warning at all. A warning that is always there is a warning nobody reads.
+func TestBackupRestoreRunE_NoDroppedColumnsNoWarning(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetBackupRestoreFlags(t)
+	stub.OnPost("/api/v1/admin/backups/restore", clitest.JSONResponse(200, map[string]any{
+		"restored_ws": "acme", "crews_count": 1, "rows_inserted": 10,
+		"columns_dropped": 0,
+	}))
+
+	var err error
+	out := covCaptureAll(t, func() {
+		err = backupRestoreCmd.RunE(backupRestoreCmd, []string{"/b.tar"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(out, "dropped") {
+		t.Errorf("clean restore printed a schema-skew warning; got:\n%s", out)
+	}
+}
+
 func TestBackupRestoreRunE_DryRun(t *testing.T) {
 	stub := covSetupCli5(t)
 	covResetBackupRestoreFlags(t)

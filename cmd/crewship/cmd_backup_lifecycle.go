@@ -190,6 +190,15 @@ type restoreClamp struct {
 	To           int    `json:"to"`
 }
 
+// droppedCol mirrors backup.DroppedColumn on the wire: one column the
+// bundle carried that the target schema does not have, and which the
+// restore therefore discarded (#2034).
+type droppedCol struct {
+	Table  string `json:"table"`
+	Column string `json:"column"`
+	Rows   int    `json:"rows"`
+}
+
 var backupRestoreCmd = &cobra.Command{
 	Use:   "restore <file>",
 	Short: "Restore a workspace or crew from a backup bundle",
@@ -277,6 +286,8 @@ var backupRestoreCmd = &cobra.Command{
 			DroppedCrewFilesystems []string       `json:"dropped_crew_filesystems"`
 			SecurityLevelClamped   int            `json:"security_level_clamped"`
 			SecurityLevelClamps    []restoreClamp `json:"security_level_clamps"`
+			ColumnsDropped         int            `json:"columns_dropped"`
+			DroppedColumns         []droppedCol   `json:"dropped_columns"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -361,6 +372,32 @@ var backupRestoreCmd = &cobra.Command{
 			cli.PrintWarning(fmt.Sprintf(
 				"%d credential(s) carried a security_level outside L1-L4 and %s the strictest tier: %s%s. Re-set each one with `crewship credential update <name> --security-level N`.",
 				out.SecurityLevelClamped, verb, strings.Join(details, ", "), more))
+		}
+		// Also a dry-run-relevant warning, and for a stronger reason than
+		// the clamp: a clamped credential is still restored, whereas a row
+		// that needed a dropped column to satisfy a NOT NULL or a primary
+		// key was not restored at all and nothing else in this output says
+		// so. `rows=` counts what landed, not what was meant to (#2034).
+		if out.ColumnsDropped > 0 {
+			verb := "were dropped"
+			if dryRun {
+				verb = "would be dropped"
+			}
+			details := make([]string, 0, len(out.DroppedColumns))
+			counted := 0
+			for _, d := range out.DroppedColumns {
+				counted += d.Rows
+				details = append(details, fmt.Sprintf("%s.%s (%d row(s))", d.Table, d.Column, d.Rows))
+			}
+			more := ""
+			if out.ColumnsDropped > counted {
+				more = fmt.Sprintf(" (+%d more)", out.ColumnsDropped-counted)
+			}
+			cli.PrintWarning(fmt.Sprintf(
+				"%d value(s) in this bundle %s because this instance's schema has no such column: %s%s.\n"+
+					"  The bundle was written against a different schema. Rows that needed one of those columns to satisfy a NOT NULL or a primary key did NOT land, and the restore could not report them individually.\n"+
+					"  Check the tables named above before treating this restore as complete.",
+				out.ColumnsDropped, verb, strings.Join(details, ", "), more))
 		}
 		return nil
 	},

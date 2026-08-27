@@ -137,6 +137,18 @@ type RestoreResult struct {
 	// SecurityLevelClamps is a bounded sample of the above, with the
 	// credential id, its name, and the value the bundle carried.
 	SecurityLevelClamps []SecurityLevelClamp
+	// ColumnsDropped counts the values this restore discarded because the
+	// bundle named a column the target schema does not have (#2034). On a
+	// dry run it is what WOULD be discarded.
+	//
+	// Structured, and not only a log line, for the same reason
+	// DroppedCrewFilesystems is: this is schema skew, the operator is the
+	// only one who can judge whether the missing column mattered, and a
+	// restore that has already committed cannot tell them later.
+	ColumnsDropped int
+	// DroppedColumns names them — table, column, and how many rows carried
+	// it. Bounded; ColumnsDropped stays exact.
+	DroppedColumns []DroppedColumn
 }
 
 // warnSecurityLevelClamps emits the operator-facing warning for a restore
@@ -718,6 +730,18 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// so it is reported here as well as on the committed path.
 		clamps, clamped := InspectSecurityLevels(extracted.DBDump)
 		warnSecurityLevelClamps(opts.Logger, clamps, clamped, true)
+		// Same argument for schema skew: "this bundle names columns your
+		// schema does not have" is something the operator can still act on
+		// before the restore, and cannot act on after it (#2034). The error
+		// is returned rather than logged — a target that cannot answer
+		// PRAGMA table_info is a target this bundle is not going to restore
+		// into, and saying "validation OK" about it is the lie a dry run
+		// exists to prevent.
+		columnsDropped, droppedColumns, err := InspectDroppedColumns(ctx, db, extracted.DBDump)
+		if err != nil {
+			return nil, err
+		}
+		warnDroppedColumns(opts.Logger, droppedColumns, columnsDropped, true)
 		return &RestoreResult{
 			Manifest:               manifest,
 			RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
@@ -728,6 +752,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			DroppedCrewFilesystems: droppedCrewFilesystems,
 			SecurityLevelClamped:   clamped,
 			SecurityLevelClamps:    clamps,
+			ColumnsDropped:         columnsDropped,
+			DroppedColumns:         droppedColumns,
 		}, nil
 	}
 
@@ -865,6 +891,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		stats = s
 		warnSecurityLevelClamps(opts.Logger, stats.SecurityLevelClamps, stats.SecurityLevelClamped, false)
+		warnDroppedColumns(opts.Logger, stats.DroppedColumns, stats.ColumnsDropped, false)
 	} else {
 		if err := memoryBlobsRestore(ctx); err != nil {
 			return nil, err
@@ -915,6 +942,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			DroppedCrewFilesystems: droppedCrewFilesystems,
 			SecurityLevelClamped:   stats.SecurityLevelClamped,
 			SecurityLevelClamps:    stats.SecurityLevelClamps,
+			// A no-op restore whose bundle also carried unknown columns is
+			// the one case where the two diagnoses compete: the generic
+			// "every PK collided" message is wrong if what actually
+			// happened is that the key columns were dropped. Carrying the
+			// skew out here is what lets the operator tell them apart.
+			ColumnsDropped: stats.ColumnsDropped,
+			DroppedColumns: stats.DroppedColumns,
 		}, fmt.Errorf("%w: 0 of %d rows inserted — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", ErrNoOpRestore, stats.RowsSeen)
 	}
 
@@ -932,6 +966,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		DroppedCrewFilesystems: droppedCrewFilesystems,
 		SecurityLevelClamped:   stats.SecurityLevelClamped,
 		SecurityLevelClamps:    stats.SecurityLevelClamps,
+		ColumnsDropped:         stats.ColumnsDropped,
+		DroppedColumns:         stats.DroppedColumns,
 	}, nil
 }
 

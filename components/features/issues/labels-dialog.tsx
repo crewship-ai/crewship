@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { isImeComposing } from "@/lib/ime"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
@@ -170,7 +171,9 @@ export function LabelsDialog({
               onChange={(e) => setNewName(e.target.value)}
               className="h-8 text-sm flex-1"
               onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreate()
+                // Enter confirms an IME candidate before it means "create".
+                if (isImeComposing(e)) return
+                if (e.key === "Enter") void handleCreate()
               }}
             />
             <Input
@@ -254,7 +257,11 @@ export function LabelsDialog({
                       className="h-7 text-xs flex-1 ml-1"
                       autoFocus
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") handleUpdate(label.id)
+                        // Enter confirms an IME candidate before it means
+                        // "rename"; Escape cancels the candidate, not the
+                        // edit.
+                        if (isImeComposing(e)) return
+                        if (e.key === "Enter") void handleUpdate(label.id)
                         if (e.key === "Escape") setEditingId(null)
                       }}
                     />

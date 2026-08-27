@@ -99,7 +99,7 @@ Design notes:
 - **`Score` is 0..1 and provider-specific.** Local impl returns 1.0 for substring hits (no ranking signal). Vector providers return cosine similarity. BM25 providers return rescaled BM25. Don't compare scores across providers.
 - **`Snippet`** is the matched excerpt the model sees in the tool result. Keep it short (≤500 chars) — the model has the `Source` if it wants to fetch the full content via `memory.read`.
 - **`Source` is the tier-relative label**, never an absolute filesystem path (leaking bind-mount layout to the model is a small but real info-disclosure surface — see `tools.go::pathToSourceLabel` for the canonicalisation contract).
-- **`Quarantined` is for files the inbound prompt-injection scanner rejected** ([Layer 5 — memory prompt-injection scanner](/security/threat-model#layer-5--memory-prompt-injection-scanner)). Surface these in the operator UI but NEVER feed them back to the model — the model would re-read poisoned content into its context.
+- **`Quarantined` is for files the inbound prompt-injection scanner rejected** ([Layer 5 — memory prompt-injection scanner](/security/threat-model#layer-5-—-memory-prompt-injection-scanner)). Surface these in the operator UI but NEVER feed them back to the model — the model would re-read poisoned content into its context.
 
 ### `Forget` — delete
 

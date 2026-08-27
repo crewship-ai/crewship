@@ -39,7 +39,8 @@ Examples:
   crewship keeper contact --clear
   crewship keeper threshold 8
   crewship keeper second-approver enable
-  crewship keeper auto-lease set 15m`,
+  crewship keeper auto-lease set 15m
+  crewship keeper sampling set 3`,
 }
 
 // keeperGovernance mirrors the GET/PUT /api/v1/admin/keeper/governance
@@ -68,6 +69,11 @@ type keeperGovernance struct {
 	// approve re-issues an L3/L4 grant as a lease of that length. Managed by
 	// `crewship keeper auto-lease`.
 	AutoLeaseSeconds int `json:"auto_lease_seconds"`
+	// BehaviorSampleEvery is how often the behavioural watchdog reviews a tool
+	// call (issue #1001 M3): one in every N per crew. 0 means the workspace
+	// never set one and follows the built-in default — it does NOT mean "never".
+	// Managed by `crewship keeper sampling`.
+	BehaviorSampleEvery int `json:"behavior_sample_every"`
 	// Warning is a non-blocking advisory the server returns on a mutation —
 	// e.g. enabling second-approver with fewer than 2 eligible approvers.
 	Warning string `json:"warning,omitempty"`
@@ -189,6 +195,7 @@ func printKeeperGovernance(gov keeperGovernance) {
 	fmt.Printf("  Configured:   %s\n", configured)
 	fmt.Printf("  Watchdog:     %s\n", enabled)
 	fmt.Printf("  Contact:      %s\n", contact)
+	fmt.Printf("  Reviews:      %s\n", formatSampleEvery(gov.BehaviorSampleEvery))
 	fmt.Printf("  DENY-notify:  risk >= %d\n", gov.DenyNotifyMinRisk)
 	fmt.Printf("  2nd approver: %s\n", secondApprover)
 	// The stored toggle is not the rule. Printing it alone is what let an

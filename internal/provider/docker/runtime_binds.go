@@ -27,7 +27,11 @@ package docker
 //     "this path must be shared" requirements into the one that was already
 //     load-bearing. On the default install ($HOME/.crewship/output) that is
 //     inside Colima's default share and a Homebrew-installed crewship starts
-//     crews on a default Colima with no configuration at all.
+//     crews on a default Colima with no configuration at all. The copy itself
+//     lives in internal/provider/runtimestage because the apple provider needs
+//     exactly the same one (#1724) — including the mtime preservation that
+//     sidecar_freshness.go depends on, which is precisely the detail a second
+//     hand-written copy would drop.
 //
 //  2. explainBindFailure turns the daemon's `bind source path does not exist`
 //     into a message that says what is actually wrong, for the cases staging
@@ -40,7 +44,6 @@ package docker
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -50,152 +53,21 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
-)
 
-// stagedRuntimeDirName is the subdirectory of OutputBasePath that holds the
-// bind-mountable copies. Dot-prefixed so it can never collide with a crew id
-// (cuid2, never leading-dot) and never with the reserved "crews"/"workspaces"/
-// "secrets" subtrees prepareCrewDirs owns. It is NOT mounted into any
-// container — only the two files inside it are, read-only, at their existing
-// /usr/local/bin targets — so it stays out of reach of every agent.
-const stagedRuntimeDirName = ".runtime"
+	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
+)
 
 // stageRuntimeArtifacts returns cfg with SidecarBinaryPath and EntrypointPath
 // repointed at copies under OutputBasePath/.runtime, so the mandatory binds
 // live in the same host subtree as the crew data dirs.
 //
-// Unconditional rather than "only when the daemon looks VM-backed". There is no
-// API that enumerates a VM's share set, so any conditional version is a guess
-// about which runtimes need it — which is exactly how #1706 stayed invisible to
-// everyone developing on OrbStack. One path, exercised on every runtime, beats
-// a fast path that only three of them take.
-//
-// Best-effort: any failure leaves cfg untouched and logs why, because a copy
-// error must degrade to today's behaviour (which works on a native daemon)
-// rather than take the provider down.
+// A thin mapping of this package's Config onto runtimestage.Artifacts, which
+// holds the staging rules — unconditional, best-effort, atomic and
+// mtime-preserving — and the reasoning for each of them.
 func stageRuntimeArtifacts(cfg Config, logger *slog.Logger) Config {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	if cfg.OutputBasePath == "" {
-		// No data dir to stage into — a hand-built provider (tests) or an
-		// embedding that never persists crew state. Leave the paths alone.
-		return cfg
-	}
-	dir := filepath.Join(cfg.OutputBasePath, stagedRuntimeDirName)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		logger.Warn("could not create the runtime staging dir; crew containers will bind the sidecar and entrypoint from their install location, which a VM-backed runtime may not be able to see (#1706)",
-			"dir", dir, "error", err)
-		return cfg
-	}
-
-	if staged, err := stageArtifact(cfg.SidecarBinaryPath, filepath.Join(dir, "crewship-sidecar")); err != nil {
-		logger.Warn("could not stage crewship-sidecar next to the crew data dirs; binding it from its install path instead (#1706)",
-			"source", cfg.SidecarBinaryPath, "error", err)
-	} else if staged != "" {
-		logger.Info("staged crewship-sidecar for bind-mounting",
-			"install_path", cfg.SidecarBinaryPath, "bind_source", staged)
-		cfg.SidecarBinaryPath = staged
-	}
-
-	if staged, err := stageArtifact(cfg.EntrypointPath, filepath.Join(dir, "entrypoint.sh")); err != nil {
-		logger.Warn("could not stage entrypoint.sh next to the crew data dirs; binding it from its install path instead (#1706)",
-			"source", cfg.EntrypointPath, "error", err)
-	} else if staged != "" {
-		cfg.EntrypointPath = staged
-	}
+	cfg.SidecarBinaryPath, cfg.EntrypointPath = runtimestage.Artifacts(
+		cfg.OutputBasePath, cfg.SidecarBinaryPath, cfg.EntrypointPath, logger)
 	return cfg
-}
-
-// stageArtifact copies src to dst and returns dst. An empty src is not an
-// error — the caller's config simply has no such artifact — and returns "".
-//
-// The copy is atomic (temp file + rename) so two servers sharing a data dir
-// cannot bind a half-written sidecar, and it PRESERVES the source's mtime:
-// assertSidecarFreshAtStartup compares the sidecar's mtime against the server
-// binary's to catch a deploy that updated one and not the other, and a copy
-// that stamped "now" would silence that check on every single boot.
-func stageArtifact(src, dst string) (string, error) {
-	if src == "" {
-		return "", nil
-	}
-	if same, err := sameFile(src, dst); err == nil && same {
-		// Already the staged copy (a re-entrant call, or an operator who
-		// pinned CREWSHIP_SIDECAR_PATH at it). Copying a file onto itself
-		// would truncate it.
-		return dst, nil
-	}
-	info, err := os.Stat(src)
-	if err != nil {
-		return "", err
-	}
-	if alreadyStaged(info, dst) {
-		// Same size and same mtime: the previous boot already staged this exact
-		// artifact. Skipping is not only about the ~20 MB copy — the rename
-		// swaps the inode under any crew container currently bind-mounting it,
-		// which is harmless (the mount holds the old inode) but pointless
-		// churn on every single restart.
-		return dst, nil
-	}
-	in, err := os.Open(src) // #nosec G304 — src is an operator-configured artifact path
-	if err != nil {
-		return "", err
-	}
-	defer in.Close()
-
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".stage-*")
-	if err != nil {
-		return "", err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }() // no-op once the rename succeeded
-
-	if _, err := io.Copy(tmp, in); err != nil {
-		tmp.Close()
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Chmod(tmpName, 0o755); err != nil {
-		return "", err
-	}
-	if err := os.Chtimes(tmpName, info.ModTime(), info.ModTime()); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmpName, dst); err != nil {
-		return "", err
-	}
-	return dst, nil
-}
-
-// alreadyStaged reports whether dst is a copy of the file src describes.
-//
-// Size and mtime, because mtime is what the staging contract already promises
-// to carry across (assertSidecarFreshAtStartup reads it) — a dst that matches on
-// both is a copy this function made from a src that has not changed since. It
-// deliberately does NOT hash: a content hash of the sidecar on every boot buys
-// nothing over the pair, since a rebuild that produced identical bytes needs no
-// re-copy either.
-func alreadyStaged(src os.FileInfo, dst string) bool {
-	di, err := os.Stat(dst)
-	if err != nil {
-		return false
-	}
-	return di.Size() == src.Size() && di.ModTime().Equal(src.ModTime())
-}
-
-// sameFile reports whether two paths are the same file on disk.
-func sameFile(a, b string) (bool, error) {
-	ai, err := os.Stat(a)
-	if err != nil {
-		return false, err
-	}
-	bi, err := os.Stat(b)
-	if err != nil {
-		return false, err
-	}
-	return os.SameFile(ai, bi), nil
 }
 
 // bindSourceMissingPatterns extract the host path out of a daemon's

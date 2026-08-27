@@ -71,6 +71,55 @@ FAILED_BODY='> [!CAUTION]
 >
 > The pull request is closed.'
 
+# Verbatim shape from PR #2022 (2026-08-20), the CHILL profile's *clean*
+# result: a walkthrough that names the commit range it read and reports zero
+# findings, followed by a zero-body APPROVED review and no inline comments.
+# Structurally identical to the #1729 non-event — which is why the range is
+# the only thing that separates them.
+clean_walkthrough() { # <fromSha> <toSha>
+  cat <<EOF
+<!-- This is an auto-generated comment: summarize by coderabbit.ai -->
+<!-- recent_review_start -->
+
+No actionable comments were generated in the recent review. 🎉
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Review profile**: CHILL
+
+</details>
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between $1 and $2.
+
+</details>
+<!-- recent_review_end -->
+<!-- walkthrough_start -->
+## Walkthrough
+
+The doctor reachability tests now cover the successful DSN probe path.
+<!-- walkthrough_end -->
+EOF
+}
+
+# Also from #2022, 2026-08-20T12:29:09Z. The rate-limit notice no longer
+# always arrives as the 2026-07-30 "Review limit reached" banner: answering
+# `@coderabbitai review` with no slot left returns this, which shares every
+# marker with the "✅ Action performed" acknowledgement and differs only in
+# the summary line and the words "Review rate limited".
+RATE_LIMITED_ACK_BODY='<!-- This is an auto-generated reply by CodeRabbit -->
+<!-- CodeRabbit review command invocation: b9bbb365-e8f0-41f3-b7a9-1437acc8a73b -->
+<details>
+<summary>⚠️ Action not completed</summary>
+
+Review rate limited.
+
+> Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits.
+
+</details>'
+
 # Verbatim from PR #1587, which is what this script shipped in: answering
 # `@coderabbitai review` while still rate-limited gets a ✅ and no review.
 ACK_BODY='<!-- This is an auto-generated reply by CodeRabbit -->
@@ -198,6 +247,120 @@ STALE_INLINE="$(in_json_rc "$NOW" "$OPENED" "$SHA" success "Review rate limited"
   '[{"createdAt":"2026-07-30T21:00:00Z"}]')"
 expect_eq "inline comments predating the approval do not count for it" \
   "throttled" "$(state_of "$STALE_INLINE")"
+
+echo "== a clean review is delivered as an empty approval too (#2038) =="
+
+# The mirror image of #1729, and the reason that guard cannot simply be
+# "empty body ⇒ not a review". On the CHILL profile a review that finds
+# nothing posts a walkthrough naming the commit range it read, then a
+# zero-body APPROVED with no inline comments. Read only through the review
+# object the two are the same bytes; the walkthrough's range is the evidence
+# that separates "read it, nothing to say" from "never looked".
+OLD_SHA=dddddddddddddddddddddddddddddddddddddddd
+BASE_SHA=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+
+CLEAN_REVIEW_IN="$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" \
+  "$(cmt 2026-07-30T21:16:00Z "$(clean_walkthrough "$BASE_SHA" "$SHA")")" \
+  "$(rev 2026-07-30T21:20:00Z APPROVED "" "$SHA")")"
+expect_eq "a walkthrough reporting zero findings makes the empty approval a review" \
+  "reviewed" "$(state_of "$CLEAN_REVIEW_IN")"
+expect_not_contains "…and it is no longer accused of not reading the diff" \
+  "$(notes_of "$CLEAN_REVIEW_IN")" "did not read the diff"
+expect_contains "…and the zero finding count is reported, not left blank" \
+  "$(classify "$CLEAN_REVIEW_IN")" "0 actionable"
+
+# The promotion is keyed on the range, not on the walkthrough's existence.
+# A walkthrough for some other commit is not evidence about this review.
+expect_eq "a walkthrough for a different commit does not promote the approval" \
+  "absent" "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" \
+      "$(cmt 2026-07-30T21:16:00Z "$(clean_walkthrough "$BASE_SHA" "$OLD_SHA")")" \
+      "$(rev 2026-07-30T21:20:00Z APPROVED "" "$SHA")")")"
+
+# A walkthrough with no range at all — the shape the rate-limit notice and the
+# plain summary both have — must not promote anything either.
+expect_eq "a walkthrough with no commit range does not promote the approval" \
+  "absent" "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" \
+      "$(cmt 2026-07-30T21:16:00Z "$WALKTHROUGH_BODY")" \
+      "$(rev 2026-07-30T21:20:00Z APPROVED "" "$SHA")")")"
+
+# Promoted or not, a review is still a review OF A COMMIT. One that read an
+# older head is stale, and says so through the existing head cross-check.
+STALE_CLEAN="$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" \
+  "$(cmt 2026-07-30T21:16:00Z "$(clean_walkthrough "$BASE_SHA" "$OLD_SHA")")" \
+  "$(rev 2026-07-30T21:20:00Z APPROVED "" "$OLD_SHA")")"
+expect_eq "a clean review of a superseded commit is still a review" \
+  "reviewed" "$(state_of "$STALE_CLEAN")"
+expect_contains "…and is flagged stale against head" \
+  "$(notes_of "$STALE_CLEAN")" "the newest push is unreviewed"
+
+# "Newest wins" is untouched where it was aimed: a throttle after a clean
+# review of a commit that is no longer head means the newest push went unread.
+expect_eq "a throttle after a clean review of an older commit still wins" "throttled" \
+  "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review rate limited" \
+      "$(merge "$(cmt 2026-07-30T21:16:00Z "$(clean_walkthrough "$BASE_SHA" "$OLD_SHA")")" \
+               "$(cmt 2026-07-30T21:40:00Z "$THROTTLE_BODY")")" \
+      "$(rev 2026-07-30T21:20:00Z APPROVED "" "$OLD_SHA")")")"
+
+echo '== "⚠️ Action not completed — Review rate limited." is a throttle =='
+
+# Same PR, two minutes later. This wording carries none of the three phrases
+# the 2026-07-30 banner did, so it used to classify as `other` — a rate limit
+# that the re-review queue could not see and the reader was never shown.
+expect_eq "the modern rate-limit reply is a throttle, not an ack" "throttled" \
+  "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review rate limited" \
+      "$(cmt 2026-07-30T21:20:00Z "$RATE_LIMITED_ACK_BODY")" "$NONE")")"
+
+# And the #1729 laundering must stay shut under the new wording: an empty
+# approval following it has no walkthrough behind it and stays throttled.
+expect_eq "an empty approval after the modern rate-limit reply is not a review" \
+  "throttled" "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review rate limited" \
+      "$(cmt 2026-07-30T21:20:00Z "$RATE_LIMITED_ACK_BODY")" \
+      "$(rev 2026-07-30T21:35:00Z APPROVED "" "$SHA")")")"
+
+# Not every "Action not completed" is a rate limit — "Head commit changed" is
+# the other one, and it is not a reason to call the PR unreviewed.
+expect_not_contains "«Action not completed» without a rate limit is not a throttle" \
+  "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "" \
+      "$(cmt 2026-07-30T21:20:00Z '<!-- This is an auto-generated reply by CodeRabbit -->
+<details>
+<summary>⚠️ Action not completed</summary>
+
+Head commit changed.
+
+</details>')" "$NONE")")" "throttled"
+
+echo "== a refused re-request does not un-review the head (#2038) =="
+
+# Seen on #2019: CodeRabbit reviewed head, someone asked again, and the answer
+# was "Review rate limited." Under a literal newest-wins that demotes a
+# fully-reviewed head to `throttled` — and `--retrigger` then re-requests it,
+# collects another refusal, and loops on the one PR that needs nothing. The
+# push, not the clock, is what leaves code unread, so a throttle only outranks
+# a review that does NOT name the head commit.
+REFUSED_RETRIGGER="$(in_json "$NOW" "$OPENED" "$SHA" success "Review rate limited" \
+  "$(merge "$(cmt 2026-07-30T21:16:00Z "$WALKTHROUGH_BODY")" \
+           "$(cmt 2026-07-30T21:40:00Z "$RATE_LIMITED_ACK_BODY")")" \
+  "$(rev 2026-07-30T21:20:00Z CHANGES_REQUESTED "$REVIEW_BODY" "$SHA")")"
+expect_eq "a rate-limited re-request after a review OF HEAD leaves it reviewed" \
+  "reviewed" "$(state_of "$REFUSED_RETRIGGER")"
+
+# The note attached to a throttle must not claim an untruth either: it is only
+# printed when the earlier review genuinely predates the current head.
+expect_not_contains "…and is not told its review misses head" \
+  "$(notes_of "$REFUSED_RETRIGGER")" "does not cover the current head"
+
+# The same shape one push later is exactly what newest-wins was written for,
+# and must not be swept up by the exception above.
+expect_eq "…but one push later the head really is unread" "throttled" \
+  "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review rate limited" \
+      "$(merge "$(cmt 2026-07-30T21:16:00Z "$WALKTHROUGH_BODY")" \
+               "$(cmt 2026-07-30T21:40:00Z "$RATE_LIMITED_ACK_BODY")")" \
+      "$(rev 2026-07-30T21:20:00Z CHANGES_REQUESTED "$REVIEW_BODY" "$OLD_SHA")")")"
+
+# The exception is spent on REAL reviews only. #1729's empty approval never
+# becomes one, so it cannot reach the head-covers clause however it is timed.
+expect_eq "an empty approval of head does not survive the throttle either" \
+  "throttled" "$(state_of "$EMPTY_APPROVAL_AFTER_THROTTLE")"
 
 echo "== newest event wins =="
 
@@ -439,6 +602,10 @@ expect_contains "--help prints usage" "$out" "Usage:"
 for s in reviewed throttled failed pending absent unknown; do
   expect_contains "--help documents the state '$s'" "$out" "$s"
 done
+# usage() slices the header by a hardcoded line range, so any line added to
+# that header silently truncates the tail. Pin the last line of it.
+expect_contains "--help prints the whole header, not a truncated slice" \
+  "$out" "Requires: gh CLI logged in"
 
 echo
 if [ "$FAILURES" -gt 0 ]; then

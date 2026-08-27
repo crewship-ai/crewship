@@ -99,6 +99,8 @@ interface Gov {
     tier_floor_label?: string
   }
   auto_lease_seconds?: number
+  // #1001 M3. 0/absent = never configured → the built-in default (5).
+  behavior_sample_every?: number
   watch_spec?: string
   watch_presets?: string[]
   gov_model_provider?: string
@@ -218,6 +220,10 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
       enabled: true,
       watch_spec: "flag egress to non-allowlisted hosts",
       watch_presets: ["destructive"],
+      // The sampling cadence is this card's field too (#1001 M3) — how often it
+      // looks belongs with what it looks for. Unset hydrates as the default, so
+      // an untouched cadence is written as the number the operator was shown.
+      behavior_sample_every: 5,
     })
     // Nothing else travels with it — in particular not the lease TTL or the
     // governance model, which a single-Save panel resent on every edit.
@@ -240,6 +246,123 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     // Same set, different array — the draft must compare by content, or the
     // footer would sit there offering to save nothing.
     expect(screen.queryByTestId("keeper-watchdog-save")).not.toBeInTheDocument()
+  })
+
+  // ── Sampling cadence (#1001 M3) ──────────────────────────────────────────
+
+  it("hydrates the sampling cadence, showing the default for a workspace that never set one", async () => {
+    mockRoutes({ ...BASE, behavior_sample_every: 0 })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    // 0 on the wire is "never configured", not "never review" — the field has to
+    // show the cadence actually in force, or the operator reads it as disabled.
+    expect(await screen.findByTestId("keeper-governance-sample-every")).toHaveValue(5)
+    expect(screen.queryByTestId("keeper-watchdog-save")).not.toBeInTheDocument()
+  })
+
+  it("hydrates an explicitly configured cadence", async () => {
+    mockRoutes({ ...BASE, behavior_sample_every: 20 })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    expect(await screen.findByTestId("keeper-governance-sample-every")).toHaveValue(20)
+  })
+
+  it("saves an edited cadence with the watchdog card", async () => {
+    mockRoutes({ ...BASE, behavior_sample_every: 5, watch_presets: [], watch_spec: "" })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.change(await screen.findByTestId("keeper-governance-sample-every"), { target: { value: "12" } })
+    fireEvent.click(screen.getByTestId("keeper-watchdog-save"))
+
+    await waitFor(() => expect(putBodies()).toHaveLength(1))
+    expect(putBodies()[0]).toMatchObject({ behavior_sample_every: 12 })
+    expect(putBodies()[0]).not.toHaveProperty("deny_notify_min_risk")
+  })
+
+  it("refuses 0 by name — that is the switch's job, not the cadence's", async () => {
+    mockRoutes({ ...BASE, behavior_sample_every: 5 })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.change(await screen.findByTestId("keeper-governance-sample-every"), { target: { value: "0" } })
+
+    // The message has to point at the control that actually turns it off; a bare
+    // "out of range" would leave the operator hunting for the off value.
+    expect(screen.getByTestId("keeper-governance-sample-every-invalid")).toHaveTextContent(/turn it off/i)
+    expect(screen.getByTestId("keeper-watchdog-save")).toBeDisabled()
+  })
+
+  it("refuses a cadence past the ceiling", async () => {
+    mockRoutes({ ...BASE, behavior_sample_every: 5 })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.change(await screen.findByTestId("keeper-governance-sample-every"), { target: { value: "101" } })
+    expect(screen.getByTestId("keeper-governance-sample-every-invalid")).toHaveTextContent(/1 to 100/)
+    expect(screen.getByTestId("keeper-watchdog-save")).toBeDisabled()
+  })
+
+  it("warns about the cost of an aggressive cadence without blocking it", async () => {
+    mockRoutes({ ...BASE, behavior_sample_every: 5 })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.change(await screen.findByTestId("keeper-governance-sample-every"), { target: { value: "1" } })
+
+    // Reviewing everything is a real posture, so it stays saveable — the cost is
+    // stated rather than refused.
+    expect(screen.queryByTestId("keeper-governance-sample-every-invalid")).not.toBeInTheDocument()
+    expect(screen.getByTestId("keeper-governance-sample-every-cost")).toBeInTheDocument()
+    expect(screen.getByTestId("keeper-watchdog-save")).toBeEnabled()
+  })
+
+  it("hides the cadence with the rest of the rules when the watchdog is off", async () => {
+    mockRoutes({ ...BASE, enabled: false })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    await screen.findByTestId("keeper-governance-switch")
+    // Configuring how often a monitor that is not running looks is a screen for
+    // a thing that does not exist yet — same reasoning as the watch rules.
+    expect(screen.queryByTestId("keeper-governance-sample-every")).not.toBeInTheDocument()
+  })
+
+  // Turning the watchdog OFF is the one action on this card that must never be
+  // blocked by something else on it. The cadence row unmounts with the rest of
+  // the rules, taking its inline error with it — so a cadence left mid-edit
+  // would veto the Save with nothing on screen saying why, and the operator
+  // could not switch the monitor off at all.
+  it("still turns the watchdog off when the cadence was left mid-edit", async () => {
+    mockRoutes({ ...BASE, enabled: true, behavior_sample_every: 5, watch_spec: "", watch_presets: [] })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.change(await screen.findByTestId("keeper-governance-sample-every"), { target: { value: "" } })
+    expect(screen.getByTestId("keeper-watchdog-save")).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("keeper-governance-switch"))
+    expect(screen.queryByTestId("keeper-governance-sample-every")).not.toBeInTheDocument()
+
+    const save = screen.getByTestId("keeper-watchdog-save")
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+
+    await waitFor(() => expect(putBodies()).toHaveLength(1))
+    // …and the half-typed cadence does not ride along. Sending it would 400 the
+    // whole save on a value the operator can no longer see or correct.
+    expect(putBodies()[0]).toMatchObject({ enabled: false })
+    expect(putBodies()[0]).not.toHaveProperty("behavior_sample_every")
+  })
+
+  // A cadence is a rule about a running monitor. With the switch off the row is
+  // hidden, so writing one is writing a field nobody was shown — and it would
+  // spend the "never configured" sentinel that keeps an untouched workspace on
+  // whatever the built-in default is, rather than on today's copy of it.
+  it("does not write a cadence the operator was never shown", async () => {
+    mockRoutes({ ...BASE, enabled: true, behavior_sample_every: 0, watch_spec: "", watch_presets: [] })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.click(await screen.findByTestId("keeper-governance-switch"))
+    fireEvent.click(screen.getByTestId("keeper-watchdog-save"))
+
+    await waitFor(() => expect(putBodies()).toHaveLength(1))
+    expect(putBodies()[0]).toMatchObject({ enabled: false })
+    expect(putBodies()[0]).not.toHaveProperty("behavior_sample_every")
   })
 
   // ── Findings & routing card ──────────────────────────────────────────────

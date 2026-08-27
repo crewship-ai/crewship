@@ -18,6 +18,45 @@ import (
 // status cannot be determined, so those callers fail closed either way.
 const execRunningExitCode = -1
 
+// execWaitDelay bounds how long cmd.Wait spends waiting for an exec's output
+// pipes to close after the `container` process itself has exited.
+//
+// Stdout and Stderr on both exec paths are an execSpool — an io.Writer, not an
+// *os.File — so os/exec gives the child a real pipe and copies out of it in a
+// goroutine. Wait blocks on that goroutine until every write end of the pipe
+// is closed, and a descendant the CLI leaves behind holds one. A single orphan
+// therefore hung Wait for its whole lifetime, and nothing downstream recovered:
+// registerExec closes entry.done only after Wait returns, so ExecInspect
+// reported the exec as running indefinitely and collectFinishedExecs never
+// reclaimed the entry (#2037).
+//
+// WaitDelay is the answer at THIS site and not at the sibling one.
+// AppleContainerBuilder.Build reads through StdoutPipe, where both ends are
+// *os.File: no copying goroutine exists, so WaitDelay has nothing to interrupt
+// and process-group signalling was the only lever (#2030, #2032). Here it is
+// the reverse — verified by execution in #2037.
+//
+// The value is generous because it can only ever elapse when something really
+// is holding the pipes. A command whose descendants all exited closes them with
+// its last descriptor and Wait returns at once, whatever this is set to; no
+// output is lost and no exit status is affected in that case.
+const execWaitDelay = 5 * time.Second
+
+// newExecCmd builds one `container` invocation for an exec session, carrying
+// the WaitDelay that keeps a stray descendant from pinning cmd.Wait.
+//
+// The delay is applied here, before Start, rather than next to the Wait in
+// registerExec — which would read as the more natural single place for it.
+// Start spawns a goroutine to watch the command's context, and that goroutine
+// reads WaitDelay when the context is done (os/exec's watchCtx). Setting the
+// field after Start is therefore an unsynchronised write to one a live
+// goroutine may read, and every caller here passes a cancellable context.
+func newExecCmd(ctx context.Context, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "container", args...)
+	cmd.WaitDelay = execWaitDelay
+	return cmd
+}
+
 func (p *Provider) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
 	return nil, fmt.Errorf("container stats not supported on Apple Containers")
 }
@@ -55,7 +94,7 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	args = append(args, cfg.ContainerID)
 	args = append(args, cfg.Cmd...)
 
-	cmd := exec.CommandContext(ctx, "container", args...)
+	cmd := newExecCmd(ctx, args)
 
 	// Attach stdin when supplied so oversized agent prompts (too large to pass
 	// as an argv element) reach the CLI. nil leaves stdin unset — the historic
@@ -130,6 +169,12 @@ func (p *Provider) resolveExecUser(ctx context.Context, op, containerID, user st
 // records the exit code and closes the entry's done channel. cleanup runs as
 // the goroutine returns (after done is closed), closing the caller's pipe
 // writers so readers observe EOF.
+//
+// The Wait below is bounded only because the command was built by newExecCmd:
+// an orphaned descendant holding the output pipes would otherwise keep this
+// goroutine, entry.done and the whole entry alive forever (#2037). It still
+// waits on the stdin copier where there is one, so ExecInteractive callers
+// must close their end of the terminal pipe as they always have.
 func (p *Provider) registerExec(cmd *exec.Cmd, cleanup func()) string {
 	execID := fmt.Sprintf("apple-exec-%d", p.execSeq.Add(1))
 
@@ -209,7 +254,7 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 	args = append(args, cfg.ContainerID)
 	args = append(args, cfg.Cmd...)
 
-	cmd := exec.CommandContext(ctx, "container", args...)
+	cmd := newExecCmd(ctx, args)
 
 	// Stdin stays a pipe (the terminal writes into it); stdout is spooled for
 	// the same reason as in Exec — a session whose reader goes away must still

@@ -168,6 +168,16 @@ the chat as a status line. A crew that sets none of them sees nothing.
   creates — and refuses to create a container without. It is reported as
   unenforced in exactly one case: a deployment with no sidecar binary configured
   at all.
+
+  The bind source is **not** the install location. `crewship-sidecar` and
+  `entrypoint.sh` are resolved next to the `crewship` executable
+  (`/opt/homebrew/…` on a Homebrew install), and each Apple container is its own
+  lightweight VM, so that path is resolved by the runtime rather than by this
+  process. `New()` therefore copies both into `<OutputBasePath>/.runtime/` and
+  binds the copies, collapsing two "this host path must be reachable"
+  requirements into the one that was already load-bearing — the data dir, which
+  `/workspace`, `/output` and `/crew` are bound out of. Nothing to configure,
+  and a copy that fails falls back to binding the install path.
 </Note>
 
 The runtime's own gaps — no `ContainerStats`, `ExecResize` is a no-op, integer
@@ -181,6 +191,7 @@ forces — are listed in
 |---|---|
 | Runtime detection + macOS version gate | `internal/provider/apple/detect.go` |
 | `container create` argument vector | `internal/provider/apple/apple_create_args.go` |
+| Staging the mandatory binds into the data dir | `internal/provider/apple/runtime_binds.go`, `internal/provider/runtimestage` |
 | What the provider does not apply | `internal/provider/apple/apple_capability.go` |
 | Build-only provisioning path | `internal/devcontainer/provisioner_build.go` |
 | `container build` engine + builder sizing | `internal/devcontainer/imagebuilder_apple.go` |

@@ -31,6 +31,7 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"configured": boolean(), "enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(),
 		"watch_spec": str(), "watch_presets": array(str()), "require_second_approver": boolean(),
 		"gov_model_provider": str(), "gov_model_id": str(), "auto_lease_seconds": integer(), "gov_model_credential_id": str(),
+		"behavior_sample_every": integer(),
 		"effective_second_approver": object(map[string]any{
 			"min_security_level": integer(), "min_security_level_label": str(), "source": str(),
 			"tier_floor_security_level": integer(), "tier_floor_label": str(),
@@ -48,7 +49,17 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	}), "error": str()})
 	backupCreate := object(map[string]any{"path": str(), "size_bytes": integer(), "payload_sha256": str(), "format_version": integer(), "scope": str(), "scope_level": str(), "created_at": str(), "encrypted": boolean()})
 	backupRotate := object(map[string]any{"deleted": array(str()), "dry_run": boolean()})
-	backupRestore := object(map[string]any{"manifest": object(map[string]any{}), "restored_ws": boolean(), "restored_workspace_id": str(), "crews_count": integer(), "crews_restored": integer(), "rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": array(str()), "security_level_clamped": integer(), "security_level_clamps": array(object(map[string]any{}))})
+	// restored_ws is the restored workspace's SLUG — it is what the CLI
+	// prints as `workspace=`, and RestoreResult.RestoredWs is a string.
+	// It was declared boolean here, so every client generated from this
+	// spec typed the one field an operator actually reads wrong.
+	backupRestore := object(map[string]any{"manifest": object(map[string]any{}), "restored_ws": str(), "restored_workspace_id": str(), "crews_count": integer(), "crews_restored": integer(), "rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": array(str()), "security_level_clamped": integer(), "security_level_clamps": array(object(map[string]any{})),
+		// Schema skew: values discarded because the bundle named a column
+		// this instance's schema does not have (#2034). Spelled out rather
+		// than left as a bare object — the whole point of the field is that
+		// a client can act on WHICH table lost WHAT.
+		"columns_dropped": integer(),
+		"dropped_columns": array(object(map[string]any{"table": str(), "column": str(), "rows": integer()}))})
 	backupSelfTest := object(map[string]any{"ok": boolean(), "crew_id": str(), "crew_slug": str(), "canary_path": str(), "canary_bytes": integer(), "bundle_bytes": integer(), "elapsed_ms": integer(), "error": str()})
 	backupMetrics := object(map[string]any{"created_total": integer(), "created_by_scope": map[string]any{"type": "object", "additionalProperties": integer()}, "failed_total": integer(), "failed_by_reason": map[string]any{"type": "object", "additionalProperties": integer()}, "restored_total": integer(), "size_bytes_total": integer(), "duration_seconds_p50": numberSchema(), "duration_seconds_p95": numberSchema(), "duration_seconds_mean": numberSchema(), "lock_held_seconds_by_workspace": map[string]any{"type": "object", "additionalProperties": integer()}})
 	setup := object(map[string]any{

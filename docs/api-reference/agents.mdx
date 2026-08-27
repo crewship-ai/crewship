@@ -838,7 +838,7 @@ GET /api/v1/agents/{agentId}/persona/history?limit=20
 ```
 
 Lists rows from `memory_versions` filtered to this agent's
-`PERSONA.md` path. Pairs with [`GET /api/v1/admin/memory/versions/{id}/content`](/api-reference/admin#get-api-v1-admin-memory-versions-id-content) for content drill-down — the history endpoint deliberately omits content to keep responses small.
+`PERSONA.md` path. Pairs with [`GET /api/v1/admin/memory/versions/{id}/content`](/api-reference/admin#get-/api/v1/admin/memory/versions/id/content) for content drill-down — the history endpoint deliberately omits content to keep responses small.
 
 **Query Parameters:**
 
@@ -1168,7 +1168,7 @@ route.
 **Response:** `204 No Content`
 
 <Note>
-  The GDPR cascade endpoint [`DELETE /api/v1/admin/users/{userId}/data`](/api-reference/admin#delete-api-v1-admin-users-userid-data) deletes peer cards across **all** agents in the workspace for a single user — that's the right path for a full SAR. This per-agent endpoint is for the narrower "clean up just this agent's notes about this user" case.
+  The GDPR cascade endpoint [`DELETE /api/v1/admin/users/{userId}/data`](/api-reference/admin#delete-/api/v1/admin/users/userid/data) deletes peer cards across **all** agents in the workspace for a single user — that's the right path for a full SAR. This per-agent endpoint is for the narrower "clean up just this agent's notes about this user" case.
 </Note>
 
 ### Related admin user routes

@@ -1038,9 +1038,46 @@ restart needed:
 | Setting | What it does | Default |
 |---------|-------------|---------|
 | **Watchdog enabled** | Master toggle for behavior monitoring + DENY notifications in this workspace | **Off (opt-in)** — enable per workspace |
+| **Review one in every N tool calls** | How often the monitor reviews a tool call, counted per crew. 1–100; each review is a governance-model call | 5 |
 | **Security contact** | A named OWNER/ADMIN the escalation is highlighted for (via the inbox item's target) | Unset — findings go to all MANAGER+ members |
 | **Notify on DENY at risk ≥ N** | High-risk DENY decisions (1–10 scale) also land in the inbox as non-blocking items — ESCALATE always does | 7 |
 | **Require a second approver** | Four-eyes: a `CREDENTIAL` escalation can't be resolved by the person who owns the requesting agent (segregation of duties, #1084) | **Off (opt-in)** — but see below: the toggle is not the whole rule |
+
+#### How often it looks
+
+The watchdog does **not** review everything agents do. Each review is a call to
+the governance model, so it samples: one in every N tool calls, counted per
+crew. The default is one in 5, and the control sits on the **Watch what agents
+do** card next to the rules themselves — how often it looks belongs with what it
+looks for.
+
+```bash
+crewship keeper sampling status
+crewship keeper sampling set 1      # review every tool call
+crewship keeper sampling set 20     # cheaper, quieter
+crewship keeper sampling default    # back to one in 5
+```
+
+Which way to move it:
+
+- **Tighter** (a smaller number) catches more, sooner. `1` reviews every tool
+  call. That is a legitimate posture and it is allowed — with a warning, because
+  it puts a governance-model round-trip behind essentially everything your
+  agents do. On a local judge that is latency; on a hosted one it is a bill that
+  scales with tool-call volume.
+- **Looser** (a bigger number) is cheaper and quieter, up to a ceiling of 100.
+
+**There is no cadence that means "off."** A `0` is rejected rather than stored,
+because a workspace whose settings read *watchdog enabled* while nothing is ever
+reviewed is the one failure this control must not be able to produce. Turning it
+off is `crewship keeper disable`. The ceiling exists for the same reason from
+the other side: the per-crew counter lives in memory and starts at zero each
+restart, so a cadence larger than the number of tool calls a run makes would
+never fire — monitoring that is off while claiming to be on.
+
+Changes apply to the **next tool call**. The cadence is read from the workspace
+row on each observation, not captured when the server booted, so there is no
+restart and no per-workspace bleed on a shared instance.
 
 The **Require a second approver** switch sits in the same **Admin → Keeper →
 Watchdog governance** panel as the settings above and writes through the same
