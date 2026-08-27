@@ -844,6 +844,40 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   and the groups AND — "any Anthropic or GitHub certificate this crew can
   reach" is now one pass through the panel.
 
+- **The MCP OAuth client never told an authorization server which MCP server
+  a token was for, and never checked which authorization server actually
+  answered.** Two MUSTs from the MCP authorization spec were both absent:
+  the RFC 8707 `resource` indicator was never sent on the authorization
+  request or the token request, so a token minted for one connected MCP
+  server carried no audience binding an operator running that server could
+  be stopped from replaying against another; and the RFC 9207 `iss`
+  parameter an authorization server returns on the redirect was read
+  nowhere, so nothing defended against a mix-up between the several
+  authorization servers Crewship's MCP connections talk to by construction.
+  PKCE and RFC 9728 protected-resource discovery were already in place —
+  discovery just discarded the two fields (`resource`, `issuer`) that make
+  the other two RFCs possible, instead of ever recording them.
+
+  Both are now carried through the connect flow: `AutoConnect` persists the
+  discovered protected-resource `resource` and authorization-server `issuer`
+  on the credential (`oauth_resource`, `oauth_issuer` — new columns, empty
+  for every credential connected before this and for the plain
+  Google/Slack/GitHub-style provider catalogue, which never had a resource
+  to discover), `resource` is sent on both the authorization and the token
+  request whenever one is known, and `Callback`/`Loopback` reject the
+  redirect before ever exchanging the code if `iss` is absent or does not
+  match. Discovery itself now fails closed when an authorization server's
+  metadata omits `issuer` — RFC 8414 makes the field REQUIRED, so a server
+  that omits it gives the mix-up defence nothing to check against, and
+  Crewship's whole reason to check `iss` at all is that MCP servers are
+  third-party-operated and not trusted by default.
+
+  **Known gap, not fixed here:** the manual "paste the redirect URL/code"
+  fallback (`Exchange`, used when the automatic redirect can't reach
+  Crewship — private IP, firewall) still doesn't validate `iss`, because the
+  frontend only ever extracted `code` from the pasted URL. It still sends
+  `resource` on the token request.
+
 ### Added
 
 - **A database write looked exactly like `ls` in the run trace.** Sub-span

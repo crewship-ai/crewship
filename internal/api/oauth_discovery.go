@@ -40,6 +40,20 @@ type DiscoveredOAuth struct {
 	Scopes               string `json:"scopes,omitempty"`
 	SupportsPKCE         bool   `json:"supports_pkce"`
 	SupportsDCR          bool   `json:"supports_dcr"`
+
+	// Resource is the RFC 8707 resource identifier this OAuth grant must be
+	// bound to — the canonical URI of the MCP server as reported by its own
+	// RFC 9728 protected-resource metadata (ProtectedResourceMetadata.Resource).
+	// It is never invented from mcpURL: an authorization server can only
+	// enforce audience binding against a value the resource itself vouched
+	// for, so absence of PRM means absence of a resource identifier.
+	Resource string `json:"resource,omitempty"`
+
+	// Issuer is the authorization server's RFC 8414 `issuer` value, recorded
+	// so the RFC 9207 `iss` returned on the authorization response can later
+	// be checked against it (the mix-up defence for a host that may talk to
+	// more than one authorization server).
+	Issuer string `json:"issuer,omitempty"`
 }
 
 // discoveryClient is the prod HTTP client. ssrfSafeTransport is the
@@ -88,12 +102,26 @@ func discoverOAuthFromMCPURL(ctx context.Context, mcpURL string) (*DiscoveredOAu
 	if meta.AuthorizationEndpoint == "" || meta.TokenEndpoint == "" {
 		return nil, fmt.Errorf("OAuth metadata missing required endpoints")
 	}
+	// RFC 8414 §2 makes `issuer` a REQUIRED metadata field. It is also the
+	// only anchor RFC 9207's mix-up defence has to check the authorization
+	// response against. Fail closed rather than proceeding with an unbound
+	// flow: a compliant authorization server always publishes this, so its
+	// absence means either a broken or an actively hostile server — and
+	// Crewship's whole reason to check `iss` at all is that MCP servers are
+	// third-party-operated and not trusted by default.
+	if meta.Issuer == "" {
+		return nil, fmt.Errorf("OAuth server metadata missing required issuer")
+	}
 
 	result := &DiscoveredOAuth{
 		AuthURL:              meta.AuthorizationEndpoint,
 		TokenURL:             meta.TokenEndpoint,
 		RegistrationEndpoint: meta.RegistrationEndpoint,
 		SupportsDCR:          meta.RegistrationEndpoint != "",
+		Issuer:               meta.Issuer,
+	}
+	if prm != nil {
+		result.Resource = prm.Resource
 	}
 
 	// Check PKCE support

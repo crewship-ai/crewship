@@ -26,7 +26,23 @@ type tokenResponse struct {
 	Scope        string `json:"scope"`
 }
 
-func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier string) (*tokenResponse, error) {
+// oauthTokenClient is the prod HTTP client for the token endpoint. It is a
+// package-level var (same pattern as discoveryClient in oauth_discovery.go)
+// so tests can swap its Transport with httpsafe.RewriteRoundTripper and
+// assert on the actual request body — including the RFC 8707 `resource`
+// parameter — without weakening the SSRF guard for production traffic.
+var oauthTokenClient = &http.Client{
+	Timeout:   15 * time.Second,
+	Transport: ssrfSafeTransport(),
+}
+
+// exchangeOAuthCode performs the authorization_code token exchange.
+//
+// resource is the RFC 8707 resource indicator for the MCP server this token
+// must be bound to (from the credential's discovered protected-resource
+// metadata). An empty resource omits the parameter, so non-MCP OAuth
+// credentials are unaffected.
+func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier, resource string) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
@@ -39,6 +55,9 @@ func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, co
 	if codeVerifier != "" {
 		data.Set("code_verifier", codeVerifier)
 	}
+	if resource != "" {
+		data.Set("resource", resource)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
@@ -47,8 +66,7 @@ func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, co
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second, Transport: ssrfSafeTransport()}
-	resp, err := client.Do(req)
+	resp, err := oauthTokenClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}

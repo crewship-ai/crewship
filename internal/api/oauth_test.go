@@ -86,7 +86,7 @@ func TestGenerateOAuthState(t *testing.T) {
 
 func TestBuildOAuthURL(t *testing.T) {
 	t.Parallel()
-	got := buildOAuthURL("https://provider/auth", "client-id", "https://app/cb", "state-x", "challenge-y", "read write")
+	got := buildOAuthURL("https://provider/auth", "client-id", "https://app/cb", "state-x", "challenge-y", "read write", "")
 	u, err := url.Parse(got)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -114,7 +114,7 @@ func TestBuildOAuthURL(t *testing.T) {
 
 func TestBuildOAuthURL_PreservesExistingQuery(t *testing.T) {
 	t.Parallel()
-	got := buildOAuthURL("https://provider/auth?audience=foo", "cid", "/cb", "s", "ch", "")
+	got := buildOAuthURL("https://provider/auth?audience=foo", "cid", "/cb", "s", "ch", "", "")
 	u, _ := url.Parse(got)
 	if u.Query().Get("audience") != "foo" {
 		t.Errorf("audience param lost: %s", got)
@@ -620,7 +620,7 @@ func withTestDiscoveryClient(t *testing.T, srv *httptest.Server) {
 func TestExchangeOAuthCode_HTTPError(t *testing.T) {
 	t.Parallel()
 	// 192.0.2.0/24 is RFC 5737 TEST-NET-1 — never routable.
-	_, err := exchangeOAuthCode(context.Background(), "http://192.0.2.1:1/token", "cid", "", "c", "r", "")
+	_, err := exchangeOAuthCode(context.Background(), "http://192.0.2.1:1/token", "cid", "", "c", "r", "", "")
 	if err == nil {
 		t.Error("expected connection error")
 	}

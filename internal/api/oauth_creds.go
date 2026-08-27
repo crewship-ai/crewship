@@ -20,17 +20,28 @@ type oauthCredConfig struct {
 	AuthURL      string
 	TokenURL     string
 	Scopes       string
+
+	// Resource is the RFC 8707 resource indicator recorded for this
+	// credential at connect time (from RFC 9728 discovery) — empty for
+	// credentials that never went through MCP discovery.
+	Resource string
+	// Issuer is the RFC 8414 `issuer` recorded for this credential's
+	// authorization server, used to validate the RFC 9207 `iss` returned on
+	// the authorization response — empty for credentials that never went
+	// through MCP discovery.
+	Issuer string
 }
 
 // generateOAuthState produces a hex-encoded 16-byte random state token.
 
 func (h *OAuthHandler) loadOAuthCredential(ctx context.Context, credID, wsID string) (*oauthCredConfig, error) {
-	var clientID, clientSecretEnc, authURL, tokenURL, scopes string
+	var clientID, clientSecretEnc, authURL, tokenURL, scopes, resource, issuer string
 	err := h.db.QueryRowContext(ctx, `
 		SELECT oauth_client_id, COALESCE(oauth_client_secret_enc, ''),
-			oauth_auth_url, oauth_token_url, COALESCE(oauth_scopes, '')
+			oauth_auth_url, oauth_token_url, COALESCE(oauth_scopes, ''),
+			COALESCE(oauth_resource, ''), COALESCE(oauth_issuer, '')
 		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credID, wsID).Scan(&clientID, &clientSecretEnc, &authURL, &tokenURL, &scopes)
+		credID, wsID).Scan(&clientID, &clientSecretEnc, &authURL, &tokenURL, &scopes, &resource, &issuer)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("credential not found: %w", err)
@@ -53,6 +64,8 @@ func (h *OAuthHandler) loadOAuthCredential(ctx context.Context, credID, wsID str
 		AuthURL:      authURL,
 		TokenURL:     tokenURL,
 		Scopes:       scopes,
+		Resource:     resource,
+		Issuer:       issuer,
 	}, nil
 }
 
@@ -181,6 +194,11 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	// Step 1: Resolve OAuth endpoints
 	var authURL, tokenURL, scopes string
 	var registrationEndpoint string
+	// resource/issuer stay empty unless RFC 9728/8414 discovery actually
+	// found them — a provider hint or the hardcoded known-provider fallback
+	// has no canonical resource identifier to bind to, so neither must be
+	// invented for those paths.
+	var resource, issuer string
 
 	if req.ProviderHint != "" {
 		if p, ok := OAuthProviders[req.ProviderHint]; ok {
@@ -207,6 +225,8 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 			tokenURL = discovered.TokenURL
 			scopes = discovered.Scopes
 			registrationEndpoint = discovered.RegistrationEndpoint
+			resource = discovered.Resource
+			issuer = discovered.Issuer
 		}
 	}
 
@@ -272,9 +292,10 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, status,
 			oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,
+			oauth_resource, oauth_issuer,
 			created_by, created_at, updated_at)
-		VALUES (?, ?, ?, 'OAUTH2', '', 'PENDING', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		credID, workspaceID, credName, clientID, encSecret, authURL, tokenURL, scopes, user.ID); err != nil {
+		VALUES (?, ?, ?, 'OAUTH2', '', 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		credID, workspaceID, credName, clientID, encSecret, authURL, tokenURL, scopes, resource, issuer, user.ID); err != nil {
 		h.logger.Error("create auto-connect credential", "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to create credential")
 		return
@@ -300,7 +321,7 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 6: Build auth URL with PKCE
-	fullAuthURL := buildOAuthURL(authURL, clientID, redirectURI, state, codeChallenge, scopes)
+	fullAuthURL := buildOAuthURL(authURL, clientID, redirectURI, state, codeChallenge, scopes, resource)
 
 	h.logger.Info("OAuth auto-connect ready", "server", req.ServerName, "credential_id", credID)
 
