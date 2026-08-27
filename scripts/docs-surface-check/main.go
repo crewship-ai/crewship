@@ -245,6 +245,15 @@ func main() {
 	}
 	fmt.Printf("docs-surface-check: no inline code span wraps onto a `<` continuation\n")
 
+	// MDX tag safety. Runs after the content passes because a broken tag fails
+	// the whole external docs build, and that build reports as a status the
+	// repo does not control — on the commit that introduced the last one it
+	// said "skipped: Changes superseded by downstream commit", so nothing
+	// surfaced until unrelated PRs merged main days later.
+	if err := reportUnguardedMDXTags(*root); err != nil {
+		fail(err)
+	}
+
 	served, err := checkServed(*baseURL, len(declared))
 	if err != nil {
 		fail(err)
