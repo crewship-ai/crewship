@@ -276,6 +276,14 @@ export function IssueDetailSurface({
       // undefined every time, which silently disables the filter below and
       // makes a busy workspace refetch this issue for every other issue's
       // traffic.
+      //
+      // Every emitter keys the payload on the mission id, so this filter is
+      // safe against all of them. The one thing it cannot see is a relation
+      // added FROM another issue: the server broadcasts only the source's id
+      // (internal/api/issue_handler_relations.go, issues_internal_relations.go),
+      // so a tab open on the target still will not repaint. That is a payload
+      // gap on the server, not a filter bug here, and it is left alone
+      // deliberately rather than by widening the filter to match everything.
       const id = (event.payload as { id?: string } | undefined)?.id
       if (id && issue?.id && id !== issue.id) return
       void fetchIssue()

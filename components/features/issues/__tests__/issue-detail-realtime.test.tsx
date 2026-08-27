@@ -1,7 +1,8 @@
 // An agent's write has to reach a tab that is already open.
 //
-// `crewship issue link`, a comment, a status move, a relation, a PATCH — nine
-// production handlers broadcast `issue.updated` on the workspace channel. The
+// `crewship issue link`, a comment, a status move, a relation, a PATCH — a
+// dozen production handlers broadcast `issue.updated` on the workspace
+// channel, every one of them keying the payload on the mission id. The
 // issue detail subscribed to `mission.updated` and nothing else, so none of
 // those arrived: our own writes refetch directly (clicking in the UI works),
 // and an agent's write simply did not show up. Reload and it is there.

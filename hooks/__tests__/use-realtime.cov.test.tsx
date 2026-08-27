@@ -127,14 +127,14 @@ describe("RealtimeProvider — message dispatch", () => {
     expect(cb).not.toHaveBeenCalled()
   })
 
-  // Nine production handlers broadcast `issue.updated` — code links
-  // attach/refresh/delete, the PATCH path, workflow, relations, comments and
-  // the internal agent-facing routes. The allowlist is what stands between
-  // that broadcast and a subscriber, and while it was missing, an issue a
-  // human had open never learned that an agent had written to it. Reload and
-  // the change is there, which is the worst shape of the bug: it looks like
-  // it did not happen.
-  it("delivers issue.updated — the event nine handlers actually emit", () => {
+  // A dozen production handlers broadcast `issue.updated` — code links,
+  // attachments, the PATCH path, workflow, relations, comments,
+  // agent-to-agent assignment and the internal agent-facing routes. The
+  // allowlist is what stands between that broadcast and a subscriber, and
+  // while it was missing, an issue a human had open never learned that an
+  // agent had written to it. Reload and the change is there, which is the
+  // worst shape of the bug: it looks like it did not happen.
+  it("delivers issue.updated — the event the issue handlers actually emit", () => {
     const { result } = renderHook(() => useRealtime(), { wrapper })
     const cb = vi.fn()
     act(() => {

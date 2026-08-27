@@ -46,9 +46,13 @@ export type RealtimeEventType =
   | "escalation.resolved"
   | "mission.updated"
   // An issue changed — `{id, identifier?}`, and `status`/`assignee` where the
-  // handler has one. Nine production sites broadcast it (code links
-  // attach/refresh/delete, the PATCH path, workflow, relations, comments and
-  // the internal agent-facing routes), and it is NOT the same thing as
+  // handler has one. `id` is the mission id at every emitter without
+  // exception, which is what makes an id filter on the subscriber side safe;
+  // `docs/api-reference/websocket.mdx` documents the same shape. Broadcast
+  // from a dozen places — code links, attachments, the PATCH path, workflow,
+  // relations, comments, agent-to-agent assignment and the internal
+  // agent-facing routes, several of them via `issueEvents.record`
+  // (internal/api/issue_events.go). It is NOT the same thing as
   // "mission.updated": that one comes from the mission ENGINE and reports the
   // run. Both are needed. This one was emitted for a long time with nothing
   // able to receive it, because the type was missing here and from
