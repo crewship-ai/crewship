@@ -134,6 +134,16 @@ See [Onboarding](/guides/onboarding).
   [Devcontainers](/guides/devcontainers).
 </Warning>
 
+## An integration's audience is stored, not counted
+
+An MCP server used to be available to every agent for exactly as long as **no** agent was bound to it: "available to all" was inferred from a binding count of zero, so the first binding anywhere in the workspace flipped the server to opt-in and revoked it from every other agent — silently, with nothing on the integration's page saying so. Every MCP server now carries `default_access` (`all` or `bound-only`) and resolution reads it. Binding an agent attaches a credential, a config override or an opt-out for **that** agent and changes nobody else's access; narrowing a server is a deliberate act: `crewship integration access <id-or-name> bound-only`, `--access` on `integration add` / `integration crew create` / `integration crew update`, or `default_access` on the API. `integration list` gained an `ACCESS` column and the integration's detail panel names its audience.
+
+<Warning>
+  **Upgrading does not move anybody's access.** The migration freezes each existing server at the audience it effectively had: servers that already carried an agent binding become `bound-only`, everything else becomes `all`. Nothing is granted and nothing is revoked at upgrade time — but from then on, only an explicit change alters who can use a server. If you were relying on the old side effect to keep a server private, it is now written down as `bound-only` and will stay that way.
+</Warning>
+
+Same pass: `mcp_tool_bindings` had no referential integrity, so deleting an integration stranded its per-tool toggles forever. They now follow their server, an insert naming a server that does not exist is rejected, and the rows already orphaned are swept. See [Integrations](/guides/integrations#who-gets-which-server) and [`crewship integration`](/cli/integration).
+
 ## Updates
 
 - **An evaluator slot follows the key you actually have.** Auxiliary slots now
@@ -183,10 +193,6 @@ See [Onboarding](/guides/onboarding).
   were created before they were written, so an agent reading its own rules in
   that window saw nothing rather than the previous contents — reproducibly, on
   a tick that runs every six hours. They are written atomically now.
-- **A first integration grant silently revoked it from everyone else.** A
-  workspace integration with no agent bindings is available to every agent; the
-  first explicit grant flips it to opt-in and removes it from all the others.
-  The create-agent form now warns, by name, before that happens.
 - **Forking a mission from the timeline 404'd**, and the 404 was rendered as
   "not yet wired to backend" — so a broken call looked like an unbuilt feature.
 - **Accessibility.** Page tabs are now linked to the panels they reveal and the
@@ -194,16 +200,6 @@ See [Onboarding](/guides/onboarding).
   real tab set rather than buttons claiming to be one; the admin console's
   content pane can be scrolled by keyboard; New routine has a Cancel button on
   every screen.
-
-## An integration's audience is stored, not counted
-
-An MCP server used to be available to every agent for exactly as long as **no** agent was bound to it: "available to all" was inferred from a binding count of zero, so the first binding anywhere in the workspace flipped the server to opt-in and revoked it from every other agent — silently, with nothing on the integration's page saying so. Every MCP server now carries `default_access` (`all` or `bound-only`) and resolution reads it. Binding an agent attaches a credential, a config override or an opt-out for **that** agent and changes nobody else's access; narrowing a server is a deliberate act: `crewship integration access <id-or-name> bound-only`, `--access` on `integration add` / `integration crew create` / `integration crew update`, or `default_access` on the API. `integration list` gained an `ACCESS` column and the integration's detail panel names its audience.
-
-<Warning>
-  **Upgrading does not move anybody's access.** The migration freezes each existing server at the audience it effectively had: servers that already carried an agent binding become `bound-only`, everything else becomes `all`. Nothing is granted and nothing is revoked at upgrade time — but from then on, only an explicit change alters who can use a server. If you were relying on the old side effect to keep a server private, it is now written down as `bound-only` and will stay that way.
-</Warning>
-
-Same pass: `mcp_tool_bindings` had no referential integrity, so deleting an integration stranded its per-tool toggles forever. They now follow their server, an insert naming a server that does not exist is rejected, and the rows already orphaned are swept. See [Integrations](/guides/integrations#who-gets-which-server) and [`crewship integration`](/cli/integration).
 
 </Update>
 

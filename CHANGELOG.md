@@ -10,11 +10,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 <!--
-  Backfill (#2086). The fifteen entries between this marker and the next one
+  Backfill (#2086). The sixteen entries between this marker and the next one
   chronicle PRs that merged with no changelog trace anywhere — written from
   their diffs, after the fact, rather than by their authors at the time. The
   `Changelog Guard` workflow now fails a PR that touches `internal/api/`,
-  `cmd/crewship/`, `app/` or `components/` without touching this file.
+  `cmd/crewship/`, `app/`, `components/`, `lib/`, `hooks/` or `stores/`
+  without touching this file.
+
+  Fifteen of the sixteen were on the #2086 audit list. #2079 is the sixteenth:
+  it merged after that list was cut, unchronicled like the rest, and it
+  supersedes #2070 below — which is why leaving it out was not merely a gap
+  but left a wrong entry standing with nothing to correct it.
 -->
 
 ### Added
@@ -460,13 +466,72 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `crewship integration crew test <crew-slug> <integration-id>`.
 
 - **A first integration grant silently revoked it from every other agent
-  (#2070).** A workspace integration with **zero** agent bindings resolves for
-  every agent; the moment any agent gets one it flips to opt-in and everyone
-  else loses it — with no warning, no audit line and nothing on the
-  integration's own page. It was previously reachable only through
+  (#2070).** A workspace integration with **zero** agent bindings resolved for
+  every agent; the moment any agent got one it flipped to opt-in and everyone
+  else lost it — with no warning, no audit line and nothing on the
+  integration's own page. It had been reachable only through
   `crewship integration bind`; the new create-agent form put a switch on it.
-  The form now warns, by name, which integrations are about to flip. It warns
-  rather than prevents: making a first grant is legitimate.
+  #2070 could not reach the resolver, so it warned beside the switch, by name,
+  which integrations were about to flip — warning rather than preventing,
+  because making a first grant is legitimate.
+
+  **Superseded inside this same unreleased window by #2079, below.** The
+  audience is now a stored column instead of a row count, so a grant made on
+  that form costs no other agent anything, and #2079 deleted the warning
+  #2070 added. Nothing shipping here asks an operator to hesitate before a
+  first grant; read the two entries as one story, not two.
+
+- **An MCP server's audience is a stored column, not a binding count (#2079,
+  closes #2072).** `ResolveAgentIntegrations` decided who could use a
+  workspace MCP server by counting rows in `agent_mcp_bindings`. "Available to
+  every agent" was never a stored state — it was the *absence* of bindings, so
+  it evaporated the moment that absence ended: one
+  `POST /api/v1/agents/{id}/integrations` anywhere in the workspace flipped the
+  server to opt-in and revoked it from every agent relying on the default.
+
+  `default_access` (`all` or `bound-only`) on `workspace_mcp_servers` and
+  `crew_mcp_servers` replaces the inference, and **both** resolvers read it:
+  `ResolveAgentIntegrations` (the console and `crewship integration resolve`)
+  and `resolveAgentMCPServers` in `agent_config.go`, which is what the
+  container actually gets. Fixing only the first would have shown an operator
+  an access list the agent does not have — and the runtime copy was the worse
+  of the two, because its binding count was not workspace-scoped at all, so a
+  binding in a *different* workspace could revoke a server here. Both fail
+  closed: only the exact string `all` opens a server to unbound agents. A
+  binding is now purely additive — a credential, a config override, an
+  opt-out — and cannot change what any other agent resolves.
+
+  The audience is now sayable and visible:
+  `crewship integration access <id-or-name> <all|bound-only>`, `--access` on
+  `integration add` / `integration crew create` / `integration crew update`,
+  `default_access` on the API, an `ACCESS` column on both `integration list`
+  tables, and the integration's detail sheet naming it outright ("Available
+  to: Every agent in the workspace" / "Bound agents only").
+
+  Same pass: `mcp_tool_bindings` had no referential integrity, so deleting an
+  integration stranded its per-tool toggles forever. Its `mcp_server_id` is
+  polymorphic across two ID spaces, so a literal foreign key is not
+  expressible; three triggers stand in for one — two `BEFORE DELETE` cascades
+  and a `BEFORE INSERT` that rejects a toggle naming a server that does not
+  exist — and the rows already orphaned are swept.
+
+  ⚠️ **Behaviour change: the upgrade moves nobody's access, but the old side
+  effect is gone for good.** Migration `20260826190607_mcp_default_access`
+  defaults the column to `all` and then pins every server that already carries
+  an agent binding to `bound-only`, freezing each server at the audience it
+  effectively had — nothing is granted and nothing is revoked at upgrade time.
+  After that, only an explicit change alters who can use a server. Anything
+  that relied on binding one agent to keep a server private must now say so:
+  `crewship integration access <id-or-name> bound-only`.
+
+  ⚠️ **Behaviour change: a replace-mode restore now clears that workspace's
+  per-tool toggles.** `mcp_tool_bindings` is deliberately excluded from
+  backups, and `crewship backup restore --replace` deletes and re-inserts the
+  workspace's server rows; the new cascade trigger takes the toggles with them,
+  where before they survived by being orphaned and were then silently
+  re-adopted by the re-inserted row. Toggles default to enabled, so a cleared
+  set means every tool is on — re-disable the ones you want off with
+  `crewship integration tools disable`.
 
 - **The mission fork button called a route that does not exist (#2056).** It
   posted to `POST /api/v1/missions/{missionId}/fork`; the route is
