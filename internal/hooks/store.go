@@ -298,6 +298,12 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 // UPDATE, which is the only way to land another writer inside that window
 // deterministically. Kept in the non-test file because the seam has to sit
 // in the function it guards.
+//
+// Unsynchronised on purpose — same shape as the stdlib's testHook* vars.
+// A test that sets it must not run under t.Parallel(), and no test may set
+// it while another goroutine is inside Update, or the race detector will
+// (correctly) object. No test in this package does either today; if that
+// changes, the seam needs an atomic, not a comment.
 var updateEventRaceHookForTest func()
 
 // currentEventFor returns the event a row currently has, scoped to
