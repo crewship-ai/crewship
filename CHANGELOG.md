@@ -631,6 +631,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   run-id, and a 403 on every agent is reported as an access failure instead
   of exiting not-found with "chat not found".
 
+- **A CLI render that failed mid-stream said only "broken pipe".** The
+  formatter's JSON, YAML and NDJSON renderers returned the encoder's error
+  untouched, and what usually reaches that return is a *write* failure — a
+  closed pipe from a `| head -1`, a full disk — whose text names neither the
+  format nor the fact that output was being serialised at all. Each renderer
+  now names itself, and the NDJSON slice path names the row index, so a partial
+  stream says how much of it a consumer already received. The context is added
+  once at the renderer rather than at the four routing helpers and the ~110
+  direct call sites above them, so the message reads the same whichever of them
+  produced it. `gopkg.in/yaml.v3` flattens the cause into its own error type
+  before we see it, so `errors.Is` cannot reach through a YAML render error —
+  the text survives, and a test pins that difference rather than leaving it to
+  be rediscovered.
+
 - **A port-expose URL on Colima returned a bare `502` and explained nothing.**
   The capability-URL proxy dials the crew container on its Docker bridge IP,
   which is reachable only where crewshipd shares a network namespace with
