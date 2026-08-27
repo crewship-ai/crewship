@@ -60,12 +60,13 @@ the column**, and because the column lists conversations rather than agents
 there is no row of any kind standing in for them. Nothing on screen marks the
 absence.
 
-That is the defect. The column already distinguishes *"this list failed to
-load"* from *"this list is empty"* — a failed fetch gets an explicit
-`Could not load <agent>'s conversations… this is not an empty history` panel
-with a **Retry**. An agent past the fan-out cap gets neither, and is presented
-as an agent with no history, which for a busy thirteenth agent is simply
-false.
+That is the defect, and right now it is the larger of two. `useChatTreeData`
+still distinguishes *"this list failed to load"* from *"this list is empty"* —
+it returns a per-agent `threadErrors` map precisely so a 500 is never rendered
+as "no conversations" — but the conversations column does not read it. So a
+capped agent and an agent whose fetch just failed reach the reader the same
+way: silently absent. Both are presented as an agent with no history, which for
+a busy thirteenth agent is simply false.
 
 Ordering is what keeps this from being worse than it is: `GET /agents`
 returns live agents by creation recency with retired ones last, so the twelve
@@ -85,9 +86,9 @@ spans up to 400 agents.
 
 **What the general case still needs is a screen affordance, not a doc line.**
 A conversation that was "not asked for" is indistinguishable from one that
-does not exist, which is the same defect class this surface already fixed once
-for failed fetches. Until an agent past the cap renders as *unknown* rather
-than *absent*, this page is a workaround and not a fix.
+does not exist, and so, today, is one whose fetch failed. Until the column
+renders both as *unknown* rather than *absent* — the data to do it is already
+in `threadErrors` — this page is a workaround and not a fix.
 
 ## Workspace conversation search stops at 400 agents
 

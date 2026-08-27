@@ -257,9 +257,25 @@ const crewFileReadScript = `set -eu; f=$(realpath "$FENCE"); rp=$(realpath "$SRC
 // panel and still bounded.
 const maxCrewFileReadBytes = 32 << 20 // 32 MiB
 
+// crewFileReadSem bounds concurrent read replays, the way gitDiffSem bounds
+// `git diff` execs and for a sharper reason: this path BUFFERS, so the ceiling
+// above is per-request, not per-server. Unbounded, N simultaneous downloads of
+// large artefacts reserve N × 32 MiB of heap while also each holding a docker
+// exec slot — a workspace member with read access could starve agent work by
+// opening the Files panel in a loop. Four in flight caps that at 128 MiB.
+var crewFileReadSem = make(chan struct{}, 4)
+
 var errCrewFileNotFound = errors.New("crew file not found")
 
 func (s *Server) readCrewFileViaContainer(ctx context.Context, crewID, containerPath, fence string) ([]byte, error) {
+	// resolveCrewContainer dereferences s.container (its doc comment says
+	// callers must have checked), and a nil provider is a supported state —
+	// handleContainerStatus reports it as "not_configured". Without this the
+	// replay panics instead of reporting an unavailable container.
+	if s.container == nil {
+		return nil, errCrewContainerUnavailable
+	}
+
 	containerName, _, ok := s.resolveCrewContainer(ctx, crewID, false)
 	if !ok {
 		return nil, errCrewNotFound
@@ -267,6 +283,15 @@ func (s *Server) readCrewFileViaContainer(ctx context.Context, crewID, container
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
+	// Wait for a slot, or give up if the client goes away — the same shape
+	// handleContainerGitDiff uses.
+	select {
+	case crewFileReadSem <- struct{}{}:
+		defer func() { <-crewFileReadSem }()
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: %v", errCrewContainerUnavailable, ctx.Err())
+	}
 
 	result, err := s.container.Exec(ctx, provider.ExecConfig{
 		ContainerID: containerName,
