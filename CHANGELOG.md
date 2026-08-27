@@ -710,7 +710,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   that exists past them. The scan now sends the route's own ceiling (`limit=500`),
   and a CUID goes back to the single-resource `GET /api/v1/agents/{id}`, which
   has no ceiling at all — so `agent runs`, `agent get` and `run` are uncapped
-  too, not just the log commands.
+  too, not just the log commands. `GET /api/v1/crews` paginates identically and
+  the crew resolver had the same unqualified read, so it got the same ceiling
+  lifted; a workspace past **500** still needs an id rather than a slug, since
+  500 is where both routes stop. (`GET /api/v1/projects` has no `LIMIT` at all,
+  so the project resolver needs nothing.)
 
 - **`crewship project get`, `project milestone list|create` and
   `skill proposed list|approve|reject` refused the slug their own help

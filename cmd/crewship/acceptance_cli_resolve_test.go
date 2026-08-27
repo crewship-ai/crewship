@@ -831,3 +831,174 @@ func runMemoryCLI(t *testing.T, args ...string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+
+// ─── #2106: the crew lookup had the agent lookup's ceiling too ──────────────
+//
+// GET /api/v1/crews paginates exactly like the agent list —
+// parseListPagination(r, 100, 500) in internal/api/crews_query.go, and the
+// query ends in LIMIT ? OFFSET ?. resolveCrewID sent no `limit`, so it saw the
+// first 100 crews and answered "crew not found" for one that exists past them.
+//
+// That was already true before this branch, but the branch is what makes it
+// reachable: `skill proposed list|approve|reject --crew` used to demand the
+// CUID, which never touches the scan, and now takes the slug its help
+// advertises. Fixing the agent ceiling and leaving this one would have left
+// the identical defect one command away.
+
+// pagedCrewStub serves a roster of crews the way the real List handler does,
+// so a caller that forgets `limit` gets exactly the truncation production
+// gives it. Crews are the only thing it pages; /api/v1/skills/proposed answers
+// on the resolved id, the same as the live route, which resolves crew_id
+// against the crews table and 404s a slug.
+type pagedCrewStub struct {
+	mu    sync.Mutex
+	calls []resolveStubCall
+	ids   []string
+	slugs []string
+}
+
+func newPagedCrewStub(n int) *pagedCrewStub {
+	s := &pagedCrewStub{}
+	for i := 0; i < n; i++ {
+		s.ids = append(s.ids, "c"+strings.Repeat("0", 20-len(strconv.Itoa(i)))+strconv.Itoa(i))
+		s.slugs = append(s.slugs, "crew-"+strconv.Itoa(i))
+	}
+	return s
+}
+
+func (s *pagedCrewStub) callsFor(method, path string) []resolveStubCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []resolveStubCall
+	for _, c := range s.calls {
+		if c.Method == method && c.Path == path {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (s *pagedCrewStub) row(i int) string {
+	return `{"id":"` + s.ids[i] + `","slug":"` + s.slugs[i] + `","name":"Crew ` + strconv.Itoa(i) + `"}`
+}
+
+func (s *pagedCrewStub) start(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if r.Body != nil {
+			if raw, _ := io.ReadAll(r.Body); len(raw) > 0 {
+				body = map[string]any{}
+				_ = json.Unmarshal(raw, &body)
+			}
+		}
+		s.mu.Lock()
+		s.calls = append(s.calls, resolveStubCall{
+			Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, Body: body,
+		})
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/crews" {
+			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+			if limit <= 0 {
+				limit = 100
+			}
+			if limit > 500 {
+				limit = 500
+			}
+			if offset < 0 {
+				offset = 0
+			}
+			rows := make([]string, 0, limit)
+			for i := offset; i < len(s.ids) && len(rows) < limit; i++ {
+				rows = append(rows, s.row(i))
+			}
+			_, _ = w.Write([]byte("[" + strings.Join(rows, ",") + "]"))
+			return
+		}
+		for i, id := range s.ids {
+			if r.URL.Path == "/api/v1/crews/"+id {
+				_, _ = w.Write([]byte(s.row(i)))
+				return
+			}
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/skills/proposed" {
+			if !s.knownID(r.URL.Query().Get("crew_id")) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"detail":"crew not found"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"file_name":"skill-deploy-friday.md","name":"Deploy Friday",` +
+				`"description":"How the Friday deploy goes","description_quality":"ok","category":"ops"}]`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail":"resource not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func (s *pagedCrewStub) knownID(id string) bool {
+	for _, known := range s.ids {
+		if known == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAcceptance_SkillProposed_ResolvesPastTheFirstPageOfCrews(t *testing.T) {
+	const roster = 150
+	const target = 120 // past the handler's default LIMIT 100
+
+	tests := []struct {
+		name    string
+		useCUID bool
+		// wantListCalls is how many times the LIST may be read. A CUID must
+		// not need it at all — /api/v1/crews/{id} is the lookup with no
+		// ceiling, and asserting zero is what stops this passing on a fix
+		// that merely raised the limit.
+		wantListCalls int
+	}{
+		{name: "slug past the first page", wantListCalls: 1},
+		{name: "cuid takes the uncapped by-id path", useCUID: true, wantListCalls: 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newPagedCrewStub(roster)
+			srv := stub.start(t)
+			ref := stub.slugs[target]
+			if tc.useCUID {
+				ref = stub.ids[target]
+			}
+
+			out, err := runResolveCLI(t, credStubConfig(t, srv.URL),
+				"skill", "proposed", "list", "--crew", ref)
+			if err != nil {
+				t.Fatalf("skill proposed list --crew %s exited %v — crew %d of %d is not findable\noutput: %s",
+					ref, err, target, roster, out)
+			}
+			if !strings.Contains(out, "skill-deploy-friday.md") {
+				t.Errorf("proposal row missing from output:\n%s", out)
+			}
+			if got := len(stub.callsFor("GET", "/api/v1/crews")); got != tc.wantListCalls {
+				t.Errorf("LIST reads = %d, want %d", got, tc.wantListCalls)
+			}
+
+			// The id on the wire has to be the resolved CUID, not the ref
+			// the operator typed — the route resolves crew_id against the
+			// crews table and 404s a slug.
+			calls := stub.callsFor("GET", "/api/v1/skills/proposed")
+			if len(calls) != 1 {
+				t.Fatalf("proposed reads = %d, want 1", len(calls))
+			}
+			if want := "crew_id=" + stub.ids[target]; !strings.Contains(calls[0].Query, want) {
+				t.Errorf("query = %q, want it to carry %q", calls[0].Query, want)
+			}
+		})
+	}
+}
