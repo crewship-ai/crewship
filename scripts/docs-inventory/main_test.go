@@ -242,15 +242,42 @@ func TestDocsToCodeAcceptsCommandAliasesAndVariableAPIPaths(t *testing.T) {
 	}
 }
 
+// Both comment spellings have to suppress, and only one of them is safe to
+// write on a published page: Mintlify parses `.mdx` as JSX, where `<!--` is a
+// syntax error that fails the whole deployment. Every live marker in the docs
+// tree is therefore `{/* ... */}`, and nothing pinned that the parser accepts
+// it — the suppression is a `strings.Contains` on the directive text, so it
+// works by not caring, which is exactly the kind of thing a later tightening
+// ("anchor the regexp to the comment delimiters") breaks without a failing
+// test. `.md` files keep the HTML spelling and are covered here too.
 func TestDocsToCodeExplicitIgnoreConvention(t *testing.T) {
-	checks := inventoryDocsToCode(
-		openAPIDocument{Paths: map[string]map[string]json.RawMessage{}},
-		commandManifest{},
-		[]docFile{{Path: "docs/architecture.mdx", Text: "<!-- docs-inventory: ignore --> `crewship illustrative-command` /api/v1/retired\n"}},
-		nil, nil,
-	)
-	if len(checks.Missing) != 0 {
-		t.Fatalf("explicit docs-inventory ignore marker did not suppress illustrative symbols: %+v", checks.Missing)
+	for _, tc := range []struct {
+		name string
+		path string
+		text string
+	}{
+		{
+			name: "MDX expression comment, the only spelling Mintlify can parse",
+			path: "docs/architecture.mdx",
+			text: "{/* docs-inventory: ignore */} `crewship illustrative-command` /api/v1/retired\n",
+		},
+		{
+			name: "HTML comment, still valid in plain Markdown",
+			path: "docs/architecture.md",
+			text: "<!-- docs-inventory: ignore --> `crewship illustrative-command` /api/v1/retired\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checks := inventoryDocsToCode(
+				openAPIDocument{Paths: map[string]map[string]json.RawMessage{}},
+				commandManifest{},
+				[]docFile{{Path: tc.path, Text: tc.text}},
+				nil, nil,
+			)
+			if len(checks.Missing) != 0 {
+				t.Fatalf("explicit docs-inventory ignore marker did not suppress illustrative symbols: %+v", checks.Missing)
+			}
+		})
 	}
 }
 
