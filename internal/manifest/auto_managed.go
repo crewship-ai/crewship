@@ -440,12 +440,20 @@ func generateAutoCredentialValue(bytes int) (string, error) {
 	if bytes <= 0 {
 		bytes = 32
 	}
-	// Clamp independently of the validator. `bytes` originates in a
-	// manifest, and make([]byte, n) on an unbounded manifest integer
-	// is a remote allocation primitive; a caller that reaches this
-	// generator by some other path must not get the allocation
-	// either. maxAutoCredentialBytes is already far past any real
-	// credential, so clamping still yields a strong value.
+	// Clamp independently of the validator — and this is load-bearing,
+	// not belt-and-braces. checkAutoManagedCollisions (validate.go)
+	// runs the expander as a probe from *inside* Validate, and it runs
+	// after checkAutoCredentials has merely *recorded* the ceiling
+	// error: the validator accumulates every failure and never returns
+	// early. So an over-ceiling `length` still reaches this function on
+	// the ordinary validate path — including the agent-facing
+	// validate_manifest MCP tool (internal/sidecar/routine_mcp.go),
+	// which validates attacker-supplied YAML and applies nothing.
+	// Remove this clamp and `length: 67108864` costs that endpoint
+	// ~335 MB per call, with no crew ever created.
+	// TestValidate_OverCeilingLengthDoesNotAllocate pins it.
+	// maxAutoCredentialBytes is already far past any real credential,
+	// so clamping still yields a strong value.
 	if bytes > maxAutoCredentialBytes {
 		bytes = maxAutoCredentialBytes
 	}

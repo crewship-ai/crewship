@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -159,6 +160,89 @@ spec:
 				t.Errorf("error message should contain %q, got: %v", tc.errMustContain, err)
 			}
 		})
+	}
+}
+
+// TestValidate_OverCeilingLengthDoesNotAllocate pins the property the
+// ceiling check alone does NOT give us.
+//
+// Rejecting the row is not the same as never allocating for it. The
+// validator accumulates failures and never returns early, and
+// checkAutoManagedCollisions runs expandAutoCredentialsInCrewSpec as a
+// probe *after* checkAutoCredentials has recorded the ceiling error —
+// so the over-ceiling length reaches generateAutoCredentialValue on
+// the ordinary validate path, error already in hand. Only the clamp
+// inside the generator stops the make([]byte, n).
+//
+// That path is remotely reachable and needs no apply: the sidecar's
+// validate_manifest MCP tool (internal/sidecar/routine_mcp.go) feeds
+// agent-supplied YAML straight to ValidateBundle. With the clamp
+// deleted this test allocates ~335 MB; with it, a few KB.
+//
+// The credentials[] entry is load-bearing: checkAutoManagedCollisions
+// returns early unless the scope declares at least one credential, so
+// without it the probe never runs and the test proves nothing.
+func TestValidate_OverCeilingLengthDoesNotAllocate(t *testing.T) {
+	// 64 MiB of declared bytes — big enough that a regression is
+	// unmissable, small enough not to wedge a shared CI box.
+	const declared = 1 << 26
+
+	body := []byte(`
+apiVersion: crewship/v1
+kind: Crew
+metadata: {name: T, slug: t}
+spec:
+  credentials:
+    - { env: UNRELATED_SECRET, provider: NONE, type: GENERIC_SECRET }
+  services:
+    - name: pg
+      image: postgres:16-alpine
+      auto_credentials:
+        - { name: POSTGRES_PASSWORD, length: 67108864 }
+  agents:
+    - {slug: a, name: A, agent_role: LEAD, prompt: x}
+`)
+	b := loadBundleOrFail(t, body)
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	err := b.Validate()
+	runtime.ReadMemStats(&after)
+
+	if err == nil {
+		t.Fatal("expected the ceiling error, got nil")
+	}
+	if !strings.Contains(err.Error(), "above the 512-byte maximum") {
+		t.Errorf("error should name the ceiling, got: %v", err)
+	}
+
+	// A deterministic second opinion on the same clamp, so the test
+	// still fails loudly if the allocation budget below ever proves
+	// unreliable: the expander is the engine the probe runs, and an
+	// over-ceiling length must come back out of it as a 512-byte value.
+	if planned, perr := expandAutoCredentialsInCrewSpec(
+		&CrewSpec{Services: []Service{{
+			Name:            "pg",
+			Image:           "postgres:16-alpine",
+			AutoCredentials: []AutoCredential{{Name: "POSTGRES_PASSWORD", Length: declared}},
+		}}}, ""); perr != nil {
+		t.Fatalf("probe expander: %v", perr)
+	} else if len(planned) != 1 {
+		t.Fatalf("probe expander planned %d creds, want 1", len(planned))
+	} else if got := len(planned[0].Value); got != 2*maxAutoCredentialBytes {
+		t.Errorf("expander produced a %d-char value, want %d — the generator's clamp is gone",
+			got, 2*maxAutoCredentialBytes)
+	}
+
+	// TotalAlloc is cumulative and process-wide, but Go runs
+	// non-parallel top-level tests one at a time, so the delta is this
+	// call's. 4 MiB sits ~1000x above the clean measurement and ~80x
+	// below the regressed one; nothing marginal lands in between.
+	const budget = 4 << 20
+	if delta := after.TotalAlloc - before.TotalAlloc; delta > budget {
+		t.Errorf("Validate allocated %d bytes for a rejected length: %d (budget %d) — "+
+			"the clamp in generateAutoCredentialValue is gone and the validator "+
+			"is an allocation primitive again", delta, declared, budget)
 	}
 }
 

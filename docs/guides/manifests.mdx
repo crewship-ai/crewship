@@ -346,7 +346,7 @@ reach the service with the right value. Fields and defaults:
 | `inject_as_env` | = `name` | Override the env-var name the sidecar receives (e.g. `MARIADB_ROOT_PASSWORD`) |
 | `inject_as_command` | _(none)_ | Command-arg template for images that read the secret from a CLI flag instead of env. `{{value}}` is replaced by the generated secret and the rendered argv becomes the sidecar's `command`. Used for Redis (`["redis-server", "--requirepass", "{{value}}"]`); the sidecar env is skipped in this mode. |
 | `inject_to_agents` | `true` | Set `false` when only the sidecar should see the secret |
-| `length` | `32` bytes (64 hex chars) | Random bytes generated; minimum 16 |
+| `length` | `32` bytes (64 hex chars) | Random bytes generated; minimum 16, maximum 512 |
 | `description` | sugar-filled | Shown in the credentials UI |
 
 You rarely write this by hand: for well-known images (`postgres:*`, `mysql:*`,
