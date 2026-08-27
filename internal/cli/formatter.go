@@ -325,6 +325,36 @@ func (f *Formatter) WriteNDJSONRow(v interface{}) error {
 	return nil
 }
 
+// WriteStreamRow writes one row of an unbounded stream in the caller's
+// requested machine format.
+//
+// A stream cannot be a single JSON array or a single YAML document: the
+// closing bracket, or the end of the document, arrives when the stream ends —
+// which for a --follow is never. Each format therefore has a streaming shape,
+// and they are not interchangeable:
+//
+//	json, ndjson  one JSON object per line
+//	yaml          one YAML document per row, separated by `---`
+//
+// It exists because `--follow` routed every machine format to
+// WriteNDJSONRow, so `-f yaml` silently emitted JSON — the same
+// asked-for-one-format-got-another defect the format sweep was closing,
+// surviving on the one path the sweep's guard cannot drive, because a follow
+// does not terminate.
+func (f *Formatter) WriteStreamRow(v interface{}) error {
+	if f.Format != "yaml" {
+		return f.WriteNDJSONRow(v)
+	}
+	// yaml.v3 writes the `---` separator itself for each Encode call after the
+	// first, so a single encoder per row would emit none. Write it explicitly
+	// and keep every row self-contained, matching WriteNDJSONRow's contract of
+	// no buffering between calls.
+	if _, err := io.WriteString(f.Writer, "---\n"); err != nil {
+		return err
+	}
+	return yaml.NewEncoder(f.Writer).Encode(v)
+}
+
 // Auto routes to the correct format based on f.Format.
 // tableHeaders/tableRows for table format, v for json/yaml/ndjson.
 func (f *Formatter) Auto(v interface{}, tableHeaders []string, tableRows [][]string) error {

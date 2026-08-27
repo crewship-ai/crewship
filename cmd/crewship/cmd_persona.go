@@ -41,15 +41,15 @@ Subcommands:
   crew <crewSlug>         — same subcommands for the crew default layer`,
 }
 
-// personaResponse mirrors the API response shape.
-type personaResponse struct {
-	AgentID     string `json:"agent_id"`
-	CrewID      string `json:"crew_id"`
-	Layer       string `json:"layer"`
-	FromDefault bool   `json:"from_default"`
-	Content     string `json:"content"`
-	Bytes       int    `json:"bytes"`
-	CapBytes    int    `json:"cap_bytes"`
+// PersonaResponse mirrors the API response shape.
+type PersonaResponse struct {
+	AgentID     string `json:"agent_id" yaml:"agent_id"`
+	CrewID      string `json:"crew_id" yaml:"crew_id"`
+	Layer       string `json:"layer" yaml:"layer"`
+	FromDefault bool   `json:"from_default" yaml:"from_default"`
+	Content     string `json:"content" yaml:"content"`
+	Bytes       int    `json:"bytes" yaml:"bytes"`
+	CapBytes    int    `json:"cap_bytes" yaml:"cap_bytes"`
 }
 
 var personaViewCmd = &cobra.Command{
@@ -65,7 +65,7 @@ var personaViewCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		var resp personaResponse
+		var resp PersonaResponse
 		if err := getJSON(client, "/api/v1/agents/"+url.PathEscape(agentID)+"/persona", &resp); err != nil {
 			return err
 		}
@@ -87,7 +87,7 @@ var personaEditCmd = &cobra.Command{
 			return err
 		}
 		// Fetch current state as the editor seed.
-		var current personaResponse
+		var current PersonaResponse
 		if err := getJSON(client, "/api/v1/agents/"+url.PathEscape(agentID)+"/persona", &current); err != nil {
 			return err
 		}
@@ -244,13 +244,13 @@ var personaCrewCmd = &cobra.Command{
 		path := "/api/v1/crews/" + url.PathEscape(crewID) + "/persona"
 		switch sub {
 		case "view":
-			var resp personaResponse
+			var resp PersonaResponse
 			if err := getJSON(client, path, &resp); err != nil {
 				return err
 			}
 			return printPersona(cmd, "crew", resp)
 		case "edit":
-			var current personaResponse
+			var current PersonaResponse
 			if err := getJSON(client, path, &current); err != nil {
 				return err
 			}
@@ -290,7 +290,7 @@ var personaCrewCmd = &cobra.Command{
 // PERSONA.md or at the synthesized fallback just as much as a reader does,
 // and inferring it from `from_default` is a rule that lives in this function
 // rather than in the payload.
-func printPersona(cmd *cobra.Command, kind string, p personaResponse) error {
+func printPersona(cmd *cobra.Command, kind string, p PersonaResponse) error {
 	source := p.Layer
 	if p.FromDefault {
 		source = "synthesized default"
@@ -298,7 +298,7 @@ func printPersona(cmd *cobra.Command, kind string, p personaResponse) error {
 	return resolvedFormatter(cmd).AutoHuman(personaView{
 		Kind:            kind,
 		Source:          source,
-		personaResponse: p,
+		PersonaResponse: p,
 	}, func() {
 		out := cmd.OutOrStdout()
 		fmt.Fprintf(out, "=== %s persona (source: %s, %d/%d bytes) ===\n",
@@ -308,10 +308,14 @@ func printPersona(cmd *cobra.Command, kind string, p personaResponse) error {
 }
 
 // personaView is the machine-readable form of `persona view`.
+// Exported so yaml.v3 can reflect into the embedded value: it ignores `json:`
+// tags, does not auto-inline embedded structs, and cannot read an unexported
+// embedded field at all — `persona view -f yaml` panicked with
+// "cannot return value obtained from unexported field or method".
 type personaView struct {
-	Kind            string `json:"kind"`
-	Source          string `json:"source"`
-	personaResponse `json:",inline"`
+	Kind            string `json:"kind" yaml:"kind"`
+	Source          string `json:"source" yaml:"source"`
+	PersonaResponse `json:",inline" yaml:",inline"`
 }
 
 // openInEditor writes seed to a temp file with the given extension,

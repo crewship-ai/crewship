@@ -101,7 +101,7 @@ Examples:
 		machine := f.Format == "json" || f.Format == "yaml" || f.Format == "ndjson"
 		if follow && machine {
 			for _, l := range logEntries {
-				if err := f.WriteNDJSONRow(l); err != nil {
+				if err := f.WriteStreamRow(l); err != nil {
 					return err
 				}
 			}
@@ -195,7 +195,7 @@ func logsFollow(f *cli.Formatter, client *cli.Client, agentID, agentSlug string)
 		// what `-f json` gets here for that reason.
 		switch f.Format {
 		case "json", "ndjson", "yaml":
-			if err := f.WriteNDJSONRow(logEntry{
+			if err := f.WriteStreamRow(logEntry{
 				Timestamp: now.Format(time.RFC3339Nano),
 				Event:     event.Type,
 				Content:   event.Content,

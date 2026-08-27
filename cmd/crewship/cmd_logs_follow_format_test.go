@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
@@ -21,9 +23,15 @@ import (
 // gets its own guard rather than riding on the generic format contract — the
 // generic sweep cannot drive `--follow`, because a follow does not terminate.
 //
-// The backlog is therefore written as NDJSON, one object per line, which is
-// the shape the live tail already uses. Both halves of the stream then agree,
-// and a consumer reads the whole thing with one parser.
+// The backlog is therefore written in the requested format's streaming shape —
+// one JSON object per line for json/ndjson, one YAML document per row for yaml
+// — matching the live tail, so both halves of the stream agree and a consumer
+// reads the whole thing with one parser.
+//
+// The yaml case is not decoration. Both halves originally routed every machine
+// format through the JSON row writer, so `-f yaml` silently produced JSON:
+// asked for one format, got another, which is the exact defect this sweep
+// exists to remove.
 func TestLogsFollow_MachineFormatIsNDJSONNotArray(t *testing.T) {
 	backlog := []map[string]string{
 		{"ts": "2026-06-10T10:00:00Z", "level": "info", "agent": "viktor", "event": "output", "content": "first"},
@@ -56,6 +64,37 @@ func TestLogsFollow_MachineFormatIsNDJSONNotArray(t *testing.T) {
 			}
 			if strings.HasPrefix(trimmed, "[") {
 				t.Errorf("--follow -f %s opened a JSON array whose bracket can never close:\n%s", format, out)
+			}
+
+			// Each format has its own streaming shape and they are not
+			// interchangeable — routing yaml through the JSON row writer is
+			// how `-f yaml` came to silently emit JSON.
+			if format == "yaml" {
+				docs := strings.Split(trimmed, "---")
+				var got []map[string]interface{}
+				for _, d := range docs {
+					if strings.TrimSpace(d) == "" {
+						continue
+					}
+					var row map[string]interface{}
+					if err := yaml.Unmarshal([]byte(d), &row); err != nil {
+						t.Errorf("--follow -f yaml document is not YAML: %v\n%s", err, d)
+						continue
+					}
+					if strings.Contains(d, `"content"`) {
+						t.Errorf("--follow -f yaml emitted JSON, not YAML:\n%s", d)
+					}
+					got = append(got, row)
+				}
+				if len(got) != len(backlog) {
+					t.Fatalf("--follow -f yaml wrote %d documents, want %d:\n%s", len(got), len(backlog), out)
+				}
+				for i, row := range got {
+					if row["content"] != backlog[i]["content"] {
+						t.Errorf("--follow -f yaml doc %d content = %v, want %q", i, row["content"], backlog[i]["content"])
+					}
+				}
+				return
 			}
 
 			// Every non-empty line must stand alone as one object.
