@@ -607,7 +607,7 @@ code.
       latency      1.51s
       stop reason  end_turn
       tokens       in 15  out 3  cached-in 0  cache-write 0
-      cost         $0.000540 (fallback rates: in $20.0000  out $80.0000  cached-in $5.0000  cache-write $20.0000)
+      cost         $0.004050 (fallback rates: in $150.0000  out $600.0000  cached-in $150.0000  cache-write $150.0000)
       reply        Pong.
     ```
 
@@ -615,8 +615,9 @@ code.
       **The pricing key follows the provider NAME, not the endpoint.** In that
       run the request went to OpenRouter and the ledger priced it as `openai` —
       and since `openai/gpt-4o-mini` is not a row in the table, at the **openai
-      ceiling**: \$20/Mtok input. OpenRouter's own `usage.cost` for the same
-      call was \$0.000003. We over-estimated by roughly 180×.
+      ceiling**: \$150/Mtok input, \$600/Mtok output. OpenRouter's own
+      `usage.cost` for the same call was \$0.000003. We over-estimated by
+      roughly 1350×.
 
       Nothing is broken — `fallback rates` in the output says exactly what
       happened, and over-estimating is the safe direction — but it is why

@@ -26,9 +26,14 @@ import (
 )
 
 const (
-	openAPIPath    = "internal/api/openapi.gen.json"
-	docsRoot       = "docs"
-	docsNavigation = "docs/docs.json"
+	openAPIPath = "internal/api/openapi.gen.json"
+	docsRoot    = "docs"
+	// docs/docs.json was declared here and never read, which is a large part of
+	// why three published pages could sit outside the navigation while this
+	// report said "0 missing": the inventory matches operations against page
+	// *files*, so a page nothing links to counts as documented. Navigation
+	// reachability is checked in scripts/docs-surface-check, in both
+	// directions — see orphanedPages there (#2086).
 	reportDir      = "docs/prd/reports"
 	jsonReport     = reportDir + "/release-1-0-api-cli-inventory.json"
 	markdownReport = reportDir + "/release-1-0-api-cli-inventory.md"
@@ -598,21 +603,15 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 			rec.TestSignals = testContaining(path, tests)
 			rec.Contract = contractFor(rec.Method, path, evidence, rec.SourceFile, rec.TestSignals, op.RequestBody != nil || len(op.Parameters) > 0)
 			r.API = append(r.API, rec)
-			rec.ConcreteResponseSchema = hasConcreteSuccessSchema(op.Responses)
-			rec.GenericResponseSchema = !rec.ConcreteResponseSchema && hasSuccessSchema(op.Responses)
-			rec.RequestBodyPresent = op.RequestBody != nil
-			if op.RequestBody != nil {
-				if jsonBody, ok := op.RequestBody.Content["application/json"]; ok {
-					rec.ConcreteJSONRequest = isConcreteSchema(jsonBody.Schema)
-					rec.GenericJSONRequest = !rec.ConcreteJSONRequest
-				}
-				for media := range op.RequestBody.Content {
-					if media != "application/json" {
-						rec.NonJSONRequestMedia = append(rec.NonJSONRequestMedia, media)
-					}
-				}
-				sort.Strings(rec.NonJSONRequestMedia)
-			}
+			// Same classifier the published figures are derived through, so the
+			// report rows and the sentence in openapi.mdx cannot disagree.
+			schema := classifySchemas(op)
+			rec.ConcreteResponseSchema = schema.ConcreteResponseSchema
+			rec.GenericResponseSchema = schema.GenericResponseSchema
+			rec.RequestBodyPresent = schema.RequestBodyPresent
+			rec.ConcreteJSONRequest = schema.ConcreteJSONRequest
+			rec.GenericJSONRequest = schema.GenericJSONRequest
+			rec.NonJSONRequestMedia = schema.NonJSONRequestMedia
 			r.API[len(r.API)-1] = rec
 		}
 	}
@@ -788,6 +787,98 @@ func tokenMentioned(text, needle string) bool {
 
 func isTokenByte(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-'
+}
+
+// classifySchemas is the single place an operation's schema quality is decided.
+//
+// It exists because the same six judgements were about to be made twice — once
+// while building the per-operation rows of the report, once while deriving the
+// figures docs/api-reference/openapi.mdx quotes — and "these two agree" would
+// then have been a comment rather than a fact. That is precisely the defect
+// #2086 is about, one level up: the MDX claimed "513 of 536 operations … 184
+// request bodies" long after the spec reached 588, while the generated report
+// beside it carried the right numbers, and nothing compared them.
+//
+// So run() and schemaStats both call this. A change to any predicate moves both
+// readings together, and cannot silently move only the published one.
+func classifySchemas(op openAPIOperation) (rec apiRecord) {
+	rec.ConcreteResponseSchema = hasConcreteSuccessSchema(op.Responses)
+	rec.GenericResponseSchema = !rec.ConcreteResponseSchema && hasSuccessSchema(op.Responses)
+	rec.RequestBodyPresent = op.RequestBody != nil
+	if op.RequestBody == nil {
+		return rec
+	}
+	if jsonBody, ok := op.RequestBody.Content["application/json"]; ok {
+		rec.ConcreteJSONRequest = isConcreteSchema(jsonBody.Schema)
+		rec.GenericJSONRequest = !rec.ConcreteJSONRequest
+	}
+	for media := range op.RequestBody.Content {
+		if media != "application/json" {
+			rec.NonJSONRequestMedia = append(rec.NonJSONRequestMedia, media)
+		}
+	}
+	sort.Strings(rec.NonJSONRequestMedia)
+	return rec
+}
+
+// specSchemaStats are the schema-quality figures the generated report prints
+// and docs/api-reference/openapi.mdx quotes in prose.
+type specSchemaStats struct {
+	Operations           int
+	NamedResponses       int
+	GenericResponses     int
+	NoSuccessBody        int
+	RequestBodies        int
+	ConcreteJSONRequests int
+	NonJSONRequestBodies int
+	GenericJSONRequests  int
+}
+
+// schemaStats derives the figures straight from the generated spec, through the
+// same classifySchemas the report rows go through and the same `parameters`
+// skip run() applies, so the counted population is identical too.
+//
+// NoSuccessBody is the one figure the report does not itself print. It is the
+// residual — neither a concrete nor a generic 2xx schema — and it is derived
+// here rather than subtracted in prose, so it cannot be a stale hand-computed
+// difference of two numbers that have since moved.
+func schemaStats(doc openAPIDocument) (specSchemaStats, error) {
+	var s specSchemaStats
+	for path, methods := range doc.Paths {
+		for method, raw := range methods {
+			if method == "parameters" {
+				continue
+			}
+			var op openAPIOperation
+			if err := json.Unmarshal(raw, &op); err != nil {
+				return s, fmt.Errorf("decode OpenAPI operation %s %s: %w", method, path, err)
+			}
+			rec := classifySchemas(op)
+			s.Operations++
+			switch {
+			case rec.ConcreteResponseSchema:
+				s.NamedResponses++
+			case rec.GenericResponseSchema:
+				s.GenericResponses++
+			default:
+				s.NoSuccessBody++
+			}
+			if !rec.RequestBodyPresent {
+				continue
+			}
+			s.RequestBodies++
+			if rec.ConcreteJSONRequest {
+				s.ConcreteJSONRequests++
+			}
+			if rec.GenericJSONRequest {
+				s.GenericJSONRequests++
+			}
+			if len(rec.NonJSONRequestMedia) > 0 {
+				s.NonJSONRequestBodies++
+			}
+		}
+	}
+	return s, nil
 }
 
 func hasSuccessSchema(responses map[string]openAPIResponse) bool {
