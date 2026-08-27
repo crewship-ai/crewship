@@ -54,7 +54,7 @@ func TestStreamOutput_EmitsOutputChunkSummary(t *testing.T) {
 		ChatID: "chat", CLIAdapter: "PLAIN", // non-stream-JSON path to keep the test simple
 	}
 
-	o.streamOutput(context.Background(), result, req, nil)
+	o.streamOutput(context.Background(), result, req, nil, nil)
 
 	entry := rec.findFirst("exec.output_chunk")
 	if entry == nil {
@@ -106,7 +106,7 @@ func TestStreamOutput_TruncatesLargeOutput(t *testing.T) {
 		ChatID: "chat", CLIAdapter: "PLAIN",
 	}
 
-	o.streamOutput(context.Background(), result, req, nil)
+	o.streamOutput(context.Background(), result, req, nil, nil)
 
 	entry := rec.findFirst("exec.output_chunk")
 	if entry == nil {
@@ -123,5 +123,47 @@ func TestStreamOutput_TruncatesLargeOutput(t *testing.T) {
 	tb, _ := payload["total_bytes"].(int64)
 	if int(tb) < len(full)/2 {
 		t.Errorf("total_bytes should record full volume; got %d for %d-byte input", tb, len(full))
+	}
+}
+
+// TestStreamOutput_ScrubsCredentialFromJournalPayload guards against the raw
+// stdout+stderr capture landing in the hash-chained journal unscrubbed. The
+// agent's captured output goes straight into the exec.output_chunk payload
+// without passing through the credential scrubber the rest of the outbound
+// path uses (wrapScrubHandler operates on parsed AgentEvents, never on this
+// raw byte capture) — so a credential an agent printed (accidentally, or
+// echoed back by a poisoned tool result) is written to an append-only,
+// hash-chained store that can never be redacted after the fact.
+func TestStreamOutput_ScrubsCredentialFromJournalPayload(t *testing.T) {
+	t.Parallel()
+
+	o := New(nil, newMemState(), slog.Default())
+	rec := &chunkRecorder{}
+	o.SetJournal(rec)
+
+	// sk-ant-* is one of the scrubber's built-in patterns (internal/scrubber),
+	// so no per-run secret registration is needed to trigger it.
+	const secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"
+	result := &provider.ExecResult{
+		ExecID: "exec-secret",
+		Reader: io.NopCloser(strings.NewReader("printing my key: " + secret + "\n")),
+	}
+	req := AgentRunRequest{
+		AgentID: "a1", AgentSlug: "sluggy", WorkspaceID: "ws", CrewID: "c1",
+		ChatID: "chat", CLIAdapter: "PLAIN",
+	}
+
+	o.streamOutput(context.Background(), result, req, nil, nil)
+
+	entry := rec.findFirst("exec.output_chunk")
+	if entry == nil {
+		t.Fatalf("no exec.output_chunk entry emitted")
+	}
+	output, _ := entry.Payload["output"].(string)
+	if strings.Contains(output, secret) {
+		t.Fatalf("journal payload leaked unscrubbed credential: %q", output)
+	}
+	if !strings.Contains(output, "REDACTED") {
+		t.Errorf("expected a redaction marker in the captured output, got %q", output)
 	}
 }

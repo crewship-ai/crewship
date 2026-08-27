@@ -163,7 +163,7 @@ func runStreamOutput(t *testing.T, adapterName, line string) []AgentEvent {
 		mu.Unlock()
 	}
 	res := &provider.ExecResult{Reader: io.NopCloser(strings.NewReader(line + "\n"))}
-	o.streamOutput(ctx, res, AgentRunRequest{AgentID: "a1", CLIAdapter: adapterName}, handler)
+	o.streamOutput(ctx, res, AgentRunRequest{AgentID: "a1", CLIAdapter: adapterName}, handler, nil)
 
 	mu.Lock()
 	defer mu.Unlock()
