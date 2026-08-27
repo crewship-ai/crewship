@@ -33,7 +33,6 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
-	"log/slog"
 	"strings"
 	"testing"
 
@@ -141,10 +140,6 @@ func bypassReq(credType string) AgentRunRequest {
 	}
 }
 
-func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
 // assertWithheldEverywhere drives all four Keeper-ON delivery gates with one
 // credential type and fails on the first channel that hands the value over.
 // One helper rather than four copies so a newly added attack automatically
@@ -159,7 +154,7 @@ func assertWithheldEverywhere(t *testing.T, credType string) {
 	}
 
 	// exec_env.go:210 — MCP ${VAR} injection.
-	mcpEnv := injectMCPCredentialEnvVars(req, nil, true, discardLogger())
+	mcpEnv := injectMCPCredentialEnvVars(req, nil, true, secretsTestLogger())
 	if name, leaked := envCarries(mcpEnv, bypassCanary); leaked {
 		t.Errorf("type %q: MCP env injection handed the gated value over as %s= "+
 			"with Keeper ON (exec_env.go:210)", credType, name)
@@ -308,12 +303,14 @@ func TestBypass_ExposureReportCannotUnderReportAGatedCredentialInEnv(t *testing.
 				t.Parallel()
 				req := bypassReq(ty)
 				env := BuildEnvVarsSidecar(req, keeper)
+				exposures := AgentEnvCredentialExposures(req, keeper)
+
 				envName, inEnv := envCarries(env, bypassCanary)
 				if !inEnv {
 					return // nothing in the env, nothing to report
 				}
 				reported := false
-				for _, e := range AgentEnvCredentialExposures(req, keeper) {
+				for _, e := range exposures {
 					if e.EnvVarName == envName {
 						reported = true
 						if !e.Actionable {
@@ -330,6 +327,27 @@ func TestBypass_ExposureReportCannotUnderReportAGatedCredentialInEnv(t *testing.
 						"report it. The leak is invisible to the operator (exec_env.go:1207)",
 						ty, state, envName)
 				}
+
+				// The SECRET PART rides the same env block on the same terms, and
+				// under a DERIVED name the operator would never think to look for.
+				// exec_env.go reports parts in a separate loop keyed on
+				// markExposed, so "the value is reported" does not imply "its parts
+				// are" — the two can drift apart, and the direction that drifts
+				// silently is the one that under-reports.
+				partName, partInEnv := envCarries(env, bypassPartCanary)
+				if !partInEnv {
+					return
+				}
+				for _, e := range exposures {
+					if e.EnvVarName == partName {
+						return
+					}
+				}
+				t.Errorf("type %q (%s): the gated credential's SECRET PART is in the agent "+
+					"env as %s= and AgentEnvCredentialExposures does not report it. The "+
+					"operator's posture view names the credential but not the second "+
+					"variable carrying its material, so the part is an invisible leak "+
+					"(exec_env.go — the SECRET-parts exposure loop)", ty, state, partName)
 			})
 		}
 	}
