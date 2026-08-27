@@ -135,3 +135,59 @@ func TestIsProtectedAgentConfigPath(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// IsProtectedCrewConfigPath — the crew door's generalization of
+// isProtectedAgentConfigPath (#2142).
+//
+// The agent door knows exactly one slug, so it can require an exact
+// "<crewID>/<slug>/" prefix. The crew door has no such context — a request
+// can legitimately name any agent in the crew — so this must deny the six
+// generated files under WHICHEVER slug the path names, not just one. The
+// case that matters most here is "other-agent's config, reached through the
+// crew door": isProtectedAgentConfigPath(crew, slug, ...) says false for it
+// (correctly — it isn't THIS agent's file), but the crew-door bypass
+// (#2142) was exactly a caller reaching another agent's config where no
+// per-agent check ran at all.
+// ---------------------------------------------------------------------------
+
+func TestIsProtectedCrewConfigPath(t *testing.T) {
+	const crew = "crew123"
+
+	protected := []string{
+		".mcp.json",
+		".cursor/mcp.json",
+		".factory/mcp.json",
+		".gemini/settings.json",
+		"opencode.json",
+		".codex/config.toml",
+	}
+	for _, relative := range protected {
+		for _, agentSlug := range []string{"riley", "other-agent", "morgan"} {
+			path := crew + "/" + agentSlug + "/" + relative
+			t.Run(path, func(t *testing.T) {
+				if !IsProtectedCrewConfigPath(crew, path) {
+					t.Fatalf("IsProtectedCrewConfigPath(%q, %q) = false, want true", crew, path)
+				}
+			})
+		}
+	}
+
+	allowed := []string{
+		"crew123/riley/docs/.mcp.json",     // nested, not the file itself
+		"crew123/riley/docs/opencode.json", // nested
+		"crew123/report.md",                // crew-root file, no agent segment
+		"crew123/.notes",                   // crew-root dotfile
+		"crew123",                          // the crew root itself
+		"crew123/",                         // trailing slash, no file
+		"othercrew/riley/.mcp.json",        // a different crew id entirely
+		"crew123/riley/.codex/skills/x/SKILL.md",
+	}
+	for _, path := range allowed {
+		t.Run("allowed/"+path, func(t *testing.T) {
+			if IsProtectedCrewConfigPath(crew, path) {
+				t.Fatalf("IsProtectedCrewConfigPath(%q, %q) = true, want false", crew, path)
+			}
+		})
+	}
+}

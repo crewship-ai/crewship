@@ -293,6 +293,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The crew-scoped file download served the exact bytes the agent door had
+  just been taught to refuse (#2142).** #2069 added a check to
+  `GET /agents/{agentId}/files/download` denying the six generated per-agent
+  files that hold resolved MCP credentials, but that check had exactly one
+  call site. `GET /crews/{crewId}/files/download` reads the identical
+  crewshipd storage — the same `<crewID>/<agentSlug>/.mcp.json` key resolves
+  on either door — and forwarded it unguarded, so the same 0600 credential
+  bytes any workspace role with read access was refused on one URL were
+  served whole on the other. The check now also runs in crewshipd's single
+  download funnel, which both HTTP doors proxy through, so a future caller
+  that reaches it inherits the denial rather than needing to remember to add
+  it again.
+
 - **Agent file downloads no longer expose generated MCP credentials (#2069,
   #2140).** Crewship writes resolved HTTP headers and process environment
   values into each CLI's native MCP config with mode `0600`. The Files API's
