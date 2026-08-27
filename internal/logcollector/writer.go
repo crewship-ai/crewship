@@ -129,7 +129,17 @@ func (w *Writer) Flush() {
 	}
 }
 
-// Close closes all open log file handles. A nil receiver is a no-op.
+// Close fsyncs and then closes all open log file handles. A nil receiver is
+// a no-op — see Append.
+//
+// The Sync is what makes Close a durability boundary rather than just a
+// handle release. Append writes through a cached handle, so entries only
+// reach the page cache; closing an fd does not flush it. Flush exists for
+// the same purpose but has no caller outside tests — Server.Shutdown
+// reaches Close and nothing else — so before this the agent logs were
+// never fsynced at all, and a power failure could lose the tail of the
+// run an operator is reading the logs to explain. Same fix, and the same
+// reason, as conversation.Store.Close (#1999).
 func (w *Writer) Close() {
 	if w == nil {
 		return
@@ -137,6 +147,7 @@ func (w *Writer) Close() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for key, f := range w.files {
+		_ = f.Sync()
 		_ = f.Close()
 		delete(w.files, key)
 	}
