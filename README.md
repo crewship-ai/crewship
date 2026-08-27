@@ -263,9 +263,9 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 
 - ✅ **Web UI** — activity feed, per-crew dashboards, approvals queue,
   integrations page, and a bottom command dock. Every create surface runs on one
-  shell: ⌘↵ to submit, a discard guard on Esc, a 400's field list rendered as a
-  worklist, and a bottom sheet rather than a squeezed card on a phone.
-  [→ activity](docs/guides/activity.mdx)
+  shell: ⌘/Ctrl+↵ to submit, a discard guard on Esc, a rejected form's field
+  errors listed as a worklist, and a bottom sheet rather than a squeezed card on
+  a phone. [→ activity](docs/guides/activity.mdx)
 - 🟡 **Pages** — dashboards an agent or routine pushes data into, permissioned
   per panel and honest about when a number goes stale. The page holds no query
   and no credentials. [→ pages](docs/guides/pages.mdx)
@@ -308,8 +308,10 @@ maintainer in production-shaped workloads; 🟡 and 🚧 are still being shaped.
 
 - **Claude Code is the production-tested adapter.** Ollama and OpenCode run
   today; Codex / Gemini / Cursor / Factory Droid are wired end to end — command
-  line, tool profile, output parsing — but do not yet have the integration tests
-  and tuning to call production-ready. [→ CLI adapters](docs/guides/cli-adapters.mdx)
+  line, prompt handling, output parsing — but do not yet have the integration
+  tests and tuning to call production-ready. Built-in tool curation is per
+  adapter and not every CLI exposes the lever.
+  [→ CLI adapters](docs/guides/cli-adapters.mdx)
 - **SQLite for now.** Runs on `modernc.org/sqlite` (single binary, WAL, no extra
   services). PostgreSQL is on the roadmap.
 - **Single host.** One instance manages many crews on its own host. A full
