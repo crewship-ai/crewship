@@ -76,6 +76,14 @@ func execResult(id, out string) *provider.ExecResult {
 
 func (c *sidecarRaceContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	joined := strings.Join(cfg.Cmd, " ")
+	// The sidecar launch script (including "crewship-sidecar --addr") rides
+	// stdin, not argv — see the security fix in startSidecar — so it must be
+	// folded in here too for this fake's script-matching to still see it.
+	if cfg.Stdin != nil {
+		if b, err := io.ReadAll(cfg.Stdin); err == nil {
+			joined += "\n" + string(b)
+		}
+	}
 
 	switch {
 	case strings.Contains(joined, "pkill -f '^crewship-sidecar'"):

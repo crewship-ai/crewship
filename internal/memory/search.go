@@ -8,11 +8,11 @@ import (
 
 // SearchResult is a single match from the FTS5 index.
 type SearchResult struct {
-	File      string  `json:"file"`
-	LineStart int     `json:"line_start"`
-	LineEnd   int     `json:"line_end"`
-	Snippet   string  `json:"snippet"`
-	Score     float64 `json:"score"`
+	File      string  `json:"file" yaml:"file"`
+	LineStart int     `json:"line_start" yaml:"line_start"`
+	LineEnd   int     `json:"line_end" yaml:"line_end"`
+	Snippet   string  `json:"snippet" yaml:"snippet"`
+	Score     float64 `json:"score" yaml:"score"`
 }
 
 // Search performs a BM25-ranked FTS5 search over indexed memory chunks.

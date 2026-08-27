@@ -210,6 +210,36 @@ func TestAgentFileDownload_SidecarNon200Maps404(t *testing.T) {
 	}
 }
 
+func TestAgentFileDownload_ProtectedConfigNeverReachesIPC(t *testing.T) {
+	h, userID, wsID, crewID, agentID, calls := covPFRig(t)
+	paths := []string{
+		".mcp.json",
+		crewID + "/pf-agent/.codex/config.toml",
+		".gemini/settings.json",
+		"opencode.json",
+	}
+
+	for _, role := range []string{"OWNER", "VIEWER"} {
+		for _, path := range paths {
+			t.Run(role+"/"+path, func(t *testing.T) {
+				req := httptest.NewRequest("GET", "/x?path="+path, nil)
+				req.SetPathValue("agentId", agentID)
+				req = withWorkspaceUser(req, userID, wsID, role)
+				rr := httptest.NewRecorder()
+
+				h.AgentFileDownload(rr, req)
+
+				if rr.Code != http.StatusForbidden {
+					t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+				}
+				if len(*calls) != 0 {
+					t.Fatalf("protected download made %d IPC calls, want 0", len(*calls))
+				}
+			})
+		}
+	}
+}
+
 // ---- AgentFileSave ----
 
 func TestAgentFileSave_Matrix(t *testing.T) {

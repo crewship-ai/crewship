@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { spring } from "@/lib/motion"
+import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
 
 interface RailItem {
@@ -25,13 +26,30 @@ interface RailItem {
 
 // Context tab intentionally dropped from the chat drawer — that surface
 // belongs to the agent canvas / settings page, not the per-session chat.
-// Keeping the rail tight to Files / Triggers / Team makes the drawer
-// feel less like a kitchen-sink and more like a focused chat sidekick.
-const ITEMS: RailItem[] = [
-  { id: "files", label: "Files", icon: FileText, shortcut: "1" },
-  { id: "triggers", label: "Triggers", icon: Zap, shortcut: "2" },
-  { id: "team", label: "Team", icon: Users, shortcut: "3" },
+// Keeping the rail tight makes the drawer feel less like a kitchen-sink and
+// more like a focused chat sidekick.
+//
+// Triggers is gated on the SAME flag the panel gates its tab on, and for the
+// obvious reason: right-panel.tsx renders the Triggers tab only when
+// AGENT_EXTERNAL_TRIGGERS is set, and the flag is currently false — so the
+// rail was offering a button (and ⌘2) that opened the drawer onto an empty
+// pane. A rail entry whose panel cannot render is not a hidden feature, it is
+// a dead control, and it was the first thing every reader clicked.
+//
+// The shortcut number is derived from the position rather than written down,
+// so removing an entry cannot leave ⌘3 pointing at the second icon.
+const RAIL_PANELS: Omit<RailItem, "shortcut">[] = [
+  { id: "files", label: "Files", icon: FileText },
+  ...(AGENT_EXTERNAL_TRIGGERS
+    ? [{ id: "triggers" as DrawerTab, label: "Triggers", icon: Zap }]
+    : []),
+  { id: "team", label: "Team", icon: Users },
 ]
+
+const ITEMS: RailItem[] = RAIL_PANELS.map((item, i) => ({
+  ...item,
+  shortcut: String(i + 1),
+}))
 
 /**
  * What each panel is called, in one place.

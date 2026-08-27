@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/spf13/cobra"
 )
 
@@ -189,8 +190,21 @@ func printInspectTable(runID, agentSlug, agentID, model string, entries []map[st
 		case "notice":
 			color = cli.Cyan
 		}
-		if entryType == "tool_call" || strings.HasPrefix(entryType, "tool.") {
+		// A tool the agent invoked is journaled as run.agent_span (see
+		// internal/journal/types.go), never as "tool_call" or a "tool."-
+		// prefixed type — those never reach the journal at all, so this
+		// used to always read 0. Its payload carries "status" (ok|error|
+		// running); a failed span is journaled at severity "warn", not
+		// "error" (internal/pipeline/agent_span_emit.go), so it has to be
+		// counted here too or a run with only failed tool calls reports
+		// "errors: 0".
+		if entryType == string(journal.EntryRunAgentSpan) {
 			toolCalls++
+			if payload, ok := e["payload"].(map[string]any); ok {
+				if status, _ := payload["status"].(string); status == "error" {
+					errors++
+				}
+			}
 		}
 		if entryType == "cost.incurred" {
 			if payload, ok := e["payload"].(map[string]any); ok {

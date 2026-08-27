@@ -136,9 +136,9 @@ var serverListCmd = &cobra.Command{
 				fmt.Printf("\n%s! active profile %q has no definition%s — run 'crewship server add %s --server <url>'\n",
 					cli.Yellow, active, cli.Reset, active)
 			}
-			if hint := directoryOverrideHint(cfg, source); hint != "" {
+			if line := directoryOverrideLine(directoryOverrideHint(cfg, source)); line != "" {
 				fmt.Println()
-				fmt.Println(hint)
+				fmt.Println(line)
 			}
 		})
 	},
@@ -276,33 +276,79 @@ var serverCurrentCmd = &cobra.Command{
 			return err
 		}
 		name, source := cli.ActiveProfileNameWithSource(flagProfile, cfg)
+		f := resolvedFormatter(cmd)
+		hint := directoryOverrideHint(cfg, source)
+
+		// Three outcomes, and a script has to be able to tell them apart:
+		// no profile at all (legacy single-server), a selected profile whose
+		// definition is missing (a typo or a removed entry — the case that
+		// produces a confusing 403 later), and a real one. `state` names them
+		// so the caller does not have to infer from which fields are empty.
 		if name == "" {
-			fmt.Printf("No profile active (legacy single-server mode).\nServer: %s\n",
-				valueOrDefault(cfg.Server, "http://localhost:8080"))
-			return nil
+			return f.AutoHuman(serverCurrentResult{
+				State:  "no-profile",
+				Server: valueOrDefault(cfg.Server, "http://localhost:8080"),
+				// A legacy single-server config keeps its credential at the
+				// top level, so "no profile" and "not authenticated" are
+				// different things. Left at its zero value this branch
+				// reported token_set=false for a config `config show -f json`
+				// — same PR, same overlay — reports true for, and a setup
+				// script branching on .token_set to decide whether to run
+				// `crewship login` would loop.
+				TokenSet: cfg.Token != "",
+			}, func() {
+				fmt.Printf("No profile active (legacy single-server mode).\nServer: %s\n",
+					valueOrDefault(cfg.Server, "http://localhost:8080"))
+			})
 		}
 		var p *cli.ServerProfile
 		if cfg.Servers != nil {
 			p = cfg.Servers[name]
 		}
 		if p == nil {
-			fmt.Printf("Active profile %q is selected but not defined (see 'crewship server list').\n", name)
-			if hint := directoryOverrideHint(cfg, source); hint != "" {
-				fmt.Println(hint)
-			}
-			return nil
+			return f.AutoHuman(serverCurrentResult{
+				State:                 "profile-undefined",
+				Profile:               name,
+				DirectoryOverrideHint: hint,
+			}, func() {
+				fmt.Printf("Active profile %q is selected but not defined (see 'crewship server list').\n", name)
+				if line := directoryOverrideLine(hint); line != "" {
+					fmt.Println(line)
+				}
+			})
 		}
 		auth := "(none)"
 		if p.Token != "" {
 			auth = "set"
 		}
-		fmt.Printf("Active profile: %s\nServer:         %s\nWorkspace:      %s\nToken:          %s\n",
-			name, p.Server, valueOrDefault(p.Workspace, "(none)"), auth)
-		if hint := directoryOverrideHint(cfg, source); hint != "" {
-			fmt.Println(hint)
-		}
-		return nil
+		return f.AutoHuman(serverCurrentResult{
+			State:                 "active",
+			Profile:               name,
+			Server:                p.Server,
+			Workspace:             p.Workspace,
+			TokenSet:              p.Token != "",
+			DirectoryOverrideHint: hint,
+		}, func() {
+			fmt.Printf("Active profile: %s\nServer:         %s\nWorkspace:      %s\nToken:          %s\n",
+				name, p.Server, valueOrDefault(p.Workspace, "(none)"), auth)
+			if line := directoryOverrideLine(hint); line != "" {
+				fmt.Println(line)
+			}
+		})
 	},
+}
+
+// serverCurrentResult is the machine-readable form of `server current`.
+//
+// TokenSet rather than the token: this output is what a setup script captures
+// into its log.
+type serverCurrentResult struct {
+	State                 string `json:"state" yaml:"state"` // active | no-profile | profile-undefined
+	Profile               string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	Server                string `json:"server,omitempty" yaml:"server,omitempty"`
+	Workspace             string `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	TokenSet              bool   `json:"token_set" yaml:"token_set"`
+	DirectoryOverrideHint string `json:"directory_override_hint,omitempty" yaml:"directory_override_hint,omitempty"`
 }
 
 // directoryOverrideHint explains, when a directory_profiles cwd match won
@@ -312,6 +358,14 @@ var serverCurrentCmd = &cobra.Command{
 // CLI's own output, making `server use` look silently broken from inside
 // a directory-mapped clone). Returns "" when source isn't a directory
 // override, so callers can print it unconditionally.
+//
+// The text is PLAIN. It became a field of serverCurrentResult in the format
+// sweep, and `!` plus a colour are presentation: a caller reading
+// .directory_override_hint out of `server current -f json` should not have to
+// strip terminal control bytes to compare or log it. Colour is added by
+// directoryOverrideLine, which is what the human renderers print. (Colours are
+// already empty when stdout is not a TTY — but an agent harness running the
+// CLI under a PTY is a TTY, so that is not the guarantee it looks like.)
 func directoryOverrideHint(cfg *cli.CLIConfig, source cli.ProfileSource) string {
 	if source != cli.ProfileSourceDirectory || cfg == nil {
 		return ""
@@ -321,8 +375,17 @@ func directoryOverrideHint(cfg *cli.CLIConfig, source cli.ProfileSource) string 
 	if persisted == "" {
 		persisted = "(none)"
 	}
-	return fmt.Sprintf("%s! directory override for %s — persisted default (`server use`) is %q%s",
-		cli.Yellow, dir, persisted, cli.Reset)
+	return fmt.Sprintf("directory override for %s — persisted default (`server use`) is %q",
+		dir, persisted)
+}
+
+// directoryOverrideLine is directoryOverrideHint dressed for a terminal.
+// Empty in, empty out, so callers can print it unconditionally.
+func directoryOverrideLine(hint string) string {
+	if hint == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s! %s%s", cli.Yellow, hint, cli.Reset)
 }
 
 func init() {

@@ -309,8 +309,10 @@ func covDecodeSidecarInput(t *testing.T, script string) map[string]any {
 func TestStartSidecar_SuccessPayloadShape(t *testing.T) {
 	t.Parallel()
 	c := &covContainer{route: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
-		script := covScript(cfg)
-		if strings.Contains(script, "crewship-sidecar --addr") {
+		// The launch script (including "crewship-sidecar --addr") rides
+		// stdin, not argv (see the security fix in startSidecar) — so the
+		// launch exec is identified by its stdin content, not cfg.Cmd.
+		if strings.Contains(covStdin(cfg), "crewship-sidecar --addr") {
 			return covResult("sidecar-start", ""), nil
 		}
 		return nil, nil
@@ -364,8 +366,11 @@ func TestStartSidecar_SuccessPayloadShape(t *testing.T) {
 	if launch.User != "1002:1002" {
 		t.Errorf("sidecar must run as UID 1002, got %q", launch.User)
 	}
+	if len(launch.Cmd) != 1 || launch.Cmd[0] != "sh" {
+		t.Errorf("sidecar launch must run `sh` with no operands (script/creds ride stdin, never argv), got Cmd=%v", launch.Cmd)
+	}
 
-	input := covDecodeSidecarInput(t, covScript(launch))
+	input := covDecodeSidecarInput(t, covStdin(launch))
 	credsOut, _ := input["credentials"].([]any)
 	if len(credsOut) != 1 {
 		t.Fatalf("expected 1 mapped credential, got %v", input["credentials"])
@@ -472,6 +477,56 @@ func TestStartSidecar_HealthCheckFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "sidecar health check failed") {
 		t.Errorf("error must carry the captured output: %v", err)
+	}
+}
+
+// covBase64BlobRE finds base64-alphabet runs long enough to plausibly be an
+// encoded payload, so the argv-leak test below can decode ANY such run in Cmd
+// rather than hard-coding the pre-fix `echo '<b64>' | base64 -d` shape — the
+// point of the test is that no encoding of the secret reaches argv, by
+// whatever wrapping.
+var covBase64BlobRE = regexp.MustCompile(`[A-Za-z0-9+/]{24,}={0,2}`)
+
+// TestStartSidecar_CredentialsNeverInArgv is the regression test for the
+// sh -c argv leak: the sidecar launch exec used to pass its whole script —
+// including the base64-encoded credential JSON — as a `sh -c <script>`
+// argument. That argv is exposed via /proc/<pid>/cmdline, which is
+// world-readable (mode 0444) regardless of the exec's User, so the UID 1002
+// mem-read mitigation did nothing to protect it. The fix moves the script
+// (and the embedded credentials) onto the exec's stdin.
+//
+// This test fails against the pre-fix code: it decodes every long base64 run
+// found in each recorded ExecConfig.Cmd and fails if any decodes to bytes
+// containing the planted credential marker.
+func TestStartSidecar_CredentialsNeverInArgv(t *testing.T) {
+	t.Parallel()
+	c := &covContainer{}
+	const marker = "sk-test-marker-f83a1c6e9d20"
+	creds := []Credential{
+		{ID: "c1", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: marker, Priority: 1},
+	}
+	if err := startSidecar(context.Background(), c, "ctr-123456789012", creds, nil, nil, nil, nil, nil, nil, "", covQuietLogger()); err != nil {
+		t.Fatalf("startSidecar: %v", err)
+	}
+
+	calls := c.snapshotCalls()
+	if len(calls) == 0 {
+		t.Fatal("expected at least one exec call")
+	}
+	for _, call := range calls {
+		argv := strings.Join(call.Cmd, "\x00")
+		if strings.Contains(argv, marker) {
+			t.Fatalf("credential plaintext leaked directly into exec argv: %q", call.Cmd)
+		}
+		for _, blob := range covBase64BlobRE.FindAllString(argv, -1) {
+			raw, err := base64.StdEncoding.DecodeString(blob)
+			if err != nil {
+				continue
+			}
+			if strings.Contains(string(raw), marker) {
+				t.Fatalf("credential material reached exec argv (base64-decoded): %q, argv=%q", raw, call.Cmd)
+			}
+		}
 	}
 }
 

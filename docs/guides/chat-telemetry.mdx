@@ -174,18 +174,23 @@ leaves the session untitled, and an event saying otherwise would disagree with
 the sidebar the user is looking at. Nothing emits `manual` yet — renaming by
 hand is a different surface.
 
-`source` names the door, and there are three:
+`source` names the door. Exactly **one** is wired today:
 
 | `source` | Emitted by | Which is |
 |---|---|---|
 | `composer` | `chat-panel.tsx`, `ensureSession` | a draft session becoming real because somebody typed or attached a file — the row does not exist until then |
-| `sidebar` | `chat-page-client.tsx`, `handleNewSession` | the **New session** control in the chat page's session chrome |
-| `deeplink` | `chat-page-client.tsx`, `openInitialSession` | arriving with `?prompt=` — `routine-create-dialog` mints a session this way |
 
-A create the server refused emits nothing, from any of the three: there is no
-conversation, and a funnel that counts refusals as starts is worse than no
-funnel, because it is believed. `chip`, `palette` and `home` are declared for
-doors that do not exist here yet.
+A create the server refused emits nothing: there is no conversation, and a
+funnel that counts refusals as starts is worse than no funnel, because it is
+believed.
+
+`sidebar`, `deeplink`, `chip`, `palette` and `home` are declared in
+`lib/telemetry.ts` but nothing emits them. `sidebar` and `deeplink` are not
+merely unbuilt — they were live on the surface the chat rewrite replaced, and
+their emitters went with `chat-page-client.tsx`. So the funnel currently
+under-counts: **New conversation** in the left column and an arrival with
+`?prompt=` both mint sessions and neither is recorded. Read `chat_session_created`
+as "sessions started by typing into the composer", not as "sessions started".
 
 ### Conversation search
 
@@ -198,10 +203,15 @@ Nothing about the search **terms** is recorded — not the text, not its length.
 What somebody types into ⌘K is as private as the message they are hunting for.
 
 The two sources are two doors onto one question. The ⌘K palette asks the server
-about message bodies; the chat tree's search box filters titles it already has.
-Somebody who searches the tree, finds nothing, and then reaches for ⌘K is
-telling you the tree's scope is too narrow — which is only legible because both
-emit the same event under a different `source`.
+about message bodies; the conversations column's search box filters titles it
+already has. Somebody who searches the column, finds nothing, and then reaches
+for ⌘K is telling you that column's scope is too narrow — which would only be
+legible if both emitted the same event under a different `source`.
+
+**Only `palette` emits today.** The column's search box filters in place and
+records nothing, so the comparison above is a design the data does not yet
+support; `source` is currently a constant. Its emitter was lost with the chat
+surface rewrite, along with the test that pinned it.
 
 `position` is the rank of the row that was opened. A search whose answer is
 always at position 4 is a ranking bug, and nothing else in the product can see

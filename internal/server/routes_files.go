@@ -168,18 +168,161 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	filename := sanitizeDownloadFilename(filepath.Base(filePath))
+	setDownloadHeaders := func() {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+
 	reader, err := s.storage.Read(r.Context(), storageKey)
-	if err != nil {
+	if err == nil {
+		defer reader.Close()
+		setDownloadHeaders()
+		if _, cerr := io.Copy(w, reader); cerr != nil {
+			s.logger.Error("file download stream error", "path", sanitizeLogPath(filePath), "error", cerr)
+		}
+		return
+	}
+
+	// A host-side read can fail for a reason that has nothing to do with the
+	// file being absent.
+	//
+	// Every tree here is chowned to the agent UID 1001 when the crew is
+	// provisioned (#922), and the agent writes into it at that UID, so
+	// crewshipd — running as the host user — takes EACCES on anything the
+	// container created without group-read. `List` still succeeds, because it
+	// only needs the DIRECTORY, which is 0755. The result was a Files panel
+	// that listed a full tree and answered "file not found" for every single
+	// entry in it, which is a lie with the worst possible failure mode: it
+	// sends you looking for a missing file that is right there.
+	//
+	// The save path has replayed through the container on exactly this error
+	// since #922. The read path never did, which is the whole asymmetry — so
+	// it does now, with the same fence, and the same UID.
+	if !errors.Is(err, fs.ErrPermission) {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return
 	}
-	defer reader.Close()
 
-	filename := sanitizeDownloadFilename(filepath.Base(filePath))
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	w.Header().Set("Content-Type", "application/octet-stream")
-	if _, err := io.Copy(w, reader); err != nil {
-		s.logger.Error("file download stream error", "path", sanitizeLogPath(filePath), "error", err)
+	cpath, fence, replayable := crewContainerPath(crewID, storageKey)
+	if !replayable {
+		s.logger.Warn("file download permission denied and not replayable",
+			"path", sanitizeLogPath(filePath), "error", err)
+		http.Error(w, "file not readable", http.StatusForbidden)
+		return
+	}
+
+	content, rerr := s.readCrewFileViaContainer(r.Context(), crewID, cpath, fence)
+	if rerr != nil {
+		if errors.Is(rerr, errCrewFileNotFound) {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		// Do NOT collapse this into 404. The bytes exist and we could not get
+		// at them; saying "not found" is what made the original defect take a
+		// day to see.
+		s.logger.Error("container file read replay failed",
+			"path", sanitizeLogPath(filePath), "error", rerr)
+		http.Error(w, "file not readable — the crew container is unavailable", http.StatusConflict)
+		return
+	}
+
+	setDownloadHeaders()
+	if _, werr := w.Write(content); werr != nil {
+		s.logger.Error("file download stream error", "path", sanitizeLogPath(filePath), "error", werr)
+	}
+}
+
+/**
+ * The read half of the #922 container replay.
+ *
+ * No `echo` anywhere in the script, and that is deliberate rather than terse:
+ * the docker provider demuxes stdout and stderr into ONE pipe
+ * (stdcopy.StdCopy(pw, pw, …)), so any diagnostic the script printed would be
+ * spliced into the middle of the file the caller asked for. Every failure is
+ * therefore a bare exit code, and the bytes are only trusted once the exit
+ * code is 0.
+ *
+ * That is also why this buffers rather than streaming: the exit code is only
+ * knowable after the stream ends, so streaming straight to the client would
+ * mean committing to bytes we cannot yet vouch for.
+ */
+const crewFileReadScript = `set -eu; f=$(realpath "$FENCE"); rp=$(realpath "$SRC") || exit 4; ` +
+	`case "$rp" in "$f"|"$f"/*) ;; *) exit 3 ;; esac; ` +
+	`[ -f "$rp" ] || exit 4; exec cat "$rp"`
+
+// maxCrewFileReadBytes caps the replay. An /output write is uncapped by design
+// — an agent artefact can be arbitrarily large — but this path buffers, so it
+// needs a ceiling that is generous for anything a person opens in the Files
+// panel and still bounded.
+const maxCrewFileReadBytes = 32 << 20 // 32 MiB
+
+// crewFileReadSem bounds concurrent read replays, the way gitDiffSem bounds
+// `git diff` execs and for a sharper reason: this path BUFFERS, so the ceiling
+// above is per-request, not per-server. Unbounded, N simultaneous downloads of
+// large artefacts reserve N × 32 MiB of heap while also each holding a docker
+// exec slot — a workspace member with read access could starve agent work by
+// opening the Files panel in a loop. Four in flight caps that at 128 MiB.
+var crewFileReadSem = make(chan struct{}, 4)
+
+var errCrewFileNotFound = errors.New("crew file not found")
+
+func (s *Server) readCrewFileViaContainer(ctx context.Context, crewID, containerPath, fence string) ([]byte, error) {
+	// resolveCrewContainer dereferences s.container (its doc comment says
+	// callers must have checked), and a nil provider is a supported state —
+	// handleContainerStatus reports it as "not_configured". Without this the
+	// replay panics instead of reporting an unavailable container.
+	if s.container == nil {
+		return nil, errCrewContainerUnavailable
+	}
+
+	containerName, _, ok := s.resolveCrewContainer(ctx, crewID, false)
+	if !ok {
+		return nil, errCrewNotFound
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Wait for a slot, or give up if the client goes away — the same shape
+	// handleContainerGitDiff uses.
+	select {
+	case crewFileReadSem <- struct{}{}:
+		defer func() { <-crewFileReadSem }()
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: %v", errCrewContainerUnavailable, ctx.Err())
+	}
+
+	result, err := s.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerName,
+		Cmd:         []string{"sh", "-c", crewFileReadScript},
+		Env:         []string{"SRC=" + containerPath, "FENCE=" + fence},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errCrewContainerUnavailable, err)
+	}
+	defer result.Reader.Close()
+
+	content, rerr := io.ReadAll(io.LimitReader(result.Reader, maxCrewFileReadBytes+1))
+	if rerr != nil {
+		return nil, fmt.Errorf("read container file stream: %w", rerr)
+	}
+	if len(content) > maxCrewFileReadBytes {
+		return nil, fmt.Errorf("file exceeds %d bytes", maxCrewFileReadBytes)
+	}
+
+	code, ierr := provider.WaitExecExit(ctx, s.container, result.ExecID, execProbeTimeout)
+	if ierr != nil {
+		return nil, fmt.Errorf("inspect container read: %w", ierr)
+	}
+	switch code {
+	case 0:
+		return content, nil
+	case 4:
+		return nil, errCrewFileNotFound
+	default:
+		return nil, fmt.Errorf("container read exited %d", code)
 	}
 }
 
