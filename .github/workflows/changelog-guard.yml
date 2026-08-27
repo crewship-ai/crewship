@@ -183,6 +183,26 @@ jobs:
           # section its added lines landed in, and deriving that is the kind of
           # cleverness that fails quietly the first time a heading moves.
           #
+          # The base side is read at the MERGE BASE, not at the tip of
+          # `origin/$BASE_REF`. The tip moves under an open PR, and because this
+          # guard works, what it moves by is release notes: every user-visible
+          # merge into `main` adds to `## [Unreleased]`. Read the tip at run
+          # time and those entries land on the base side of a comparison the PR
+          # had nothing to do with, the two sides differ, and a PR that touches
+          # `CHANGELOG.md` zero times is waved through with
+          # "'## [Unreleased]' section is changed by this PR. ✓". Reproduced in
+          # the shape CI actually runs — `HEAD` is `refs/pull/N/merge`, a merge
+          # into the base tip as it stood when that ref was built, while
+          # `origin/$BASE_REF` is fetched fresh and is newer. The guard grew
+          # more wrong the better it worked, which is the worst way for a gate
+          # to fail.
+          #
+          # `...` in the two `git diff` calls already means "against the merge
+          # base"; this names the same commit explicitly so both halves of the
+          # step agree on what "base" is. Bare assignment, so `set -e` kills the
+          # step if it cannot be resolved — fail-closed, like `watched_raw`.
+          merge_base="$(git merge-base "origin/$BASE_REF" HEAD)"
+
           # `|| true` on the two `git show` calls does NOT reopen the fail-open
           # hole above: an unresolvable `origin/$BASE_REF` has already killed
           # the step at `watched_raw`, which runs before this and unconditionally.
@@ -208,7 +228,7 @@ jobs:
             '
           }
 
-          base_changelog="$(git show "origin/$BASE_REF:CHANGELOG.md" 2>/dev/null || true)"
+          base_changelog="$(git show "$merge_base:CHANGELOG.md" 2>/dev/null || true)"
           head_changelog="$(git show "HEAD:CHANGELOG.md" 2>/dev/null || true)"
 
           # A base with no heading is legitimate — the PR is adding the file.

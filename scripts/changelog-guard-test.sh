@@ -145,7 +145,10 @@ git -C "$FIXTURE" commit -qm "base"
 git -C "$FIXTURE" update-ref refs/remotes/origin/main "$(git -C "$FIXTURE" rev-parse main)"
 
 # Reset to a fresh PR branch off the base commit.
-scenario() { git -C "$FIXTURE" checkout -q -B pr refs/remotes/origin/main; }
+scenario() { scenario_at refs/remotes/origin/main; }
+# …or off a named commit, for the cases where `origin/main` has moved on since
+# the PR forked.
+scenario_at() { git -C "$FIXTURE" checkout -q -B pr "$1"; }
 
 touch_file() { echo "changed $RANDOM" >> "$FIXTURE/$1"; }
 remove_file() { git -C "$FIXTURE" rm -q "$1"; }
@@ -156,6 +159,15 @@ add_unreleased_entry() {
   sed -i '/^### Fixed$/a\
 \
 - **A new unreleased entry.** What changed and why.' "$FIXTURE/CHANGELOG.md"
+}
+# Somebody else's release note, landing on `main` while this PR is open. Worded
+# differently from the PR's own on purpose: two PRs writing byte-identical
+# entries is a coincidence, and a fixture that relies on one proves less than it
+# looks like it does.
+add_someone_elses_entry() {
+  sed -i '/^### Fixed$/a\
+\
+- **An entry from a PR that merged while this one was open.** Not ours.' "$FIXTURE/CHANGELOG.md"
 }
 # An edit that is NOT a release note: it lands in the shipped section at the
 # bottom of the file, which is what "any change to CHANGELOG.md" used to accept.
@@ -285,6 +297,45 @@ fi
 # diff that never ran.
 scenario; touch_file components/thing.tsx; add_unreleased_entry; commit_pr
 expect "a broken base ref fails even when CHANGELOG.md is touched" nonzero nonexistent-branch someone false
+
+# ---------------------------------------------------------------------------
+# The base branch moves under an open PR
+# ---------------------------------------------------------------------------
+# Every case above forks from an `origin/main` that never moves. Real ones move
+# constantly — main took 25 merges in the window this guard was written for —
+# and BECAUSE this guard works, what they move by is release notes: each
+# user-visible merge writes its own `## [Unreleased]` entry.
+#
+# Read the section from the base TIP and main's entry alone makes the two sides
+# differ, so a PR that touches CHANGELOG.md zero times is waved through with
+# "'## [Unreleased]' section is changed by this PR. ✓". These cases pin the
+# merge base instead. They are last because they advance `origin/main`.
+echo "the base branch moves under the PR:"
+
+BASE_COMMIT="$(git -C "$FIXTURE" rev-parse refs/remotes/origin/main)"
+
+# One merge lands on main, carrying a release note of its own.
+git -C "$FIXTURE" checkout -q -B mainmoved "$BASE_COMMIT"
+add_someone_elses_entry
+git -C "$FIXTURE" commit -qam "another PR merged, with its entry"
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$(git -C "$FIXTURE" rev-parse mainmoved)"
+
+scenario_at "$BASE_COMMIT"; touch_file components/thing.tsx; commit_pr
+expect "a PR forked before main moved still needs its own entry" 1 main someone false
+
+scenario_at "$BASE_COMMIT"; touch_file components/thing.tsx; add_unreleased_entry; commit_pr
+expect "…and one that did write an entry still passes after main moved" 0 main someone false
+
+# The shape CI actually runs: `actions/checkout` takes `refs/pull/N/merge`, a
+# merge of the PR head into the base tip as it stood when GitHub built that ref,
+# while `origin/main` is fetched fresh at run time and can be newer. HEAD
+# therefore already contains part of main's history — but not the merge that
+# landed after it, which is exactly the gap the tip comparison read as the PR's
+# own work.
+scenario_at "$BASE_COMMIT"; touch_file components/thing.tsx; commit_pr
+git -C "$FIXTURE" checkout -q -B mergeref "$BASE_COMMIT"
+git -C "$FIXTURE" merge -q --no-ff -m "Merge pr into main" pr
+expect "the pull/N/merge ref does not count main's entries as the PR's" 1 main someone false
 
 echo
 if [ "$FAILURES" -ne 0 ]; then
