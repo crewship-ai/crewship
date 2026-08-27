@@ -129,7 +129,11 @@ Containers are created with these security measures (`internal/provider/docker/d
 - **Shared network, restricted egress:** every crew's container joins one
   Docker bridge network (`crewship-agents` by default) — crews are not
   network-isolated from each other on that bridge. Outbound access is
-  controlled per crew by egress policy, not by network segmentation.
+  controlled per crew by egress policy enforced by the sidecar proxy
+  (`127.0.0.1:9119`, via `HTTP_PROXY`/`HTTPS_PROXY`) — it filters only
+  traffic actually routed through it. A raw socket, or a tool pointed past
+  the proxy (`curl --noproxy '*'`), reaches the bridge directly: the shared
+  bridge itself carries no network-layer isolation to fall back on.
 - **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
 - **Named volumes:** `crewship-home-{slug}-{crewID}` and `crewship-tools-{slug}-{crewID}` for persistent home and tools directories (namespaced by crew ID to prevent cross-tenant collisions)
 

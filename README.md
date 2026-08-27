@@ -50,9 +50,11 @@ while member **Agents** do the tasks. Every participant — human and agent — 
 their own **chat**, their own **inbox**, and a place in the org.
 
 You bring the keys — or run fully local. Crewship keeps them encrypted at
-rest and, for API-key auth on Claude Code, Codex, and Gemini, out of the
-agent process too; other auth modes and adapters put the real key in the
-container's environment (see [what's ready vs. WIP](#whats-ready-vs-wip)).
+rest and, for proxied API-key auth (Claude Code, Codex, Gemini, and any
+OpenCode provider actually routed through the sidecar), out of the agent
+process too; OAuth tokens and other non-proxied auth modes or adapters put
+the real key in the container's environment (see [what's ready vs.
+WIP](#whats-ready-vs-wip)).
 
 ---
 
@@ -260,8 +262,9 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   [→ crew journal](docs/guides/crew-journal.mdx)
 - 🟡 **Replay & regression** — observational replay rehydrates a mission's
   trajectory from the journal and recomputes its metrics; it does not
-  re-execute the agents. Regression diff compares tool success rate and cost
-  between two runs. *(Quartermaster)* [→ API: eval](docs/api-reference/eval.mdx)
+  re-execute the agents. Regression diff compares tool success rate, steps
+  to goal, cost, and hallucination count between two runs. *(Quartermaster)*
+  [→ API: eval](docs/api-reference/eval.mdx)
 - ✅ **Checkpoints & fork** — snapshot a mission's state, advisory-restore it, or
   fork a fresh mission from any point. *(Cartographer)* [→ API: checkpoints](docs/api-reference/checkpoints.mdx)
 - ✅ **Admin console** — instance security posture, plus rate limits and memory

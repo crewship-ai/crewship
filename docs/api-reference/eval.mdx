@@ -6,7 +6,7 @@ stability: experimental
 tag: Experimental
 ---
 
-Quartermaster performs observational replay — it rehydrates a mission's trajectory from the journal and recomputes metrics, without re-executing the agents — and diffs two missions to detect regressions in tool success rate and cost. Both mutating endpoints return `202 Accepted` immediately and run the work in a background goroutine; poll [List runs](#list-runs) for results. See the [Quartermaster guide](/guides/quartermaster).
+Quartermaster performs observational replay — it rehydrates a mission's trajectory from the journal and recomputes metrics, without re-executing the agents — and diffs two missions to detect regressions in tool success rate, steps to goal, cost, and hallucination count. Both mutating endpoints return `202 Accepted` immediately and run the work in a background goroutine; poll [List runs](#list-runs) for results. See the [Quartermaster guide](/guides/quartermaster).
 
 <Note>
   All endpoints require authentication and are workspace-scoped. Mutating endpoints (`replay`, `regression`) require `OWNER` or `ADMIN` role. Mission IDs must belong to the caller's workspace -- cross-tenant IDs return 404 with the same shape as "not found".
