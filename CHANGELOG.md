@@ -839,6 +839,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   names the problem, which is what the command's own help ("pipe to jq")
   promises.
 
+- **The machine error envelope disagreed with itself across formats.** Every
+  command emits `cli.ErrorEnvelope` on stderr when it fails under
+  `-f json|yaml|ndjson`, and it carried `json:` tags only — so the same
+  failure came back as `exit_code` under json and `exitcode` under yaml, with
+  `status: 0`, `detail: ""` and `extensions: {}` added on the yaml side
+  because `omitempty` went with the tag. A caller that branches on the exit
+  code found nothing at that key in one of the two formats it was told were
+  the same data. The failure side now matches the success side (#1211).
+
 - **Upgrading threw finished users back into the setup wizard.**
   `onboarding_skipped_at` was added without a backfill, and
   `OnboardingHandler.Status` reads a NULL there as "this completion was

@@ -27,6 +27,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // yamlParityTypes are the machine-rendered result structs whose json and yaml
@@ -83,6 +85,11 @@ func yamlParityTypes() []any {
 		PersonaResponse{},
 		// cmd_digest.go
 		digestEnableResult{},
+		// internal/cli/errors.go — the failure-side counterpart of every
+		// struct above. Not a cmd/crewship type, but it is emitted by every
+		// command in every machine format, which makes it the one this list
+		// could least afford to omit.
+		cli.ErrorEnvelope{},
 	}
 }
 
@@ -93,18 +100,28 @@ func TestMachineResultStructsHaveMatchingJSONAndYAMLKeys(t *testing.T) {
 	if len(types) == 0 {
 		t.Fatal("yamlParityTypes is empty — the guard covers nothing")
 	}
-	checked := 0
 	for _, v := range types {
 		rt := reflect.TypeOf(v)
 		t.Run(rt.Name(), func(t *testing.T) {
-			checked += checkYAMLKeyParity(t, rt, rt.Name(), map[reflect.Type]bool{})
+			checkYAMLKeyParity(t, rt, rt.Name(), map[reflect.Type]bool{})
 		})
 	}
 
-	// Anti-vacuity, the count the walker returns for exactly this purpose: if
-	// the tag lookup or the struct walk ever stops finding fields, every
-	// subtest above passes while checking nothing. One field per listed type
-	// is a floor no real result struct falls below.
+	// Anti-vacuity, using the count the walker returns for exactly this
+	// purpose: if the tag lookup or the struct walk ever stops finding fields,
+	// every subtest above passes while checking nothing. One field per listed
+	// type is a floor no real result struct falls below.
+	//
+	// Counted in a separate pass against a throwaway *testing.T rather than
+	// summed from the subtests: `go test -run …/ErrorEnvelope` skips the rest,
+	// which would leave the total short and fail the parent for no reason.
+	// Findings are reported by the subtests above; this pass only counts.
+	probe := &testing.T{}
+	checked := 0
+	for _, v := range types {
+		rt := reflect.TypeOf(v)
+		checked += checkYAMLKeyParity(probe, rt, rt.Name(), map[reflect.Type]bool{})
+	}
 	if checked < len(types) {
 		t.Errorf("walked %d tagged field(s) across %d result types — the walker has gone blind",
 			checked, len(types))
