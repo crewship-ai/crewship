@@ -875,6 +875,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   them silently, and refused alongside `--value`/`--value-stdin`, which would
   otherwise fill the same column twice and discard one of the two. Filing a
   token obtained elsewhere as `--type OAUTH2 --value <token>` is untouched.
+  `--oauth-client-secret-stdin` keeps an app secret out of `argv` — it outlives
+  every token it issues, and an argument is readable by anything that can see
+  the process table. The refusals key off the flag being *named*, not off it
+  carrying a value, so an explicitly empty secret source cannot slip past them
+  and be dropped in silence; they are also decided before stdin is read, so a
+  refused command leaves the piped stream intact for the corrected one.
 
 - **`crewship consolidate proposed` — the human half of memory consolidation.**
   `consolidate run` triggered the extraction; the four review endpoints

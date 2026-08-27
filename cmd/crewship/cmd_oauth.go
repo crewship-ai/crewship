@@ -752,19 +752,39 @@ func readOAuthClientSecret(flags *pflag.FlagSet) (string, error) {
 	return secret, nil
 }
 
-func readOAuthAppFlags(flags *pflag.FlagSet, credType string) (*oauthAppSpec, error) {
-	providerSlug, _ := flags.GetString("oauth-provider")
-	clientID, _ := flags.GetString("oauth-client-id")
-	clientSecret, err := readOAuthClientSecret(flags)
-	if err != nil {
-		return nil, err
-	}
-	authURL, _ := flags.GetString("oauth-auth-url")
-	tokenURL, _ := flags.GetString("oauth-token-url")
-	scopes, _ := flags.GetString("oauth-scopes")
+// oauthAppFlagNames is every flag readOAuthAppFlags consults, listed once so
+// the "did the operator reach for one of these?" question below cannot drift
+// from the set of flags that actually feed the spec.
+var oauthAppFlagNames = []string{
+	"oauth-provider",
+	"oauth-client-id",
+	"oauth-client-secret",
+	"oauth-client-secret-stdin",
+	"oauth-auth-url",
+	"oauth-token-url",
+	"oauth-scopes",
+}
 
-	anySet := providerSlug != "" || clientID != "" || clientSecret != "" ||
-		authURL != "" || tokenURL != "" || scopes != ""
+// anyOAuthAppFlagSet reports whether the operator reached for an --oauth-*
+// flag — which is not the same question as whether one carried a value.
+//
+// Reading it off the resolved values instead let an explicitly empty source
+// disappear: `--oauth-client-secret-stdin < /dev/null` and
+// `--oauth-client-secret ""` both resolve to "", so
+// `credential create --type API_KEY --value v --oauth-client-secret-stdin`
+// slipped past the --type guard and created an API key with the OAuth option
+// silently dropped — exactly the silent-drop the guard exists to prevent.
+func anyOAuthAppFlagSet(flags *pflag.FlagSet) bool {
+	for _, name := range oauthAppFlagNames {
+		if flags.Changed(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func readOAuthAppFlags(flags *pflag.FlagSet, credType string) (*oauthAppSpec, error) {
+	anySet := anyOAuthAppFlagSet(flags)
 
 	if !strings.EqualFold(credType, "OAUTH2") {
 		if anySet {
@@ -786,11 +806,25 @@ func readOAuthAppFlags(flags *pflag.FlagSet, credType string) (*oauthAppSpec, er
 		return nil, nil
 	}
 
+	providerSlug, _ := flags.GetString("oauth-provider")
+	clientID, _ := flags.GetString("oauth-client-id")
+	authURL, _ := flags.GetString("oauth-auth-url")
+	tokenURL, _ := flags.GetString("oauth-token-url")
+	scopes, _ := flags.GetString("oauth-scopes")
+
 	if clientID == "" {
 		return nil, cli.WithExitCode(fmt.Errorf(
 			"--oauth-client-id is required for --type OAUTH2: without it there is no client to authorize as. "+
 				"Register an OAuth app with the provider first, then pass its client id here"),
 			cli.ExitValidation)
+	}
+
+	// Read last, deliberately. Resolving the secret consumes stdin, and a run
+	// that is about to be refused for its --type or for a missing client id
+	// must not first swallow a stream another flag was going to read.
+	clientSecret, err := readOAuthClientSecret(flags)
+	if err != nil {
+		return nil, err
 	}
 
 	spec := &oauthAppSpec{

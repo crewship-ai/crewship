@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,10 +26,15 @@ import (
 func oauthAppFlagSet(t *testing.T, set map[string]string) *pflag.FlagSet {
 	t.Helper()
 	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	for _, name := range []string{
-		"oauth-provider", "oauth-client-id", "oauth-client-secret",
-		"oauth-auth-url", "oauth-token-url", "oauth-scopes",
-	} {
+	for _, name := range oauthAppFlagNames {
+		// The one bool in the set. Registering it with the same type the real
+		// command uses is what lets a test drive the stdin path at all — a
+		// FlagSet missing it makes GetBool/Changed answer "false" forever and
+		// every stdin assertion below would pass vacuously.
+		if name == "oauth-client-secret-stdin" {
+			fs.Bool(name, false, "")
+			continue
+		}
 		fs.String(name, "", "")
 	}
 	for name, value := range set {
@@ -64,6 +71,38 @@ func TestReadOAuthAppFlags(t *testing.T) {
 			credType: "API_KEY",
 			flags:    map[string]string{"oauth-client-id": "cid"},
 			wantErr:  "only valid with --type OAUTH2",
+			wantExit: cli.ExitValidation,
+		},
+		{
+			// THE REGRESSION. "Did the operator reach for an --oauth-* flag?"
+			// used to be answered by looking at the resolved VALUES, so an
+			// explicitly empty one answered "no" and the guard above never
+			// fired: the flag was accepted and then dropped in silence, which
+			// is the exact outcome the guard exists to prevent.
+			name:     "an explicitly empty oauth flag on a non-OAUTH2 type is still a flag",
+			credType: "API_KEY",
+			flags:    map[string]string{"oauth-client-secret": ""},
+			wantErr:  "only valid with --type OAUTH2",
+			wantExit: cli.ExitValidation,
+		},
+		{
+			// The same defect reached through the stdin source rather than
+			// argv: an empty stream also resolves to "".
+			name:     "an empty --oauth-client-secret-stdin on a non-OAUTH2 type is still a flag",
+			credType: "API_KEY",
+			flags:    map[string]string{"oauth-client-secret-stdin": "true"},
+			wantErr:  "only valid with --type OAUTH2",
+			wantExit: cli.ExitValidation,
+		},
+		{
+			// Nothing but the stdin switch is still an app configuration, and
+			// an app configuration without a client id cannot be authorized.
+			// Before the fix this returned (nil, nil) and the row was created
+			// as a bare OAUTH2 value credential.
+			name:     "OAUTH2 with only the stdin switch is an app config, and an incomplete one",
+			credType: "OAUTH2",
+			flags:    map[string]string{"oauth-client-secret-stdin": "true"},
+			wantErr:  "--oauth-client-id is required",
 			wantExit: cli.ExitValidation,
 		},
 		{
@@ -184,6 +223,37 @@ func TestReadOAuthAppFlags(t *testing.T) {
 				t.Errorf("spec = %+v, want %+v", *got, *tc.want)
 			}
 		})
+	}
+}
+
+// The --type guard has to fire BEFORE the secret is resolved. Resolving it
+// consumes os.Stdin, so a run that is about to exit 2 for its --type must not
+// first swallow the stream — the operator would get the refusal and an empty
+// pipe, with nothing left to pipe into the corrected command.
+//
+// Not parallel: it swaps os.Stdin.
+func TestReadOAuthAppFlagsRefusesBeforeItConsumesStdin(t *testing.T) {
+	feedStdin(t, "the-secret\n")
+
+	flags := oauthAppFlagSet(t, nil)
+	if err := flags.Set("oauth-client-secret-stdin", "true"); err != nil {
+		t.Fatalf("set oauth-client-secret-stdin: %v", err)
+	}
+
+	got, err := readOAuthAppFlags(flags, "API_KEY")
+	if err == nil {
+		t.Fatalf("an --oauth-* flag on --type API_KEY was accepted: %+v", got)
+	}
+	if !strings.Contains(err.Error(), "only valid with --type OAUTH2") {
+		t.Fatalf("error = %q, want the --type refusal", err)
+	}
+
+	rest, readErr := io.ReadAll(os.Stdin)
+	if readErr != nil {
+		t.Fatalf("read stdin: %v", readErr)
+	}
+	if strings.TrimSpace(string(rest)) != "the-secret" {
+		t.Errorf("the refused run consumed stdin; what is left = %q", rest)
 	}
 }
 
