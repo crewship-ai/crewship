@@ -250,7 +250,8 @@ const (
 	// evaluated — a DB error, not a policy decision. Kept distinct from
 	// hook.fired/hook.blocked so operators (and the journal feed) can
 	// tell "we couldn't check for hooks" apart from "a hook fired" or "a
-	// hook blocked this". Severity is warn. Payload: event, error.
+	// hook blocked this". Gating callers fail closed, while observational
+	// callers may continue. Severity is warn. Payload: event, error.
 	EntryHookDispatchError EntryType = "hook.dispatch_error"
 
 	// Automations — workspace-scoped rules that turn a journal event into a

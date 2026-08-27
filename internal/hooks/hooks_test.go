@@ -961,28 +961,23 @@ func TestSubagentHandlerConfigured(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------
-// Dispatch: ListByEvent (infra) failure must be indistinguishable from
-// "no hooks registered", never from "a hook blocked this".
+// Dispatch: ListByEvent (infra) failure must be distinguishable from both
+// "no hooks registered" and "a hook blocked this".
 // ---------------------------------------------------------------------
 
 // TestDispatchDistinguishesInfraErrorFromBlock is table-driven across the
-// two causes Dispatch can return a non-nil-vs-nil verdict for: a broken
+// two causes Dispatch can return a non-nil verdict for: a broken
 // hook lookup (infrastructure) and a blocking hook actually saying Block
 // (policy). A caller — orchestrator_run.go's pre_agent_start gate chief
-// among them — treats any non-nil Dispatch error as "a hook blocked this
-// run". Before the fix, a closed/broken DB during ListByEvent produced a
-// plain wrapped error here too, so a transient SQLite hiccup was reported
-// to users as a hook blocking their run, which is false.
+// among them — must abort on either error but report the cause honestly.
 func TestDispatchDistinguishesInfraErrorFromBlock(t *testing.T) {
 	t.Setenv(allowPrivateEnvVar, "true")
 
-	t.Run("ListByEvent failure fails open and is journaled, not swallowed", func(t *testing.T) {
+	t.Run("ListByEvent failure returns a typed error and is journaled", func(t *testing.T) {
 		db := openTestDB(t)
 		// Close the DB so the lookup itself fails the way a real infra
 		// hiccup would — QueryContext returns sql.ErrConnDone rather
-		// than a normal "no rows" result. This must NOT stop the
-		// caller: Dispatch must fail open like the documented handler
-		// fail-open below it in the same function.
+		// than a normal "no rows" result.
 		if err := db.Close(); err != nil {
 			t.Fatalf("close db: %v", err)
 		}
@@ -991,8 +986,16 @@ func TestDispatchDistinguishesInfraErrorFromBlock(t *testing.T) {
 		err := Dispatch(context.Background(), db, rec, EventPreAgentStart, EventContext{
 			WorkspaceID: "ws_test",
 		})
-		if err != nil {
-			t.Fatalf("infra error must fail open (nil), got: %v", err)
+		if err == nil {
+			t.Fatal("infra error was swallowed")
+		}
+		var de *DispatchError
+		if !errors.As(err, &de) {
+			t.Fatalf("infra error = %T, want *DispatchError: %v", err, err)
+		}
+		var be *BlockedError
+		if errors.As(err, &be) {
+			t.Fatalf("infra error also presents as *BlockedError: %v", err)
 		}
 
 		// It must still be observable — not silently swallowed.
@@ -1007,6 +1010,37 @@ func TestDispatchDistinguishesInfraErrorFromBlock(t *testing.T) {
 		}
 		if !sawDispatchError {
 			t.Errorf("expected a hook.dispatch_error journal entry, got types=%v", rec.typesSeen())
+		}
+	})
+
+	t.Run("blocking handler failure is typed infrastructure, not policy", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+		id, err := Register(context.Background(), db, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": "://invalid"},
+			Blocking:      true,
+			Enabled:       true,
+		}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = Dispatch(context.Background(), db, &recordingEmitter{}, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		var dispatchErr *DispatchError
+		if !errors.As(err, &dispatchErr) {
+			t.Fatalf("handler error = %T, want *DispatchError: %v", err, err)
+		}
+		if dispatchErr.HookID != id {
+			t.Fatalf("DispatchError.HookID = %q, want %q", dispatchErr.HookID, id)
+		}
+		var blockedErr *BlockedError
+		if errors.As(err, &blockedErr) {
+			t.Fatalf("handler failure masquerades as a policy block: %v", err)
 		}
 	})
 
@@ -1045,9 +1079,7 @@ func TestDispatchDistinguishesInfraErrorFromBlock(t *testing.T) {
 	})
 
 	t.Run("a caller can tell the two apart programmatically", func(t *testing.T) {
-		// Infra error: Dispatch returns nil, so `err != nil` (the check
-		// every call site uses) is false — the caller proceeds. No
-		// *BlockedError is ever produced from a lookup failure.
+		// Infra error: errors.As recovers DispatchError, never BlockedError.
 		db := openTestDB(t)
 		if err := db.Close(); err != nil {
 			t.Fatalf("close db: %v", err)
@@ -1059,8 +1091,9 @@ func TestDispatchDistinguishesInfraErrorFromBlock(t *testing.T) {
 		if errors.As(infraErr, &be) {
 			t.Fatal("an infra lookup error must never present as *BlockedError")
 		}
-		if infraErr != nil {
-			t.Fatalf("an infra lookup error must present as nil, got: %v", infraErr)
+		var de *DispatchError
+		if !errors.As(infraErr, &de) {
+			t.Fatalf("an infra lookup error must present as *DispatchError, got: %T: %v", infraErr, infraErr)
 		}
 
 		// Block: Dispatch returns non-nil and errors.As recovers the

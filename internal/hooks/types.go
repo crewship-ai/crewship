@@ -219,9 +219,35 @@ type BlockedError struct {
 	Result Result
 }
 
+// HookBlocked lets packages that intentionally avoid importing hooks (most
+// notably orchestrator) distinguish an explicit policy refusal through a
+// small structural interface. It remains available through errors.Join and
+// errors.As.
+func (e *BlockedError) HookBlocked() bool { return true }
+
 func (e *BlockedError) Error() string {
 	if e.Result.Message != "" {
 		return "hooks: blocked by " + e.HookID + ": " + e.Result.Message
 	}
 	return "hooks: blocked by " + e.HookID
 }
+
+// DispatchError means hook policy could not be evaluated or a configured
+// handler failed to run. It is deliberately distinct from BlockedError: the
+// former is an infrastructure/configuration failure, while the latter is an
+// explicit policy decision. Gate call sites normally fail closed on both but
+// must report them differently; observation call sites may log and continue.
+type DispatchError struct {
+	Event  Event
+	HookID string // empty when failure happened before a hook was selected
+	Cause  error
+}
+
+func (e *DispatchError) Error() string {
+	if e.HookID != "" {
+		return fmt.Sprintf("hooks: dispatch %s hook %s failed: %v", e.Event, e.HookID, e.Cause)
+	}
+	return fmt.Sprintf("hooks: dispatch %s failed: %v", e.Event, e.Cause)
+}
+
+func (e *DispatchError) Unwrap() error { return e.Cause }

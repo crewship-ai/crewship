@@ -2579,13 +2579,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   travels in, and every call site — `pre_agent_start` in the orchestrator
   chief among them — treated any non-nil `Dispatch` error as a block. An
   infrastructure blip cancelled the agent run and printed "pre_agent_start
-  hook blocked", which was false: no hook ever ran. The lookup failure is now
-  handled the same way the dispatcher already documents for a broken handler
-  — fail open so it can't wedge the platform — logged unconditionally and, when
-  a journal emitter is wired, recorded as a new `hook.dispatch_error` entry so
-  the outage stays observable instead of silently vanishing. A real
-  `*BlockedError` from a blocking hook is unaffected and still stops the
-  caller exactly as before.
+  hook blocked", which was false: no hook ever ran. Registry and handler
+  failures now return a typed `*hooks.DispatchError`; an explicit policy
+  refusal remains `*hooks.BlockedError`. The `pre_agent_start` gate fails
+  closed for either condition but reports "dispatch failed" for infrastructure
+  instead of inventing a policy block. Lookup failures are also logged
+  unconditionally and, when a journal emitter is wired, recorded as a new
+  `hook.dispatch_error` entry so the outage stays observable.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
