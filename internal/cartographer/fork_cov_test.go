@@ -36,7 +36,7 @@ func TestFork_ParentMissionNotFound(t *testing.T) {
 	defer db.Close()
 
 	// Mission in ws_other, checkpoint row claiming ws_test scope.
-	mustExecSQL(t, db, `INSERT INTO crews (id, workspace_id) VALUES ('crew_o', 'ws_other')`)
+	mustExecSQL(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew_o', 'ws_other', 'Crew O', 'crew-o')`)
 	mustExecSQL(t, db, `INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title)
 		VALUES ('mis_foreign', 'ws_other', 'crew_o', 'agent_lead', 'tr_f', 'Foreign')`)
 	mustExecSQL(t, db, `INSERT INTO checkpoints (id, workspace_id, mission_id, journal_cursor, state_snapshot)
@@ -56,7 +56,7 @@ func TestFork_DefaultLabelAndMetaClone(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_a",
@@ -107,7 +107,7 @@ func TestFork_BadDependsOnFails(t *testing.T) {
 
 	mustExecSQL(t, db, `INSERT INTO mission_tasks (id, mission_id, title, status, task_order, depends_on)
 		VALUES ('mt_corrupt', 'mis_1', 'Broken', 'PENDING', 0, '{oops')`)
-	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+	emitJournalEntry(ctx, t, db, "j_seed", "mis_1", time.Now().UTC())
 	srcID, err := Create(ctx, db, nil, Checkpoint{
 		WorkspaceID: "ws_test", MissionID: "mis_1", JournalCursor: "j_seed",
 	})
