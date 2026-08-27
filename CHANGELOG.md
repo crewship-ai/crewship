@@ -155,18 +155,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **The wake-time system prompt now shows its own memory budget (#2135).** Every
   tier injected into a session's opening prompt — `Pins`, `Crew`,
-  `Workspace`, `Agent` — now reports how many characters of its allotted
+  `Workspace`, `Agent` — now reports how many bytes of its allotted
   slice it used and what percent that is, plus a `Total` line, in a new
   `[MEMORY BUDGET]` block placed right before `[MEMORY INSTRUCTIONS]`. The
   wording matches `memory.write`'s existing overflow-guidance usage string
-  (`<used> of <cap> bytes, <pct>%`) so the model reads one consistent
-  format whether it's checking a write it just made or the snapshot it
-  woke up with. When the budget forced a tier's trailing content to be
-  dropped — previously silent — the meter now says so by name
+  byte for byte, unit included (`<used> of <cap> bytes, <pct>%`): both
+  meters count `len(string)` bytes, and the budget these tiers are
+  actually enforced against is itself byte-denominated, so "bytes" is the
+  only label that describes what is measured and capped — an earlier
+  draft of this meter said "chars" while still counting and enforcing
+  bytes, which reads as accurate for pure-ASCII content but is wrong for
+  anything else (this product carries Czech text throughout). A
+  percentage that would round down to 0% for real, non-zero usage now
+  floors to 1% instead. When the budget forced a tier's trailing content
+  to be dropped — previously silent — the meter now says so by name
   (`Truncated to fit: Agent — trailing content in it was dropped, not
-  just hidden.`). The default 15,000-char budget, the per-tier allocation
-  ratios, and the truncation policy itself are unchanged; this only makes
-  the existing behaviour visible to the model.
+  just hidden.`), and truncation itself is now rune-aligned so a cut can
+  never sever a multi-byte UTF-8 character and hand the model invalid
+  text. A separate `Read incomplete: Workspace` clause covers a distinct
+  failure the truncation notice can't: a stalled or slow workspace
+  filesystem read that times out mid-scan, which previously came back
+  indistinguishable from "there just wasn't much workspace memory" — the
+  model is now told the read did not finish rather than being left to
+  assume it saw everything. The default 15,000-byte budget, the per-tier
+  allocation ratios, and the truncation policy itself are unchanged; this
+  only makes the existing behaviour visible to the model, honestly.
 
 ### Changed
 

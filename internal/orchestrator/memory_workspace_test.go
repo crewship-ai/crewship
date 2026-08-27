@@ -25,13 +25,20 @@ func (s *stubWorkspaceProvider) For(workspaceID string) WorkspaceMemoryReader {
 // stubWorkspaceReader returns a fixed content + the byte count of the
 // returned string. The orchestrator's block assembly handles framing,
 // so the reader's job is just "here's what to render at this budget".
+//
+// forceIncomplete simulates the #1637 timeout path: a reader whose read
+// stopped before finishing (e.g. ctx expired mid-scan) but still hands
+// back whatever partial content it had, `used` typically far under
+// budget. Real callers get this from WorkspaceMemory.GetContext's own
+// ctx.Done() detection; the stub just needs to be able to say it too.
 type stubWorkspaceReader struct {
-	content string
+	content         string
+	forceIncomplete bool
 }
 
-func (s *stubWorkspaceReader) GetContext(_ context.Context, budget int) (string, int) {
+func (s *stubWorkspaceReader) GetContext(_ context.Context, budget int) (string, int, bool) {
 	if s == nil || s.content == "" || budget <= 0 {
-		return "", 0
+		return "", 0, s != nil && s.forceIncomplete
 	}
 	if len(s.content) > budget {
 		// Mirror the WorkspaceMemory.GetContext truncation semantics —
@@ -46,9 +53,9 @@ func (s *stubWorkspaceReader) GetContext(_ context.Context, budget int) (string,
 			cut = len(s.content)
 		}
 		out := s.content[:cut] + "\n...(truncated)\n"
-		return out, len(out)
+		return out, len(out), s.forceIncomplete
 	}
-	return s.content, len(s.content)
+	return s.content, len(s.content), s.forceIncomplete
 }
 
 // TestBuildWorkspaceMemoryBlock_NoProvider_Empty ensures the existing
@@ -178,5 +185,67 @@ func TestBuildMemoryContext_NoWorkspaceProvider_NoRegression(t *testing.T) {
 	}
 	if !strings.Contains(out, "[AGENT MEMORY]") {
 		t.Errorf("agent tier still expected: %q", out)
+	}
+}
+
+// TestBuildMemoryContext_WorkspaceIncomplete_DistinctFromTruncated is the
+// #1637 finding-2 regression at the orchestrator level: a workspace
+// reader whose read did not finish (e.g. ctx timed out mid-walk) must
+// surface as "Read incomplete" in the [MEMORY BUDGET] meter — a
+// different, distinguishable clause from "Truncated to fit", which means
+// the content was seen in full and then deliberately cut. Conflating the
+// two tells the model "you saw everything" when a chunk of workspace
+// memory was silently never read at all.
+func TestBuildMemoryContext_WorkspaceIncomplete_DistinctFromTruncated(t *testing.T) {
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/agents/agent-1/.memory/AGENT.md": "long-term\n",
+	})
+	o := New(mc, newMemState(), slog.Default())
+	o.SetWorkspaceMemoryProvider(&stubWorkspaceProvider{readers: map[string]WorkspaceMemoryReader{
+		// used (len(content)) is small relative to any reasonable
+		// budget — the #1637 shape where nothing about the number alone
+		// hints that content is missing.
+		"ws_test": &stubWorkspaceReader{content: "a little workspace content", forceIncomplete: true},
+	}})
+	req := AgentRunRequest{
+		ContainerID:   "c1",
+		AgentSlug:     "agent-1",
+		AgentID:       "a1",
+		WorkspaceID:   "ws_test",
+		MemoryEnabled: true,
+	}
+
+	out := o.buildMemoryContext(context.Background(), req, 0)
+
+	if !strings.Contains(out, "Read incomplete: Workspace") {
+		t.Errorf("expected a distinct 'Read incomplete: Workspace' clause in the meter:\n%s", out)
+	}
+	if strings.Contains(out, "Truncated to fit: Workspace") {
+		t.Errorf("an incomplete read is not the same fact as a to-fit truncation — must not also claim Workspace was truncated to fit:\n%s", out)
+	}
+}
+
+// TestBuildMemoryContext_WorkspaceComplete_NoIncompleteNoise guards the
+// meter against inventing a "Read incomplete" clause for a normal,
+// finished workspace read.
+func TestBuildMemoryContext_WorkspaceComplete_NoIncompleteNoise(t *testing.T) {
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/agents/agent-1/.memory/AGENT.md": "long-term\n",
+	})
+	o := New(mc, newMemState(), slog.Default())
+	o.SetWorkspaceMemoryProvider(&stubWorkspaceProvider{readers: map[string]WorkspaceMemoryReader{
+		"ws_test": &stubWorkspaceReader{content: "a little workspace content"},
+	}})
+	req := AgentRunRequest{
+		ContainerID:   "c1",
+		AgentSlug:     "agent-1",
+		AgentID:       "a1",
+		WorkspaceID:   "ws_test",
+		MemoryEnabled: true,
+	}
+
+	out := o.buildMemoryContext(context.Background(), req, 0)
+	if strings.Contains(out, "Read incomplete") {
+		t.Errorf("a finished workspace read must not print a 'Read incomplete' clause:\n%s", out)
 	}
 }

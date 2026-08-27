@@ -39,7 +39,7 @@ Skip memory if the agent is single-use, the conversation never references prior 
 | **`topics/`** | Crew-only. Domain-specific knowledge files (`topics/deployment.md`, `topics/security.md`) that accrete bounded subject expertise. Hybrid retrieval ranks them above daily noise on on-topic queries. |
 | **FTS5 index** | SQLite's full-text-search-5 extension. Each tier has its own `index.sqlite` file managed by the sidecar. BM25 ranks results — relevance scoring used by virtually every modern search system since Elasticsearch. |
 | **Hybrid retrieval (RRF)** | When an in-process embedding model is configured, dense vector scoring runs alongside BM25 and the two ranked lists are fused via reciprocal rank fusion. From PR #212; sub-millisecond on tens of thousands of chunks because nothing leaves the process. |
-| **Budget** | The character allowance for memory content in the system prompt. Default 15,000 chars. The crew tier is capped at 40% of total; the agent tier reclaims the remainder. Empty tiers reclaim their entire share. A `[MEMORY BUDGET]` meter renders per-tier and total usage into the prompt itself — see [Reading Memory](#2-reading-memory-system-prompt-injection). |
+| **Budget** | The byte allowance for memory content in the system prompt. Default 15,000 bytes. The crew tier is capped at 40% of total; the agent tier reclaims the remainder. Empty tiers reclaim their entire share. A `[MEMORY BUDGET]` meter renders per-tier and total usage into the prompt itself — see [Reading Memory](#2-reading-memory-system-prompt-injection). |
 | **System-prompt injection** | The orchestrator's `BuildMemoryBlock` reads the top-K chunks at session start and prepends them between `[AGENT MEMORY]` / `[END AGENT MEMORY]` and `[CREW SHARED MEMORY]` / `[END CREW SHARED MEMORY]` markers. The LLM sees memory as part of its system prompt; the agent never has to *ask* for it. |
 | **Sidecar memory engine** | Each agent container's sidecar process (`localhost:9119`) owns the agent's FTS5 index and proxies search to the lead's sidecar for crew-tier queries. The lead sidecar reindexes the crew tier every 60 seconds. |
 | **`memory_enabled`** | Per-agent flag. `false` by default — memory tiers are not read, written, or indexed for that agent. Flip via `crewship agent update --memory`. |
@@ -274,9 +274,9 @@ When a session starts, the orchestrator reads memory files and injects them into
 [END CREW SHARED MEMORY]
 
 [MEMORY BUDGET]
-Crew: 1980 of 6000 chars, 33%
-Agent: 6432 of 9000 chars, 71%
-Total: 8412 of 15000 chars, 56%
+Crew: 1980 of 6000 bytes, 33%
+Agent: 6432 of 9000 bytes, 71%
+Total: 8412 of 15000 bytes, 56%
 [END MEMORY BUDGET]
 
 [MEMORY INSTRUCTIONS]
@@ -287,33 +287,50 @@ Total: 8412 of 15000 chars, 56%
 #### The `[MEMORY BUDGET]` meter
 
 Right after the tier blocks and before `[MEMORY INSTRUCTIONS]`, the prompt
-carries a one-line-per-tier usage meter: how many of the wake-time character
-budget's chars each allocated tier (`Pins`, `Crew`, `Workspace`, `Agent` —
-only the tiers actually allocated for this run) actually used, plus a
-`Total` line. The wording mirrors `memory.write`'s own overflow-guidance
-usage string byte for byte (`<used> of <cap> bytes, <pct>%`, described
-above) except for the unit — chars in the assembled prompt, not bytes on a
-tier's file:
+carries a one-line-per-tier usage meter: how many of the wake-time byte
+budget each allocated tier (`Pins`, `Crew`, `Workspace`, `Agent` — only the
+tiers actually allocated for this run) actually used, plus a `Total` line.
+The wording matches `memory.write`'s own overflow-guidance usage string byte
+for byte, unit included (`<used> of <cap> bytes, <pct>%`, described above):
+every number here is a `len(string)` byte count, and the budget these tiers
+are actually enforced against is itself byte-denominated, so "bytes" is the
+only label that describes what was measured and capped. A percentage that
+would otherwise round down to 0% is floored to 1% for any non-zero usage —
+`50 of 15000 bytes, 1%`, not `0%`, which reads as empty when it is not:
 
 ```
-Agent: 6432 of 9000 chars, 71%
+Agent: 6432 of 9000 bytes, 71%
 ```
 
 If a tier's content had to be cut or dropped to fit its slice of the
-budget — the default 15,000-char wake-time cap, split 10% pins / 40% crew /
+budget — the default 15,000-byte wake-time cap, split 10% pins / 40% crew /
 15% workspace / agent remainder — the meter says so explicitly instead of
 letting the model believe it saw the whole snapshot:
 
 ```
 [MEMORY BUDGET]
-Agent: 9000 of 9000 chars, 100%
-Total: 9000 of 9000 chars, 100%
+Agent: 9000 of 9000 bytes, 100%
+Total: 9000 of 9000 bytes, 100%
 Truncated to fit: Agent — trailing content in it was dropped, not just hidden.
 [END MEMORY BUDGET]
 ```
 
 The notice only ever names tiers that actually lost content; a prompt that
 fit within budget prints no truncation line at all.
+
+A separate clause covers a different failure: the Workspace tier's read can
+be cut short by a timeout before it ever finishes scanning (a stalled or
+slow workspace filesystem), rather than finishing and being trimmed to fit.
+That case prints `Read incomplete` instead of `Truncated to fit` — the
+`used` number can look small and unremarkable while real content past it
+was never even read:
+
+```
+[MEMORY BUDGET]
+Workspace: 800 of 2000 bytes, 40%
+Read incomplete: Workspace — the read did not finish (e.g. timed out); content beyond what is shown may be missing entirely, not just cut to fit.
+[END MEMORY BUDGET]
+```
 
 ### 2a. Operator model (per-user)
 
@@ -603,7 +620,7 @@ routes are no longer a boot-agent-only surface.
 
 ## Dynamic Budget Allocation
 
-The orchestrator allocates a character budget (default 15,000 chars) across memory tiers. Empty tiers reclaim their budget for lower tiers.
+The orchestrator allocates a byte budget (default 15,000 bytes) across memory tiers. Empty tiers reclaim their budget for lower tiers.
 
 | Agent Role | Crew (max) | Agent (remainder) |
 |------------|------------|-------------------|
@@ -613,11 +630,11 @@ The orchestrator allocates a character budget (default 15,000 chars) across memo
 
 <Accordion title="Budget examples">
 **Lead with small crew memory:**
-- Crew: 2,000 chars (actual content, under 40% cap)
-- Agent: 13,000 chars (reclaimed from crew)
+- Crew: 2,000 bytes (actual content, under 40% cap)
+- Agent: 13,000 bytes (reclaimed from crew)
 
 **Single-agent crew (no peers, empty crew memory):**
-- Agent: 15,000 chars (full budget)
+- Agent: 15,000 bytes (full budget)
 </Accordion>
 
 ## API reference

@@ -8,7 +8,7 @@ import (
 )
 
 // The model assembling this prompt is never otherwise told how much of
-// its wake-time character budget it just spent, or whether a tier's
+// its wake-time byte budget it just spent, or whether a tier's
 // content was silently dropped to fit (#1637 covers the drop; this is
 // making the fact of it visible). Research on agent memory finds
 // rendering that meter is the single largest lever measured in the area
@@ -39,8 +39,8 @@ func TestRenderMemoryBudget_Table(t *testing.T) {
 			},
 			wantLines: []string{
 				"[MEMORY BUDGET]",
-				"Agent: 300 of 8000 chars, 3%",
-				"Total: 300 of 15000 chars, 2%",
+				"Agent: 300 of 8000 bytes, 3%",
+				"Total: 300 of 15000 bytes, 2%",
 				"[END MEMORY BUDGET]",
 			},
 			wantTruncated: false,
@@ -53,9 +53,9 @@ func TestRenderMemoryBudget_Table(t *testing.T) {
 				{label: "Agent", used: 7600, budget: 8000, truncated: false},
 			},
 			wantLines: []string{
-				"Pins: 140 of 1500 chars, 9%",
-				"Agent: 7600 of 8000 chars, 95%",
-				"Total: 7740 of 15000 chars, 51%",
+				"Pins: 140 of 1500 bytes, 9%",
+				"Agent: 7600 of 8000 bytes, 95%",
+				"Total: 7740 of 15000 bytes, 51%",
 			},
 			wantTruncated: false,
 		},
@@ -67,9 +67,9 @@ func TestRenderMemoryBudget_Table(t *testing.T) {
 				{label: "Agent", used: 8000, budget: 8000, truncated: false},
 			},
 			wantLines: []string{
-				"Crew: 6000 of 6000 chars, 100%",
-				"Agent: 8000 of 8000 chars, 100%",
-				"Total: 14000 of 15000 chars, 93%",
+				"Crew: 6000 of 6000 bytes, 100%",
+				"Agent: 8000 of 8000 bytes, 100%",
+				"Total: 14000 of 15000 bytes, 93%",
 			},
 			wantTruncated: true,
 		},
@@ -100,8 +100,30 @@ func TestRenderMemoryBudget_MatchesWriteTimeWording(t *testing.T) {
 	got := renderMemoryBudget(4000, []memoryBudgetStat{
 		{label: "Agent", used: 3900, budget: 4000, truncated: false},
 	})
-	if !strings.Contains(got, "3900 of 4000 chars, 97%") {
-		t.Errorf("meter wording does not mirror memory.write's capUsage format (\"<used> of <cap> bytes/chars, <pct>%%\"):\n%s", got)
+	if !strings.Contains(got, "3900 of 4000 bytes, 97%") {
+		t.Errorf("meter wording does not mirror memory.write's capUsage format (\"<used> of <cap> bytes, <pct>%%\"):\n%s", got)
+	}
+}
+
+// TestMemoryBudgetPct_FloorsToOnePercentForSmallUsage: integer division
+// (used*100)/budget floors "50 of 15000 bytes" to 0%, which reads as
+// "empty" when 50 bytes were, in fact, used. Any non-zero usage should
+// round up to at least 1%; zero usage must still read 0%.
+func TestMemoryBudgetPct_FloorsToOnePercentForSmallUsage(t *testing.T) {
+	cases := []struct {
+		used, budget, want int
+	}{
+		{used: 0, budget: 15000, want: 0},
+		{used: 50, budget: 15000, want: 1},
+		{used: 1, budget: 1000000, want: 1},
+		{used: 150, budget: 15000, want: 1}, // exact 1% stays 1%, not bumped
+		{used: 7500, budget: 15000, want: 50},
+	}
+	for _, tc := range cases {
+		got := memoryBudgetPct(tc.used, tc.budget)
+		if got != tc.want {
+			t.Errorf("memoryBudgetPct(%d, %d) = %d, want %d", tc.used, tc.budget, got, tc.want)
+		}
 	}
 }
 
@@ -112,7 +134,7 @@ func TestRenderMemoryBudget_NoStats_NoTruncationNoise(t *testing.T) {
 	if strings.Contains(got, "Truncated to fit") {
 		t.Errorf("empty stats must never print a truncation notice:\n%s", got)
 	}
-	if !strings.Contains(got, "Total: 0 of 15000 chars, 0%") {
+	if !strings.Contains(got, "Total: 0 of 15000 bytes, 0%") {
 		t.Errorf("expected a zeroed total line:\n%s", got)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -76,7 +77,16 @@ type WorkspaceMemoryReader interface {
 	// stall cannot block prompt assembly past the orchestrator's
 	// memoryReadTimeout; implementations should plumb the ctx into
 	// any DB/file IO they do under the hood.
-	GetContext(ctx context.Context, budget int) (string, int)
+	//
+	// incomplete reports that the read stopped before it finished
+	// scanning workspace memory (e.g. ctx expired mid-walk) as opposed
+	// to finishing normally and being cut to fit budget. #1637 found a
+	// case where a stalled read returns a partial file set with `used`
+	// far under budget — nothing about that shape distinguishes it from
+	// "there just wasn't much workspace memory" unless the reader says
+	// so explicitly. A reader with no partial-read concept can always
+	// return false.
+	GetContext(ctx context.Context, budget int) (content string, used int, incomplete bool)
 }
 
 // WorkspaceMemoryProvider resolves the WorkspaceMemoryReader for a given
@@ -141,11 +151,11 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	remaining -= crewUsed
 	var workspaceBlock string
 	var workspaceUsed, wsBudget int
-	var workspaceTruncated, workspaceAllocated bool
+	var workspaceTruncated, workspaceAllocated, workspaceIncomplete bool
 	if req.WorkspaceID != "" {
 		workspaceAllocated = true
 		wsBudget = remaining * workspaceMemoryMaxPct / 100
-		workspaceBlock, workspaceUsed, workspaceTruncated = o.buildWorkspaceMemoryBlockDetailed(ctx, req.WorkspaceID, wsBudget)
+		workspaceBlock, workspaceUsed, workspaceTruncated, workspaceIncomplete = o.buildWorkspaceMemoryBlockDetailed(ctx, req.WorkspaceID, wsBudget)
 	}
 
 	// --- Agent memory gets remainder (dynamic reclaim from empty tiers) ---
@@ -163,15 +173,15 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	// reads one consistent format for both.
 	var budgetStats []memoryBudgetStat
 	if pinsAllocated {
-		budgetStats = append(budgetStats, memoryBudgetStat{"Pins", pinsUsed, pinsBudget, pinsTruncated})
+		budgetStats = append(budgetStats, memoryBudgetStat{label: "Pins", used: pinsUsed, budget: pinsBudget, truncated: pinsTruncated})
 	}
 	if crewAllocated {
-		budgetStats = append(budgetStats, memoryBudgetStat{"Crew", crewUsed, crewBudget, crewTruncated})
+		budgetStats = append(budgetStats, memoryBudgetStat{label: "Crew", used: crewUsed, budget: crewBudget, truncated: crewTruncated})
 	}
 	if workspaceAllocated {
-		budgetStats = append(budgetStats, memoryBudgetStat{"Workspace", workspaceUsed, wsBudget, workspaceTruncated})
+		budgetStats = append(budgetStats, memoryBudgetStat{label: "Workspace", used: workspaceUsed, budget: wsBudget, truncated: workspaceTruncated, incomplete: workspaceIncomplete})
 	}
-	budgetStats = append(budgetStats, memoryBudgetStat{"Agent", len(agentBlock), agentBudget, agentTruncated})
+	budgetStats = append(budgetStats, memoryBudgetStat{label: "Agent", used: len(agentBlock), budget: agentBudget, truncated: agentTruncated})
 	budgetBlock := renderMemoryBudget(charBudget, budgetStats)
 
 	// If no memory files at all, the PERSONA + peer card blocks are
@@ -262,14 +272,22 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 }
 
 // memoryBudgetStat is one tier's line in the [MEMORY BUDGET] meter: its
-// allocated slice of the wake-time character budget, how much of it this
+// allocated slice of the wake-time byte budget, how much of it this
 // prompt actually used, and whether that tier's content was dropped or
 // cut to fit.
 type memoryBudgetStat struct {
 	label     string
 	used      int
 	budget    int
-	truncated bool
+	truncated bool // content was cut to fit this tier's budget slice
+
+	// incomplete: the read itself stopped before it finished (e.g. a
+	// timeout aborted a filesystem walk mid-scan), as opposed to
+	// finishing and then being cut to fit budget. #1637: with `used`
+	// typically far under budget in this case, nothing else about the
+	// numbers on this line signals that content is missing — only the
+	// reader that stopped early knows.
+	incomplete bool
 }
 
 // renderMemoryBudget formats the [MEMORY BUDGET] block — the wake-time
@@ -282,9 +300,13 @@ type memoryBudgetStat struct {
 // to keep.
 //
 // Wording deliberately matches capUsage's "<used> of <cap> bytes, <pct>%"
-// so an agent reads the same shape whether it is checking a write it just
-// made or the snapshot it woke up with; only the unit changes (bytes on a
-// tier file vs. chars in the assembled prompt).
+// byte for byte, including the unit: every number here is a Go
+// len(string) byte count (this product carries Czech and other
+// multi-byte text throughout, so bytes and characters diverge in
+// practice), and the budget these tiers are actually enforced against
+// (assembleSectionsEmitted's contentBudget, WorkspaceMemory.GetContext's
+// cut) is itself byte-denominated. Labeling the number anything but
+// "bytes" would describe a quantity the enforcement never computed.
 //
 // stats should include one entry per tier that was actually allocated a
 // slice of the budget this run (a crew-less solo agent has no [PINS] /
@@ -300,11 +322,15 @@ func renderMemoryBudget(totalBudget int, stats []memoryBudgetStat) string {
 	b.WriteString("[MEMORY BUDGET]\n")
 	var totalUsed int
 	var truncatedLabels []string
+	var incompleteLabels []string
 	for _, s := range stats {
 		totalUsed += s.used
 		b.WriteString(fmt.Sprintf("%s: %s\n", s.label, memoryBudgetUsage(s.used, s.budget)))
 		if s.truncated {
 			truncatedLabels = append(truncatedLabels, s.label)
+		}
+		if s.incomplete {
+			incompleteLabels = append(incompleteLabels, s.label)
 		}
 	}
 	b.WriteString(fmt.Sprintf("Total: %s\n", memoryBudgetUsage(totalUsed, totalBudget)))
@@ -315,6 +341,17 @@ func renderMemoryBudget(totalBudget int, stats []memoryBudgetStat) string {
 		// case, now stated instead of left implicit).
 		b.WriteString(fmt.Sprintf("Truncated to fit: %s — trailing content in %s was dropped, not just hidden.\n",
 			strings.Join(truncatedLabels, ", "), pluralizeThis(len(truncatedLabels))))
+	}
+	if len(incompleteLabels) > 0 {
+		// A separate clause from "truncated to fit": that one means the
+		// content existed and was cut on purpose; this one means the read
+		// itself never finished (e.g. a timed-out filesystem walk), so
+		// the `used` number above may look small and unremarkable while
+		// real content past it was never even seen. #1637's second gap —
+		// conflating the two would tell the model "you saw everything"
+		// when it did not.
+		b.WriteString(fmt.Sprintf("Read incomplete: %s — the read did not finish (e.g. timed out); content beyond what is shown may be missing entirely, not just cut to fit.\n",
+			strings.Join(incompleteLabels, ", ")))
 	}
 	b.WriteString("[END MEMORY BUDGET]\n\n")
 	return b.String()
@@ -330,20 +367,28 @@ func pluralizeThis(n int) string {
 	return "them"
 }
 
-// memoryBudgetUsage renders one "<used> of <budget> chars, <pct>%" line,
-// matching internal/memory/tools.go's capUsage wording byte for byte
-// except for the unit (chars, not bytes — the wake-time budget is
-// denominated in characters of assembled prompt, not a file's bytes on
-// disk).
+// memoryBudgetUsage renders one "<used> of <budget> bytes, <pct>%" line,
+// matching internal/memory/tools.go's capUsage wording exactly, unit
+// included: both meters count len(string) bytes of the same content
+// class (memory tier text), and the wake-time budget is enforced in
+// bytes (assembleSectionsEmitted, WorkspaceMemory.GetContext), so "bytes"
+// is the only label that describes what was actually measured and capped.
 func memoryBudgetUsage(used, budget int) string {
-	return fmt.Sprintf("%d of %d chars, %d%%", used, budget, memoryBudgetPct(used, budget))
+	return fmt.Sprintf("%d of %d bytes, %d%%", used, budget, memoryBudgetPct(used, budget))
 }
 
+// memoryBudgetPct floors to 1% for any non-zero usage rather than letting
+// integer division round a small-but-real usage down to 0%. "50 of 15000
+// bytes, 0%" reads as "nothing here" when 50 bytes were, in fact, used.
 func memoryBudgetPct(used, budget int) int {
 	if budget <= 0 {
 		return 0
 	}
-	return (used * 100) / budget
+	pct := (used * 100) / budget
+	if pct == 0 && used > 0 {
+		return 1
+	}
+	return pct
 }
 
 // nudgeThreshold is how many new journal entries for the agent since
@@ -771,40 +816,44 @@ const crewOutcomesMaxEntries = 10
 // markers + content) — workspace tier is contextual reference, not
 // session-state.
 // Thin wrapper over buildWorkspaceMemoryBlockDetailed that drops the
-// truncated bool — kept so existing two-value callers don't need to
-// change for the [MEMORY BUDGET] meter's sake.
+// truncated and incomplete bools — kept so existing two-value callers
+// don't need to change for the [MEMORY BUDGET] meter's sake.
 func (o *Orchestrator) buildWorkspaceMemoryBlock(ctx context.Context, workspaceID string, budget int) (string, int) {
-	block, used, _ := o.buildWorkspaceMemoryBlockDetailed(ctx, workspaceID, budget)
+	block, used, _, _ := o.buildWorkspaceMemoryBlockDetailed(ctx, workspaceID, budget)
 	return block, used
 }
 
 // buildWorkspaceMemoryBlockDetailed is buildWorkspaceMemoryBlock plus
-// whether the budget forced this tier's content to be dropped or cut.
+// whether the budget forced this tier's content to be dropped or cut,
+// and whether the underlying read itself stopped before finishing.
 //
-// Truncation here has two sources: WorkspaceMemoryReader.GetContext can
+// Truncation-to-fit has two sources: WorkspaceMemoryReader.GetContext can
 // already cut content to fit BEFORE this function ever sees it (the
-// concrete memory.WorkspaceMemory implementation does exactly that,
-// including files it drops entirely with no marker at all — see the
-// GetContext doc comment), and assembleSectionsEmitted can cut again when
-// re-wrapping with markers. The literal "...(truncated)" marker the
-// reader leaves behind is the only signal available across the narrow
-// WorkspaceMemoryReader interface for the first case; a reader that drops
-// whole trailing files silently (no cut mid-file) is invisible from here
-// — flagged in the PR body as a pre-existing gap, not fixed by this
-// change.
-func (o *Orchestrator) buildWorkspaceMemoryBlockDetailed(ctx context.Context, workspaceID string, budget int) (string, int, bool) {
+// concrete memory.WorkspaceMemory implementation does exactly that when
+// it runs out of budget mid-walk), and assembleSectionsEmitted can cut
+// again when re-wrapping with markers. The literal "...(truncated)"
+// marker the reader leaves behind is the only signal available across
+// the narrow WorkspaceMemoryReader interface for the first case.
+//
+// That is a distinct failure mode from incomplete: #1637 found that a
+// stalled or slow workspace filesystem can make GetContext's walk abort
+// on ctx expiry with a partial file set and no cut mid-file at all — no
+// "...(truncated)" marker, and `used` typically far under budget, so
+// nothing about the numbers here would otherwise say content is missing.
+// incomplete is that explicit signal, threaded straight from the reader.
+func (o *Orchestrator) buildWorkspaceMemoryBlockDetailed(ctx context.Context, workspaceID string, budget int) (string, int, bool, bool) {
 	if budget <= 0 || workspaceID == "" {
-		return "", 0, false
+		return "", 0, false, false
 	}
 	o.mu.RLock()
 	provider := o.workspaceMemory
 	o.mu.RUnlock()
 	if provider == nil {
-		return "", 0, false
+		return "", 0, false, false
 	}
 	reader := provider.For(workspaceID)
 	if reader == nil {
-		return "", 0, false
+		return "", 0, false, false
 	}
 	// Bounded read: the other tier blocks already cap their FTS reads
 	// at memoryReadTimeout; the workspace tier needs the same defence
@@ -812,16 +861,20 @@ func (o *Orchestrator) buildWorkspaceMemoryBlockDetailed(ctx context.Context, wo
 	// assembly.
 	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
 	defer cancel()
-	content, used := reader.GetContext(readCtx, budget)
+	content, used, incomplete := reader.GetContext(readCtx, budget)
 	if used == 0 || content == "" {
-		return "", 0, false
+		// A ctx timeout that fires before the walk finds even one file
+		// still means the read did not finish — that fact must survive
+		// this early return, or a wedged workspace filesystem renders as
+		// indistinguishable from "no workspace memory configured".
+		return "", 0, false, incomplete
 	}
 	readerTruncated := strings.Contains(content, "...(truncated)")
 	// Match the assembleSections framing the other tiers use so the
 	// agent's prompt parser sees a consistent shape across blocks.
 	sections := []memorySection{{label: "workspace-wide memory", content: content}}
 	block, _, wrapTruncated := assembleSectionsEmitted("[WORKSPACE MEMORY]", "[END WORKSPACE MEMORY]", sections, budget)
-	return block, len(block), readerTruncated || wrapTruncated
+	return block, len(block), readerTruncated || wrapTruncated, incomplete
 }
 
 // buildPinsBlock reads the operator-pinned entries file
@@ -864,6 +917,29 @@ func (o *Orchestrator) buildPinsBlockDetailed(ctx context.Context, req AgentRunR
 	}
 	block, _, truncated := assembleSectionsEmitted("[PINS]", "[END PINS]", sections, budget)
 	return block, len(block), truncated
+}
+
+// truncateUTF8 returns the longest prefix of s that is at most maxBytes
+// bytes long and does not end mid-rune. Section content is authored by
+// prior agent runs and regularly contains multi-byte UTF-8 (this product
+// carries Czech text throughout); slicing a Go string by raw byte offset
+// can land inside a multi-byte sequence and produce invalid UTF-8 — a
+// lead byte with its continuation bytes severed off. Walking back to the
+// nearest rune-start byte only ever removes bytes, so a caller's budget
+// is still honoured (the result can be shorter than maxBytes, never
+// longer).
+func truncateUTF8(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if maxBytes >= len(s) {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // assembleSections builds a memory block from sections with budget-aware truncation.
@@ -972,8 +1048,17 @@ func assembleSectionsEmitted(startMarker, endMarker string, sections []memorySec
 			// so slice+suffix fits the cap exactly. Without this,
 			// slicing to `remaining` and then appending the suffix
 			// overshoots by len(truncSuffix).
+			//
+			// The cut itself must land on a UTF-8 rune boundary. This
+			// product carries Czech (and other multi-byte) text
+			// throughout, and a plain byte slice at an arbitrary offset
+			// can land inside a multi-byte sequence — severing a lead
+			// byte from its continuation bytes and handing the model
+			// invalid UTF-8 inside a memory block it is told to trust as
+			// text. truncateUTF8 only ever removes bytes, so it never
+			// grows past the budget it was asked to fit.
 			cut := remaining - len(truncSuffix)
-			section = section[:cut] + truncSuffix
+			section = truncateUTF8(section, cut) + truncSuffix
 		}
 		content.WriteString(section)
 		totalChars += len(section)

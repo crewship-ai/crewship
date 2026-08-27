@@ -80,7 +80,7 @@ func TestServer_OrchestratorWorkspaceProvider_ValidWorkspace_ReturnsReader(t *te
 	// means the adapter handed back the wrong type.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	body, used := reader.GetContext(ctx, 0)
+	body, used, _ := reader.GetContext(ctx, 0)
 	if body != "" || used != 0 {
 		t.Errorf("empty workspace should yield (\"\", 0), got (%q, %d)", body, used)
 	}
