@@ -693,9 +693,10 @@ func (o *Orchestrator) buildAgentMemoryBlockDetailed(ctx context.Context, req Ag
 	return block, gap, truncated
 }
 
-// buildCrewMemoryBlock reads crew shared memory files and returns a formatted
-// block with [CREW SHARED MEMORY] markers. Returns empty string and 0 chars used
-// if no crew memory files exist.
+// buildCrewMemoryBlockDetailed reads crew shared memory files and returns a
+// formatted block with [CREW SHARED MEMORY] markers, the characters it spent,
+// and whether the budget forced this tier's content to be dropped or cut.
+// Returns empty string and 0 chars used if no crew memory files exist.
 //
 // For LEAD-role agents this also surfaces a "Crew outcomes" section
 // derived from the crew-shared lessons.md (F4.5 mission outcomes).
@@ -704,16 +705,9 @@ func (o *Orchestrator) buildAgentMemoryBlockDetailed(ctx context.Context, req Ag
 // without delivering signal that's actionable at the agent tier.
 // Non-LEAD members can still pull the same data on demand via
 // memory.read tier=lessons if they need it mid-session.
-// Thin wrapper over buildCrewMemoryBlockDetailed that drops the truncated
-// bool — kept so existing two-value callers don't need to change for the
-// [MEMORY BUDGET] meter's sake.
-func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunRequest, budget int, today string) (string, int) {
-	block, used, _ := o.buildCrewMemoryBlockDetailed(ctx, req, budget, today)
-	return block, used
-}
-
-// buildCrewMemoryBlockDetailed is buildCrewMemoryBlock plus whether the
-// budget forced this tier's content to be dropped or cut.
+//
+// The other three tier builders kept a two-value wrapper because tests call
+// them that way; this one had no such caller, so there is no wrapper to keep.
 func (o *Orchestrator) buildCrewMemoryBlockDetailed(ctx context.Context, req AgentRunRequest, budget int, today string) (string, int, bool) {
 	// Container path: this block reads through a container exec.
 	crewMemDir := memory.ContainerCrewMemoryRoot
