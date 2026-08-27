@@ -88,6 +88,27 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **A database write looked exactly like `ls` in the run trace.** Sub-span
+  kinds were derived from the tool NAME alone, and every shell call is the
+  same tool — so `psql -c "delete from orders"` and a directory listing both
+  rendered as an anonymous `bash` row, and the one question a trace exists to
+  answer ("what did this run touch?") had no answer for infrastructure. Shell
+  calls and MCP calls that reach a datastore now carry their own `db` kind and
+  name the engine (`postgres`, `redis`, `mysql`, `mongodb`, and a dozen more)
+  in `attributes.tool`, so the row shows the store's own mark rather than a
+  terminal glyph.
+
+  Classification reads the first executable of the command — past leading
+  `VAR=value` assignments, a bare `sudo`, quotes and any directory prefix —
+  and stops there. It deliberately does not split on `&&`, `|` or `;`, or
+  descend into subshells and here-docs: doing that correctly means
+  implementing shell quoting, and doing it *incorrectly* is how
+  `echo "psql is great"` becomes a database span. Anything the shallow parse
+  misses — `cd /app && psql …`, an engine not on the list, an MCP server
+  called `prod-db` — keeps its old `bash` / `mcp_tool` kind. Under-classifying
+  is the designed failure: a span that renders as a shell call is recoverable,
+  a span that lies about what it touched is not.
+
 - `crewship onboarding proposal create --agent "Name:Role"` (repeatable)
   names a bespoke roster, so the CLI can finally reach the branch the Guide
   actually takes. `--template-slug` is no longer required — give one or the

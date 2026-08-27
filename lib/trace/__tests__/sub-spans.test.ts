@@ -98,6 +98,24 @@ describe("mapSubSpans", () => {
     expect(s.name).toBe("tool") // name falls back to kind
   })
 
+  // #848 pillar 2.4 — the backend classifies a datastore call as its own
+  // kind. An unrecognised kind is coerced to "tool", so a "db" span would be
+  // silently flattened into the generic bucket until the mapper knows it.
+  it("keeps the db kind and its engine attribute", () => {
+    const [s] = mapSubSpans([
+      {
+        kind: "db",
+        name: "Bash",
+        detail: 'psql -c "select 1"',
+        status: "ok",
+        attributes: { tool: "postgres", model: "opus-4-8" },
+      },
+    ])
+    expect(s.kind).toBe("db")
+    expect(s.name).toBe("Bash")
+    expect(s.attributes.tool).toBe("postgres")
+  })
+
   it("returns [] for the empty / no-drill-down cases", () => {
     expect(mapSubSpans(undefined)).toEqual([])
     expect(mapSubSpans(null)).toEqual([])

@@ -1,7 +1,7 @@
 // sub-spans — pure helpers for the run-trace drill-down layer.
 //
 // `GetRun` returns `sub_spans`: a map keyed by step id, each value an
-// array of the agent's internal tool calls (bash, write, read, edit,
+// array of the agent's internal tool calls (bash, db, write, read, edit,
 // mcp_tool, http, tool, think), ordered by `seq`. These helpers turn
 // that loosely-typed wire data into the normalized `SubSpan[]` the
 // canvas + detail panel render, and lay them out as a waterfall.
@@ -20,6 +20,7 @@ import type {
 
 const KNOWN_KINDS: ReadonlySet<string> = new Set<SubSpanKind>([
   "bash",
+  "db",
   "write",
   "read",
   "edit",
