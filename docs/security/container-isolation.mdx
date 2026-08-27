@@ -126,7 +126,10 @@ Containers are created with these security measures (`internal/provider/docker/d
 - **PID limit: 200:** Prevents fork bomb attacks (`PidsLimit: 200`)
 - **Memory limits:** Configurable per-crew (`default_memory_mb`, default 8192 MB / 8 GiB)
 - **CPU limits:** Configurable per-crew (`default_cpus`, default 2.0)
-- **Network isolation:** Containers connect to a dedicated Docker bridge network
+- **Shared network, restricted egress:** every crew's container joins one
+  Docker bridge network (`crewship-agents` by default) — crews are not
+  network-isolated from each other on that bridge. Outbound access is
+  controlled per crew by egress policy, not by network segmentation.
 - **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
 - **Named volumes:** `crewship-home-{slug}-{crewID}` and `crewship-tools-{slug}-{crewID}` for persistent home and tools directories (namespaced by crew ID to prevent cross-tenant collisions)
 
