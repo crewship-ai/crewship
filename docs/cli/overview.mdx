@@ -672,9 +672,48 @@ few commands have a different *default* than `table`:
   `system onboarding status` — default to `json` (with `yaml`/`ndjson` honoured), and
   `metrics` defaults to `json` (with `yaml` honoured).
 
-The one documented exception is `crewship wait`: it owns its run-outcome exit codes and
-prints `[wait] error:` diagnostics to stderr as plain text even under a machine
-`--format` (no structured error envelope). See the [Wait page](/cli/wait).
+### An empty result is `[]`, never `null`
+
+Any command whose answer is a list emits an empty **array** when it finds nothing —
+never a bare `null`. This matters more than it looks: Go marshals an unfilled slice as
+`null`, so before this was fixed centrally a list command answered `[]` on a populated
+workspace and `null` on an empty one, which meant `crewship prompt list -f json | jq '.[]'`
+worked while you were developing against seeded data and failed with
+`Cannot iterate over null` on a fresh install.
+
+```bash
+crewship prompt list -f json        # []   — not null, even with no prompts saved
+crewship routine active -f json     # []   — not "No active runs."
+```
+
+An empty *list* is `[]`; an absent *object* is still `null`, because `{}` and `null`
+mean different things for a record and nothing iterates an object the way `.[]`
+iterates an array.
+
+### Where stdout is not a document
+
+`--format` describes how a **result** is rendered. Four kinds of command put something
+else on stdout, and for them the flag has nothing to convert:
+
+| Kind | Commands | What stdout is |
+|------|----------|----------------|
+| Downloads | `crew files get`, `agent avatar show`, `memory show`, `memory versions show` | The file's raw bytes, streamed. Use `--out` to write to disk. |
+| Manifests | `export crew`, `export page`, `export workspace` | A YAML manifest you check into git and feed back to `crewship apply`. Always YAML, by design. |
+| Generated documents | `routine schema`, `completion <shell>` | The schema / shell script itself. |
+| Live streams | `ask`, `explain`, `repl`, `logs --follow` | A token or event stream with no end to close. `logs --follow` emits NDJSON under a machine format, which is the streaming-native shape. |
+
+The one documented exception on the *error* side is `crewship wait`: it owns its
+run-outcome exit codes and prints `[wait] error:` diagnostics to stderr as plain text
+even under a machine `--format` (no structured error envelope). See the
+[Wait page](/cli/wait).
+
+### Success receipts belong on stderr
+
+A command that *changes* something prints its confirmation (`✓ Integration enabled`) to
+**stderr**, so stdout stays clean for whatever the command returns. The answer to "did
+it work" is the exit code. Some mutation commands still print their receipt on stdout;
+that is a known cleanup, and `TestMutationReceiptsOnStdoutDoNotGrow` in
+`cmd/crewship` keeps the population from growing.
 
 ## Resolving resource references
 

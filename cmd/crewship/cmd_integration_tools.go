@@ -308,15 +308,33 @@ refreshing with nothing would report success while changing nothing; pass
 		if err != nil {
 			return fmt.Errorf("read refresh response: %w", err)
 		}
+		f := resolvedFormatter(cmd)
+		// An empty body is a valid 2xx from this endpoint (see the TODO
+		// above), and it used to answer a sentence on stdout regardless of
+		// format. Give the machine formats the same envelope shape they get
+		// when the server does return a document.
 		if len(data) == 0 {
-			fmt.Printf("Tool bindings refresh requested for %s/%s.\n", args[0], args[1])
-			return nil
+			return f.AutoHuman(map[string]any{
+				"crew":        args[0],
+				"integration": args[1],
+				"refreshed":   true,
+			}, func() {
+				fmt.Printf("Tool bindings refresh requested for %s/%s.\n", args[0], args[1])
+			})
 		}
-		var result map[string]any
-		if err := json.Unmarshal(data, &result); err != nil {
-			return fmt.Errorf("decode refresh response: %w", err)
+		// Validated but not decoded: a round trip through map[string]any
+		// turns every number into a float64, so a tool count or an epoch
+		// past 53 bits would come back rounded. The body still has to BE
+		// JSON — a 200 carrying prose is an error, not something to pass
+		// through — hence the explicit validity check.
+		if !json.Valid(data) {
+			return fmt.Errorf("decode refresh response: body is not valid JSON: %s",
+				truncateString(string(data), 120))
 		}
-		return newFormatter().JSON(result)
+		// Machine, not JSON: the server's document has always been this
+		// command's output, so JSON stays the default, but `-f yaml` and
+		// `-f ndjson` are no longer ignored.
+		return f.Machine(cli.RawJSON(data))
 	},
 }
 

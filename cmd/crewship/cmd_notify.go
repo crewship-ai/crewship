@@ -69,12 +69,17 @@ var notifyStatusCmd = &cobra.Command{
 	Short: "Show whether notifications are enabled",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		on := cli.NotificationsEnabled(cliCfg)
-		if on {
-			fmt.Println("notifications: enabled")
-		} else {
-			fmt.Println("notifications: disabled")
-		}
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(
+			struct {
+				Enabled bool `json:"enabled"`
+			}{on},
+			func() {
+				if on {
+					fmt.Println("notifications: enabled")
+				} else {
+					fmt.Println("notifications: disabled")
+				}
+			})
 	},
 }
 
