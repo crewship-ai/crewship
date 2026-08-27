@@ -84,16 +84,18 @@ export function useChatCompactLayout(): boolean {
  *
  * 12 is chosen against the ordering the roster already has: `/agents` returns
  * live agents by creation recency with ghosts last, so the first 12 are the
- * newest live agents — the ones with threads if anyone has any. Every agent
- * still gets a row; the cap only bounds the thread lookup.
+ * newest live agents — the ones with threads if anyone has any.
+ *
+ * What the cap costs changed when the column became a list of CONVERSATIONS
+ * rather than a tree of agents. It used to leave a visible agent row reporting
+ * a thread count of 0; now the agent has no row of its own, so its
+ * conversations are simply absent from the list with nothing to mark their
+ * absence. `docs/guides/chat-surface-limits.mdx` says so in those terms.
  */
 export const AGENT_FANOUT_CAP = 12
 
 /** Per-agent page size. 12 × 10 is a comfortable superset of what is shown. */
 export const PER_AGENT_CHAT_LIMIT = 10
-
-/** How many merged threads reach the /chat index. */
-export const RECENT_THREAD_LIMIT = 25
 
 export interface ChatTreeData<A extends ChatTreeAgent = ChatTreeAgent> {
   /** Live agents, ghosts removed — what the tree lists. null until resolved. */
@@ -126,16 +128,24 @@ export interface ChatTreeData<A extends ChatTreeAgent = ChatTreeAgent> {
  * The tree's data, fetched once and shared by whatever else the page draws
  * from the same lists.
  *
- * `skipSlug` names an agent whose threads the CALLER already owns —
- * `/chat/<agent>` keeps its own `sessions` state (optimistic inserts, auto
- * titles, mark-read) and passes it back in. Skipping by slug rather than by id
- * is deliberate: the slug is known from the URL before any request goes out,
- * so there is no window in which the fan-out fires for an agent the page was
- * about to claim.
+ * `ensureSlug` names the agent the URL asked for, and guarantees it a place in
+ * the capped fan-out by sorting it to the front before the slice.
+ *
+ * It replaces `skipSlug`, which was the mirror-image option for a page that no
+ * longer exists: the old `/chat/<agent>` fetched its own agent's sessions and
+ * asked to be left out of the fan-out. The surface that replaced it has no
+ * second fetch — the fan-out is the only source — so an agent past
+ * `AGENT_FANOUT_CAP` arrived with an empty thread list, and the page cannot
+ * tell that from an agent nobody has talked to. It would mint a fresh draft on
+ * top of a real history.
+ *
+ * By slug rather than by id, for the same reason the old option was: the slug
+ * is known from the URL before any request goes out, so there is no window in
+ * which the fan-out fires without it.
  */
 export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
-  skipSlug,
-}: { skipSlug?: string | null } = {}): ChatTreeData<A> {
+  ensureSlug,
+}: { ensureSlug?: string | null } = {}): ChatTreeData<A> {
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   const [roster, setRoster] = useState<A[] | null>(null)
@@ -174,7 +184,12 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   // ── The fan-out ──
   useEffect(() => {
     if (!workspaceId || agents === null) return
-    const scope = agents.filter((a) => a.slug !== skipSlug).slice(0, AGENT_FANOUT_CAP)
+    // The named agent goes first, so the cap can never be the reason the one
+    // conversation the reader actually asked for is missing.
+    const ordered = ensureSlug
+      ? [...agents].sort((a, b) => Number(b.slug === ensureSlug) - Number(a.slug === ensureSlug))
+      : agents
+    const scope = ordered.slice(0, AGENT_FANOUT_CAP)
     if (scope.length === 0) {
       setThreadsByAgent({})
       setThreadErrors({})
@@ -217,7 +232,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
     return () => {
       cancelled = true
     }
-  }, [workspaceId, agents, skipSlug, threadsNonce])
+  }, [workspaceId, agents, ensureSlug, threadsNonce])
 
   return { agents, roster, threadsByAgent, threadErrors, threadsLoaded, retryThreads, error, wsLoading }
 }
