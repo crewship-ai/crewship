@@ -184,6 +184,76 @@ func DeleteUserModelBySlug(p UserModelPaths, userSlug string) error {
 	return removeUnderLock(path, "users")
 }
 
+// DeleteUserModelEverywhere removes every on-disk copy of a user model
+// for the given slug, regardless of which crew directory currently
+// holds it.
+//
+// A user model's identity is (user, workspace); crew only decides which
+// shared directory the file physically sits in, and that directory
+// changes over the model's lifetime as the operator's most-active crew
+// shifts (consolidate.RunUserModelSync recomputes it on every sweep).
+// The user_models index row tracks only the CURRENT crew — its ON
+// CONFLICT DO UPDATE moves crew_id forward on a refresh but never
+// touches whatever file an earlier crew already held — so a purge keyed
+// on that one row only ever reaches the newest copy and leaves every
+// prior copy as an orphan nothing points at any more.
+//
+// This is the fix: enumerate every crew directory actually present on
+// disk under basePath, plus the crew-less workspace fallback, and
+// delete the slug's file from each. GDPR erasure (self-service delete,
+// admin SAR cascade) must use this instead of reconstructing a single
+// "expected" path from a stored crew_id, because a purge that only
+// agrees with the writer about where the CURRENT file lives is exactly
+// the kind of purge that misses an old one.
+//
+// basePath is the same OutputBasePath the writer and the sweep use.
+// Returns the number of files actually removed and the first error
+// encountered — best-effort, so one unreadable crew directory does not
+// stop the sweep from clearing the rest.
+func DeleteUserModelEverywhere(basePath, userSlug string) (removed int, err error) {
+	if basePath == "" || userSlug == "" {
+		return 0, nil
+	}
+
+	var firstErr error
+	tryDelete := func(sharedDir string) {
+		p := UserModelPaths{SharedDir: sharedDir}
+		path := p.ModelPath(userSlug)
+		existed := anyExists(path, path+lockSuffix)
+		if delErr := DeleteUserModelBySlug(p, userSlug); delErr != nil {
+			if firstErr == nil {
+				firstErr = delErr
+			}
+			return
+		}
+		if existed {
+			removed++
+		}
+	}
+
+	// Crew-less workspace fallback — matches consolidate.UserModelPathsFor
+	// with an empty crewID.
+	tryDelete(filepath.Join(basePath, "workspace", "shared", ".memory"))
+
+	// Every crew directory actually present on disk, not just the one the
+	// index row currently names.
+	crewsRoot := filepath.Join(basePath, "crews")
+	entries, readErr := os.ReadDir(crewsRoot)
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		if firstErr == nil {
+			firstErr = readErr
+		}
+		return removed, firstErr
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		tryDelete(filepath.Join(crewsRoot, e.Name(), "shared", ".memory"))
+	}
+	return removed, firstErr
+}
+
 // ListUserModelSlugs returns every user model slug present on disk for
 // this crew-shared memory, sorted lexicographically. Used by routine
 // sweeps reconciling disk against the user_models DB index. Returns a

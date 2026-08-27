@@ -135,7 +135,7 @@ func RunUserModelSync(
 				"cap_bytes", memory.UserModelCapBytes)
 			content = trimmed
 		}
-		out := SyncUserModel(ctx, db, logger, opts.Threshold, cand, content, paths, now)
+		out := SyncUserModel(ctx, db, logger, opts.Threshold, cand, content, paths, opts.OutputBasePath, now)
 		if out.Err != nil {
 			sum.Errors++
 			logger.Warn("user model sync candidate failed",

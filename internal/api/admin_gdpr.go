@@ -496,14 +496,29 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 		_ = umRows.Close()
 		for _, m := range models {
 			if h.outputBasePath != "" {
-				// Path resolution must match the writer's exactly — see
-				// userModelPathsFor in user_model_privacy.go, which is the
-				// shared one. A crew-less model falls back to the
-				// workspace-level shared dir rather than being skipped.
-				if delErr := memory.DeleteUserModelBySlug(
-					userModelPathsFor(h.outputBasePath, m.crewID), m.slug); delErr != nil {
+				// Deletes from EVERY crew directory on disk, not just
+				// m.crewID. The index row only ever names the operator's
+				// CURRENT most-active crew — a prior crew reassignment
+				// moves crew_id forward without removing the file it left
+				// behind in the crew the operator has since left, and an
+				// erase that reconstructed a single "expected" path from
+				// m.crewID would leave that copy readable after the SAR
+				// ticket said "deleted" (#1701).
+				if _, delErr := memory.DeleteUserModelEverywhere(h.outputBasePath, m.slug); delErr != nil {
 					h.logger.Warn("gdpr delete: on-disk user model delete failed",
 						"action_id", actionID, "err", delErr)
+					if firstErr == nil {
+						firstErr = delErr
+					}
+					// Do NOT delete the index row when a copy could not be
+					// removed. This loop is reached by walking user_models
+					// WHERE user_id/workspace_id — the only enumerator that
+					// ever revisits this slug — so deleting the row here
+					// would make the surviving copy permanently unfindable
+					// by a future retry of this same cascade, while the
+					// response still has to admit the failure (207) rather
+					// than report the erasure as complete.
+					continue
 				}
 			}
 			res, delErr := h.db.ExecContext(r.Context(),

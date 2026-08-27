@@ -384,3 +384,115 @@ func TestUserModel_ListSkipsNonMarkdown(t *testing.T) {
 		t.Errorf("expected [abc]; got %v", slugs)
 	}
 }
+
+// A user model's identity is (user, workspace); crew only decides which
+// shared directory it currently sits under, and that directory shifts
+// as the operator's most-active crew changes. DeleteUserModelEverywhere
+// is the erasure primitive: it must reach every crew's copy of a slug on
+// disk, not just the one a caller happens to name.
+func TestDeleteUserModelEverywhere(t *testing.T) {
+	slug := UserSlug("u1", "ws1")
+
+	tests := []struct {
+		name       string
+		seed       func(t *testing.T, base string)
+		wantRemove int
+	}{
+		{
+			name:       "nothing on disk",
+			seed:       func(t *testing.T, base string) {},
+			wantRemove: 0,
+		},
+		{
+			name: "single crew",
+			seed: func(t *testing.T, base string) {
+				p := UserModelPaths{SharedDir: filepath.Join(base, "crews", "crewA", "shared", ".memory")}
+				if err := WriteUserModel(p, "u1", "ws1", "- role: a"); err != nil {
+					t.Fatalf("seed crewA: %v", err)
+				}
+			},
+			wantRemove: 1,
+		},
+		{
+			name: "orphaned copy in a prior crew plus the current one",
+			seed: func(t *testing.T, base string) {
+				old := UserModelPaths{SharedDir: filepath.Join(base, "crews", "crewA", "shared", ".memory")}
+				if err := WriteUserModel(old, "u1", "ws1", "- role: a"); err != nil {
+					t.Fatalf("seed crewA: %v", err)
+				}
+				cur := UserModelPaths{SharedDir: filepath.Join(base, "crews", "crewB", "shared", ".memory")}
+				if err := WriteUserModel(cur, "u1", "ws1", "- role: b"); err != nil {
+					t.Fatalf("seed crewB: %v", err)
+				}
+			},
+			wantRemove: 2,
+		},
+		{
+			name: "crew-less workspace fallback plus a crew copy",
+			seed: func(t *testing.T, base string) {
+				ws := UserModelPaths{SharedDir: filepath.Join(base, "workspace", "shared", ".memory")}
+				if err := WriteUserModel(ws, "u1", "ws1", "- role: fallback"); err != nil {
+					t.Fatalf("seed fallback: %v", err)
+				}
+				crew := UserModelPaths{SharedDir: filepath.Join(base, "crews", "crewA", "shared", ".memory")}
+				if err := WriteUserModel(crew, "u1", "ws1", "- role: a"); err != nil {
+					t.Fatalf("seed crewA: %v", err)
+				}
+			},
+			wantRemove: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := t.TempDir()
+			tt.seed(t, base)
+
+			removed, err := DeleteUserModelEverywhere(base, slug)
+			if err != nil {
+				t.Fatalf("DeleteUserModelEverywhere: %v", err)
+			}
+			if removed != tt.wantRemove {
+				t.Errorf("removed = %d, want %d", removed, tt.wantRemove)
+			}
+
+			// Nothing addressable to this slug may survive anywhere under
+			// base after the call.
+			crewsRoot := filepath.Join(base, "crews")
+			entries, _ := os.ReadDir(crewsRoot)
+			for _, e := range entries {
+				p := UserModelPaths{SharedDir: filepath.Join(crewsRoot, e.Name(), "shared", ".memory")}
+				if body, _ := LoadUserModelBySlug(p, slug); body != "" {
+					t.Errorf("copy survived under crew %q: %q", e.Name(), body)
+				}
+			}
+			wsFallback := UserModelPaths{SharedDir: filepath.Join(base, "workspace", "shared", ".memory")}
+			if body, _ := LoadUserModelBySlug(wsFallback, slug); body != "" {
+				t.Errorf("copy survived in the workspace fallback: %q", body)
+			}
+		})
+	}
+}
+
+// A second slug in the same crew directories must never be touched by an
+// erasure aimed at a different one.
+func TestDeleteUserModelEverywhere_NeverTouchesAnotherSlug(t *testing.T) {
+	base := t.TempDir()
+	slugVictim := UserSlug("u1", "ws1")
+	slugOther := UserSlug("u2", "ws1")
+	p := UserModelPaths{SharedDir: filepath.Join(base, "crews", "crewA", "shared", ".memory")}
+	if err := WriteUserModel(p, "u1", "ws1", "- role: victim"); err != nil {
+		t.Fatalf("seed victim: %v", err)
+	}
+	if err := WriteUserModel(p, "u2", "ws1", "- role: other"); err != nil {
+		t.Fatalf("seed other: %v", err)
+	}
+
+	if _, err := DeleteUserModelEverywhere(base, slugVictim); err != nil {
+		t.Fatalf("DeleteUserModelEverywhere: %v", err)
+	}
+
+	if body, _ := LoadUserModelBySlug(p, slugOther); body != "- role: other" {
+		t.Errorf("another operator's model was destroyed: %q", body)
+	}
+}

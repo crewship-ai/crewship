@@ -93,6 +93,11 @@ type UserModelOutcome struct {
 // handler shapes the (already-merged) content via the aux model slot
 // and passes the result in via `content` so this primitive stays unit-
 // testable without a live model.
+//
+// basePath is the OutputBasePath the deletion path needs to enumerate
+// every crew directory on disk (see the opt-out branch); paths is still
+// used for the write branch, which only ever writes to the operator's
+// CURRENT most-active crew.
 func SyncUserModel(
 	ctx context.Context,
 	db *sql.DB,
@@ -101,6 +106,7 @@ func SyncUserModel(
 	cand UserModelCandidate,
 	content string,
 	paths memory.UserModelPaths,
+	basePath string,
 	now time.Time,
 ) UserModelOutcome {
 	slug := memory.UserSlug(cand.UserID, cand.WorkspaceID)
@@ -117,7 +123,18 @@ func SyncUserModel(
 		// Opt-out is a hard stop: purge the model + index row. Propagate
 		// errors so the routine summary counts a failed purge as a
 		// failure rather than reporting GDPR cleanup complete.
-		if err := memory.DeleteUserModel(paths, cand.UserID, cand.WorkspaceID); err != nil {
+		//
+		// DeleteUserModelEverywhere (not the single-crew DeleteUserModel)
+		// is deliberate: cand.CrewID is the operator's CURRENT most-active
+		// crew, recomputed fresh on every sweep, so a purge keyed on
+		// `paths` alone only ever reaches today's crew and leaves an
+		// orphan behind in whichever crew held the file before the
+		// operator's most-active crew last changed — the same #1701 bug
+		// the two API-surface purges (admin GDPR cascade, self-service
+		// delete) were fixed to avoid. Opt-out is a user-initiated
+		// erasure trigger exactly like those two, so it gets the same
+		// exhaustive delete.
+		if _, err := memory.DeleteUserModelEverywhere(basePath, slug); err != nil {
 			out.Action = "delete_opt_out"
 			out.Err = fmt.Errorf("delete user model on opt-out: %w", err)
 			return out

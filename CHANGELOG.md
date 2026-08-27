@@ -394,6 +394,50 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   constraint could not fire. Those tests now run against the real migration
   chain, which also surfaced a second case seeding an assignment against a
   chat that did not exist.
+- **Erasing an operator model reported success while leaving a readable copy
+  behind (#2131).** The user model is stored per crew, at
+  `crews/{crewID}/shared/.memory/users/{slug}.md`, but its index row is keyed
+  `UNIQUE(workspace_id, user_slug)` with `crew_id` merely informational — and
+  the consolidation sweep recomputes that `crew_id` as the operator's
+  *most-active* crew. So a crew change moved the row's pointer forward and
+  wrote a fresh file, without ever removing the one it left behind. All three
+  erasure triggers — the self-service `DELETE /api/v1/users/me/user-model`
+  (`crewship privacy user-model delete`), the admin GDPR subject-access
+  cascade, and the daily sweep's own opt-out purge (`consolidate.SyncUserModel`)
+  — reconstructed a single expected path from a current `crew_id`, so each
+  reached only the newest copy and reported deletion while every prior crew's
+  copy stayed on disk and readable by that crew's agents. Erasure now
+  enumerates the crew directories that actually exist and removes the slug's
+  file from each, rather than trusting one row's idea of where the file
+  should be — including the opt-out path, which the first pass of this fix
+  had not yet reached.
+
+  A second defect in the same fix: the two API surfaces widened the delete
+  from one directory to N but still swallowed a per-directory failure into a
+  log line, deleting the index row unconditionally either way — so a single
+  crew directory that could not be cleared (permissions, a stray non-empty
+  path) still came back `200` (self-service) or `202` full-success (admin
+  cascade), the identical "erasure reports success while a copy survives"
+  bug one level up. Both now surface a real partial failure — `500` from the
+  self-service delete, `207 Multi-Status` from the admin cascade — and leave
+  the index row in place when a directory could not be cleared, rather than
+  deleting it and making the survivor unfindable by the next retry (this
+  code is reached by looking the row up in the first place).
+
+  Not changed: an operator moving to a new crew still starts from an empty
+  model there. Carrying content across would cross the same per-crew boundary
+  the erasure fix deliberately does not treat as one address space, and that
+  is an isolation decision to make explicitly, not a side effect of a
+  deletion fix.
+
+  Known remaining gap, not fixed here: each crew's sidecar keeps its own FTS5
+  search index (`index.sqlite`) alongside `.memory/`, rebuilt from whatever is
+  on disk at container startup and every 60 seconds while the container runs.
+  The host-side erasure above never opens that file. A crew whose container
+  is running clears itself on its next tick; a **dormant** crew — typically
+  exactly the one the operator has since left — keeps the erased content's
+  search chunks until its container is next started. See
+  `docs/security/gdpr.mdx` for the proposed fix.
 
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
