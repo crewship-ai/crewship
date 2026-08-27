@@ -52,11 +52,9 @@ func openTestDBWithHooks(t *testing.T) *sql.DB {
 	return db
 }
 
-// TestEnforceHardModeBlocks_DispatchesOnBudgetExceededHook registers a
-// blocking on_budget_exceeded webhook, breaches a hard-mode budget the same
-// way TestEnforceHardModeBlocks does, and asserts the webhook was actually
-// hit. Blocking makes the dispatch synchronous — no polling/sleep needed to
-// observe it before Enforce returns.
+// TestEnforceHardModeBlocks_DispatchesOnBudgetExceededHook registers an
+// observation webhook, breaches a hard-mode budget the same way
+// TestEnforceHardModeBlocks does, and asserts the webhook was actually hit.
 func TestEnforceHardModeBlocks_DispatchesOnBudgetExceededHook(t *testing.T) {
 	t.Setenv("CREWSHIP_HOOKS_ALLOW_PRIVATE", "true") // httptest binds 127.0.0.1; opt out of the SSRF guard like the hooks package's own tests do
 
@@ -64,9 +62,9 @@ func TestEnforceHardModeBlocks_DispatchesOnBudgetExceededHook(t *testing.T) {
 	em := &fakeEmitter{}
 	ctx := context.Background()
 
-	var hit bool
+	hit := make(chan struct{}, 1)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hit = true
+		hit <- struct{}{}
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -79,8 +77,7 @@ func TestEnforceHardModeBlocks_DispatchesOnBudgetExceededHook(t *testing.T) {
 		HandlerConfig: map[string]any{
 			"url": ts.URL,
 		},
-		Blocking: true,
-		Enabled:  true,
+		Enabled: true,
 	}, false); err != nil {
 		t.Fatalf("register hook: %v", err)
 	}
@@ -95,7 +92,9 @@ func TestEnforceHardModeBlocks_DispatchesOnBudgetExceededHook(t *testing.T) {
 		t.Fatal("expected BudgetExceededError")
 	}
 
-	if !hit {
+	select {
+	case <-hit:
+	case <-time.After(time.Second):
 		t.Fatal("on_budget_exceeded hook was never dispatched — Enforce blocked the budget but did not fire the hook")
 	}
 }

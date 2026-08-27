@@ -218,7 +218,7 @@ func TestHooksCreateRunE_PostsTheFullBody(t *testing.T) {
 	m.status = http.StatusCreated
 
 	setHookFlags(t, hooksCreateCmd, map[string]string{
-		"event":              string(hooks.EventPostToolCall),
+		"event":              string(hooks.EventPreLLMCall),
 		"handler":            "http",
 		"url":                "https://example.test/h",
 		"crew":               "backend",
@@ -236,7 +236,7 @@ func TestHooksCreateRunE_PostsTheFullBody(t *testing.T) {
 	if m.method != "POST" || m.path != "/api/v1/hooks" {
 		t.Fatalf("request = %s %s, want POST /api/v1/hooks", m.method, m.path)
 	}
-	if m.body["event"] != string(hooks.EventPostToolCall) {
+	if m.body["event"] != string(hooks.EventPreLLMCall) {
 		t.Errorf("event = %v", m.body["event"])
 	}
 	if m.body["handler_kind"] != "http" {

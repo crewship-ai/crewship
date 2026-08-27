@@ -14,12 +14,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/hooks"
 )
 
 // TestRunAssignment_DispatchesPreAndPostTaskDelegationHooks registers a
-// blocking webhook on each event and drives runAssignment synchronously
+// blocking pre-hook and an asynchronous post-hook, then drives runAssignment
 // (same harness as TestRunAssignment_NoOrchestrator_FailsAssignment) —
 // h.orch is nil, so the run fails immediately after start, but both hooks
 // must have already fired by then since post_task_delegation is dispatched
@@ -30,9 +31,9 @@ func TestRunAssignment_DispatchesPreAndPostTaskDelegationHooks(t *testing.T) {
 	h, wsID, _, leadID, workerID, chatID := covAsgRig(t)
 	insertAssignment(t, h.db, "asg-hook-1", wsID, chatID, leadID, workerID, "PENDING")
 
-	var seen []string
+	seen := make(chan string, 2)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.URL.Path)
+		seen <- r.URL.Path
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -44,7 +45,7 @@ func TestRunAssignment_DispatchesPreAndPostTaskDelegationHooks(t *testing.T) {
 			Event:         ev,
 			HandlerKind:   hooks.HandlerKindHTTP,
 			HandlerConfig: map[string]any{"url": ts.URL + "/" + string(ev)},
-			Blocking:      true,
+			Blocking:      ev.SupportsBlocking(),
 			Enabled:       true,
 		}, false); err != nil {
 			t.Fatalf("register %s hook: %v", ev, err)
@@ -57,11 +58,17 @@ func TestRunAssignment_DispatchesPreAndPostTaskDelegationHooks(t *testing.T) {
 	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
 	h.runAssignment(context.Background(), "asg-hook-1", body, target)
 
-	if len(seen) != 2 {
-		t.Fatalf("hook hits = %v, want exactly [pre_task_delegation, post_task_delegation]", seen)
+	got := make([]string, 0, 2)
+	for len(got) < 2 {
+		select {
+		case path := <-seen:
+			got = append(got, path)
+		case <-time.After(time.Second):
+			t.Fatalf("hook hits = %v, want exactly [pre_task_delegation, post_task_delegation]", got)
+		}
 	}
-	if seen[0] != "/pre_task_delegation" || seen[1] != "/post_task_delegation" {
-		t.Errorf("hook order = %v, want [/pre_task_delegation /post_task_delegation]", seen)
+	if got[0] != "/pre_task_delegation" || got[1] != "/post_task_delegation" {
+		t.Errorf("hook order = %v, want [/pre_task_delegation /post_task_delegation]", got)
 	}
 }
 

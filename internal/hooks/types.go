@@ -138,6 +138,23 @@ func EventNames() []string {
 	return out
 }
 
+// SupportsBlocking reports whether an event fires before an operation at a
+// call site that can still cancel that operation. Post- and on-events are
+// observations: making one synchronous only adds latency, while a Block
+// outcome arrives too late to undo anything.
+func (e Event) SupportsBlocking() bool {
+	switch e {
+	case EventPreTaskDelegation,
+		EventPreAgentStart,
+		EventPreLLMCall,
+		EventPreMemoryWrite,
+		EventPrePeerConversation:
+		return true
+	default:
+		return false
+	}
+}
+
 // HandlerKind enumerates the three dispatch backends the platform supports.
 // The hooks_config CHECK constraint enforces the same set at the schema
 // level so a bad insert fails fast.
@@ -225,6 +242,7 @@ var (
 	ErrSubagentHandlerNotConfigured = errors.New("hooks: subagent handler not configured")
 	ErrUnknownHandlerKind           = errors.New("hooks: unknown handler kind")
 	ErrUnknownEvent                 = errors.New("hooks: unknown event")
+	ErrEventCannotBlock             = errors.New("hooks: event cannot block")
 )
 
 // BlockedError is returned by Dispatch when a blocking hook fires a Block

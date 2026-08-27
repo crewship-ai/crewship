@@ -76,7 +76,7 @@ GET /api/v1/hooks?crew_id=<optional>
 | `rows[].handler_kind` | string | `shell`, `http`, or `subagent`. |
 | `rows[].handler_config` | object | Handler-specific config (URL for http, command for shell, subagent name for subagent). |
 | `rows[].matcher` | object | Optional filter: `tools`, `agent_ids`, `crew_ids`, `severities`. Empty = match-all. |
-| `rows[].blocking` | boolean | If true, a Block outcome short-circuits the triggering operation. Non-blocking runs in a goroutine. |
+| `rows[].blocking` | boolean | If true on a gate-capable `pre_*` event, a Block outcome short-circuits the triggering operation. `post_*` and `on_*` observations always dispatch asynchronously; legacy rows carrying `true` are treated as non-blocking. |
 
 **Errors:**
 
@@ -107,12 +107,12 @@ POST /api/v1/hooks
 | `handler_config` | object | yes* | `{"url": ...}` for http, `{"command": ...}` for shell. Optional for subagent. |
 | `matcher` | object | no | `tools`, `agent_ids`, `crew_ids`, `severities`, `when`. Empty (default) matches every event. |
 | `crew_id` | string | no | Scope to one crew. Omit for workspace-wide. Cross-tenant IDs return `404`. |
-| `blocking` | boolean | no | Default `false`. When `true`, a `block` outcome cancels the triggering operation. |
+| `blocking` | boolean | no | Default `false`. Valid only for gate-capable `pre_*` events. `post_*` and `on_*` events are asynchronous observations and reject `true`. |
 | `enabled` | boolean | no | Default **`true`**. Pass `false` to register without arming. |
 
 ```json
 {
-  "event": "post_tool_call",
+  "event": "pre_llm_call",
   "handler_kind": "http",
   "handler_config": { "url": "https://hooks.slack.test/services/XXX" },
   "matcher": { "tools": ["Bash", "Write"] },
@@ -126,7 +126,7 @@ POST /api/v1/hooks
 
 | Status | Condition |
 |---|---|
-| 400 | Unknown `event` (message lists the 14 valid names); unknown `handler_kind`; missing `handler_config.url` / `.command`; malformed JSON. |
+| 400 | Unknown `event` (message lists the 14 valid names); `blocking: true` on an observation event; unknown `handler_kind`; missing `handler_config.url` / `.command`; malformed JSON. |
 | 401 | Not authenticated / no workspace. |
 | 403 | Not `OWNER`/`ADMIN`; or `shell` requested by a non-`OWNER`. |
 | 404 | `crew_id` names a crew outside your workspace. |
@@ -147,7 +147,7 @@ PATCH /api/v1/hooks/{id}
 
 **Auth:** `OWNER` or `ADMIN`. `OWNER` is required to set `handler_kind: "shell"` **or** to edit a hook that is already `shell`.
 
-Semantics are **patch, not put**: only the fields present in the body change. An omitted field keeps its current value, so `{"event": "post_tool_call"}` does not clear the matcher, the blocking flag, or the enabled flag.
+Semantics are **patch, not put**: only the fields present in the body change. An omitted field keeps its current value. Consequently, changing a blocking `pre_*` hook to a `post_*` or `on_*` event must also send `"blocking": false`; otherwise the merged observation hook is rejected with `400`.
 
 Accepts the same fields as [create](#create-a-hook), all optional.
 

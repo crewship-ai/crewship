@@ -50,8 +50,8 @@ func TestLLMRunner_RunStep_PaymasterFailsClosed(t *testing.T) {
 // TestLLMRunner_RunStep_InputGuardBlocks drives the FULL middleware
 // chain: budget tables exist (empty → Enforce passes), the prompt
 // carries a textbook injection so lookout's input guard blocks it, and
-// the guard listener fires — whose hooks dispatch fails (no hooks
-// table) and lands in the warn branch. All without network.
+// the guard listener fires. The runner fixture includes the empty hooks
+// registry that production migrations always provide. All without network.
 func TestLLMRunner_RunStep_InputGuardBlocks(t *testing.T) {
 	r, db := newLLMRunnerWithCred(t)
 	// Minimal paymaster surface: applicable-budget query must succeed.

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/hooks"
 )
@@ -39,7 +40,7 @@ func newPeerQueryRig(t *testing.T) (h *QueryHandler, wsID string, body *bytes.Bu
 }
 
 // TestQueryCreate_DispatchesPreAndPostPeerConversationHooks registers a
-// blocking webhook on each event and drives Create with a nil
+// webhook on each event (blocking only for the pre-event) and drives Create with a nil
 // orchestrator (503, but Create still reaches finishQuery — see
 // TestCovQCreateNilOrchEmitsJournal) so both hooks fire without needing a
 // full agent run.
@@ -48,9 +49,9 @@ func TestQueryCreate_DispatchesPreAndPostPeerConversationHooks(t *testing.T) {
 
 	h, wsID, body := newPeerQueryRig(t)
 
-	var seen []string
+	seenCh := make(chan string, 2)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.URL.Path)
+		seenCh <- r.URL.Path
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -62,7 +63,7 @@ func TestQueryCreate_DispatchesPreAndPostPeerConversationHooks(t *testing.T) {
 			Event:         ev,
 			HandlerKind:   hooks.HandlerKindHTTP,
 			HandlerConfig: map[string]any{"url": ts.URL + "/" + string(ev)},
-			Blocking:      true,
+			Blocking:      ev == hooks.EventPrePeerConversation,
 			Enabled:       true,
 		}, false); err != nil {
 			t.Fatalf("register %s hook: %v", ev, err)
@@ -77,11 +78,78 @@ func TestQueryCreate_DispatchesPreAndPostPeerConversationHooks(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 (nil orchestrator), got %d; body=%s", w.Code, w.Body.String())
 	}
-	if len(seen) != 2 {
-		t.Fatalf("hook hits = %v, want exactly [pre_peer_conversation, post_peer_conversation]", seen)
+	seen := make([]string, 0, 2)
+	for len(seen) < 2 {
+		select {
+		case path := <-seenCh:
+			seen = append(seen, path)
+		case <-time.After(time.Second):
+			t.Fatalf("hook hits = %v, want exactly [pre_peer_conversation, post_peer_conversation]", seen)
+		}
 	}
 	if seen[0] != "/pre_peer_conversation" || seen[1] != "/post_peer_conversation" {
 		t.Errorf("hook order = %v, want [/pre_peer_conversation /post_peer_conversation]", seen)
+	}
+}
+
+func TestFinishQuery_PersistsTerminalStateBeforePostHook(t *testing.T) {
+	t.Setenv("CREWSHIP_HOOKS_ALLOW_PRIVATE", "true")
+	h, wsID, _ := newPeerQueryRig(t)
+	execOrFatal(t, h.db, `INSERT INTO peer_conversations
+		(id, workspace_id, crew_id, chat_id, from_agent_id, to_agent_id, question, status, created_at)
+		VALUES ('conv-order', ?, 'crewX', 'chatX', 'from1', 'to1', 'ping?', 'RUNNING', datetime('now'))`, wsID)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	observedStatus := make(chan string, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+		var status string
+		if err := h.db.QueryRow(`SELECT status FROM peer_conversations WHERE id = 'conv-order'`).Scan(&status); err != nil {
+			status = "query-error: " + err.Error()
+		}
+		observedStatus <- status
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	// Simulate a row created before observation events were made
+	// non-blocking. Dispatch must treat this legacy flag as configuration
+	// history, not as permission for a post-event to gate finishQuery.
+	execOrFatal(t, h.db, `INSERT INTO hooks_config
+		(id, workspace_id, event, matcher, handler_kind, handler_config, blocking, enabled)
+		VALUES ('legacy-post-peer', ?, 'post_peer_conversation', '{}', 'http', ?, 1, 1)`,
+		wsID, `{"url":"`+ts.URL+`"}`)
+
+	done := make(chan struct{})
+	go func() {
+		h.finishQuery(context.Background(), "conv-order", "", "chatX", "viktor", "nela",
+			wsID, "crewX", "to1", "answer", "", time.Now().Add(-time.Millisecond), nil)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		close(release)
+		<-done
+		t.Fatal("post_peer_conversation blocked finishQuery before its database update")
+	}
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("post hook never started")
+	}
+	close(release)
+	select {
+	case status := <-observedStatus:
+		if status != "COMPLETED" {
+			t.Fatalf("post hook observed peer_conversations.status = %q, want COMPLETED", status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("post hook did not report observed status")
 	}
 }
 

@@ -20,8 +20,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
-// TestConsolidator_DispatchesPreAndPostMemoryWriteHooks registers a
-// blocking webhook on each event and runs a normal consolidation tick
+// TestConsolidator_DispatchesPreAndPostMemoryWriteHooks registers a blocking
+// pre-hook and an asynchronous post-hook, then runs a normal consolidation tick
 // (same fixture as TestConsolidator_WritesLearnedMarkdownAndEmitsEntry)
 // end to end, asserting both fired in order around the write.
 func TestConsolidator_DispatchesPreAndPostMemoryWriteHooks(t *testing.T) {
@@ -35,9 +35,9 @@ func TestConsolidator_DispatchesPreAndPostMemoryWriteHooks(t *testing.T) {
 	ids := seedEntries(t, db, w, "ws_test", "crew_test", 12, journal.EntryPeerEscalation)
 	reply := `[{"pattern":"frequent escalations to lead","action":"pre-brief leads","evidence":["` + ids[0] + `","` + ids[1] + `"],"confidence":0.8}]`
 
-	var seen []string
+	seen := make(chan string, 2)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.URL.Path)
+		seen <- r.URL.Path
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -49,7 +49,7 @@ func TestConsolidator_DispatchesPreAndPostMemoryWriteHooks(t *testing.T) {
 			Event:         ev,
 			HandlerKind:   hooks.HandlerKindHTTP,
 			HandlerConfig: map[string]any{"url": ts.URL + "/" + string(ev)},
-			Blocking:      true,
+			Blocking:      ev.SupportsBlocking(),
 			Enabled:       true,
 		}, false); err != nil {
 			t.Fatalf("register %s hook: %v", ev, err)
@@ -73,11 +73,17 @@ func TestConsolidator_DispatchesPreAndPostMemoryWriteHooks(t *testing.T) {
 		t.Fatalf("rules appended = %d, want 1", res.RulesAppended)
 	}
 
-	if len(seen) != 2 {
-		t.Fatalf("hook hits = %v, want exactly [pre_memory_write, post_memory_write]", seen)
+	got := make([]string, 0, 2)
+	for len(got) < 2 {
+		select {
+		case path := <-seen:
+			got = append(got, path)
+		case <-time.After(time.Second):
+			t.Fatalf("hook hits = %v, want exactly [pre_memory_write, post_memory_write]", got)
+		}
 	}
-	if seen[0] != "/pre_memory_write" || seen[1] != "/post_memory_write" {
-		t.Errorf("hook order = %v, want [/pre_memory_write /post_memory_write]", seen)
+	if got[0] != "/pre_memory_write" || got[1] != "/post_memory_write" {
+		t.Errorf("hook order = %v, want [/pre_memory_write /post_memory_write]", got)
 	}
 }
 

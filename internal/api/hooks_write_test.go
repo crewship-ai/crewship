@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/hooks"
 )
@@ -194,8 +195,10 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 	t.Setenv("CREWSHIP_HOOKS_ALLOW_PRIVATE", "true")
 
 	var fired atomic.Int32
+	firedCh := make(chan struct{}, 2)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fired.Add(1)
+		firedCh <- struct{}{}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"outcome":"pass","message":"ok"}`))
 	}))
@@ -211,7 +214,6 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 		"handler_kind":   "http",
 		"handler_config": map[string]any{"url": target.URL},
 		"matcher":        map[string]any{"tools": []string{"Bash"}},
-		"blocking":       true,
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201; body=%s", rr.Code, rr.Body.String())
@@ -232,6 +234,11 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 	if err := hooks.Dispatch(context.Background(), db, nil, hooks.EventPostToolCall, ec); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
+	select {
+	case <-firedCh:
+	case <-time.After(time.Second):
+		t.Fatal("created hook did not fire")
+	}
 	if got := fired.Load(); got != 1 {
 		t.Fatalf("handler fired %d times, want 1 — the created row is invisible to Dispatch", got)
 	}
@@ -243,6 +250,26 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 	}
 	if got := fired.Load(); got != 1 {
 		t.Errorf("matcher not persisted: handler fired %d times for a non-matching tool", got)
+	}
+}
+
+func TestHooksCreate_ObservationEventCannotBlock(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewHooksHandler(db, newTestLogger())
+
+	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
+		"event":          string(hooks.EventPostToolCall),
+		"handler_kind":   "http",
+		"handler_config": map[string]any{"url": "https://example.test/hook"},
+		"blocking":       true,
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("create status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "observation-only") {
+		t.Fatalf("error does not explain blocking semantics: %s", rr.Body.String())
 	}
 }
 
@@ -340,9 +367,10 @@ func TestHooksUpdate_PatchLeavesOmittedFieldsAlone(t *testing.T) {
 	var created hookRow
 	_ = json.Unmarshal(rr.Body.Bytes(), &created)
 
-	// Change only the event. Everything else must survive.
+	// Change only the event to another gate-capable event. Everything else
+	// must survive.
 	rr = patchHook(t, h, userID, wsID, "OWNER", created.ID, map[string]any{
-		"event": string(hooks.EventPostToolCall),
+		"event": string(hooks.EventPreLLMCall),
 	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("patch status = %d, want 200; body=%s", rr.Code, rr.Body.String())
@@ -351,8 +379,8 @@ func TestHooksUpdate_PatchLeavesOmittedFieldsAlone(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.Event != string(hooks.EventPostToolCall) {
-		t.Errorf("event = %q, want %q", got.Event, hooks.EventPostToolCall)
+	if got.Event != string(hooks.EventPreLLMCall) {
+		t.Errorf("event = %q, want %q", got.Event, hooks.EventPreLLMCall)
 	}
 	if got.HandlerConfig["url"] != "https://old.test" {
 		t.Errorf("handler_config clobbered by a partial patch: %v", got.HandlerConfig)
@@ -362,6 +390,35 @@ func TestHooksUpdate_PatchLeavesOmittedFieldsAlone(t *testing.T) {
 	}
 	if !got.Blocking {
 		t.Error("blocking clobbered by a partial patch")
+	}
+}
+
+func TestHooksUpdate_CannotRetainBlockingWhenChangingToObservationEvent(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewHooksHandler(db, newTestLogger())
+
+	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
+		"event":          string(hooks.EventPreAgentStart),
+		"handler_kind":   "http",
+		"handler_config": map[string]any{"url": "https://example.test/hook"},
+		"blocking":       true,
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
+	}
+	var created hookRow
+	_ = json.Unmarshal(rr.Body.Bytes(), &created)
+
+	rr = patchHook(t, h, userID, wsID, "OWNER", created.ID, map[string]any{
+		"event": string(hooks.EventPostAgentStop),
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("patch status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "observation-only") {
+		t.Fatalf("error does not explain retained blocking flag: %s", rr.Body.String())
 	}
 }
 

@@ -108,6 +108,10 @@ func validateForInsert(h Hook, allowedShell bool) error {
 	if err := ValidateEvent(h.Event); err != nil {
 		return err
 	}
+	if h.Blocking && !h.Event.SupportsBlocking() {
+		return fmt.Errorf("%w: %s is observation-only; use a pre_* event for a synchronous gate",
+			ErrEventCannotBlock, h.Event)
+	}
 	switch h.HandlerKind {
 	case HandlerKindShell:
 		if !allowedShell {

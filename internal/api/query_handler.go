@@ -464,31 +464,36 @@ func (h *QueryHandler) finishQuery(
 		status = "FAILED"
 	}
 
-	// post_peer_conversation: fire-and-forget, mirroring the answer journal
-	// entry below — the peer question has been answered (or failed), and
-	// this is the single place every peer query's completion converges on.
-	_ = hooks.Dispatch(ctx, h.db, h.journal, hooks.EventPostPeerConversation, hooks.EventContext{
-		WorkspaceID: workspaceID,
-		CrewID:      crewID,
-		AgentID:     targetAgentID,
-		Payload: map[string]any{
-			"from_slug":   fromSlug,
-			"target_slug": targetSlug,
-			"status":      status,
-			"duration_ms": durationMs,
-		},
-	})
-
 	var responseVal interface{}
 	if result != "" {
 		responseVal = result
 	}
 
 	// Update peer_conversations
+	conversationUpdated := true
 	if _, err := h.db.ExecContext(ctx,
 		`UPDATE peer_conversations SET status=?, response=?, duration_ms=?, finished_at=? WHERE id=?`,
 		status, responseVal, durationMs, now, convID); err != nil {
+		conversationUpdated = false
 		h.logger.Error("update peer_conversation", "error", err, "id", convID)
+	}
+
+	// post_peer_conversation is an observation, so publish it only after the
+	// terminal state it describes is durable. A background context keeps a
+	// request cancellation racing the response from dropping the lookup; the
+	// dispatcher itself runs observation handlers asynchronously.
+	if conversationUpdated {
+		_ = hooks.Dispatch(context.Background(), h.db, h.journal, hooks.EventPostPeerConversation, hooks.EventContext{
+			WorkspaceID: workspaceID,
+			CrewID:      crewID,
+			AgentID:     targetAgentID,
+			Payload: map[string]any{
+				"from_slug":   fromSlug,
+				"target_slug": targetSlug,
+				"status":      status,
+				"duration_ms": durationMs,
+			},
+		})
 	}
 
 	// Emit the answer entry on the same thread. Severity elevates to

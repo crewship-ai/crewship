@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -38,9 +39,9 @@ func TestPostToolCallObserver_DispatchesUserHookWithoutGovernanceEnabled(t *test
 	// watchdog is OFF (the default), exercising the exact case Observe
 	// used to short-circuit on before doing anything post_tool_call-shaped.
 
-	var hit bool
+	hit := make(chan struct{}, 1)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hit = true
+		hit <- struct{}{}
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -51,7 +52,6 @@ func TestPostToolCallObserver_DispatchesUserHookWithoutGovernanceEnabled(t *test
 		Event:         hooks.EventPostToolCall,
 		HandlerKind:   hooks.HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": ts.URL},
-		Blocking:      true,
 		Enabled:       true,
 	}, false); err != nil {
 		t.Fatalf("register hook: %v", err)
@@ -66,7 +66,9 @@ func TestPostToolCallObserver_DispatchesUserHookWithoutGovernanceEnabled(t *test
 		ToolName:    "shell_exec",
 	})
 
-	if !hit {
+	select {
+	case <-hit:
+	case <-time.After(time.Second):
 		t.Fatal("post_tool_call hook was never dispatched despite governance being disabled for the workspace")
 	}
 }

@@ -312,6 +312,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `pre_memory_write` refuses the consolidator's write) — a workspace with
   such a hook already registered will see it start enforcing on upgrade.
 
+- **Newly wired observation hooks could delay operations, report zero LLM
+  cost, and observe stale peer-query state.** `post_*` and `on_*` events now
+  always dispatch asynchronously; new or edited observation hooks reject
+  `blocking: true`, while legacy rows with that flag are safely treated as
+  non-blocking. The paymaster returns its estimated cost to the LLM hook
+  layer (not only to the ledger), HTTP and shell handlers receive the LLM
+  provider/model/cost fields, and `post_peer_conversation` fires only after
+  the terminal query state is committed.
+
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
   reverse-foreign-key chain from each table to `workspaces` and built a `WHERE`

@@ -84,7 +84,7 @@ New hooks are **enabled** unless you pass `--disabled`.
 | `--matcher-agents` | `string` | Comma-separated agent IDs. |
 | `--matcher-crews` | `string` | Comma-separated crew IDs. |
 | `--matcher-severities` | `string` | Comma-separated severities. |
-| `--blocking` | `bool` | Run synchronously; a `block` outcome cancels the triggering operation. |
+| `--blocking` | `bool` | Run synchronously; valid only for `pre_*` events that can still cancel the operation. `post_*` and `on_*` events are always asynchronous observations. |
 | `--disabled` | `bool` | Register without arming the hook. |
 
 ```bash
@@ -92,8 +92,8 @@ New hooks are **enabled** unless you pass `--disabled`.
 crewship hooks create --event on_approval_requested --handler http \
     --url https://hooks.slack.com/services/XXX
 
-# Blocking shell gate on Bash and Write, for one crew (OWNER only)
-crewship hooks create --event post_tool_call --handler shell \
+# Blocking shell gate before an LLM call, for one crew (OWNER only)
+crewship hooks create --event pre_llm_call --handler shell \
     --command /usr/local/bin/gate.sh \
     --matcher-tools 'Bash,Write' --crew backend-team --blocking
 
@@ -107,7 +107,7 @@ Sample output:
 
 ```
 Created hook hk_abc123
-  event    post_tool_call
+  event    pre_llm_call
   handler  shell → /usr/local/bin/gate.sh
   crew     crw_backend
   state    enabled, blocking
@@ -123,7 +123,7 @@ crewship hooks update hk_abc123 --matcher-tools 'Bash,Write'
 crewship hooks update hk_abc123 --disabled
 ```
 
-Takes the same flags as `create`, all optional. **Only the flags you pass are sent** — an omitted flag keeps its current server-side value, so changing the event does not quietly clear your matcher or blocking flag. Passing no flags at all is an error rather than an empty patch.
+Takes the same flags as `create`, all optional. **Only the flags you pass are sent** — an omitted flag keeps its current server-side value. If a blocking `pre_*` hook is changed to a `post_*` or `on_*` event, explicitly pass `--blocking=false`; the server refuses an observation event that retains the old blocking flag. Passing no flags at all is an error rather than an empty patch.
 
 Converting a hook to `--handler shell`, or editing one that is already shell, requires `OWNER`.
 
@@ -171,7 +171,7 @@ Same auth and audit semantics as enable.
 
 | Exit | Meaning |
 |---|---|
-| 400 | Unknown event or handler kind, or a handler with no target. Most of these are caught locally before a request is sent. |
+| 400 | Unknown event or handler kind, a handler with no target, or `--blocking` on an observation event. Most of these are caught locally before a request is sent. |
 | 401 | Not authenticated. |
 | 403 | Logged in but not `OWNER` / `ADMIN`; or a non-`OWNER` touching a shell hook. |
 | 404 | Hook ID not found in your workspace (also returned for cross-tenant IDs). |

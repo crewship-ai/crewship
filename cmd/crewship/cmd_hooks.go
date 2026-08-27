@@ -41,8 +41,8 @@ Examples:
   crewship hooks list --crew backend-team
   crewship hooks create --event on_budget_exceeded --handler http \
       --url https://hooks.slack.test/services/XXX
-  crewship hooks create --event post_tool_call --handler shell \
-      --command /usr/local/bin/gate.sh --matcher-tools Bash --blocking
+  crewship hooks create --event pre_llm_call --handler shell \
+	  --command /usr/local/bin/gate.sh --blocking
   crewship hooks update hk_abc --disabled
   crewship hooks delete hk_abc --yes
   crewship hooks enable hk_abc
@@ -234,6 +234,9 @@ func buildHookBody(cmd *cobra.Command, client *cli.Client, onlyChanged bool) (ma
 	}
 	if changed("blocking") {
 		v, _ := cmd.Flags().GetBool("blocking")
+		if v && event != "" && !hooks.Event(event).SupportsBlocking() {
+			return nil, fmt.Errorf("--blocking is not valid for observation event %q; use a pre_* event for a synchronous gate", event)
+		}
 		body["blocking"] = v
 	}
 	if changed("disabled") {
@@ -257,8 +260,8 @@ New hooks are enabled unless you pass --disabled.
 Examples:
   crewship hooks create --event on_approval_requested --handler http \
       --url https://hooks.slack.test/services/XXX
-  crewship hooks create --event post_tool_call --handler shell \
-      --command /usr/local/bin/gate.sh --matcher-tools 'Bash,Write' --blocking
+  crewship hooks create --event pre_llm_call --handler shell \
+	  --command /usr/local/bin/gate.sh --blocking
   crewship hooks create --event post_agent_stop --handler subagent \
       --subagent oncall-router --crew backend-team
   crewship hooks create --event pre_llm_call --handler http \

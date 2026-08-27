@@ -8,16 +8,18 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/lookout"
 )
 
-// TestMiddleware_DispatchesPreAndPostLLMCallHooks registers a blocking
-// webhook on each event, drives one Complete call through the full
+// TestMiddleware_DispatchesPreAndPostLLMCallHooks registers a webhook on
+// each event (blocking only for the pre-event), drives one Complete call through the full
 // middleware stack, and asserts both fired exactly once, in order.
 func TestMiddleware_DispatchesPreAndPostLLMCallHooks(t *testing.T) {
 	t.Setenv("CREWSHIP_HOOKS_ALLOW_PRIVATE", "true") // httptest binds 127.0.0.1
@@ -25,9 +27,17 @@ func TestMiddleware_DispatchesPreAndPostLLMCallHooks(t *testing.T) {
 	db := openLLMTestDB(t)
 	ctx := context.Background()
 
-	var seen []string
+	type hookHit struct {
+		path string
+		body map[string]any
+	}
+	seenCh := make(chan hookHit, 2)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.URL.Path)
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode hook body: %v", err)
+		}
+		seenCh <- hookHit{path: r.URL.Path, body: body}
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -39,7 +49,7 @@ func TestMiddleware_DispatchesPreAndPostLLMCallHooks(t *testing.T) {
 			Event:         ev,
 			HandlerKind:   hooks.HandlerKindHTTP,
 			HandlerConfig: map[string]any{"url": ts.URL + "/" + string(ev)},
-			Blocking:      true,
+			Blocking:      ev == hooks.EventPreLLMCall,
 			Enabled:       true,
 		}, false); err != nil {
 			t.Fatalf("register %s hook: %v", ev, err)
@@ -60,11 +70,20 @@ func TestMiddleware_DispatchesPreAndPostLLMCallHooks(t *testing.T) {
 		t.Fatalf("Complete: %v", err)
 	}
 
-	if len(seen) != 2 {
-		t.Fatalf("hook hits = %v, want exactly [pre_llm_call, post_llm_call]", seen)
+	seen := make([]hookHit, 0, 2)
+	for len(seen) < 2 {
+		select {
+		case hit := <-seenCh:
+			seen = append(seen, hit)
+		case <-time.After(time.Second):
+			t.Fatalf("hook hits = %v, want exactly [pre_llm_call, post_llm_call]", seen)
+		}
 	}
-	if seen[0] != "/pre_llm_call" || seen[1] != "/post_llm_call" {
+	if seen[0].path != "/pre_llm_call" || seen[1].path != "/post_llm_call" {
 		t.Errorf("hook order = %v, want [/pre_llm_call /post_llm_call]", seen)
+	}
+	if cost, _ := seen[1].body["cost_usd"].(float64); cost <= 0 {
+		t.Errorf("post_llm_call cost_usd = %v, want the paymaster estimate", seen[1].body["cost_usd"])
 	}
 }
 
