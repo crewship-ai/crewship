@@ -99,14 +99,30 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 // silently never fires. Rejecting it at the only write path turns a
 // permanently-dead registration into an error the caller can act on.
 func validateForInsert(h Hook, allowedShell bool) error {
-	if h.WorkspaceID == "" {
-		return errors.New("hooks: workspace_id required")
+	if err := validateEventForWrite(h.Event); err != nil {
+		return err
 	}
-	if h.Event == "" {
+	return validateWorkspaceAndHandler(h, allowedShell)
+}
+
+// validateEventForWrite is the event half of validateForInsert, split out
+// so Update can apply it only when the event is actually changing (see
+// Update's comment) while Register keeps requiring it unconditionally.
+func validateEventForWrite(e Event) error {
+	if e == "" {
 		return errors.New("hooks: event required")
 	}
-	if err := ValidateEvent(h.Event); err != nil {
-		return err
+	return ValidateEvent(e)
+}
+
+// validateWorkspaceAndHandler is the non-event half of validateForInsert:
+// workspace_id presence and the handler-kind shape/gate checks. These run
+// on every write regardless of whether the event is changing — a shell
+// hook edited to drop its command, or an http hook edited to drop its url,
+// is just as dead as a bad event.
+func validateWorkspaceAndHandler(h Hook, allowedShell bool) error {
+	if h.WorkspaceID == "" {
+		return errors.New("hooks: workspace_id required")
 	}
 	switch h.HandlerKind {
 	case HandlerKindShell:
@@ -160,7 +176,40 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 	// Validate against the workspace we are actually writing to, not the
 	// one the caller put in the struct.
 	h.WorkspaceID = workspaceID
-	if err := validateForInsert(h, allowedShell); err != nil {
+
+	// h is the FULL merged struct (see the doc comment above), so
+	// h.Event is populated even when the caller's request never
+	// mentioned "event" — it just carries whatever the row already had.
+	// A pre-existing row can carry an event that used to be valid and
+	// no longer is (pre_tool_call, removed from AllEvents the same
+	// change that added this comment): that row must stay editable and
+	// disable-able for every OTHER field, the same way SetEnabled and
+	// Delete don't care what event a row has. Re-running
+	// validateForInsert's event check unconditionally — as if every
+	// Update were a fresh Register — would instead turn "PATCH blocking
+	// on a legacy hook" into a permanent "unknown event" error with no
+	// way out short of deleting the row.
+	//
+	// So: look up the event the row actually has right now and only
+	// validate h.Event when the caller is changing it. This intentionally
+	// does NOT trust a caller-supplied "did you touch event" flag (the
+	// HTTP layer already validates an explicit change in the request
+	// body, but a future call site could get that wrong) — it re-derives
+	// "changing" from the database, so the guard holds regardless of who
+	// calls Update.
+	currentEvent, err := currentEventFor(ctx, db, workspaceID, h.ID)
+	if err != nil {
+		return fmt.Errorf("hooks: update: look up current event: %w", err)
+	}
+	if currentEvent == "" {
+		return sql.ErrNoRows
+	}
+	if h.Event != currentEvent {
+		if err := validateEventForWrite(h.Event); err != nil {
+			return err
+		}
+	}
+	if err := validateWorkspaceAndHandler(h, allowedShell); err != nil {
 		return err
 	}
 
@@ -219,6 +268,25 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		}
 	}
 	return nil
+}
+
+// currentEventFor returns the event a row currently has, scoped to
+// workspaceID so a cross-tenant id reads back as "not found" rather than
+// leaking another tenant's event value. Returns ("", nil) — not an error —
+// when no such row exists in that workspace; Update treats that the same
+// way SetEnabled/Delete treat a missing row (sql.ErrNoRows).
+func currentEventFor(ctx context.Context, db *sql.DB, workspaceID, id string) (Event, error) {
+	var event string
+	err := db.QueryRowContext(ctx,
+		`SELECT event FROM hooks_config WHERE id = ? AND workspace_id = ?`,
+		id, workspaceID).Scan(&event)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return Event(event), nil
 }
 
 // Delete removes a hook row, scoped to the workspace so cross-tenant

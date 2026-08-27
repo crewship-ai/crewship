@@ -1,10 +1,13 @@
 package hooks
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -20,27 +23,46 @@ import (
 // bug: declared in AllEvents, accepted by ValidateEvent, and dispatched by
 // nothing.
 //
-// The scan looks, in every non-test .go file outside this package, for
-// either:
-//   - the qualified identifier hooks.Event<PascalName> (covers call sites
-//     that pass the typed constant straight into Dispatch, e.g.
-//     runner_llm.go's hooks.Dispatch(..., hooks.EventOnGuardrailTriggered, ...)), or
-//   - the event's snake_case string literal on a line that also contains
-//     "Dispatch(" (covers the generic string-typed pass-through in
-//     internal/server/orchestrator_adapters.go, which forwards a plain
-//     string the orchestrator supplies at the call site, not a typed
-//     constant).
+// The scan parses every non-test .go file outside this package with
+// go/parser and looks for a call expression whose selector is named
+// "Dispatch" (hooks.Dispatch itself, or an interface method like
+// orchestrator.HookDispatcher.Dispatch that hooks.Dispatch sits behind —
+// see orchestrator_run.go calling o.getHooks().Dispatch(ctx,
+// "pre_agent_start", ...) rather than hooks.Dispatch directly) that takes,
+// as one of its arguments, either:
 //
-// This is a heuristic, not full data-flow analysis — a file that merely
-// mentions hooks.EventXxx without ever feeding it to Dispatch would still
-// count as "found". That imprecision is deliberate: the alternative is a
+//   - the qualified identifier hooks.Event<PascalName> (call sites that
+//     pass the typed constant straight in, e.g. runner_llm.go's
+//     hooks.Dispatch(..., hooks.EventOnGuardrailTriggered, ...)), or
+//   - the event's snake_case string literal (the generic string-typed
+//     pass-through in orchestrator_run.go, which calls the
+//     HookDispatcher interface with a plain string literal rather than a
+//     typed constant).
+//
+// This used to be a regexp.MatchString over each file's ENTIRE raw text,
+// which meant the qualified-identifier branch matched a file that merely
+// MENTIONED hooks.EventXxx anywhere, dispatch or not. post_tool_call
+// slipped through exactly that gap: its only mentions outside this package
+// are `Event: hooks.EventPostToolCall,` struct-field assignments in
+// internal/server/post_tool_call_adapter.go and
+// internal/keeper/behaviorhook/behaviorhook.go — an unrelated sampling
+// subsystem that never calls Dispatch — and the bare-presence regexp
+// counted those as a dispatch site. Requiring the identifier (or literal)
+// to actually be an ARGUMENT of a call to something named Dispatch closes
+// that gap: post_tool_call now correctly reports no dispatch site (see
+// preExistingGaps below).
+//
+// This is still a heuristic, not full data-flow analysis — a value routed
+// through an intermediate variable before reaching Dispatch, or a Dispatch
+// call on a wrapper type whose events are computed rather than literal,
+// would not be seen. That imprecision is deliberate: the alternative is a
 // hand-maintained event -> dispatch-site table that has to be edited by
 // hand every time a call site moves, which is the same kind of silent
-// drift this test exists to catch. Known cases where the heuristic is
-// looser than reality are called out inline below.
+// drift this test exists to catch.
 func TestEveryOfferedEventHasADispatchSite(t *testing.T) {
 	root := repoRootForTest(t)
 	files := collectScanFiles(t, root)
+	constNames := collectEventConstNames(t, root)
 
 	// preExistingGaps: events that already had zero production dispatch
 	// site before this test was written, discovered by the same
@@ -52,7 +74,12 @@ func TestEveryOfferedEventHasADispatchSite(t *testing.T) {
 	// a failure. Removing an event from this map is part of the diff that
 	// wires up its dispatch, the same discipline this test applies to
 	// every event added from here on.
+	//
+	// post_tool_call is deliberately NOT in this map: closing the
+	// false-positive gap above makes this test newly (and correctly)
+	// report it as undispatched, same as the other nine.
 	preExistingGaps := map[Event]bool{
+		EventPostToolCall:         true,
 		EventPreTaskDelegation:    true,
 		EventPostTaskDelegation:   true,
 		EventPreLLMCall:           true,
@@ -66,7 +93,7 @@ func TestEveryOfferedEventHasADispatchSite(t *testing.T) {
 
 	var undispatched []string
 	for _, ev := range AllEvents {
-		if eventHasDispatchSite(ev, files) {
+		if eventHasDispatchSite(ev, files, constNames[ev]) {
 			continue
 		}
 		if preExistingGaps[ev] {
@@ -86,54 +113,149 @@ func TestEveryOfferedEventHasADispatchSite(t *testing.T) {
 
 // eventHasDispatchSite reports whether ev has at least one plausible
 // dispatch site among files, per the heuristic documented on
-// TestEveryOfferedEventHasADispatchSite.
-func eventHasDispatchSite(ev Event, files []scannedFile) bool {
-	goName := "hooks." + "Event" + snakeToPascal(string(ev))
-	identRe := regexp.MustCompile(`\b` + regexp.QuoteMeta(goName) + `\b`)
-	literal := `"` + string(ev) + `"`
+// TestEveryOfferedEventHasADispatchSite. constName is the Go identifier
+// declared for ev in internal/hooks/types.go (e.g. "EventPreLLMCall" for
+// ev == EventPreLLMCall), as discovered by collectEventConstNames — an
+// empty constName just disables the identifier branch and falls back to
+// the string-literal branch.
+func eventHasDispatchSite(ev Event, files []scannedFile, constName string) bool {
+	literal := string(ev)
 
 	for _, f := range files {
-		if identRe.MatchString(f.content) {
-			return true
+		if f.astFile == nil {
+			continue // unparseable file already reported via t.Logf; skip rather than crash the scan
 		}
-		for _, line := range strings.Split(f.content, "\n") {
-			if strings.Contains(line, "Dispatch(") && strings.Contains(line, literal) {
+		found := false
+		ast.Inspect(f.astFile, func(n ast.Node) bool {
+			if found {
+				return false
+			}
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
 				return true
 			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Dispatch" {
+				return true
+			}
+			for _, arg := range call.Args {
+				if dispatchArgMatchesEvent(arg, constName, literal) {
+					found = true
+					return false
+				}
+			}
+			return true
+		})
+		if found {
+			return true
 		}
 	}
 	return false
 }
 
-// snakeToPascal turns "on_guardrail_triggered" into "OnGuardrailTriggered"
-// — the same convention the Event constants above already follow, derived
-// rather than hand-listed so a newly added event needs no parallel entry
-// here to be checked.
-func snakeToPascal(snake string) string {
-	parts := strings.Split(snake, "_")
-	var b strings.Builder
-	for _, p := range parts {
-		if p == "" {
+// dispatchArgMatchesEvent reports whether arg — one argument of a call to
+// something named Dispatch — is evidence that call dispatches ev.
+func dispatchArgMatchesEvent(arg ast.Expr, constName, literal string) bool {
+	switch v := arg.(type) {
+	case *ast.SelectorExpr:
+		// hooks.EventPreLLMCall — the typed constant passed straight in.
+		id, ok := v.X.(*ast.Ident)
+		return ok && id.Name == "hooks" && constName != "" && v.Sel.Name == constName
+	case *ast.BasicLit:
+		// "pre_llm_call" — the generic string-typed pass-through.
+		if v.Kind != token.STRING {
+			return false
+		}
+		s, err := strconv.Unquote(v.Value)
+		return err == nil && s == literal
+	default:
+		return false
+	}
+}
+
+// collectEventConstNames maps each Event value to the Go identifier its
+// `const` declaration uses in internal/hooks (e.g. "pre_llm_call" ->
+// "EventPreLLMCall"), by parsing the package's own non-test source rather
+// than guessing the identifier from the snake_case value.
+//
+// An earlier version of this test derived the identifier with a
+// snake_case -> PascalCase helper (snakeToPascal) that got acronyms wrong:
+// snakeToPascal("pre_llm_call") produced "PreLlmCall", but the real
+// constant is EventPreLLMCall. That bug was silent only because every
+// event whose name contains an acronym (LLM) was, at the time, also in
+// preExistingGaps — the moment one of those events gets a real Dispatch
+// call site wired up, the guessed name stops matching the real one and
+// the test fails with a confusing "no dispatch site" even though a
+// dispatch site exists. Reading the identifier directly out of the const
+// declaration is correct for every acronym, current or future, without
+// needing a parallel spelling table to keep in sync.
+func collectEventConstNames(t *testing.T, root string) map[Event]string {
+	t.Helper()
+	hooksDir := filepath.Join(root, "internal", "hooks")
+
+	entries, err := os.ReadDir(hooksDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", hooksDir, err)
+	}
+
+	fset := token.NewFileSet()
+	out := map[Event]string{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		b.WriteString(strings.ToUpper(p[:1]))
-		b.WriteString(p[1:])
+		path := filepath.Join(hooksDir, name)
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, decl := range f.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				typeIdent, ok := vs.Type.(*ast.Ident)
+				if !ok || typeIdent.Name != "Event" {
+					continue
+				}
+				for i, valExpr := range vs.Values {
+					lit, ok := valExpr.(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						continue
+					}
+					s, err := strconv.Unquote(lit.Value)
+					if err != nil {
+						continue
+					}
+					if i < len(vs.Names) {
+						out[Event(s)] = vs.Names[i].Name
+					}
+				}
+			}
+		}
 	}
-	return b.String()
+	return out
 }
 
 type scannedFile struct {
 	path    string
-	content string
+	astFile *ast.File // nil if the file failed to parse — skipped, not fatal
 }
 
-// collectScanFiles reads every non-test .go file in the repo except this
-// package's own (internal/hooks defines the Event constants themselves,
-// which would trivially "find" every event regardless of whether anything
-// actually dispatches it).
+// collectScanFiles reads and parses every non-test .go file in the repo
+// except this package's own (internal/hooks defines the Event constants
+// themselves, which would trivially "find" every event regardless of
+// whether anything actually dispatches it).
 func collectScanFiles(t *testing.T, root string) []scannedFile {
 	t.Helper()
 	hooksDir := filepath.Join(root, "internal", "hooks") + string(filepath.Separator)
+	fset := token.NewFileSet()
 
 	var out []scannedFile
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -153,11 +275,16 @@ func collectScanFiles(t *testing.T, root string) []scannedFile {
 		if strings.HasPrefix(path, hooksDir) {
 			return nil
 		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return nil // unreadable file can't be a dispatch site either way
+		f, parseErr := parser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			// A handful of generated or build-tagged files may not parse
+			// with a bare parser.ParseFile (no build constraints applied).
+			// Log and skip rather than fail the whole invariant on a file
+			// that was never going to contain a Dispatch call anyway.
+			t.Logf("dispatch-site scan: skipping unparseable file %s: %v", path, parseErr)
+			f = nil
 		}
-		out = append(out, scannedFile{path: path, content: string(data)})
+		out = append(out, scannedFile{path: path, astFile: f})
 		return nil
 	})
 	if err != nil {
