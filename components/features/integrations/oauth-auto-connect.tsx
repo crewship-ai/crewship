@@ -6,6 +6,8 @@ import { Spinner } from "@/components/ui/spinner"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
@@ -31,9 +33,14 @@ export function OAuthAutoConnect({
   onCredentialCreated,
 }: OAuthAutoConnectProps) {
   const [status, setStatus] = React.useState<
-    "idle" | "discovering" | "authorizing" | "polling" | "done" | "error"
+    "idle" | "discovering" | "client_id" | "authorizing" | "polling" | "done" | "error"
   >(authStatus === "connected" ? "done" : "idle")
   const [error, setError] = React.useState("")
+  const [clientPrompt, setClientPrompt] = React.useState("")
+  const [clientId, setClientId] = React.useState("")
+  const [clientSecret, setClientSecret] = React.useState("")
+  const [redirectURI, setRedirectURI] = React.useState("")
+  const fieldID = React.useId()
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   // Guards against double-firing onCredentialCreated. If a poll
@@ -56,10 +63,15 @@ export function OAuthAutoConnect({
     completedRef.current = false
 
     try {
+      const body: Record<string, string> = { mcp_url: mcpURL, server_name: serverName }
+      if (clientId.trim()) {
+        body.oauth_client_id = clientId.trim()
+        if (clientSecret) body.oauth_client_secret = clientSecret
+      }
       const res = await apiFetch(`/api/v1/oauth/auto-connect?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mcp_url: mcpURL, server_name: serverName }),
+        body: JSON.stringify(body),
       })
       // Parsed defensively and only trusted after the status is checked:
       // apiFetch resolves on 4xx/5xx, and a gateway 502 arrives as an HTML
@@ -68,7 +80,7 @@ export function OAuthAutoConnect({
       // down (#1563).
       const data = await res.json().catch(() => null)
       if (!res.ok) {
-        setStatus("error")
+        setStatus(clientId.trim() ? "client_id" : "error")
         // The server distinguishes "admins only" from "that MCP URL has no
         // OAuth metadata"; keep its wording rather than a second guess at it.
         const said = [data?.error, data?.detail, data?.message].find(
@@ -128,14 +140,15 @@ export function OAuthAutoConnect({
           timeoutRef.current = null
         }, 120000)
       } else if (data?.status === "needs_client_id") {
-        setStatus("error")
-        setError(data.message || "Please provide Client ID manually via OAuth form in credential picker.")
+        setStatus("client_id")
+        setRedirectURI(typeof data.redirect_uri === "string" ? data.redirect_uri : "")
+        setClientPrompt(data.message || "Register an OAuth app and provide its Client ID.")
       } else {
-        setStatus("error")
+        setStatus(clientId.trim() ? "client_id" : "error")
         setError(data?.error || "Unknown error")
       }
     } catch {
-      setStatus("error")
+      setStatus(clientId.trim() ? "client_id" : "error")
       setError("Network error")
     }
   }
@@ -181,21 +194,71 @@ export function OAuthAutoConnect({
             ? "The OAuth token has expired. Reconnect to refresh."
             : "Connect with OAuth to automatically authenticate with this service."}
       </p>
-      {error && (
+      {status === "client_id" && clientPrompt && (
+        <p className="text-label text-muted-foreground">{clientPrompt}</p>
+      )}
+      {status === "client_id" && (
+        <div className="space-y-3">
+          {redirectURI && (
+            <div className="space-y-1">
+              <Label htmlFor={`${fieldID}-redirect-uri`} className="text-label">Redirect URI</Label>
+              <Input
+                id={`${fieldID}-redirect-uri`}
+                value={redirectURI}
+                readOnly
+                className="font-mono text-xs"
+              />
+            </div>
+          )}
+          <div className="space-y-1">
+            <Label htmlFor={`${fieldID}-client-id`} className="text-label">Client ID</Label>
+            <Input
+              id={`${fieldID}-client-id`}
+              value={clientId}
+              onChange={(event) => setClientId(event.target.value)}
+              placeholder="your-client-id"
+              autoComplete="off"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`${fieldID}-client-secret`} className="text-label">
+              Client Secret <span className="text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id={`${fieldID}-client-secret`}
+              type="password"
+              value={clientSecret}
+              onChange={(event) => setClientSecret(event.target.value)}
+              placeholder="Not required for public PKCE clients"
+              autoComplete="new-password"
+            />
+          </div>
+        </div>
+      )}
+      {(status === "error" || status === "client_id") && error && (
         <p role="alert" className="text-label text-destructive">{error}</p>
       )}
       <Button
         size="sm"
         variant={isMissing || isExpired ? "destructive" : "default"}
         onClick={handleConnect}
-        disabled={status === "discovering" || status === "authorizing" || status === "polling"}
+        disabled={
+          status === "discovering" ||
+          status === "authorizing" ||
+          status === "polling" ||
+          (status === "client_id" && !clientId.trim())
+        }
       >
         {(status === "discovering" || status === "authorizing") && (
           <Spinner className="mr-2 h-3 w-3" />
         )}
-        {status === "authorizing" ? "Waiting for authorization..."
-          : isMissing || isExpired ? "Reconnect with OAuth"
-          : "Connect with OAuth"}
+        {status === "authorizing"
+          ? "Waiting for authorization..."
+          : status === "client_id"
+            ? "Continue with Client ID"
+            : isMissing || isExpired
+              ? "Reconnect with OAuth"
+              : "Connect with OAuth"}
       </Button>
     </Card>
   )

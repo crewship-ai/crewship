@@ -270,11 +270,16 @@ the built-in catalogue instead.
 ```bash
 crewship oauth auto-connect https://mcp.linear.app/sse --name linear-mcp
 crewship oauth auto-connect https://mcp.linear.app/sse --name linear
+crewship oauth auto-connect https://mcp.example/sse --name example \
+  --oauth-client-id "$CLIENT_ID" --oauth-client-secret-stdin
 ```
 
 | Flag | Type | Description |
 |---|---|---|
 | `--name` | `string` | Name for the MCP server. Server default: `mcp-server`. |
+| `--oauth-client-id` | `string` | Existing OAuth app client ID when the provider does not support DCR. |
+| `--oauth-client-secret` | `string` | Existing app client secret. Prefer the stdin form so it does not reach shell history or the process table. |
+| `--oauth-client-secret-stdin` | `boolean` | Read the existing app client secret from stdin. Public PKCE clients can omit both secret flags. |
 
 <Note>
 The endpoint accepts a `provider_hint`, and this command deliberately never
@@ -286,16 +291,19 @@ can only fail is worse than no flag; use `crewship oauth providers` if what you
 wanted was the endpoints.
 </Note>
 
-Discovers the endpoints, performs RFC 7591 Dynamic Client Registration, creates
-an `OAUTH2` credential in `PENDING`, and prints the URL to authorize. Finish
-with `crewship oauth connect <credential-id>`.
+Discovers the endpoints, performs RFC 7591 Dynamic Client Registration when the
+provider supports it, creates an `OAUTH2` credential in `PENDING`, and prints
+the URL to authorize. Finish with `crewship oauth connect <credential-id>`.
 
 <Warning>
 When the provider offers no registration endpoint the server answers **200**
 with `status: "needs_client_id"` and **creates nothing**. This command treats
 that as a failure (exit `2`) and prints the server's explanation plus the
-`credential create` invocation to run instead — reporting it as success would
-leave you looking for a credential that does not exist.
+`--oauth-client-id` retry to run instead — reporting it as success would leave
+you looking for a credential that does not exist. The retry repeats discovery
+on the server; it does not ask you to copy the protected-resource identifier or
+issuer through the command line. The failure output includes the exact redirect
+URI to register on the OAuth app before retrying.
 </Warning>
 
 ---

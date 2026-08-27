@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -179,9 +180,11 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		MCPURL       string `json:"mcp_url"`
-		ServerName   string `json:"server_name"`
-		ProviderHint string `json:"provider_hint"`
+		MCPURL            string `json:"mcp_url"`
+		ServerName        string `json:"server_name"`
+		ProviderHint      string `json:"provider_hint"`
+		OAuthClientID     string `json:"oauth_client_id"`
+		OAuthClientSecret string `json:"oauth_client_secret"`
 	}
 	if err := readJSON(r, &req); err != nil || req.MCPURL == "" {
 		replyError(w, http.StatusBadRequest, "mcp_url is required")
@@ -189,6 +192,11 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ServerName == "" {
 		req.ServerName = "mcp-server"
+	}
+	req.OAuthClientID = strings.TrimSpace(req.OAuthClientID)
+	if req.OAuthClientID == "" && req.OAuthClientSecret != "" {
+		replyError(w, http.StatusBadRequest, "oauth_client_id is required when oauth_client_secret is provided")
+		return
 	}
 
 	// Step 1: Resolve OAuth endpoints
@@ -244,17 +252,20 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	redirectURI := fmt.Sprintf("%s://%s/api/v1/oauth/callback", scheme, host)
 
 	// Step 3: Dynamic Client Registration (if available)
-	var clientID, clientSecret string
-	if registrationEndpoint != "" {
+	clientID, clientSecret := req.OAuthClientID, req.OAuthClientSecret
+	if clientID != "" {
+		h.logger.Info("using operator-supplied OAuth client", "client_id", clientID, "server", req.ServerName)
+	} else if registrationEndpoint != "" {
 		dcr, err := dynamicClientRegister(r.Context(), registrationEndpoint, redirectURI)
 		if err != nil {
 			h.logger.Warn("DCR failed, returning needs_client_id", "error", err)
 			writeJSON(w, http.StatusOK, map[string]any{
-				"status":    "needs_client_id",
-				"auth_url":  authURL,
-				"token_url": tokenURL,
-				"scopes":    scopes,
-				"message":   "Automatic registration not available. Please create an OAuth app and provide Client ID.",
+				"status":       "needs_client_id",
+				"auth_url":     authURL,
+				"token_url":    tokenURL,
+				"scopes":       scopes,
+				"redirect_uri": redirectURI,
+				"message":      "Automatic registration not available. Please create an OAuth app and provide Client ID.",
 			})
 			return
 		}
@@ -264,11 +275,12 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// No DCR — return info so frontend can ask for Client ID
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":    "needs_client_id",
-			"auth_url":  authURL,
-			"token_url": tokenURL,
-			"scopes":    scopes,
-			"message":   "This provider requires a Client ID. Create an OAuth app in the provider's settings.",
+			"status":       "needs_client_id",
+			"auth_url":     authURL,
+			"token_url":    tokenURL,
+			"scopes":       scopes,
+			"redirect_uri": redirectURI,
+			"message":      "This provider requires a Client ID. Create an OAuth app in the provider's settings.",
 		})
 		return
 	}

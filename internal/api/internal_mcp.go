@@ -140,7 +140,7 @@ func resolveOneEnvVar(
 		query = `
 			SELECT id, encrypted_value, type,
 				oauth_client_id, oauth_client_secret_enc, oauth_token_url,
-				oauth_refresh_token_enc, oauth_token_expires_at
+				oauth_refresh_token_enc, oauth_token_expires_at, COALESCE(oauth_resource, '')
 			FROM credentials
 			WHERE workspace_id = ? AND deleted_at IS NULL AND status != 'REVOKED'
 			  AND (name LIKE ? OR (type = 'OAUTH2' AND name LIKE ? AND oauth_client_id != '' AND oauth_client_id IS NOT NULL))
@@ -150,7 +150,7 @@ func resolveOneEnvVar(
 		query = `
 			SELECT id, encrypted_value, type,
 				oauth_client_id, oauth_client_secret_enc, oauth_token_url,
-				oauth_refresh_token_enc, oauth_token_expires_at
+				oauth_refresh_token_enc, oauth_token_expires_at, COALESCE(oauth_resource, '')
 			FROM credentials
 			WHERE workspace_id = ? AND name LIKE ? AND deleted_at IS NULL
 			  AND status != 'REVOKED'
@@ -161,9 +161,9 @@ func resolveOneEnvVar(
 	row := db.QueryRowContext(ctx, query, queryArgs...)
 
 	var id, encValue, credType string
-	var oaClientID, oaSecretEnc, oaTokenURL, oaRefreshEnc, oaExpiresAt sql.NullString
+	var oaClientID, oaSecretEnc, oaTokenURL, oaRefreshEnc, oaExpiresAt, oaResource sql.NullString
 	if err := row.Scan(&id, &encValue, &credType,
-		&oaClientID, &oaSecretEnc, &oaTokenURL, &oaRefreshEnc, &oaExpiresAt); err != nil {
+		&oaClientID, &oaSecretEnc, &oaTokenURL, &oaRefreshEnc, &oaExpiresAt, &oaResource); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			logger.Warn("auto-resolve MCP credential", "env_var", envVar, "error", err)
 		}
@@ -189,7 +189,7 @@ func resolveOneEnvVar(
 		if oaRefreshEnc.Valid && oaRefreshEnc.String != "" && oaTokenURL.Valid {
 			encValue = ensureFreshOAuthToken(ctx, db, logger, id, encValue,
 				oaClientID.String, oaSecretEnc.String, oaTokenURL.String,
-				oaRefreshEnc.String, oaExpiresAt.String)
+				oaRefreshEnc.String, oaExpiresAt.String, oaResource.String)
 		}
 	}
 
@@ -242,7 +242,7 @@ func ensureFreshOAuthToken(
 	logger *slog.Logger,
 	credID string,
 	currentEncValue string,
-	clientID, clientSecretEnc, tokenURL, refreshTokenEnc, expiresAt string,
+	clientID, clientSecretEnc, tokenURL, refreshTokenEnc, expiresAt, resource string,
 ) string {
 	// Check if token expires within the next 5 minutes.
 	if expiresAt != "" {
@@ -269,7 +269,7 @@ func ensureFreshOAuthToken(
 	}
 
 	// Call the token endpoint.
-	tokenResp, err := refreshOAuthToken(ctx, tokenURL, clientID, clientSecret, refreshToken)
+	tokenResp, err := refreshOAuthToken(ctx, tokenURL, clientID, clientSecret, refreshToken, resource)
 	if err != nil {
 		logger.Warn("refresh OAuth token before exec", "credential_id", credID, "error", err)
 		return currentEncValue

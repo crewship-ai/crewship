@@ -124,6 +124,63 @@ func TestExchangeOAuthCode_SendsResource(t *testing.T) {
 	}
 }
 
+func TestRefreshOAuthToken_SendsResource(t *testing.T) {
+	var gotResource string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse form: %v", err)
+		}
+		gotResource = r.PostFormValue("resource")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"refreshed","token_type":"Bearer"}`)
+	}))
+	defer srv.Close()
+	withTestOAuthTokenClient(t, srv)
+
+	_, err := refreshOAuthToken(context.Background(), "https://token.test/token", "cid", "", "refresh-x", "https://mcp.example.test/")
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if gotResource != "https://mcp.example.test/" {
+		t.Errorf("resource = %q, want protected MCP resource", gotResource)
+	}
+}
+
+func TestRefreshExpiringTokens_LoadsStoredResource(t *testing.T) {
+	setTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	refreshEnc, err := encryption.Encrypt("refresh-x")
+	if err != nil {
+		t.Fatalf("encrypt refresh: %v", err)
+	}
+
+	var gotResource string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse form: %v", err)
+		}
+		gotResource = r.PostFormValue("resource")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"worker-refreshed","expires_in":3600}`)
+	}))
+	defer srv.Close()
+	withTestOAuthTokenClient(t, srv)
+
+	covOTSeedExpiring(t, db, wsID, userID, "cred-resource-refresh", "", refreshEnc, "https://token.test/token")
+	if _, err := db.Exec(`UPDATE credentials SET oauth_resource = ? WHERE id = ?`,
+		"https://mcp.example.test/", "cred-resource-refresh"); err != nil {
+		t.Fatalf("set resource: %v", err)
+	}
+
+	refreshExpiringTokens(context.Background(), db, nil, covOTLogger())
+
+	if gotResource != "https://mcp.example.test/" {
+		t.Errorf("resource = %q, want value loaded from credential row", gotResource)
+	}
+}
+
 // ---- discovery: resource + issuer ----
 
 func TestDiscoverOAuthFromMCPURL_ResourceAndIssuer(t *testing.T) {
@@ -413,5 +470,81 @@ func TestOAuthAutoConnect_PersistsDiscoveredResourceAndIssuer(t *testing.T) {
 	}
 	if got := u.Query().Get("resource"); got != "https://issuer.test/mcp" {
 		t.Errorf("auth_url resource = %q", got)
+	}
+}
+
+func TestOAuthAutoConnect_ManualClientIDPreservesDiscoveredMetadata(t *testing.T) {
+	h, db, userID, wsID := covOAuthRig(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/oauth-protected-resource", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"resource":"https://issuer.test/mcp","authorization_servers":["https://issuer.test"]}`)
+	})
+	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"issuer":"https://issuer.test",
+			"authorization_endpoint":"https://issuer.test/authorize",
+			"token_endpoint":"https://issuer.test/token"
+		}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	withTestDiscoveryClient(t, srv)
+
+	missing := covACPost(t, h, userID, wsID, "OWNER", `{"mcp_url":"https://issuer.test/mcp","server_name":"manual"}`)
+	if missing.Code != http.StatusOK || !strings.Contains(missing.Body.String(), `"needs_client_id"`) {
+		t.Fatalf("initial status = %d; body=%s", missing.Code, missing.Body.String())
+	}
+	var missingOut map[string]any
+	if err := json.Unmarshal(missing.Body.Bytes(), &missingOut); err != nil {
+		t.Fatalf("decode initial response: %v", err)
+	}
+	if missingOut["redirect_uri"] != "http://crewship.local/api/v1/oauth/callback" {
+		t.Errorf("redirect_uri = %v", missingOut["redirect_uri"])
+	}
+
+	rr := covACPost(t, h, userID, wsID, "OWNER", `{
+		"mcp_url":"https://issuer.test/mcp",
+		"server_name":"manual",
+		"oauth_client_id":"manual-client",
+		"oauth_client_secret":"manual-secret"
+	}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("manual status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	var out map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out["status"] != "authorize" {
+		t.Fatalf("status = %v, want authorize; body=%s", out["status"], rr.Body.String())
+	}
+	credID, _ := out["credential_id"].(string)
+
+	var clientID, secretEnc, resource, issuer string
+	if err := db.QueryRow(`
+		SELECT oauth_client_id, oauth_client_secret_enc, oauth_resource, oauth_issuer
+		FROM credentials WHERE id = ?`, credID).Scan(&clientID, &secretEnc, &resource, &issuer); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	secret, err := encryption.Decrypt(secretEnc)
+	if err != nil {
+		t.Fatalf("decrypt client secret: %v", err)
+	}
+	if clientID != "manual-client" || secret != "manual-secret" {
+		t.Errorf("stored client = (%q, %q)", clientID, secret)
+	}
+	if resource != "https://issuer.test/mcp" || issuer != "https://issuer.test" {
+		t.Errorf("stored metadata = resource %q issuer %q", resource, issuer)
+	}
+	authURL, _ := out["auth_url"].(string)
+	u, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatalf("parse auth URL: %v", err)
+	}
+	if got := u.Query().Get("resource"); got != resource {
+		t.Errorf("auth resource = %q, want %q", got, resource)
 	}
 }

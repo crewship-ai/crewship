@@ -628,7 +628,7 @@ func TestExchangeOAuthCode_HTTPError(t *testing.T) {
 
 func TestRefreshOAuthToken_HTTPError(t *testing.T) {
 	t.Parallel()
-	_, err := refreshOAuthToken(context.Background(), "http://192.0.2.1:1/token", "c", "", "rt")
+	_, err := refreshOAuthToken(context.Background(), "http://192.0.2.1:1/token", "c", "", "rt", "")
 	if err == nil {
 		t.Error("expected connection error")
 	}

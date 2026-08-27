@@ -863,14 +863,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   on the credential (`oauth_resource`, `oauth_issuer` — new columns, empty
   for every credential connected before this and for the plain
   Google/Slack/GitHub-style provider catalogue, which never had a resource
-  to discover), `resource` is sent on both the authorization and the token
-  request whenever one is known, and `Callback`/`Loopback` reject the
+  to discover), `resource` is sent on the authorization request, the code
+  exchange, and both background and just-in-time refresh requests whenever one
+  is known, and `Callback`/`Loopback` reject the
   redirect before ever exchanging the code if `iss` is absent or does not
   match. Discovery itself now fails closed when an authorization server's
   metadata omits `issuer` — RFC 8414 makes the field REQUIRED, so a server
   that omits it gives the mix-up defence nothing to check against, and
   Crewship's whole reason to check `iss` at all is that MCP servers are
-  third-party-operated and not trusted by default.
+  third-party-operated and not trusted by default. A provider without Dynamic
+  Client Registration can now continue the same discovered flow with an
+  operator-supplied client ID (and optional secret); the server repeats
+  discovery and persists its resource and issuer instead of sending the
+  operator through the generic credential form that discarded both.
 
   **Known gap, not fixed here:** the manual "paste the redirect URL/code"
   fallback (`Exchange`, used when the automatic redirect can't reach
@@ -960,7 +965,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   it stored; the web UI omits it, so that path fails against any provider that
   enforces PKCE. `oauth auto-connect` treats the server's
   `status: "needs_client_id"` — a `200` that creates nothing — as a failure,
-  and prints the `credential create` to run instead.
+  and prints the `auto-connect --oauth-client-id` retry to run instead.
 
 - **`crewship credential create --type OAUTH2` could not set the OAuth app.**
   `POST /api/v1/credentials` has accepted `oauth_client_id` and its endpoints

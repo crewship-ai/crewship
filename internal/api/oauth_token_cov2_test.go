@@ -33,7 +33,7 @@ func TestCov2OTExchangeOAuthCode_BadURLRequestError(t *testing.T) {
 func TestCov2OTRefreshOAuthToken_BadURLRequestError(t *testing.T) {
 	t.Parallel()
 	_, err := refreshOAuthToken(context.Background(),
-		"http://exa\nmple.com/token", "cid", "", "rt")
+		"http://exa\nmple.com/token", "cid", "", "rt", "")
 	if err == nil {
 		t.Fatal("expected request-construction error for control-char URL")
 	}
