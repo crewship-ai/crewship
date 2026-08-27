@@ -514,7 +514,17 @@ func TestAcceptance_MemoryStatus_FailsLoudlyAndActionably(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.skipAsRoot && os.Geteuid() == 0 {
-				t.Skip("running as root: permission bits do not apply")
+				// SKIP-WAIVER: a directory the caller cannot enter IS the
+				// premise, and root enters a 0o000 directory anyway — at
+				// euid 0 the case would report ok while asserting the
+				// opposite of what it claims. There is no permission-free
+				// route to EACCES: ENOTDIR and ELOOP, which no euid
+				// bypasses, land in the other branches of memoryDirError
+				// and are what the "not a directory" case covers. Permanent
+				// platform guard, not debt, so deliberately no tracking
+				// issue — the #1546 precedent in scripts/skip-budget.txt.
+				// The other three cases in this table run as root.
+				t.Skip("running as root: directory permissions are not enforced")
 			}
 			cmd := exec.Command(buildCrewshipBinary(t), tc.args...)
 			cmd.Env = offlineEnv(t)
