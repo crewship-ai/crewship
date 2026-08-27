@@ -19,9 +19,8 @@ than being described as if it did.
 
 | Limit | Value | Enforced in | At the boundary | Are you told? |
 |---|---|---|---|---|
-| Agents given a thread lookup on `/chat` and in the chat tree | 12 | `components/features/chat/chat-tree-sidebar.tsx` (`AGENT_FANOUT_CAP`) | Agents past the cap are still listed, but their conversations are never fetched | **No** — see below |
+| Agents given a thread lookup for the conversations column | 12 | `components/features/chat/chat-tree-data.ts` (`AGENT_FANOUT_CAP`) | Agents past the cap keep every other affordance, but their conversations are never fetched and so never appear in the column | **No** — see below |
 | Threads fetched per agent for that lookup | 10 | same file (`PER_AGENT_CHAT_LIMIT`) | Older threads are not in the merged list | **No** |
-| Threads shown under **Recent conversations** on `/chat` | 25 | same file (`RECENT_THREAD_LIMIT`) | The list is cut to the 25 most recent | Partly — the heading counts what is shown, not what exists |
 | Agents spanned by a workspace-wide conversation search | 400 | `internal/api/conversation_search.go` (`maxWorkspaceSearchAgents`) | The 400 most recently created agents are searched; the rest are not | Documented, but nothing in the response or the log says the scope was cut |
 | Chat attachment size | 25 MB | `internal/api/proxy_attachments.go`, and again in the browser | `400` from the API; the composer refuses the file with a toast naming it | **Yes** |
 | Chat attachment, crew stopped | — | `internal/server/routes_files.go` | `409` with the remedy in the message | **Yes** |
@@ -46,30 +45,27 @@ This is the one worth reading in full, because it is the only limit on this
 page that removes something from the product's primary navigation with no
 signal at all.
 
-`/chat` and the chat tree do not have a "recent conversations across the
-workspace" endpoint. They build that list on the client: one
-`GET /api/v1/agents`, then one `GET /api/v1/agents/{id}/chats` per agent, in
-parallel, merged and sorted by last activity. That fan-out is capped at **12
-agents**, because a workspace with sixty agents would otherwise spend sixty
-requests to draw a column on a surface whose whole job is to open fast.
+The chat surface does not have a "recent conversations across the workspace"
+endpoint. It builds that list on the client: one `GET /api/v1/agents`, then
+one `GET /api/v1/agents/{id}/chats` per agent, in parallel, merged and sorted
+by last activity. That fan-out is capped at **12 agents**, because a workspace
+with sixty agents would otherwise spend sixty requests to draw a column on a
+surface whose whole job is to open fast.
 
-Every agent still gets a **row** — the cap bounds the thread lookup, not the
-roster. So on a workspace with more than twelve live agents:
+The cap bounds the thread lookup, not the roster — every agent is still
+reachable, and starting a conversation with one works normally. What it costs
+is the conversations already there. On a workspace with more than twelve live
+agents, the existing conversations of agents 13 and beyond **never appear in
+the column**, and because the column lists conversations rather than agents
+there is no row of any kind standing in for them. Nothing on screen marks the
+absence.
 
-- agents 13 and beyond appear in the tree and in the **Agents** list on
-  `/chat`, and clicking one opens a conversation normally;
-- their existing threads **never appear** under **Recent conversations**, and
-  never appear as children of their row in the tree;
-- their row shows a thread count of **`0`** and has no disclosure chevron;
-- if you narrow the tree to one of them, the tree offers **Start a
-  conversation** — the row it shows for an agent nobody has ever talked to.
-
-That last point is the defect. The tree already distinguishes *"this list
-failed to load"* from *"this list is empty"*: a failed fetch renders an em
-dash instead of a count, plus an explicit `Could not load <agent>'s
-conversations… this is not an empty history` panel with a **Retry**. An agent
-past the fan-out cap gets neither. It is presented as an agent with no
-history, which for a busy thirteenth agent is simply false.
+That is the defect. The column already distinguishes *"this list failed to
+load"* from *"this list is empty"* — a failed fetch gets an explicit
+`Could not load <agent>'s conversations… this is not an empty history` panel
+with a **Retry**. An agent past the fan-out cap gets neither, and is presented
+as an agent with no history, which for a busy thirteenth agent is simply
+false.
 
 Ordering is what keeps this from being worse than it is: `GET /agents`
 returns live agents by creation recency with retired ones last, so the twelve
@@ -77,18 +73,21 @@ that do get a lookup are the twelve newest live agents.
 
 **Which agents am I losing?** Sort your roster by creation date, newest
 first, ignore retired agents, and count off twelve. Everything below that
-line has an unreadable thread list on `/chat`.
+line has an unreadable thread list in the conversations column.
 
-**Working around it today:** open the agent directly at `/chat/<agent-slug>`.
-That page fetches its own agent's sessions and excludes it from the fan-out,
-so the agent you are looking at is never the one being dropped. Or use
+**Naming an agent exempts it.** Opening that agent directly at
+`/chat/<agent-slug>` — the shape `crewship open <agent>` and every
+crews / dashboard "Open chat" link already build — sorts it to the front of
+the fan-out before the cap is applied (`ensureSlug` in `chat-tree-data.ts`), so
+the agent you asked for is never the one dropped. Or use
 [conversation search](/guides/conversation-search), which is server-side and
 spans up to 400 agents.
 
-**What this needs is a screen affordance, not a doc line.** A count of `0`
-that means "not asked" is the same defect class this surface already fixed
-once for failed fetches. Until an agent past the cap renders as *unknown*
-rather than *empty*, this page is a workaround and not a fix.
+**What the general case still needs is a screen affordance, not a doc line.**
+A conversation that was "not asked for" is indistinguishable from one that
+does not exist, which is the same defect class this surface already fixed once
+for failed fetches. Until an agent past the cap renders as *unknown* rather
+than *absent*, this page is a workaround and not a fix.
 
 ## Workspace conversation search stops at 400 agents
 

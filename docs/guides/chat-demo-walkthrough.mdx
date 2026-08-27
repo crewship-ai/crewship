@@ -9,7 +9,8 @@ tag: Experimental
 # Chat demo walkthrough
 
 This is a script, not a reference. It takes a seeded install from "the chat page
-exists" to "I have seen the tree, both kinds of chip, a questionnaire, an
+exists" to "I have seen the conversations column, both kinds of chip, a
+questionnaire, an
 attachment, ⌘K and the CLI half — and I have seen four of them refuse". Each
 step leaves behind what the next one needs, so run it in order the first time.
 
@@ -26,7 +27,7 @@ of them.
 | # | Step | Where | Roughly |
 |---|---|---|---|
 | 0 | Check what the seed gave you | CLI | 1 min |
-| 1 | `/chat` — the tree, the agent filter, a thread that names itself | Browser | 2 min |
+| 1 | `/chat` — the conversations column, the facets, a thread that names itself | Browser | 2 min |
 | 2 | The two kinds of chip | Browser | 1 min |
 | 3 | The questionnaire, end to end | Browser | 2 min |
 | 4 | An attachment, and what the agent is told about it | Browser | 2 min |
@@ -41,10 +42,11 @@ State these to your audience. Three of them are the reason a demo falls over.
 **A seeded install, and a login.** [`crewship seed`](/cli/seed) prints the
 account it creates. It makes seven demo agents across four crews — comfortably
 under the twelve-agent fan-out cap, so nothing in this walkthrough disappears
-from the tree. On a workspace with more than twelve agents, read
+from the conversations column. On a workspace with more than twelve agents, read
 [the thirteenth agent](/guides/chat-surface-limits#the-thirteenth-agent)
-first: agents past the cap show a thread count of `0` whether or not they have
-history, and this walkthrough would be demonstrating that instead.
+first: the existing conversations of agents past the cap never appear in the
+column at all, with no row standing in for them, and this walkthrough would be
+demonstrating that instead.
 
 **The CLI, pointed at the same server.** Nothing defaults to it:
 
@@ -135,46 +137,54 @@ template is not something anyone types on a command line.
 
 ## Step 1 — `/chat` is a surface, not a drawer
 
-Open `/chat`. This is the index: one left column, recent threads across every
-agent on the right, the agent roster beneath them. It holds no WebSocket —
-picking a thread is what opens a live connection, on the page below.
+Open `/chat`. It is **not** an index. It picks up where you left off: the
+freshest conversation in the workspace opens immediately, the address bar is
+rewritten to that conversation's `/chat/<agent>?session=<id>` shape, and a live
+WebSocket is open from the moment the page settles. On a workspace with no
+conversations at all you get "Pick a conversation" instead.
 
 <Steps>
 
-<Step title="The tree">
+<Step title="The left column">
 
-The left column is the same component on `/chat` and on `/chat/<agent>`, built
-out of the same sidebar kit `/routines` and `/issues` use. Search on top, status
-facets under it, agents under that, and each agent's threads as its own
-children — not as a folder you have to open first.
+The column lists **conversations**, not agents. The agent is an attribute of a
+row — its avatar, and its name on the row's second line — the way a sender is an
+attribute of an email, not a folder you have to open first.
+
+Top to bottom: a search box that filters titles the page already has, a
+**New conversation** button, then one segmented strip of three facets — **All**,
+**Unread**, **Live** — each carrying its own count. Under that, **Conversations**,
+newest activity first.
 
 </Step>
 
-<Step title="The agent filter">
+<Step title="The facets">
 
-**Click an agent's row.** The other agents animate away and that one unfolds.
-Click it again and they come back.
+**Click Unread, then open the row it shows.** The count drops immediately and
+the row **stays where it is**. Reading something must not delete it from the
+list you are reading it from, so the open conversation is pinned into the list
+whatever the facet says — and the counts are computed *without* that pin, so
+"Unread 0" can never sit above a list with a row in it.
 
-Say what did *not* happen: no navigation, no URL write, no refetch, no page
-transition. Clicking an agent used to be a route change, and the whole dashboard
-chrome tore down and rebuilt every time somebody looked at a different agent.
-Nobody can feel a `useState`; everybody feels a page transition.
+**Live** means the agent is working right now. It is driven by the
+`agent.status` workspace event rather than by a roster fetched once at mount, so
+it flips at the moment a run does: send a message and watch it go to 1, then
+back to 0 when the reply lands.
 
-The chevron is separate — it opens and closes the branch and does nothing else,
-and so do ← / → on the row.
-
-Two things reach past the filter on purpose: the search box (a search box that
-cannot see six of seven agents is a lie) and the status facets, which count what
-the narrowed list can show and name whose they are in the section header, so the
-number never changes meaning in silence.
+Say what did *not* happen on any of that: no navigation, no refetch, no page
+transition — picking a conversation is a `useState` plus a `replaceState`.
+Picking used to be a route change, and the whole dashboard chrome tore down and
+rebuilt every time. Nobody can feel a `useState`; everybody feels a page
+transition.
 
 </Step>
 
 <Step title="A thread that names itself">
 
-Narrow the tree to `casey` and click **Start a conversation** — the row a
-filtered agent with no threads shows. It opens `/chat/casey` and posts nothing;
-arriving is not sending.
+At the foot of the column, **Not started yet** collects the agents nobody has
+talked to. Expand it and click `casey`. That mints a conversation id locally and
+posts nothing — arriving is not sending, and a conversation you never write in
+must not leave a row behind.
 
 Type a real sentence and send it. Something you will search for in step 5:
 
@@ -182,7 +192,7 @@ Type a real sentence and send it. Something you will search for in step 5:
 The staging deploy failed on the pipeline worker again last night
 ```
 
-Watch the sidebar. The thread appears, and its name is the first message cut to
+Watch the column. The thread appears, and its name is the first message cut to
 **60 characters at a word boundary**, with an ellipsis only if something was
 actually cut. `chats.title` had been in the schema since the first migration
 with nothing writing it, so every thread in every list used to read "Untitled
@@ -208,9 +218,21 @@ it.
 
 ## Step 2 — The two kinds of chip
 
-Chips render under an **empty** conversation, so open a new session on `casey`
-(**New session** in the header). After the first turn they come back as
-follow-ups under an assistant reply, three at a time.
+Chips render under an **empty** conversation, so you need a second, empty one
+with `casey`. The column cannot give you that today — **Not started yet** only
+lists agents with no conversations at all, and `casey` now has the one from
+step 1 — so mint it from the CLI and open its deep link:
+
+```bash
+crewship chat create casey     # prints the chat id
+```
+
+Then open `/chat/casey?session=<that-id>`. A side benefit: the conversation was
+created by the CLI, so its header carries a `CLI` origin chip, which is the same
+chip step 4's webhook conversation gets as `WEBHOOK`.
+
+After the first turn the chips come back as follow-ups under an assistant reply,
+three at a time.
 
 <Steps>
 
@@ -424,7 +446,7 @@ Retry.
 
 ## Step 5 — ⌘K finds a phrase, not a name
 
-Go back to `/chat` — the index, which mounts no chat panel — and press **⌘K**
+Go back to `/chat` — which reopens your freshest conversation — and press **⌘K**
 (Ctrl+K elsewhere). Type a phrase from step 1:
 
 ```text
@@ -688,9 +710,11 @@ reasoning; two of its session events are declared and not yet emitted, because
 their call sites live in files another workstream owns.
 
 **The one silent cap has no screen affordance.** Past twelve agents, the
-thirteenth agent's threads are never fetched and its row reads `0` —
-indistinguishable from an agent nobody has talked to. Do not demo on such a
-workspace without saying so first. [Chat Surface Limits](/guides/chat-surface-limits)
+thirteenth agent's conversations are never fetched, so they are simply absent
+from the column with no row standing in for them — indistinguishable from an
+agent nobody has talked to. Opening that agent by name (`/chat/<slug>`) exempts
+it from the cap, but browsing the column will not reveal it. Do not demo on such
+a workspace without saying so first. [Chat Surface Limits](/guides/chat-surface-limits)
 is the honest list of every bound and whether anything tells you.
 
 **Two render bounds truncate silently.** One substituted answer over 2000
