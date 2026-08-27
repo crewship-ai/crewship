@@ -36,7 +36,7 @@ func adminSpecialRequestSchemaCatalog() (map[string]DomainSchema, map[string]any
 		"enabled": anyValue(), "judge_provider": str(), "judge_endpoint_url": str(), "judge_wire": str(), "judge_model": str(), "judge_timeout_ms": integer(), "judge_profile": str(),
 		"judge_evidence": anyValue(), "judge_evidence_facts": str(), "judge_hard_gate": anyValue(), "judge_precedent": anyValue(), "judge_precedent_n": integer(), "judge_consistency_samples": integer(), "judge_escalate_from": integer(), "judge_prompt_budget_tokens": integer(),
 	})
-	governance := object(map[string]any{"enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(), "watch_spec": str(), "watch_presets": array(str()), "require_second_approver": boolean(), "auto_lease_seconds": integer(), "gov_model_provider": str(), "gov_model_id": str(), "gov_model_credential_id": str()})
+	governance := object(map[string]any{"enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(), "watch_spec": str(), "watch_presets": array(str()), "require_second_approver": boolean(), "auto_lease_seconds": integer(), "behavior_sample_every": integer(), "gov_model_provider": str(), "gov_model_id": str(), "gov_model_credential_id": str()})
 
 	components := map[string]any{
 		"AdminBackupCreateRequest":          req(map[string]any{"scope": map[string]any{"type": "string", "enum": []string{"crew", "workspace"}}, "scope_level": map[string]any{"type": "string", "enum": []string{"quick", "standard", "full"}}, "crew_id": str(), "passphrase": str(), "recipient": str(), "no_encrypt": boolean(), "output_dir": str()}, "scope"),

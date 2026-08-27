@@ -161,7 +161,7 @@ the deep dive.
 | `name` | string | **yes** | The credential's workspace-unique name **and** the default env-var name on the sidecar + every crew agent. SCREAMING_SNAKE_CASE (env-var shaped); must not clash with the crew's `credentials[]`. |
 | `inject_as_env` | string | no | Override the env-var name the **sidecar** receives (some images want `MARIADB_ROOT_PASSWORD`, not `name`). Env-var shaped. Empty → use `name`. |
 | `inject_to_agents` | bool | no | Whether crew agents pick the credential up automatically. Defaults to **true**; set `false` when the sidecar uses the secret internally but no agent should ever see it. |
-| `length` | int | no | Random bytes Crewship generates before hex-encoding. Default **32** bytes (64 hex chars); minimum 16. |
+| `length` | int | no | Random bytes Crewship generates before hex-encoding. Default **32** bytes (64 hex chars); minimum 16, maximum 512. |
 | `description` | string | no | Shown in the UI on the "Created by &lt;agent&gt;" row. The sugar layer fills this in for known images. |
 
 > **Host-published ports disable auto_credentials.** When a service
@@ -270,7 +270,9 @@ every failure into one message so you fix them in a single pass:
 - Services: `auto_credentials[]` entries each need a valid env-var-shaped
   `name` (unique within the service, no clash with the crew's
   `credentials[]`); `inject_as_env`, when set, must be env-var-shaped;
-  `length`, when positive, is at least the 16-byte floor.
+  `length`, when positive, is at least the 16-byte floor and at most
+  the 512-byte ceiling (the byte count reaches the random-value
+  allocation directly, so it is bounded on both ends).
 
 ## Round-trip via export
 

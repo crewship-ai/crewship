@@ -31,7 +31,37 @@ COPY . .
 RUN pnpm prisma generate
 RUN pnpm build
 
-FROM golang:1.26.6-alpine AS backend
+FROM golang:1.27.0-alpine AS backend
+# This tag is the compiler for the shipped binary, and it is the one Go version
+# no pull-request check ever exercises: the image is built by release.yml and
+# nightly.yml only (#2064). Dependabot's `docker-images` group bumps it alone.
+#
+# `local` makes the tag above the single authority: the go command uses the
+# toolchain this image ships and never downloads another. Without it the
+# default is `auto`, which honours go.mod's `toolchain` directive by FETCHING
+# that compiler — so a `toolchain` bump would quietly build the release with a
+# Go that no line in this repo pins and no vuln scan ever graded.
+#
+# Deliberately not a version literal. `GOTOOLCHAIN=go1.27.0` would be one more
+# copy of the string to keep in sync, and it fails the wrong way round: bump
+# the FROM tag above, forget the literal, and Go downloads the OLD toolchain
+# and undoes the bump while every check stays green. `local` cannot do that.
+#
+# What `local` does NOT do — verified against this image, not assumed — is
+# object when go.mod's `toolchain` names something else. That directive is
+# ignored outright under `local`, so a `toolchain go1.27.1` against this 1.27.0
+# tag builds happily and silently with 1.27.0. Only the `go` DIRECTIVE can fail
+# the build ("go.mod requires go >= 1.28; running go 1.27.0"), and that line
+# deliberately sits at 1.26. So nothing at build time will ever tell us these
+# two files disagree — which is exactly why the disagreement is checked
+# statically instead, by scripts/go-toolchain-pin.sh, on every PR.
+#
+# The official golang-alpine images already default to `local`, so this line
+# changes nothing today. It is written down because an inherited upstream
+# default is a fact that happens to hold, not an invariant: stated here it
+# survives a base-image swap, and the guard can check it alongside the FROM
+# tag, go.mod's `toolchain` directive and every GO_VERSION in .github/.
+ENV GOTOOLCHAIN=local
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \

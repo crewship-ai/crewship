@@ -105,16 +105,22 @@ func parseMCPConfigBlob(mcpJSON string) ([]parsedMCPServer, error) {
 
 // insertCrewMCPServersFromBlob inserts parsed MCP servers into crew_mcp_servers
 // using INSERT OR IGNORE for idempotency (duplicates by crew_id+name are skipped).
-
-func insertCrewMCPServersFromBlob(ctx context.Context, tx *sql.Tx, crewID string, servers []parsedMCPServer) error {
+//
+// access is the row's default_access. A crew's blob describes servers the whole
+// crew had, so it migrates as "all"; an AGENT's blob described that agent's own
+// servers and migrates as "bound-only" alongside the binding that names them.
+// Before #2072 the distinction was accidental — a server was private exactly
+// while somebody held a binding to it — and writing it down is what stops the
+// next binding from changing it.
+func insertCrewMCPServersFromBlob(ctx context.Context, tx *sql.Tx, crewID, access string, servers []parsedMCPServer) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, srv := range servers {
 		id := generateCUID()
 		if _, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO crew_mcp_servers
-				(id, crew_id, name, display_name, transport, endpoint, command, args_json, env_json, enabled, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-			id, crewID, srv.name, srv.displayName, srv.transport, srv.endpoint, srv.command, srv.argsJSON, srv.envJSON, now, now); err != nil {
+				(id, crew_id, name, display_name, transport, endpoint, command, args_json, env_json, enabled, default_access, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+			id, crewID, srv.name, srv.displayName, srv.transport, srv.endpoint, srv.command, srv.argsJSON, srv.envJSON, access, now, now); err != nil {
 			return fmt.Errorf("insert crew server %q: %w", srv.name, err)
 		}
 	}
@@ -161,7 +167,7 @@ func MigrateJSONBlobToCrewServers(ctx context.Context, db *sql.DB, logger *slog.
 	}
 	defer tx.Rollback()
 
-	if err := insertCrewMCPServersFromBlob(ctx, tx, crewID, servers); err != nil {
+	if err := insertCrewMCPServersFromBlob(ctx, tx, crewID, accessAll, servers); err != nil {
 		return err
 	}
 
@@ -201,7 +207,7 @@ func MigrateJSONBlobToAgentServers(ctx context.Context, db *sql.DB, logger *slog
 	}
 	defer tx.Rollback()
 
-	if err := insertCrewMCPServersFromBlob(ctx, tx, crewID, servers); err != nil {
+	if err := insertCrewMCPServersFromBlob(ctx, tx, crewID, accessBoundOnly, servers); err != nil {
 		return err
 	}
 

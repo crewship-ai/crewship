@@ -12,8 +12,10 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
@@ -152,6 +154,14 @@ type keeperGovernancePutBody struct {
 	// [governance.MinAutoLeaseSeconds, governance.MaxAutoLeaseSeconds].
 	AutoLeaseSeconds *int `json:"auto_lease_seconds"`
 
+	// BehaviorSampleEvery is how often the behaviour monitor reviews a tool call
+	// (#1001 M3): every Nth call per crew. Bounded to
+	// [governance.MinBehaviorSampleEvery, governance.MaxBehaviorSampleEvery] —
+	// see the const block for why neither end is negotiable. Omit to leave the
+	// cadence alone; 0 is a read-only "never configured" sentinel and is
+	// rejected on write.
+	BehaviorSampleEvery *int `json:"behavior_sample_every"`
+
 	// Governance-model selection (M2a, #1001). Empty provider = "use the
 	// server/env default". A credential ref must point at an ENDPOINT_URL /
 	// API_KEY credential in this workspace.
@@ -233,6 +243,30 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cur.AutoLeaseSeconds = v
+	}
+	if body.BehaviorSampleEvery != nil {
+		v := *body.BehaviorSampleEvery
+		// 0 gets its own message. It is the value an operator reaches for when
+		// they mean "stop reviewing", and it is the one number that must not do
+		// that here: the hook treats a cadence <= 0 as "never fire", so the row
+		// would say the watchdog is enabled while nothing was ever evaluated.
+		// Point at the control that actually turns it off.
+		if v == 0 {
+			replyError(w, http.StatusBadRequest,
+				"behavior_sample_every cannot be 0 — that would leave the watchdog enabled but never sampling. "+
+					"Turn the watchdog off with `crewship keeper disable` instead.")
+			return
+		}
+		if v < governance.MinBehaviorSampleEvery || v > governance.MaxBehaviorSampleEvery {
+			replyError(w, http.StatusBadRequest, fmt.Sprintf(
+				"behavior_sample_every must be between %d and %d (review every Nth tool call) — "+
+					"below %d there is no cadence to run, and above %d the monitor would never fire "+
+					"within a typical run",
+				governance.MinBehaviorSampleEvery, governance.MaxBehaviorSampleEvery,
+				governance.MinBehaviorSampleEvery, governance.MaxBehaviorSampleEvery))
+			return
+		}
+		cur.BehaviorSampleEvery = v
 	}
 	if body.GovModelProvider != nil {
 		// Empty is allowed and means "use the server/env default". A non-empty
@@ -352,6 +386,9 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 			"watch_spec_len":          len(s.WatchSpec),
 			"require_second_approver": s.RequireSecondApprover,
 			"auto_lease_seconds":      s.AutoLeaseSeconds,
+			// The cadence as ENFORCED, not the raw sentinel: an audit entry
+			// reading 0 would be indistinguishable from "monitoring disabled".
+			"behavior_sample_every": governance.EffectiveBehaviorSampleEvery(s.BehaviorSampleEvery),
 			// Governance-model selection: log the provider/model + whether a
 			// vault credential backs it (never the credential value).
 			"gov_model_provider": s.GovModelProvider,
@@ -362,13 +399,27 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("keeper governance: journal emit failed", "error", jerr)
 	}
 
+	// Non-blocking advisories. Collected rather than assigned so one save that
+	// trips two of them reports both — the previous single-slot version would
+	// have dropped whichever ran second.
+	var warnings []string
+
+	// A cadence this tight is a legitimate posture and a real bill: at every
+	// other call or tighter, most of what the workspace's agents do carries a
+	// governance-model round-trip. Say so; do not refuse it.
+	if body.BehaviorSampleEvery != nil && *body.BehaviorSampleEvery < governance.WarnBehaviorSampleEveryBelow {
+		warnings = append(warnings, fmt.Sprintf(
+			"reviewing 1 in %d tool calls puts a governance-model call behind most of what your agents do — "+
+				"expect the latency and (on a hosted judge) the bill to scale with tool-call volume.",
+			*body.BehaviorSampleEvery))
+	}
+
 	// Warn (do NOT block) when enabling the four-eyes rule on a workspace that
 	// can't satisfy it: with fewer than two members who can resolve escalations
 	// (OWNER/ADMIN/MANAGER), a credential raised via the only eligible member's
 	// agent can never be approved by a different person — the rule would deadlock.
 	// The operator may be mid-setup (about to invite a second admin), so this is
 	// advisory, not a 4xx.
-	warning := ""
 	if body.RequireSecondApprover != nil && *body.RequireSecondApprover {
 		var eligible int
 		if err := h.db.QueryRowContext(r.Context(), `
@@ -377,7 +428,7 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 			wsID).Scan(&eligible); err != nil {
 			h.logger.Warn("keeper governance: eligible-approver count failed", "error", err)
 		} else if eligible < 2 {
-			warning = "second-approver is enabled, but this workspace has fewer than 2 members who can approve escalations (OWNER/ADMIN/MANAGER). A credential raised via the only eligible member's agent cannot be resolved by anyone else — add another OWNER/ADMIN/MANAGER."
+			warnings = append(warnings, "second-approver is enabled, but this workspace has fewer than 2 members who can approve escalations (OWNER/ADMIN/MANAGER). A credential raised via the only eligible member's agent cannot be resolved by anyone else — add another OWNER/ADMIN/MANAGER.")
 			h.logger.Warn("keeper governance: second-approver enabled with <2 eligible approvers",
 				"workspace_id", wsID, "eligible", eligible)
 		}
@@ -387,6 +438,6 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 		Configured:              true,
 		Settings:                s,
 		EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
-		Warning:                 warning,
+		Warning:                 strings.Join(warnings, " "),
 	})
 }

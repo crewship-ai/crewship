@@ -8,6 +8,14 @@ import { MemoryConfigCard } from "@/components/features/admin/memory-config-card
 import { RuntimeIcon, runtimeBrand } from "@/components/icons/runtime-icons"
 import { cn } from "@/lib/utils"
 
+/** One crew hardening control the runtime in use is measured not to deliver. */
+export interface RuntimeGap {
+  /** The control that is dropped, e.g. "GroupAdd". */
+  control: string
+  /** What breaks because of it, in an operator's terms. */
+  detail: string
+}
+
 /** One container runtime present on the host, as GET /api/v1/system/runtime reports it. */
 export interface RuntimeEntry {
   runtime: string
@@ -19,6 +27,12 @@ export interface RuntimeEntry {
    * being installed and a runtime being used are different facts.
    */
   in_use: boolean
+  /**
+   * Controls this runtime will not honour (#1672). The server sends them on the
+   * `in_use` entry only and omits the key entirely when there are none, so this
+   * is optional twice over — an older server does not send it at all.
+   */
+  gaps?: RuntimeGap[]
 }
 
 interface RuntimeTabProps {
@@ -93,40 +107,64 @@ export const RuntimeTab = React.memo(function RuntimeTab({
                 {ordered.map((rt) => {
                   const brand = runtimeBrand(rt.runtime)
                   return (
-                    <div
-                      key={rt.runtime + rt.socket}
-                      data-testid={`runtime-row-${rt.runtime}`}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg border px-3 py-2",
-                        rt.in_use
-                          ? "border-border bg-white/[0.04]"
-                          : "border-border/60 bg-white/[0.02]",
-                      )}
-                    >
-                      <span
-                        data-testid="runtime-icon"
-                        className="flex h-6 w-6 shrink-0 items-center justify-center"
+                    <div key={rt.runtime + rt.socket} className="flex flex-col gap-1">
+                      <div
+                        data-testid={`runtime-row-${rt.runtime}`}
+                        className={cn(
+                          "flex items-center gap-3 rounded-lg border px-3 py-2",
+                          rt.in_use
+                            ? "border-border bg-white/[0.04]"
+                            : "border-border/60 bg-white/[0.02]",
+                        )}
                       >
-                        <RuntimeIcon runtime={rt.runtime} className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-2 text-xs">
-                          <span className="font-medium">{brand.label}</span>
-                          {rt.version && (
-                            <span className="font-mono text-muted-foreground">{rt.version}</span>
+                        <span
+                          data-testid="runtime-icon"
+                          className="flex h-6 w-6 shrink-0 items-center justify-center"
+                        >
+                          <RuntimeIcon runtime={rt.runtime} className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline gap-2 text-xs">
+                            <span className="font-medium">{brand.label}</span>
+                            {rt.version && (
+                              <span className="font-mono text-muted-foreground">{rt.version}</span>
+                            )}
+                          </div>
+                          {rt.socket && (
+                            <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                              {rt.socket}
+                            </p>
                           )}
                         </div>
-                        {rt.socket && (
-                          <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
-                            {rt.socket}
-                          </p>
-                        )}
+                        <StatusBadge
+                          status={rt.in_use ? "COMPLETED" : "PENDING"}
+                          label={rt.in_use ? "In use" : "Detected"}
+                          className="text-[10px]"
+                        />
                       </div>
-                      <StatusBadge
-                        status={rt.in_use ? "COMPLETED" : "PENDING"}
-                        label={rt.in_use ? "In use" : "Detected"}
-                        className="text-[10px]"
-                      />
+                      {/*
+                        Attached to the row rather than collected into one
+                        notice at the foot of the card: a gap is a property of a
+                        specific daemon at a specific version, and detaching it
+                        from the row that names them is how it stops being
+                        actionable. Only the in_use entry ever carries any.
+                      */}
+                      {rt.gaps && rt.gaps.length > 0 && (
+                        <div
+                          data-testid={`runtime-gaps-${rt.runtime}`}
+                          className="rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn"
+                        >
+                          {rt.gaps.map((gap) => (
+                            <p key={gap.control} className="flex items-start gap-1.5">
+                              <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
+                              <span>
+                                <span className="font-mono font-medium">{gap.control}</span> is not
+                                honoured — {gap.detail}
+                              </span>
+                            </p>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })}

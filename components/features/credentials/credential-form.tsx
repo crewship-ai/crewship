@@ -602,7 +602,7 @@ export function CredentialForm({
                 </div>
               ) : (
                 <>
-                  <Popover open={crewPopoverOpen} onOpenChange={setCrewPopoverOpen}>
+                  <Popover open={crewPopoverOpen} onOpenChange={setCrewPopoverOpen} modal>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"

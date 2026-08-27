@@ -42,9 +42,26 @@ ANY /exposed/{token}/
 | 404 | Token unknown or revoked. (Same shape so existence isn't leaked.) |
 | 410 | Token expired (`gone (expired)`). |
 | 426 | `Upgrade: websocket` request (`websocket not supported`). |
-| 502 | Upstream (in-container) port not reachable, or any reverse-proxy error (including timeout). |
+| 502 | Upstream (in-container) port not reachable, or any reverse-proxy error (including timeout). The body names the target address and, where it applies, the [container runtime constraint](#container-runtime-requirements) below. |
 
 There is no rate limit on the capability URL — it forwards as fast as the underlying TCP connection allows.
+
+### Container runtime requirements
+
+The capability URL is proxied by **crewshipd itself**, which dials the crew container on its Docker bridge IP (`http://172.19.0.2:3000`). No host port is ever published — that is the design intent — so the proxy works only when the process running crewshipd can route to the container network directly.
+
+| Runtime | Port expose | Why |
+|---|---|---|
+| Docker Engine on Linux (crewshipd on the same host) | Works | dockerd and crewshipd share the host's network namespace; bridge IPs are ordinary routable addresses. This is the typical production shape. |
+| OrbStack (macOS) | Works | OrbStack makes container IPs routable from the host as a deliberate product feature. |
+| Colima (macOS) | **Does not work** | dockerd runs inside a Lima VM. The bridge network exists only inside that VM, so a host-side crewshipd cannot reach it. |
+| Rancher Desktop, Docker Desktop (macOS/Windows) | **Does not work** | Same shape as Colima — a VM boundary sits between the host process and the container network. |
+
+<Warning>
+  On an affected runtime the expose is still created and the capability URL is still handed to the agent — nothing in token handling, policy, or IP resolution is wrong. Every request to it then returns `502`, because the packets have nowhere to go. There is no setting that fixes this: either use a runtime from the "Works" rows, or run crewshipd where it shares a network namespace with the crew containers.
+</Warning>
+
+`services:` sidecars are unaffected on every runtime — agent↔sidecar traffic never leaves the container network. Only the host-facing `/exposed/{token}` proxy needs host→container routability.
 
 ---
 

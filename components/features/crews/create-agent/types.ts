@@ -61,6 +61,13 @@ export interface CrewLite {
   id: string
   slug: string
   name: string
+  /** The crew's own face, so the picker can show it. Optional because
+   *  callers that only have {id, slug, name} still work — the picker falls
+   *  back to a generic glyph. */
+  icon?: string | null
+  color?: string | null
+  /** Drives the picker's "with agents" / "empty" grouping. */
+  agentCount?: number
 }
 
 /** Creates the initial draft with sensible defaults. */
@@ -122,6 +129,47 @@ export function resolveFinalPrompt(draft: AgentDraft): string {
   if (draft.editedPersonaPrompt !== null) return draft.editedPersonaPrompt
   if (draft.selectedPersona) return draft.selectedPersona.systemPrompt
   return ""
+}
+
+/** Fields compared by `isDraftDirty`. Everything on AgentDraft except
+ *  `selectedPersona`, which is an object and gets compared by id. Listed
+ *  rather than derived from Object.keys so a new field is a compile error
+ *  here (`keyof AgentDraft`) instead of a silently unguarded one. */
+const DIRTY_KEYS = [
+  "name",
+  "slug",
+  "slugTouched",
+  "agentRole",
+  "crewSlug",
+  "roleTitle",
+  "description",
+  "avatarSeed",
+  "avatarStyle",
+  "avatarTouched",
+  "customPrompt",
+  "editedPersonaPrompt",
+  "llmProvider",
+  "llmModel",
+  "cliAdapter",
+  "toolProfile",
+  "memoryEnabled",
+  "timeoutSeconds",
+  "leadMode",
+] as const satisfies readonly Exclude<keyof AgentDraft, "selectedPersona">[]
+
+/** True when the surface holds input that closing would throw away.
+ *
+ *  Measured against the draft the dialog OPENED with, not against a blank
+ *  one: a pre-selected crew (from `?crew=` on /crews) and the default model
+ *  are not the user's work, and prompting about them would train people to
+ *  click through the discard dialog without reading it.
+ *
+ *  Feeds `dirty` on CreateSurface, which owns the Esc / overlay-click guard
+ *  — the two dismissals a per-dialog guard can never see. */
+export function isDraftDirty(draft: AgentDraft, defaultCrewSlug: string | null): boolean {
+  const base = initialAgentDraft(defaultCrewSlug)
+  if ((draft.selectedPersona?.id ?? null) !== (base.selectedPersona?.id ?? null)) return true
+  return DIRTY_KEYS.some((k) => draft[k] !== base[k])
 }
 
 /** Submit-time validation — true means the Create button is enabled.

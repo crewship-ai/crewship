@@ -117,7 +117,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     expect(screen.getByRole("button", { name: /Continue/ })).toBeDisabled()
   })
 
-  it("Step 2 — empty mode → Step 3 → Step 4 → Review → submit POSTs only /api/v1/crews once", async () => {
+  it("empty mode → Container → Review → submit POSTs only /api/v1/crews once", async () => {
     const calls = setupFetch([
       // Templates list
       (c) => c.url.includes("/crew-templates") && !c.url.includes("/deploy")
@@ -140,16 +140,15 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
     // Step 2 — switch to Empty
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Empty crew/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Start empty/ })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Start empty/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     // Step 3 — Runtime defaults are valid → continue
     await waitFor(() => {
-      expect(screen.getByText("Container resources")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     // Step 4 — Container (optional) — skip via Skip-to-defaults to keep this happy
     // path from depending on RuntimeConfig / MCPConfigEditor mounting cleanly.
@@ -186,7 +185,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       color: expect.any(String),
       container_memory_mb: expect.any(Number),
       container_cpus: expect.any(Number),
-      network_mode: "restricted", // fail-safe default (wizard INITIAL_STATE)
+      network_mode: "free", // what the Container step proposes, and shows
     })
   })
 
@@ -215,6 +214,9 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
     })
+    // The step no longer auto-selects filtered[0], so the wizard cannot
+    // advance past a lineup nobody chose.
+    fireEvent.click(screen.getByRole("button", { name: /^Software Development/ }))
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Continue/ })).not.toBeDisabled()
     })
@@ -223,9 +225,8 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
     // Step 3
     await waitFor(() => {
-      expect(screen.getByText("Container resources")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     // Step 4 — skip Container customisation
     await waitFor(() => {
@@ -264,7 +265,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /^Software Development/ })).toBeInTheDocument()
     })
     expect(screen.getAllByText(/step 2 of 4/i).length).toBeGreaterThanOrEqual(1)
 
@@ -294,10 +295,8 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "OverCap" } })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
-    fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByText("Container resources"))
+    await waitFor(() => screen.getByRole("button", { name: /Start empty/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Start empty/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
     await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
     fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
@@ -328,14 +327,16 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
     })
+    // The step no longer auto-selects filtered[0], so the wizard cannot
+    // advance past a lineup nobody chose.
+    fireEvent.click(screen.getByRole("button", { name: /^Software Development/ }))
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Continue/ })).not.toBeDisabled()
     })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
     await waitFor(() => {
-      expect(screen.getByText("Container resources")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
     // Step 4 — skip
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
@@ -354,7 +355,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })
 
-  it("Skip to defaults on Step 4 jumps directly to Review (Step 5)", async () => {
+  it("Skip to defaults on the Container step jumps directly to Review", async () => {
     setupFetch([
       (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
     ])
@@ -364,18 +365,20 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 1 → 2
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /^Software Development/ })).toBeInTheDocument()
     })
+    // The step no longer auto-selects filtered[0], so the wizard cannot
+    // advance past a lineup nobody chose.
+    fireEvent.click(screen.getByRole("button", { name: /^Software Development/ }))
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Continue/ })).not.toBeDisabled()
     })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 2 → 3
     await waitFor(() => {
-      expect(screen.getByText("Container resources")).toBeInTheDocument()
+      expect(screen.getByText("Base image")).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 3 → 4
 
-    // On Step 4, Skip-to-defaults is visible and jumps straight to Review.
+    // On Container, Skip-to-defaults is visible and jumps straight to Review.
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
     })
@@ -398,7 +401,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /^Software Development/ })).toBeInTheDocument()
     })
     // Step 2 — no skip button
     expect(screen.queryByRole("button", { name: /Skip to defaults/ })).toBeNull()
@@ -413,16 +416,126 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
 
-    // Step 2 button is "ahead" of step 1 — disabled
-    const step2Btn = screen.getByLabelText(/Step 2: Lineup/)
+    // Step 2 button is "ahead" of step 1 — disabled.
+    // CreateSurfaceSteps names its chips by their visible label ("2 Lineup");
+    // the old hand-rolled strip carried an aria-label ("Step 2: Lineup").
+    const step2Btn = screen.getByRole("button", { name: /Lineup/ })
     expect(step2Btn).toBeDisabled()
 
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     // After advancing, Step 1 button is now "completed" → clickable
     await waitFor(() => {
-      const s1 = screen.getByLabelText(/Step 1: Identity/)
+      const s1 = screen.getByRole("button", { name: /Identity/ })
       expect(s1).not.toBeDisabled()
+    })
+  })
+
+  // ── The base-image catalogue is a panel, not a list on the step ──────────
+  //
+  // /design opens the catalogue the way the icon picker opens: the surface
+  // swaps its header, body and footer, and the back arrow returns. Rendering
+  // nine radio rows inline on a step that also carries tooling, network and
+  // sizing is what made Container read as a list of lists.
+  describe("<CreateCrewDialog> — the base image panel", () => {
+    async function reachContainer() {
+      setupFetch([
+        (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
+      ])
+      renderDialog()
+      fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
+      fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+      await waitFor(() => screen.getByRole("button", { name: /^Start empty/ }))
+      fireEvent.click(screen.getByRole("button", { name: /^Start empty/ }))
+      fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+      await waitFor(() => screen.getByText("Base image"))
+    }
+
+    it("swaps the surface for the picker, and says where you are", async () => {
+      await reachContainer()
+      fireEvent.click(screen.getByRole("button", { name: /Change/ }))
+
+      await waitFor(() => expect(screen.getByText("Base image — new crew")).toBeInTheDocument())
+      // A step strip reading "3 of 4" over a picker is a lie about where you
+      // are: the panel is not a step.
+      expect(screen.queryByRole("button", { name: /Step 3: Container/ })).toBeNull()
+      // And the primary is the panel's, not the wizard's.
+      expect(screen.getByRole("button", { name: /Use this image/ })).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /^Continue$/ })).toBeNull()
+    })
+
+    it("comes back to the step it left, with the pick applied", async () => {
+      await reachContainer()
+      fireEvent.click(screen.getByRole("button", { name: /Change/ }))
+      await screen.findByText("Base image — new crew")
+
+      // Picker cells are radios, not plain buttons — CreateSurfacePicker
+      // renders a radiogroup so a keyboard user gets arrow-key selection.
+      fireEvent.click(await screen.findByRole("radio", { name: /Ubuntu 24\.04/ }))
+      fireEvent.click(screen.getByRole("button", { name: /Use this image/ }))
+
+      await waitFor(() => expect(screen.getByRole("button", { name: /Change/ })).toHaveTextContent("ubuntu"))
+      // Back on the step, not left in the panel.
+      expect(screen.getByRole("button", { name: /^Continue$/ })).toBeInTheDocument()
+    })
+  })
+
+  // ── The icon picker is a panel, like New project's ────────────────────
+  //
+  // It was an inline block on the Identity step: the form, a notice, a
+  // preview, a colour row, a search box and a grid of 345 icons on one
+  // screen. New project had already solved this — the surface swaps, the
+  // header says where you are, and the footer commits.
+  describe("<CreateCrewDialog> — the icon panel", () => {
+    it("swaps the surface, with the categories New project has", async () => {
+      setupFetch([])
+      renderDialog()
+
+      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+
+      await waitFor(() => expect(screen.getByText("Icon — new crew")).toBeInTheDocument())
+      expect(screen.getByPlaceholderText(/search icons/i)).toBeInTheDocument()
+      // Browsing 345 icons by category is the thing the inline version never
+      // had, and the reason it was unusable.
+      // CATEGORY_MAP keys are lowercase; the capital is CSS.
+      expect(screen.getByRole("button", { name: "engineering" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Use this icon/ })).toBeInTheDocument()
+      // Still one dialog.
+      expect(screen.queryAllByRole("dialog")).toHaveLength(1)
+    })
+
+    it("hides the step strip while the panel is up", async () => {
+      setupFetch([])
+      renderDialog()
+      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+
+      await screen.findByText("Icon — new crew")
+      expect(screen.queryByRole("button", { name: /Step 2: Lineup/ })).toBeNull()
+    })
+
+    it("applies the pick and returns to the step", async () => {
+      setupFetch([])
+      renderDialog()
+      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+      await screen.findByText("Icon — new crew")
+
+      fireEvent.click(screen.getByRole("radio", { name: "Rocket" }))
+      fireEvent.click(screen.getByRole("button", { name: /Use this icon/ }))
+
+      await waitFor(() => expect(screen.getByPlaceholderText("Engineering")).toBeInTheDocument())
+      expect(screen.getByText(/Rocket ·/)).toBeInTheDocument()
+    })
+
+    it("searches the set instead of making you scroll it", async () => {
+      setupFetch([])
+      renderDialog()
+      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+      await screen.findByText("Icon — new crew")
+
+      const before = screen.getAllByRole("radio").length
+      fireEvent.change(screen.getByPlaceholderText(/search icons/i), { target: { value: "rocket" } })
+      expect(screen.getAllByRole("radio").length).toBeLessThan(before)
+      expect(screen.getByRole("radio", { name: "Rocket" })).toBeInTheDocument()
     })
   })
 })

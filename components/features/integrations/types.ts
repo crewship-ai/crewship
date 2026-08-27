@@ -22,6 +22,15 @@ export interface CrewIntegration {
   created_at: string
   updated_at: string
   agent_binding_count: number
+  /**
+   * Who may use this server: "all" (every agent in scope) or "bound-only"
+   * (only agents with an explicit binding). A stored fact since #2072 — it
+   * used to be inferred from agent_binding_count, which made the first
+   * binding a workspace-wide revocation. Optional so a response from an older
+   * server still parses; a missing value means "all", which is how those
+   * servers behaved.
+   */
+  default_access?: "all" | "bound-only"
   auth_status: "connected" | "missing" | "expired" | "none"
 }
 

@@ -28,6 +28,10 @@ type OutputBuffer struct {
 
 // NewOutputBuffer creates an OutputBuffer that aggregates streaming token
 // fragments before writing them to the given Writer.
+//
+// A nil Writer is accepted: the returned buffer aggregates as usual and its
+// writes are discarded (see Writer.Append). Callers that only have a log sink
+// sometimes may therefore build the buffer unconditionally.
 func NewOutputBuffer(w *Writer, crewID, agentID string) *OutputBuffer {
 	return &OutputBuffer{
 		writer:  w,
@@ -56,8 +60,14 @@ func eventLevel(event string) string {
 	}
 }
 
-// Append adds a log entry to the buffer, flushing non-streamed events immediately.
+// Append adds a log entry to the buffer, flushing non-streamed events
+// immediately. A nil receiver is a no-op: the buffer is itself an optional
+// dependency (orchestrator.BufferingHandlerOpts.LogBuf is documented "when
+// non-nil"), so a missing one must be inert rather than fatal.
 func (ob *OutputBuffer) Append(entry LogEntry) error {
+	if ob == nil {
+		return nil
+	}
 	if !isStreamedEvent(entry.Event) {
 		ob.flush()
 		if entry.Level == "" {
@@ -90,8 +100,13 @@ func (ob *OutputBuffer) Append(entry LogEntry) error {
 	return nil
 }
 
-// Close flushes remaining content and stops the timer.
+// Close flushes remaining content and stops the timer. A nil receiver is a
+// no-op — Close is almost always deferred, so it is the call most likely to
+// meet a buffer that was never built.
 func (ob *OutputBuffer) Close() {
+	if ob == nil {
+		return
+	}
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
 	if ob.timer != nil {

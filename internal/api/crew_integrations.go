@@ -23,6 +23,7 @@ type crewMCPServerResponse struct {
 	ConfigJSON           *string `json:"config_json"`
 	Icon                 *string `json:"icon"`
 	Enabled              bool    `json:"enabled"`
+	DefaultAccess        string  `json:"default_access"`
 	CreatedAt            string  `json:"created_at"`
 	UpdatedAt            string  `json:"updated_at"`
 	AgentBindCount       int     `json:"agent_binding_count"`
@@ -60,7 +61,7 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT cs.id, cs.crew_id, cs.workspace_mcp_server_id, cs.name, cs.display_name,
 			cs.transport, cs.endpoint, cs.command, cs.args_json, cs.env_json, cs.config_json,
-			cs.icon, cs.enabled, cs.created_at, cs.updated_at,
+			cs.icon, cs.enabled, cs.default_access, cs.created_at, cs.updated_at,
 			c.name AS crew_name, c.slug AS crew_slug,
 			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = cs.id AND mcp_server_scope = 'crew') AS bind_count
 		FROM crew_mcp_servers cs
@@ -79,7 +80,7 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		var enabled int
 		if err := rows.Scan(&s.ID, &s.CrewID, &s.WorkspaceMCPServerID, &s.Name, &s.DisplayName,
 			&s.Transport, &s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-			&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt,
+			&s.Icon, &enabled, &s.DefaultAccess, &s.CreatedAt, &s.UpdatedAt,
 			&s.CrewName, &s.CrewSlug, &s.AgentBindCount); err != nil {
 			h.logger.Error("scan crew integration overview", "error", err)
 			continue
@@ -180,7 +181,7 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT cs.id, cs.crew_id, cs.workspace_mcp_server_id, cs.name, cs.display_name,
 			cs.transport, cs.endpoint, cs.command, cs.args_json, cs.env_json, cs.config_json,
-			cs.icon, cs.enabled, cs.created_at, cs.updated_at,
+			cs.icon, cs.enabled, cs.default_access, cs.created_at, cs.updated_at,
 			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = cs.id AND mcp_server_scope = 'crew') AS bind_count
 		FROM crew_mcp_servers cs
 		WHERE cs.crew_id = ? AND cs.deleted_at IS NULL
@@ -197,7 +198,7 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 		var enabled int
 		if err := rows.Scan(&s.ID, &s.CrewID, &s.WorkspaceMCPServerID, &s.Name, &s.DisplayName,
 			&s.Transport, &s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-			&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt, &s.AgentBindCount); err != nil {
+			&s.Icon, &enabled, &s.DefaultAccess, &s.CreatedAt, &s.UpdatedAt, &s.AgentBindCount); err != nil {
 			h.logger.Error("scan crew integration", "error", err)
 			continue
 		}

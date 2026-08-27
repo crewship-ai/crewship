@@ -44,6 +44,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { isImeComposing } from "@/lib/ime"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -698,6 +699,8 @@ export function AddRelationPicker({ edit }: { edit: IssueCardEdit }) {
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           onKeyDown={(e) => {
+            // Enter confirms an IME candidate before it means "add".
+            if (isImeComposing(e)) return
             if (e.key === "Enter") void submit()
           }}
           placeholder="Target identifier (e.g. ENG-5)"
@@ -778,6 +781,13 @@ export function TitleEditor({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => setEditing(false)}
         onKeyDown={(e) => {
+          // The destructive one. This Enter PATCHes the title straight onto
+          // the issue, and mid-composition it saves a fragment of what the
+          // reader was typing — with no `mission_activity` row recording
+          // what the title used to be. Escape is guarded for the same
+          // reason: mid-composition it means "cancel this candidate", not
+          // "throw the draft away".
+          if (isImeComposing(e)) return
           if (e.key === "Enter") {
             e.preventDefault()
             const next = draft.trim()

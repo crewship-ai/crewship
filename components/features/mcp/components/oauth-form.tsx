@@ -1,35 +1,91 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
-import { ExternalLink } from "lucide-react"
+import { useCallback, useState, useEffect, useRef } from "react"
+import {
+  Cloud,
+  CreditCard,
+  ExternalLink,
+  FileText,
+  GitBranch,
+  GitMerge,
+  Globe,
+  LayoutGrid,
+  MessageSquare,
+  Route,
+  Wrench,
+} from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { cn } from "@/lib/utils"
+import type { AccentName } from "@/lib/concept-accents"
+import {
+  CREATE_SURFACE_INPUT,
+  CreateSurfaceTile,
+  type SurfaceIcon as SurfaceIconComponent,
+} from "@/components/layout/create-surface"
 import type { Credential, OAuthProvider } from "../types"
 import { deriveCredentialName } from "../lib/credential-helpers"
 
 // ---------------------------------------------------------------------------
-// Provider shortcuts shown as pill buttons
+// Provider shortcuts
+//
+// Rendered as pills inline (the MCP credential picker, where this is one field
+// among many) and as tiles in a CreateSurface (Credentials → Connect via
+// OAuth, where picking the provider IS the surface). The glyph and accent are
+// only read by the tile layout; the pills have never carried either.
 // ---------------------------------------------------------------------------
 
-const OAUTH_PROVIDER_SHORTCUTS: { key: string; label: string }[] = [
-  { key: "google", label: "Google" },
-  { key: "github", label: "GitHub" },
-  { key: "slack", label: "Slack" },
-  { key: "microsoft", label: "Microsoft" },
-  { key: "linear", label: "Linear" },
-  { key: "gitlab", label: "GitLab" },
-  { key: "notion", label: "Notion" },
-  { key: "stripe", label: "Stripe" },
-  { key: "cloudflare", label: "Cloudflare" },
+interface OAuthShortcut {
+  key: string
+  label: string
+  icon: SurfaceIconComponent
+  accent: AccentName
+}
+
+const OAUTH_PROVIDER_SHORTCUTS: OAuthShortcut[] = [
+  { key: "google", label: "Google", icon: Globe, accent: "blue" },
+  { key: "github", label: "GitHub", icon: GitBranch, accent: "slate" },
+  { key: "slack", label: "Slack", icon: MessageSquare, accent: "red" },
+  { key: "microsoft", label: "Microsoft", icon: LayoutGrid, accent: "sky" },
+  { key: "linear", label: "Linear", icon: Route, accent: "purple" },
+  { key: "gitlab", label: "GitLab", icon: GitMerge, accent: "amber" },
+  { key: "notion", label: "Notion", icon: FileText, accent: "slate" },
+  { key: "stripe", label: "Stripe", icon: CreditCard, accent: "purple" },
+  { key: "cloudflare", label: "Cloudflare", icon: Cloud, accent: "gold" },
 ]
+
+/**
+ * The scope list as a tile subtitle.
+ *
+ * Google states its scopes as full URLs — three of them run to 130 characters
+ * and wrap a 480px tile to three lines, which buries the provider name they
+ * are meant to annotate. The trailing segment is the part that carries the
+ * meaning (`.../auth/drive` → `drive`), and the full string is still what gets
+ * sent: this shortens the label, not the request.
+ */
+function formatScopes(raw: string): string {
+  return raw
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map((s) => (s.startsWith("http") ? s.replace(/\/+$/, "").split("/").pop() || s : s))
+    .join(" · ")
+}
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
+
+/** What the form's primary action is, right now. */
+export interface OAuthFormAction {
+  authorize: () => void
+  disabled: boolean
+  busy: boolean
+  label: string
+}
 
 export interface OAuthFormProps {
   envKey: string
@@ -37,6 +93,30 @@ export interface OAuthFormProps {
   onAddCredential: (cred: Credential) => void
   onSelectCredential: (credName: string) => void
   onCancel: () => void
+  /**
+   * Hand the primary action to the caller instead of drawing it.
+   *
+   * The MCP credential picker renders this form inline, where an action row
+   * at the bottom of the form is right. `ConnectOAuthDialog` renders it in a
+   * CreateSurface, where the primary belongs in the footer — outside the
+   * scrollport, next to Cancel, reachable by ⌘↵ — and a second Authorize
+   * button halfway up the body is the thing the shell exists to stop.
+   *
+   * Supplying this suppresses the in-form row. Called on mount and whenever
+   * the action's state changes; the callback itself must be stable.
+   */
+  onActionChange?: (action: OAuthFormAction) => void
+  /**
+   * How the provider shortcuts are drawn.
+   *
+   * `inline` (default) is the pill row the MCP credential picker has always
+   * shown, where this form is one control inside a larger config panel.
+   * `surface` is the tile list /design specifies for Credentials → Connect via
+   * OAuth: glyph, name, and the scopes the provider will be asked for, which
+   * is the fact a person needs before handing over access and the one a pill
+   * has no room to carry.
+   */
+  variant?: "inline" | "surface"
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +129,8 @@ export function OAuthForm({
   onAddCredential,
   onSelectCredential,
   onCancel,
+  onActionChange,
+  variant = "inline",
 }: OAuthFormProps) {
   const [providers, setProviders] = useState<Record<string, OAuthProvider>>({})
   const [providersFetched, setProvidersFetched] = useState(false)
@@ -114,6 +196,51 @@ export function OAuthForm({
     setTokenUrl("")
     setScopes("")
   }
+
+  // ── The primary, published rather than drawn ───────────────────────────
+  //
+  // `handleAuthorize` is redeclared every render, so it cannot go in the
+  // effect's deps without looping. The ref holds the current one and the
+  // callback stays stable; the effect then depends only on the four things a
+  // caller's footer actually renders from.
+  const canAuthorize =
+    !authorizing &&
+    clientId.trim() !== "" &&
+    clientSecret.trim() !== "" &&
+    !(selectedProvider === "custom" && (!authUrl.trim() || !tokenUrl.trim()))
+  const primaryLabel = polling ? "Waiting for authorization..." : "Authorize"
+
+  const authorizeRef = useRef<() => void>(() => {})
+  const authorize = useCallback(() => authorizeRef.current(), [])
+
+  /**
+   * Publish the current handler AFTER commit, not during render.
+   *
+   * This was a bare `authorizeRef.current = handleAuthorize` down in the
+   * render body. React may replay or discard a render — StrictMode does it on
+   * every one — so a discarded render could leave the committed footer's
+   * stable `authorize` pointing at a closure over state the UI never showed.
+   * The footer's primary creates a credential, so "runs against state nobody
+   * saw" is not a theoretical cost.
+   *
+   * No dependency array: the point is that it tracks every commit.
+   * `handleAuthorize` is a function declaration, so it is hoisted and this
+   * effect can be declared above it — deliberately, because effects fire in
+   * declaration order and the ref must be current before the effect below
+   * hands `authorize` to the caller.
+   */
+  useEffect(() => {
+    authorizeRef.current = handleAuthorize
+  })
+
+  useEffect(() => {
+    onActionChange?.({
+      authorize,
+      disabled: !canAuthorize,
+      busy: authorizing || polling,
+      label: primaryLabel,
+    })
+  }, [onActionChange, authorize, canAuthorize, authorizing, polling, primaryLabel])
 
   async function handleAuthorize() {
     if (!clientId.trim() || !clientSecret.trim() || !authUrl.trim() || !tokenUrl.trim()) {
@@ -332,35 +459,80 @@ export function OAuthForm({
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="p-3 space-y-3">
-      <div className="text-xs font-medium">Connect with OAuth</div>
+    <div className={cn("space-y-3", variant === "surface" ? "p-0" : "p-3")}>
+      {/* In a CreateSurface the header two rows up already says "Connect via
+          OAuth"; repeating it is the duplicated-title shape the shell exists
+          to remove. Inline, this label is the only thing naming the form. */}
+      {variant === "inline" && <div className="text-xs font-medium">Connect with OAuth</div>}
 
-      {/* Provider shortcuts */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {OAUTH_PROVIDER_SHORTCUTS.map((p) => (
+      {variant === "surface" ? (
+        <div className="space-y-2">
+          {OAUTH_PROVIDER_SHORTCUTS.map((p) => {
+            const provider = providers[p.key]
+            const unavailable = !providersFetched || (providersFetched && !provider)
+            return (
+              <CreateSurfaceTile
+                key={p.key}
+                icon={p.icon}
+                accent={p.accent}
+                title={p.label}
+                // Before the providers land there is nothing truthful to say
+                // about scopes, so the tile says nothing rather than guessing.
+                description={
+                  provider?.default_scopes
+                    ? formatScopes(provider.default_scopes)
+                    : providersFetched
+                      ? "Not configured on this server"
+                      : undefined
+                }
+                selected={selectedProvider === p.key}
+                onClick={() => handleProviderSelect(p.key)}
+                disabled={unavailable || authorizing}
+              />
+            )
+          })}
+          <CreateSurfaceTile
+            icon={Wrench}
+            accent="slate"
+            title="Custom"
+            description="Any OAuth2 endpoint — you supply the authorise and token URLs."
+            selected={selectedProvider === "custom"}
+            onClick={handleCustom}
+            disabled={authorizing}
+          />
+        </div>
+      ) : (
+        /* Provider shortcuts. `max-sm:h-12`: this form is also used
+           un-migrated inline in the MCP credential picker, so unlike the rest
+           of the create surfaces these pills never picked up a phone size —
+           measured at 24.15px tall (`h-6`) on an iPhone 13, well short of the
+           44px floor either place this renders. */
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {OAUTH_PROVIDER_SHORTCUTS.map((p) => (
+            <Button
+              key={p.key}
+              type="button"
+              variant={selectedProvider === p.key ? "default" : "outline"}
+              size="sm"
+              className="h-6 text-[10px] px-2 max-sm:h-12 max-sm:px-3 max-sm:text-sm"
+              onClick={() => handleProviderSelect(p.key)}
+              disabled={!providersFetched || authorizing || (providersFetched && !providers[p.key])}
+            >
+              {p.label}
+            </Button>
+          ))}
           <Button
-            key={p.key}
             type="button"
-            variant={selectedProvider === p.key ? "default" : "outline"}
+            variant={selectedProvider === "custom" ? "default" : "outline"}
             size="sm"
-            className="h-6 text-[10px] px-2"
-            onClick={() => handleProviderSelect(p.key)}
-            disabled={!providersFetched || authorizing || (providersFetched && !providers[p.key])}
+            className="h-6 text-[10px] px-2 max-sm:h-12 max-sm:px-3 max-sm:text-sm"
+            onClick={handleCustom}
+            disabled={authorizing}
           >
-            {p.label}
+            Custom
           </Button>
-        ))}
-        <Button
-          type="button"
-          variant={selectedProvider === "custom" ? "default" : "outline"}
-          size="sm"
-          className="h-6 text-[10px] px-2"
-          onClick={handleCustom}
-          disabled={authorizing}
-        >
-          Custom
-        </Button>
-      </div>
+        </div>
+      )}
 
       {selectedProvider && (
         <div className="space-y-2">
@@ -371,7 +543,7 @@ export function OAuthForm({
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
               placeholder="your-client-id"
-              className="h-7 text-xs"
+              className={CREATE_SURFACE_INPUT}
               disabled={authorizing}
             />
           </div>
@@ -383,7 +555,7 @@ export function OAuthForm({
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
               placeholder="your-client-secret"
-              className="h-7 text-xs font-mono"
+              className={cn(CREATE_SURFACE_INPUT, "font-mono")}
               disabled={authorizing}
             />
           </div>
@@ -396,7 +568,7 @@ export function OAuthForm({
                   value={authUrl}
                   onChange={(e) => setAuthUrl(e.target.value)}
                   placeholder="https://accounts.google.com/o/oauth2/v2/auth"
-                  className="h-7 text-xs font-mono"
+                  className={cn(CREATE_SURFACE_INPUT, "font-mono")}
                   disabled={authorizing}
                 />
               </div>
@@ -407,7 +579,7 @@ export function OAuthForm({
                   value={tokenUrl}
                   onChange={(e) => setTokenUrl(e.target.value)}
                   placeholder="https://oauth2.googleapis.com/token"
-                  className="h-7 text-xs font-mono"
+                  className={cn(CREATE_SURFACE_INPUT, "font-mono")}
                   disabled={authorizing}
                 />
               </div>
@@ -420,7 +592,7 @@ export function OAuthForm({
               value={scopes}
               onChange={(e) => setScopes(e.target.value)}
               placeholder="space-separated scopes"
-              className="h-7 text-xs font-mono"
+              className={cn(CREATE_SURFACE_INPUT, "font-mono")}
               disabled={authorizing}
             />
             {scopes && selectedProvider !== "custom" && (
@@ -430,32 +602,34 @@ export function OAuthForm({
             )}
           </div>
 
-          <div className="flex items-center gap-2 pt-1">
-            <Button
-              type="button"
-              size="sm"
-              className="h-7 text-xs gap-1.5 flex-1"
-              disabled={authorizing || !clientId.trim() || !clientSecret.trim() || (selectedProvider === "custom" && (!authUrl.trim() || !tokenUrl.trim()))}
-              onClick={handleAuthorize}
-            >
-              {polling ? (
-                <Spinner className="h-3 w-3" />
-              ) : (
-                <ExternalLink className="h-3 w-3" />
-              )}
-              {polling ? "Waiting for authorization..." : "Authorize"}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={onCancel}
-              disabled={authorizing}
-            >
-              Cancel
-            </Button>
-          </div>
+          {!onActionChange && (
+            <div className="flex items-center gap-2 pt-1">
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 text-xs gap-1.5 flex-1 max-sm:h-12 max-sm:text-sm"
+                disabled={!canAuthorize}
+                onClick={handleAuthorize}
+              >
+                {polling ? (
+                  <Spinner className="h-3 w-3" />
+                ) : (
+                  <ExternalLink className="h-3 w-3" />
+                )}
+                {primaryLabel}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs max-sm:h-12 max-sm:text-sm"
+                onClick={onCancel}
+                disabled={authorizing}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
 
           {/* Manual code fallback */}
           {(showCodeInput || polling) && (
@@ -470,12 +644,12 @@ export function OAuthForm({
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
                   placeholder="Paste redirect URL or authorization code"
-                  className="h-7 text-xs font-mono flex-1"
+                  className={cn(CREATE_SURFACE_INPUT, "font-mono flex-1")}
                 />
                 <Button
                   type="button"
                   size="sm"
-                  className="h-7 text-xs"
+                  className="h-7 text-xs max-sm:h-12 max-sm:text-sm"
                   disabled={!manualCode.trim() || !pendingCredId}
                   onClick={handleManualCodeExchange}
                 >
@@ -487,7 +661,9 @@ export function OAuthForm({
         </div>
       )}
 
-      {!selectedProvider && (
+      {/* The tiles say what they are; the pills do not, so only the pill
+          layout needs telling the reader what the row above is for. */}
+      {!selectedProvider && variant === "inline" && (
         <p className="text-xs text-muted-foreground">
           Select a provider above or choose Custom for any OAuth2 endpoint.
         </p>

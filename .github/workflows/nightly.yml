@@ -39,7 +39,7 @@ concurrency:
 env:
   NODE_VERSION: "22"
   PNPM_VERSION: "10"
-  GO_VERSION: "1.26.6"
+  GO_VERSION: "1.27.0"
 
 jobs:
   docker:

@@ -7,7 +7,7 @@ import type { WizardState } from "./types"
 interface Props {
   state: WizardState
   /** Optional jump-back callback to allow click-to-edit on a row */
-  onEdit?: (step: 1 | 2 | 3 | 4) => void
+  onEdit?: (step: 1 | 2 | 3) => void
   /** Lineup summary derived from wizard mode */
   lineupSummary: { count: number; source: string; agents?: { name: string; agent_role: string }[] }
 }
@@ -59,7 +59,7 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
         )}
       </Row>
 
-      <Row label="Container" onEdit={onEdit && (() => onEdit(3))}>
+      <Row label="Size" onEdit={onEdit && (() => onEdit(3))}>
         <Pill>{prettyMemory(state.memoryMB)}</Pill>
         <Pill>{state.cpus} CPU</Pill>
         <Pill>TTL: {state.ttlHours === null ? "never" : `${state.ttlHours} h`}</Pill>
@@ -79,24 +79,23 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
         )}
       </Row>
 
-      {hasContainerOverrides(state) && (
-        <Row label="Image" onEdit={onEdit && (() => onEdit(4))}>
-          <Pill>{summaryBaseImage(state)}</Pill>
-          {summaryFeatureCount(state.devcontainerConfig) > 0 && (
-            <Pill>{summaryFeatureCount(state.devcontainerConfig)} feature{summaryFeatureCount(state.devcontainerConfig) === 1 ? "" : "s"}</Pill>
-          )}
-          {summaryRuntimeCount(state.miseConfig) > 0 && (
-            <Pill>{summaryRuntimeCount(state.miseConfig)} runtime{summaryRuntimeCount(state.miseConfig) === 1 ? "" : "s"}</Pill>
-          )}
-        </Row>
-      )}
-
-      {summaryMCPCount(state.mcpConfig) > 0 && (
-        <Row label="MCP" onEdit={onEdit && (() => onEdit(4))}>
-          <span className="h-2 w-2 rounded-full inline-block bg-purple" />
-          <Pill>{summaryMCPCount(state.mcpConfig)} server{summaryMCPCount(state.mcpConfig) === 1 ? "" : "s"}</Pill>
-        </Row>
-      )}
+      {/* Unconditional. This used to render only when the state carried an
+          override, which hid the row for exactly the crews that never opened
+          the image list — so the step offering nine base images was reviewed
+          by a summary with no image in it. The default is a choice too, and
+          the row says which one it is. */}
+      <Row label="Runs on" onEdit={onEdit && (() => onEdit(3))}>
+        <Pill>{summaryBaseImage(state)}</Pill>
+        {!hasContainerOverrides(state) && (
+          <span className="text-[11px] text-muted-foreground">the shipped default</span>
+        )}
+        {summaryFeatureCount(state.devcontainerConfig) > 0 && (
+          <Pill>{summaryFeatureCount(state.devcontainerConfig)} feature{summaryFeatureCount(state.devcontainerConfig) === 1 ? "" : "s"}</Pill>
+        )}
+        {summaryRuntimeCount(state.miseConfig) > 0 && (
+          <Pill>{summaryRuntimeCount(state.miseConfig)} runtime{summaryRuntimeCount(state.miseConfig) === 1 ? "" : "s"}</Pill>
+        )}
+      </Row>
 
       <Row label="After create">
         <span className="text-muted-foreground text-[12px] leading-relaxed">
@@ -182,10 +181,8 @@ function summaryRuntimeCount(miseConfig: string): number {
   return count
 }
 
-function summaryMCPCount(mcpConfig: string): number {
-  if (!mcpConfig.trim()) return 0
-  try {
-    const parsed = JSON.parse(mcpConfig) as { mcpServers?: Record<string, unknown> }
-    return parsed.mcpServers ? Object.keys(parsed.mcpServers).length : 0
-  } catch { return 0 }
-}
+// summaryMCPCount went with the MCP row. The wizard no longer authors
+// `mcpConfig` — tools reach agents through Composio and the integrations
+// surface — and a Review row offering to edit it would send the reader to a
+// step that cannot. `mcpConfig` stays on WizardState because submitCrew still
+// carries whatever an older draft put there.

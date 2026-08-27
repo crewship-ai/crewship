@@ -73,11 +73,6 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 	policy := obj(map[string]any{
 		"crew_id": str(), "autonomy_level": str(), "behavior_mode": str(), "set_by_user_id": str(), "set_at": dateTime(), "reason": str(),
 	})
-	runtime := obj(map[string]any{
-		"available": boolean(), "runtime": nullableStr(), "version": nullableStr(), "socket": nullableStr(),
-		"runtimes":      array(obj(map[string]any{"runtime": str(), "version": str(), "socket": str(), "in_use": boolean()})),
-		"install_links": map[string]any{"type": "object", "additionalProperties": str()},
-	})
 	version := obj(map[string]any{
 		"current": str(), "latest": nullableStr(), "newer": boolean(), "url": nullableStr(), "commit": str(), "build_time": str(),
 		"dirty": boolean(), "go_version": str(), "os": str(), "arch": str(), "schema_version": integer(),
@@ -98,33 +93,40 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 		"count":   integer(), "applied": boolean(), "inspected": integer(), "identified": integer(), "detector_inert": boolean(),
 	})
 	return map[string]DomainSchema{
-		"GET /api/v1/admin/health":                               {Response: adminHealth},
-		"GET /api/v1/admin/users":                                {Response: array(user)},
-		"GET /api/v1/admin/users/{userId}/data":                  {Response: obj(map[string]any{"user": user, "journal": array(free()), "credentials": array(free()), "counts": free()})},
-		"DELETE /api/v1/admin/users/{userId}/data":               {Response: noContent()},
-		"GET /api/v1/admin/keeper/health":                        {Response: keeperHealth},
-		"GET /api/v1/admin/keeper/config":                        {Response: keeperConfig},
-		"PUT /api/v1/admin/keeper/config":                        {Request: json(map[string]any{"enabled": boolean(), "judge_provider": str(), "judge_endpoint_url": str(), "judge_wire": str(), "judge_model": str(), "judge_timeout_ms": integer(), "judge_profile": str(), "judge_evidence": boolean(), "judge_evidence_facts": str(), "judge_hard_gate": boolean(), "judge_precedent": boolean(), "judge_precedent_n": integer(), "judge_consistency_samples": integer(), "judge_escalate_from": integer(), "judge_prompt_budget_tokens": integer()}), Response: keeperConfig},
-		"DELETE /api/v1/admin/keeper/config":                     {Response: keeperConfig},
-		"GET /api/v1/admin/keeper/aux":                           {Response: keeperAux},
-		"PUT /api/v1/admin/keeper/aux/{slot}":                    {Request: json(map[string]any{"provider": str(), "model": str(), "timeout_ms": integer(), "credential_id": str()}), Response: keeperAux},
-		"DELETE /api/v1/admin/keeper/aux/{slot}":                 {Response: keeperAux},
-		"DELETE /api/v1/admin/keeper/aux":                        {Response: keeperAux},
-		"POST /api/v1/admin/keeper/aux/use-judge":                {Response: keeperAux},
-		"POST /api/v1/admin/keeper/aux/{slot}/probe":             {Response: keeperTest},
-		"GET /api/v1/admin/keeper/judge/models":                  {Response: keeperModels},
-		"POST /api/v1/admin/keeper/judge/test":                   {Request: json(map[string]any{"judge_endpoint_url": str(), "judge_model": str()}), Response: keeperTest},
-		"POST /api/v1/admin/keeper/judge/test-hosted":            {Request: json(map[string]any{"provider": str(), "model": str(), "credential_id": str()}), Response: keeperTest},
-		"POST /api/v1/admin/keeper/findings/test":                {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "reason": str()}), Response: obj(map[string]any{"inbox_item_id": str(), "recipients": array(obj(map[string]any{"user_id": str(), "email": str(), "name": str(), "role": str()}))})},
-		"POST /api/v1/admin/keeper/review/{slot}/run":            {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "agent_id": str(), "skill_id": str(), "tool_name": str(), "tool_args_snippet": str(), "recent_tool_calls": array(str()), "trigger": str(), "failure_snippet": str(), "prior_lesson": str()}), Response: obj(map[string]any{"slot": str(), "decision": str(), "reason": str(), "lesson": str(), "error": str(), "data": free()})},
-		"GET /api/v1/admin/journal/verify":                       {Response: integrity},
-		"GET /api/v1/admin/legacy-resources":                     {Response: obj(map[string]any{"present": boolean()})},
-		"POST /api/v1/admin/prune-legacy-resources":              {Response: prune},
-		"POST /api/v1/admin/prune-crew-runtimes":                 {Response: prune},
-		"POST /api/v1/admin/reap-orphan-containers":              {Response: reap},
-		"GET /api/v1/system/setup-status":                        {Response: setup},
-		"GET /api/v1/system/telemetry":                           {Response: telemetry},
-		"GET /api/v1/system/runtime":                             {Response: runtime},
+		"GET /api/v1/admin/health":                    {Response: adminHealth},
+		"GET /api/v1/admin/users":                     {Response: array(user)},
+		"GET /api/v1/admin/users/{userId}/data":       {Response: obj(map[string]any{"user": user, "journal": array(free()), "credentials": array(free()), "counts": free()})},
+		"DELETE /api/v1/admin/users/{userId}/data":    {Response: noContent()},
+		"GET /api/v1/admin/keeper/health":             {Response: keeperHealth},
+		"GET /api/v1/admin/keeper/config":             {Response: keeperConfig},
+		"PUT /api/v1/admin/keeper/config":             {Request: json(map[string]any{"enabled": boolean(), "judge_provider": str(), "judge_endpoint_url": str(), "judge_wire": str(), "judge_model": str(), "judge_timeout_ms": integer(), "judge_profile": str(), "judge_evidence": boolean(), "judge_evidence_facts": str(), "judge_hard_gate": boolean(), "judge_precedent": boolean(), "judge_precedent_n": integer(), "judge_consistency_samples": integer(), "judge_escalate_from": integer(), "judge_prompt_budget_tokens": integer()}), Response: keeperConfig},
+		"DELETE /api/v1/admin/keeper/config":          {Response: keeperConfig},
+		"GET /api/v1/admin/keeper/aux":                {Response: keeperAux},
+		"PUT /api/v1/admin/keeper/aux/{slot}":         {Request: json(map[string]any{"provider": str(), "model": str(), "timeout_ms": integer(), "credential_id": str()}), Response: keeperAux},
+		"DELETE /api/v1/admin/keeper/aux/{slot}":      {Response: keeperAux},
+		"DELETE /api/v1/admin/keeper/aux":             {Response: keeperAux},
+		"POST /api/v1/admin/keeper/aux/use-judge":     {Response: keeperAux},
+		"POST /api/v1/admin/keeper/aux/{slot}/probe":  {Response: keeperTest},
+		"GET /api/v1/admin/keeper/judge/models":       {Response: keeperModels},
+		"POST /api/v1/admin/keeper/judge/test":        {Request: json(map[string]any{"judge_endpoint_url": str(), "judge_model": str()}), Response: keeperTest},
+		"POST /api/v1/admin/keeper/judge/test-hosted": {Request: json(map[string]any{"provider": str(), "model": str(), "credential_id": str()}), Response: keeperTest},
+		"POST /api/v1/admin/keeper/findings/test":     {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "reason": str()}), Response: obj(map[string]any{"inbox_item_id": str(), "recipients": array(obj(map[string]any{"user_id": str(), "email": str(), "name": str(), "role": str()}))})},
+		"POST /api/v1/admin/keeper/review/{slot}/run": {Request: json(map[string]any{"workspace_id": str(), "crew_id": str(), "agent_id": str(), "skill_id": str(), "tool_name": str(), "tool_args_snippet": str(), "recent_tool_calls": array(str()), "trigger": str(), "failure_snippet": str(), "prior_lesson": str()}), Response: obj(map[string]any{"slot": str(), "decision": str(), "reason": str(), "lesson": str(), "error": str(), "data": free()})},
+		"GET /api/v1/admin/journal/verify":            {Response: integrity},
+		"GET /api/v1/admin/legacy-resources":          {Response: obj(map[string]any{"present": boolean()})},
+		"POST /api/v1/admin/prune-legacy-resources":   {Response: prune},
+		"POST /api/v1/admin/prune-crew-runtimes":      {Response: prune},
+		"POST /api/v1/admin/reap-orphan-containers":   {Response: reap},
+		"GET /api/v1/system/setup-status":             {Response: setup},
+		"GET /api/v1/system/telemetry":                {Response: telemetry},
+		// GET /api/v1/system/runtime was declared here too, with a `runtimes`
+		// item shape that had drifted from the one in
+		// schemas_observability_payments.go. routeSchemaCatalog merges
+		// last-writer-wins and this file is applied first, so the copy here had
+		// no effect on the generated document — editing it (adding the `gaps`
+		// field for #1672) changed nothing at all, silently. Removed rather
+		// than kept in sync: a schema nobody reads is the same defect this
+		// endpoint's own issue was opened about.
 		"GET /api/v1/system/version":                             {Response: version},
 		"GET /api/v1/system/license":                             {Response: license},
 		"GET /api/v1/system/keeper":                              {Response: obj(map[string]any{"enabled": boolean(), "ollama_url": str(), "model": str(), "ollama_online": boolean(), "ollama_probed": boolean(), "gatekeeper_configured": boolean(), "total_requests": integer(), "allow_count": integer(), "deny_count": integer(), "escalate_count": integer(), "secret_count": integer(), "enabled_source": str(), "ollama_url_source": str(), "model_source": str(), "gov_model_configured": boolean(), "gov_model_provider": str(), "gov_model": str(), "gov_model_degraded": boolean(), "gov_model_degrade_reason": str()})},

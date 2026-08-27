@@ -9,7 +9,10 @@ set -euo pipefail
 # CI is the enforcement backstop.
 
 HOOK=".git/hooks/pre-commit"
-MARKER="# crewship-pre-commit-v2"
+# Bump this whenever the hook body below changes: the installer is idempotent
+# on this marker, so a body change without a bump reaches nobody who already
+# has the hook installed.
+MARKER="# crewship-pre-commit-v3"
 
 if [ ! -d .git ]; then
   echo "install-hooks.sh: not a git repo, skipping"
@@ -23,7 +26,7 @@ fi
 
 cat > "$HOOK" <<'EOF'
 #!/usr/bin/env bash
-# crewship-pre-commit-v2
+# crewship-pre-commit-v3
 set -euo pipefail
 
 # Sentinel: reject leaked git merge-conflict markers in staged files.
@@ -107,7 +110,31 @@ if [ -n "$STAGED_GO" ] && command -v golangci-lint >/dev/null 2>&1; then
   done < <(printf '%s\n' "$STAGED_GO" | xargs -r -n1 dirname | sort -u)
   [ "${#PKGS[@]}" -eq 0 ] && PKGS=("./...")
 
-  if ! golangci-lint run --new-from-rev="$BASE_REF" "${PKGS[@]}"; then
+  # Capture rather than stream, so the two very different reasons this can
+  # fail get two different messages. A golangci-lint built with an older Go
+  # than the repo targets refuses to load its config at all — and reporting
+  # that as "issues on new code" sends the reader looking for a bug in their
+  # own diff that does not exist. The Go 1.27 bump made this the *expected*
+  # state of every machine that had not upgraded the linter yet.
+  # `set -e` is on: without the `|| LINT_RC=$?` the failing assignment would
+  # abort the hook here and block the commit with no explanation at all.
+  LINT_RC=0
+  LINT_OUT="$(golangci-lint run --new-from-rev="$BASE_REF" "${PKGS[@]}" 2>&1)" || LINT_RC=$?
+  if [ "$LINT_RC" -ne 0 ]; then
+    printf '%s\n' "$LINT_OUT"
+    if printf '%s' "$LINT_OUT" | grep -q 'lower than the targeted Go version'; then
+      # pipefail is on, so a grep that matches nothing would fail the whole
+      # substitution and abort before the message it exists to print.
+      GOLANGCI_PINNED="$(grep -m1 -oE 'GOLANGCI_VERSION: v[0-9.]+' .github/workflows/ci.yml 2>/dev/null | cut -d' ' -f2 || true)"
+      echo ""
+      echo "✗ golangci-lint is older than this repo's Go target — commit blocked"
+      echo "  This is a tooling mismatch, NOT a problem with your code."
+      echo "  Build one with the repo's own toolchain (CI pins ${GOLANGCI_PINNED:-see .github/workflows/ci.yml}):"
+      echo "    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_PINNED:-<GOLANGCI_VERSION>}"
+      echo "  A Homebrew build is generally too old for this — it ships built"
+      echo "  against whatever Go the formula was bottled with."
+      exit 1
+    fi
     echo ""
     echo "✗ golangci-lint found issues on new code — commit blocked"
     echo "  Fix the issues or add //nolint:<rule> with justification"
@@ -115,7 +142,9 @@ if [ -n "$STAGED_GO" ] && command -v golangci-lint >/dev/null 2>&1; then
   fi
 elif [ -n "$STAGED_GO" ]; then
   echo "⚠ golangci-lint not installed — skipping lint"
-  echo "  Install with: brew install golangci-lint"
+  echo "  Install the version CI pins as GOLANGCI_VERSION in"
+  echo "  .github/workflows/ci.yml, built with this repo's toolchain:"
+  echo "    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@<GOLANGCI_VERSION>"
 fi
 EOF
 

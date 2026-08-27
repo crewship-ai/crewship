@@ -67,6 +67,39 @@ describe("the shell's chain wiring", () => {
     }
   })
 
+  it("fetches the answers the waiting join needs, not the ask types alone", () => {
+    // #2036. `entriesInScope(_, "waiting")` retires a row by finding its
+    // ANSWER in the window, and the answers are filed under Security —
+    // `sourceEntryTypes("human")` excludes every one of them server-side. The
+    // list read "Waiting on you: 5" beside a card reading 1, one click apart.
+    //
+    // Asserted over the source for the same reason as the chain wiring above:
+    // the fact lives in one branch of one useMemo, and mounting the shell to
+    // reach it costs five mocks. `waitingEntryTypes` itself is covered by
+    // behaviour in lib/__tests__/activity-stream.test.ts.
+    const branch = /facets\.scope === "waiting"[\s\S]{0,400}?\n\s*: /.exec(source)?.[0] ?? ""
+    expect(branch, 'the params memo no longer has a "waiting" branch').not.toBe("")
+    expect(branch).toContain("waitingEntryTypes()")
+    expect(branch).not.toMatch(/\?\s*sourceEntryTypes\("human"\)/)
+  })
+
+  it("pages the waiting scope deeper than the rest, to pay for the answers", () => {
+    // #2036. The window is a fixed ROW count from the newest end, and the
+    // waiting fetch now spends part of it on answer rows. At the shared page
+    // size it would reach back less far in ASKS than the pre-fix query did,
+    // and an open ask pushed past the boundary vanishes from "Waiting on you"
+    // — the opposite of this join's bias, which is to over-report rather than
+    // hide something a person is blocking on.
+    const limitArg = /limit:\s*([^,\n]+)/.exec(source)?.[1] ?? ""
+    expect(limitArg, "the journal list no longer takes a limit").not.toBe("")
+    expect(limitArg).toContain('facets.scope === "waiting"')
+
+    const waiting = Number(/const WAITING_PAGE_SIZE = ([\d_]+)/.exec(source)?.[1]?.replace(/_/g, ""))
+    const base = Number(/const PAGE_SIZE = ([\d_]+)/.exec(source)?.[1]?.replace(/_/g, ""))
+    expect(waiting).toBeGreaterThan(base)
+    expect(waiting, "the journal API rejects limit > 500").toBeLessThanOrEqual(500)
+  })
+
   it("hands the drill-downs an id, never a display label, as the key they match on", () => {
     // `stop.label` is `identifier || title || id`, so on a workspace without
     // issue identifiers it is the TITLE — nothing matched, and the deep link

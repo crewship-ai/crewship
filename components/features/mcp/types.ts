@@ -68,10 +68,3 @@ export interface MCPTemplate {
   oauthProvider?: string
 }
 
-export interface MCPConfigEditorProps {
-  value: string
-  onChange: (json: string) => void
-  readOnly?: boolean
-  label?: string
-  workspaceId?: string
-}

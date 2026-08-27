@@ -179,7 +179,7 @@ The serialized struct (`quartermaster.RunRecord`) marks `mission_id`, `baseline_
 GET /api/v1/eval/runs/{id}
 ```
 
-Fetches a single run by id, scoped to the caller's workspace. Same shape as one row of [List runs](#list-runs) — this is the endpoint behind `crewship eval get <id>` ([CLI docs](/cli/eval#crewship-eval-get-run-id)).
+Fetches a single run by id, scoped to the caller's workspace. Same shape as one row of [List runs](#list-runs) — this is the endpoint behind `crewship eval get <id>` ([CLI docs](/cli/eval#crewship-eval-get-%3Crun-id%3E)).
 
 **Request:** `id` is the required run path parameter. Workspace context is
 supplied by the optional `X-Workspace-ID` header (or the authenticated session).

@@ -2,11 +2,10 @@
 
 import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, ChevronDown, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
-import { useReactionsStore } from "@/stores/reactions-store"
 import { useEffect } from "react"
 import { useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
-import { ReactionsRow } from "./reactions/reactions-row"
+import { TurnReactions } from "./reactions/turn-reactions"
 import {
   Message,
   MessageContent,
@@ -652,27 +651,14 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: As
         </button>
       )}
 
-      {/* Reactions row */}
-      <TurnReactions turnId={turn.id} streaming={turn.isStreaming} />
+      {/* Reactions row — server-backed, so it needs the chat id */}
+      <TurnReactions chatId={chatId} messageId={turn.id} streaming={turn.isStreaming} />
 
       {/* Actions (only when done streaming and has text content) */}
       {!turn.isStreaming && fullText && !hasDelegation && (
         <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} chatId={chatId} />
       )}
     </Message>
-  )
-}
-
-function TurnReactions({ turnId, streaming }: { turnId: string; streaming: boolean }) {
-  const reactions = useReactionsStore((s) => s.byTurn[turnId])
-  const toggle = useReactionsStore((s) => s.toggle)
-  if (streaming || !reactions || Object.keys(reactions).length === 0) return null
-  return (
-    <ReactionsRow
-      reactions={reactions}
-      onToggle={(emoji) => toggle(turnId, emoji)}
-      className="mt-1"
-    />
   )
 }
 
@@ -776,15 +762,17 @@ function TurnFeedbackActions({
       {/* No emoji picker.
        *
        * Reactions persist — `message_reactions`, keyed per (chat, message,
-       * emoji, user) — and they render back. But an emoji is addressed to
-       * somebody, and in a one-person chat there is nobody in the room to read
-       * it: nothing downstream consumes the table, and the only reader is the
-       * person who clicked. The thumbs stay because they are a different thing
-       * wearing a similar shape — `message_feedback` carries a trace_id back
-       * to the run that produced the answer, and `crewship feedback` reads it.
+       * emoji, user) — and they render back, which is why `TurnReactions`
+       * above stays. But an emoji is addressed to somebody, and in a
+       * one-person chat there is nobody in the room to read it: nothing
+       * downstream consumes the table, and the only reader is the person who
+       * clicked. The thumbs stay because they are a different thing wearing a
+       * similar shape — `message_feedback` carries a trace_id back to the run
+       * that produced the answer, and `crewship feedback` reads it.
        *
        * When more than one person is in a thread this comes back, because then
-       * the emoji finally has an audience. */}
+       * the emoji finally has an audience — `TurnReactionPicker` is still
+       * exported and tested for that day. */}
     </MessageActions>
   )
 }

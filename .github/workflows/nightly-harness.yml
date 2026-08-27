@@ -61,6 +61,27 @@ name: Nightly Harness
 #                                 `redis-cli` inside the agent container; the
 #                                 README marks it dev-VM only, and it is not in
 #                                 run-all.sh either
+#   test-crew-lifecycle.sh        needs a crew whose container has already RUN —
+#                                 strictly more than "provisioned". Its §2/§4
+#                                 pair only reproduces on a shared-tree file the
+#                                 container runtime owns (uid 1001); the suite
+#                                 header says so and uses an existing seeded
+#                                 crew for exactly that reason. Neither tier's
+#                                 fixture produces one: the control-plane seed
+#                                 does not provision at all, and the runtime
+#                                 seed's `--wait-provision` builds an IMAGE and
+#                                 starts nothing. Every step is assert_ok with
+#                                 no runtime-absent SKIP, so a square here is
+#                                 red, not yellow. It is also provider-free, so
+#                                 parking it in `harness-runtime` would hide it
+#                                 behind a secret this repo does not have and
+#                                 report a tier it never ran in — the honesty
+#                                 objection below. It DOES run on dev slots:
+#                                 unlike test-datastore-redis-auth.sh it is in
+#                                 run-all.sh, and it mutates a shared seeded
+#                                 crew's tree (leaving its file behind when the
+#                                 §5 xfail path trips), which is a dev-slot
+#                                 liberty, not a CI one
 #   test-redteam-insider.sh       attacks the instance from inside a crew
 #                                 container and carries xfail assertions for
 #                                 open issues (#1368); needs provisioned crews
@@ -95,13 +116,15 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.26.6"
+  GO_VERSION: "1.27.0"
   # Suites this workflow deliberately never runs. The reason for each is in the
   # "Suites deliberately NOT run here" block above; this list is the machine-
-  # readable half, read by `suite-coverage-guard`. The two RUN lists are not
-  # duplicated here — the guard reads them out of the matrices themselves, so
-  # there is nothing to keep in sync.
+  # readable half, read by `suite-coverage-guard` — which also fails if a name
+  # here appears nowhere in that block, so the reason cannot be skipped. The two
+  # RUN lists are not duplicated here — the guard reads them out of the matrices
+  # themselves, so there is nothing to keep in sync.
   EXCLUDED_SUITES: >-
+    test-crew-lifecycle.sh
     test-datastore-redis-auth.sh
     test-gitlink-realworld.sh
     test-keeper-escalation.sh
@@ -131,8 +154,10 @@ jobs:
         # list needs declaring — those suites have no matrix to be read from.
         #
         # Fails on a suite in no tier (it would silently get zero nightly
-        # coverage, the exact failure mode this workflow exists to end) and on a
-        # tier naming a suite that no longer exists (renamed/deleted).
+        # coverage, the exact failure mode this workflow exists to end), on a
+        # tier naming a suite that no longer exists (renamed/deleted), and on an
+        # EXCLUDED_SUITES entry with no reason in the header block — "in a tier"
+        # must not be reachable by typing a filename into the cheapest list.
         run: |
           set -euo pipefail
           # PyYAML is present on the hosted images today but is not a documented
@@ -143,7 +168,8 @@ jobs:
           python3 - <<'PY'
           import os, pathlib, sys, yaml
 
-          wf = yaml.safe_load(open(".github/workflows/nightly-harness.yml"))
+          SELF = pathlib.Path(".github/workflows/nightly-harness.yml")
+          wf = yaml.safe_load(SELF.open())
           jobs = wf["jobs"]
 
           def matrix_suites(job):
@@ -161,10 +187,31 @@ jobs:
           unclaimed = sorted(on_disk - claimed)
           phantom = sorted(claimed - on_disk)
 
+          # "with a reason in the workflow header" is what the error below tells
+          # you to do, and nothing checked that half: EXCLUDED_SUITES is the
+          # cheapest of the three tiers to reach for, and one word there silences
+          # a suite forever with no reason recorded anywhere. Comments are the
+          # only place that reason can live and yaml.safe_load drops them, so
+          # read the file's own text for this one. The header is everything
+          # before the top-level `on:` key.
+          text = SELF.read_text()
+          header_end = text.find("\non:\n")
+          # Fail loudly rather than treating the whole file as the header: that
+          # would pass every excluded suite by matching its own EXCLUDED_SUITES
+          # entry, i.e. fail open on the exact check being made.
+          header_lost = header_end < 0
+          undocumented = [] if header_lost else sorted(
+              s for s in excluded if s not in text[:header_end])
+
           print(f"on disk: {len(on_disk)}  gated: {len(gated)}  "
                 f"runtime: {len(runtime)}  excluded: {len(excluded)}")
 
           rc = 0
+          if header_lost:
+              print("::error::cannot locate the top-level `on:` key, so the "
+                    "header block cannot be delimited and excluded suites "
+                    "cannot be checked for a stated reason")
+              rc = 1
           if unclaimed:
               print("::error::harness suite(s) in no tier — add to the "
                     "harness-control-plane matrix, the harness-runtime matrix, or "
@@ -181,6 +228,13 @@ jobs:
           if overlap:
               print("::error::suite(s) claimed by more than one tier:")
               for s in sorted(overlap):
+                  print(f"  {s}")
+              rc = 1
+          if undocumented:
+              print("::error::excluded suite(s) named nowhere in the "
+                    "\"Suites deliberately NOT run here\" header block — say why "
+                    "it is never run before silencing it:")
+              for s in undocumented:
                   print(f"  {s}")
               rc = 1
           if rc == 0:

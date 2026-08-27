@@ -128,7 +128,7 @@ crewship inbox bulk read --all-unread
 crewship inbox bulk resolve --ids inbox_abc,inbox_def --action acknowledged
 ```
 
-Bulk operations submit the whole id set to the server-side [`POST /api/v1/inbox/bulk`](/api-reference/inbox#post-apiv1inboxbulk) endpoint (one request flips many rows), chunked at 500 ids per call — the endpoint's id cap. On a `resolve` the server **skips** decision items (source-managed waitpoints/escalations and blocking rows) rather than closing them. The final line summarises the aggregated counts:
+Bulk operations submit the whole id set to the server-side [`POST /api/v1/inbox/bulk`](/api-reference/inbox#post-/api/v1/inbox/bulk) endpoint (one request flips many rows), chunked at 500 ids per call — the endpoint's id cap. On a `resolve` the server **skips** decision items (source-managed waitpoints/escalations and blocking rows) rather than closing them. The final line summarises the aggregated counts:
 
 ```
 N updated · M skipped · K not found

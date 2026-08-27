@@ -95,7 +95,12 @@ try {
   // ── Open dialog ──────────────────────────────────────────────────
   await triggerLocator.click()
   // Dialog has a "New agent" header.
-  await page.getByRole("heading", { name: "New agent", exact: true }).waitFor({
+  //
+  // The shared shell renders `context › title` as ONE heading on purpose — two
+  // headings side by side would make the accessible name "CrewsNew agent" — so
+  // with a crew in context this reads "Engineering New agent". Match the part
+  // that is stable rather than pinning the whole computed name.
+  await page.getByRole("heading", { name: /New agent/ }).waitFor({
     timeout: 5000,
   })
   step("Create Agent dialog opens", true)

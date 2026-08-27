@@ -83,7 +83,10 @@ Two mechanisms keep this from being the operator's problem:
   `<OutputBasePath>/.runtime/` and bind-mounts the copies, so the daemon only
   has to see the one host subtree it already needed for `/workspace`, `/output`
   and `/crew`. The copy preserves the source's mtime, so the startup
-  stale-sidecar check keeps working.
+  stale-sidecar check keeps working. **The Apple provider stages the same two
+  artefacts the same way** — each Apple container is its own VM, so it has the
+  same host-path-resolved-elsewhere problem and shares the implementation
+  (`internal/provider/runtimestage`).
 - **Anything still unreachable is named.** The provider probes the mandatory
   binds at construction and, on any bind failure, rewrites the daemon's error
   into one that says which runtime, which path, that the path *does* exist on
@@ -268,6 +271,15 @@ binary that enforces `restricted` network mode, and `entrypoint.sh` forced as
 the container entrypoint with an init process to reap orphans. Both host
 artefacts are mandatory — the Apple provider refuses to create a crew container
 without them rather than starting one whose egress mode nothing enforces.
+
+Both providers also **stage those two artefacts into the data dir** at startup:
+they are resolved next to the `crewship` executable (`/opt/homebrew/…`,
+`/usr/local/bin`), and every Apple container is its own lightweight VM, so the
+bind source is a path the *runtime* resolves rather than this process. Copying
+them to `<OutputBasePath>/.runtime/` and binding the copies means the only host
+subtree the runtime has to reach is the one `/workspace`, `/output` and `/crew`
+already needed. Nothing to configure. See
+[VM-backed runtimes and host bind mounts](#vm-backed-runtimes-and-host-bind-mounts).
 
 The one difference worth knowing is `/secrets` ownership. Docker mounts it
 owned by the agent UID with mode `0700`; Apple's `container create --mount`

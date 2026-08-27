@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { formatRelativeTime } from "@/lib/time"
 import { apiFetch } from "@/lib/api-fetch"
+import { checkpointIdOf, checkpointLabelOf } from "./checkpoint-ref"
 import type { JournalEntry } from "@/lib/types/journal"
 
 interface CheckpointMarkerProps {
@@ -30,28 +31,42 @@ interface CheckpointMarkerProps {
 export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
   const [restoring, setRestoring] = useState(false)
 
-  const label =
-    typeof entry.payload?.label === "string"
-      ? (entry.payload.label as string)
-      : typeof entry.payload?.name === "string"
-        ? (entry.payload.name as string)
-        : "Checkpoint"
-
-  const checkpointId =
-    typeof entry.payload?.checkpoint_id === "string"
-      ? (entry.payload.checkpoint_id as string)
-      : entry.id
+  const label = checkpointLabelOf(entry) ?? "Checkpoint"
+  // Same resolution the fork path uses — the checkpoint id lives in refs, and
+  // `entry.id` (the journal row) is not a substitute for it. Null means the
+  // entry can't address a checkpoint, so restore is disabled rather than
+  // firing a request that can only 404.
+  const checkpointId = checkpointIdOf(entry)
 
   async function handleRestore() {
+    if (!checkpointId) return
     setRestoring(true)
     try {
       const res = await apiFetch(`/api/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST" })
       if (res.status === 404) {
         toast.error("Checkpoint not found or restore unavailable")
       } else if (!res.ok) {
-        toast.error(`Restore failed (${res.status})`)
+        toast.error(`Restore preview failed (${res.status})`)
       } else {
-        toast.success("Mission restored to checkpoint")
+        // Say what the endpoint DID, which is not what this used to claim.
+        //
+        // It reported "Mission restored to checkpoint". POST
+        // /checkpoints/{id}/restore does not restore anything —
+        // cartographer.Restore says so in its own doc comment ("no DB rows are
+        // mutated, no containers are torn down, no memory is rewound") and
+        // journals the attempt as "restore preview for checkpoint …". The
+        // rewind is deferred to a handler that does not exist yet.
+        //
+        // So the toast reports the one thing the call actually produces: the
+        // divergence list, which is what a real restore would have to abandon.
+        // Throwing that away AND claiming success was the worst of both.
+        const body = (await res.json().catch(() => null)) as { warn_divergence?: unknown } | null
+        const diverged = Array.isArray(body?.warn_divergence) ? body.warn_divergence.length : 0
+        toast.info("Restore preview — nothing has been rewound", {
+          description: diverged > 0
+            ? `Restoring here would abandon ${diverged} later event${diverged === 1 ? "" : "s"}. Rewinding is not implemented yet.`
+            : "No later events to abandon. Rewinding is not implemented yet.",
+        })
       }
     } catch {
       toast.error("Restore failed")
@@ -90,13 +105,13 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
                 <GitBranch className="h-3 w-3 mr-1.5" />
                 Fork from here
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleRestore} disabled={restoring}>
+              <DropdownMenuItem onClick={handleRestore} disabled={restoring || !checkpointId}>
                 {restoring ? (
                   <Spinner className="h-3 w-3 mr-1.5" />
                 ) : (
                   <RotateCcw className="h-3 w-3 mr-1.5" />
                 )}
-                Restore
+                Preview restore
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

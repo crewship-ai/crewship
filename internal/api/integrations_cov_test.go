@@ -1034,9 +1034,11 @@ func TestCovIntResolveAgentIntegrations(t *testing.T) {
 	// Workspace server "shared" and a crew server "shared" that overrides it by name.
 	covIntWSServer(t, db, "ws-shared", wsID, "shared", "streamable-http", "https://ws")
 	covIntCrewServer(t, db, "crew-shared", crewID, "shared", "streamable-http", "https://crew")
-	// Crew-only server "extra" bound to agentB only → opt-in filtering should hide
-	// it from agentA.
+	// Crew-only server "extra": bound-only, and bound to agentB → hidden from
+	// agentA. Since #2072 it is the server's default_access that hides it;
+	// agentB's binding on its own would not.
 	covIntCrewServer(t, db, "crew-extra", crewID, "extra", "streamable-http", "https://x")
+	execOrFatal(t, db, `UPDATE crew_mcp_servers SET default_access = 'bound-only' WHERE id = 'crew-extra'`)
 	covIntBinding(t, db, "b-extra", agentB, "crew-extra", "crew", "")
 	// Crew server "muted" bound to agentA with enabled=0 → opt-out for A.
 	covIntCrewServer(t, db, "crew-muted", crewID, "muted", "streamable-http", "https://m")
@@ -1079,9 +1081,9 @@ func TestCovIntResolveAgentIntegrations(t *testing.T) {
 	if s, ok := byName["shared"]; !ok || s.Scope != "crew" || s.Endpoint == nil || *s.Endpoint != "https://crew" {
 		t.Fatalf("shared override wrong: %+v (ok=%v)", s, ok)
 	}
-	// "extra" hidden from agentA (bound only to agentB)
+	// "extra" hidden from agentA (bound-only, and agentA holds no binding)
 	if _, ok := byName["extra"]; ok {
-		t.Fatalf("extra should be hidden from agentA via opt-in filtering")
+		t.Fatalf("bound-only server resolved for an agent with no binding")
 	}
 	// "muted" excluded (binding disabled it)
 	if _, ok := byName["muted"]; ok {

@@ -67,8 +67,8 @@ func TestCovIRes_BindingsQueryError_500(t *testing.T) {
 //   - "search": workspace-level with a binding that attaches a
 //     credential and a config override → both must surface;
 //   - "muted": workspace-level with a binding that disables it → gone;
-//   - "private": workspace-level bound ONLY to another agent → opt-in
-//     filtering hides it from this agent.
+//   - "private": workspace-level, default_access='bound-only', bound only to
+//     another agent → hidden from this agent.
 func TestCovIRes_CascadeOverrideBindingAndOptIn(t *testing.T) {
 	ensureEncryptionKey(t)
 	h, userID, wsID, crewID, agentID := covIResFixture(t)
@@ -92,6 +92,11 @@ func TestCovIRes_CascadeOverrideBindingAndOptIn(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO agent_mcp_bindings
 		(id, agent_id, mcp_server_id, mcp_server_scope, enabled)
 		VALUES ('covires-b3', ?, 'covires-ws-private', 'workspace', 1)`, otherAgent)
+	// "private" is hidden from this agent because the SERVER says bound-only,
+	// not because some other agent happens to hold a binding. Since #2072 the
+	// binding above is not what hides it — this UPDATE is.
+	execOrFatal(t, db, `UPDATE workspace_mcp_servers SET default_access = 'bound-only'
+		WHERE id = 'covires-ws-private'`)
 
 	rr := covIResGet(h, userID, wsID, agentID)
 	if rr.Code != http.StatusOK {
@@ -130,7 +135,7 @@ func TestCovIRes_CascadeOverrideBindingAndOptIn(t *testing.T) {
 		t.Errorf("muted server resolved despite disabled binding")
 	}
 	if _, present := byName["private"]; present {
-		t.Errorf("private server resolved for agent without binding (opt-in filter broken)")
+		t.Errorf("bound-only server resolved for an agent without a binding")
 	}
 }
 

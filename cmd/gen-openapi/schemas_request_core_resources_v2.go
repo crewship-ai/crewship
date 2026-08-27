@@ -53,7 +53,16 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 		"name": nullable(str()), "slug": nullable(str()), "description": nullable(str()), "color": nullable(str()), "icon": nullable(str()), "avatar_style": nullable(str()),
 		"container_memory_mb": nullable(integer()), "container_cpus": nullable(number()), "container_ttl_hours": nullable(integer()), "network_mode": nullable(str()),
 		"allowed_domains": nullable(array(str())), "allow_private_endpoints": nullable(boolean()), "mcp_config_json": nullable(str()), "escalation_config": nullable(str()),
-		"issue_prefix": nullable(str()), "runtime_image": nullable(str()), "devcontainer_config": nullable(str()), "mise_config": nullable(str()), "services_json": nullable(str()), "max_ephemeral_agents": nullable(integer()),
+		// issue_prefix carries its format rule into the spec (#2035): it becomes
+		// part of missions.identifier, which every issue route addresses as a
+		// single URL path segment, so "A/B" would mint an issue nothing can
+		// open. The alternation admits "", which is the documented clear.
+		"issue_prefix": map[string]any{
+			"type": "string", "nullable": true, "maxLength": 16,
+			"pattern":     `^$|^[A-Za-z0-9_-]{1,16}$`,
+			"description": `Issue identifier prefix, e.g. "ENG" for ENG-42. Letters, digits, underscore or hyphen, 1-16 characters; "" clears it and identifiers fall back to the first three letters of the crew slug.`,
+		},
+		"runtime_image": nullable(str()), "devcontainer_config": nullable(str()), "mise_config": nullable(str()), "services_json": nullable(str()), "max_ephemeral_agents": nullable(integer()),
 	}))
 
 	request("CoreAgentCreateRequestV2", object(map[string]any{

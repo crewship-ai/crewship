@@ -91,6 +91,13 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, underscores, and hyphens")
 		return
 	}
+	// #2035: the prefix ends up inside missions.identifier, which every issue
+	// route addresses as one path segment, so "A/B" would mint an issue nothing
+	// can open. "" is exempt — it is the clear, applied below.
+	if req.IssuePrefix != nil && *req.IssuePrefix != "" && !validIssuePrefixFormat(*req.IssuePrefix) {
+		replyError(w, http.StatusBadRequest, issuePrefixFormatRule)
+		return
+	}
 
 	if req.Slug != nil {
 		var slugOwnerID string
@@ -244,6 +251,8 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ub.Set("mcp_config_json", *req.MCPConfigJSON)
 	}
 	if req.IssuePrefix != nil {
+		// Format already checked above; "" clears the column, after which the
+		// prefix falls back to the first three letters of the slug.
 		if *req.IssuePrefix == "" {
 			ub.Set("issue_prefix", nil)
 		} else {

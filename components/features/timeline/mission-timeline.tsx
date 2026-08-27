@@ -6,6 +6,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { JournalEntryCard } from "@/components/features/journal/journal-entry-card"
 import { CheckpointMarker } from "./checkpoint-marker"
 import { ForkDialog } from "./fork-dialog"
+import { checkpointIdOf, checkpointLabelOf } from "./checkpoint-ref"
 import type { JournalEntry } from "@/lib/types/journal"
 
 interface MissionTimelineProps {
@@ -66,14 +67,10 @@ export function MissionTimeline({ missionId, entries, loading, error }: MissionT
   // Timeline is rendered oldest-first so the story reads top → bottom.
   const chronological = [...entries].reverse()
 
-  const forkLabel =
-    forkTarget && typeof forkTarget.payload?.label === "string"
-      ? (forkTarget.payload.label as string)
-      : undefined
-  const forkCheckpointId =
-    forkTarget && typeof forkTarget.payload?.checkpoint_id === "string"
-      ? (forkTarget.payload.checkpoint_id as string)
-      : (forkTarget?.id ?? null)
+  // The fork endpoint keys off the checkpoint id the entry announced in its
+  // refs — never the journal entry's own id. See checkpoint-ref.ts.
+  const forkLabel = checkpointLabelOf(forkTarget)
+  const forkCheckpointId = checkpointIdOf(forkTarget)
 
   return (
     <>

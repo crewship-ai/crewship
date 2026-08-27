@@ -6,10 +6,10 @@ import { storageFilePath } from "./global-setup"
 //
 // Drives the actual UI in Chromium against a live backend (dev server).
 // Covers:
-//   1. Empty crew flow (Identity → Lineup=Empty → Runtime → Container=Skip → Review → Create)
-//   2. Browse template flow (Identity → Lineup=Template → Runtime → Container → Review → Create)
+//   1. Empty crew flow (Identity → Lineup=Start empty → Container=Skip → Review → Create)
+//   2. Browse template flow (Identity → Lineup=Template → Container → Review → Create)
 //   3. Step strip jump-back navigation
-//   4. Container step makes Image & features and MCP servers visible (no collapse)
+//   4. Container step: image and tooling up front, sizing folded, no MCP
 //   5. Skip-to-defaults shortcut
 //
 // Each test creates a crew with a unique slug (timestamp-suffixed) so reruns
@@ -64,7 +64,7 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     }
   })
 
-  test("empty crew end-to-end via Skip-to-defaults on Step 4", async ({ page }) => {
+  test("empty crew end-to-end via Skip-to-defaults on Container", async ({ page }) => {
     const slug = uniqueSlug("e2e-empty")
     const name = `E2E Empty ${slug.slice(-6)}`
 
@@ -77,18 +77,14 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Step 2 — Lineup → Empty crew
+    // Step 2 — Lineup → Start empty
     await expect(page.getByText(/step 2 of 4/i).first()).toBeVisible()
-    await page.getByRole("button", { name: /Empty crew/ }).click()
+    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Step 3 — Runtime defaults
+    // Step 3 — Container
     await expect(page.getByText(/step 3 of 4/i).first()).toBeVisible()
-    await expect(page.getByText("Container resources")).toBeVisible()
-    await page.getByRole("button", { name: /Continue/ }).click()
-
-    // Step 4 — Container — skip
-    await expect(page.getByText(/step 4 of 4/i).first()).toBeVisible()
+    await expect(page.getByText("Base image")).toBeVisible()
     await expect(page.getByRole("button", { name: /Skip to defaults/ })).toBeVisible()
     await page.getByRole("button", { name: /Skip to defaults/ }).click()
 
@@ -133,24 +129,37 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await expect(page.getByPlaceholder("Engineering", { exact: true })).toHaveValue("Strip Test")
   })
 
-  test("Step 4 shows Image & features and MCP servers always visible (no collapse)", async ({ page }) => {
+  test("Container leads with image and tooling, folds sizing away, and drops MCP", async ({ page }) => {
     await openCreateCrew(page)
 
     await page.getByPlaceholder("Engineering", { exact: true }).fill("Container Vis")
     await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Empty crew/ }).click()
-    await page.getByRole("button", { name: /Continue/ }).click()
-    await expect(page.getByText("Container resources")).toBeVisible()
+    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Step 4 — both section headers + their children must be visible without
-    // any extra clicks. The strings appear in dialog description / intro
-    // paragraph too; first() targets the section header specifically.
-    await expect(page.getByText("Image & features").first()).toBeVisible()
-    await expect(page.getByText("MCP servers").first()).toBeVisible()
-
-    // BASE IMAGE picker rendered inline (not behind a collapsed panel).
+    // Base image is the first thing on the step, mounted rather than
+    // hidden behind a disclosure — and the base-image picker with it.
+    await expect(page.getByText("Base image").first()).toBeVisible()
     await expect(page.getByText(/^Base Image$/i).first()).toBeVisible({ timeout: TIMEOUT })
+
+    // Egress is open, and the allowlist is one switch away rather than the
+    // default. An allowlist that is still maturing fails as a silent timeout
+    // deep inside a run.
+    await expect(page.getByText("Open egress")).toBeVisible()
+    await page.getByRole("switch", { name: /allowlist/i }).click()
+    await expect(page.getByText(/Allowed hosts/)).toBeVisible()
+    await page.getByRole("switch", { name: /allowlist/i }).click()
+
+    // Sizing is an administrator's question: collapsed, with its values in
+    // the summary so nothing is hidden, only folded.
+    const size = page.getByRole("button", { name: /^Size/ })
+    await expect(size).toHaveAttribute("aria-expanded", "false")
+    await expect(size).toContainText("4 GB")
+    await size.click()
+    await expect(page.getByText("--memory-mb 4096")).toBeVisible()
+
+    // Tools reach agents through Composio and the integrations surface now.
+    await expect(page.getByText(/MCP servers/i)).toHaveCount(0)
   })
 
   test("Cmd+Enter advances when the step is valid", async ({ page }) => {
@@ -172,29 +181,23 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: TIMEOUT })
   })
 
-  test("MCP servers section is reachable on Step 4 with at most one body scroll", async ({ page }) => {
+  test("everything on Container is reachable without hunting for it", async ({ page }) => {
     await openCreateCrew(page)
 
-    // Walk to Step 4 (Empty crew + accept Runtime defaults)
-    await page.getByPlaceholder("Engineering", { exact: true }).fill("Mcp Visible")
+    await page.getByPlaceholder("Engineering", { exact: true }).fill("Reachable")
     await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Empty crew/ }).click()
-    await page.getByRole("button", { name: /Continue/ }).click()
-    await expect(page.getByText("Container resources")).toBeVisible()
+    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    await expect(page.getByText(/step 4 of 4/i).first()).toBeVisible()
+    await expect(page.getByText(/step 3 of 4/i).first()).toBeVisible()
 
-    // The MCP section header has a recognizable subtitle when nothing's
-    // configured. Locate it as a single element.
-    const mcpHeader = page.getByText(/No servers configured/i).first()
-
-    // Scroll inside the dialog body until the MCP section header lands in
-    // viewport. scrollIntoViewIfNeeded is the right primitive: it succeeds
-    // if the element is REACHABLE (within or after a short scroll), and
-    // fails outright if the section was never rendered.
-    await mcpHeader.scrollIntoViewIfNeeded({ timeout: TIMEOUT })
-    await expect(mcpHeader).toBeVisible()
+    // This replaces a test that scrolled to find the MCP card. The step used
+    // to stack three tall sections and cap the tallest at 280px so the last
+    // one stayed above the fold; with MCP gone and sizing folded, the last
+    // thing on the step is a summary row.
+    const size = page.getByRole("button", { name: /^Size/ })
+    await size.scrollIntoViewIfNeeded({ timeout: TIMEOUT })
+    await expect(size).toBeVisible()
   })
 
   // ============================================================================
@@ -216,27 +219,31 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await page.getByPlaceholder("Engineering", { exact: true }).fill(name)
     await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
     await page.getByPlaceholder(/What does this crew do/).fill("End-to-end smoke crew")
-    // Open icon picker; verify it opens; close with Cancel (don't change icon
-    // because picker dialog mounts heavy lucide grid — opening + closing is
-    // enough to prove the wiring works).
+    // Open the icon panel and come back. It used to be a second Radix Dialog
+    // stacked on this one, then an inline block on this step; it is a PANEL
+    // now — the surface swaps, the header says where you are, and the footer
+    // commits — which is what New project already did.
     await page.getByLabel("Pick icon and color").click()
-    await expect(page.getByText(/^Icon —/)).toBeVisible({ timeout: TIMEOUT })
-    await page.getByRole("button", { name: "Cancel" }).first().click()
-    await expect(page.getByText(/^Icon —/)).not.toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByText("Icon — new crew")).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByPlaceholder(/search icons/i)).toBeVisible({ timeout: TIMEOUT })
+    // Still exactly one dialog — that was the whole point of the change.
+    await expect(page.getByRole("dialog")).toHaveCount(1)
+    await page.getByRole("button", { name: /Use this icon/ }).click()
+    await expect(page.getByPlaceholder(/search icons/i)).not.toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByPlaceholder("Engineering", { exact: true })).toBeVisible()
 
     await page.getByRole("button", { name: /Continue/ }).click()
 
     // Step 2 — Lineup → Empty (template flow has its own seed-race issues)
     await expect(page.getByText(/step 2 of 4/i).first()).toBeVisible()
-    await page.getByRole("button", { name: /Empty crew/ }).click()
+    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Step 3 — Runtime: pick a non-default memory chip + TTL chip + switch to restricted
+    // Step 3 — Container: turn on the allowlist, list a host, and open the
+    // sizing fold to pick a non-default memory and TTL. Sizing is folded by
+    // default now, which is the point of the click.
     await expect(page.getByText(/step 3 of 4/i).first()).toBeVisible()
-    await page.getByRole("button", { name: "8 GB" }).click()
-    await page.getByRole("button", { name: "24 h" }).click()
-    await page.getByRole("button", { name: /Restricted/ }).click()
-    // Domain chip: type + Enter
+    await page.getByRole("switch", { name: /allowlist/i }).click()
     const domainInput = page.locator('input[placeholder*="github.com"]').first()
     await domainInput.fill("github.com")
     await domainInput.press("Enter")
@@ -244,15 +251,15 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     // same string, so use exact: true to disambiguate).
     await expect(page.getByText("github.com", { exact: true })).toBeVisible()
 
+    await page.getByRole("button", { name: /^Size/ }).click()
+    await page.getByRole("button", { name: "8 GB" }).click()
+    await page.getByRole("button", { name: "24 h" }).click()
+
+    // Skip-to-defaults would throw away the image overrides; there are none
+    // here, and Continue is the path a user who filled the step in takes.
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Step 4 — Container: Skip-to-defaults (full RuntimeConfig + MCP picker
-    // is exercised in their own component tests; this smoke is about the
-    // wizard scaffold).
-    await expect(page.getByText(/step 4 of 4/i).first()).toBeVisible()
-    await page.getByRole("button", { name: /Skip to defaults/ }).click()
-
-    // Step 5 — Review: assert summary reflects the values we entered
+    // Step 4 — Review: assert summary reflects the values we entered
     await expect(page.getByRole("button", { name: /Create crew/ })).toBeVisible()
     await expect(page.getByText(name)).toBeVisible()
     await expect(page.getByText("8 GB")).toBeVisible()

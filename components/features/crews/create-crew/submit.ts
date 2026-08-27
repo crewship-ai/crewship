@@ -27,9 +27,18 @@ function runtimeBody(state: WizardState): Record<string, unknown> {
     container_cpus: state.cpus,
     network_mode: state.networkMode,
   }
-  if (state.ttlHours !== null && state.ttlHours > 0) {
-    body.container_ttl_hours = state.ttlHours
-  }
+  // #1662, dashboard half: the "Never" chip stores null, and an ABSENT
+  // container_ttl_hours is not "never" to the server — crews_create.go leaves
+  // the column NULL, which resolveCrewContainerTTLHours() reads as "never
+  // configured" and answers with the 4 h default. The never-stop sentinel is an
+  // explicit 0 (the reaper skips it), accepted the same way by POST and by the
+  // template path's PATCH. So the field always goes out, and "Never" goes out
+  // as 0 — the rule cmd_crew_manage.go already follows for `--ttl 0`.
+  //
+  // Clamped at 0 because both handlers 400 on a negative and neither has a
+  // ceiling; nothing in the wizard can produce one today, but ttlHours is a
+  // plain `number | null` and a 400 here costs the user the whole wizard.
+  body.container_ttl_hours = state.ttlHours === null ? 0 : Math.max(0, state.ttlHours)
   if (state.networkMode === "restricted" && state.allowedDomains.length > 0) {
     body.allowed_domains = state.allowedDomains
   }

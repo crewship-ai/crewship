@@ -150,6 +150,18 @@ type runtimeEntry struct {
 	// different facts, and this endpoint is the only place that can tell them
 	// apart.
 	InUse bool `json:"in_use"`
+	// Gaps are the crew hardening controls this runtime is measured not to
+	// deliver (docker.KnownRuntimeGaps). Absent when there are none, which is
+	// every runtime but podman below 5.
+	//
+	// Set on the `in_use` entry ONLY, and computed from the DetectResult the
+	// running provider reports rather than from this entry's own probe. That is
+	// the same input docker.logRuntimeGaps uses at startup, so the boot WARN and
+	// this field cannot drift into contradicting each other. Hanging gaps on an
+	// installed-but-unused runtime would also be advice nobody can take:
+	// `container.provider` accepts docker | apple | auto only, so there is no
+	// switching to the entry it would be warning about (#1689).
+	Gaps []docker.Gap `json:"gaps,omitempty"`
 }
 
 // inventory probes the host and returns every runtime that answered, with the
@@ -204,6 +216,11 @@ func (h *SystemHandler) inventory(ctx context.Context) []runtimeEntry {
 		// the setups this endpoint was built for.
 		if docker.SameRuntimeEndpoint(d, active) {
 			entries[i].InUse = true
+			// From `active`, not from `d`. The two describe the same daemon, but
+			// `active` is what the provider actually dialled and what the startup
+			// WARN was computed from — deriving the gaps from anything else is an
+			// invitation for the two reports to disagree about the same host.
+			entries[i].Gaps = docker.KnownRuntimeGaps(active)
 			return entries
 		}
 	}
@@ -214,6 +231,7 @@ func (h *SystemHandler) inventory(ctx context.Context) []runtimeEntry {
 	// claiming nothing is in use while agents are running on it.
 	return append(entries, runtimeEntry{
 		Runtime: active.Runtime, Version: active.Version, Socket: active.Socket, InUse: true,
+		Gaps: docker.KnownRuntimeGaps(active),
 	})
 }
 
@@ -228,6 +246,12 @@ func (h *SystemHandler) inventory(ctx context.Context) []runtimeEntry {
 // are installed but none is in use — the server booted without a container
 // provider — because naming one of them there would report a runtime that is
 // running nothing.
+//
+// The `in_use` entry also carries `gaps[]` when the runtime is measured not to
+// honour a crew hardening control (#1672). Deliberately NOT mirrored to the top
+// level next to runtime/version/socket: one copy cannot disagree with itself,
+// and a consumer that wants it is already selecting the `in_use` entry to get
+// the socket. It is host detail, so the redacted arm below carries none of it.
 func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {

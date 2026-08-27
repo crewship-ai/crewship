@@ -12,6 +12,19 @@ tag: Experimental
 
 All subcommands scope to one crew because the server enforces crew-level auth on the underlying routes.
 
+## Container runtime requirements
+
+`expose list` and `expose revoke` work everywhere — they are plain API calls. The **capability URLs themselves** do not: crewshipd proxies them by dialing the crew container on its Docker bridge IP, with no host port published anywhere, so it must be able to route to the container network directly.
+
+| Runtime | Capability URLs | Why |
+|---|---|---|
+| Docker Engine on Linux (crewshipd on the same host) | Work | dockerd and crewshipd share the host's network namespace; bridge IPs are ordinary routable addresses. |
+| OrbStack (macOS) | Work | OrbStack makes container IPs routable from the host by design. |
+| Colima (macOS) | **Do not work** | dockerd runs inside a Lima VM; the bridge network exists only inside it. |
+| Rancher Desktop, Docker Desktop (macOS/Windows) | **Do not work** | Same VM boundary as Colima. |
+
+On an affected runtime `expose list` still shows the exposure as `ACTIVE` — the row is real and the token is valid. Opening the URL returns `502` with a body naming the unreachable target address. That is the symptom to look for; it is a routing constraint, not a bug in the exposure. See [Port Expose — container runtime requirements](/api-reference/port-expose#container-runtime-requirements).
+
 ## `crewship expose list`
 
 `GET /api/v1/crews/{crewId}/port-expose`.

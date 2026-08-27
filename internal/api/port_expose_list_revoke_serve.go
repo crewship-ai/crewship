@@ -2,12 +2,15 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -272,10 +275,123 @@ func (h *PortExposeHandler) ServeExposed(w http.ResponseWriter, r *http.Request)
 	proxy.ErrorLog = slog.NewLogLogger(h.logger.Handler(), slog.LevelWarn)
 	proxy.ErrorHandler = func(rw http.ResponseWriter, rq *http.Request, err error) {
 		h.logger.Warn("port_expose proxy error",
-			"token", safeTokenPrefix(token), "target", target.String(), "error", err)
-		http.Error(rw, "bad gateway", http.StatusBadGateway)
+			"token", safeTokenPrefix(token), "target", target.String(),
+			"failure", classifyProxyFailure(err).String(), "error", err)
+		http.Error(rw, portExposeProxyError(target, err), http.StatusBadGateway)
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+// proxyFailureKind is a coarse read of why the reverse proxy could not talk
+// to the container. Deliberately coarse: the goal is to point the operator
+// at the right class of problem, not to diagnose their network for them.
+type proxyFailureKind int
+
+const (
+	// proxyFailureOther — not confidently classifiable.
+	proxyFailureOther proxyFailureKind = iota
+	// proxyFailureRefused — something sent back an RST. Whatever else is
+	// wrong, the packets arrived, so routing is not the problem.
+	proxyFailureRefused
+	// proxyFailureBlackholed — the SYN went nowhere: it timed out, or the
+	// kernel had no route for it at all.
+	proxyFailureBlackholed
+)
+
+func (k proxyFailureKind) String() string {
+	switch k {
+	case proxyFailureRefused:
+		return "refused"
+	case proxyFailureBlackholed:
+		return "blackholed"
+	default:
+		return "other"
+	}
+}
+
+// classifyProxyFailure buckets a reverse-proxy transport error.
+//
+// Only dial-phase failures say anything about reachability, so anything that
+// is not a dial error stays unclassified. A timeout while waiting on a
+// response body, for instance, means we connected fine and the application
+// inside the container is slow — calling that a routing problem would send
+// the operator down entirely the wrong path.
+func classifyProxyFailure(err error) proxyFailureKind {
+	var opErr *net.OpError
+	if !errors.As(err, &opErr) || opErr.Op != "dial" {
+		return proxyFailureOther
+	}
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return proxyFailureRefused
+	case errors.Is(err, syscall.EHOSTUNREACH), errors.Is(err, syscall.ENETUNREACH):
+		return proxyFailureBlackholed
+	}
+	if opErr.Timeout() {
+		return proxyFailureBlackholed
+	}
+	return proxyFailureOther
+}
+
+// targetIsContainerNetwork reports whether host ("ip:port") is a literal
+// private address — the shape a Docker bridge IP always has. Loopback and
+// public addresses both fail this test, and both should: a loopback target
+// means crewshipd and the upstream share a namespace, where a VM boundary
+// cannot be the explanation.
+func targetIsContainerNetwork(host string) bool {
+	h := host
+	if hostOnly, _, err := net.SplitHostPort(host); err == nil {
+		h = hostOnly
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsPrivate()
+}
+
+// portExposeProxyError renders the 502 body for a reverse-proxy failure.
+//
+// The target address is included in every branch. Without it the operator
+// sees a bare "bad gateway" and cannot tell a stopped container from a
+// network they cannot reach — the dead end reported in #1710, where the one
+// useful fact lived only in the server log. The address is an ephemeral
+// RFC1918 bridge IP with no meaning off this host, and the caller already
+// holds the capability token, so the disclosure is bounded.
+//
+// The VM-routing paragraph is added only when the dial was blackholed
+// against a private address, because that is the only combination the
+// explanation fits: a refused connection proves routing works, and a
+// loopback or public target has no VM boundary to blame. Even then it stays
+// one of two listed possibilities rather than a verdict — a container that
+// died and took its bridge interface with it fails in exactly this way, and
+// nothing reachable from here distinguishes the two.
+func portExposeProxyError(target *url.URL, err error) string {
+	addr := target.Host
+	switch classifyProxyFailure(err) {
+	case proxyFailureRefused:
+		return "bad gateway: " + addr + " refused the connection.\n\n" +
+			"The address is reachable, so this is not a container-networking " +
+			"problem. The process inside the container is most likely no " +
+			"longer listening on that port."
+	case proxyFailureBlackholed:
+		msg := "bad gateway: no response from " + addr + ".\n\n" +
+			"Nothing answered at that address."
+		if !targetIsContainerNetwork(addr) {
+			return msg + " The container may have stopped, or the address is no longer routable."
+		}
+		return msg + " Two situations look identical from here, and which " +
+			"one is likely depends on your container runtime:\n\n" +
+			"  1. crewshipd cannot route to the container network at all. " +
+			"This is the expected outcome when the Docker daemon runs inside " +
+			"a VM — Colima, Rancher Desktop, Docker Desktop — while crewshipd " +
+			"runs on the host, because " + addr + " then exists only inside " +
+			"that VM. Port expose is not usable on those runtimes; see " +
+			"\"Container runtime requirements\" in the port-expose docs.\n" +
+			"  2. The container stopped, or nothing is listening on that port " +
+			"any more. Check it first if crewshipd and the Docker daemon share " +
+			"a host (plain Docker Engine on Linux, or OrbStack), where routing " +
+			"is expected to work."
+	default:
+		return "bad gateway: could not proxy to " + addr + " (" + err.Error() + ")"
+	}
 }
 
 // ----- helpers -----

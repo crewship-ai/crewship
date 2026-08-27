@@ -132,6 +132,11 @@ export interface PipelineDSL {
 // every renderer consumes one stable type.
 export type SubSpanKind =
   | "bash"
+  // A shell command or MCP call the backend recognised as talking to a
+  // datastore (`psql`, `redis-cli`, an `mcp__postgres__*` tool). Its engine
+  // rides in `attributes.tool` — "postgres", "redis", … — so the row shows
+  // which store it hit and not just that it was a shell call.
+  | "db"
   | "write"
   | "read"
   | "edit"

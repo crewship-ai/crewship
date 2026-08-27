@@ -153,6 +153,7 @@ func TestCov2CIScanError_RowSkipped(t *testing.T) {
 		name TEXT, display_name TEXT, transport TEXT DEFAULT 'streamable-http',
 		endpoint TEXT, command TEXT, args_json TEXT, env_json TEXT, config_json TEXT,
 		icon TEXT, enabled INTEGER DEFAULT 1, deleted_at TEXT,
+		default_access TEXT NOT NULL DEFAULT 'all',
 		created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))`); err != nil {
 		t.Fatalf("recreate: %v", err)
 	}

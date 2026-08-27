@@ -44,6 +44,7 @@ interface ServerSummary {
   created_at: string
   updated_at: string
   agent_binding_count: number
+  default_access?: "all" | "bound-only"
   auth_status: "connected" | "missing" | "expired" | "none"
   trust_tier?: TrustTier
 }
@@ -126,15 +127,27 @@ export function MCPDetailSheet({
     }
   }
 
-  const refreshTools = async () => {
+  // Re-reads the stored bindings. It does NOT ask the MCP server what it
+  // offers, and the label must not imply that it does.
+  //
+  // Nothing in the product currently can. `POST …/tools/refresh` takes a
+  // client-supplied `tools[]` and upserts it (mcp_tool_bindings.go:174-295) —
+  // it performs no discovery — and the only code that really speaks
+  // `tools/list` is the sidecar's gateway (internal/sidecar/mcp_gateway.go:348),
+  // whose catalogue never leaves the container. `crewship integration tools
+  // refresh` now carries a real tool list (#1884), but only one its CALLER
+  // discovered and passed on --tool/--tools-file; this sheet has no such list,
+  // so posting from here would trade a working re-read for an empty payload
+  // the server no-ops — and for a 403, since the route is ADMIN+ while viewing
+  // this tab is not.
+  //
+  // The re-read is still worth having: it picks up toggles another admin made.
+  // So the button stays and the wording stops lying.
+  const reloadTools = async () => {
     if (!server) return
     setReloading(true)
     try {
-      // Hot-swap reload (CONNECTIONS.md §5.5 + §7.5).
-      // For MVP we just re-pull the bindings from DB; live mcp/list-tools
-      // wiring lands in a sidecar follow-up.
       await loadTools()
-      toast.success("Tools refreshed")
     } finally {
       setReloading(false)
     }
@@ -199,6 +212,14 @@ export function MCPDetailSheet({
                 <Field label="Transport">{server.transport}</Field>
                 {server.endpoint && <Field label="Endpoint">{server.endpoint}</Field>}
                 {server.command && <Field label="Command">{server.command}</Field>}
+                {/* The audience, on the integration's own page. It used to be
+                    inferred from the binding count below, so it could change
+                    without anyone touching this integration (#2072). */}
+                <Field label="Available to">
+                  {server.default_access === "bound-only"
+                    ? "Bound agents only"
+                    : "Every agent in the workspace"}
+                </Field>
                 <Field label="Agent bindings">{server.agent_binding_count}</Field>
                 <Field label="Updated">{formatRelativeTime(server.updated_at)}</Field>
               </TabsContent>
@@ -208,9 +229,9 @@ export function MCPDetailSheet({
                   <div className="text-xs text-muted-foreground">
                     {totalCount === 0 ? "No tools recorded yet" : `${enabledCount} of ${totalCount} enabled`}
                   </div>
-                  <Button variant="outline" size="sm" onClick={refreshTools} disabled={reloading} className="h-7 text-xs">
+                  <Button variant="outline" size="sm" onClick={reloadTools} disabled={reloading} className="h-7 text-xs">
                     {reloading ? <Spinner className="h-3 w-3 mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
-                    Refresh
+                    Reload list
                   </Button>
                 </div>
 
@@ -228,9 +249,11 @@ export function MCPDetailSheet({
                   <div className="text-center py-8"><Spinner className="inline h-4 w-4 text-muted-foreground" /></div>
                 ) : totalCount === 0 ? (
                   <div className="rounded-md border border-white/10 bg-background p-4 text-xs text-muted-foreground">
-                    No tools recorded yet. Click <strong>Refresh</strong> after a successful test
-                    connection to populate this list. Until then the server exposes whatever
-                    tools the upstream MCP server publishes (default: all enabled).
+                    No tools recorded here yet, and this screen cannot discover them &mdash; nothing in
+                    Crewship probes an MCP server&rsquo;s catalogue for you. You can record one you
+                    already have with <code>crewship integration tools refresh</code>. The server
+                    still exposes whatever the upstream publishes, all enabled by default; this list
+                    only records tools somebody has explicitly toggled or refreshed in.
                   </div>
                 ) : (
                   <ul className="space-y-1.5">
@@ -269,9 +292,9 @@ export function MCPDetailSheet({
               </TabsContent>
 
               <TabsContent value="settings" className="m-0 space-y-3">
-                <Button variant="outline" size="sm" onClick={refreshTools} disabled={reloading} className="w-full justify-start">
+                <Button variant="outline" size="sm" onClick={reloadTools} disabled={reloading} className="w-full justify-start">
                   {reloading ? <Spinner className="h-3.5 w-3.5 mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
-                  Hot-swap reload
+                  Reload tool list
                 </Button>
 
                 <div className="pt-3 border-t border-white/10">

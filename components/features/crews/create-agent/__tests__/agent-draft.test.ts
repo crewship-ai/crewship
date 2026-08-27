@@ -3,6 +3,7 @@ import { BUILTIN_PERSONAS } from "@/lib/entities"
 import {
   initialAgentDraft,
   applyPersonaDefaults,
+  isDraftDirty,
   resolveFinalPrompt,
   isIdentityValid,
 } from "../types"
@@ -71,6 +72,46 @@ describe("agent draft", () => {
     it("rejects whitespace-only name", () => {
       const d = { ...initialAgentDraft("eng"), name: "  ", slug: "test" }
       expect(isIdentityValid(d)).toBe(false)
+    })
+  })
+
+  // What CreateSurface's `dirty` prop is fed. It decides whether Esc and an
+  // overlay click ask before throwing the form away, so a false positive is
+  // a prompt nobody can dismiss honestly and a false negative loses work.
+  describe("isDraftDirty", () => {
+    it("a freshly-seeded draft is not dirty", () => {
+      expect(isDraftDirty(initialAgentDraft("engineering"), "engineering")).toBe(false)
+      expect(isDraftDirty(initialAgentDraft(null), null)).toBe(false)
+    })
+
+    it("a pre-selected crew is the parent's doing, not the user's", () => {
+      // /crews?crew=engineering seeds crewSlug. Prompting about it would
+      // train people to click Discard without reading.
+      const d = initialAgentDraft("engineering")
+      expect(isDraftDirty(d, "engineering")).toBe(false)
+    })
+
+    it("typing a name makes it dirty", () => {
+      const d = { ...initialAgentDraft("eng"), name: "F" }
+      expect(isDraftDirty(d, "eng")).toBe(true)
+    })
+
+    it("picking a template makes it dirty", () => {
+      const filip = BUILTIN_PERSONAS.find((p) => p.id === "b_filip")!
+      const d = applyPersonaDefaults(initialAgentDraft("eng"), filip)
+      expect(isDraftDirty(d, "eng")).toBe(true)
+    })
+
+    it("switching crew away from the seeded one makes it dirty", () => {
+      const d = { ...initialAgentDraft("eng"), crewSlug: "research" }
+      expect(isDraftDirty(d, "eng")).toBe(true)
+    })
+
+    it("flipping an advanced default makes it dirty", () => {
+      const d = { ...initialAgentDraft("eng"), memoryEnabled: false }
+      expect(isDraftDirty(d, "eng")).toBe(true)
+      const t = { ...initialAgentDraft("eng"), timeoutSeconds: 3600 }
+      expect(isDraftDirty(t, "eng")).toBe(true)
     })
   })
 

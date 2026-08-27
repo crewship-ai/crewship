@@ -643,7 +643,7 @@ crewship routine backtest support-triage --against "$CANDIDATE_VERSION" --last 7
 
 ### Why this is read-only
 
-`backtest` never creates a pipeline version and never changes `head_version` — it replays each corpus run's **original captured inputs** pinned to the immutable version you named with `--against` (the same pinning mechanism cron schedules and webhooks already use for `target_pipeline_version`). Live traffic keeps resolving to whatever `head_version` already was, before, during, and after the backtest. If it reports `CLEAN`, roll forward with [`routine rollback`](/cli/routine#crewship-routine-rollback-slug) or your normal promotion path — `backtest` only tells you whether it's safe, it doesn't flip anything.
+`backtest` never creates a pipeline version and never changes `head_version` — it replays each corpus run's **original captured inputs** pinned to the immutable version you named with `--against` (the same pinning mechanism cron schedules and webhooks already use for `target_pipeline_version`). Live traffic keeps resolving to whatever `head_version` already was, before, during, and after the backtest. If it reports `CLEAN`, roll forward with [`routine rollback`](/cli/routine#crewship-routine-rollback-%3Cslug%3E) or your normal promotion path — `backtest` only tells you whether it's safe, it doesn't flip anything.
 
 ### What to do at each verdict
 

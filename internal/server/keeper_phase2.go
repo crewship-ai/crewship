@@ -238,6 +238,15 @@ func registerBehaviorHook(
 			"impact", "EventPostToolCall sampling will not run; F4.2 endpoint still serves on POST /api/v1/keeper/behavior")
 		return
 	}
+	// No SetSampleEvery here on purpose (#1001 M3). The per-workspace cadence
+	// (keeper_governance_settings.behavior_sample_every) is handed to the hook
+	// per call by postToolCallObserver, not stored on it: this hook is a
+	// process-wide singleton shared by every workspace, so a cadence pushed in
+	// here would be one workspace's policy applied to all of them — and would
+	// need a restart to change, which is #1601/#1556 in this same subsystem.
+	// The construction-time value stays behaviorhook.DefaultSampleEvery, which
+	// is what a workspace that never configured one runs on.
 	behaviorhook.Set(behaviorhook.New(ev, resolver, logger))
-	logger.Info("keeper: behaviorhook installed (F4.2 sampling active on tool-call hot path)")
+	logger.Info("keeper: behaviorhook installed (F4.2 sampling active on tool-call hot path)",
+		"default_sample_every", behaviorhook.DefaultSampleEvery)
 }

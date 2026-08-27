@@ -234,3 +234,45 @@ func TestCrewUpdateCLI_TwoCrewsMayShareAPrefix(t *testing.T) {
 		t.Errorf("%d distinct identifiers in the workspace, want 3", identifiers)
 	}
 }
+
+// TestCrewUpdateCLI_RefusesUnaddressableIssuePrefix is #2035 through the CLI
+// door that #1797 opened. The prefix becomes the leading half of the issue
+// identifier, and the identifier is a single URL path segment on every route
+// that addresses an issue — so `--issue-prefix "A/B"` used to file A/B-1, an
+// issue that exists, lists, and can never be opened, patched, closed or
+// commented on again.
+//
+// The guard is on the API (crews_update.go), not in the flag handler, so the
+// web UI is behind the same rule. This test drives the CLI against the real
+// router to prove the rule reaches the operator holding the flag, message and
+// all.
+func TestCrewUpdateCLI_RefusesUnaddressableIssuePrefix(t *testing.T) {
+	saveCLIState(t)
+	db := setupIssuePrefixServer(t)
+
+	for _, bad := range []string{"A/B", "A B", "A%B", "ENGINEERING-PLATFORM-TEAM"} {
+		err := prefixSetIssuePrefix(t, prefixCrewAID, bad)
+		if err == nil {
+			t.Fatalf("`crew update --issue-prefix %q` succeeded, want a rejection — "+
+				"that prefix mints an identifier no route can address", bad)
+		}
+		if !strings.Contains(err.Error(), "issue_prefix") ||
+			!strings.Contains(err.Error(), "A-Za-z0-9_-") {
+			t.Errorf("rejection of %q reads %q; it must name the field and state the rule", bad, err)
+		}
+
+		var stored sql.NullString
+		if qerr := db.QueryRow(`SELECT issue_prefix FROM crews WHERE id = ?`,
+			prefixCrewAID).Scan(&stored); qerr != nil {
+			t.Fatalf("read issue_prefix: %v", qerr)
+		}
+		if stored.Valid {
+			t.Fatalf("issue_prefix = %q after a rejected write, want it untouched", stored.String)
+		}
+	}
+
+	// The rule refuses only what it must: a normal prefix still lands.
+	if err := prefixSetIssuePrefix(t, prefixCrewAID, "ENG-2"); err != nil {
+		t.Fatalf("`crew update --issue-prefix ENG-2`: %v", err)
+	}
+}

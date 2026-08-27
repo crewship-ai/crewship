@@ -544,6 +544,32 @@ CLI: `crewship integration composio account {revoke,refresh,remove} <account-id>
 
 ---
 
+## Who can use an integration
+
+Every MCP server — workspace- or crew-scoped — carries a `default_access`
+column that says who may use it:
+
+| `default_access` | Who resolves the server |
+|---|---|
+| `all` (default) | every agent in the server's scope, whether or not it has a binding |
+| `bound-only` | only agents with an explicit agent binding |
+
+An **agent binding** adds things to one agent's use of a server: a credential,
+a config override, or an opt-out (`enabled: false`). It does **not** change the
+audience, and creating one for one agent never changes what any other agent
+resolves.
+
+<Warning>
+Before Crewship 2026.08 this was inferred rather than stored: a server with
+**zero** bindings resolved for every agent, and the first binding anywhere in
+the workspace silently flipped it to opt-in, revoking it from every other
+agent. Existing servers were migrated to whichever audience they effectively
+had at upgrade time — servers that already carried a binding became
+`bound-only`, everything else became `all` — so nobody's access moved. Narrowing
+a server is now a deliberate act: `PATCH` with `default_access`, or
+`crewship integration access <id-or-name> bound-only`.
+</Warning>
+
 ## Workspace Integrations
 
 Workspace-level MCP server definitions available to all crews and agents.
@@ -575,6 +601,7 @@ GET /api/v1/integrations?workspace_id={workspaceId}
     "config_json": null,
     "icon": "github",
     "enabled": true,
+    "default_access": "all",
     "created_at": "2024-01-15T10:00:00Z",
     "updated_at": "2024-01-15T10:00:00Z",
     "agent_binding_count": 5,
@@ -599,7 +626,8 @@ GET /api/v1/integrations?workspace_id={workspaceId}
 | `config_json` | string? | Additional configuration JSON |
 | `icon` | string? | Display icon name |
 | `enabled` | boolean | Whether the integration is active |
-| `agent_binding_count` | integer | Number of agent bindings |
+| `default_access` | string | Who may use it: `all` (every agent in scope) or `bound-only` (only agents with an explicit binding). See [Who can use an integration](#who-can-use-an-integration). |
+| `agent_binding_count` | integer | Number of agent bindings. Informational only — it does **not** affect who resolves the server. |
 | `crew_server_count` | integer | Number of crew-level servers |
 
 ### Create Workspace Integration
@@ -623,6 +651,7 @@ POST /api/v1/integrations?workspace_id={workspaceId}
 | `env_json` | string | No | `null` | JSON object of env vars |
 | `config_json` | string | No | `null` | Additional config JSON |
 | `icon` | string | No | `null` | Display icon |
+| `default_access` | string | No | `"all"` | `all` or `bound-only`. A new integration is available to every agent unless you say otherwise. |
 
 ```json
 {
@@ -639,7 +668,7 @@ POST /api/v1/integrations?workspace_id={workspaceId}
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `name`, invalid `transport`, or `endpoint`/`command` missing for the chosen transport |
+| `400` | Missing `name`, invalid `transport`, `endpoint`/`command` missing for the chosen transport, or `default_access` outside `all` / `bound-only` |
 | `403` | Insufficient role |
 | `409` | Integration with this name already exists |
 
@@ -668,7 +697,10 @@ PATCH /api/v1/integrations/{integrationId}?workspace_id={workspaceId}
 
 **Auth:** `OWNER` or `ADMIN` role
 
-All fields optional: `display_name`, `transport`, `endpoint`, `command`, `args_json`, `env_json`, `config_json`, `icon`, `enabled`.
+All fields optional: `display_name`, `transport`, `endpoint`, `command`, `args_json`, `env_json`, `config_json`, `icon`, `enabled`, `default_access`.
+
+Sending `default_access` is the only way to change who may use the integration —
+creating or deleting agent bindings never does. CLI: `crewship integration access <id-or-name> <all|bound-only>`.
 
 **Response:** `200 OK`
 
@@ -800,12 +832,13 @@ POST /api/v1/crews/{crewId}/integrations?workspace_id={workspaceId}
 | `env_json` | string | No | `null` | JSON object of env vars |
 | `config_json` | string | No | `null` | Additional config JSON |
 | `icon` | string | No | `null` | Display icon |
+| `default_access` | string | No | `"all"` | `all` or `bound-only`. A new integration is available to every agent unless you say otherwise. |
 
 **Response:** `201 Created` -- crew MCP server object.
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `name`, invalid `transport`, missing endpoint/command for transport, or referenced workspace integration not in same workspace |
+| `400` | Missing `name`, invalid `transport`, missing endpoint/command for transport, `default_access` outside `all` / `bound-only`, or referenced workspace integration not in same workspace |
 | `404` | Crew not found |
 | `409` | Integration with this name already exists in this crew |
 
@@ -817,7 +850,10 @@ PATCH /api/v1/crews/{crewId}/integrations/{integrationId}?workspace_id={workspac
 
 **Auth:** `OWNER` or `ADMIN` role
 
-All fields optional: `display_name`, `transport`, `endpoint`, `command`, `args_json`, `env_json`, `config_json`, `icon`, `enabled`. Changing `transport` re-validates against the merged final endpoint/command.
+All fields optional: `display_name`, `transport`, `endpoint`, `command`, `args_json`, `env_json`, `config_json`, `icon`, `enabled`, `default_access`.
+
+Sending `default_access` is the only way to change who may use the integration —
+creating or deleting agent bindings never does. CLI: `crewship integration crew update <crew-slug> <integration-id> --access <all|bound-only>`. Changing `transport` re-validates against the merged final endpoint/command.
 
 **Response:** `200 OK` -- updated crew integration object.
 
@@ -1079,6 +1115,11 @@ workspace and crew servers and applying the agent's bindings. Credential IDs
 and names may be present, but secret values are never returned. The response
 is a JSON array; a missing agent returns `404`.
 
+A server is in the answer when it is enabled **and** either its `default_access`
+is `all` or this agent holds a binding for it — see
+[Who can use an integration](#who-can-use-an-integration). Another agent's
+binding never removes a server from this list.
+
 ```json
 [
   {
@@ -1095,7 +1136,8 @@ is a JSON array; a missing agent returns `404`.
     "icon": "github",
     "enabled": true,
     "credential_id": "cred_abc",
-    "credential_name": "github-primary"
+    "credential_name": "github-primary",
+    "default_access": "all"
   }
 ]
 ```

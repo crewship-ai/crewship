@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/shlex"
@@ -39,6 +40,21 @@ func argsJSON(args []string) string {
 		return ""
 	}
 	return string(b)
+}
+
+// normalizeAccessFlag canonicalises a default_access value and rejects
+// anything outside the closed vocabulary before it reaches the server, so a
+// typo is a CLI error naming both values rather than a 400 the caller has to
+// interpret. Case and surrounding whitespace are forgiven; nothing else is —
+// resolution fails closed on a value it does not recognise, so a stored
+// "All" would revoke the server from every unbound agent.
+func normalizeAccessFlag(v string) (string, error) {
+	switch s := strings.ToLower(strings.TrimSpace(v)); s {
+	case "all", "bound-only":
+		return s, nil
+	default:
+		return "", fmt.Errorf("access must be 'all' or 'bound-only', got %q", v)
+	}
 }
 
 var integrationCmd = &cobra.Command{
@@ -102,6 +118,7 @@ var intgListCmd = &cobra.Command{
 			Transport       string `json:"transport"`
 			Endpoint        string `json:"endpoint"`
 			Enabled         bool   `json:"enabled"`
+			DefaultAccess   string `json:"default_access"`
 			AgentBindCount  int    `json:"agent_binding_count"`
 			CrewServerCount int    `json:"crew_server_count"`
 		}
@@ -109,7 +126,7 @@ var intgListCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		headers := []string{"NAME", "DISPLAY", "TRANSPORT", "ENDPOINT", "ENABLED", "AGENTS", "CREWS"}
+		headers := []string{"NAME", "DISPLAY", "TRANSPORT", "ENDPOINT", "ENABLED", "ACCESS", "AGENTS", "CREWS"}
 		var rows [][]string
 		for _, s := range items {
 			enabled := "yes"
@@ -123,8 +140,14 @@ var intgListCmd = &cobra.Command{
 			if len(ep) > 40 {
 				ep = ep[:37] + "..."
 			}
+			// A server that predates the default_access column in a stale
+			// cached response reads as "all", which is what it behaved as.
+			access := s.DefaultAccess
+			if access == "" {
+				access = "all"
+			}
 			rows = append(rows, []string{
-				s.Name, s.DisplayName, s.Transport, ep, enabled,
+				s.Name, s.DisplayName, s.Transport, ep, enabled, access,
 				fmt.Sprintf("%d", s.AgentBindCount),
 				fmt.Sprintf("%d", s.CrewServerCount),
 			})
@@ -152,6 +175,7 @@ var intgAddCmd = &cobra.Command{
 		endpoint, _ := flags.GetString("endpoint")
 		command, _ := flags.GetString("command")
 		icon, _ := flags.GetString("icon")
+		access, _ := flags.GetString("access")
 
 		if name == "" {
 			return fmt.Errorf("--name is required")
@@ -180,6 +204,13 @@ var intgAddCmd = &cobra.Command{
 		}
 		if icon != "" {
 			body["icon"] = icon
+		}
+		if access != "" {
+			normalized, err := normalizeAccessFlag(access)
+			if err != nil {
+				return err
+			}
+			body["default_access"] = normalized
 		}
 
 		client := newAPIClient()
@@ -229,6 +260,60 @@ var intgRemoveCmd = &cobra.Command{
 			return err
 		}
 		fmt.Printf("Integration %s deleted.\n", args[0])
+		return nil
+	},
+}
+
+// intgAccessCmd sets the stored audience of a workspace integration. Before
+// #2072 there was no such state to set: a server was open to everyone exactly
+// while no agent held a binding to it, so `integration bind` doubled as a
+// workspace-wide revocation nobody asked for. Narrowing a server is now this
+// command and nothing else.
+var intgAccessCmd = &cobra.Command{
+	Use:   "access <id-or-name> <all|bound-only>",
+	Short: "Set which agents may use a workspace integration",
+	Long: `Set a workspace integration's default access.
+
+  all         every agent in the workspace resolves this integration, whether
+              or not it has an explicit binding (the default for new ones)
+  bound-only  only agents with an explicit binding resolve it; binding an
+              agent is what grants it
+
+Binding an agent never changes this value, and never changes what any other
+agent resolves. Run "crewship integration get <id-or-name>" to read it back.`,
+	Example: `  crewship integration access github bound-only
+  crewship integration access github all`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		access, err := normalizeAccessFlag(args[1])
+		if err != nil {
+			return err
+		}
+		client := newAPIClient()
+		id, err := resolveIntegrationID(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Patch("/api/v1/integrations/"+id, map[string]interface{}{
+			"default_access": access,
+		})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		if access == "bound-only" {
+			fmt.Printf("Integration %s is now bound-only: only agents with an explicit binding can use it.\n", args[0])
+		} else {
+			fmt.Printf("Integration %s is now available to all agents in the workspace.\n", args[0])
+		}
 		return nil
 	},
 }
@@ -493,16 +578,17 @@ var intgGetCmd = &cobra.Command{
 			return err
 		}
 		var s struct {
-			ID          string  `json:"id"`
-			Name        string  `json:"name"`
-			DisplayName string  `json:"display_name"`
-			Transport   string  `json:"transport"`
-			Endpoint    *string `json:"endpoint"`
-			Command     *string `json:"command"`
-			Enabled     bool    `json:"enabled"`
-			Icon        *string `json:"icon"`
-			CreatedAt   string  `json:"created_at"`
-			UpdatedAt   string  `json:"updated_at"`
+			ID            string  `json:"id"`
+			Name          string  `json:"name"`
+			DisplayName   string  `json:"display_name"`
+			Transport     string  `json:"transport"`
+			Endpoint      *string `json:"endpoint"`
+			Command       *string `json:"command"`
+			Enabled       bool    `json:"enabled"`
+			DefaultAccess string  `json:"default_access"`
+			Icon          *string `json:"icon"`
+			CreatedAt     string  `json:"created_at"`
+			UpdatedAt     string  `json:"updated_at"`
 		}
 		if err := cli.ReadJSON(resp, &s); err != nil {
 			return err
@@ -520,6 +606,10 @@ var intgGetCmd = &cobra.Command{
 		if s.Icon != nil {
 			icon = *s.Icon
 		}
+		access := s.DefaultAccess
+		if access == "" {
+			access = "all"
+		}
 		pairs := [][]string{
 			{"ID", s.ID},
 			{"Name", s.Name},
@@ -528,6 +618,7 @@ var intgGetCmd = &cobra.Command{
 			{"Endpoint", endpoint},
 			{"Command", command},
 			{"Enabled", yesNo(s.Enabled)},
+			{"Access", access},
 			{"Icon", icon},
 			{"Created", s.CreatedAt},
 			{"Updated", s.UpdatedAt},
@@ -639,6 +730,7 @@ func registerIntegrationWorkspaceFlags() {
 	intgAddCmd.Flags().String("endpoint", "", "MCP server endpoint URL")
 	intgAddCmd.Flags().String("command", "", "MCP server command (for stdio)")
 	intgAddCmd.Flags().String("icon", "", "Lucide icon name")
+	intgAddCmd.Flags().String("access", "", "Who may use it: all (default) or bound-only")
 
 	intgBindCmd.Flags().String("agent", "", "Agent slug (required)")
 	intgBindCmd.Flags().String("server", "", "Integration name (required)")
@@ -658,6 +750,7 @@ func init() {
 	integrationCmd.AddCommand(intgAddCmd)
 	integrationCmd.AddCommand(intgRemoveCmd)
 	integrationCmd.AddCommand(intgEnableCmd)
+	integrationCmd.AddCommand(intgAccessCmd)
 	integrationCmd.AddCommand(intgDisableCmd)
 	integrationCmd.AddCommand(intgGetCmd)
 	integrationCmd.AddCommand(intgTestCmd)
@@ -678,5 +771,6 @@ func init() {
 
 	registerIntegrationWorkspaceFlags()
 	registerIntegrationCrewFlags()
+	registerIntegrationToolsFlags()
 	registerIntegrationAgentFlags()
 }

@@ -3,10 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/spf13/cobra"
 )
 
@@ -38,24 +38,33 @@ func emitToken(cmd *cobra.Command, name, id, token string) error {
 	errOut := cmd.ErrOrStderr()
 
 	if outFile != "" {
-		// Lock the perms to 0600 even when OVERWRITING a pre-existing file:
-		// os.WriteFile preserves an existing file's (possibly world-readable)
-		// mode, so open with O_TRUNC at 0600 AND Chmod explicitly so a
-		// rotated token never lands world-readable. Trailing newline keeps
-		// the file a clean single-line secret for `cat`/`$(<file)`.
-		f, err := os.OpenFile(outFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-		if err != nil {
-			return fmt.Errorf("write token to %s: %w", outFile, err)
-		}
-		if err := f.Chmod(0o600); err != nil {
-			f.Close()
-			return fmt.Errorf("secure token file %s: %w", outFile, err)
-		}
-		if _, err := f.WriteString(token + "\n"); err != nil {
-			f.Close()
-			return fmt.Errorf("write token to %s: %w", outFile, err)
-		}
-		if err := f.Close(); err != nil {
+		// Durable, atomic, and 0600 — all three matter here because the
+		// bytes are a credential (#1999).
+		//
+		// The previous form was O_TRUNC + Chmod + WriteString: it emptied
+		// an existing token file BEFORE writing the replacement, so an
+		// interrupted write (full disk, SIGINT, crash) destroyed the old
+		// token and wrote nothing in its place — the operator is left with
+		// no working credential and, after `token rotate` revoked the old
+		// one, no way back. WriteFileDurable writes a sibling tempfile,
+		// fsyncs it, then atomically renames: on any failure outFile still
+		// holds the previous token untouched.
+		//
+		// Perms do NOT regress. WriteFileDurable passes perm straight into
+		// the tempfile's O_CREATE|O_EXCL open — it does not create at 0644
+		// and chmod afterwards — so the bytes are never momentarily
+		// world-readable, and umask can only clear bits, never widen them.
+		// Because the tempfile is always a fresh inode, the rename also
+		// makes the explicit Chmod unnecessary: a pre-existing
+		// world-readable token file cannot leak its mode into the
+		// replacement the way os.WriteFile / O_CREATE would.
+		//
+		// The rename replaces a symlink at outFile rather than writing
+		// through it, which the old O_TRUNC open did not.
+		//
+		// Trailing newline keeps the file a clean single-line secret for
+		// `cat` / `$(<file)`.
+		if err := memory.WriteFileDurable(outFile, []byte(token+"\n"), 0o600); err != nil {
 			return fmt.Errorf("write token to %s: %w", outFile, err)
 		}
 		fmt.Fprintf(out, "%sToken created:%s %s\n", cli.Bold, cli.Reset, name)
