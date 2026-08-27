@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
 
@@ -270,6 +272,91 @@ func TestLookupChatAgentID(t *testing.T) {
 		_, err := lookupChatAgentID(newAPIClient(), covChatID)
 		if err == nil || !strings.Contains(err.Error(), "list broke") {
 			t.Fatalf("expected list error, got %v", err)
+		}
+	})
+
+	// The walk skips an agent whose chat list it cannot read so one denial
+	// cannot hide a chat owned by somebody else. When EVERY list is
+	// unreadable there is nothing left to have found the chat in, and
+	// answering "chat not found" sends the user to check a chat id that was
+	// never in question — `resume` wraps it as "could not determine agent for
+	// chat <id>: chat <id> not found …", which reads as a typo report for
+	// what is really a 403.
+	t.Run("every chat list denied is reported as access, not not-found", func(t *testing.T) {
+		stub := covStub(t)
+		stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{
+			{"id": otherAgent, "slug": "eva"},
+			{"id": covAgentIDCli3, "slug": "viktor"},
+		}))
+		stub.OnGet("/api/v1/agents/"+otherAgent+"/chats", clitest.ErrorResponse(403, "denied"))
+		stub.OnGet("/api/v1/agents/"+covAgentIDCli3+"/chats", clitest.ErrorResponse(403, "denied"))
+
+		_, err := lookupChatAgentID(newAPIClient(), covChatID)
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if strings.Contains(err.Error(), "not found in any agent") {
+			t.Errorf("reported a permission failure as a missing chat: %v", err)
+		}
+		if !strings.Contains(err.Error(), "denied") {
+			t.Errorf("error does not name what the lookup actually hit: %v", err)
+		}
+		if cli.ExitCodeFor(err) == cli.ExitNotFound {
+			t.Errorf("a 403 on every agent must not exit as ExitNotFound: %v", err)
+		}
+	})
+
+	// A partial failure is still a miss, but the count of unreadable lists is
+	// the difference between "your chat id is wrong" and "you cannot see the
+	// agent that owns it".
+	t.Run("partial denial names how much was not searched", func(t *testing.T) {
+		stub := covStub(t)
+		stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{
+			{"id": otherAgent, "slug": "eva"},
+			{"id": covAgentIDCli3, "slug": "viktor"},
+		}))
+		stub.OnGet("/api/v1/agents/"+otherAgent+"/chats", clitest.ErrorResponse(403, "denied"))
+		stub.OnGet("/api/v1/agents/"+covAgentIDCli3+"/chats",
+			clitest.JSONResponse(200, []map[string]any{{"id": "c_unrelated"}}))
+
+		_, err := lookupChatAgentID(newAPIClient(), covChatID)
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "could not be read") {
+			t.Errorf("error hides that 1 of 2 agents was never searched: %v", err)
+		}
+	})
+
+	// GET /api/v1/agents/{id}/chats is a hard LIMIT 100 with no pagination
+	// (internal/api/agent_chats.go), so a chat outside an agent's 100 most
+	// recent is invisible to this walk. Saying "not found" without saying
+	// "in the most recent N" points a user with a valid, older chat id at
+	// their clipboard instead of at the bound.
+	t.Run("clean miss names the recency bound", func(t *testing.T) {
+		stub := covStub(t)
+		stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{
+			{"id": covAgentIDCli3, "slug": "viktor"},
+		}))
+		stub.OnGet("/api/v1/agents/"+covAgentIDCli3+"/chats",
+			clitest.JSONResponse(200, []map[string]any{{"id": "c_unrelated"}}))
+
+		_, err := lookupChatAgentID(newAPIClient(), covChatID)
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), strconv.Itoa(agentChatListLimit)) {
+			t.Errorf("miss does not name the %d-chat bound it searched within: %v",
+				agentChatListLimit, err)
+		}
+	})
+
+	t.Run("workspace with no agents says so", func(t *testing.T) {
+		stub := covStub(t)
+		stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{}))
+		_, err := lookupChatAgentID(newAPIClient(), covChatID)
+		if err == nil || !strings.Contains(err.Error(), "no agents") {
+			t.Fatalf("expected a no-agents error, got %v", err)
 		}
 	})
 }

@@ -320,6 +320,19 @@ jobs:
       - name: onboarding journey is gated on PRs
         run: bash scripts/onboarding-gate-test.sh
 
+      # Three compiled binaries have reached main by the same route — `go build
+      # ./scripts/<tool>` with no -o writes into the repo root, `git add -A`
+      # sweeps it in — and each time the remedy was one more .gitignore line.
+      # The comment written after the second occurrence said an enumerated list
+      # only covers the binaries someone remembered; the third arrived through
+      # exactly that gap (#2123, 10.5 MB). Nothing else in CI notices: it is not
+      # a build failure, not a lint finding, and the file has no extension.
+      # A committed Go binary also carries every stdlib CVE present at build
+      # time, statically linked, which is what the /ping-go code-scanning alerts
+      # actually were.
+      - name: no compiled binaries are committed
+        run: bash scripts/no-root-binaries-test.sh
+
       # The same "a green check that never ran" shape as the two steps above,
       # applied to the one file no PR check can reach at all: the root
       # Dockerfile is built by release.yml and nightly.yml only, so its `FROM
