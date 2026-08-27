@@ -18,7 +18,11 @@
 # So this script never asks the check what happened. It reads the comment and
 # review bodies CodeRabbit actually posted, and reports one of:
 #
-#   reviewed   a review was submitted (with its actionable-comment count)
+#   reviewed   a review was submitted (with its actionable-comment count).
+#              An APPROVED review with an empty body counts only when a
+#              walkthrough names the same commit as reviewed — a clean CHILL
+#              review and the #1729 non-event are the same empty approval,
+#              and that range is the only thing that separates them.
 #   throttled  a rate-limit notice was posted instead — NOT reviewed
 #   failed     CodeRabbit reported a failure (e.g. the PR was closed mid-run)
 #   pending    nothing yet, still inside the review window
@@ -60,7 +64,7 @@ Usage: scripts/review-status.sh [PR...] [--checks] [--json] [--window-min N]
        scripts/review-status.sh --retrigger [--dry-run] [--max N] [--delay S]
 
 EOF
-  sed -n '3,42p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,46p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 die() { printf 'review-status: %s\n' "$1" >&2; exit 2; }
@@ -113,7 +117,13 @@ CLASSIFY_JQ="$WAIT_JQ"'
   def isThrottle:
     test("rate limited by coderabbit\\.ai"; "i")
     or test("review limit reached"; "i")
-    or test("reached your PR review limit"; "i");
+    or test("reached your PR review limit"; "i")
+    # Seen on #2022, 2026-08-20: a re-trigger with no slot left is refused
+    # with "⚠️ Action not completed / Review rate limited." — none of the
+    # three phrases above, and every marker of the "✅ Action performed"
+    # acknowledgement below. Matched on the pair so a walkthrough that merely
+    # mentions a limit cannot be mistaken for the refusal.
+    or (test("action not completed"; "i") and test("rate.?limit"; "i"));
 
   # "Review failed — PR is closed" is the one this repo trips by merging
   # early; the rest are the generic CodeRabbit error shapes.
@@ -123,6 +133,31 @@ CLASSIFY_JQ="$WAIT_JQ"'
     or test("could ?n.t (complete|finish) (the|this) review"; "i");
 
   def isWalkthrough: test("summarize by coderabbit\\.ai"; "i");
+
+  # A walkthrough that reports a FINISHED review, as opposed to one that only
+  # announces the change. #2038: on the CHILL profile a review that finds
+  # nothing is delivered as this comment plus a zero-body APPROVED with no
+  # inline comments — byte-identical, through the review object alone, to the
+  # #1729 non-event. This comment is the difference, and it is only trusted
+  # because it names the commit range it read (see reviewedSha).
+  def isCompletedWalkthrough:
+    test("<!-- recent_review_start -->"; "i")
+    or test("no actionable comments were generated"; "i");
+
+  # `Reviewing files that changed from the base of the PR and between
+  #  39a4ea4b…388 and b709c11b…f1e.` — the END of the range is the commit
+  # CodeRabbit actually read to.
+  def reviewedSha:
+    ( [ scan("between\\s+([0-9a-f]{7,40})\\s+and\\s+([0-9a-f]{7,40})"; "i") ]
+      | if length == 0 then null else (.[0][1] | ascii_downcase) end );
+
+  # Abbreviated SHAs appear in some of these bodies, so compare by prefix —
+  # but never on a stub short enough to collide.
+  def shaCovers($a; $b):
+    ( ($a // "") | ascii_downcase ) as $x
+    | ( ($b // "") | ascii_downcase ) as $y
+    | ($x | length) >= 7 and ($y | length) >= 7
+      and (($x | startswith($y)) or ($y | startswith($x)));
 
   # The most misleading artifact of the lot, found by running this script on
   # its own PR: answering `@coderabbitai review` while still rate-limited
@@ -141,19 +176,36 @@ CLASSIFY_JQ="$WAIT_JQ"'
 
   . as $in
   | ($in.now | secs) as $now
-  | ( [ $in.comments[]? | {
+  | ( [ $in.comments[]?
+        | (.body // "") as $b
+        | {
           at: (.createdAt // ""),
           t:  ((.createdAt // "") | secs),
-          kind: ( (.body // "")
+          kind: ( $b
                   | if isThrottle then "throttle"
                     elif isFailure then "failure"
                     elif isAck then "ack"
+                    elif isCompletedWalkthrough then "completed-walkthrough"
                     elif isWalkthrough then "walkthrough"
                     else "other" end ),
-          wait: ((.body // "") | waitMinutes)
-        } ]
+          # Only meaningful on a completed walkthrough; null everywhere else,
+          # and a null never matches a commit id.
+          reviewedSha: ($b | reviewedSha),
+          found: ($b | if test("no actionable comments were generated"; "i")
+                       then 0 else actionable end),
+          wait: ($b | waitMinutes)
+        } ] ) as $cev
+  | ( [ $cev[] | select(.kind == "completed-walkthrough")
+                | select(.reviewedSha != null) ] ) as $done
+
+  | ( $cev
       + [ $in.reviews[]?
           | ((((.submittedAt // "") | secs) // 0) - 60) as $since
+          | (.commitId // "") as $cid
+          # The walkthrough that says a review of the commit THIS review
+          # points at finished. Nothing else promotes an empty approval: not a
+          # walkthrough for another commit, not one with no range at all.
+          | ([ $done[] | select(shaCovers(.reviewedSha; $cid)) ] | last) as $cw
           | {
           at: (.submittedAt // ""),
           t:  ((.submittedAt // "") | secs),
@@ -164,27 +216,49 @@ CLASSIFY_JQ="$WAIT_JQ"'
           # that outrank the throttle notice — the script reported `reviewed`
           # on a PR nothing had read. An approval that says nothing is the
           # same non-event the green check was.
+          #
+          # #2038 is the mirror image, and the reason "empty ⇒ not a review"
+          # cannot be the whole rule: a CHILL-profile review that finds
+          # nothing posts the same empty approval. So a third way to earn
+          # `review` — a completed walkthrough naming this exact commit. The
+          # evidence is the range, never the emptiness.
           kind: (if ((.body // "") | length) > 0
                     or ([ $in.reviewComments[]? | select((((.createdAt // "") | secs) // 0) >= $since) ] | length) > 0
+                    or ($cw != null)
                  then "review" else "empty-review" end),
+          # True only when the walkthrough is what carried it, so the
+          # headline can say where the verdict came from.
+          promoted: (((.body // "") | length) == 0
+                     and ([ $in.reviewComments[]? | select((((.createdAt // "") | secs) // 0) >= $since) ] | length) == 0
+                     and ($cw != null)),
           rstate: (.state // "?"),
           commitId: (.commitId // ""),
-          actionable: ((.body // "") | actionable)
+          actionable: (((.body // "") | actionable)
+                       // (if $cw != null then $cw.found else null end))
         } ] ) as $ev
 
   | ($ev | map(select(.kind == "review"))      | last) as $rev
   | ($ev | map(select(.kind == "empty-review")) | last) as $emptyRev
   | ($ev | map(select(.kind == "throttle"))    | last) as $thr
   | ($ev | map(select(.kind == "failure"))     | last) as $fail
-  | ($ev | map(select(.kind == "walkthrough")) | last) as $walk
+  | ($ev | map(select(.kind == "walkthrough" or .kind == "completed-walkthrough")) | last) as $walk
   | ($ev | map(select(.kind == "ack"))         | last) as $ack
   | (if $now == null or (($in.createdAt // "") | secs) == null then null
      else $now - (($in.createdAt // "") | secs) end) as $age
   | (($in.windowMin // 5) * 60) as $window
 
+  # Does the winning review name the commit that is about to merge?
+  | (($rev != null) and (($in.headSha // "") != "")
+     and shaCovers($rev.commitId; $in.headSha)) as $revCoversHead
+
   # Newest wins. A review followed by a throttle means the latest push went
-  # unread, however thorough the earlier review was.
-  | (if   ($rev != null) and (($thr == null) or ($rev.t >= $thr.t))
+  # unread, however thorough the earlier review was — unless the review names
+  # the head commit itself, in which case there was no later push and the
+  # throttle is a refused RE-request, not an unread diff. Without that
+  # exception every refused `@coderabbitai review` would demote a
+  # fully-reviewed head, and `--retrigger` would then re-request it, collect
+  # another refusal, and loop.
+  | (if   ($rev != null) and (($thr == null) or ($rev.t >= $thr.t) or $revCoversHead)
           and (($fail == null) or ($rev.t >= $fail.t))              then "reviewed"
      elif ($thr != null) and (($fail == null) or ($thr.t >= $fail.t)) then "throttled"
      elif ($fail != null)                                            then "failed"
@@ -195,6 +269,9 @@ CLASSIFY_JQ="$WAIT_JQ"'
         "review " + ($rev.rstate | ascii_downcase)
         + (if $rev.actionable != null
            then ", " + ($rev.actionable | tostring) + " actionable comment(s)" else "" end)
+        + (if ($rev.promoted // false)
+           then " (empty body; the walkthrough records a completed review of "
+                + ($rev.commitId | short) + ")" else "" end)
      elif $state == "throttled" then
         "rate-limited, no review"
         + (if $thr.wait != null
@@ -217,7 +294,7 @@ CLASSIFY_JQ="$WAIT_JQ"'
          then ["CodeRabbit " + ($emptyRev.rstate | ascii_downcase)
                + " with no content — no body, no inline comments; it did not read the diff"]
          else [] end)
-      + (if $state == "throttled" and $rev != null
+      + (if $state == "throttled" and $rev != null and ($revCoversHead | not)
          then ["an earlier review exists (" + $rev.at + ") but does not cover the current head"]
          else [] end)
       + (if $state == "absent" and $walk != null

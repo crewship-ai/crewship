@@ -307,6 +307,18 @@ the window), **absent** (window elapsed, nothing arrived), or
 one PR is not reviewed. It also flags a review that covers an older
 commit than the current head: real review, wrong code.
 
+Two of those states arrive as *the same bytes*. A rate-limited
+CodeRabbit sometimes still submits an `APPROVED` review with an empty
+body and no inline comments; so does a review on the CHILL profile that
+read the diff and found nothing. The tie-breaker is the walkthrough
+comment, which on a finished review names the range it read —
+`between <base> and <head>`. An empty approval counts as reviewed only
+when a walkthrough names that same commit; otherwise it stays the
+non-event the green check was. So read the headline, not just the tick:
+`review approved, 0 actionable comment(s) (empty body; the walkthrough
+records a completed review of <sha>)` is a clean review, and any PR
+still described as approving "with no content" is not.
+
 Throttling is a queue problem, not something to fight. Re-request the
 reviews serially, seeded from the "next review available in N minutes"
 the notice itself carries:
