@@ -15,7 +15,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   their diffs, after the fact, rather than by their authors at the time. The
   `Changelog Guard` workflow now fails a PR that touches `internal/api/`,
   `cmd/crewship/`, `app/`, `components/`, `lib/`, `hooks/` or `stores/`
-  without touching this file.
+  without adding to the `## [Unreleased]` section above — that section
+  specifically, not the file, because it is the only one `RELEASING.md`
+  cuts release notes from.
 
   Fifteen of the sixteen were on the #2086 audit list. #2079 is the sixteenth:
   it merged after that list was cut, unchronicled like the rest, and it
