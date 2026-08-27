@@ -95,7 +95,14 @@ expect() {
     printf '%s\n' "$out" | sed 's/^/         | /'
     return
   fi
-  if [ -n "$want_match" ] && ! printf '%s\n' "$out" | grep -qE "$want_match"; then
+  # `grep -q` short-circuits on the first match and closes its stdin, so under
+  # `set -o pipefail` a `printf "$out" | grep -q` pipeline reports the WRITER's
+  # SIGPIPE (141) — a matched pattern comes back as a failed assertion. It is
+  # timing-dependent: it only happens when grep exits before printf has flushed,
+  # which for output this size is a coin toss under load (measured ~1 spurious
+  # FAIL per 40 suite runs on a busy box, and 300/300 once the payload passes
+  # the pipe buffer). A here-string has no pipeline and no writer to kill.
+  if [ -n "$want_match" ] && ! grep -qE "$want_match" <<< "$out"; then
     fail "$label (exit $rc as expected, but output never mentions '$want_match')"
     printf '%s\n' "$out" | sed 's/^/         | /'
     return
@@ -183,6 +190,98 @@ make_tree "$GOTC_AFTER" 1.27.0 1.27.0 - 1.27.0 1.27.0
 expect "GOTOOLCHAIN set in the runner stage -> red" 1 "no 'ENV GOTOOLCHAIN=local'" \
   "$GOTC_AFTER"
 
+# Two Go stages. A tool-build or codegen stage carries its own environment and
+# its own `go build`, so a pin in the FIRST does nothing for the SECOND — and a
+# check that asked only "is there a GOTOOLCHAIN line inside some golang stage"
+# would call this green. Both orders, because either stage can be the one left
+# behind.
+GOTC_TWO_STAGES_2ND="$TMPROOT/gotc-two-stages-second-unpinned"
+make_tree "$GOTC_TWO_STAGES_2ND" 1.27.0 1.27.0 - 1.27.0 1.27.0
+{
+  echo "FROM golang:1.27.0-alpine AS backend"
+  echo "ENV GOTOOLCHAIN=local"
+  echo "WORKDIR /app"
+  echo "FROM golang:1.27.0-alpine AS tools"
+  echo "RUN go install example.com/t@latest"
+} > "$GOTC_TWO_STAGES_2ND/Dockerfile"
+expect "second Go stage left unpinned -> red" 1 \
+  "Dockerfile:4 — this Go stage has no 'ENV GOTOOLCHAIN=local'" \
+  "$GOTC_TWO_STAGES_2ND"
+
+GOTC_TWO_STAGES_1ST="$TMPROOT/gotc-two-stages-first-unpinned"
+make_tree "$GOTC_TWO_STAGES_1ST" 1.27.0 1.27.0 - 1.27.0 1.27.0
+{
+  echo "FROM golang:1.27.0-alpine AS backend"
+  echo "WORKDIR /app"
+  echo "FROM golang:1.27.0-alpine AS tools"
+  echo "ENV GOTOOLCHAIN=local"
+} > "$GOTC_TWO_STAGES_1ST/Dockerfile"
+expect "first Go stage left unpinned -> red" 1 \
+  "Dockerfile:1 — this Go stage has no 'ENV GOTOOLCHAIN=local'" \
+  "$GOTC_TWO_STAGES_1ST"
+
+# The mirror of both: two stages, both pinned, is the state that must stay
+# green — otherwise the per-stage rule above is just a check nobody can satisfy.
+GOTC_TWO_STAGES_OK="$TMPROOT/gotc-two-stages-ok"
+make_tree "$GOTC_TWO_STAGES_OK" 1.27.0 1.27.0 - 1.27.0 1.27.0
+{
+  echo "FROM golang:1.27.0-alpine AS backend"
+  echo "ENV GOTOOLCHAIN=local"
+  echo "FROM golang:1.27.0-alpine AS tools"
+  echo "ENV GOTOOLCHAIN=local"
+} > "$GOTC_TWO_STAGES_OK/Dockerfile"
+expect "both Go stages pinned -> green" 0 "all Go toolchain pins agree" \
+  "$GOTC_TWO_STAGES_OK"
+
+echo
+echo "pins the scan must not skip in silence:"
+
+# YAML has three spellings of one scalar. Matching only "1.27.0" meant a file
+# reformatted to '1.27.0' dropped out of the comparison entirely — and because
+# the other pins still matched, the "matched nothing" fatal below never fired
+# and the guard printed "all Go toolchain pins agree" over a real disagreement.
+# That is the exact vacuous pass this suite exists to make impossible, so it is
+# tested in both directions and for both keys.
+SQ_ENV="$TMPROOT/single-quoted-env-lags"
+make_tree "$SQ_ENV" 1.27.0 1.27.0 local 1.27.0 1.27.0
+printf 'name: CI\nenv:\n  GO_VERSION: '"'"'1.26.6'"'"'\njobs: {}\n' > "$SQ_ENV/.github/workflows/ci.yml"
+expect "single-quoted GO_VERSION lags -> red, not skipped" 1 \
+  "ci\.yml:[0-9]+ names 1\.26\.6," "$SQ_ENV"
+
+SQ_LIT="$TMPROOT/single-quoted-literal-lags"
+make_tree "$SQ_LIT" 1.27.0 1.27.0 local 1.27.0 1.27.0
+printf 'name: CodeQL\njobs:\n  a:\n    steps:\n      - with:\n          go-version: '"'"'1.26.6'"'"'\n' \
+  > "$SQ_LIT/.github/workflows/codeql.yml"
+expect "single-quoted literal go-version lags -> red, not skipped" 1 \
+  "codeql\.yml:[0-9]+ names 1\.26\.6," "$SQ_LIT"
+
+SQ_OK="$TMPROOT/single-quoted-agrees"
+make_tree "$SQ_OK" 1.27.0 1.27.0 local 1.27.0 1.27.0
+printf 'name: CI\nenv:\n  GO_VERSION: '"'"'1.27.0'"'"'\njobs: {}\n' > "$SQ_OK/.github/workflows/ci.yml"
+expect "single-quoted GO_VERSION agrees -> green" 0 "all Go toolchain pins agree" \
+  "$SQ_OK"
+
+# The general case behind that bug: a pin spelled a way the scans do not read
+# is invisible, and invisible reads as agreement. Naming the key with a value
+# the version scan did not pick up is therefore fatal, not ignored.
+UNPARSED="$TMPROOT/unparseable-pin"
+make_tree "$UNPARSED" 1.27.0 1.27.0 local 1.27.0 1.27.0
+printf 'name: CI\nenv:\n  GO_VERSION: !!str 1.26.6\njobs: {}\n' > "$UNPARSED/.github/workflows/ci.yml"
+expect "pin in an unreadable form -> fatal, not skipped" 1 \
+  "cannot parse" "$UNPARSED"
+
+# ...but the two non-pin forms must NOT trip it, or every Go job in the repo
+# reddens: `go-version: ${{ env.GO_VERSION }}` consumes the pin rather than
+# setting one (the base fixture's ci.yml already has one), and a composite
+# action declares `go-version:` as an input with no value at all.
+NON_PIN="$TMPROOT/non-pin-forms"
+make_tree "$NON_PIN" 1.27.0 1.27.0 local 1.27.0 1.27.0
+mkdir -p "$NON_PIN/.github/actions/setup-go-embed"
+printf 'inputs:\n  go-version:\n    description: Go version\n    required: true\n' \
+  > "$NON_PIN/.github/actions/setup-go-embed/action.yml"
+expect "expressions and bare input keys are not pins -> green" 0 \
+  "all Go toolchain pins agree" "$NON_PIN"
+
 echo
 echo "the guard must not pass vacuously:"
 
@@ -207,6 +306,36 @@ make_tree "$NO_FROM" 1.27.0 1.27.0 local 1.27.0 1.27.0
 printf 'FROM node:22-alpine AS frontend\nENV GOTOOLCHAIN=local\n' > "$NO_FROM/Dockerfile"
 expect "Go build stage gone from Dockerfile -> fatal, not green" 1 \
   "no 'FROM golang:<version>' line" "$NO_FROM"
+
+echo
+echo "the harness must not fail on the size of its own output:"
+
+# This case is about expect() rather than the guard. The assertion used to be
+# `printf "$out" | grep -qE "$want_match"`, and grep -q closes stdin the moment
+# it matches — so with `set -o pipefail` the pipeline returned the WRITER's
+# SIGPIPE and a matched pattern was reported as a failed assertion. Whether it
+# bit depended on whether printf had flushed before grep exited, i.e. on the
+# size of the guard's output and on machine load: roughly one spurious FAIL per
+# 40 suite runs on a busy box, and every single time once the output passed the
+# 64 KiB pipe buffer. That is a red `Shell` job on a PR that changed nothing,
+# which is how a guard gets switched off.
+#
+# So: a fixture whose output is unambiguously past that buffer, with the line
+# the assertion looks for near the TOP so grep exits with most of it unwritten.
+# The workflow is a text fixture, not runnable YAML — thousands of GO_VERSION
+# keys in one mapping exist only to make the guard print thousands of lines.
+BIG="$TMPROOT/big-output"
+make_tree "$BIG" 1.27.0 1.27.0 local 1.27.0 1.27.0
+{
+  echo "name: Big"
+  echo "env:"
+  echo '  GO_VERSION: "1.26.6"'
+  # ~60 bytes of guard output per line; 1500 puts it around 90 KiB, comfortably
+  # past the 64 KiB pipe buffer without making this the slowest case in the file.
+  awk 'BEGIN { for (i = 0; i < 1500; i++) print "  GO_VERSION: \"1.27.0\"" }'
+} > "$BIG/.github/workflows/ci.yml"
+expect "a mismatch found in >64KiB of output is still asserted" 1 \
+  "ci\.yml:3 names 1\.26\.6," "$BIG"
 
 echo
 echo "against the repo as committed:"

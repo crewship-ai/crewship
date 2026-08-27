@@ -130,8 +130,14 @@ scan() {
 GOMOD="$ROOT/go.mod"
 [ -f "$GOMOD" ] || fatal "no go.mod at $GOMOD"
 
-# `toolchain go1.27.0` -> `1.27.0`
-WANT="$(sed -nE 's|^[[:space:]]*toolchain[[:space:]]+go([0-9][0-9.]*)[[:space:]]*$|\1|p' "$GOMOD" | head -1)"
+# `toolchain go1.27.0` -> `1.27.0`. First match wins, taken by expansion rather
+# than by `| head -1`: head exits after one line and SIGPIPEs sed, which under
+# `set -o pipefail` makes the substitution's status 141 even though the value
+# read fine. Harmless here only because nothing tests that status — but the
+# same shape in go-toolchain-pin-test.sh's expect() turned matched assertions
+# into random failures, so it is not left lying around in this file either.
+WANT="$(sed -nE 's|^[[:space:]]*toolchain[[:space:]]+go([0-9][0-9.]*)[[:space:]]*$|\1|p' "$GOMOD")"
+WANT="${WANT%%$'\n'*}"
 if [ -z "$WANT" ]; then
   fatal "go.mod has no 'toolchain goX.Y.Z' directive." \
     "Every other Go version pin in this repo is compared against that line," \
@@ -165,15 +171,24 @@ FROM_PINS="$(scan 'FROM[[:space:]]+golang:([0-9][0-9.]*)[^[:space:]]*.*' "$DOCKE
   "Either the Go build stage is gone or its base image is no longer pinned" \
   "to an explicit version. Both make this guard vacuous."
 
+# YAML spells the same scalar three ways — `1.27.0`, `"1.27.0"` and `'1.27.0'`
+# are one value — so the quote is optional and either kind. Matching only the
+# double-quoted form is not a cosmetic gap: an unmatched line is a line this
+# guard never compares, and with ten other pins still matching it does not
+# even trip the "matched nothing" fatal below. One workflow reformatted to
+# single quotes would drop silently out of the check and the guard would go on
+# printing "all Go toolchain pins agree" while that file named another version.
+Q="[\"']?"
+
 # `GO_VERSION: "1.27.0"` at workflow env level (any indent, quoted or not).
 ENV_PINS=""
 LITERAL_PINS=""
 if [ "${#WORKFLOWS[@]}" -gt 0 ]; then
-  ENV_PINS="$(scan '[[:space:]]*GO_VERSION:[[:space:]]*"?([0-9][0-9.]*)"?[[:space:]]*(#.*)?' "${WORKFLOWS[@]}")"
+  ENV_PINS="$(scan "[[:space:]]*GO_VERSION:[[:space:]]*${Q}([0-9][0-9.]*)${Q}[[:space:]]*(#.*)?" "${WORKFLOWS[@]}")"
   # `go-version: "1.27.0"` written out instead of `${{ env.GO_VERSION }}`.
   # The value must start with a digit, so input declarations (`go-version:`
   # with nothing after it) and expressions are not matched.
-  LITERAL_PINS="$(scan '[[:space:]]*go-version:[[:space:]]*"?([0-9][0-9.]*)"?[[:space:]]*(#.*)?' "${WORKFLOWS[@]}")"
+  LITERAL_PINS="$(scan "[[:space:]]*go-version:[[:space:]]*${Q}([0-9][0-9.]*)${Q}[[:space:]]*(#.*)?" "${WORKFLOWS[@]}")"
 fi
 
 if [ -z "$ENV_PINS" ] && [ -z "$LITERAL_PINS" ]; then
@@ -181,6 +196,52 @@ if [ -z "$ENV_PINS" ] && [ -z "$LITERAL_PINS" ]; then
     "Ten workflows set GO_VERSION and codeql.yml pins go-version directly;" \
     "finding none of them means this scan stopped matching, not that the" \
     "pins are gone. A guard that matches nothing passes everything."
+fi
+
+# Belt and braces for the class of bug the quote fix above is one instance of.
+# The scans are regexes over a format with more spellings than any regex will
+# hold, and the failure mode when one is written a way they do not recognise is
+# SILENCE — the pin is skipped, the remaining ten agree, and the guard reports
+# success. So: any line that names one of these keys and carries a value, but
+# that the version scans did not pick up, is a pin in a form this parser does
+# not understand, and that is fatal rather than ignored.
+#
+# The two forms deliberately excluded are the ones that are not pins at all: a
+# `${{ ... }}` expression (twenty-odd `go-version: ${{ env.GO_VERSION }}` lines
+# consume the pin rather than setting one) and a bare key with no value (the
+# `go-version:` input declaration in .github/actions/setup-go-embed).
+UNPARSED=()
+if [ "${#WORKFLOWS[@]}" -gt 0 ]; then
+  # One scan per key: ERE has no non-capturing group, and scan() reads the
+  # caller's value out of \2, so `(GO_VERSION|go-version)` would take that slot.
+  NAMED="$(
+    scan '[[:space:]]*GO_VERSION:[[:space:]]*([^[:space:]].*)' "${WORKFLOWS[@]}"
+    scan '[[:space:]]*go-version:[[:space:]]*([^[:space:]].*)' "${WORKFLOWS[@]}"
+  )"
+  # Set membership rather than a grep per line: no subprocess, and nothing that
+  # can answer "not matched" for any reason other than actually not matching.
+  declare -A MATCHED=()
+  while IFS=$'\t' read -r loc _; do
+    [ -n "$loc" ] && MATCHED["$loc"]=1
+  done <<< "$ENV_PINS"$'\n'"$LITERAL_PINS"
+
+  while IFS=$'\t' read -r loc value; do
+    [ -n "$loc" ] || continue
+    # Not pins: an expression that consumes the pin, and a commented-out value.
+    case "$value" in \$\{\{*|\#*) continue ;; esac
+    [ -n "${MATCHED[$loc]:-}" ] && continue
+    UNPARSED+=("  $loc  ->  $value")
+  done <<< "$NAMED"
+fi
+if [ "${#UNPARSED[@]}" -gt 0 ]; then
+  fatal "Go version pin written in a form this guard cannot parse:" \
+    "${UNPARSED[@]}" \
+    "" \
+    "Those lines were NOT compared against go.mod. Write the value as a plain" \
+    "GO_VERSION: \"X.Y.Z\" / go-version: \"X.Y.Z\" scalar, or teach the scans in" \
+    "this script to read it — but do not leave it unmatched. An unmatched pin" \
+    "is an unchecked pin, and the rest of the tree agreeing would have let this" \
+    "guard report success over it."
 fi
 
 # ---------------------------------------------------------------------------
@@ -215,21 +276,40 @@ check_pins "workflow literal go-version"    "$LITERAL_PINS"
 # has no effect whatsoever on `go build`, while a whole-file grep would report
 # it as present and green. That is the same "the value under test is not the
 # value production uses" bypass scripts/security-yml-test.sh is built around.
-GO_STAGE="$(awk '
-  /^FROM[[:space:]]+golang:/ { inside = 1; next }
-  inside && /^FROM[[:space:]]/ { inside = 0 }
-  inside { print }
+#
+# And scoped to EVERY golang stage, one verdict each, not to "somewhere in a
+# golang stage". There is one Go stage today, but a second one — a tool build,
+# a codegen step — carries its own environment and its own `go build`, so a pin
+# in the first would do nothing for it while a file-wide search would count it
+# as covered. The FROM scan above already treats every `FROM golang:` line as a
+# pin site that must agree; this check now agrees with that instead of stopping
+# at the first stage that happens to satisfy it.
+#
+# Emits `<FROM line>\t<value>` per stage, with the value EMPTY when the stage
+# sets nothing. Last ENV in a stage wins, which is what Docker does.
+GO_STAGES="$(awk '
+  function flush() { if (stage) { print stage "\t" val; stage = 0; val = "" } }
+  /^FROM[[:space:]]+golang:/ { flush(); stage = FNR; val = ""; next }
+  /^FROM[[:space:]]/         { flush(); next }
+  stage && /^[[:space:]]*ENV[[:space:]]+GOTOOLCHAIN=[^[:space:]]/ {
+    val = $0
+    sub(/^[[:space:]]*ENV[[:space:]]+GOTOOLCHAIN=/, "", val)
+    sub(/[[:space:]].*$/, "", val)
+  }
+  END { flush() }
 ' "$DOCKERFILE")"
 
-GOTOOLCHAIN_VAL="$(printf '%s\n' "$GO_STAGE" \
-  | sed -nE 's|^[[:space:]]*ENV[[:space:]]+GOTOOLCHAIN=([^[:space:]]+).*$|\1|p' | head -1)"
-if [ -z "$GOTOOLCHAIN_VAL" ]; then
-  fail "Dockerfile has no 'ENV GOTOOLCHAIN=local' in the Go build stage (see this script's header for why)"
-elif [ "$GOTOOLCHAIN_VAL" != "local" ]; then
-  fail "Dockerfile sets GOTOOLCHAIN=$GOTOOLCHAIN_VAL, want local — a version literal here lets a base-image bump be silently undone by a download"
-else
-  printf '  ok       %-46s %s\n' "Dockerfile ENV GOTOOLCHAIN" "local"
-fi
+DOCKERFILE_REL="${DOCKERFILE#"$ROOT"/}"
+while IFS=$'\t' read -r stage_ln GOTOOLCHAIN_VAL; do
+  [ -n "$stage_ln" ] || continue
+  if [ -z "$GOTOOLCHAIN_VAL" ]; then
+    fail "$DOCKERFILE_REL:$stage_ln — this Go stage has no 'ENV GOTOOLCHAIN=local' (see this script's header for why)"
+  elif [ "$GOTOOLCHAIN_VAL" != "local" ]; then
+    fail "$DOCKERFILE_REL:$stage_ln sets GOTOOLCHAIN=$GOTOOLCHAIN_VAL, want local — a version literal here lets a base-image bump be silently undone by a download"
+  else
+    printf '  ok       %-46s %s\n' "$DOCKERFILE_REL:$stage_ln ENV GOTOOLCHAIN" "local"
+  fi
+done <<< "$GO_STAGES"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
