@@ -323,6 +323,48 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     expect(screen.queryByTestId("keeper-governance-sample-every")).not.toBeInTheDocument()
   })
 
+  // Turning the watchdog OFF is the one action on this card that must never be
+  // blocked by something else on it. The cadence row unmounts with the rest of
+  // the rules, taking its inline error with it — so a cadence left mid-edit
+  // would veto the Save with nothing on screen saying why, and the operator
+  // could not switch the monitor off at all.
+  it("still turns the watchdog off when the cadence was left mid-edit", async () => {
+    mockRoutes({ ...BASE, enabled: true, behavior_sample_every: 5, watch_spec: "", watch_presets: [] })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.change(await screen.findByTestId("keeper-governance-sample-every"), { target: { value: "" } })
+    expect(screen.getByTestId("keeper-watchdog-save")).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("keeper-governance-switch"))
+    expect(screen.queryByTestId("keeper-governance-sample-every")).not.toBeInTheDocument()
+
+    const save = screen.getByTestId("keeper-watchdog-save")
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+
+    await waitFor(() => expect(putBodies()).toHaveLength(1))
+    // …and the half-typed cadence does not ride along. Sending it would 400 the
+    // whole save on a value the operator can no longer see or correct.
+    expect(putBodies()[0]).toMatchObject({ enabled: false })
+    expect(putBodies()[0]).not.toHaveProperty("behavior_sample_every")
+  })
+
+  // A cadence is a rule about a running monitor. With the switch off the row is
+  // hidden, so writing one is writing a field nobody was shown — and it would
+  // spend the "never configured" sentinel that keeps an untouched workspace on
+  // whatever the built-in default is, rather than on today's copy of it.
+  it("does not write a cadence the operator was never shown", async () => {
+    mockRoutes({ ...BASE, enabled: true, behavior_sample_every: 0, watch_spec: "", watch_presets: [] })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.click(await screen.findByTestId("keeper-governance-switch"))
+    fireEvent.click(screen.getByTestId("keeper-watchdog-save"))
+
+    await waitFor(() => expect(putBodies()).toHaveLength(1))
+    expect(putBodies()[0]).toMatchObject({ enabled: false })
+    expect(putBodies()[0]).not.toHaveProperty("behavior_sample_every")
+  })
+
   // ── Findings & routing card ──────────────────────────────────────────────
 
   it("saves the risk threshold and second-approver flag together, alone", async () => {

@@ -106,6 +106,8 @@ crewship keeper auto-lease off
 `set` accepts a Go duration from 60 seconds through 30 days (`720h`). It is
 opt-in and applies only to L3/L4 grants approved by Keeper, including approved
 credential escalations. It never shortens a longer manually assigned lease.
+`off` restores standing grants for future approvals but does not un-lease
+already leased grants.
 
 ### Sampling cadence
 
@@ -132,8 +134,6 @@ ever reviewed. Use `keeper disable`. The ceiling of 100 exists for the same
 reason from the other end: the per-crew counter is in memory and starts at zero
 each restart, so a cadence larger than the number of tool calls a run makes
 would never fire.
-`off` restores standing grants for future approvals but does not un-lease
-already leased grants.
 
 ## Instance judge
 

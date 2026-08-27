@@ -242,6 +242,19 @@ const SAMPLE_EVERY_DEFAULT = 5
 // arrives while the operator is choosing rather than after they have saved.
 const SAMPLE_EVERY_WARN_BELOW = 3
 
+// sampleEveryIssue validates a typed cadence, returning the operator-facing
+// problem or null. A free function rather than an inline expression because the
+// Save path needs the same verdict the field shows: the row is hidden while the
+// watchdog is off, so "is this value sendable?" has to be answerable without a
+// rendered input to read it off.
+function sampleEveryIssue(raw: string): string | null {
+  const n = Number(raw)
+  if (raw.trim() === "" || !Number.isInteger(n)) return "Must be a whole number."
+  if (n === 0) return "0 would leave the watchdog on but never looking. Use the switch above to turn it off."
+  if (n < SAMPLE_EVERY_MIN || n > SAMPLE_EVERY_MAX) return `Must be from ${SAMPLE_EVERY_MIN} to ${SAMPLE_EVERY_MAX}.`
+  return null
+}
+
 // secondsToLeaseMinutes renders the wire value for the minutes input. 0 /
 // undefined (auto-lease off) becomes "" so the field reads as empty rather than
 // as a meaningful zero.
@@ -471,14 +484,13 @@ function WatchdogCard({
   })
 
   const sampleEveryNum = Number(form.draft.sampleEvery)
-  const sampleEveryProblem =
-    !Number.isInteger(sampleEveryNum) || form.draft.sampleEvery.trim() === ""
-      ? "Must be a whole number."
-      : sampleEveryNum === 0
-        ? "0 would leave the watchdog on but never looking. Use the switch above to turn it off."
-        : sampleEveryNum < SAMPLE_EVERY_MIN || sampleEveryNum > SAMPLE_EVERY_MAX
-          ? `Must be from ${SAMPLE_EVERY_MIN} to ${SAMPLE_EVERY_MAX}.`
-          : null
+  const sampleEveryProblem = sampleEveryIssue(form.draft.sampleEvery)
+  // The cadence only vetoes Save while it is on screen. With the watchdog being
+  // switched off the row unmounts and takes its inline error with it, so a value
+  // left mid-edit would disable Save with nothing on the card saying why — and
+  // the action it blocked would be turning the monitor OFF, the one that must
+  // never be held hostage by another field.
+  const sampleEveryBlocksSave = form.draft.enabled && sampleEveryProblem !== null
 
   function handleSave() {
     void form.submit(async (draft) => {
@@ -486,7 +498,14 @@ function WatchdogCard({
         enabled: draft.enabled,
         watch_presets: keyToPresets(draft.presets),
         watch_spec: draft.spec,
-        behavior_sample_every: Number(draft.sampleEvery),
+        // Sent only when the row was actually on screen and valid. A cadence is
+        // a rule about a running monitor: writing one while the switch is off
+        // would write a field nobody was shown, and would spend the "never
+        // configured" sentinel that keeps an untouched workspace on the built-in
+        // default rather than on a frozen copy of today's number.
+        ...(draft.enabled && sampleEveryIssue(draft.sampleEvery) === null
+          ? { behavior_sample_every: Number(draft.sampleEvery) }
+          : {}),
       })
     })
   }
@@ -646,7 +665,7 @@ function WatchdogCard({
           dirty={form.isDirty}
           status={form.status}
           error={form.error}
-          canSave={sampleEveryProblem === null}
+          canSave={!sampleEveryBlocksSave}
           onSave={handleSave}
           onCancel={form.reset}
           testId="keeper-watchdog-save"
