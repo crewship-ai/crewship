@@ -17,8 +17,8 @@
     "api_non_json_request_bodies": 4,
     "cli_with_test_signals": 797,
     "cli_with_flags": 385,
-    "cli_with_all_flags_documented": 385,
-    "cli_missing_flag_docs": 0,
+    "cli_with_all_flags_documented": 384,
+    "cli_missing_flag_docs": 1,
     "api_contract_gaps": 0,
     "environment_variables": 102,
     "environment_variables_missing": 0,
@@ -29304,6 +29304,7 @@
         "oauth-auth-url",
         "oauth-client-id",
         "oauth-client-secret",
+        "oauth-client-secret-stdin",
         "oauth-provider",
         "oauth-scopes",
         "oauth-token-url",
@@ -29335,6 +29336,9 @@
         "type",
         "value",
         "value-stdin"
+      ],
+      "missing_flags": [
+        "oauth-client-secret-stdin"
       ]
     },
     {

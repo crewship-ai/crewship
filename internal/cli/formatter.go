@@ -278,6 +278,25 @@ func (f *Formatter) Auto(v interface{}, tableHeaders []string, tableRows [][]str
 	}
 }
 
+// RoutesToHuman reports whether AutoHuman would hand this format to the human
+// renderer rather than a structured one. `quiet` and the empty default are
+// human: they are terminal presentation choices, not serialization formats.
+//
+// It exists because the rule was being restated at call sites that cannot use
+// AutoHuman — paths that emit a machine envelope and a human line from
+// different branches. Two such copies had already drifted apart, classifying
+// `quiet` differently in `oauth connect` and `oauth auto-connect`, so the same
+// flag produced an envelope in one command and not the other. Ask the
+// formatter instead of restating its rule.
+func (f *Formatter) RoutesToHuman() bool {
+	switch f.Format {
+	case "json", "yaml", "ndjson":
+		return false
+	default:
+		return true
+	}
+}
+
 // AutoHuman routes machine formats (json/yaml/ndjson) to the structured
 // renderers and everything else (table/quiet/empty) to the hand-crafted human
 // renderer. For commands whose human output is prose/sections rather than a
@@ -285,16 +304,17 @@ func (f *Formatter) Auto(v interface{}, tableHeaders []string, tableRows [][]str
 // while --format json/yaml/ndjson becomes actually machine-readable — those
 // commands used to leak ANSI-colored text onto stdout regardless of format.
 func (f *Formatter) AutoHuman(v interface{}, human func()) error {
+	if f.RoutesToHuman() {
+		human()
+		return nil
+	}
 	switch f.Format {
 	case "json":
 		return f.JSON(v)
 	case "yaml":
 		return f.YAML(v)
-	case "ndjson":
-		return f.NDJSON(v)
 	default:
-		human()
-		return nil
+		return f.NDJSON(v)
 	}
 }
 

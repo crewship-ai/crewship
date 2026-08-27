@@ -70,11 +70,10 @@ func TestReadOAuthAppFlags(t *testing.T) {
 			name:     "type is matched case-insensitively",
 			credType: "oauth2",
 			flags: map[string]string{
-				"oauth-client-id":  "cid",
-				"oauth-auth-url":   "https://idp.example/authorize",
-				"oauth-token-url":  "https://idp.example/token",
-				"oauth-scopes":     "read",
-				"oauth-client-sec": "",
+				"oauth-client-id": "cid",
+				"oauth-auth-url":  "https://idp.example/authorize",
+				"oauth-token-url": "https://idp.example/token",
+				"oauth-scopes":    "read",
 			},
 			want: &oauthAppSpec{
 				ClientID: "cid",
@@ -139,8 +138,13 @@ func TestReadOAuthAppFlags(t *testing.T) {
 			t.Parallel()
 			flags := oauthAppFlagSet(t, nil)
 			for name, value := range tc.flags {
+				// Fail, don't skip. The previous version `continue`d on an
+				// unknown name and called that a guard against "a typo'd key
+				// silently passing" — but skipping IS passing silently, and a
+				// typo (`oauth-client-sec`) was already sitting in the table
+				// below, asserting nothing while the case reported green.
 				if flags.Lookup(name) == nil {
-					continue // guards against a typo'd key silently passing
+					t.Fatalf("no such flag %q — a typo here would otherwise assert nothing", name)
 				}
 				if err := flags.Set(name, value); err != nil {
 					t.Fatalf("set %s: %v", name, err)

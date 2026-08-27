@@ -666,7 +666,8 @@ func init() {
 	// `crewship oauth connect` is what puts tokens in it. See cmd_oauth.go.
 	credCreateCmd.Flags().String("oauth-provider", "", "Fill the OAuth endpoints from the built-in catalogue (see `crewship oauth providers`); --type OAUTH2 only")
 	credCreateCmd.Flags().String("oauth-client-id", "", "OAuth app client ID, required for --type OAUTH2")
-	credCreateCmd.Flags().String("oauth-client-secret", "", "OAuth app client secret; stored encrypted. Omit for a public (PKCE-only) client")
+	credCreateCmd.Flags().String("oauth-client-secret", "", "OAuth app client secret; stored encrypted. Omit for a public (PKCE-only) client. Prefer --oauth-client-secret-stdin: an argument is visible to anything that can read the process table")
+	credCreateCmd.Flags().Bool("oauth-client-secret-stdin", false, "Read the OAuth app client secret from stdin instead of --oauth-client-secret, so it never appears in argv")
 	credCreateCmd.Flags().String("oauth-auth-url", "", "Authorization endpoint; overrides --oauth-provider, and required without it")
 	credCreateCmd.Flags().String("oauth-token-url", "", "Token endpoint; overrides --oauth-provider, and required without it")
 	credCreateCmd.Flags().String("oauth-scopes", "", "Space-separated scopes to request; defaults to the catalogue's for --oauth-provider")

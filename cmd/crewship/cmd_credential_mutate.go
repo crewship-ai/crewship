@@ -222,13 +222,19 @@ var credCreateCmd = &cobra.Command{
 		if oauthErr != nil {
 			return oauthErr
 		}
-		if oauthApp != nil {
+		if strings.EqualFold(credType, "OAUTH2") {
 			// readOAuthAppFlags matches the type case-insensitively; the server
 			// compares req.Type == "OAUTH2" exactly (credentials_mutate.go:248).
 			// Without this, `--type oauth2` skipped the server's OAUTH2 branch
 			// and came back `400 value is required` — an error naming a flag the
 			// operator deliberately omitted rather than the spelling that
 			// actually caused it.
+			//
+			// Gated on the type, not on oauthApp != nil: the legacy form
+			// `--type oauth2 --value <token>` sets no --oauth-* flag, so
+			// readOAuthAppFlags returns nil by design and the lowercase
+			// spelling used to reach the server unchanged — leaving exactly
+			// the confusing 400 this block exists to prevent.
 			credType = "OAUTH2"
 		}
 

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -377,11 +379,11 @@ Examples:
 		}
 
 		f := newFormatter()
-		// The same set Formatter.AutoHuman treats as human — `quiet` included.
-		// Classifying quiet as machine-readable suppressed the authorize URL,
-		// without which the flow cannot be completed at all, while still
-		// printing the success line afterwards.
-		human := f.Format != "json" && f.Format != "yaml" && f.Format != "ndjson"
+		// Ask the formatter rather than restating its rule: classifying quiet
+		// as machine-readable suppressed the authorize URL, without which the
+		// flow cannot be completed at all, while still printing the success
+		// line afterwards.
+		human := f.RoutesToHuman()
 
 		if human {
 			fmt.Println("Open this URL to authorize (must be a browser on the API host):")
@@ -649,7 +651,10 @@ Examples:
 		// not exist.
 		if out.Status != "authorize" {
 			f := newFormatter()
-			if f.Format != "table" {
+			// Same predicate as the authorize path above. `f.Format != "table"`
+			// counted quiet as machine here and as human there, so one flag
+			// value produced an envelope in one command and not the other.
+			if !f.RoutesToHuman() {
 				_ = f.Machine(out)
 			}
 			msg := out.Message
@@ -713,10 +718,47 @@ func (s *oauthAppSpec) apply(body map[string]interface{}) {
 // `crewship oauth providers` prints, which is the whole point of shipping a
 // catalogue; explicit --oauth-auth-url/--oauth-token-url override it and are
 // the path for a provider the catalogue does not carry.
+// readOAuthClientSecret resolves the OAuth app client secret from
+// --oauth-client-secret or --oauth-client-secret-stdin.
+//
+// Every other secret-bearing flag on `credential create` already had this pair
+// — --value/--value-stdin and --auth-token/--auth-token-stdin — because an
+// argument is readable by anything that can see the process table for as long
+// as the command runs, and lands in shell history besides. The client secret
+// shipped without one, despite being the longest-lived secret of the three: an
+// access token expires, an app's client secret does not until it is rotated.
+//
+// Unlike --auth-token-stdin there is no merge to protect, so empty input is
+// simply "no secret" — a public PKCE-only client is a legitimate configuration.
+func readOAuthClientSecret(flags *pflag.FlagSet) (string, error) {
+	secret, _ := flags.GetString("oauth-client-secret")
+	fromStdin, _ := flags.GetBool("oauth-client-secret-stdin")
+	if !fromStdin {
+		return secret, nil
+	}
+	if flags.Changed("oauth-client-secret") {
+		return "", cli.WithExitCode(
+			fmt.Errorf("--oauth-client-secret and --oauth-client-secret-stdin are mutually exclusive"),
+			cli.ExitValidation)
+	}
+	scanner := bufio.NewScanner(os.Stdin)
+	if scanner.Scan() {
+		secret = scanner.Text()
+	}
+	if err := scanner.Err(); err != nil {
+		return "", cli.WithExitCode(
+			fmt.Errorf("read --oauth-client-secret-stdin: %w", err), cli.ExitValidation)
+	}
+	return secret, nil
+}
+
 func readOAuthAppFlags(flags *pflag.FlagSet, credType string) (*oauthAppSpec, error) {
 	providerSlug, _ := flags.GetString("oauth-provider")
 	clientID, _ := flags.GetString("oauth-client-id")
-	clientSecret, _ := flags.GetString("oauth-client-secret")
+	clientSecret, err := readOAuthClientSecret(flags)
+	if err != nil {
+		return nil, err
+	}
 	authURL, _ := flags.GetString("oauth-auth-url")
 	tokenURL, _ := flags.GetString("oauth-token-url")
 	scopes, _ := flags.GetString("oauth-scopes")
