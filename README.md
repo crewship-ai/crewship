@@ -165,8 +165,11 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   agent or a whole crew; an agent can also turn a workflow it just performed
   into one. [→ skills](docs/guides/skills.mdx)
   · [agent-authored](docs/guides/skills-agent-authored.mdx)
-- 🟡 **Hooks** — shell, HTTP or subagent callbacks on lifecycle events, able to
-  block the action that fired them. [→ hooks](docs/guides/hooks.mdx)
+- 🟡 **Hooks** — shell, HTTP or subagent callbacks on lifecycle events. 4 of
+  the 15 declared events are ever dispatched — agent start, agent stop, an
+  approval request, and a guardrail trip — and only the agent-start hook can
+  block the action that fired it; the other three fire but their result is
+  discarded or only logged. [→ hooks](docs/guides/hooks.mdx)
 - ✅ **Manifests** — declare your whole org as files and `crewship apply` it:
   21 kinds, from workspace, crews, agents, skills, integrations, issues, and
   projects down to labels, milestones, workflow templates, triage rules,
@@ -186,9 +189,13 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 - ✅ **Per-agent chat** — every agent has its own conversation, resumable across
   sessions. [→ chat sessions](docs/guides/chat-sessions.mdx)
 - ✅ **Inbound webhooks** — `POST /api/v1/webhooks/{crewId}/{agentId}/trigger`
-  wakes a specific agent from outside Crewship: HMAC-SHA256 over
-  `timestamp.body` with a 5-minute replay window, it starts the crew container
-  if needed and opens or continues a chat turn. [→ API: webhooks](docs/api-reference/webhooks.mdx)
+  wakes a specific agent from outside Crewship: HMAC-SHA256 over the body,
+  keyed by the agent's webhook secret. Sending `X-Timestamp` upgrades the
+  signature to `timestamp.body` with a 5-minute replay window; a sender that
+  omits it gets accepted on body-only HMAC, which has no replay protection.
+  An agent can be set to require the timestamped scheme, closing that gap for
+  its callers. It starts the crew container if needed and opens or continues
+  a chat turn. [→ API: webhooks](docs/api-reference/webhooks.mdx)
 - 🟡 **Ask forms** — when an agent needs answers before it can start, it offers a
   short questionnaire instead of a paragraph of questions; what you fill in is
   sent as an ordinary message. [→ ask forms](docs/guides/ask-forms.mdx)
@@ -223,10 +230,13 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 - ✅ **Role-based access control** — OWNER › ADMIN › MANAGER › MEMBER › VIEWER,
   enforced on every route. [→ auth](docs/guides/auth.mdx)
 - 🟡 **Approvals** — a human sign-off gate on starting an agent run, and on
-  marking a finished mission task complete; both can block synchronously until
-  someone decides. A risky tool call mid-run is not paused before it executes —
-  it runs, then gets logged and journaled. *(Harbormaster)*
-  [→ harbormaster](docs/guides/harbormaster.mdx)
+  marking a finished mission task complete. Starting a run blocks
+  synchronously — the caller polls until someone decides or it times out.
+  Finishing a task does not block a call; it marks the task
+  `AWAITING_APPROVAL` and the mission holds by never advancing that task's
+  dependents until someone decides. A risky tool call mid-run is not paused
+  before it executes — it runs, then gets logged and journaled.
+  *(Harbormaster)* [→ harbormaster](docs/guides/harbormaster.mdx)
 - ✅ **Keeper** — optional rule-based gate + watchdog on what agents pull and do:
   it sits between an agent and the vault and can refuse a secret the job does not
   justify asking for, with snitch-to-admin alerts. How often the watchdog reviews
@@ -266,7 +276,9 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   Claude Code, Codex, and Gemini are proxied per-request over a loopback TCP
   sidecar (`127.0.0.1:9119`) and never reach the agent process; OAuth tokens
   (any adapter, including Claude Code), Cursor CLI, Factory Droid, and
-  non-proxied OpenCode providers land in the container's environment instead.
+  non-proxied OpenCode providers land in the container's environment instead
+  — and so does any `SECRET`-type credential, since Keeper, which gates
+  `SECRET` behind a request/execute flow, is off by default.
   [→ credentials](docs/guides/credentials.mdx) · [encryption at rest](docs/guides/encryption-at-rest.mdx)
 - 🟡 **Outbound scrubber** — the assistant's chat-facing response stream is
   redacted for credential patterns before it's journaled or shown. Raw
