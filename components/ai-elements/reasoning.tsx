@@ -134,13 +134,23 @@ export const Reasoning = memo(
       }
     }, [isStreaming, isOpen, setIsOpen, isExplicitlyClosed]);
 
-    // Auto-close when streaming ends (once only, and only if it ever streamed)
+    // Auto-close when streaming ends (once only, and only if it ever streamed).
+    //
+    // `isExplicitlyClosed` gates this as well as the auto-open, and it has to:
+    // the auto-close exists to UNDO the auto-open, so a consumer that opted
+    // out of one never wanted the other. Without it the one-shot budget is
+    // still unspent when the stream ends — the block was never opened, so this
+    // effect never fired — and the reader's own first click on the chevron
+    // sets `isOpen`, re-fires this, and collapses the block a second later.
+    // The block they asked to see closes itself in front of them, and only the
+    // second click sticks.
     useEffect(() => {
       if (
         hasEverStreamedRef.current &&
         !isStreaming &&
         isOpen &&
-        !hasAutoClosed
+        !hasAutoClosed &&
+        !isExplicitlyClosed
       ) {
         const timer = setTimeout(() => {
           setIsOpen(false);
@@ -149,7 +159,7 @@ export const Reasoning = memo(
 
         return () => clearTimeout(timer);
       }
-    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed]);
+    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed, isExplicitlyClosed]);
 
     const handleOpenChange = useCallback(
       (newOpen: boolean) => {

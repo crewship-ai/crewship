@@ -422,6 +422,60 @@ func TestHooksUpdate_CannotRetainBlockingWhenChangingToObservationEvent(t *testi
 	}
 }
 
+// TestHooksUpdate_LegacyPreToolCallRowSurvivesUnrelatedPatch pins the claim
+// the PR body, CHANGELOG, and docs/api-reference/hooks.mdx all make: a hook
+// row registered under pre_tool_call before it was retired from AllEvents
+// still "lists, toggles, and reads back fine". PATCHing a field that has
+// nothing to do with event must not resurrect the retired-event rejection.
+//
+// The row is seeded with a raw INSERT rather than hooks.Register, because
+// Register itself now (correctly) refuses event=pre_tool_call — the same
+// way a row from before the retirement would already be sitting in
+// hooks_config, untouched by the migration that removed the event from
+// AllEvents.
+func TestHooksUpdate_LegacyPreToolCallRowSurvivesUnrelatedPatch(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewHooksHandler(db, newTestLogger())
+
+	const id = "hk_legacy_pretool"
+	_, err := db.Exec(`INSERT INTO hooks_config
+		(id, workspace_id, event, matcher, handler_kind, handler_config, blocking, enabled)
+		VALUES (?, ?, 'pre_tool_call', '{}', 'http', ?, 0, 1)`,
+		id, wsID, `{"url":"https://legacy.test"}`)
+	if err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	// PATCH only blocking — the request body never mentions event.
+	rr := patchHook(t, h, userID, wsID, "OWNER", id, map[string]any{
+		"blocking": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got hookRow
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Event != "pre_tool_call" {
+		t.Errorf("event = %q, want it left unchanged at %q", got.Event, "pre_tool_call")
+	}
+	if !got.Blocking {
+		t.Error("blocking not applied by the patch")
+	}
+
+	var event string
+	if err := db.QueryRow(`SELECT event FROM hooks_config WHERE id = ?`, id).Scan(&event); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if event != "pre_tool_call" {
+		t.Errorf("stored event = %q, want it left unchanged at pre_tool_call", event)
+	}
+}
+
 func TestHooksUpdate_NonOwnerCannotConvertAHookToShell(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)

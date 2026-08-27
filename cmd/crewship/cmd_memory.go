@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/spf13/cobra"
 )
@@ -49,12 +52,7 @@ var memorySearchCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		type scopedResult struct {
-			Source string              `json:"source"`
-			Result memory.SearchResult `json:"result"`
-		}
-
-		var allResults []scopedResult
+		allResults := []scopedResult{}
 
 		for _, mp := range paths {
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
@@ -79,25 +77,27 @@ var memorySearchCmd = &cobra.Command{
 			}
 		}
 
-		if len(allResults) == 0 {
-			fmt.Println("No results found.")
-			return nil
-		}
-
-		// JSON output for tooling, table for humans.
-		format, _ := cmd.Flags().GetString("format")
-		if format == "json" {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(allResults)
-		}
-
-		for i, sr := range allResults {
-			fmt.Printf("[%d] [%s] %s (score: %.4f)\n", i+1, sr.Source, sr.Result.File, sr.Result.Score)
-			fmt.Printf("    %s\n\n", sr.Result.Snippet)
-		}
-		return nil
+		// "No results found." used to be printed before the format was
+		// consulted at all, so a `--format json` search that matched nothing
+		// answered a sentence — and a search matching nothing is the case a
+		// caller most needs to handle.
+		return resolvedFormatter(cmd).AutoHuman(allResults, func() {
+			if len(allResults) == 0 {
+				fmt.Println("No results found.")
+				return
+			}
+			for i, sr := range allResults {
+				fmt.Printf("[%d] [%s] %s (score: %.4f)\n", i+1, sr.Source, sr.Result.File, sr.Result.Score)
+				fmt.Printf("    %s\n\n", sr.Result.Snippet)
+			}
+		})
 	},
+}
+
+// scopedResult is one memory search hit, tagged with the scope it came from.
+type scopedResult struct {
+	Source string              `json:"source" yaml:"source"`
+	Result memory.SearchResult `json:"result" yaml:"result"`
 }
 
 var memoryStatusCmd = &cobra.Command{
@@ -119,29 +119,104 @@ var memoryStatusCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		// A scope that will not open is a RESULT, not a failure of the
+		// command — `--scope all` legitimately reaches paths that were never
+		// initialised. It used to be printed as prose and exit 0, so a caller
+		// asking for JSON got a mix of a driver error and, sometimes,
+		// nothing else. Each scope now carries its own error field.
+		//
+		// #2086 adds the other half: the text in that field has to name a
+		// cause the operator can act on, and when NO scope could be read the
+		// command must not still exit 0 — `crewship memory status … ||
+		// handle_it` was dead code in every script that had it. The row shape
+		// is unchanged, so `--format json` keeps carrying the error per scope.
+		scopes := []memoryScopeStatus{}
+		var failed int
 		for _, mp := range paths {
+			row := memoryScopeStatus{Scope: mp.scope, Path: mp.path}
+
+			// Ask the filesystem before SQLite does: the driver collapses a
+			// missing path, a file where a directory belongs, and a directory
+			// it cannot enter into one "unable to open database file (14)",
+			// which names neither the cause nor the path it tried.
+			if err := memoryDirError(mp.path); err != nil {
+				row.Error = err.Error()
+				scopes = append(scopes, row)
+				failed++
+				continue
+			}
+
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
 			if err != nil {
-				fmt.Printf("[%s] %s — not initialized: %v\n", mp.scope, mp.path, err)
+				row.Error = memoryOpenError(mp.path, err).Error()
+				scopes = append(scopes, row)
+				failed++
 				continue
 			}
 
 			status, err := eng.Status(ctx)
 			eng.Close()
 			if err != nil {
-				fmt.Printf("[%s] %s — error: %v\n", mp.scope, mp.path, err)
+				row.Error = fmt.Sprintf("cannot read the memory index in %s: %v", mp.path, err)
+				scopes = append(scopes, row)
+				failed++
 				continue
 			}
 
-			fmt.Printf("[%s] %s\n", mp.scope, mp.path)
-			fmt.Printf("  Files:   %d\n", status.TotalFiles)
-			fmt.Printf("  Chunks:  %d\n", status.TotalChunks)
-			fmt.Printf("  Size:    %d KB\n", status.TotalSizeKB)
-			fmt.Printf("  Indexed: %s\n", status.IndexedAt.Format(time.RFC3339))
-			fmt.Printf("  Ready:   %v\n\n", status.SearchReady)
+			row.Initialized = true
+			row.TotalFiles = status.TotalFiles
+			row.TotalChunks = status.TotalChunks
+			row.TotalSizeKB = status.TotalSizeKB
+			row.IndexedAt = status.IndexedAt.Format(time.RFC3339)
+			row.SearchReady = status.SearchReady
+			scopes = append(scopes, row)
+		}
+
+		if err := resolvedFormatter(cmd).AutoHuman(scopes, func() {
+			for _, s := range scopes {
+				// A per-scope failure is a diagnostic, so in human output it
+				// goes to stderr and stdout stays clean for the scopes that
+				// did report. Structured formats keep it in the row, where a
+				// caller can read it per scope.
+				if s.Error != "" {
+					fmt.Fprintf(os.Stderr, "[%s] %s\n", s.Scope, s.Error)
+					continue
+				}
+				fmt.Printf("[%s] %s\n", s.Scope, s.Path)
+				fmt.Printf("  Files:   %d\n", s.TotalFiles)
+				fmt.Printf("  Chunks:  %d\n", s.TotalChunks)
+				fmt.Printf("  Size:    %d KB\n", s.TotalSizeKB)
+				fmt.Printf("  Indexed: %s\n", s.IndexedAt)
+				fmt.Printf("  Ready:   %v\n\n", s.SearchReady)
+			}
+		}); err != nil {
+			return err
+		}
+
+		// Every scope failed: nothing was reported, so the command did not
+		// do what it was asked and must not claim success. A partial failure
+		// stays exit 0 — the scopes that answered, answered — with the
+		// failures already rendered above.
+		if failed == len(paths) {
+			return cli.WithExitCode(
+				fmt.Errorf("no readable memory index for scope %q under %s", scope, basePath),
+				cli.ExitNotFound)
 		}
 		return nil
 	},
+}
+
+// memoryScopeStatus is one scope's index status in `memory status`.
+type memoryScopeStatus struct {
+	Scope       string `json:"scope" yaml:"scope"`
+	Path        string `json:"path" yaml:"path"`
+	Initialized bool   `json:"initialized" yaml:"initialized"`
+	TotalFiles  int    `json:"total_files" yaml:"total_files"`
+	TotalChunks int    `json:"total_chunks" yaml:"total_chunks"`
+	TotalSizeKB int64  `json:"total_size_kb" yaml:"total_size_kb"`
+	IndexedAt   string `json:"indexed_at,omitempty" yaml:"indexed_at,omitempty"`
+	SearchReady bool   `json:"search_ready" yaml:"search_ready"`
+	Error       string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
 var memoryReindexCmd = &cobra.Command{
@@ -163,11 +238,33 @@ var memoryReindexCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		var succeeded int
+		var succeeded, gateFailed int
 		for _, mp := range paths {
+			// Building an index is what this command is for, so it creates
+			// the directory to build it in — otherwise `status`'s advice to
+			// "build an index with `crewship memory reindex`" landed right
+			// back on the gate below and reproduced the identical error, one
+			// exit code lower (#2106). A mkdir that FAILS is reported here
+			// for the same reason: left to the gate, an unwritable parent
+			// reads as a directory that "does not exist", which is the
+			// message that advises running this very command again.
+			if err := createMemoryDir(mp.path); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] %v\n", mp.scope, memoryCreateError(mp.path, err))
+				gateFailed++
+				continue
+			}
+
+			// Same driver-error leak as `status` had, same fix (#2086) —
+			// reindex already exits non-zero when every scope fails.
+			if err := memoryDirError(mp.path); err != nil {
+				fmt.Fprintf(os.Stderr, "[%s] %v\n", mp.scope, err)
+				gateFailed++
+				continue
+			}
+
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
 			if err != nil {
-				fmt.Printf("[%s] %s — cannot open: %v\n", mp.scope, mp.path, err)
+				fmt.Fprintf(os.Stderr, "[%s] %v\n", mp.scope, memoryOpenError(mp.path, err))
 				continue
 			}
 
@@ -193,7 +290,14 @@ var memoryReindexCmd = &cobra.Command{
 			succeeded++
 		}
 		if succeeded == 0 {
-			return fmt.Errorf("all reindex operations failed")
+			err := fmt.Errorf("all reindex operations failed")
+			// "there is no directory to index" is a not-found, and `status`
+			// already exits 3 for it. The same condition answering 3 from one
+			// command and 1 from the other is what a script cannot handle.
+			if gateFailed > 0 && gateFailed == len(paths) {
+				return cli.WithExitCode(err, cli.ExitNotFound)
+			}
+			return err
 		}
 		return nil
 	},
@@ -207,7 +311,22 @@ func init() {
 	}
 
 	memorySearchCmd.Flags().IntP("limit", "l", 10, "Max results per scope")
-	memorySearchCmd.Flags().StringP("format", "F", "table", "Output format: table, json")
+
+	// This command owned a LOCAL `--format/-F` flag (table|json). Because it
+	// took the NAME "format", it shadowed the root's persistent flag on this
+	// command — and a shadowed persistent flag takes its shorthand with it, so
+	// `crewship memory search … -f json` did not fall back to human output, it
+	// FAILED with `unknown shorthand flag: 'f'` on the one flag the CLI
+	// advertises everywhere (#2086). The help was wrong to match: it printed
+	// "Output format: table, json" where every other command prints the five.
+	//
+	// The alias survives under its own name so `-F json` keeps working, and is
+	// marked deprecated so it stops spreading. Nothing reads it directly —
+	// resolvedFormat folds it into the global resolution below.
+	memorySearchCmd.Flags().StringP("output-format", "F", "", "Deprecated alias for --format/-f")
+	if err := memorySearchCmd.Flags().MarkDeprecated("output-format", "use --format/-f (which now supports table|json|yaml|ndjson|quiet)"); err != nil {
+		panic(err) // programmer error: the flag was just registered
+	}
 
 	memoryCmd.AddCommand(memorySearchCmd)
 	memoryCmd.AddCommand(memoryStatusCmd)
@@ -271,4 +390,117 @@ func ensureMemorySubdir(p string) string {
 func dirExists(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
+}
+
+// memoryDirError reports, in words an operator can act on, why p cannot hold a
+// memory index — or nil when it looks usable.
+//
+// The check exists because SQLite collapses every one of these causes into the
+// single opaque SQLITE_CANTOPEN, which the driver renders as "unable to open
+// database file (14)": that string is identical for a path that does not
+// exist, a file where a directory belongs, and a directory the caller cannot
+// enter, and it never names the path it tried (#2086). The path itself is
+// derived from --path *and* --scope, so the user cannot reconstruct it from
+// the flags they typed.
+func memoryDirError(p string) error {
+	info, err := os.Stat(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// Which of the two things is missing decides what the operator does
+		// next, and only one of them has a command behind it. `reindex`
+		// creates the .memory directory inside a base path that exists
+		// (createMemoryDir); it will not invent the base path itself,
+		// because a --path that is not there is a typo (#2106).
+		if parent := filepath.Dir(p); !dirExists(parent) {
+			return fmt.Errorf("%s does not exist, and neither does %s — check --path and --scope (`crewship memory --help` lists what --path means per scope)", p, parent)
+		}
+		return fmt.Errorf("%s does not exist — build the index with `crewship memory reindex`, which creates it, or check --path and --scope (`crewship memory --help` lists what --path means per scope)", p)
+	case errors.Is(err, fs.ErrPermission):
+		return memoryPermissionError(p)
+	case err != nil:
+		return fmt.Errorf("%s cannot be read: %v", p, err)
+	case !info.IsDir():
+		return fmt.Errorf("%s is not a directory — --path names the directory holding the index, not a file inside it", p)
+	}
+
+	// os.Stat needs only +x on the PARENT, so every check above succeeds on a
+	// directory the caller cannot enter and reports IsDir() == true — which
+	// made the fs.ErrPermission branch unreachable for exactly the case it
+	// names, a .memory written inside an agent container and owned by uid
+	// 1001, and let SQLITE_CANTOPEN through anyway (#2106). Opening the
+	// directory asks for the permission the engine is about to need, at the
+	// cost of one syscall.
+	f, err := os.Open(p)
+	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return memoryPermissionError(p)
+		}
+		return fmt.Errorf("%s cannot be read: %v", p, err)
+	}
+	f.Close()
+	return nil
+}
+
+// memoryPermissionError is the one wording for "the directory is there and you
+// cannot have it", which two branches of memoryDirError now reach.
+func memoryPermissionError(p string) error {
+	return fmt.Errorf("%s cannot be read: permission denied — you are uid %d, and memory dirs written inside an agent container are owned by uid 1001", p, os.Getuid())
+}
+
+// memoryOpenError renders a memory.New failure in words that are not the
+// SQLite driver's own.
+//
+// memoryDirError catches every cause visible from outside the directory, but
+// the index FILE has an owner and a mode of its own: a .memory the caller can
+// enter, holding an index.sqlite written by uid 1001, or a read-only directory
+// with no index in it yet, both still come back as "unable to open database
+// file (14)" — a string that names no cause and no path. The substring match
+// is a backstop, not the fix; the probe in memoryDirError is.
+func memoryOpenError(p string, err error) error {
+	if strings.Contains(err.Error(), "unable to open database file") {
+		return fmt.Errorf("%s cannot be opened: %s is readable, so check that index.sqlite inside it — and the directory itself, if the index has yet to be built — are readable and writable by uid %d (memory written inside an agent container is owned by uid 1001)",
+			filepath.Join(p, "index.sqlite"), p, os.Getuid())
+	}
+	return fmt.Errorf("cannot open the memory index in %s: %v", p, err)
+}
+
+// createMemoryDir makes p when it is missing and its parent is not, so
+// `memory reindex` can build an index in a crew directory that has never held
+// one — which is the advice `memory status` gives, and which looped straight
+// back into the same error until #2106 (memory.New does not mkdir: sql.Open is
+// lazy and SQLite will not create a directory).
+//
+// It deliberately does not mkdir -p. A --path whose own directory is absent is
+// a mistyped path, and materialising the tree hides the typo instead of
+// reporting it — so that case returns nil and leaves the reporting to
+// memoryDirError, which names both halves and has a different remedy.
+//
+// A FAILED mkdir is returned rather than dropped. Discarding it reopened the
+// loop this issue closed, one door along: on a base path that exists but is
+// not writable the mkdir failed silently, the gate below then saw a directory
+// that merely "does not exist", and its message advised `crewship memory
+// reindex` — the command that had just failed to create it. The advice was
+// not only circular but false, since it claims "which creates it".
+func createMemoryDir(p string) error {
+	if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if !dirExists(filepath.Dir(p)) {
+		return nil
+	}
+	// 0755 is what the engine itself uses for memory directories
+	// (internal/memory/workspace.go), so an index built here has the same
+	// mode as one built by the sidecar.
+	return os.Mkdir(p, 0o755)
+}
+
+// memoryCreateError explains a failed mkdir in the terms the operator needs:
+// which directory could not be made, and that the thing to fix is the writable
+// bit on its PARENT, not on the index that does not exist yet.
+func memoryCreateError(p string, err error) error {
+	if errors.Is(err, fs.ErrPermission) {
+		return fmt.Errorf("%s cannot be created: permission denied — %s is not writable by uid %d, so `crewship memory reindex` has nowhere to build the index (memory written inside an agent container is owned by uid 1001)",
+			p, filepath.Dir(p), os.Getuid())
+	}
+	return fmt.Errorf("%s cannot be created: %v", p, err)
 }

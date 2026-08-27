@@ -13,9 +13,14 @@ import (
 // cmd_skill_proposed wires the operator-side CLI for the memory→Skills
 // HITL surface (PRD §8.2). Three verbs mirror the HTTP endpoints:
 //
-//   crewship skill proposed list --crew <crew_id>
-//   crewship skill proposed approve --crew <crew_id> --file skill-<slug>.md
-//   crewship skill proposed reject  --crew <crew_id> --file skill-<slug>.md
+//   crewship skill proposed list --crew <crew-id-or-slug>
+//   crewship skill proposed approve --crew <crew-id-or-slug> --file skill-<slug>.md
+//   crewship skill proposed reject  --crew <crew-id-or-slug> --file skill-<slug>.md
+//
+// --crew takes the slug an operator reads out of `crewship crew list`, the
+// same as every sibling that names a crew (`crew get`, `skill escalation`,
+// `skill expose`, `integration crew list`). It used to accept the CUID only,
+// so the obvious invocation came back "crew not found" (#2086).
 //
 // These hit /api/v1/skills/proposed[/approve|/reject] on the daemon
 // over the same auth path as `crewship skill list` — so the surface
@@ -49,6 +54,7 @@ named crew. Output is a table by default (--format=text) or JSON
 (--format=json) for piping into jq.
 
 Example:
+  crewship skill proposed list --crew engineering
   crewship skill proposed list --crew crew_abc123`,
 	RunE: runSkillProposedList,
 }
@@ -62,7 +68,7 @@ injection scan apply). On success the staging file is deleted and
 an EntryMemorySkillApproved journal entry fires.
 
 Example:
-  crewship skill proposed approve --crew crew_abc --file skill-deploy-friday.md`,
+  crewship skill proposed approve --crew engineering --file skill-deploy-friday.md`,
 	RunE: runSkillProposedApprove,
 }
 
@@ -74,21 +80,21 @@ already-deleted file returns success (no error). An
 EntryMemorySkillRejected journal entry fires either way.
 
 Example:
-  crewship skill proposed reject --crew crew_abc --file skill-noise.md`,
+  crewship skill proposed reject --crew engineering --file skill-noise.md`,
 	RunE: runSkillProposedReject,
 }
 
 func init() {
-	skillProposedListCmd.Flags().String("crew", "", "crew id whose .proposed/ dir to scan (required)")
+	skillProposedListCmd.Flags().String("crew", "", "crew slug or id whose .proposed/ dir to scan (required)")
 	skillProposedListCmd.Flags().String("format", "text", "output format: text|json")
 	_ = skillProposedListCmd.MarkFlagRequired("crew")
 
-	skillProposedApproveCmd.Flags().String("crew", "", "crew id (required)")
+	skillProposedApproveCmd.Flags().String("crew", "", "crew slug or id (required)")
 	skillProposedApproveCmd.Flags().String("file", "", "staged file name, e.g. skill-foo.md (required)")
 	_ = skillProposedApproveCmd.MarkFlagRequired("crew")
 	_ = skillProposedApproveCmd.MarkFlagRequired("file")
 
-	skillProposedRejectCmd.Flags().String("crew", "", "crew id (required)")
+	skillProposedRejectCmd.Flags().String("crew", "", "crew slug or id (required)")
 	skillProposedRejectCmd.Flags().String("file", "", "staged file name, e.g. skill-foo.md (required)")
 	_ = skillProposedRejectCmd.MarkFlagRequired("crew")
 	_ = skillProposedRejectCmd.MarkFlagRequired("file")
@@ -117,10 +123,14 @@ func runSkillProposedList(cmd *cobra.Command, _ []string) error {
 	if err := requireWorkspace(); err != nil {
 		return err
 	}
-	crewID, _ := cmd.Flags().GetString("crew")
+	crewRef, _ := cmd.Flags().GetString("crew")
 	format, _ := cmd.Flags().GetString("format")
 
 	client := newAPIClient()
+	crewID, err := resolveCrewID(client, crewRef)
+	if err != nil {
+		return err
+	}
 	// URL-encode the crew_id so a value with `&` or `?` doesn't
 	// silently change query semantics. Crew ids are CUID-format
 	// today (no special chars), but the encoding is cheap and the
@@ -146,7 +156,7 @@ func runSkillProposedList(cmd *cobra.Command, _ []string) error {
 	}
 
 	if len(rows) == 0 {
-		fmt.Fprintf(os.Stderr, "no staged skill proposals for crew %s\n", crewID)
+		fmt.Fprintf(os.Stderr, "no staged skill proposals for crew %s\n", crewRef)
 		return nil
 	}
 	f := newFormatter()
@@ -181,10 +191,14 @@ func runSkillProposedApprove(cmd *cobra.Command, _ []string) error {
 	if err := requireWorkspace(); err != nil {
 		return err
 	}
-	crewID, _ := cmd.Flags().GetString("crew")
+	crewRef, _ := cmd.Flags().GetString("crew")
 	fileName, _ := cmd.Flags().GetString("file")
 
 	client := newAPIClient()
+	crewID, err := resolveCrewID(client, crewRef)
+	if err != nil {
+		return err
+	}
 	resp, err := client.Post("/api/v1/skills/proposed/approve", proposedRequest{CrewID: crewID, FileName: fileName})
 	if err != nil {
 		return err
@@ -216,10 +230,14 @@ func runSkillProposedReject(cmd *cobra.Command, _ []string) error {
 	if err := requireWorkspace(); err != nil {
 		return err
 	}
-	crewID, _ := cmd.Flags().GetString("crew")
+	crewRef, _ := cmd.Flags().GetString("crew")
 	fileName, _ := cmd.Flags().GetString("file")
 
 	client := newAPIClient()
+	crewID, err := resolveCrewID(client, crewRef)
+	if err != nil {
+		return err
+	}
 	resp, err := client.Post("/api/v1/skills/proposed/reject", proposedRequest{CrewID: crewID, FileName: fileName})
 	if err != nil {
 		return err

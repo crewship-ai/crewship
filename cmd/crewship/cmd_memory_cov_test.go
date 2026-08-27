@@ -4,11 +4,52 @@ package main
 // memory engine is real (SQLite in a temp dir); no server involved.
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
+
+// covCaptureStderrMemory captures os.Stderr for the duration of fn. The memory
+// commands write per-scope failures there, so a test that asserts on the
+// wording an operator sees has to read that stream.
+//
+// Restoration is deferred, and the read end is closed, because fn runs a
+// command's RunE: if that panics — or exits via runtime.Goexit — an inline
+// restore never happens, and os.Stderr stays pointing at a pipe nothing is
+// draining. Every later test in the binary then writes into a 64 KB buffer
+// and blocks forever, surfacing as a timeout in whichever unrelated test was
+// unlucky rather than as the panic that caused it.
+func covCaptureStderrMemory(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	guardCLIState(t)
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer func() {
+		os.Stderr = old
+		_ = w.Close()
+		_ = r.Close()
+	}()
+	os.Stderr = w
+
+	runErr := fn()
+
+	// Close the write end before draining: ReadAll needs EOF, and the
+	// deferred Close above is too late to provide it.
+	os.Stderr = old
+	_ = w.Close()
+	data, readErr := io.ReadAll(r)
+	if readErr != nil {
+		t.Fatalf("read captured stderr: %v", readErr)
+	}
+	return string(data), runErr
+}
 
 func TestResolveMemoryPaths(t *testing.T) {
 	base := t.TempDir()
@@ -193,11 +234,19 @@ func TestMemoryReindexStatusSearch_EndToEnd(t *testing.T) {
 		t.Errorf("status should report 1 indexed file, got %q", out)
 	}
 
-	// search finds the indexed content (table format).
+	// search finds the indexed content (human format).
+	//
+	// The format comes from the global flagFormat now. `memory search` used to
+	// own a local --format/-F, and because it took the NAME "format" it
+	// shadowed the root's persistent flag on this command — which meant
+	// `memory search … -f json` failed with `unknown shorthand flag: 'f'`
+	// rather than producing JSON (#2086). -F survives as a deprecated,
+	// differently-named alias.
 	covSetMemoryFlags(t, 0, base, "agent")
-	if err := memorySearchCmd.Flags().Set("format", "table"); err != nil {
-		t.Fatal(err)
-	}
+	origFormat := flagFormat
+	t.Cleanup(func() { flagFormat = origFormat })
+	flagFormat = ""
+
 	out, err = covCaptureStdoutCli7(t, func() error {
 		return memorySearchCmd.RunE(memorySearchCmd, []string{"kraken"})
 	})
@@ -209,10 +258,7 @@ func TestMemoryReindexStatusSearch_EndToEnd(t *testing.T) {
 	}
 
 	// JSON format path.
-	if err := memorySearchCmd.Flags().Set("format", "json"); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = memorySearchCmd.Flags().Set("format", "table") })
+	flagFormat = "json"
 	out, err = covCaptureStdoutCli7(t, func() error {
 		return memorySearchCmd.RunE(memorySearchCmd, []string{"kraken"})
 	})
@@ -223,15 +269,48 @@ func TestMemoryReindexStatusSearch_EndToEnd(t *testing.T) {
 		t.Errorf("json search output = %q", out)
 	}
 
-	// A query with no hits prints the empty-state message.
+	// A query with no hits, still under -f json, must produce an empty JSON
+	// ARRAY. This assertion used to demand "No results found." — the English
+	// sentence the command printed before it consulted the format at all — so
+	// the test encoded the bug it should have caught. A search that matches
+	// nothing is the case a caller most needs to survive.
 	out, err = covCaptureStdoutCli7(t, func() error {
 		return memorySearchCmd.RunE(memorySearchCmd, []string{"zebrasaurus"})
 	})
 	if err != nil {
 		t.Fatalf("search no hits: %v", err)
 	}
+	if strings.TrimSpace(out) != "[]" {
+		t.Errorf("-f json with no hits must emit [] so `jq '.[]'` works; got %q", out)
+	}
+
+	// …and the human path keeps the sentence.
+	flagFormat = ""
+	out, err = covCaptureStdoutCli7(t, func() error {
+		return memorySearchCmd.RunE(memorySearchCmd, []string{"zebrasaurus"})
+	})
+	if err != nil {
+		t.Fatalf("search no hits (human): %v", err)
+	}
 	if !strings.Contains(out, "No results found.") {
 		t.Errorf("expected empty-state output, got %q", out)
+	}
+
+	// The deprecated -F alias still selects a format, without stealing "format"
+	// back and re-breaking -f.
+	flagFormat = ""
+	if err := memorySearchCmd.Flags().Set("output-format", "json"); err != nil {
+		t.Fatalf("set deprecated --output-format: %v", err)
+	}
+	t.Cleanup(func() { _ = memorySearchCmd.Flags().Set("output-format", "") })
+	out, err = covCaptureStdoutCli7(t, func() error {
+		return memorySearchCmd.RunE(memorySearchCmd, []string{"kraken"})
+	})
+	if err != nil {
+		t.Fatalf("search via deprecated alias: %v", err)
+	}
+	if !strings.Contains(out, `"source": "agent"`) {
+		t.Errorf("deprecated -F alias lost its meaning; got %q", out)
 	}
 }
 
@@ -251,19 +330,31 @@ func TestMemoryReindex_AllTargetsFailing(t *testing.T) {
 	}
 }
 
-func TestMemoryStatus_NotInitialized(t *testing.T) {
+// A memory index that cannot be read is a failure, and the command has to say
+// so with its exit status — it used to print the SQLite driver's own
+// "unable to open database file (14)" and return nil, so `crewship memory
+// status … || handle_it` never fired (#2086).
+func TestMemoryStatus_MissingIndexIsAFailure(t *testing.T) {
 	saveCLIState(t)
 	base := filepath.Join(t.TempDir(), "missing-root")
 	covSetMemoryFlags(t, 1, base, "agent")
 
-	out, err := covCaptureStdoutCli7(t, func() error {
+	// stderr, not stdout: the per-scope failure is a diagnostic, and stdout
+	// stays clean for the scopes that did report.
+	out, err := covCaptureStderrMemory(t, func() error {
 		return memoryStatusCmd.RunE(memoryStatusCmd, nil)
 	})
-	if err != nil {
-		t.Fatalf("status should not error on missing index: %v", err)
+	if err == nil {
+		t.Fatalf("status returned nil on an unreadable index; out=%q", out)
 	}
-	if !strings.Contains(out, "not initialized") {
-		t.Errorf("expected 'not initialized', got %q", out)
+	if got := cli.ExitCodeFor(err); got != cli.ExitNotFound {
+		t.Errorf("exit code = %d, want ExitNotFound (%d) — err: %v", got, cli.ExitNotFound, err)
+	}
+	if !strings.Contains(out, "does not exist") {
+		t.Errorf("expected an actionable cause, got %q", out)
+	}
+	if strings.Contains(out, "unable to open database file") || strings.Contains(out, "(14)") {
+		t.Errorf("the raw driver error leaked to the user: %q", out)
 	}
 }
 

@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship hooks
 
-Manage the lifecycle-hook registry -- shell commands, HTTP webhooks, or subagents that fire on platform events (`post_tool_call`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 14-event catalog and the three handler kinds. There is no `pre_tool_call` -- the platform has no interception point before a tool runs.
+Manage the lifecycle-hook registry -- shell commands, HTTP webhooks, or subagents that fire on platform events (`pre_agent_start`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 14-event catalog and the three handler kinds. There is no `pre_tool_call` -- the platform has no interception point before a tool runs. Every one of the 14 catalog events, including `post_tool_call`, now dispatches from a real call site -- see [Currently-dispatched events](#currently-dispatched-events) below.
 
 ```bash
 crewship hooks <subcommand> [flags]
@@ -92,10 +92,10 @@ New hooks are **enabled** unless you pass `--disabled`.
 crewship hooks create --event on_approval_requested --handler http \
     --url https://hooks.slack.com/services/XXX
 
-# Blocking shell gate before an LLM call, for one crew (OWNER only)
-crewship hooks create --event pre_llm_call --handler shell \
+# Blocking shell gate before every agent run, for one crew (OWNER only)
+crewship hooks create --event pre_agent_start --handler shell \
     --command /usr/local/bin/gate.sh \
-    --matcher-tools 'Bash,Write' --crew backend-team --blocking
+    --crew backend-team --blocking
 
 # Anything the convenience flags don't cover
 crewship hooks create --event pre_llm_call --handler http \
@@ -107,7 +107,7 @@ Sample output:
 
 ```
 Created hook hk_abc123
-  event    pre_llm_call
+  event    pre_agent_start
   handler  shell → /usr/local/bin/gate.sh
   crew     crw_backend
   state    enabled, blocking

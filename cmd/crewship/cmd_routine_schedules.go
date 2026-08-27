@@ -22,36 +22,36 @@ import (
 )
 
 type scheduleRow struct {
-	ID                    string                 `json:"id"`
-	WorkspaceID           string                 `json:"workspace_id"`
-	Name                  string                 `json:"name"`
-	TargetPipelineID      string                 `json:"target_pipeline_id"`
-	TargetPipelineSlug    string                 `json:"target_pipeline_slug,omitempty"`
-	TargetPipelineVersion *int                   `json:"target_pipeline_version,omitempty"`
-	CronExpr              string                 `json:"cron_expr"`
-	Timezone              string                 `json:"timezone"`
-	Inputs                map[string]interface{} `json:"inputs"`
-	Enabled               bool                   `json:"enabled"`
-	LastRunAt             *string                `json:"last_run_at,omitempty"`
-	LastStatus            *string                `json:"last_status,omitempty"`
-	LastRunID             *string                `json:"last_run_id,omitempty"`
-	NextRunAt             *string                `json:"next_run_at,omitempty"`
-	WakePipelineID        string                 `json:"wake_pipeline_id,omitempty"`
-	WakePipelineSlug      string                 `json:"wake_pipeline_slug,omitempty"`
-	WakeInputs            map[string]interface{} `json:"wake_inputs,omitempty"`
-	WakeFailClosed        bool                   `json:"wake_fail_closed,omitempty"`
-	WakeCheckCount        int                    `json:"wake_check_count,omitempty"`
-	WakeFireCount         int                    `json:"wake_fire_count,omitempty"`
-	LastWakeAt            *string                `json:"last_wake_at,omitempty"`
-	LastWakeStatus        string                 `json:"last_wake_status,omitempty"`
-	CatchupPolicy         string                 `json:"catchup_policy,omitempty"`
-	LastMissedCount       int                    `json:"last_missed_count,omitempty"`
+	ID                    string                 `json:"id" yaml:"id"`
+	WorkspaceID           string                 `json:"workspace_id" yaml:"workspace_id"`
+	Name                  string                 `json:"name" yaml:"name"`
+	TargetPipelineID      string                 `json:"target_pipeline_id" yaml:"target_pipeline_id"`
+	TargetPipelineSlug    string                 `json:"target_pipeline_slug,omitempty" yaml:"target_pipeline_slug,omitempty"`
+	TargetPipelineVersion *int                   `json:"target_pipeline_version,omitempty" yaml:"target_pipeline_version,omitempty"`
+	CronExpr              string                 `json:"cron_expr" yaml:"cron_expr"`
+	Timezone              string                 `json:"timezone" yaml:"timezone"`
+	Inputs                map[string]interface{} `json:"inputs" yaml:"inputs"`
+	Enabled               bool                   `json:"enabled" yaml:"enabled"`
+	LastRunAt             *string                `json:"last_run_at,omitempty" yaml:"last_run_at,omitempty"`
+	LastStatus            *string                `json:"last_status,omitempty" yaml:"last_status,omitempty"`
+	LastRunID             *string                `json:"last_run_id,omitempty" yaml:"last_run_id,omitempty"`
+	NextRunAt             *string                `json:"next_run_at,omitempty" yaml:"next_run_at,omitempty"`
+	WakePipelineID        string                 `json:"wake_pipeline_id,omitempty" yaml:"wake_pipeline_id,omitempty"`
+	WakePipelineSlug      string                 `json:"wake_pipeline_slug,omitempty" yaml:"wake_pipeline_slug,omitempty"`
+	WakeInputs            map[string]interface{} `json:"wake_inputs,omitempty" yaml:"wake_inputs,omitempty"`
+	WakeFailClosed        bool                   `json:"wake_fail_closed,omitempty" yaml:"wake_fail_closed,omitempty"`
+	WakeCheckCount        int                    `json:"wake_check_count,omitempty" yaml:"wake_check_count,omitempty"`
+	WakeFireCount         int                    `json:"wake_fire_count,omitempty" yaml:"wake_fire_count,omitempty"`
+	LastWakeAt            *string                `json:"last_wake_at,omitempty" yaml:"last_wake_at,omitempty"`
+	LastWakeStatus        string                 `json:"last_wake_status,omitempty" yaml:"last_wake_status,omitempty"`
+	CatchupPolicy         string                 `json:"catchup_policy,omitempty" yaml:"catchup_policy,omitempty"`
+	LastMissedCount       int                    `json:"last_missed_count,omitempty" yaml:"last_missed_count,omitempty"`
 	// Circuit breaker (#1405).
-	ConsecutiveFailures    int    `json:"consecutive_failures"`
-	MaxConsecutiveFailures int    `json:"max_consecutive_failures"`
-	DisabledReason         string `json:"disabled_reason,omitempty"`
-	CreatedAt              string `json:"created_at"`
-	UpdatedAt              string `json:"updated_at"`
+	ConsecutiveFailures    int    `json:"consecutive_failures" yaml:"consecutive_failures"`
+	MaxConsecutiveFailures int    `json:"max_consecutive_failures" yaml:"max_consecutive_failures"`
+	DisabledReason         string `json:"disabled_reason,omitempty" yaml:"disabled_reason,omitempty"`
+	CreatedAt              string `json:"created_at" yaml:"created_at"`
+	UpdatedAt              string `json:"updated_at" yaml:"updated_at"`
 }
 
 // routineCell renders the ROUTINE column for trigger lists: the target
@@ -271,15 +271,22 @@ var routineSchedulesCreateCmd = &cobra.Command{
 				previewTZ = "UTC"
 			}
 			occs, oerr := pipeline.NextOccurrences(cronExpr, previewTZ, 3, time.Now())
-			fmt.Printf("Parsed %q as cron %q (%s).\n", when, cronExpr, previewTZ)
+			// The preview and the prompt go to STDERR, which is where every
+			// other confirmation in this CLI already lives (see
+			// confirmAction). They were on stdout, so `-f json` prefixed the
+			// created schedule with four lines of English and the stream
+			// stopped parsing (#2086). A human sees them either way; a pipe
+			// no longer does.
+			errOut := cmd.ErrOrStderr()
+			fmt.Fprintf(errOut, "Parsed %q as cron %q (%s).\n", when, cronExpr, previewTZ)
 			if oerr == nil {
-				fmt.Println("Next 3 fire times:")
+				fmt.Fprintln(errOut, "Next 3 fire times:")
 				for _, o := range occs {
-					fmt.Printf("  - %s\n", o.Format("2006-01-02 15:04 MST"))
+					fmt.Fprintf(errOut, "  - %s\n", o.Format("2006-01-02 15:04 MST"))
 				}
 			}
 			if !yes {
-				fmt.Print("Create this schedule? [y/N]: ")
+				fmt.Fprint(errOut, "Create this schedule? [y/N]: ")
 				var input string
 				_, _ = fmt.Scanln(&input)
 				if strings.ToLower(strings.TrimSpace(input)) != "y" && strings.ToLower(strings.TrimSpace(input)) != "yes" {
@@ -592,8 +599,14 @@ var routineSchedulesDeleteCmd = &cobra.Command{
 		}
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			fmt.Printf("Delete schedule %s? Use --yes to skip this prompt.\n", args[0])
-			fmt.Print("Type 'yes' to confirm: ")
+			// Prompt on STDERR, like confirmAction and every other
+			// confirmation in the CLI. On stdout it prefixed whatever the
+			// command printed afterwards, so `-f json` returned prose plus a
+			// document (#2086). The stricter "type yes" wording is kept —
+			// this delete cannot be undone.
+			errOut := cmd.ErrOrStderr()
+			fmt.Fprintf(errOut, "Delete schedule %s? Use --yes to skip this prompt.\n", args[0])
+			fmt.Fprint(errOut, "Type 'yes' to confirm: ")
 			var input string
 			_, _ = fmt.Scanln(&input)
 			if strings.ToLower(strings.TrimSpace(input)) != "yes" {

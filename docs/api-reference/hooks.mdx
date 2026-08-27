@@ -72,7 +72,7 @@ GET /api/v1/hooks?crew_id=<optional>
 
 | Field | Type | Description |
 |---|---|---|
-| `rows[].event` | string | One of the 14 lifecycle events open to new writes. See [Hooks guide](/guides/hooks#events). A row created before `pre_tool_call` was removed from that list may still show `pre_tool_call`; it lists and toggles normally, it just never dispatches. |
+| `rows[].event` | string | One of the 14 lifecycle events open to new writes, every one of which now has a real dispatch site — see [Currently-dispatched events](/cli/hooks#currently-dispatched-events). A row created before `pre_tool_call` was removed from that list may still show `pre_tool_call`; it lists, toggles, and can be edited (as long as the edit doesn't try to change `event` to something else invalid) — it just never dispatches, since there is no interception point before a tool runs. |
 | `rows[].handler_kind` | string | `shell`, `http`, or `subagent`. |
 | `rows[].handler_config` | object | Handler-specific config (URL for http, command for shell, subagent name for subagent). |
 | `rows[].matcher` | object | Optional filter: `tools`, `agent_ids`, `crew_ids`, `severities`. Empty = match-all. |
@@ -112,10 +112,10 @@ POST /api/v1/hooks
 
 ```json
 {
-  "event": "pre_llm_call",
+  "event": "pre_agent_start",
   "handler_kind": "http",
   "handler_config": { "url": "https://hooks.slack.test/services/XXX" },
-  "matcher": { "tools": ["Bash", "Write"] },
+  "crew_id": "crw_backend",
   "blocking": true
 }
 ```
@@ -147,7 +147,7 @@ PATCH /api/v1/hooks/{id}
 
 **Auth:** `OWNER` or `ADMIN`. `OWNER` is required to set `handler_kind: "shell"` **or** to edit a hook that is already `shell`.
 
-Semantics are **patch, not put**: only the fields present in the body change. An omitted field keeps its current value. Consequently, changing a blocking `pre_*` hook to a `post_*` or `on_*` event must also send `"blocking": false`; otherwise the merged observation hook is rejected with `400`.
+Semantics are **patch, not put**: only the fields present in the body change. An omitted field keeps its current value, so `{"event": "pre_agent_start"}` does not clear the matcher, the blocking flag, or the enabled flag. In particular, a body that never mentions `event` at all leaves it untouched — including on a legacy row whose `event` is `pre_tool_call`, which stays editable for every other field. Consequently, changing a blocking `pre_*` hook to a `post_*` or `on_*` event must also send `"blocking": false`; otherwise the merged observation hook is rejected with `400`.
 
 Accepts the same fields as [create](#create-a-hook), all optional.
 

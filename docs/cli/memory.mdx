@@ -27,7 +27,20 @@ crewship memory search <query> [flags]
 | `--path` | `-p` | (required) | Base path (meaning depends on scope) |
 | `--scope` | `-S` | `agent` | `agent`, `crew`, `workspace`, or `all` |
 | `--limit` | `-l` | `10` | Maximum results per scope |
-| `--format` | `-F` | `table` | Output format: `table` or `json` |
+| `--output-format` | `-F` | — | **Deprecated.** Alias for the global `--format`/`-f`. |
+
+<Warning>
+  `memory search` used to own a **local** `--format` flag with the `-F`
+  shorthand. Because it took the name `format`, it shadowed the global
+  persistent flag on this command — and a shadowed persistent flag takes its
+  shorthand with it, so `crewship memory search … -f json` did not fall back to
+  human output, it **failed** with `unknown shorthand flag: 'f'`.
+
+  The global `--format`/`-f` now reaches this command like every other, with the
+  full `table|json|yaml|ndjson|quiet` vocabulary instead of `table|json`. `-F`
+  survives as a deprecated alias under the name `--output-format` so existing
+  scripts keep working; it prints a deprecation notice and will be removed.
+</Warning>
 
 **Examples:**
 
@@ -63,6 +76,36 @@ crewship memory status -p /path/to/agents/lead/.memory
 #   Size:    48 KB
 #   Indexed: 2026-04-14T10:15:52Z
 #   Ready:   true
+```
+
+**Exit codes.** A scope whose index cannot be read is reported on stderr, naming the resolved path (which `--path` *and* `--scope` decide together) and the cause — the directory does not exist, is not a directory, cannot be entered, or holds an `index.sqlite` that cannot be opened. When **every** scope fails the command exits `3`; a partial failure exits `0` with the successful scopes on stdout. SQLite's own `unable to open database file (14)` is never what you see: that string is identical for all four causes and names none of them.
+
+When the base path itself is missing, that is a mistyped `--path` and the message says so:
+
+```bash
+crewship memory status -p /path/that/is/not/there
+# [agent] /path/that/is/not/there/.memory does not exist, and neither does /path/that/is/not/there — check --path and --scope (…)
+# no readable memory index for scope "agent" under /path/that/is/not/there
+# exit 3
+```
+
+When the base path is real and has simply never been indexed, [`reindex`](#reindex) is the fix and it creates the directory itself:
+
+```bash
+crewship memory status -p /path/to/crews/abc123
+# [agent] /path/to/crews/abc123/.memory does not exist — build the index with `crewship memory reindex`, which creates it, or check --path and --scope (…)
+# exit 3
+crewship memory reindex -p /path/to/crews/abc123
+# [agent] reindexed 0 files (0 chunks) in 19ms
+# exit 0
+```
+
+A directory you cannot enter is called out as such, because inside an agent container the memory tree belongs to uid 1001:
+
+```bash
+crewship memory status -p /crew/agents/lead
+# [agent] /crew/agents/lead/.memory cannot be read: permission denied — you are uid 1000, and memory dirs written inside an agent container are owned by uid 1001
+# exit 3
 ```
 
 ### health
@@ -111,7 +154,18 @@ crewship memory reindex -p /path/to/crew-root -S crew
 # [crew] reindexed 3 files (10 chunks) in 19ms
 ```
 
-Returns non-zero exit code if all reindex operations fail.
+**It creates the index directory it is asked to build in**, so the `.memory` a crew has never had is one `reindex` away rather than a `mkdir` you have to work out. It will not create the *base* path: a `--path` whose own directory is absent is a typo, and inventing the tree would hide it.
+
+Creating `.memory` needs the base path to exist **and be writable by you**. When it is not, `reindex` says so rather than reporting the directory as merely missing — that wording advises running `reindex`, which is the command that just failed:
+
+```bash
+crewship memory reindex --path /crew/read-only
+# [agent] /crew/read-only/.memory cannot be created: permission denied — /crew/read-only
+#   is not writable by uid 1000, so `crewship memory reindex` has nowhere to build the
+#   index (memory written inside an agent container is owned by uid 1001)
+```
+
+Returns a non-zero exit code if all reindex operations fail — `3` when the reason is that no scope had a directory to index, which is the code `status` uses for the same condition, and `1` otherwise. Per-scope failures go to stderr with the same actionable wording `status` uses.
 
 ### hybrid
 

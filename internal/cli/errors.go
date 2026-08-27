@@ -132,16 +132,24 @@ func ExitCodeFor(err error) int {
 // this envelope is the failure-side counterpart so agents never have to
 // regex "API error (404)" out of prose.
 type ErrorEnvelope struct {
-	Error ErrorBody `json:"error"`
+	Error ErrorBody `json:"error" yaml:"error"`
 }
 
 // ErrorBody carries the failure details inside an ErrorEnvelope.
+//
+// The yaml tags mirror the json ones for the reason #1211 records: yaml.v3
+// does not read `json:` tags, so without them this envelope — the one struct
+// every command in every machine format can emit — disagreed with itself.
+// `-f json` gave `exit_code` and dropped the unset fields; `-f yaml` gave
+// `exitcode` and emitted `status: 0`, `detail: ""` and `extensions: {}`
+// alongside it. A caller switching formats got a different failure document
+// for the same failure.
 type ErrorBody struct {
-	Message    string                 `json:"message"`
-	Status     int                    `json:"status,omitempty"`
-	Detail     string                 `json:"detail,omitempty"`
-	ExitCode   int                    `json:"exit_code"`
-	Extensions map[string]interface{} `json:"extensions,omitempty"`
+	Message    string                 `json:"message" yaml:"message"`
+	Status     int                    `json:"status,omitempty" yaml:"status,omitempty"`
+	Detail     string                 `json:"detail,omitempty" yaml:"detail,omitempty"`
+	ExitCode   int                    `json:"exit_code" yaml:"exit_code"`
+	Extensions map[string]interface{} `json:"extensions,omitempty" yaml:"extensions,omitempty"`
 }
 
 // NewErrorEnvelope builds the structured error envelope for err,

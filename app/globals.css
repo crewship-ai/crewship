@@ -880,6 +880,138 @@ body {
 }
 
 /*
+ * .surface-pane — the onboarding pane's treatment, restated so it can be
+ * worn by any surface in the product instead of only by /onboarding.
+ *
+ * Same idea, different arithmetic. `.onboarding-pane` above is three literal
+ * dark hex stops, which is exactly right for a screen that only ever renders
+ * dark and wrong for anything reused. Converting those stops to OKLCH shows
+ * what they actually are: the middle one (#0b0c11) IS dark `--card`, and the
+ * outer two sit about +0.037 L above it and -0.010 L below. So the pane is
+ * not a colour, it is ONE SURFACE lifted toward the light along its top edge
+ * and falling away at its foot.
+ *
+ * Restating it that way is what makes it theme-safe, and it has to be,
+ * because the card/ground relationship INVERTS between the themes: dark
+ * `--card` (0.155) is lighter than dark `--background` (0.10), while light
+ * `--card` (0.9851) is DARKER than light `--background` (0.9911). A literal
+ * transplant of "top lighter, bottom darker" therefore reads as a raised
+ * panel in one theme and as a smudge in the other. Mixing per theme keeps the
+ * same *gesture* while letting each theme resolve its own direction — and in
+ * light the seam highlight becomes a seam shadow, because the light is coming
+ * from the other side of the surface.
+ *
+ * ANCHORED ABOVE `--card`. Both halves of that matter, and both were got
+ * wrong once each on the way here — worth writing down, because each mistake
+ * had a plausible reason.
+ *
+ * On `--card` rather than `--background`: the surround in the dashboard IS
+ * card — the app rail, the top bar and the chat column all compute to the same
+ * value — so the pane has to be defined against card or it has no stated
+ * relationship to the thing it sits inside. Anchoring on `--background`
+ * (0.10 in dark) made the conversation near-black and the gradient vanished
+ * into it; the whole treatment was technically present and visually absent.
+ *
+ * ABOVE it rather than straddling it: every stop is lifted, so the foot of
+ * the pane is still lighter than the frame. Straddling — the first cut, taken
+ * straight from `.onboarding-pane`, whose middle stop IS card — meant the
+ * centre of the conversation matched the column exactly, and the two ran
+ * together across the middle third of the screen where most of the reading
+ * happens.
+ *
+ * The spread is ~0.046 L, the same as the onboarding pane's, so it reads as
+ * the same surface: one panel lit along its top edge and falling away at its
+ * foot. It is only where that panel sits relative to its frame that changed.
+ *
+ * One recipe serves both themes here, unlike the seam treatment below. In
+ * dark, card is lighter than background; in light, card is DARKER than
+ * background — but "lifted toward the light" is the same direction in both,
+ * because what it is lifted away from is the chrome, and the chrome is card
+ * in both.
+ *
+ * Mount this on a NON-SCROLLING element. On a scroll container the gradient
+ * stretches to the full document height and the top highlight — the entire
+ * point of it — scrolls off the screen on any page taller than the viewport.
+ */
+.surface-pane {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--card), white 7%) 0%,
+    color-mix(in oklab, var(--card), white 3.5%) 58%,
+    color-mix(in oklab, var(--card), white 1.5%) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    inset 0 -80px 90px -70px rgb(0 0 0 / 0.55);
+}
+
+/* The seam does flip. A white inset highlight on a near-white surface is
+   invisible, so in light the shared edge is described by a shadow instead. */
+:root:not(.dark) .surface-pane {
+  box-shadow:
+    inset 0 1px 0 rgb(20 22 29 / 0.05),
+    inset 0 -80px 90px -70px rgb(20 22 29 / 0.12);
+}
+
+/*
+ * The transcript's thinking indicator (components/features/chat/v2).
+ *
+ * A ring that turns around the agent's avatar plus a slow breathe on the
+ * face itself. Two channels rather than one because a single spinning ring
+ * on a 32px square reads as a loading spinner bolted onto a portrait, where
+ * the pair reads as the portrait being alive.
+ *
+ * The ring is a conic gradient masked to its own outer 2px, which is one
+ * painted element — a bordered pseudo-element with a transparent side would
+ * need a second box to hide the seam, and an SVG stroke-dasharray would
+ * rasterise on every frame at this size.
+ *
+ * Periods are 1.5s and 2.6s. Deliberately not a ratio that divides, so the
+ * two never resynchronise into a single visible pulse — the same reason the
+ * three sails in components/branding/animated-mark.tsx run coprime periods.
+ */
+@keyframes thinking-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes thinking-face-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.055); }
+}
+
+.thinking-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 13px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 200deg,
+    color-mix(in oklab, var(--primary), transparent 30%) 300deg,
+    var(--primary) 340deg,
+    transparent 360deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  animation: thinking-ring-spin 1.5s linear infinite;
+  pointer-events: none;
+}
+
+.thinking-face {
+  transform-origin: 50% 50%;
+  animation: thinking-face-breathe 2.6s ease-in-out infinite;
+}
+
+/* Held still, not removed: a reader who suppresses motion still has to be
+   able to tell that the agent has not finished. */
+@media (prefers-reduced-motion: reduce) {
+  .thinking-ring,
+  .thinking-face {
+    animation: none;
+  }
+}
+
+/*
  * Touch targets in the unauthenticated forms.
  *
  * The shared Input is h-9 and Button's default size is h-9 — 36px, which is

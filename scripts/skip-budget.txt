@@ -109,5 +109,37 @@
 #                     for. Permanent by design, carries a SKIP-WAIVER comment and
 #                     deliberately no tracking issue, on the #1546 precedent.
 #                     CI does not pass -short, so the variant is still covered.
+#
+# 2026-08-27          135 -> 136. +1 from the #2106 review follow-ups. The
+#                     table case is `memory status` against a .memory the
+#                     caller cannot enter — the exact scenario whose error
+#                     message names uid 1001, and the one memoryDirError's
+#                     fs.ErrPermission branch never actually reached, because
+#                     os.Stat needs only +x on the parent. The fixture is a
+#                     chmod 0o000 that root walks straight through, so at
+#                     euid 0 the case would report ok while asserting the
+#                     opposite. There is no permission-free route to EACCES:
+#                     ENOTDIR and ELOOP, which no euid bypasses, land in
+#                     memoryDirError's other branches and are already covered
+#                     by the "not a directory" case in the same table.
+#                     Permanent platform guard, not debt, so it carries a
+#                     SKIP-WAIVER comment and deliberately no tracking issue,
+#                     on the #1546 precedent. The other three cases in the
+#                     table run as root, and the branch added no other skip.
+#
+# 2026-08-27          136 -> 137. +1 from the CodeRabbit review on the same
+#                     PR, and the same platform reason one door along.
+#                     TestAcceptance_MemoryReindex_SaysWhyItCannotCreateTheIndexDir
+#                     pins that `memory reindex` reports a mkdir it could not
+#                     perform, instead of letting the gate behind it describe
+#                     an unwritable parent as a directory that merely "does
+#                     not exist" — wording that advises running `crewship
+#                     memory reindex`, the command that had just failed. The
+#                     fixture is a 0o500 base path, and root writes into it
+#                     regardless, so at euid 0 the mkdir succeeds and the case
+#                     would assert the opposite of what it claims. Same
+#                     permanent platform guard as the 135 -> 136 entry above,
+#                     SKIP-WAIVER comment, deliberately no tracking issue, on
+#                     the #1546 precedent. The branch added no other skip.
 
-135
+137
