@@ -43,6 +43,26 @@ active profile (`--profile` / `CREWSHIP_PROFILE`) → `CREWSHIP_SERVER` env → 
 An active profile that has no `server:` entry fails closed — the scheme check reports
 INFO instead of silently diagnosing a different host than your API calls use.
 
+Database-dependent checks (*db migration version*, *telemetry status*, *DSN
+wiring*, *telemetry endpoint*) read the SQLite file on **this host**, resolved
+`DATABASE_URL` → `CREWSHIP_DATA_DIR` → `~/.crewship` — the same order the server
+itself resolves. The `db migration version` row prints that path and where it
+came from, e.g. `v20260826190607 (latest) — ./crewship.db (DATABASE_URL)`.
+
+<Note>
+Until [#2109](https://github.com/crewship-ai/crewship/pull/2109) these checks
+ignored `DATABASE_URL` and always opened `~/.crewship/crewship.db`. On any host
+where `crewshipd` runs with its own `DATABASE_URL` — every development clone
+uses `file:./crewship.db` — doctor reported on a file the instance had never
+written, and nothing in the output said so.
+
+Unlike `crewship admin` / `crewship db`, these checks are **not** gated behind
+`--local` and do not refuse when `CREWSHIP_SERVER` names a server. `doctor`
+reports on the machine you run it on, by design; a diagnostic that switched
+itself off because a server was named would be unavailable exactly when
+something is wrong. Naming the file it read is what replaces the refusal.
+</Note>
+
 ### Container runtime
 
 Detects which Docker-compatible runtime is available — Docker, Podman,

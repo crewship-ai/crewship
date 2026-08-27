@@ -89,7 +89,7 @@ func seedUserWithSessions(t *testing.T, db *sql.DB, email string, activeN, revok
 
 // TestAdminInvalidateSessions_Core exercises the SQL surface
 // runAdminInvalidateSessions touches without going through cobra or
-// the openAdminDB path. The cobra wrapper is a thin shim; the
+// the local-database path. The cobra wrapper is a thin shim; the
 // interesting logic is the UPDATE statement's WHERE clause:
 //
 //   - revokes only matching user_id rows

@@ -56,10 +56,23 @@ func covSeedMemoryVersion(t *testing.T, content string) (sha, blobRoot string) {
 	return res.Sha256, blobRoot
 }
 
+// covMemLogCmd / covMemShowCmd build the LOCAL variant of the command: since
+// #2086 `memory log` and `memory show` read the server by default, and every
+// case in this file is about the SQLite path — the query, the blob store, the
+// database-missing error. The server-side halves are covered by the acceptance
+// tests in acceptance_local_db_target_test.go, which drive the real binary
+// against a stub of the two admin routes.
 func covMemLogCmd() *cobra.Command {
 	c := &cobra.Command{Use: "log", RunE: runMemoryLog}
 	c.Flags().Int("limit", 20, "")
 	c.Flags().String("format", "json", "")
+	c.Flags().Bool("local", true, "")
+	return c
+}
+
+func covMemShowCmd() *cobra.Command {
+	c := &cobra.Command{Use: "show", RunE: runMemoryShow}
+	c.Flags().Bool("local", true, "")
 	return c
 }
 
@@ -69,6 +82,7 @@ func covMemRestoreCmd() *cobra.Command {
 	c.Flags().String("user", "", "")
 	c.Flags().String("tier", "learned", "")
 	c.Flags().Bool("force", false, "")
+	c.Flags().Bool("local", true, "")
 	return c
 }
 
@@ -76,7 +90,10 @@ func TestRunMemoryLog_JSONOutput(t *testing.T) {
 	sha, _ := covSeedMemoryVersion(t, "alpha learned content\n")
 
 	c := covMemLogCmd()
-	out, err := covCaptureStdoutCli4(t, func() error {
+	// stdout ONLY: the "which database" note goes to stderr precisely so
+	// `memory log --format json | jq` keeps working, and a merged capture
+	// would hide a regression that put it on stdout.
+	out, err := covCaptureStdoutCli6(t, func() error {
 		return c.RunE(c, []string{covMemWorkspace, covMemPath})
 	})
 	if err != nil {
@@ -161,8 +178,10 @@ func TestRunMemoryShow_StreamsBlobToStdout(t *testing.T) {
 	const content = "## learned\n- always run the tests\n"
 	sha, _ := covSeedMemoryVersion(t, content)
 
-	c := &cobra.Command{Use: "show", RunE: runMemoryShow}
-	out, err := covCaptureStdoutCli4(t, func() error {
+	c := covMemShowCmd()
+	// stdout ONLY: this command is documented as pipe-friendly, so the blob
+	// must be the entire contents of stdout and nothing else.
+	out, err := covCaptureStdoutCli6(t, func() error {
 		return c.RunE(c, []string{covMemWorkspace, covMemPath, sha})
 	})
 	if err != nil {
@@ -306,7 +325,7 @@ func TestDefaultBlobRoot_NoHomeErrors(t *testing.T) {
 }
 
 func TestRunMemoryLog_QueryErrorOnUnmigratedDB(t *testing.T) {
-	// A reachable SQLite file WITHOUT the schema: openAdminDB succeeds,
+	// A reachable SQLite file WITHOUT the schema: the open succeeds,
 	// the memory_versions query fails.
 	dir := t.TempDir()
 	dbURL := "file:" + filepath.Join(dir, "empty.db")
@@ -327,7 +346,7 @@ func TestRunMemoryLog_QueryErrorOnUnmigratedDB(t *testing.T) {
 func TestRunMemoryShow_DatabaseMissing(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("CREWSHIP_DATA_DIR", t.TempDir())
-	c := &cobra.Command{Use: "show", RunE: runMemoryShow}
+	c := covMemShowCmd()
 	err := c.RunE(c, []string{covMemWorkspace, covMemPath, "deadbeef"})
 	if err == nil || !strings.Contains(err.Error(), "database not found") {
 		t.Fatalf("want database-not-found, got %v", err)
@@ -343,7 +362,7 @@ func TestRunMemoryShow_BlobMissingSurfacesReadError(t *testing.T) {
 		t.Fatalf("remove blob: %v", err)
 	}
 
-	c := &cobra.Command{Use: "show", RunE: runMemoryShow}
+	c := covMemShowCmd()
 	err := c.RunE(c, []string{covMemWorkspace, covMemPath, sha})
 	if err == nil || !strings.Contains(err.Error(), "read blob") {
 		t.Fatalf("want read-blob error, got %v", err)

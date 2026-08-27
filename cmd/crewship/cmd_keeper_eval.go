@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/keeper/eval"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
@@ -76,12 +75,15 @@ Examples:
   crewship keeper eval --candidate qwen2.5:7b --format json`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dd, err := database.DefaultDataDir()
+		// Read-only, but it ranks judge models from a corpus of past Keeper
+		// decisions — so replaying the wrong instance's corpus produces a
+		// confident ranking of the wrong thing, at real token cost. Gated
+		// like the rest: --local says you mean this machine's history.
+		target, err := requireLocalDB(cmd, "crewship keeper eval", "")
 		if err != nil {
-			return fmt.Errorf("resolve data dir: %w", err)
+			return err
 		}
-		dbPath := dd.DatabasePath()
-		warnDBLocalOnly(dbPath)
+		dbPath := target.Path
 
 		// mode=ro: a replay only reads, and the server may well be up holding
 		// the file. Opening read-write would take a lock for no reason.
@@ -99,7 +101,10 @@ Examples:
 			}
 			return fmt.Errorf("stat %s: %w", dbPath, statErr)
 		}
-		db, err := sql.Open("sqlite", dd.DatabaseURL()+"?mode=ro")
+		// Built from the resolved PATH, not from a DSN that may already carry
+		// its own query string: "file:x?_pragma=…" + "?mode=ro" is not a URI,
+		// and the pragmas are irrelevant to a read-only replay anyway.
+		db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
 		if err != nil {
 			return fmt.Errorf("open %s: %w", dbPath, err)
 		}
@@ -353,5 +358,9 @@ func init() {
 		"Replay passes per prompt; replay runs at temperature 0.1, so >1 catches non-determinism")
 	keeperEvalCmd.Flags().Float64Var(&flagKeeperEvalTolerance, "tolerance", 0,
 		"How much extra guard-downgrade rate a candidate may have over the incumbent and still count as viable")
+	// The only local-only command under `keeper` — the rest of that tree is
+	// server-side, so the flag is declared here rather than persistently on
+	// keeperCmd where it would advertise itself to commands that ignore it.
+	keeperEvalCmd.Flags().Bool("local", false, localOnlyFlagHelp)
 	keeperCmd.AddCommand(keeperEvalCmd)
 }

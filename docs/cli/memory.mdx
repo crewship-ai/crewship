@@ -167,21 +167,55 @@ A server predating this field answers without it. The CLI reads that as `recorde
 
 ### log
 
-List the `memory_versions` audit chain for a path, newest-first. **Reads the local DB directly** (`openAdminDB` — same DB the server uses) rather than going through the API; that means it works without a running server but the binary must run on the same host as the data dir.
+List the `memory_versions` audit chain for a path, newest-first. **Reads the server** the CLI targets, via `GET /api/v1/admin/memory/versions` (ADMIN+).
 
 ```bash
 crewship memory log <workspace-id> <path>
 crewship memory log <workspace-id> <path> --limit 100 --format text
+crewship memory log <workspace-id> <path> --local     # the database file on this host
 ```
+
+<Note>
+Until [#2086](https://github.com/crewship-ai/crewship/issues/2086) this
+command opened `~/.crewship/crewship.db` directly and ignored `--server` /
+`CREWSHIP_SERVER` / `--profile` — while the route above already existed and
+had no CLI command at all. On any host where `crewshipd` runs with its own
+`DATABASE_URL` (every development clone uses `file:./crewship.db`) it
+therefore reported an audit chain that was not the one being audited.
+
+`--local` is the old behaviour, asked for explicitly: it reads the database
+file on this host, works with the server down, and prints the path it opened.
+It is also the only path that reports `payload_ref` — the API deliberately
+does not hand out on-disk blob locations.
+</Note>
 
 `<path>` is the audit-trail identifier the consolidator + approve flow record under. For canonical learned files this is `crew:<crew_id>/learned-YYYY-MM-DD.md` (see `internal/consolidate.canonicalAuditPath`); for pins it's `crew:<crew_id>/pins.md`.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--limit <n>` | `20` | Max rows. Clamped to `1000` by the local query (this command reads the DB directly, no server involved). |
-| `--format` | `json` | `json` (pretty-printed) or `text` (one row per line, git-log–style: `<sha-12>  <ts>  <bytes> B  <writtenBy>`). |
+| `--limit <n>` | `20` | Max rows. Clamped to `1000` on the `--local` path by the local query. |
+| `--format` | `json` | `json` (pretty-printed) or `text` (one row per line, git-log–style: `<sha-12>  <ts>  <bytes> B  <writtenBy>`). Always on stdout; the "which database" note is on stderr, so `--format json \| jq` is unaffected. |
+| `--local` | `false` | Read the database file on this host instead of the server. |
 
 Empty result prints `no versions for <ws> @ <path>` to stderr and exits 0.
+
+<Note>
+**Partial results on a very busy workspace.** The route filters by path
+*prefix* while this command wants one *exact* path, and rows come back ordered
+by `(written_at, id)` across the whole workspace rather than per path. So a
+rarely-written file can sit behind a long run of unrelated versions. The CLI
+walks at most 200 pages of 500 rows; if it stops there it prints the matches it
+found and warns on stderr:
+
+```
+warning: stopped after 200 pages of /api/v1/admin/memory/versions without
+exhausting the prefix "crew:c1/notes.md", so this answer is partial …
+```
+
+Exit code stays `0` and stdout still carries only rows, so `--format json | jq`
+is unaffected — check stderr before treating a short list as the whole chain.
+`--local` has no ceiling: it queries the file directly.
+</Note>
 
 ### show
 
@@ -190,7 +224,20 @@ Print the raw content of one historical version to stdout. The canonical file on
 ```bash
 crewship memory show <workspace-id> <path> <sha>
 crewship memory show <ws> <path> <sha> > preview.md
+crewship memory show <ws> <path> <sha> --local   # the database file on this host
 ```
+
+Reads the server the CLI targets: the row is resolved by `(path, sha)` through
+`GET /api/v1/admin/memory/versions`, then its bytes are streamed from
+`GET /api/v1/admin/memory/versions/{id}/content`. Two calls because the content
+route is keyed by row id while the arguments here are the audit chain's own
+coordinates — which is what `memory log` puts in front of you.
+
+`--local` reads the database file and blob store on this host instead.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--local` | `false` | Read the database file and blob store on this host instead of the server. |
 
 Stdout = raw blob bytes (pipe-friendly). Stderr carries status/errors. Exit codes:
 
@@ -198,15 +245,28 @@ Stdout = raw blob bytes (pipe-friendly). Stderr carries status/errors. Exit code
 - `1` — version not found or read error
 - `2` — invalid usage
 
+A sha that is not in the chain always runs the resolving walk to its end, so on
+a very busy workspace it can hit the 200-page ceiling described under
+[`log`](#log). That is still `1` / `version not found` — the ceiling's stderr
+warning prints first, so a not-found that might be a truncation artefact says
+so rather than masquerading as a different error.
+
 ### restore
 
 Atomically replace the canonical memory file at `<canonical-path>` with the content of version `<sha>`, then write a fresh `memory_versions` row so the chain stays forward-only — history is never rewritten.
 
 ```bash
-crewship memory restore <workspace-id> <path> <sha> <canonical-path>
+crewship memory restore <workspace-id> <path> <sha> <canonical-path> --local
 crewship memory restore ws_a crew:abc/learned-2026-05-20.md <sha> /data/memory/ws_a/crew_abc/learned-2026-05-20.md \
-  --user operator@example.com --tier learned
+  --user operator@example.com --tier learned --local
 ```
+
+This one has no server-side route and is not getting one: it writes a
+canonical file onto **this machine's** disk from a blob in **this machine's**
+content-addressed store, so there is nothing a remote server could do with the
+request. When `--server` / `CREWSHIP_SERVER` / `--profile` names a server it
+refuses rather than restore from another instance's history; `--local` is how
+you say you mean this host.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -214,6 +274,7 @@ crewship memory restore ws_a crew:abc/learned-2026-05-20.md <sha> /data/memory/w
 | `--user` | `$USER` (falls back to `cli`) | `writtenBy` for the new audit row. Use a real operator id for compliance trails. |
 | `--tier` | `learned` | Tier label for the new audit row: `agent` / `crew` / `workspace` / `pins` / `learned`. |
 | `--force` | `false` | Skip the "canonical path must stay inside the data dir" guard. Use only when a workspace's memory dir lives outside the standard tree. |
+| `--local` | `false` | Required when the CLI names a server: this command only ever acts on the database file and blob store on this host. |
 
 The path guard rejects empty strings, any path containing `..`, and any target whose absolute form does not start with `{blob-root}/..` (the data dir, one level above `versions`).
 

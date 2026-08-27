@@ -572,7 +572,7 @@ have no browser session to preserve, so all browser sessions are revoked.
     the account freezes for `login.lockout_duration_sec` and this endpoint
     returns `423` — even for the correct password. A successful change clears
     the counter. Both values are tunable (`crewship admin ratelimits`); an
-    operator can unlock an account with `crewship admin reset-password`.
+    operator can unlock an account with `crewship admin reset-password --local`.
 </Note>
 
 Drive it from the CLI with [`crewship auth passwd`](/cli/auth).
@@ -629,7 +629,7 @@ Drive avatars from the CLI with [`crewship auth avatar`](/cli/auth).
 
 ## Password recovery
 
-Email-based recovery for users who don't have shell access to the box. Admins should prefer `crewship admin reset-password` -- it writes directly to the DB and doesn't require a mailer.
+Email-based recovery for users who don't have shell access to the box. Admins should prefer `crewship admin reset-password --local` -- it writes directly to the database file on the host and doesn't require a mailer.
 
 The mailer transport is wired at startup from `RESEND_API_KEY` + `RESEND_FROM`. The reset link is built from `CREWSHIP_PUBLIC_URL` (a validated `http(s)://host` value parsed once at boot). When the public URL is unset or malformed, `/forgot` silently no-ops -- without it there's no safe way to build a link that isn't `Host`-header-injection-controllable.
 

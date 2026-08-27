@@ -565,8 +565,12 @@ column in the normal lane. Skipping the gap breaks whoever upgrades slowly.
 ### Seeing what is outstanding
 
 ```bash
-crewship db migration-status
+crewship db migration-status --local
 ```
+<Note>
+If your CLI is configured for a server (`--server`, `CREWSHIP_SERVER`, a profile, or a previous `crewship login`), `crewship db` refuses to run until you add **`--local`** — it acts on the database file on this host and cannot tell whether that server uses it. See [CLI: db](/cli/db).
+</Note>
+
 
 Reports the schema version and any post-deployment migration still running.
 Reads the local database directly, so it works with the server down.
@@ -596,8 +600,8 @@ The startup guard is what you hit on a machine that ran a **feature branch** who
 The repair is `crewship db repair-ledger`:
 
 ```bash
-crewship db repair-ledger --dry-run   # show the plan, change nothing
-crewship db repair-ledger             # apply it, after confirming
+crewship db repair-ledger --dry-run --local   # show the plan, change nothing
+crewship db repair-ledger --local             # apply it, after confirming
 ```
 
 It moves the ledger row to the version this binary declares for that migration name. **No schema or table data is touched** — the migration already ran; only the number recording it was wrong. Any version the move frees up is then applied normally on the next start, so nothing is skipped.

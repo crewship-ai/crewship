@@ -604,6 +604,58 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The `admin` family answered from a different database than the server you
+  pointed it at.** `openAdminDB()` resolved `~/.crewship/crewship.db` and
+  ignored `--server`, `CREWSHIP_SERVER` and `--profile` entirely, while its own
+  comment claimed it "mirrors the resolution logic of the server" — false on
+  every host where crewshipd runs with its own `DATABASE_URL`, which is every
+  development clone (`file:./crewship.db`), every container and every
+  multi-instance box. `crewship admin list-users` against a populated server
+  printed `(no users — run 'crewship seed' …)` and exited **0**.
+  `db migration-status` reported an unrelated schema version under the heading
+  `Database:`. `memory log` / `memory show` audited an audit chain that was not
+  the one under audit — and the two routes that answer those questions,
+  `GET /api/v1/admin/memory/versions` and `…/{id}/content`, had no CLI command
+  at all.
+
+  `list-users`, `memory log` and `memory show` now read the server, through the
+  routes that already existed. Everything with no route — `reset-password`,
+  `promote`, `invalidate-sessions`, `sessions list`, `memory restore`,
+  `db migration-status`, `db repair-ledger`, `db restore-snapshot`,
+  `keeper eval` — names the file it resolved and **refuses to run when a server
+  is named**, unless you pass the new `--local`. A server on `localhost` is not
+  an exemption: the old rule warned only for a *remote* target, on the
+  inference that a server on this host must use this host's data directory, and
+  that inference is exactly the hole this was reproduced through.
+  `db migration-status` and `keeper eval` also honour `DATABASE_URL` for the
+  first time.
+
+  The read-only diagnostics were the last holdout and are fixed with them:
+  `crewship doctor` (the schema, consent and DSN checks) and
+  `crewship telemetry status` opened `~/.crewship/crewship.db` regardless of
+  `DATABASE_URL`, so on a dev clone they reported on a file the running
+  instance had never written — the #2086 defect surviving inside the command
+  you run to diagnose #2086. They resolve `DATABASE_URL` now. They are
+  deliberately **not** gated: a diagnostic reports on the host you run it on,
+  and one that switched itself off because `CREWSHIP_SERVER` was set would be
+  unavailable exactly when something is wrong. What replaces the refusal is
+  naming — the `db migration version` row and `telemetry status` both print the
+  path they read and where it came from.
+
+  **Breaking for scripts, in two different shapes.** The gated commands refuse
+  only when something names a server, so `--local` is newly required from a
+  shell that exports `CREWSHIP_SERVER`, on a machine that has run
+  `crewship login`, or under a `--profile`. `admin list-users` is **not** gated:
+  it branches on `--local` alone, so it now goes to the server and needs a login
+  *unconditionally* — including on a fresh host with no CLI config and no
+  `CREWSHIP_SERVER`, where it previously printed the table without one. That is
+  the locked-out-operator case, and it is deliberate: a command that fell back
+  to a local file whenever the login failed would be #2086 with an extra step,
+  answering "who exists on the server" from a file that may belong to a
+  different instance. Both failure paths name the fix in their own message, and
+  the fix is one word — `crewship admin list-users --local` is the old
+  behaviour, asked for explicitly. (#2086)
+
 - **`crewship resume <chat-id>` never worked, and the guard that should have
   caught it could not see two thirds of the CLI.** `resume` asked for two flat
   chat routes — `GET /api/v1/chats/{chatId}` to find the agent that owns a
