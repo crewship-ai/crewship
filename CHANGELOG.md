@@ -263,6 +263,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The agent's raw stdout+stderr capture reached the audit journal without
+  passing through the credential scrubber (#2133).** `streamOutput`'s
+  end-of-stream `exec.output_chunk` emit wrote `captureBuf` — the process's
+  raw combined output — straight into the journal payload. `wrapScrubHandler`'s
+  stream scrubber only ever sees parsed `AgentEvent`s; `captureBuf` is a
+  second, separate raw-byte capture read directly off the process's
+  stdout/stderr, so it bypassed the scrubber entirely. A credential an agent
+  printed — its own, or one echoed back by a poisoned tool result — landed in
+  a hash-chained, append-only journal row that can never be redacted after the
+  fact. The capture now runs through the same `internal/scrubber` the rest of
+  the outbound path uses, seeded with the run's own loaded credential values,
+  the same way the adapter-exec-error path already scrubs its copy of this
+  same raw output. `total_bytes` and `truncated` still describe the raw
+  stream and are computed before scrubbing, since redaction changes the
+  string's length.
+
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
   reverse-foreign-key chain from each table to `workspaces` and built a `WHERE`
