@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/safepath"
 )
@@ -89,7 +90,17 @@ func (w *WorkspaceMemory) Search(query string, limit int) ([]SearchResult, error
 // whatever has been collected so far (gracefully degraded) rather than
 // surfacing the ctx err — the agent gets a partial workspace block
 // rather than the prompt failing entirely.
-func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, int) {
+//
+// incomplete reports whether the walk was aborted by ctx cancellation
+// before it finished scanning every file — as opposed to finishing and
+// having its content cut to fit budget below. #1637: a stalled or slow
+// workspace filesystem can make the walk time out with only a handful of
+// files visited; `used` then comes back far under budget with no other
+// signal that anything is missing. The caller (orchestrator's
+// buildWorkspaceMemoryBlockDetailed) threads this into the [MEMORY
+// BUDGET] meter so the model is told the read did not finish, not just
+// handed a small-looking, apparently-complete number.
+func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (content string, used int, incomplete bool) {
 	// Walk workspace dir for .md files and read their content directly.
 	// This is a host-level operation (workspace memory lives on host, not in container).
 	var files []struct {
@@ -101,7 +112,9 @@ func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, i
 		select {
 		case <-ctx.Done():
 			// Abort the walk on cancellation; whatever we already
-			// collected is still usable for the prompt.
+			// collected is still usable for the prompt, but the caller
+			// must be told this set is partial.
+			incomplete = true
 			return filepath.SkipAll
 		default:
 		}
@@ -124,7 +137,7 @@ func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, i
 	})
 
 	if len(files) == 0 {
-		return "", 0
+		return "", 0, incomplete
 	}
 
 	var b strings.Builder
@@ -135,7 +148,12 @@ func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, i
 		if totalChars+len(section) > budget {
 			remaining := budget - totalChars - 20
 			if remaining > 50 {
-				section = section[:remaining] + "\n...(truncated)\n"
+				// The cut must land on a UTF-8 rune boundary — workspace
+				// files are markdown authored by agents and commonly
+				// carry multi-byte text, and a raw byte slice at an
+				// arbitrary offset can sever a multi-byte rune and hand
+				// the model invalid UTF-8.
+				section = truncateUTF8(section, remaining) + "\n...(truncated)\n"
 				b.WriteString(section)
 				totalChars += len(section)
 			}
@@ -145,7 +163,25 @@ func (w *WorkspaceMemory) GetContext(ctx context.Context, budget int) (string, i
 		totalChars += len(section)
 	}
 
-	return b.String(), totalChars
+	return b.String(), totalChars, incomplete
+}
+
+// truncateUTF8 returns the longest prefix of s that is at most maxBytes
+// bytes long and does not end mid-rune. Only ever removes bytes, so a
+// caller's budget is still honoured (the result can be shorter than
+// maxBytes, never longer).
+func truncateUTF8(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if maxBytes >= len(s) {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // Engine exposes the underlying memory.Engine so callers that need
