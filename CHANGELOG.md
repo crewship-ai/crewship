@@ -153,7 +153,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   seed ships four pages, one per producer door (script, routine, agent,
   webhook) instead of showing one door of the four.
 
-- **The wake-time system prompt now shows its own memory budget.** Every
+- **The wake-time system prompt now shows its own memory budget (#2135).** Every
   tier injected into a session's opening prompt — `Pins`, `Crew`,
   `Workspace`, `Agent` — now reports how many characters of its allotted
   slice it used and what percent that is, plus a `Total` line, in a new
