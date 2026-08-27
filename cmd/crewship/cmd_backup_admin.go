@@ -118,9 +118,18 @@ var backupMetricsCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &raw); err != nil {
 			return err
 		}
-		pretty, _ := json.MarshalIndent(raw, "", "  ")
-		fmt.Println(string(pretty))
-		return nil
+		// This command's output has always been the server's document, so
+		// JSON stays the default (Machine, not AutoHuman) — nothing that
+		// already scrapes it breaks. What changes is that `-f yaml` and
+		// `-f ndjson` now do what the global flag's help says instead of
+		// being silently ignored.
+		//
+		// cli.RawJSON rather than a decode into `any`: encoding/json turns
+		// every number into a float64 on the way in, so re-encoding rounds
+		// anything past 53 bits — and a metrics document is all numbers.
+		// RawJSON hands the bytes back verbatim for json/ndjson and decodes
+		// through json.Number for yaml.
+		return resolvedFormatter(cmd).Machine(cli.RawJSON(raw))
 	},
 }
 
@@ -228,9 +237,18 @@ returns the canary result with an "ok" boolean and per-stage timing.`,
 		if err := cli.ReadJSON(resp, &raw); err != nil {
 			return err
 		}
-		pretty, _ := json.MarshalIndent(raw, "", "  ")
-		fmt.Println(string(pretty))
-		return nil
+		// This command's output has always been the server's document, so
+		// JSON stays the default (Machine, not AutoHuman) — nothing that
+		// already scrapes it breaks. What changes is that `-f yaml` and
+		// `-f ndjson` now do what the global flag's help says instead of
+		// being silently ignored.
+		//
+		// cli.RawJSON rather than a decode into `any`: encoding/json turns
+		// every number into a float64 on the way in, so re-encoding rounds
+		// anything past 53 bits — and a metrics document is all numbers.
+		// RawJSON hands the bytes back verbatim for json/ndjson and decodes
+		// through json.Number for yaml.
+		return resolvedFormatter(cmd).Machine(cli.RawJSON(raw))
 	},
 }
 

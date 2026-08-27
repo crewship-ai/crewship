@@ -78,38 +78,80 @@ named, it refuses unless you pass --local.`,
 			return err
 		}
 
-		fmt.Printf("Database: %s\n", dbPath)
+		f := resolvedFormatter(cmd)
+
 		if len(applied) == 0 {
-			fmt.Println("Schema:   empty (nothing applied yet)")
-			return nil
+			return f.AutoHuman(migrationStatusResult{
+				Database:    dbPath,
+				SchemaEmpty: true,
+				Outstanding: []migrationRef{},
+			}, func() {
+				fmt.Printf("Database: %s\n", dbPath)
+				fmt.Println("Schema:   empty (nothing applied yet)")
+			})
 		}
 		highest := applied[len(applied)-1]
-		fmt.Printf("Schema:   v%d (%s), %d migration(s) applied\n",
-			highest.Version, highest.Name, len(applied))
 
 		pending, err := database.PostDeployPending(ctx, db)
 		if err != nil {
 			return err
 		}
-		var outstanding []database.PostDeployStatus
+		// Always a slice, never nil — an empty database is the case where a
+		// caller most wants `.outstanding | length` to answer 0 rather than
+		// blow up on null.
+		outstanding := []migrationRef{}
 		for _, p := range pending {
 			if !p.Applied {
-				outstanding = append(outstanding, p)
+				outstanding = append(outstanding, migrationRef{Version: p.Version, Name: p.Name})
 			}
 		}
-		if len(outstanding) == 0 {
-			fmt.Println("Post-deployment: nothing outstanding")
-			return nil
+
+		result := migrationStatusResult{
+			Database:      dbPath,
+			SchemaVersion: highest.Version,
+			SchemaName:    highest.Name,
+			AppliedCount:  len(applied),
+			Outstanding:   outstanding,
 		}
 
-		fmt.Printf("\nPost-deployment migrations outstanding (%d):\n", len(outstanding))
-		for _, p := range outstanding {
-			fmt.Printf("  v%-14d %s\n", p.Version, p.Name)
-		}
-		fmt.Println("\nThese run in the background while the server serves. If they are not")
-		fmt.Println("progressing, check the server log for \"post-deployment migration\" lines.")
-		return nil
+		return f.AutoHuman(result, func() {
+			fmt.Printf("Database: %s\n", dbPath)
+			fmt.Printf("Schema:   v%d (%s), %d migration(s) applied\n",
+				highest.Version, highest.Name, len(applied))
+			if len(outstanding) == 0 {
+				fmt.Println("Post-deployment: nothing outstanding")
+				return
+			}
+			fmt.Printf("\nPost-deployment migrations outstanding (%d):\n", len(outstanding))
+			for _, p := range outstanding {
+				fmt.Printf("  v%-14d %s\n", p.Version, p.Name)
+			}
+			fmt.Println("\nThese run in the background while the server serves. If they are not")
+			fmt.Println("progressing, check the server log for \"post-deployment migration\" lines.")
+		})
 	},
+}
+
+// migrationRef is one post-deployment migration in the machine output.
+type migrationRef struct {
+	Version int    `json:"version" yaml:"version"`
+	Name    string `json:"name" yaml:"name"`
+}
+
+// migrationStatusResult is the machine-readable form of `db migration-status`.
+//
+// The two kinds of pending work stay separate here for the same reason the
+// prose separates them: a pending SCHEMA migration means the server has not
+// started, while an outstanding POST-DEPLOYMENT one is normal and expected.
+// Collapsing them into one "pending" count would make a healthy database look
+// broken to whatever is reading this.
+type migrationStatusResult struct {
+	Database      string         `json:"database" yaml:"database"`
+	SchemaEmpty   bool           `json:"schema_empty" yaml:"schema_empty"`
+	SchemaVersion int            `json:"schema_version,omitempty" yaml:"schema_version,omitempty"`
+	SchemaName    string         `json:"schema_name,omitempty" yaml:"schema_name,omitempty"`
+	AppliedCount  int            `json:"applied_count" yaml:"applied_count"`
+	Outstanding   []migrationRef `json:"outstanding" yaml:"outstanding"`
 }
 
 func init() {

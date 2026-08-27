@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -194,6 +195,85 @@ func TestServerCurrentSurfacesDirectoryOverride(t *testing.T) {
 	}
 }
 
+// The machine field carries the hint's TEXT, never its terminal dressing.
+//
+// directory_override_hint became a field of serverCurrentResult in the format
+// sweep, and the hint string was built with cli.Yellow/cli.Reset around it. So
+// `server current -f json` could answer a value with ANSI escapes inside it —
+// a caller comparing or logging .directory_override_hint would have to strip
+// control bytes first. Colours are already empty when stdout is not a TTY,
+// which hides this in a pipeline and not in an agent harness that allocates a
+// PTY, so the guard forces the colours ON and asserts the field stays clean.
+func TestServerCurrentMachineHintCarriesNoANSI(t *testing.T) {
+	guardCLIState(t)
+	redirectConfigHome(t)
+	oldProfile := flagProfile
+	flagProfile = ""
+	t.Cleanup(func() { flagProfile = oldProfile })
+	t.Setenv("CREWSHIP_PROFILE", "")
+
+	// Force colours on regardless of how this test's stdout is wired.
+	oldYellow, oldReset := cli.Yellow, cli.Reset
+	cli.Yellow, cli.Reset = "\033[33m", "\033[0m"
+	t.Cleanup(func() { cli.Yellow, cli.Reset = oldYellow, oldReset })
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cfg.Current = "dev3-test"
+	cfg.Servers = map[string]*cli.ServerProfile{
+		"dev3":      {Server: "https://dev3.example", Token: "t"},
+		"dev3-test": {Server: "https://dev3-test.example", Token: "t2"},
+	}
+	cfg.DirectoryProfiles = map[string]string{"/work/crewship_3": "dev3"}
+	if err := cli.SaveConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	cli.SetWorkingDir("/work/crewship_3/sub")
+	t.Cleanup(func() { cli.SetWorkingDir("") })
+
+	setFormatCov(t, "json")
+	out, err := captureStdout(t, func() error {
+		return serverCurrentCmd.RunE(serverCurrentCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("current -f json: %v", err)
+	}
+
+	var doc struct {
+		Hint string `json:"directory_override_hint"`
+	}
+	if uerr := json.Unmarshal([]byte(out), &doc); uerr != nil {
+		t.Fatalf("-f json output is not JSON: %v\ngot:\n%s", uerr, out)
+	}
+	if doc.Hint == "" {
+		t.Fatal("expected a directory_override_hint on a directory-overridden config")
+	}
+	if strings.Contains(doc.Hint, "\033") {
+		t.Errorf("directory_override_hint carries ANSI escapes: %q", doc.Hint)
+	}
+	// The facts still have to be in there — a hint stripped to nothing would
+	// pass the check above and tell the caller less than the prose did.
+	for _, want := range []string{"/work/crewship_3", "dev3-test"} {
+		if !strings.Contains(doc.Hint, want) {
+			t.Errorf("hint %q lost %q", doc.Hint, want)
+		}
+	}
+
+	// And the human rendering keeps its colour.
+	setFormatCov(t, "")
+	human, err := captureStdout(t, func() error {
+		return serverCurrentCmd.RunE(serverCurrentCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("current: %v", err)
+	}
+	if !strings.Contains(human, "\033[33m") {
+		t.Errorf("human output lost the colour on the override hint: %q", human)
+	}
+}
+
 // Outside any directory-mapped clone, `server current` should show the
 // persisted default plainly, with no directory-override hint.
 func TestServerCurrentPlainWhenNoDirectoryOverride(t *testing.T) {
@@ -307,5 +387,110 @@ func TestServerRemoveClearsCurrent(t *testing.T) {
 	}
 	if cfg.Current != "" {
 		t.Errorf("current should clear when the active profile is removed, got %q", cfg.Current)
+	}
+}
+
+// A legacy single-server config — top-level `token`, no profiles — IS
+// authenticated, and `server current -f json` reported `"token_set": false`
+// for it because the no-profile branch left the field at its zero value.
+//
+// `config show -f json`, which resolves the same config through the same
+// active-profile overlay, reports `true`. Two commands in the same CLI
+// contradicting each other on "am I logged in?" is worse than either answer:
+// a setup script branching on `.token_set` to decide whether to run
+// `crewship login` loops forever against a config that was fine.
+func TestServerCurrentNoProfileReportsTokenSet(t *testing.T) {
+	guardCLIState(t)
+	redirectConfigHome(t)
+	oldProfile, oldFormat := flagProfile, flagFormat
+	flagProfile, flagFormat = "", "json"
+	t.Cleanup(func() { flagProfile, flagFormat = oldProfile, oldFormat })
+	t.Setenv("CREWSHIP_PROFILE", "")
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cfg.Current = ""
+	cfg.Servers = nil
+	cfg.Server = "https://legacy.example"
+	cfg.Token = "legacy-token"
+	if err := cli.SaveConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	cli.SetWorkingDir("/tmp")
+	t.Cleanup(func() { cli.SetWorkingDir("") })
+
+	out, err := captureStdout(t, func() error {
+		return serverCurrentCmd.RunE(serverCurrentCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("current: %v", err)
+	}
+	var doc map[string]any
+	if uerr := json.Unmarshal([]byte(out), &doc); uerr != nil {
+		t.Fatalf("-f json stdout is not valid JSON: %v\ngot:\n%s", uerr, out)
+	}
+	if doc["state"] != "no-profile" {
+		t.Fatalf("state = %v, want no-profile\ngot:\n%s", doc["state"], out)
+	}
+	if doc["token_set"] != true {
+		t.Errorf("token_set = %v for a legacy config carrying a top-level token, want true\ngot:\n%s",
+			doc["token_set"], out)
+	}
+
+	// The other half of the contradiction: `config show` must agree.
+	confOut, err := captureStdout(t, func() error {
+		return configShowCmd.RunE(configShowCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("config show: %v", err)
+	}
+	var conf map[string]any
+	if uerr := json.Unmarshal([]byte(confOut), &conf); uerr != nil {
+		t.Fatalf("config show -f json is not valid JSON: %v\ngot:\n%s", uerr, confOut)
+	}
+	if conf["token_set"] != doc["token_set"] {
+		t.Errorf("config show says token_set=%v, server current says %v — the two commands disagree",
+			conf["token_set"], doc["token_set"])
+	}
+}
+
+// The inverse: an unauthenticated legacy config must still report false, or
+// the fix is just a hardcoded true in the other direction.
+func TestServerCurrentNoProfileReportsTokenUnset(t *testing.T) {
+	guardCLIState(t)
+	redirectConfigHome(t)
+	oldProfile, oldFormat := flagProfile, flagFormat
+	flagProfile, flagFormat = "", "json"
+	t.Cleanup(func() { flagProfile, flagFormat = oldProfile, oldFormat })
+	t.Setenv("CREWSHIP_PROFILE", "")
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cfg.Current = ""
+	cfg.Servers = nil
+	cfg.Server = "https://legacy.example"
+	cfg.Token = ""
+	if err := cli.SaveConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	cli.SetWorkingDir("/tmp")
+	t.Cleanup(func() { cli.SetWorkingDir("") })
+
+	out, err := captureStdout(t, func() error {
+		return serverCurrentCmd.RunE(serverCurrentCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("current: %v", err)
+	}
+	var doc map[string]any
+	if uerr := json.Unmarshal([]byte(out), &doc); uerr != nil {
+		t.Fatalf("-f json stdout is not valid JSON: %v\ngot:\n%s", uerr, out)
+	}
+	if doc["token_set"] != false {
+		t.Errorf("token_set = %v with no token anywhere, want false\ngot:\n%s", doc["token_set"], out)
 	}
 }

@@ -531,23 +531,35 @@ var issueChangesCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &diff); err != nil {
 			return err
 		}
+		f := resolvedFormatter(cmd)
+		// "Not a repo" and "no changes" are different answers and both used to
+		// arrive as English on stdout. The machine form keeps them apart via
+		// is_repo plus an empty files list, which is what a caller deciding
+		// whether to open a PR actually needs to branch on.
 		if !diff.IsRepo {
-			fmt.Println("No git repository in this crew's workspace — nothing to diff.")
-			return nil
+			return f.AutoHuman(diff, func() {
+				fmt.Println("No git repository in this crew's workspace — nothing to diff.")
+			})
 		}
 		if len(diff.Files) == 0 {
-			fmt.Println("No changes against the base branch.")
-			return nil
+			return f.AutoHuman(diff, func() {
+				fmt.Println("No changes against the base branch.")
+			})
 		}
 		patch, _ := cmd.Flags().GetBool("patch")
 		if patch {
-			fmt.Println(diff.Diff)
-			if diff.Truncated {
-				fmt.Println("\n… (diff truncated)")
-			}
-			return nil
+			// --patch asks for the raw unified diff, so under a human format
+			// that is exactly what stdout gets. A machine caller still gets a
+			// document, with the truncation flag as a field rather than as a
+			// line of prose appended to the patch — a truncated diff that says
+			// so inside the patch body is a diff that no longer applies.
+			return f.AutoHuman(diff, func() {
+				fmt.Println(diff.Diff)
+				if diff.Truncated {
+					fmt.Println("\n… (diff truncated)")
+				}
+			})
 		}
-		f := newFormatter()
 		headers := []string{"STATUS", "FILE", "+", "−"}
 		rows := make([][]string, 0, len(diff.Files))
 		for _, fl := range diff.Files {

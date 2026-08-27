@@ -225,7 +225,9 @@ function scan(): string[] {
 const REPAIRED = [
   "app/(onboarding)/onboarding/page.tsx",
   "components/features/dashboard/welcome-checklist.tsx",
-  "app/(dashboard)/chat/[agentSlug]/chat-page-client.tsx",
+  // chat-page-client.tsx was deleted when the chat surface was rewritten;
+  // chat-client.tsx is what took over its links.
+  "app/(dashboard)/chat/chat-client.tsx",
   "components/features/crews/agent-canvas-tabs/overview-tab.tsx",
   "components/features/approvals/approval-detail.tsx",
   "components/features/journal/runs-view.tsx",

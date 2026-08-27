@@ -344,11 +344,14 @@ crewship agent stop <slug-or-id>
 
 ## `crewship agent logs`
 
-Show agent container logs.
+Show agent container logs. An alias for the top-level [`crewship logs`](/cli/logs) — same implementation, same output, and `--tail` is the same knob `crewship logs --lines` turns. Reach for `crewship logs` when you want `--follow`.
+
+Logs come out of the agent's crew container: an agent with no crew has none, and the command says so rather than printing an empty list.
 
 ```bash
 crewship agent logs <slug-or-id>
 crewship agent logs viktor --tail 50
+crewship agent logs viktor --format json      # the raw journal rows
 ```
 
 | Flag | Type | Default | Description |

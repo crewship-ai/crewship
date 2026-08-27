@@ -28,6 +28,9 @@ import { askProvenanceForTurn } from "./asks/ask-provenance"
 import { AssistantTurn } from "./assistant-turn"
 import { EditableUserMessage } from "./messages/editable-user-message"
 import { CrewProvisioningCard } from "./crew-provisioning-card"
+import { useChatAgent } from "./chat-agent-context"
+import { ThinkingAvatar } from "./messages/thinking-avatar"
+import { ChatTurnUserAvatar } from "./messages/turn-user-avatar"
 
 function formatTimestamp(date: Date): string {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
@@ -157,10 +160,20 @@ interface TurnRendererProps {
  *  memoised here: everything goes through `TurnRenderer` below — this component
  *  inside its own error boundary — and the memo sits on that, so the render is
  *  cut at exactly the same point it was before the boundary existed. */
+/**
+ * The transcript's three tracks: agent gutter, message column, person
+ * gutter. Both gutters exist on every turn even when only one carries a
+ * face — that is what keeps every bubble on the same two text edges, which
+ * is the whole reason to spend 88px of width on this.
+ */
+const TURN_GUTTER_GRID =
+  "group grid grid-cols-[32px_minmax(0,1fr)_32px] items-start gap-3"
+
 function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
   const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
   const initialAnim = shouldAnimate ? arrival.initial : false
   const transition = shouldAnimate ? arrival.transition : { duration: 0 }
+  const chatAgent = useChatAgent()
   if (turn.role === "user") {
     const textContent = turn.parts.find((p) => p.type === "text")?.content ?? ""
     // Group-chat attribution: a teammate's message shows their name; the local
@@ -180,15 +193,8 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
     const askProvenance = turn.authorUserId
       ? null
       : askProvenanceForTurn(chatId ?? "", turn) ?? resolveAskProvenance?.(textContent) ?? null
-    return (
-      <motion.div
-        initial={initialAnim}
-        animate={arrival.animate}
-        exit={arrival.exit}
-        transition={transition}
-        data-turn-id={turn.id}
-        className="group flex flex-col"
-      >
+    const userBody = (
+      <>
         {askProvenance && (
           <div
             data-testid="ask-provenance"
@@ -198,13 +204,11 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
             <span>via {askProvenance}</span>
           </div>
         )}
+        {/* The name only. Every author's face is drawn in the gutter, this
+            one included, so the initial-in-a-circle this used to carry would
+            be a second, smaller portrait of the same person. */}
         {authorName && (
-          <div className="ml-auto mb-0.5 flex items-center gap-1.5 text-micro text-muted-foreground">
-            <span aria-hidden="true" className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-[9px] font-semibold text-primary">
-              {authorName.charAt(0).toUpperCase()}
-            </span>
-            <span>{authorName}</span>
-          </div>
+          <div className="ml-auto mb-0.5 text-micro text-muted-foreground">{authorName}</div>
         )}
         {onEditUserMessage && !authorName ? (
           <EditableUserMessage
@@ -231,6 +235,27 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
             </div>
           </Message>
         )}
+      </>
+    )
+
+    return (
+      <motion.div
+        initial={initialAnim}
+        animate={arrival.animate}
+        exit={arrival.exit}
+        transition={transition}
+        data-turn-id={turn.id}
+        className={TURN_GUTTER_GRID}
+      >
+        {/* Empty left gutter. It holds the column open so a user turn and the
+            reply under it share one text edge — without it the two bubbles sit
+            on different left margins and the transcript develops a zigzag
+            nobody asked for. */}
+        <div aria-hidden="true" />
+        <div className="flex min-w-0 flex-col">{userBody}</div>
+        <div className="pt-0.5">
+          <ChatTurnUserAvatar authorName={authorName} />
+        </div>
       </motion.div>
     )
   }
@@ -439,16 +464,11 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
   }
 
   // Assistant turn - use the new grouped component
-  return (
-    <motion.div
-      initial={initialAnim}
-      animate={arrival.animate}
-      transition={transition}
-      data-turn-id={turn.id}
-    >
+  const assistantBody = (
+    <>
       <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} agentId={agentId} chatId={chatId} />
       {isLastAssistant && onRegenerate && !turn.isStreaming && (
-        <div className="flex pl-4 -mt-1 mb-2">
+        <div className="flex -mt-1 mb-2">
           <button
             onClick={onRegenerate}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -459,6 +479,25 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
           </button>
         </div>
       )}
+    </>
+  )
+
+  return (
+    <motion.div
+      initial={initialAnim}
+      animate={arrival.animate}
+      transition={transition}
+      data-turn-id={turn.id}
+      className={TURN_GUTTER_GRID}
+    >
+      {/* The face is the spinner. `turn.isStreaming` is the same flag the
+          Regenerate affordance above waits on, so the ring stops at exactly
+          the moment the turn becomes actionable. */}
+      <div className="pt-0.5">
+        <ThinkingAvatar agent={chatAgent} active={!!turn.isStreaming} />
+      </div>
+      <div className="flex min-w-0 flex-col">{assistantBody}</div>
+      <div aria-hidden="true" />
     </motion.div>
   )
 }

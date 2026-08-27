@@ -41,7 +41,13 @@ var projectMilestoneListCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/projects/" + args[0] + "/milestones")
+		// The route keys on the project id, so the slug this command's help
+		// promises has to be resolved first (#2086).
+		projectID, err := resolveProjectID(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Get("/api/v1/projects/" + projectID + "/milestones")
 		if err != nil {
 			return err
 		}
@@ -105,7 +111,11 @@ var projectMilestoneCreateCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Post("/api/v1/projects/"+args[0]+"/milestones", body)
+		projectID, err := resolveProjectID(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Post("/api/v1/projects/"+projectID+"/milestones", body)
 		if err != nil {
 			return err
 		}

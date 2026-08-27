@@ -16,6 +16,8 @@ crewship logs <agent-slug> [flags]
 
 Tab-completes `<agent-slug>` against the workspace's agents. Both the slug and the agent ID are accepted.
 
+[`crewship agent logs`](/cli/agent) is an alias for this command — same implementation, with `--tail` in place of `--lines` and no `--follow`.
+
 Requires an authenticated session (`requireAuth`) and a selected workspace (`requireWorkspace`).
 
 ## Flags
@@ -58,10 +60,17 @@ Follow mode prints the historical batch first, then opens a WebSocket against th
 
 ### Combined with jq via JSON
 
-The default output is line-formatted. For structured tooling, use the underlying journal:
+The default output is line-formatted; `--format json` emits the journal rows as they arrive from the API — as one JSON **array**, so a filter has to iterate it with `.[]` (`jq 'select(…)'` on its own fails with `Cannot index array with string "event"`):
 
 ```bash
-crewship journal --agent viktor --format json | jq 'select(.event=="error")'
+crewship logs viktor --format json | jq '.[] | select(.event=="error")'
+```
+
+For filtering server-side across agents and runs, use the journal instead. Journal rows are a different shape — they carry `entry_type` and `severity`, never `event` — and the filtering is a flag rather than a `jq` stage. [`--agent`](/cli/journal) takes an agent **ID**, not a slug:
+
+```bash
+crewship journal --severity error --format json
+crewship journal --agent "$(crewship agent get viktor --format json | jq -r .id)" --format json
 ```
 
 ## Terminal hardening

@@ -22,9 +22,9 @@ Most chat surface usage is self-evident — "talk to the agent" — but the dura
 
 - **Resume a multi-day conversation.** A session ID survives reloads and operator hand-off, so `/chat/<agent>?session=<chatId>` is the canonical "where we left off" URL. Bookmark it, paste it into Linear, share it on Slack — the recipient lands on the same transcript, the same right-panel state, and (with `&panel=files`) the same artefact tab.
 - **Reroll a bad agent response without abandoning context.** Hover-edit the user message and the conversation truncates from that point; the new edit sends as a fresh turn. The transcript before the edit is preserved as a [chat branch](#sessions) so the alternate timeline isn't lost — useful when you discover the original direction was right after all.
-- **Triage what an agent has been doing.** The Sessions sidebar groups by `chats.origin` (`UI / CLI / WEBHOOK / CRON / AGENT`) so you can see at a glance which conversations were started by the user vs by automation vs by a peer agent. Filter the sidebar to `WEBHOOK`-origin sessions if you want to audit what an integration has been driving through your agents.
+- **Triage what an agent has been doing.** `chats.origin` (`UI / CLI / WEBHOOK / CRON / AGENT`) records whether a conversation was started by a user, by automation, or by a peer agent. The open conversation reports its own origin as a chip in the chat header. The conversations column does not group or filter by it — to audit what an integration has been driving through your agents across many conversations, use `crewship chat list`, which carries the column.
 - **Watch an agent work in real time without opening the journal.** The right-panel **Files**, **Artifacts**, **Terminal**, and **Diff** tabs stream the live state of the agent's container while the chat is open. Faster than tailing logs, and the URL deep-links to a specific tab via `&panel=files` / `&panel=terminal`.
-- **Programmatic chat creation from CLI / webhook / cron.** `POST /api/v1/agents/{agentId}/chats` accepts an `origin` enum on the body and renders a coloured chip in the UI sidebar. Use `CLI` for `crewship run`-style invocations, `WEBHOOK` for trigger-handlers, `CRON` for scheduled routines, `AGENT` for peer-to-peer assignments — the chip helps a human operator scrolling the sidebar understand provenance at a glance.
+- **Programmatic chat creation from CLI / webhook / cron.** `POST /api/v1/agents/{agentId}/chats` accepts an `origin` enum on the body, which the chat header renders as a coloured chip and `crewship chat list` prints as its `ORIGIN` column. Use `CLI` for `crewship run`-style invocations, `WEBHOOK` for trigger-handlers, `CRON` for scheduled routines, `AGENT` for peer-to-peer assignments — it is how an operator tells at a glance whether a conversation was driven by a person or by automation.
 
 For one-off "ask the agent a question" use, just open `/chat/<agent>` and start typing — the session row gets created automatically on first send.
 
@@ -62,7 +62,7 @@ The end-to-end loop from "I have an agent" to "we had a productive conversation 
 https://crewship.example.com/chat/viktor
 ```
 
-Drops you into Viktor's most recent session. To start fresh, click **New session** in the sidebar. To jump to a specific past conversation, paste the deep-link URL `?session=<chatId>`. To approach from the canvas instead, use `/crews?crew=<slug>&agent=viktor` — see [Routes](#routes).
+Drops you into Viktor's most recent session. To start fresh, click **New conversation** in the left column. To jump to a specific past conversation, paste the deep-link URL `?session=<chatId>`. To approach from the canvas instead, use `/crews?crew=<slug>&agent=viktor` — see [Routes](#routes).
 
 </Step>
 
@@ -91,7 +91,7 @@ Each tab is its own URL query param (`&panel=files`, etc.), so you can share the
 
 <Step title="React or reroll">
 
-Hover an assistant message to surface the **reactions** strip (👍 👎 ❤️ 🤔 🚀). Reactions are workspace-shared and surface back to the agent on the next turn so it can adjust. Hover a user message instead to surface **Edit** — editing rewrites that turn and truncates the conversation, but the old branch lives on in `chat_branches` and can be revisited later via the branch picker. See [Edit-and-resend](#edit-and-resend).
+Hover an assistant message to surface its action row: **Copy**, and the 👍 / 👎 feedback thumbs. The thumbs write `message_feedback`, which carries a `trace_id` back to the run that produced the answer — that is the signal the agent and the eval loop read. There is no emoji picker in chat: emoji reactions still exist and still render back on a turn that has them, but they can only be added with [`crewship chat react`](/cli/chat). Hover a user message instead to surface **Edit** — editing rewrites that turn and truncates the conversation, but the old branch lives on in `chat_branches` and can be revisited later via the branch picker. See [Edit-and-resend](#edit-and-resend).
 
 </Step>
 
@@ -302,7 +302,7 @@ Three top-level routes serve chat:
 
 | Route | Purpose |
 |---|---|
-| `/chat` | The chat index, and the **Chat** entry in the left rail and the mobile nav sheet. Lists recent conversations across every agent — merged client-side from `GET /agents` plus a capped fan-out of `GET /agents/{id}/chats`, newest activity first — with the agent roster beneath it. It holds no WebSocket: picking a thread is what opens a live connection, on the page below. |
+| `/chat` | The chat surface, and the **Chat** entry in the left rail and the mobile nav sheet. It is **not an index** — it opens straight into your freshest conversation and rewrites the address bar to that conversation's `/chat/<agentSlug>?session=<chatId>` shape, so it holds a live WebSocket from the moment it loads. The left column lists conversations across every agent, merged client-side from `GET /agents` plus a capped fan-out of `GET /agents/{id}/chats`, newest activity first. Agents are an attribute of a conversation here, not a level above it. |
 | `/crews?crew=<slug>&agent=<slug>` | Selection-driven canvas. Click an agent in the canvas to open a chat panel inline. |
 | `/chat/<agentSlug>?session=<chatId>` | Full-page chat — the same agent, the same session model, the whole viewport for messages + composer + right panel. |
 
@@ -388,7 +388,7 @@ Reopening a session now rehydrates the full structured turn — assistant text, 
 ### How assistant turns render
 
 - **Streamed text reveals at a smooth, constant rate.** Network chunks arrive in bursts; the renderer buffers them and reveals characters at a steady pace that speeds up when a backlog builds (e.g. after a reconnect replay), so replies read as a calm flow instead of sentence-sized pops.
-- **All reasoning of a turn renders as ONE chain-of-thought block.** Models interleave thinking ↔ text ↔ tools freely (fast models produce a dozen short passes per reply); every pass merges into a single collapsible block at the position of the first one. While the model reasons, the header shows a live shimmering "Thinking… Ns" timer that accumulates across passes; when the turn finishes it collapses to "Thought for N seconds" (total). Transient progress lines never split the block — a streamed turn renders identically to the same turn reloaded from history.
+- **All reasoning of a turn renders as ONE chain-of-thought block.** Models interleave thinking ↔ text ↔ tools freely (fast models produce a dozen short passes per reply); every pass merges into a single collapsible block at the position of the first one. The block **starts closed and is never opened for you** — while the model reasons, its header shows a live shimmering `<agent> is thinking… Ns` timer that accumulates across passes, and when the turn finishes the header settles to "Thought for N seconds" (total). Click the chevron to read the reasoning itself; it is kept, not discarded, so a wrong answer can always be opened up after the fact. Transient progress lines never split the block — a streamed turn renders identically to the same turn reloaded from history.
 - **Your question pins to the top on send.** After you send a message, the conversation anchors your message at the top of the viewport and the reply streams in below it; once the reply outgrows the screen, normal follow-the-stream scrolling (with the scroll-to-bottom pill) resumes.
 - **Consecutive tool calls collapse into one "Worked · N steps" disclosure** with per-tool input/output. A single tool stays a plain card. Interactive tools (`AskUserQuestion`, `TodoWrite`, `Task`) are never grouped.
 - **Bursts of internal progress / thinking chatter collapse into a single quiet live status line** rather than scrolling the transcript.
@@ -424,7 +424,7 @@ Hovering over a user message reveals an "Edit" button. Editing the message rewri
 
 ## Message reactions
 
-Each assistant message has a reactions strip (👍 👎 ❤️ 🤔 🚀). Reactions are workspace-shared — if two operators are in the same workspace, they each see the other's reactions. Migration v57 added the `message_reactions` table.
+An assistant message renders any emoji reactions it already carries (❤️ 🤔 🚀 …). Reactions are workspace-shared — if two operators are in the same workspace, they each see the other's. Migration v57 added the `message_reactions` table. They are **added from the CLI only** ([`crewship chat react`](/cli/chat)); the chat surface reads them back but offers no picker, because in a one-person conversation an emoji has no audience. The 👍 / 👎 in the message action row are a different mechanism — `message_feedback`, not `message_reactions`.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -472,7 +472,7 @@ These query params are stable. Do not link to the Next.js internal route segment
 <Accordion title="Footguns and surprising behaviour (14)">
 
 - **Edit-and-resend truncates the active branch — but the tail isn't gone.** Editing a user message moves every message after it into `chat_branches`. The UI shows a small "view earlier branches" affordance, but a hurried operator may believe they've lost the alternate response. Train the muscle of opening the branch picker before assuming work is unrecoverable.
-- **Reactions are workspace-shared, not per-user-private.** A 👎 from one operator is visible to every other operator in the same workspace, and is also surfaced to the agent on the next turn. Use reactions as a deliberate signal — not as a private bookmark. If you need a private flag, use the [Inbox](/guides/inbox) pin instead.
+- **Reactions are workspace-shared, not per-user-private.** An emoji reaction added with `crewship chat react` is visible to every other operator in the same workspace, and is also surfaced to the agent on the next turn. Use reactions as a deliberate signal — not as a private bookmark. If you need a private flag, use the [Inbox](/guides/inbox) pin instead. (The 👍 / 👎 in the message action row are `message_feedback`, a separate table — see [Message reactions](#message-reactions).)
 - **`chats.origin` silently NULLs unrecognised values.** Anything outside the `UI / CLI / WEBHOOK / CRON / AGENT` allow-list gets stored as `NULL` to keep the UI chip safe from injection. A webhook handler that posts `origin: "github"` will succeed (200 OK) but show no chip — the silent failure is by design. Validate the enum on your side before posting.
 - **Prisma TypeScript schema is intentionally stale on `chats.origin`.** Prisma is types-only in this project; the v59 migration was applied to SQLite but the `prisma/schema.prisma` was deliberately not regenerated. TS callers must query `origin` via the Go-typed API surface, not via Prisma Client.
 - **Attachment cap is 25 MB, with different error surfaces by client.** Uploads larger than 25 MB return a 413 from `ProxyHandler.AgentChatAttachment`. The browser composer surfaces this as a toast, while a programmatic uploader (CLI, webhook) sees only the HTTP error — check status codes before assuming the file landed.

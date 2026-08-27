@@ -83,6 +83,27 @@ Examples:
 
 		result := digestEnableResult{}
 
+		// Everything this command has to say to a person is collected and
+		// replayed from the human renderer at the end. It used to be printed
+		// as it happened — nine lines on stdout — and then AutoHuman appended
+		// the JSON document with an EMPTY human renderer, so `-f json` emitted
+		// prose followed by a perfectly good object and `jq` failed on the
+		// whole thing (#2086). The empty `func() {}` was the tell: the human
+		// output had already escaped.
+		var notes []string
+		note := func(format string, a ...any) {
+			notes = append(notes, fmt.Sprintf(format, a...))
+		}
+		errOut := cmd.ErrOrStderr()
+		// How many notes the confirmation prompt has already shown. Flushing
+		// them to stderr does not consume them, so without this the human
+		// renderer replayed the whole slice and a person running the default
+		// interactive path (`--when` without `--yes`) saw every line TWICE —
+		// once above the question, once again after answering it. Deferring
+		// the output was allowed to change which stream a line lands on; it
+		// was not allowed to change how many times it is printed.
+		flushed := 0
+
 		exists, err := digestRoutineExists(client, ws)
 		if err != nil {
 			return err
@@ -91,13 +112,13 @@ Examples:
 			if crewSlug == "" {
 				return fmt.Errorf("workspace-digest routine does not exist yet — --crew <slug> is required to create it (the crew that will own it)")
 			}
-			if err := createDigestRoutine(client, ws, crewSlug); err != nil {
+			if err := createDigestRoutine(client, ws, crewSlug, note); err != nil {
 				return fmt.Errorf("create workspace-digest routine: %w", err)
 			}
 			result.RoutineCreated = true
-			fmt.Println("Created routine: workspace-digest")
+			note("Created routine: workspace-digest")
 		} else {
-			fmt.Println("Routine workspace-digest already exists.")
+			note("Routine workspace-digest already exists.")
 		}
 
 		if when != "" {
@@ -107,15 +128,25 @@ Examples:
 			}
 			cronExpr = derived
 			occs, oerr := pipeline.NextOccurrences(cronExpr, "UTC", 3, time.Now())
-			fmt.Printf("Parsed %q as cron %q (UTC).\n", when, cronExpr)
+			note("Parsed %q as cron %q (UTC).", when, cronExpr)
 			if oerr == nil {
-				fmt.Println("Next 3 fire times:")
+				note("Next 3 fire times:")
 				for _, o := range occs {
-					fmt.Printf("  - %s\n", o.Format("2006-01-02 15:04 MST"))
+					note("  - %s", o.Format("2006-01-02 15:04 MST"))
+					result.NextFireTimes = append(result.NextFireTimes, o.UTC().Format(time.RFC3339))
 				}
 			}
 			if !yes {
-				fmt.Print("Schedule the digest with this cadence? [y/N]: ")
+				// The prompt cannot be deferred — it needs an answer now — so
+				// it goes to stderr, where confirmAction already puts every
+				// other confirmation in this CLI. The preview lines above it
+				// are echoed there too, or the question arrives without the
+				// context it is asking about.
+				for _, n := range notes[flushed:] {
+					fmt.Fprintln(errOut, n)
+				}
+				flushed = len(notes)
+				fmt.Fprint(errOut, "Schedule the digest with this cadence? [y/N]: ")
 				var input string
 				_, _ = fmt.Scanln(&input)
 				if strings.ToLower(strings.TrimSpace(input)) != "y" && strings.ToLower(strings.TrimSpace(input)) != "yes" {
@@ -134,23 +165,32 @@ Examples:
 		result.CronExpr = cronExpr
 		result.ScheduleID = scheduleID
 		if alreadyScheduled {
-			fmt.Printf("A schedule already targets workspace-digest (id=%s) — leaving its cadence as-is. Use `crewship routine schedules update %s --cron '...'` to change it.\n", scheduleID, scheduleID)
+			note("A schedule already targets workspace-digest (id=%s) — leaving its cadence as-is. Use `crewship routine schedules update %s --cron '...'` to change it.", scheduleID, scheduleID)
 		} else {
 			result.ScheduleCreated = true
-			fmt.Printf("Scheduled workspace-digest: %s UTC (id=%s)\n", cronExpr, scheduleID)
+			note("Scheduled workspace-digest: %s UTC (id=%s)", cronExpr, scheduleID)
 		}
-		fmt.Println("Configure delivery to Slack/email: `crewship notifychannel add ...` + `crewship notify prefs set`.")
-		return resolvedFormatter(cmd).AutoHuman(result, func() {})
+		note("Configure delivery to Slack/email: `crewship notifychannel add ...` + `crewship notify prefs set`.")
+
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			for _, n := range notes[flushed:] {
+				fmt.Println(n)
+			}
+		})
 	},
 }
 
 // digestEnableResult is the machine-readable summary for `digest enable`
 // (--format json/yaml/ndjson).
 type digestEnableResult struct {
-	RoutineCreated  bool   `json:"routine_created"`
-	ScheduleCreated bool   `json:"schedule_created"`
-	ScheduleID      string `json:"schedule_id,omitempty"`
-	CronExpr        string `json:"cron_expr,omitempty"`
+	RoutineCreated  bool   `json:"routine_created" yaml:"routine_created"`
+	ScheduleCreated bool   `json:"schedule_created" yaml:"schedule_created"`
+	ScheduleID      string `json:"schedule_id,omitempty" yaml:"schedule_id,omitempty"`
+	CronExpr        string `json:"cron_expr,omitempty" yaml:"cron_expr,omitempty"`
+	// NextFireTimes is populated only for --when, where the derived cron is a
+	// guess the operator is being asked to confirm. RFC3339/UTC rather than
+	// the human "2006-01-02 15:04 MST" — a machine consumer parses it.
+	NextFireTimes []string `json:"next_fire_times,omitempty" yaml:"next_fire_times,omitempty"`
 }
 
 // digestRoutineExists checks GET /pipelines/workspace-digest.
@@ -174,7 +214,13 @@ func digestRoutineExists(client *cli.Client, ws string) (bool, error) {
 // flow (see cmd_pipeline.go) rather than any privileged skip-gate path —
 // the digest template is deterministic and agentless, so it passes the
 // real server-side test-run gate like any other routine save.
-func createDigestRoutine(client *cli.Client, ws, crewSlug string) error {
+//
+// note receives the progress line rather than stdout taking it directly: this
+// runs before `digest enable` renders its result, so an fmt.Println here is
+// prose in front of the JSON document under `-f json` — the exact defect the
+// rest of this change removes. Routing it through the caller's note buffer
+// puts it in the human transcript and leaves the machine formats alone.
+func createDigestRoutine(client *cli.Client, ws, crewSlug string, note func(string, ...any)) error {
 	crewID, err := resolveCrewID(client, crewSlug)
 	if err != nil {
 		return fmt.Errorf("resolve --crew: %w", err)
@@ -184,7 +230,7 @@ func createDigestRoutine(client *cli.Client, ws, crewSlug string) error {
 		return fmt.Errorf("marshal digest definition: %w", err)
 	}
 
-	fmt.Println("Validating workspace-digest routine (server-side dry-run)...")
+	note("Validating workspace-digest routine (server-side dry-run)...")
 	testResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), map[string]any{
 		"definition":     json.RawMessage(definitionRaw),
 		"author_crew_id": crewID,

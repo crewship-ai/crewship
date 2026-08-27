@@ -12,19 +12,19 @@ import (
 // /api/v1/admin/keeper/requests/{requestId}/events — the append-only keeper
 // transition ledger (issue #1369).
 type keeperRequestEvent struct {
-	Seq         int     `json:"seq"`
-	State       string  `json:"state"`
-	RequestType *string `json:"request_type,omitempty"`
-	AgentName   string  `json:"agent_name,omitempty"`
-	CredName    string  `json:"credential_name,omitempty"`
-	Intent      *string `json:"intent,omitempty"`
-	Command     *string `json:"command,omitempty"`
-	Reason      *string `json:"reason,omitempty"`
-	RiskScore   *int    `json:"risk_score,omitempty"`
-	ExitCode    *int    `json:"exit_code,omitempty"`
-	ActorType   string  `json:"actor_type"`
-	ActorID     *string `json:"actor_id,omitempty"`
-	RecordedAt  string  `json:"recorded_at"`
+	Seq         int     `json:"seq" yaml:"seq"`
+	State       string  `json:"state" yaml:"state"`
+	RequestType *string `json:"request_type,omitempty" yaml:"request_type,omitempty"`
+	AgentName   string  `json:"agent_name,omitempty" yaml:"agent_name,omitempty"`
+	CredName    string  `json:"credential_name,omitempty" yaml:"credential_name,omitempty"`
+	Intent      *string `json:"intent,omitempty" yaml:"intent,omitempty"`
+	Command     *string `json:"command,omitempty" yaml:"command,omitempty"`
+	Reason      *string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	RiskScore   *int    `json:"risk_score,omitempty" yaml:"risk_score,omitempty"`
+	ExitCode    *int    `json:"exit_code,omitempty" yaml:"exit_code,omitempty"`
+	ActorType   string  `json:"actor_type" yaml:"actor_type"`
+	ActorID     *string `json:"actor_id,omitempty" yaml:"actor_id,omitempty"`
+	RecordedAt  string  `json:"recorded_at" yaml:"recorded_at"`
 }
 
 var keeperHistoryCmd = &cobra.Command{
@@ -66,10 +66,17 @@ Examples:
 			// An empty list is also what a foreign-workspace request id returns —
 			// the endpoint deliberately does not distinguish "no such request" from
 			// "not yours", so the message must not claim it does not exist.
-			fmt.Println("No recorded transitions for this request in the current workspace.")
-			fmt.Printf("%sNote:%s requests raised before the ledger migration have their current\n"+
-				"state backfilled but no intermediate history.\n", cli.Yellow, cli.Reset)
-			return nil
+			//
+			// Both of these lines are guidance for a person and neither is a
+			// transition, so under a machine format the answer is `[]`. The
+			// command's own help documents `--format json | jq '.[].state'`,
+			// which this used to break on exactly the ambiguous case the note
+			// exists to explain.
+			return resolvedFormatter(cmd).AutoHuman(events, func() {
+				fmt.Println("No recorded transitions for this request in the current workspace.")
+				fmt.Printf("%sNote:%s requests raised before the ledger migration have their current\n"+
+					"state backfilled but no intermediate history.\n", cli.Yellow, cli.Reset)
+			})
 		}
 
 		headers := []string{"SEQ", "STATE", "ACTOR", "RISK", "EXIT", "RECORDED AT", "REASON"}

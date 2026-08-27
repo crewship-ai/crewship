@@ -59,7 +59,7 @@ func TestPrintPersona(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 
-	printPersona(cmd, "agent", personaResponse{
+	printPersona(cmd, "agent", PersonaResponse{
 		Layer: "agent", Content: "You write Go.", Bytes: 13, CapBytes: 1536,
 	})
 	out := buf.String()
@@ -71,7 +71,7 @@ func TestPrintPersona(t *testing.T) {
 	}
 
 	buf.Reset()
-	printPersona(cmd, "crew", personaResponse{
+	printPersona(cmd, "crew", PersonaResponse{
 		Layer: "crew", FromDefault: true, Content: "synth", Bytes: 5, CapBytes: 1536,
 	})
 	if !strings.Contains(buf.String(), "source: synthesized default") {
@@ -182,7 +182,7 @@ func TestOpenInEditor_EditorFails(t *testing.T) {
 func TestPersonaViewRunE(t *testing.T) {
 	stub := covSetupCli5(t)
 	covStubAgents(stub)
-	stub.OnGet("/api/v1/agents/"+covAgentIDCli5+"/persona", clitest.JSONResponse(200, personaResponse{
+	stub.OnGet("/api/v1/agents/"+covAgentIDCli5+"/persona", clitest.JSONResponse(200, PersonaResponse{
 		AgentID: covAgentIDCli5, Layer: "agent", Content: "Persona body", Bytes: 12, CapBytes: 1536,
 	}))
 	buf := covCmdOut(t, personaViewCmd)
@@ -211,7 +211,7 @@ func TestPersonaEditRunE_Success(t *testing.T) {
 	stub := covSetupCli5(t)
 	covStubAgents(stub)
 	personaPath := "/api/v1/agents/" + covAgentIDCli5 + "/persona"
-	stub.OnGet(personaPath, clitest.JSONResponse(200, personaResponse{
+	stub.OnGet(personaPath, clitest.JSONResponse(200, PersonaResponse{
 		Layer: "agent", FromDefault: false, Content: "old persona",
 	}))
 	stub.OnPut(personaPath, clitest.JSONResponse(200, map[string]any{"bytes": 11}))
@@ -239,7 +239,7 @@ func TestPersonaEditRunE_AbortOnEmpty(t *testing.T) {
 	stub := covSetupCli5(t)
 	covStubAgents(stub)
 	// FromDefault → blank editor seed; /usr/bin/true leaves it blank.
-	stub.OnGet("/api/v1/agents/"+covAgentIDCli5+"/persona", clitest.JSONResponse(200, personaResponse{
+	stub.OnGet("/api/v1/agents/"+covAgentIDCli5+"/persona", clitest.JSONResponse(200, PersonaResponse{
 		Layer: "agent", FromDefault: true, Content: "synthesized — should not seed",
 	}))
 	t.Setenv("EDITOR", "/usr/bin/true")
@@ -325,7 +325,7 @@ func TestPersonaSuggestFromInboxRunE(t *testing.T) {
 func TestPersonaCrewRunE_View(t *testing.T) {
 	stub := covSetupCli5(t)
 	covStubCrews(stub)
-	stub.OnGet("/api/v1/crews/"+covCrewIDCli5+"/persona", clitest.JSONResponse(200, personaResponse{
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli5+"/persona", clitest.JSONResponse(200, PersonaResponse{
 		CrewID: covCrewIDCli5, Layer: "crew", Content: "Crew voice", Bytes: 10, CapBytes: 1536,
 	}))
 	buf := covCmdOut(t, personaCrewCmd)
@@ -342,7 +342,7 @@ func TestPersonaCrewRunE_Edit(t *testing.T) {
 	stub := covSetupCli5(t)
 	covStubCrews(stub)
 	personaPath := "/api/v1/crews/" + covCrewIDCli5 + "/persona"
-	stub.OnGet(personaPath, clitest.JSONResponse(200, personaResponse{Content: "old crew"}))
+	stub.OnGet(personaPath, clitest.JSONResponse(200, PersonaResponse{Content: "old crew"}))
 	stub.OnPut(personaPath, clitest.JSONResponse(200, map[string]any{"ok": true}))
 	covEditorScript(t, "new crew persona")
 	buf := covCmdOut(t, personaCrewCmd)
@@ -446,7 +446,7 @@ func TestPersonaEditRunE_PutError(t *testing.T) {
 	stub := covSetupCli5(t)
 	covStubAgents(stub)
 	personaPath := "/api/v1/agents/" + covAgentIDCli5 + "/persona"
-	stub.OnGet(personaPath, clitest.JSONResponse(200, personaResponse{Content: "old"}))
+	stub.OnGet(personaPath, clitest.JSONResponse(200, PersonaResponse{Content: "old"}))
 	stub.OnPut(personaPath, clitest.ErrorResponse(422, "persona too large"))
 	covEditorScript(t, "way too big")
 
@@ -512,7 +512,7 @@ func TestPersonaCrewRunE_EditErrors(t *testing.T) {
 	}
 
 	// Editor fails.
-	stub.OnGet(personaPath, clitest.JSONResponse(200, personaResponse{Content: "x"}))
+	stub.OnGet(personaPath, clitest.JSONResponse(200, PersonaResponse{Content: "x"}))
 	t.Setenv("EDITOR", filepath.Join(t.TempDir(), "ghost-editor"))
 	err = personaCrewCmd.RunE(personaCrewCmd, []string{"backend", "edit"})
 	if err == nil || !strings.Contains(err.Error(), "editor failed") {
@@ -520,7 +520,7 @@ func TestPersonaCrewRunE_EditErrors(t *testing.T) {
 	}
 
 	// Empty edit aborts before PUT.
-	stub.OnGet(personaPath, clitest.JSONResponse(200, personaResponse{Content: ""}))
+	stub.OnGet(personaPath, clitest.JSONResponse(200, PersonaResponse{Content: ""}))
 	t.Setenv("EDITOR", "/usr/bin/true")
 	err = personaCrewCmd.RunE(personaCrewCmd, []string{"backend", "edit"})
 	if err == nil || !strings.Contains(err.Error(), "aborted (empty content)") {
@@ -528,7 +528,7 @@ func TestPersonaCrewRunE_EditErrors(t *testing.T) {
 	}
 
 	// PUT fails.
-	stub.OnGet(personaPath, clitest.JSONResponse(200, personaResponse{Content: "x"}))
+	stub.OnGet(personaPath, clitest.JSONResponse(200, PersonaResponse{Content: "x"}))
 	stub.OnPut(personaPath, clitest.ErrorResponse(500, "crew put failed"))
 	covEditorScript(t, "fresh")
 	err = personaCrewCmd.RunE(personaCrewCmd, []string{"backend", "edit"})
@@ -552,7 +552,7 @@ func TestPersonaEditRunE_EditorFails(t *testing.T) {
 	stub := covSetupCli5(t)
 	covStubAgents(stub)
 	stub.OnGet("/api/v1/agents/"+covAgentIDCli5+"/persona",
-		clitest.JSONResponse(200, personaResponse{Content: "x"}))
+		clitest.JSONResponse(200, PersonaResponse{Content: "x"}))
 	t.Setenv("EDITOR", filepath.Join(t.TempDir(), "no-such-editor"))
 
 	err := personaEditCmd.RunE(personaEditCmd, []string{"viktor"})
