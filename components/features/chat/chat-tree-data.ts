@@ -120,6 +120,14 @@ export interface ChatTreeData<A extends ChatTreeAgent = ChatTreeAgent> {
   threadsLoaded: boolean
   /** Re-run the fan-out. Wired to the Retry beside a failed agent. */
   retryThreads: () => void
+  /**
+   * Re-read `/agents`. Separate from `retryThreads` because the two failures
+   * are separate: the fan-out failing costs you one agent's list, the roster
+   * failing costs you the whole column. Without this, `error` was a state the
+   * surface could enter and never leave short of a page reload — which is why
+   * reporting it needed this to land in the same change.
+   */
+  retryRoster: () => void
   error: string | null
   wsLoading: boolean
 }
@@ -154,6 +162,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   const [threadsLoaded, setThreadsLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { nonce: threadsNonce, retry: retryThreads } = useRetry()
+  const { nonce: rosterNonce, retry: retryRoster } = useRetry()
 
   // ── The roster ──
   useEffect(() => {
@@ -174,7 +183,12 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
     return () => {
       cancelled = true
     }
-  }, [workspaceId])
+    // `setRoster([])` on failure rather than leaving it null is deliberate and
+    // only safe because `error` is now rendered: null keeps the page on its
+    // loading skeleton forever, so the failure has to resolve the list AND be
+    // reported. One without the other is how "no conversations yet" came to
+    // mean "the roster request 500ed".
+  }, [workspaceId, rosterNonce])
 
   // Ghosts are retired agents; starting a conversation with one is not a thing
   // this surface should offer, so they are out of the tree — but still in the
@@ -234,7 +248,17 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
     }
   }, [workspaceId, agents, ensureSlug, threadsNonce])
 
-  return { agents, roster, threadsByAgent, threadErrors, threadsLoaded, retryThreads, error, wsLoading }
+  return {
+    agents,
+    roster,
+    threadsByAgent,
+    threadErrors,
+    threadsLoaded,
+    retryThreads,
+    retryRoster,
+    error,
+    wsLoading,
+  }
 }
 
 /* ------------------------------------------------------------------ props */

@@ -13,6 +13,7 @@ import { timeAgo } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
 import { parseSessionTimestamp } from "./session-sort"
+import { ScopeFailure } from "./scope-fetch"
 import type { ChatTreeAgent, ChatTreeThread } from "./chat-tree-data"
 
 /**
@@ -201,20 +202,44 @@ export function filterConversationRows(
 interface Props {
   agents: ChatTreeAgent[] | null
   threadsByAgent: Record<string, ChatTreeThread[]>
+  /**
+   * Why the roster is missing, or null when it is not.
+   *
+   * `useChatTreeData` resolves a failed `/agents` to an EMPTY roster so the
+   * page leaves its loading skeleton, which means an empty column is
+   * ambiguous by construction: it is either a workspace with no agents or a
+   * request that failed. This prop is the disambiguator, and without it this
+   * column told someone whose server was unhappy that they had no
+   * conversations — the same lie the file download used to tell when it
+   * answered "not found" for a file it merely could not open.
+   */
+  loadError?: string | null
+  /** Agent id → why its thread list is unknown. An agent in here has an
+   *  UNKNOWN list, not an empty one, and must not be filed under "not
+   *  started yet". */
+  threadErrors?: Record<string, string>
   threadsLoaded: boolean
   activeThreadId?: string | null
   onSelectThread: (agent: ChatTreeAgent, thread: ChatTreeThread) => void
   onStartConversation: (agent: ChatTreeAgent) => void
+  /** Re-read the roster. Omitted when the caller has no way to re-ask. */
+  onRetryRoster?: () => void
+  /** Re-run the per-agent fan-out. */
+  onRetryThreads?: () => void
   className?: string
 }
 
 export function ConversationsSidebar({
   agents,
   threadsByAgent,
+  loadError = null,
+  threadErrors,
   threadsLoaded,
   activeThreadId,
   onSelectThread,
   onStartConversation,
+  onRetryRoster,
+  onRetryThreads,
   className,
 }: Props) {
   const [query, setQuery] = useState("")
@@ -241,7 +266,15 @@ export function ConversationsSidebar({
   // row in it, and the number would stop meaning anything.
   const unreadTotal = rows.reduce((n, r) => n + (r.thread.unread_count ?? 0), 0)
   const liveTotal = live.size
-  const idle = roster.filter((a) => (threadsByAgent[a.id] ?? []).length === 0)
+  // An agent whose fan-out failed is NOT idle. Listing it under "not started
+  // yet" is the per-agent form of the same lie the column-wide one tells, and
+  // it is the more dangerous of the two: clicking that row starts a second
+  // conversation on top of a history the page simply could not read.
+  const failedAgentIds = threadErrors ?? {}
+  const idle = roster.filter(
+    (a) => !failedAgentIds[a.id] && (threadsByAgent[a.id] ?? []).length === 0,
+  )
+  const failedAgents = roster.filter((a) => failedAgentIds[a.id])
 
   return (
     <div
@@ -306,10 +339,14 @@ export function ConversationsSidebar({
             it. Solid rather than the dashed outline it started as: a dashed
             border is the vocabulary of a drop zone or a placeholder, and this
             is neither — it is the one button on the column. */}
+        {/* Disabled while the roster is unknown: `roster[0]` is what this
+            starts a conversation WITH, and after a failed `/agents` there is
+            no roster to index. Offering the primary action against data we
+            do not have is how a failure becomes a wrong write. */}
         <button
           type="button"
           onClick={() => roster[0] && onStartConversation(roster[0])}
-          disabled={roster.length === 0}
+          disabled={roster.length === 0 || !!loadError}
           className={cn(
             "flex h-9 w-full items-center justify-center gap-2 rounded-lg",
             "bg-primary/15 type-nav font-medium text-primary",
@@ -355,14 +392,42 @@ export function ConversationsSidebar({
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2">
         <SidebarSection label="Conversations" count={visible.length}>
-          {!threadsLoaded && rows.length === 0 && (
+          {loadError && (
+            <ScopeFailure
+              label="Conversations could not be loaded"
+              detail={loadError}
+              onRetry={onRetryRoster}
+              className="mx-2 my-1"
+              data-testid="conversations-roster-failure"
+            />
+          )}
+          {failedAgents.length > 0 && (
+            <ScopeFailure
+              label={
+                failedAgents.length === 1
+                  ? `${failedAgents[0].name}'s conversations could not be loaded`
+                  : `${failedAgents.length} agents' conversations could not be loaded`
+              }
+              // The first message, not a join of all of them: they are almost
+              // always the same status, and a 280px column has room for one.
+              detail={failedAgentIds[failedAgents[0].id]}
+              onRetry={onRetryThreads}
+              className="mx-2 my-1"
+              data-testid="conversations-fanout-failure"
+            />
+          )}
+          {!loadError && !threadsLoaded && rows.length === 0 && (
             <p className="px-3 py-2 text-micro text-muted-foreground">Loading…</p>
           )}
-          {threadsLoaded && visible.length === 0 && (
+          {/* "No conversations yet" is a claim about the server's state, so it
+              is only made when the server actually answered. */}
+          {!loadError && threadsLoaded && visible.length === 0 && (
             <p className="px-3 py-2 text-micro text-muted-foreground">
               {query.trim() || facet !== "all"
                 ? "Nothing matches."
-                : "No conversations yet."}
+                : failedAgents.length > 0
+                  ? "No conversations loaded."
+                  : "No conversations yet."}
             </p>
           )}
           {visible.map(({ agent, thread, at }) => (

@@ -155,6 +155,36 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
+  ⚠️ **Behaviour change: the left column navigates between conversations, and
+  the per-agent "New session" control it replaced is gone.** The old surface
+  put the roster in the primary navigation and made you pick an agent to reach
+  the thing you came for — seven agents at two lines each, most with nothing to
+  open, in front of the one row anybody wanted. Threads are now the top level,
+  newest first, with the agent's face carrying the attribution its own row used
+  to; agents nobody has talked to fold into a single "not started yet" row. The
+  facets are All / Unread / Live: "Done" is gone because it read `ended_at`,
+  which nothing writes, and "Live" now reads the agent's status off the
+  workspace event stream instead of a column frozen at page load. Deep links
+  are unchanged — `/chat/<slug>?session=` is still the shape every "Open chat"
+  link and `crewship open` builds, and switching threads is a `replaceState`
+  rather than a route change, so the dashboard chrome no longer rebuilds to
+  look at a different name.
+
+  The transcript changed with it: fixed gutters with agent and user avatars,
+  reasoning closed by default, and the hover actions hidden until you want
+  them. Chain of thought is no longer rendered open — it is available, not in
+  the way. The **Files** panel hides internal files behind an explicit toggle,
+  and — the reason it is in this section rather than the next — files it lists
+  now actually open. Agent-written files are owned by the container's UID and
+  crewshipd runs as the host user, so `List` succeeded on the directory while
+  every `Read` took `EACCES`; the panel listed a full tree and answered "file
+  not found" for every entry in it. Downloads now replay through the crew
+  container on a permission error, the way saves have since #922, and a file
+  that exists but cannot be read reports that instead of claiming to be
+  missing. Four published chat guides described the surface this replaces and
+  have been rewritten against the one that ships.
+
 - **⚠️ Proxied agent calls start billing for real (#2051).** ⚠️ **Behaviour
   change: budget warnings and hard stops that have never fired on a crew can
   fire on the first deploy.** Every LLM call an agent made through the sidecar

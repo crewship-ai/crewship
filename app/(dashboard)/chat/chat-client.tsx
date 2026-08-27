@@ -456,6 +456,13 @@ export function ChatClient() {
     if (agentSlug) {
       const named = agents.find((a) => a.slug === agentSlug)
       if (!named) return
+      // The `ensureSlug` bug's twin, and it survives the cap fix: when THIS
+      // agent's thread request failed, its list is absent for a reason that
+      // has nothing to do with it being empty. Minting a draft here writes a
+      // second conversation on top of a history the page could not read —
+      // the same wrong write, reached through a 500 instead of through the
+      // fan-out cap. The sidebar names the failure and offers the retry.
+      if (tree.threadErrors[named.id]) return
       const thread = freshestOf(threadsByAgent[named.id] ?? [])
       if (thread) selectThread(named, thread)
       else startConversation(named)
@@ -474,6 +481,7 @@ export function ChatClient() {
     sessionId,
     agentSlug,
     tree.threadsLoaded,
+    tree.threadErrors,
     agents,
     threadsByAgent,
     selectThread,
@@ -513,6 +521,13 @@ export function ChatClient() {
     <ConversationsSidebar
       agents={agents}
       threadsByAgent={threadsByAgent}
+      // `useChatTreeData` distinguishes "failed" from "empty" precisely so the
+      // column does not have to guess; dropping these two values on the floor
+      // put the guess back and made every failure look like an empty history.
+      loadError={tree.error}
+      threadErrors={tree.threadErrors}
+      onRetryRoster={tree.retryRoster}
+      onRetryThreads={tree.retryThreads}
       threadsLoaded={tree.threadsLoaded}
       activeThreadId={sessionId}
       onSelectThread={(a, t) => {
