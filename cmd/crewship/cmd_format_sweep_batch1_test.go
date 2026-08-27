@@ -65,10 +65,11 @@ func TestRoutineDoctorRunE_DefaultStaysHuman(t *testing.T) {
 func TestAgentLogsRunE_DefaultStaysHuman(t *testing.T) {
 	stub := covSetupCli5(t)
 	const agentID = "c0000000000000000000001"
-	// The LIST is where the crew id comes from, and logs need one.
-	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{
-		{"id": agentID, "slug": "viktor", "crew_id": "c0000000000000000000009"},
-	}))
+	// Logs need a crew id, and the argument here is a CUID — so it comes
+	// from the single-resource GET, not the LIST.
+	row := map[string]any{"id": agentID, "slug": "viktor", "crew_id": "c0000000000000000000009"}
+	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{row}))
+	stub.OnGet("/api/v1/agents/"+agentID, clitest.JSONResponse(200, row))
 	stub.OnGet("/api/v1/agents/"+agentID+"/logs", clitest.JSONResponse(200, []map[string]any{
 		{"ts": "2026-06-01T09:00:00Z", "level": "info", "agent": "viktor", "event": "output", "content": "boot line one"},
 		{"ts": "2026-06-01T09:00:01Z", "level": "info", "agent": "viktor", "event": "output", "content": "boot line two"},

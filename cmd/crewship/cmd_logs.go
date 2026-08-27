@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -71,50 +70,34 @@ func runAgentLogs(cmd *cobra.Command, agentRef string, lines int, follow bool) e
 
 	client := newAPIClient()
 
-	// Resolve agent to get ID and crew_id. The crew is not optional: a
+	// Resolve the agent to its id AND its crew. The crew is not optional: a
 	// crewless agent has no container to read, and the handler answers that
 	// case with an empty array, which is indistinguishable from "running,
 	// nothing logged yet".
-	resp, err := client.Get("/api/v1/agents")
+	//
+	// getByRef is the shared slug-or-CUID reader every sibling command uses,
+	// and using it is what makes this lookup correct rather than merely
+	// similar (#2106). A CUID costs ONE request to /api/v1/agents/{id} — the
+	// only agent lookup with no page ceiling — and a slug goes through
+	// resolveAgentID, which owns the "Did you mean" and "Available:" hints.
+	// The hand-rolled LIST scan that stood here did neither: it sent no
+	// `limit`, so it saw the route's default first 100 rows and reported
+	// "agent not found" for anything past them, and a typo outside
+	// fuzzy.Nearest's threshold got a bare "agent not found" where every
+	// other command lists what does exist.
+	resp, agentID, err := getByRef(client, "/api/v1/agents/", agentRef, resolveAgentID)
 	if err != nil {
 		return err
 	}
-	if err := cli.CheckError(resp); err != nil {
-		return err
-	}
-
-	var agents []struct {
-		ID     string  `json:"id"`
-		Slug   string  `json:"slug"`
+	var agent struct {
 		CrewID *string `json:"crew_id"`
 	}
-	if err := cli.ReadJSON(resp, &agents); err != nil {
+	if err := cli.ReadJSON(resp, &agent); err != nil {
 		return err
 	}
-
-	var agentID, crewID string
-	available := make([]string, 0, len(agents))
-	for _, a := range agents {
-		if a.Slug == agentRef || a.ID == agentRef {
-			agentID = a.ID
-			if a.CrewID != nil {
-				crewID = *a.CrewID
-			}
-			break
-		}
-		if a.Slug != "" {
-			available = append(available, a.Slug)
-		}
-	}
-	if agentID == "" {
-		// Same near-match hint resolveAgentID gives. This lookup cannot BE
-		// resolveAgentID — it has to come back with the crew id too — but a
-		// typo should read the same either way.
-		if suggestions := nearestSlugs(agentRef, available, 3); len(suggestions) > 0 {
-			return cli.NotFoundf("agent not found: %s. Did you mean: %s?",
-				agentRef, strings.Join(suggestions, ", "))
-		}
-		return cli.NotFoundf("agent not found: %s", agentRef)
+	crewID := ""
+	if agent.CrewID != nil {
+		crewID = *agent.CrewID
 	}
 	if crewID == "" {
 		return fmt.Errorf("agent has no crew (logs require a crew)")

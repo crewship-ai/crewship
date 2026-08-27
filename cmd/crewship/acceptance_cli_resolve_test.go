@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -453,6 +454,23 @@ func TestAcceptance_MemoryStatus_FailsLoudlyAndActionably(t *testing.T) {
 		t.Fatalf("write fixture: %v", err)
 	}
 
+	// #2106: os.Stat needs only +x on the PARENT, so it succeeds on a
+	// directory the caller cannot enter and reports IsDir() == true. The
+	// fs.ErrPermission branch therefore never fired for the case its own
+	// message names — a .memory dir written inside an agent container and
+	// owned by uid 1001 — and SQLITE_CANTOPEN reached the user anyway.
+	unreadable := t.TempDir()
+	unreadableMem := filepath.Join(unreadable, ".memory")
+	if err := os.MkdirAll(unreadableMem, 0o700); err != nil {
+		t.Fatalf("mkdir fixture: %v", err)
+	}
+	if err := os.Chmod(unreadableMem, 0o000); err != nil {
+		t.Fatalf("chmod fixture: %v", err)
+	}
+	// Restore before TempDir's RemoveAll runs, or the cleanup fails the test
+	// for a reason that has nothing to do with what is being asserted.
+	t.Cleanup(func() { _ = os.Chmod(unreadableMem, 0o700) })
+
 	tests := []struct {
 		name string
 		args []string
@@ -462,6 +480,9 @@ func TestAcceptance_MemoryStatus_FailsLoudlyAndActionably(t *testing.T) {
 		path string
 		// wantText is the actionable phrasing the operator must get.
 		wantText string
+		// skipAsRoot marks a case whose fixture is a permission bit. root
+		// bypasses those, so the case would assert the opposite of the truth.
+		skipAsRoot bool
 	}{
 		{
 			name:     "missing directory",
@@ -481,10 +502,20 @@ func TestAcceptance_MemoryStatus_FailsLoudlyAndActionably(t *testing.T) {
 			path:     notADir,
 			wantText: "not a directory",
 		},
+		{
+			name:       "a memory directory the caller cannot enter",
+			args:       []string{"memory", "status", "--path", unreadable},
+			path:       unreadableMem,
+			wantText:   "permission denied",
+			skipAsRoot: true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.skipAsRoot && os.Geteuid() == 0 {
+				t.Skip("running as root: permission bits do not apply")
+			}
 			cmd := exec.Command(buildCrewshipBinary(t), tc.args...)
 			cmd.Env = offlineEnv(t)
 			raw, err := cmd.CombinedOutput()
@@ -529,4 +560,264 @@ func TestAcceptance_MemoryStatus_ReadableIndexStillReportsAndExitsZero(t *testin
 	if !strings.Contains(out, "Files:") || !strings.Contains(out, "Ready:") {
 		t.Errorf("status report missing:\n%s", out)
 	}
+}
+
+// ─── #2106 follow-up: the agent lookup behind both log commands saw one page ──
+//
+// GET /api/v1/agents is paginated: parseListPagination(r, 100, 500)
+// (internal/api/agents.go), and the list query ends in LIMIT ? OFFSET ?. A
+// scan that sends no `limit` therefore sees the first 100 rows and nothing
+// else. #2086 consolidated `agent logs` onto that scan, and in doing so
+// dropped resolveAgentID's by-id fast path — a direct GET
+// /api/v1/agents/{id} with no such ceiling. Past 100 agents both log commands
+// answered "agent not found" for an agent that exists, and `agent logs <cuid>`,
+// which had worked at any roster size, regressed with them.
+
+// pagedAgentStub serves a roster of agents the way the real List handler does
+// — `limit` defaulting to 100 and capped at 500, `offset` skipping — so a
+// caller that forgets the parameter gets exactly the truncation production
+// gives it.
+type pagedAgentStub struct {
+	mu    sync.Mutex
+	calls []resolveStubCall
+	ids   []string
+	slugs []string
+}
+
+// newPagedAgentStub builds a roster of n agents named agent-0…agent-(n-1),
+// each with a CUID-shaped id so looksLikeCUID accepts it and the by-id fast
+// path is exercised for real rather than simulated.
+func newPagedAgentStub(n int) *pagedAgentStub {
+	s := &pagedAgentStub{}
+	for i := 0; i < n; i++ {
+		// 'c' + 20 lowercase alphanumerics.
+		s.ids = append(s.ids, "c"+strings.Repeat("0", 20-len(strconv.Itoa(i)))+strconv.Itoa(i))
+		s.slugs = append(s.slugs, "agent-"+strconv.Itoa(i))
+	}
+	return s
+}
+
+func (s *pagedAgentStub) callsFor(method, path string) []resolveStubCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []resolveStubCall
+	for _, c := range s.calls {
+		if c.Method == method && c.Path == path {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (s *pagedAgentStub) row(i int) string {
+	return `{"id":"` + s.ids[i] + `","slug":"` + s.slugs[i] + `","crew_id":"` + stubCrewCUID + `"}`
+}
+
+func (s *pagedAgentStub) start(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.calls = append(s.calls, resolveStubCall{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery})
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/agents" {
+			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+			if limit <= 0 {
+				limit = 100
+			}
+			if limit > 500 {
+				limit = 500
+			}
+			if offset < 0 {
+				offset = 0
+			}
+			rows := make([]string, 0, limit)
+			for i := offset; i < len(s.ids) && len(rows) < limit; i++ {
+				rows = append(rows, s.row(i))
+			}
+			_, _ = w.Write([]byte("[" + strings.Join(rows, ",") + "]"))
+			return
+		}
+		for i, id := range s.ids {
+			if r.URL.Path == "/api/v1/agents/"+id {
+				_, _ = w.Write([]byte(s.row(i)))
+				return
+			}
+			if r.URL.Path == "/api/v1/agents/"+id+"/logs" {
+				_, _ = w.Write([]byte(`[{"ts":"2026-08-26T13:33:53Z","level":"info","agent":"` +
+					s.slugs[i] + `","event":"output","content":"hello from the container"}]`))
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail":"resource not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestAcceptance_AgentLogs_ResolvesPastTheFirstPageOfAgents(t *testing.T) {
+	const roster = 150
+	const target = 120 // past the handler's default LIMIT 100
+
+	tests := []struct {
+		name string
+		// ref is filled in from the roster at run time.
+		useCUID bool
+		args    func(ref string) []string
+		// wantListCalls is how many times the LIST endpoint may be read.
+		// A CUID must not need it at all: that direct GET is the only
+		// lookup with no page ceiling, which is the point of the fast path.
+		wantListCalls int
+	}{
+		{
+			name:          "logs <slug> past the first page",
+			args:          func(ref string) []string { return []string{"logs", ref} },
+			wantListCalls: 1,
+		},
+		{
+			name:          "agent logs <slug> past the first page",
+			args:          func(ref string) []string { return []string{"agent", "logs", ref} },
+			wantListCalls: 1,
+		},
+		{
+			name:          "agent logs <cuid> takes the uncapped by-id path",
+			useCUID:       true,
+			args:          func(ref string) []string { return []string{"agent", "logs", ref} },
+			wantListCalls: 0,
+		},
+		{
+			name:          "logs <cuid> takes the uncapped by-id path",
+			useCUID:       true,
+			args:          func(ref string) []string { return []string{"logs", ref} },
+			wantListCalls: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newPagedAgentStub(roster)
+			srv := stub.start(t)
+			ref := stub.slugs[target]
+			if tc.useCUID {
+				ref = stub.ids[target]
+			}
+			out, err := runResolveCLI(t, credStubConfig(t, srv.URL), tc.args(ref)...)
+			if err != nil {
+				t.Fatalf("%v exited %v — agent %d of %d is not findable\noutput: %s",
+					tc.args(ref), err, target, roster, out)
+			}
+			if !strings.Contains(out, "hello from the container") {
+				t.Errorf("log line missing from output:\n%s", out)
+			}
+			if got := len(stub.callsFor("GET", "/api/v1/agents")); got != tc.wantListCalls {
+				t.Errorf("LIST reads = %d, want %d", got, tc.wantListCalls)
+			}
+			if got := stub.callsFor("GET", "/api/v1/agents/"+stub.ids[target]+"/logs"); len(got) != 1 {
+				t.Errorf("logs calls = %d, want 1", len(got))
+			}
+		})
+	}
+}
+
+// A typo past fuzzy.Nearest's threshold (len(target)/3, min 2) gets no
+// suggestions, and every sibling command falls back to listing what IS there.
+// The log commands used to stop at a bare "agent not found", so the same typo
+// got two different levels of help depending on which command you typed.
+func TestAcceptance_AgentLogs_UnknownSlugListsWhatIsAvailable(t *testing.T) {
+	for _, args := range [][]string{
+		{"logs", "zzz"},
+		{"agent", "logs", "zzz"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			stub := newPagedAgentStub(3)
+			srv := stub.start(t)
+			out, err := runResolveCLI(t, credStubConfig(t, srv.URL), args...)
+			if err == nil {
+				t.Fatalf("expected a non-zero exit\noutput: %s", out)
+			}
+			if got := exitCodeOf(t, err); got != cli.ExitNotFound {
+				t.Errorf("exit code = %d, want ExitNotFound (%d)\noutput: %s", got, cli.ExitNotFound, out)
+			}
+			if !strings.Contains(out, "Available:") || !strings.Contains(out, "agent-0") {
+				t.Errorf("a typo past the suggestion threshold must still list what exists, got:\n%s", out)
+			}
+		})
+	}
+}
+
+// ─── #2106 follow-up: the advice `status` gives has to work ─────────────────
+//
+// The "does not exist" message ends "…then build an index with `crewship
+// memory reindex`", and reindex applied the very same gate before calling
+// memory.New — which never mkdirs, because sql.Open is lazy and SQLite will
+// not create a directory. Following the advice reproduced the identical
+// error, one exit code lower. reindex is the command that BUILDS an index, so
+// it now creates the directory it was asked to build in.
+func TestAcceptance_MemoryReindex_FollowsTheAdviceStatusGives(t *testing.T) {
+	// A real crew directory that has never been indexed: the base path is
+	// there, .memory is not. This is the case an operator actually hits.
+	base := t.TempDir()
+
+	statusOut, err := runMemoryCLI(t, "memory", "status", "--path", base)
+	if err == nil {
+		t.Fatalf("status on an unindexed crew dir exited 0\noutput: %s", statusOut)
+	}
+	if !strings.Contains(statusOut, "crewship memory reindex") {
+		t.Fatalf("status no longer advises reindex; this test is testing the wrong thing:\n%s", statusOut)
+	}
+
+	// Do exactly what it said.
+	reindexOut, err := runMemoryCLI(t, "memory", "reindex", "--path", base)
+	if err != nil {
+		t.Fatalf("the advice loops: reindex exited %v on the path status sent it to\noutput: %s", err, reindexOut)
+	}
+	if _, statErr := os.Stat(filepath.Join(base, ".memory")); statErr != nil {
+		t.Fatalf("reindex reported success without creating the index directory: %v", statErr)
+	}
+
+	// …and the command that sent us here now answers.
+	statusOut, err = runMemoryCLI(t, "memory", "status", "--path", base)
+	if err != nil {
+		t.Fatalf("status still fails after following its own advice: %v\noutput: %s", err, statusOut)
+	}
+	if !strings.Contains(statusOut, "Files:") {
+		t.Errorf("status report missing:\n%s", statusOut)
+	}
+}
+
+// The other half of that: reindex creating a directory must not turn a typo
+// into a new empty tree. The base path itself is the thing --path names, and
+// when IT is missing the answer is still "check --path", not mkdir -p.
+func TestAcceptance_MemoryReindex_DoesNotInventAMissingBasePath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "typo-crew")
+
+	out, err := runMemoryCLI(t, "memory", "reindex", "--path", missing)
+	if err == nil {
+		t.Fatalf("reindex invented a base path the user mistyped\noutput: %s", out)
+	}
+	if got := exitCodeOf(t, err); got != cli.ExitNotFound {
+		t.Errorf("exit code = %d, want ExitNotFound (%d) — the same condition exits 3 from `status`\noutput: %s",
+			got, cli.ExitNotFound, out)
+	}
+	if _, statErr := os.Stat(missing); statErr == nil {
+		t.Errorf("%s was created", missing)
+	}
+	for _, leak := range []string{"unable to open database file", "(14)", "init memory schema"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("driver-level error %q leaked to the user:\n%s", leak, out)
+		}
+	}
+}
+
+// runMemoryCLI drives the built binary offline — the memory commands are
+// filesystem-only and must not need a server.
+func runMemoryCLI(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command(buildCrewshipBinary(t), args...)
+	cmd.Env = offlineEnv(t)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }

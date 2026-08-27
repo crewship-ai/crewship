@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -147,7 +148,7 @@ var memoryStatusCmd = &cobra.Command{
 
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
 			if err != nil {
-				row.Error = fmt.Sprintf("cannot open the memory index in %s: %v", mp.path, err)
+				row.Error = memoryOpenError(mp.path, err).Error()
 				scopes = append(scopes, row)
 				failed++
 				continue
@@ -237,18 +238,26 @@ var memoryReindexCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		var succeeded int
+		var succeeded, gateFailed int
 		for _, mp := range paths {
+			// Building an index is what this command is for, so it creates
+			// the directory to build it in — otherwise `status`'s advice to
+			// "build an index with `crewship memory reindex`" landed right
+			// back on the gate below and reproduced the identical error, one
+			// exit code lower (#2106).
+			createMemoryDir(mp.path)
+
 			// Same driver-error leak as `status` had, same fix (#2086) —
 			// reindex already exits non-zero when every scope fails.
 			if err := memoryDirError(mp.path); err != nil {
 				fmt.Fprintf(os.Stderr, "[%s] %v\n", mp.scope, err)
+				gateFailed++
 				continue
 			}
 
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "[%s] cannot open the memory index in %s: %v\n", mp.scope, mp.path, err)
+				fmt.Fprintf(os.Stderr, "[%s] %v\n", mp.scope, memoryOpenError(mp.path, err))
 				continue
 			}
 
@@ -274,7 +283,14 @@ var memoryReindexCmd = &cobra.Command{
 			succeeded++
 		}
 		if succeeded == 0 {
-			return fmt.Errorf("all reindex operations failed")
+			err := fmt.Errorf("all reindex operations failed")
+			// "there is no directory to index" is a not-found, and `status`
+			// already exits 3 for it. The same condition answering 3 from one
+			// command and 1 from the other is what a script cannot handle.
+			if gateFailed > 0 && gateFailed == len(paths) {
+				return cli.WithExitCode(err, cli.ExitNotFound)
+			}
+			return err
 		}
 		return nil
 	},
@@ -383,13 +399,83 @@ func memoryDirError(p string) error {
 	info, err := os.Stat(p)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return fmt.Errorf("%s does not exist — check --path and --scope (`crewship memory --help` lists what --path means per scope), then build an index with `crewship memory reindex`", p)
+		// Which of the two things is missing decides what the operator does
+		// next, and only one of them has a command behind it. `reindex`
+		// creates the .memory directory inside a base path that exists
+		// (createMemoryDir); it will not invent the base path itself,
+		// because a --path that is not there is a typo (#2106).
+		if parent := filepath.Dir(p); !dirExists(parent) {
+			return fmt.Errorf("%s does not exist, and neither does %s — check --path and --scope (`crewship memory --help` lists what --path means per scope)", p, parent)
+		}
+		return fmt.Errorf("%s does not exist — build the index with `crewship memory reindex`, which creates it, or check --path and --scope (`crewship memory --help` lists what --path means per scope)", p)
 	case errors.Is(err, fs.ErrPermission):
-		return fmt.Errorf("%s cannot be read: permission denied — memory dirs inside an agent container are owned by uid 1001", p)
+		return memoryPermissionError(p)
 	case err != nil:
 		return fmt.Errorf("%s cannot be read: %v", p, err)
 	case !info.IsDir():
 		return fmt.Errorf("%s is not a directory — --path names the directory holding the index, not a file inside it", p)
 	}
+
+	// os.Stat needs only +x on the PARENT, so every check above succeeds on a
+	// directory the caller cannot enter and reports IsDir() == true — which
+	// made the fs.ErrPermission branch unreachable for exactly the case it
+	// names, a .memory written inside an agent container and owned by uid
+	// 1001, and let SQLITE_CANTOPEN through anyway (#2106). Opening the
+	// directory asks for the permission the engine is about to need, at the
+	// cost of one syscall.
+	f, err := os.Open(p)
+	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return memoryPermissionError(p)
+		}
+		return fmt.Errorf("%s cannot be read: %v", p, err)
+	}
+	f.Close()
 	return nil
+}
+
+// memoryPermissionError is the one wording for "the directory is there and you
+// cannot have it", which two branches of memoryDirError now reach.
+func memoryPermissionError(p string) error {
+	return fmt.Errorf("%s cannot be read: permission denied — you are uid %d, and memory dirs written inside an agent container are owned by uid 1001", p, os.Getuid())
+}
+
+// memoryOpenError renders a memory.New failure in words that are not the
+// SQLite driver's own.
+//
+// memoryDirError catches every cause visible from outside the directory, but
+// the index FILE has an owner and a mode of its own: a .memory the caller can
+// enter, holding an index.sqlite written by uid 1001, or a read-only directory
+// with no index in it yet, both still come back as "unable to open database
+// file (14)" — a string that names no cause and no path. The substring match
+// is a backstop, not the fix; the probe in memoryDirError is.
+func memoryOpenError(p string, err error) error {
+	if strings.Contains(err.Error(), "unable to open database file") {
+		return fmt.Errorf("%s cannot be opened: %s is readable, so check that index.sqlite inside it — and the directory itself, if the index has yet to be built — are readable and writable by uid %d (memory written inside an agent container is owned by uid 1001)",
+			filepath.Join(p, "index.sqlite"), p, os.Getuid())
+	}
+	return fmt.Errorf("cannot open the memory index in %s: %v", p, err)
+}
+
+// createMemoryDir makes p when it is missing and its parent is not, so
+// `memory reindex` can build an index in a crew directory that has never held
+// one — which is the advice `memory status` gives, and which looped straight
+// back into the same error until #2106 (memory.New does not mkdir: sql.Open is
+// lazy and SQLite will not create a directory).
+//
+// It deliberately does not mkdir -p. A --path whose own directory is absent is
+// a mistyped path, and materialising the tree hides the typo instead of
+// reporting it. Errors are dropped because memoryDirError runs immediately
+// after and names whatever is still wrong.
+func createMemoryDir(p string) {
+	if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if !dirExists(filepath.Dir(p)) {
+		return
+	}
+	// 0755 is what the engine itself uses for memory directories
+	// (internal/memory/workspace.go), so an index built here has the same
+	// mode as one built by the sidecar.
+	_ = os.Mkdir(p, 0o755)
 }

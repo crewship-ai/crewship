@@ -10,15 +10,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
 
-// stubAgentDirectory registers the agent list used by slug→ID
-// resolution in every introspection command.
-// stubAgentDirectory answers the agent LIST every slug→id resolve reads. The
-// crew id is part of the row because `agent logs` needs it: logs come out of a
-// crew container, and an agent with no crew has none to read.
+// stubAgentDirectory answers both halves of a slug-or-CUID agent resolve: the
+// LIST a slug scans, and the single-resource GET a CUID hits directly. The
+// crew id is part of each row because `agent logs` needs it — logs come out of
+// a crew container, and an agent with no crew has none to read.
 func stubAgentDirectory(stub *clitest.StubServer) {
-	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{
-		{"id": covAgentIDCli4, "slug": "viktor", "crew_id": "ccrew0123456789abcdefghi"},
-	}))
+	row := map[string]any{"id": covAgentIDCli4, "slug": "viktor", "crew_id": "ccrew0123456789abcdefghi"}
+	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]any{row}))
+	stub.OnGet("/api/v1/agents/"+covAgentIDCli4, clitest.JSONResponse(200, row))
 }
 
 func TestAgentRunsRunE_HappyPath(t *testing.T) {

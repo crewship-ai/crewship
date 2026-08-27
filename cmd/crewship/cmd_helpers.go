@@ -124,7 +124,13 @@ func resolveAgentID(client *cli.Client, slugOrID string) (string, error) {
 		// instead of forwarding a doomed id.
 	}
 
-	resp, err := client.Get("/api/v1/agents")
+	// The route paginates — parseListPagination(r, 100, 500) in
+	// internal/api/agents.go, and the list query ends in LIMIT ? OFFSET ? —
+	// so an unqualified GET scans the first 100 agents and resolves nothing
+	// past them (#2106). 500 is the route's own ceiling; a workspace larger
+	// than that is what the CUID fast path above is for, since a direct
+	// /api/v1/agents/{id} has no ceiling at all.
+	resp, err := client.Get("/api/v1/agents?limit=500")
 	if err != nil {
 		return "", fmt.Errorf("resolve agent: %w", err)
 	}
