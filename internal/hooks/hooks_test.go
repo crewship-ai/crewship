@@ -98,7 +98,7 @@ func TestRegisterGetRoundtrip(t *testing.T) {
 	h := Hook{
 		WorkspaceID: "ws_test",
 		CrewID:      "crew_a",
-		Event:       EventPreToolCall,
+		Event:       EventPreAgentStart,
 		Matcher:     Matcher{Tools: []string{"Bash"}},
 		HandlerKind: HandlerKindHTTP,
 		HandlerConfig: map[string]any{
@@ -126,7 +126,7 @@ func TestRegisterGetRoundtrip(t *testing.T) {
 	if got.WorkspaceID != "ws_test" || got.CrewID != "crew_a" {
 		t.Errorf("scope mismatch: %+v", got)
 	}
-	if got.Event != EventPreToolCall {
+	if got.Event != EventPreAgentStart {
 		t.Errorf("event: %q", got.Event)
 	}
 	if got.HandlerKind != HandlerKindHTTP {
@@ -150,7 +150,7 @@ func TestRegisterShellNotAllowed(t *testing.T) {
 
 	h := Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindShell,
 		HandlerConfig: map[string]any{"command": "echo hi"},
 		Enabled:       true,
@@ -177,7 +177,7 @@ func TestEnableDisable(t *testing.T) {
 
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://x"},
 		Enabled:       true,
@@ -213,7 +213,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	// Workspace-wide hook (crew_id nil).
 	wsID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://ws"},
 		Enabled:       true,
@@ -225,7 +225,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	aID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_a",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://a"},
 		Enabled:       true,
@@ -237,7 +237,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	bID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_b",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://b"},
 		Enabled:       true,
@@ -249,7 +249,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	disID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
 		CrewID:        "crew_a",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "https://dis"},
 		Enabled:       false,
@@ -259,7 +259,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	}
 
 	// List for crew_a: expect ws-wide + crew_a only.
-	got, err := ListByEvent(ctx, db, "ws_test", "crew_a", EventPreToolCall)
+	got, err := ListByEvent(ctx, db, "ws_test", "crew_a", EventPreAgentStart)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestListByEventCrewScope(t *testing.T) {
 	}
 
 	// Empty crewID returns only ws-wide.
-	got, err = ListByEvent(ctx, db, "ws_test", "", EventPreToolCall)
+	got, err = ListByEvent(ctx, db, "ws_test", "", EventPreAgentStart)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestShellHandlerPass(t *testing.T) {
 		},
 	}
 	res, err := shellHandler(context.Background(), h, EventContext{
-		Event:       EventPreToolCall,
+		Event:       EventPreAgentStart,
 		WorkspaceID: "ws_test",
 	})
 	if err != nil {
@@ -439,7 +439,7 @@ func TestHTTPHandlerPass(t *testing.T) {
 		},
 	}
 	res, err := httpHandler(context.Background(), nil, h, EventContext{
-		Event:       EventPreToolCall,
+		Event:       EventPreAgentStart,
 		WorkspaceID: "ws_test",
 	})
 	if err != nil {
@@ -590,7 +590,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 	orderAnchor := time.Now().UTC()
 	aID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": tsBlock.URL},
 		Blocking:      true,
@@ -602,7 +602,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 	}
 	_, err = Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": tsPass.URL},
 		Blocking:      true,
@@ -614,7 +614,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 	}
 
 	rec := &recordingEmitter{}
-	err = Dispatch(ctx, db, rec, EventPreToolCall, EventContext{
+	err = Dispatch(ctx, db, rec, EventPreAgentStart, EventContext{
 		WorkspaceID: "ws_test",
 	})
 	if err == nil {
@@ -708,7 +708,7 @@ func TestDispatcherMatcherFilter(t *testing.T) {
 	// Hook only fires on Bash tool calls.
 	_, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		Matcher:       Matcher{Tools: []string{"^Bash$"}},
 		HandlerKind:   HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": ts.URL},
@@ -721,7 +721,7 @@ func TestDispatcherMatcherFilter(t *testing.T) {
 
 	rec := &recordingEmitter{}
 	// Read → should NOT fire.
-	if err := Dispatch(ctx, db, rec, EventPreToolCall, EventContext{
+	if err := Dispatch(ctx, db, rec, EventPreAgentStart, EventContext{
 		WorkspaceID: "ws_test",
 		ToolName:    "Read",
 	}); err != nil {
@@ -734,7 +734,7 @@ func TestDispatcherMatcherFilter(t *testing.T) {
 	mu.Unlock()
 
 	// Bash → should fire.
-	if err := Dispatch(ctx, db, rec, EventPreToolCall, EventContext{
+	if err := Dispatch(ctx, db, rec, EventPreAgentStart, EventContext{
 		WorkspaceID: "ws_test",
 		ToolName:    "Bash",
 	}); err != nil {

@@ -12,17 +12,29 @@ Hooks let workspace admins run arbitrary logic when platform events fire -- pre/
 
 ## Events
 
-Defined in `internal/hooks/types.go` (15 events currently):
+Defined in `internal/hooks/types.go` (14 events offered to users):
 
 | Bucket | Events |
 |---|---|
 | Task delegation | `pre_task_delegation`, `post_task_delegation` |
 | Agent lifecycle | `pre_agent_start`, `post_agent_stop` |
-| Tool calls | `pre_tool_call`, `post_tool_call` |
+| Tool calls | `post_tool_call` |
 | LLM calls | `pre_llm_call`, `post_llm_call` |
 | Memory writes | `pre_memory_write`, `post_memory_write` |
 | Peer conversations | `pre_peer_conversation`, `post_peer_conversation` |
 | Policy | `on_approval_requested`, `on_budget_exceeded`, `on_guardrail_triggered` |
+
+<Note>
+  There is no `pre_tool_call`. The platform drives agent work by parsing the
+  stream a CLI (Claude Code, Cursor, ...) emits as it runs; by the time a
+  tool_call event reaches the orchestrator the tool has already executed, so
+  there is no "before the tool runs" interception point to hook. `pre_tool_call`
+  was briefly offered as a creatable event with no dispatch site behind it —
+  registrations against it looked fine and never fired — and was removed
+  rather than left dead. The `hooks.EventPreToolCall` Go constant still
+  exists (existing `hooks_config` rows may still carry it), but
+  `ValidateEvent` rejects it for new writes.
+</Note>
 
 ### Coverage status (as of PR #210)
 
@@ -51,7 +63,7 @@ Defined in `internal/hooks/types.go` (15 events currently):
 Add a `hooks.Dispatch` call at the relevant point when the corresponding platform path wires through:
 
 - `pre_task_delegation`, `post_task_delegation` -- hook into the assignment path (`orchestrator.RunAgentForAssignment`).
-- `pre_tool_call`, `post_tool_call` -- needs orchestrator tool-call interception.
+- `post_tool_call` -- the observation exists (`orchestrator.PostToolCallObserver`, wired to the built-in F4.2 behavior monitor), but nothing forwards it to `hooks.Dispatch` for user-registered hooks yet.
 - `pre_llm_call`, `post_llm_call` -- fits cleanly into `llm.Middleware`.
 - `pre_memory_write`, `post_memory_write` -- memory consolidation path.
 - `pre_peer_conversation`, `post_peer_conversation` -- peer bridge.
@@ -161,7 +173,11 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
 
 ### Event names are validated on write
 
-`hooks_config` has a `CHECK` constraint on `handler_kind` but **not** on `event`. A misspelled event therefore used to insert cleanly, never match `ListByEvent`'s predicate, and silently never fire — the hook listed, toggled, and looked healthy. `hooks.Register` and `hooks.Update` now reject any event outside the fifteen above, and the error message enumerates the legal values. The CLI checks the same list client-side before it sends anything.
+`hooks_config` has a `CHECK` constraint on `handler_kind` but **not** on `event`. A misspelled event therefore used to insert cleanly, never match `ListByEvent`'s predicate, and silently never fire — the hook listed, toggled, and looked healthy. `hooks.Register` now rejects any event outside the fourteen above (including `pre_tool_call`, which is no longer one of them), and the error message enumerates the legal values. The CLI checks the same list client-side before it sends anything.
+
+`hooks.Update` applies the same check, but **only when the write actually changes `event`**. It re-reads the row's current event from the database and compares — it does not trust the caller to say whether `event` was touched. A `PATCH` that omits `event`, or sends the value the row already has, skips event validation entirely, which is what keeps a legacy `pre_tool_call` row editable for every other field instead of frozen behind a permanent `unknown event` error. An update that *changes* `event` to something outside the fourteen is rejected exactly as `Register` would reject it. (Pinned by `TestUpdate_LegacyEventRowStaysEditableForOtherFields` and `TestUpdate_LegacyEventRowRejectsChangingToAnotherUnknownEvent` in `internal/hooks/store_write_test.go`.)
+
+Because that read and the `UPDATE` are two statements, the `UPDATE` also carries `AND event = <the value just read>`: if another writer changes the row's event in between, this update matches no rows and returns "not found" rather than writing a stale (and unvalidated) event back over the new one.
 
 ## Endpoints
 
@@ -181,8 +197,8 @@ See [Hooks API](/api-reference/hooks) for schemas.
 ```bash
 crewship hooks list
 crewship hooks list --crew backend-team
-crewship hooks create --event pre_tool_call --handler shell \
-    --command /usr/local/bin/gate.sh --matcher-tools 'Bash,Write' --blocking
+crewship hooks create --event pre_agent_start --handler shell \
+    --command /usr/local/bin/gate.sh --crew backend-team --blocking
 crewship hooks update hk_abc --url https://new.test/hook
 crewship hooks delete hk_abc --yes
 crewship hooks enable hk_abc

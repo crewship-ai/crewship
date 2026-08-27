@@ -265,7 +265,7 @@ func TestCovPH2HooksList_CrewFilterHappy(t *testing.T) {
 		t.Fatalf("register crew hook: %v", err)
 	}
 	if _, err := hooks.Register(context.Background(), db, hooks.Hook{
-		WorkspaceID: wsID, Event: hooks.EventPreToolCall,
+		WorkspaceID: wsID, Event: hooks.EventPreAgentStart,
 		HandlerKind:   hooks.HandlerKindHTTP,
 		HandlerConfig: map[string]any{"url": "http://x.test/g"}, Enabled: true,
 	}, false); err != nil {

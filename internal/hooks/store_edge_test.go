@@ -17,7 +17,7 @@ func TestDelete_HappyPath(t *testing.T) {
 
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindShell,
 		HandlerConfig: map[string]any{"command": "echo ok"},
 	}, true)
@@ -45,7 +45,7 @@ func TestDelete_CrossTenantSafe(t *testing.T) {
 	}
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindShell,
 		HandlerConfig: map[string]any{"command": "echo ok"},
 	}, true)
@@ -73,7 +73,7 @@ func TestSetEnabled_RoundtripsThroughDB(t *testing.T) {
 
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
-		Event:         EventPreToolCall,
+		Event:         EventPreAgentStart,
 		HandlerKind:   HandlerKindShell,
 		HandlerConfig: map[string]any{"command": "echo ok"},
 		Enabled:       true,

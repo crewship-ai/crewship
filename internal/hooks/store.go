@@ -99,14 +99,30 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 // silently never fires. Rejecting it at the only write path turns a
 // permanently-dead registration into an error the caller can act on.
 func validateForInsert(h Hook, allowedShell bool) error {
-	if h.WorkspaceID == "" {
-		return errors.New("hooks: workspace_id required")
+	if err := validateEventForWrite(h.Event); err != nil {
+		return err
 	}
-	if h.Event == "" {
+	return validateWorkspaceAndHandler(h, allowedShell)
+}
+
+// validateEventForWrite is the event half of validateForInsert, split out
+// so Update can apply it only when the event is actually changing (see
+// Update's comment) while Register keeps requiring it unconditionally.
+func validateEventForWrite(e Event) error {
+	if e == "" {
 		return errors.New("hooks: event required")
 	}
-	if err := ValidateEvent(h.Event); err != nil {
-		return err
+	return ValidateEvent(e)
+}
+
+// validateWorkspaceAndHandler is the non-event half of validateForInsert:
+// workspace_id presence and the handler-kind shape/gate checks. These run
+// on every write regardless of whether the event is changing — a shell
+// hook edited to drop its command, or an http hook edited to drop its url,
+// is just as dead as a bad event.
+func validateWorkspaceAndHandler(h Hook, allowedShell bool) error {
+	if h.WorkspaceID == "" {
+		return errors.New("hooks: workspace_id required")
 	}
 	switch h.HandlerKind {
 	case HandlerKindShell:
@@ -131,8 +147,10 @@ func validateForInsert(h Hook, allowedShell bool) error {
 // Update rewrites the mutable columns of an existing hook. The caller
 // supplies the FULL desired state (an already-merged Hook, not a patch) —
 // merging partial input against the current row is the HTTP layer's job,
-// so this function stays a single UPDATE with no read-modify-write race
-// of its own.
+// so this function does not re-derive the desired column values from the
+// row. It does read one column first (event — see below), and the UPDATE
+// carries that value as a WHERE predicate so the read and the write cannot
+// disagree.
 //
 // Three things are deliberately NOT taken from h:
 //
@@ -160,8 +178,49 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 	// Validate against the workspace we are actually writing to, not the
 	// one the caller put in the struct.
 	h.WorkspaceID = workspaceID
-	if err := validateForInsert(h, allowedShell); err != nil {
+
+	// h is the FULL merged struct (see the doc comment above), so
+	// h.Event is populated even when the caller's request never
+	// mentioned "event" — it just carries whatever the row already had.
+	// A pre-existing row can carry an event that used to be valid and
+	// no longer is (pre_tool_call, removed from AllEvents the same
+	// change that added this comment): that row must stay editable and
+	// disable-able for every OTHER field, the same way SetEnabled and
+	// Delete don't care what event a row has. Re-running
+	// validateForInsert's event check unconditionally — as if every
+	// Update were a fresh Register — would instead turn "PATCH blocking
+	// on a legacy hook" into a permanent "unknown event" error with no
+	// way out short of deleting the row.
+	//
+	// So: look up the event the row actually has right now and only
+	// validate h.Event when the caller is changing it. This intentionally
+	// does NOT trust a caller-supplied "did you touch event" flag (the
+	// HTTP layer already validates an explicit change in the request
+	// body, but a future call site could get that wrong) — it re-derives
+	// "changing" from the database, so the guard holds regardless of who
+	// calls Update.
+	currentEvent, err := currentEventFor(ctx, db, workspaceID, h.ID)
+	if err != nil {
+		return fmt.Errorf("hooks: update: look up current event: %w", err)
+	}
+	if currentEvent == "" {
+		return sql.ErrNoRows
+	}
+	if h.Event != currentEvent {
+		if err := validateEventForWrite(h.Event); err != nil {
+			return err
+		}
+	}
+	if err := validateWorkspaceAndHandler(h, allowedShell); err != nil {
 		return err
+	}
+
+	// Test seam for the TOCTOU the `AND event = ?` predicate below closes.
+	// Always nil in production; a test sets it to mutate the row in the
+	// window between the read above and the UPDATE, so the race can be
+	// asserted deterministically instead of being raced for.
+	if updateEventRaceHookForTest != nil {
+		updateEventRaceHookForTest()
 	}
 
 	matcherJSON, err := json.Marshal(h.Matcher)
@@ -180,7 +239,7 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 	res, err := db.ExecContext(ctx, `UPDATE hooks_config SET
 		crew_id = ?, event = ?, matcher = ?, handler_kind = ?, handler_config = ?,
 		blocking = ?, enabled = ?, updated_at = ?
-		WHERE id = ? AND workspace_id = ?`,
+		WHERE id = ? AND workspace_id = ? AND event = ?`,
 		nullableStr(h.CrewID),
 		string(h.Event),
 		string(matcherJSON),
@@ -191,6 +250,13 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		tsformat.Format(time.Now()),
 		h.ID,
 		workspaceID,
+		// The event we validated against, not the one we are writing:
+		// this pins the UPDATE to the exact row state the check above
+		// was made on. Without it, a concurrent write that moves a
+		// legacy pre_tool_call row onto a valid event could be undone
+		// by this (now stale) update, putting the retired event back
+		// without ever passing validateEventForWrite.
+		string(currentEvent),
 	)
 	if err != nil {
 		return fmt.Errorf("hooks: update: %w", err)
@@ -200,6 +266,12 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		return fmt.Errorf("hooks: rows affected: %w", err)
 	}
 	if n == 0 {
+		// Either the row is gone or its event changed under us. Both
+		// mean "the row you computed this patch from no longer exists
+		// in that state"; both are reported as ErrNoRows so the caller
+		// (and the 404 the HTTP layer maps it to) keeps one meaning,
+		// and a racing client re-reads and retries rather than having
+		// its stale write silently win.
 		return sql.ErrNoRows
 	}
 
@@ -219,6 +291,38 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		}
 	}
 	return nil
+}
+
+// updateEventRaceHookForTest is nil in production. Update calls it (when
+// set) between reading the row's current event and issuing the guarded
+// UPDATE, which is the only way to land another writer inside that window
+// deterministically. Kept in the non-test file because the seam has to sit
+// in the function it guards.
+//
+// Unsynchronised on purpose — same shape as the stdlib's testHook* vars.
+// A test that sets it must not run under t.Parallel(), and no test may set
+// it while another goroutine is inside Update, or the race detector will
+// (correctly) object. No test in this package does either today; if that
+// changes, the seam needs an atomic, not a comment.
+var updateEventRaceHookForTest func()
+
+// currentEventFor returns the event a row currently has, scoped to
+// workspaceID so a cross-tenant id reads back as "not found" rather than
+// leaking another tenant's event value. Returns ("", nil) — not an error —
+// when no such row exists in that workspace; Update treats that the same
+// way SetEnabled/Delete treat a missing row (sql.ErrNoRows).
+func currentEventFor(ctx context.Context, db *sql.DB, workspaceID, id string) (Event, error) {
+	var event string
+	err := db.QueryRowContext(ctx,
+		`SELECT event FROM hooks_config WHERE id = ? AND workspace_id = ?`,
+		id, workspaceID).Scan(&event)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return Event(event), nil
 }
 
 // Delete removes a hook row, scoped to the workspace so cross-tenant

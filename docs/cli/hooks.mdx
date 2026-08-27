@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship hooks
 
-Manage the lifecycle-hook registry -- shell commands, HTTP webhooks, or subagents that fire on platform events (`pre_tool_call`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 15-event catalog and the three handler kinds.
+Manage the lifecycle-hook registry -- shell commands, HTTP webhooks, or subagents that fire on platform events (`pre_agent_start`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 14-event catalog and the three handler kinds. There is no `pre_tool_call` -- the platform has no interception point before a tool runs. `post_tool_call` is a valid event you can register, but it does not currently fire for user-registered hooks either -- see [Currently-dispatched events](#currently-dispatched-events) below.
 
 ```bash
 crewship hooks <subcommand> [flags]
@@ -72,7 +72,7 @@ New hooks are **enabled** unless you pass `--disabled`.
 
 | Flag | Type | Description |
 |---|---|---|
-| `--event` | `string` | Lifecycle event. Validated locally against the 15 declared events — an unknown value errors before any request is sent, and the message lists the valid names. |
+| `--event` | `string` | Lifecycle event. Validated locally against the 14 declared events — an unknown value errors before any request is sent, and the message lists the valid names. |
 | `--handler` | `string` | `shell`, `http`, or `subagent`. |
 | `--url` | `string` | http handler: destination URL. |
 | `--command` | `string` | shell handler: command run on the host (`OWNER` only). |
@@ -92,13 +92,13 @@ New hooks are **enabled** unless you pass `--disabled`.
 crewship hooks create --event on_approval_requested --handler http \
     --url https://hooks.slack.com/services/XXX
 
-# Blocking shell gate on Bash and Write, for one crew (OWNER only)
-crewship hooks create --event pre_tool_call --handler shell \
+# Blocking shell gate before every agent run, for one crew (OWNER only)
+crewship hooks create --event pre_agent_start --handler shell \
     --command /usr/local/bin/gate.sh \
-    --matcher-tools 'Bash,Write' --crew backend-team --blocking
+    --crew backend-team --blocking
 
 # Anything the convenience flags don't cover
-crewship hooks create --event pre_llm_call --handler http \
+crewship hooks create --event on_guardrail_triggered --handler http \
     --handler-config '{"url":"https://x.test/h","method":"PUT","hmac_secret":"..."}' \
     --matcher '{"agent_ids":["ag_1"],"severities":["warn","error"]}'
 ```
@@ -107,7 +107,7 @@ Sample output:
 
 ```
 Created hook hk_abc123
-  event    pre_tool_call
+  event    pre_agent_start
   handler  shell → /usr/local/bin/gate.sh
   crew     crw_backend
   state    enabled, blocking
@@ -183,12 +183,18 @@ Same auth and audit semantics as enable.
 
   - `pre_agent_start`, `post_agent_stop`
   - `on_approval_requested`
+  - `on_guardrail_triggered`
 
-  The other 12 events are defined but not yet dispatched at their call
-  sites — see the
-  [Hooks guide coverage table](/guides/hooks#coverage-status-as-of-pr-%23210).
+  The other ten of the fourteen creatable events are defined but not yet
+  dispatched at their call sites — see the
+  [Hooks guide coverage table](/guides/hooks#coverage-status-as-of-pr-%23210),
+  which is the source of truth for this list.
   Registering a hook on an undispatched event is legal but nothing will
-  fire it.
+  fire it — `post_tool_call` included. `pre_tool_call` used to be exactly
+  this trap with no way out (an undispatched event that also had no "wire
+  it up" path on the roadmap) and was removed from the valid event list
+  rather than left there — it is the one undispatched-looking event that
+  is now also a 400, not just a silently-dead 201.
 </Accordion>
 
 ## Related

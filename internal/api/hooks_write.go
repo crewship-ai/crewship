@@ -11,7 +11,7 @@ package api
 // Two gates matter here and are enforced in this file rather than at the
 // route table, because neither reduces to a single workspace-role check:
 //
-//   - `event` must be one of the fifteen declared in internal/hooks. The
+//   - `event` must be one of the fourteen declared in internal/hooks. The
 //     hooks_config schema CHECKs handler_kind but NOT event, so a typo
 //     inserts cleanly and is then never selected by ListByEvent — the hook
 //     lists, toggles, and looks healthy while being permanently dead. The
