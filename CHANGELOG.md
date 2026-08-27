@@ -301,6 +301,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   now reject the six exact generated config paths before IPC, while ordinary
   dotfiles and user-authored skills below `.codex/`, `.gemini/`, and similar
   directories remain available.
+- **The agent's raw stdout+stderr capture reached the audit journal without
+  passing through the credential scrubber (#2133).** `streamOutput`'s
+  end-of-stream `exec.output_chunk` emit wrote `captureBuf` — the process's
+  raw combined output — straight into the journal payload. `wrapScrubHandler`'s
+  stream scrubber only ever sees parsed `AgentEvent`s; `captureBuf` is a
+  second, separate raw-byte capture read directly off the process's
+  stdout/stderr, so it bypassed the scrubber entirely. A credential an agent
+  printed — its own, or one echoed back by a poisoned tool result — landed in
+  a hash-chained, append-only journal row that can never be redacted after the
+  fact. The capture now runs through the same `internal/scrubber` the rest of
+  the outbound path uses, seeded with the run's own loaded credential values,
+  the same way the adapter-exec-error path already scrubs its copy of this
+  same raw output. `total_bytes` and `truncated` still describe the raw
+  stream and are computed before scrubbing, since redaction changes the
+  string's length.
 - **Erasing an operator model reported success while leaving a readable copy
   behind (#2131).** The user model is stored per crew, at
   `crews/{crewID}/shared/.memory/users/{slug}.md`, but its index row is keyed
@@ -1090,6 +1105,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   closes it. `CredentialFilters` facets are lists, so values inside a group OR
   and the groups AND — "any Anthropic or GitHub certificate this crew can
   reach" is now one pass through the panel.
+
+- **`crewship inspect` always printed `tool calls: 0`, no matter how many
+  tools the run actually invoked.** The footer counter recognized a journal
+  entry as a tool call when `entry_type` was `tool_call` or started with
+  `tool.` — neither of which the journal ever writes. A run's individual
+  tool invocations are journaled as `run.agent_span`
+  (`internal/journal/types.go`), the leaf of the run's drillable trace tree,
+  and matched neither check, so the counter stayed at zero on every run that
+  used tools. The `errors:` counter beside it had the same blind spot from
+  a different angle: a failed tool call is journaled at severity `warn`, not
+  `error` (`internal/pipeline/agent_span_emit.go` deliberately does not
+  escalate a span failure to the run's own error severity), so a run whose
+  only failures were failed tool calls also reported `errors: 0`. Both
+  counters now recognize `run.agent_span` entries directly, reading the
+  span's own `status` field for the error count.
 
 ### Added
 

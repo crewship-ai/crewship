@@ -625,7 +625,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			scrubHandler(event)
 		}
 	})
-	rawOutput := o.streamOutput(execCtx, result, req, tappedHandler)
+	rawOutput := o.streamOutput(execCtx, result, req, tappedHandler, secretValues)
 	// Drain the stream scrubber's overlap buffer now the stream has ended,
 	// so any secret straddling the final chunk (or short output held back
 	// entirely) is scrubbed and the redacted tail still reaches the user.

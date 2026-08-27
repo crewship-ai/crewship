@@ -159,7 +159,7 @@ func TestStreamOutput_SynthesizesTerminalResultOnEarlyExit(t *testing.T) {
 	result := &provider.ExecResult{ExecID: "e1", Reader: io.NopCloser(strings.NewReader(stream))}
 
 	var events []AgentEvent
-	o.streamOutput(context.Background(), result, opencodeStreamReq(), func(e AgentEvent) { events = append(events, e) })
+	o.streamOutput(context.Background(), result, opencodeStreamReq(), func(e AgentEvent) { events = append(events, e) }, nil)
 
 	var text string
 	var results []AgentEvent
@@ -201,7 +201,7 @@ func TestStreamOutput_NoSyntheticResultWhenStepFinishArrived(t *testing.T) {
 		if e.Type == "result" {
 			results++
 		}
-	})
+	}, nil)
 	if results != 1 {
 		t.Fatalf("want exactly 1 result event from step_finish, got %d", results)
 	}
@@ -223,7 +223,7 @@ func TestStreamOutput_NoSyntheticResultAfterErrorEvent(t *testing.T) {
 		if e.Type == "result" {
 			results++
 		}
-	})
+	}, nil)
 	if results != 0 {
 		t.Fatalf("error-terminated stream must not synthesize a result, got %d", results)
 	}
