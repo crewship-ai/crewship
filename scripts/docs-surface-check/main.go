@@ -245,6 +245,15 @@ func main() {
 	}
 	fmt.Printf("docs-surface-check: no inline code span wraps onto a `<` continuation\n")
 
+	// MDX tag safety. Runs after the content passes because a broken tag fails
+	// the whole external docs build, and that build reports as a status the
+	// repo does not control — on the commit that introduced the last one it
+	// said "skipped: Changes superseded by downstream commit", so nothing
+	// surfaced until unrelated PRs merged main days later.
+	if err := reportUnguardedMDXTags(*root); err != nil {
+		fail(err)
+	}
+
 	served, err := checkServed(*baseURL, len(declared))
 	if err != nil {
 		fail(err)
@@ -933,14 +942,16 @@ func jsxHostileCodeSpans(root string) ([]wrappedCodeSpan, error) {
 				}
 			}
 		}
-		fenced := false
+		// Shares fenceState with the MDX tag pass rather than toggling on a
+		// "```" prefix. The naive toggle is wrong on a nested fence — an inner
+		// ```yaml inside an outer ```markdown reads as a close, and everything
+		// after it is then treated as prose. docs/guides/skills-authoring.mdx
+		// has exactly that shape at :80/:83. Two fence implementations that
+		// disagree is worse than one, whichever is right.
+		var fence fenceState
 		for i := start; i < len(lines); i++ {
 			line := lines[i]
-			if strings.HasPrefix(strings.TrimSpace(line), "```") {
-				fenced = !fenced
-				continue
-			}
-			if fenced {
+			if fence.feed(line) || fence.inside() {
 				continue
 			}
 			if wrapsOntoTag(line) {
