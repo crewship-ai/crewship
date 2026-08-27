@@ -189,28 +189,40 @@ jobs:
           # What it tolerates is the narrow, legitimate case of a base commit
           # that has no `CHANGELOG.md` yet — there, base reads empty, head does
           # not, and the PR correctly counts as adding one.
+          # One pass that both extracts the section and reports whether the
+          # heading exists, via `exit 3` at END. It deliberately does NOT `exit`
+          # the moment the section ends, and the heading is NOT probed with a
+          # separate `grep -q`: either would close the pipe on the first match,
+          # `printf` would take SIGPIPE on the ~190 KB still queued, and
+          # `pipefail` would turn a successful match into status 141. That is
+          # the same trap the file-list printer above sidesteps with a counter,
+          # and a small fixture never reproduces it — the pipe buffer swallows
+          # the whole file, printf finishes, and the bug only appears against a
+          # real CHANGELOG.
           unreleased_section() {
             awk '
-              /^## \[Unreleased\]/ { inside = 1; next }
-              inside && /^## /     { exit }
+              /^## \[Unreleased\]/ { inside = 1; found = 1; next }
+              inside && /^## /     { inside = 0 }
               inside               { print }
+              END                  { if (!found) exit 3 }
             '
           }
 
           base_changelog="$(git show "origin/$BASE_REF:CHANGELOG.md" 2>/dev/null || true)"
           head_changelog="$(git show "HEAD:CHANGELOG.md" 2>/dev/null || true)"
 
-          # The heading is load-bearing. Without it every PR looks like it
+          # A base with no heading is legitimate — the PR is adding the file.
+          base_unreleased="$(printf '%s\n' "$base_changelog" | unreleased_section)" \
+            || base_unreleased=""
+
+          # A head with no heading is not. Without it every PR looks like it
           # changed nothing, and a gate that cannot see the section it checks
           # must say so rather than hand out a verdict it did not reach.
-          if ! printf '%s\n' "$head_changelog" | grep -q '^## \[Unreleased\]'; then
+          if ! head_unreleased="$(printf '%s\n' "$head_changelog" | unreleased_section)"; then
             echo "::error::CHANGELOG.md has no '## [Unreleased]' heading (or the file is gone)."
             echo "::error::RELEASING.md cuts release notes from that section, so this guard cannot verify an entry without it. Restore the heading."
             exit 1
           fi
-
-          base_unreleased="$(printf '%s\n' "$base_changelog" | unreleased_section)"
-          head_unreleased="$(printf '%s\n' "$head_changelog" | unreleased_section)"
 
           if [ "$base_unreleased" != "$head_unreleased" ]; then
             echo "CHANGELOG.md's '## [Unreleased]' section is changed by this PR. ✓"

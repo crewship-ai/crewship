@@ -120,6 +120,25 @@ cat > "$FIXTURE/CHANGELOG.md" <<'CHANGELOG'
 - **A shipped entry.** Details.
 CHANGELOG
 
+# Pad the shipped section past the 64 KiB pipe buffer. This is load-bearing,
+# not filler.
+#
+# The guard feeds the whole file into a pipe. Any matcher that stops reading at
+# the first hit — `grep -q`, an `awk` that `exit`s when the section ends —
+# closes that pipe while `printf` still has hundreds of KB queued. printf takes
+# SIGPIPE, `pipefail` reports 141, and a successful match is read as a failure:
+# the guard declares `## [Unreleased]` missing from a file that plainly has it,
+# and fails every PR.
+#
+# A small fixture hides this completely — the buffer swallows the file, printf
+# finishes, every case passes. The real CHANGELOG.md is ~190 KB, so the first
+# implementation passed this suite and then failed against the actual
+# repository. Keep the padding.
+for i in $(seq 1 4000); do
+  echo "- **Shipped entry $i.** Details, details, details, details, details." \
+    >> "$FIXTURE/CHANGELOG.md"
+done
+
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" commit -qm "base"
 # A real remote-tracking ref: `origin/$BASE_REF` is what the guard resolves.
