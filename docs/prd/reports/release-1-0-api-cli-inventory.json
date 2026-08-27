@@ -8,7 +8,7 @@
     "cli_exact_docs": 801,
     "cli_root_docs_present": 801,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 442,
+    "api_with_test_signals": 444,
     "api_with_concrete_response_schemas": 573,
     "api_generic_response_schemas": 0,
     "api_with_request_bodies": 251,
@@ -1881,7 +1881,8 @@
         "docs/api-reference/admin.mdx",
         "docs/cli/admin.mdx",
         "docs/guides/consolidate.mdx",
-        "docs/guides/memory-observability.mdx"
+        "docs/guides/memory-observability.mdx",
+        "docs/prd/documentation-contract-testing.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1928,7 +1929,8 @@
         "docs/api-reference/admin.mdx",
         "docs/cli/admin.mdx",
         "docs/guides/consolidate.mdx",
-        "docs/guides/memory-observability.mdx"
+        "docs/guides/memory-observability.mdx",
+        "docs/prd/documentation-contract-testing.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -2188,6 +2190,7 @@
       "exact_docs": [
         "docs/api-reference/admin.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/prd/documentation-contract-testing.md",
         "docs/security/security-headers.mdx"
       ],
       "resource_docs": [
@@ -2195,7 +2198,8 @@
       ],
       "status": "documented_exact",
       "test_signals": [
-        "internal/api/admin_ratelimits_test.go"
+        "internal/api/admin_ratelimits_test.go",
+        "scripts/docs-surface-check/main_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -2214,7 +2218,8 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_admin_ratelimits.go",
           "test_signals": [
-            "internal/api/admin_ratelimits_test.go"
+            "internal/api/admin_ratelimits_test.go",
+            "scripts/docs-surface-check/main_test.go"
           ]
         }
       }
@@ -2228,12 +2233,16 @@
       "exact_docs": [
         "docs/api-reference/admin.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/prd/documentation-contract-testing.md",
         "docs/security/security-headers.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "scripts/docs-surface-check/main_test.go"
+      ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
       "request_body_present": false,
@@ -2249,7 +2258,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_admin.go"
+          "source_file": "internal/api/router_admin.go",
+          "test_signals": [
+            "scripts/docs-surface-check/main_test.go"
+          ]
         }
       }
     },
@@ -2262,12 +2274,16 @@
       "exact_docs": [
         "docs/api-reference/admin.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/prd/documentation-contract-testing.md",
         "docs/security/security-headers.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "scripts/docs-surface-check/main_test.go"
+      ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
       "request_body_present": true,
@@ -2283,7 +2299,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_admin.go"
+          "source_file": "internal/api/router_admin.go",
+          "test_signals": [
+            "scripts/docs-surface-check/main_test.go"
+          ]
         }
       }
     },
@@ -2491,7 +2510,8 @@
         "internal/api/admin_authz_floor_test.go",
         "internal/api/pages_transfer_owner_test.go",
         "internal/api/unauth_reachability_test.go",
-        "internal/database/migrate_mission_code_links_test.go"
+        "internal/database/migrate_mission_code_links_test.go",
+        "…"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -2517,7 +2537,8 @@
             "internal/api/admin_authz_floor_test.go",
             "internal/api/pages_transfer_owner_test.go",
             "internal/api/unauth_reachability_test.go",
-            "internal/database/migrate_mission_code_links_test.go"
+            "internal/database/migrate_mission_code_links_test.go",
+            "…"
           ]
         }
       }
@@ -49066,7 +49087,7 @@
   ],
   "docs_to_code": {
     "command_references": 4429,
-    "api_path_references": 2166,
+    "api_path_references": 2179,
     "environment_references": 432,
     "manifest_kind_references": 230,
     "flag_references": 2094,
