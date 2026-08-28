@@ -70,6 +70,23 @@ got="$(parse "$(thread \
   "$(comment 2026-07-30T11:00:00Z Srbino '**RELEASE** — clone `crewship_2` · branch `fix/beta` · 2026-07-30T11:00Z')")")"
 expect_contains "release from another clone does NOT clear it" "$got" "crewship_1"
 
+# #2107: a claim posted before the feature branch exists (the documented
+# order — CONTRIBUTING says to claim before your first commit) is released
+# from a DIFFERENT branch of the SAME clone. The old predicate required both
+# clone and branch to match, so this release never landed and the claim
+# stayed live forever. Cancellation now keys on clone alone.
+got="$(parse "$(thread \
+  "$(comment 2026-07-30T09:00:00Z Srbino "$CLAIM_A")" \
+  "$(comment 2026-07-30T11:00:00Z Srbino '**RELEASE** — clone `crewship_1` · branch `fix/something-else-entirely` · 2026-07-30T11:00Z')")")"
+expect_eq "release from a different branch, SAME clone, clears it (#2107)" "" "$got"
+
+# The exact shape from the issue: claim under the auto-minted worktree
+# branch, release under the real feature branch that replaced it.
+got="$(parse "$(thread \
+  "$(comment 2026-07-30T09:00:00Z Srbino '**CLAIM** — clone `crewship_1` · branch `worktree-agent-a8474dee8fcab1732` · 2026-07-30T09:00Z')" \
+  "$(comment 2026-07-30T11:00:00Z Srbino '**RELEASE** — clone `crewship_1` · branch `fix/1815-the-actual-work` · 2026-07-30T11:00Z')")")"
+expect_eq "worktree-branch claim released from the real feature branch clears it (#2107)" "" "$got"
+
 got="$(parse "$(thread \
   "$(comment 2026-07-30T09:00:00Z Srbino "$CLAIM_A")" \
   "$(comment 2026-07-30T10:00:00Z Srbino "$CLAIM_B")" \
@@ -135,6 +152,61 @@ expect_eq "unnumbered checkout falls back to its directory name" "crewship" \
   "$(clone_of '/home/dev/crewship')"
 expect_eq "a path with no crewship_N anywhere still yields something" "src" \
   "$(clone_of '/home/dev/src')"
+
+echo "== branch detection (#2107) =="
+
+# A git worktree with no explicit -b mints a branch named worktree-agent-<hash>
+# — the ordinary state at claim time, since CONTRIBUTING says to claim before
+# the feature branch exists. detect_branch must never hand that string back:
+# it means nothing to a reader, and it is guaranteed to differ from whatever
+# branch exists by the time --release runs, which is the generator of #2107's
+# phantom-lock bug.
+if command -v git >/dev/null 2>&1; then
+  BRANCH_TMP="$(mktemp -d)"
+  git -C "$BRANCH_TMP" init -q -b main
+  git -C "$BRANCH_TMP" config user.email test@example.com
+  git -C "$BRANCH_TMP" config user.name test
+  git -C "$BRANCH_TMP" commit -q --allow-empty -m init
+
+  # Runs with stdout+stderr merged and prefixed on failure, so a script that
+  # does not even understand --detect-branch (e.g. pre-#2107 main) reads as
+  # an error/empty value here rather than silently passing an
+  # expect_not_contains check against "".
+  detect_branch_in() {
+    local out rc
+    out="$( ( cd "$1" && env -u CLAIM_BRANCH "$CLAIM" --detect-branch ) 2>&1 )"; rc=$?
+    [ "$rc" -eq 0 ] || out="ERROR(rc=$rc): $out"
+    printf '%s' "$out"
+  }
+
+  git -C "$BRANCH_TMP" checkout -q -b worktree-agent-a8474dee8fcab1732
+  got="$(detect_branch_in "$BRANCH_TMP")"
+  case "$got" in
+    worktree-agent-*|""|ERROR*)
+      fail "worktree-agent-* is never recorded as the branch" "got «$got»" ;;
+    *) pass "worktree-agent-* is never recorded as the branch" ;;
+  esac
+
+  got2="$(detect_branch_in "$BRANCH_TMP")"
+  expect_eq "…and the fallback is stable across repeated calls (claim, then release)" "$got" "$got2"
+
+  # An upstream configured before the feature branch exists (rare, but free
+  # when present) should win over the path fallback.
+  git -C "$BRANCH_TMP" branch --set-upstream-to=main worktree-agent-a8474dee8fcab1732 >/dev/null 2>&1
+  got="$(detect_branch_in "$BRANCH_TMP")"
+  expect_eq "an upstream branch, if configured, is preferred over the path" "main" "$got"
+
+  # An ordinary feature branch passes through unchanged — only the
+  # auto-minted worktree name is special-cased.
+  git -C "$BRANCH_TMP" checkout -q -b fix/2107-claim-release-matches-on-clone
+  got="$(detect_branch_in "$BRANCH_TMP")"
+  expect_eq "an ordinary branch name passes through unchanged" \
+    "fix/2107-claim-release-matches-on-clone" "$got"
+
+  rm -rf "$BRANCH_TMP"
+else
+  printf 'git not installed — skipping branch-detection tests\n'
+fi
 
 echo "== the gate: who gets refused =="
 
