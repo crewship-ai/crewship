@@ -77,8 +77,17 @@ const (
 	EventPrePeerConversation  Event = "pre_peer_conversation"
 	EventPostPeerConversation Event = "post_peer_conversation"
 
-	// Policy / limit events. Fire once per triggering condition so a hook
-	// can route them to pagerduty, slack, the journal, a Captain, etc.
+	// Policy / limit events, meant to be routed onward — pagerduty, slack,
+	// the journal, a Captain.
+	//
+	// OnApprovalRequested and OnGuardrailTriggered fire once per triggering
+	// condition. OnBudgetExceeded does NOT yet: it fires on every LLM call
+	// made while a budget is over, and twice on a call that breaches two
+	// budgets, because the check sits in the per-call path with nothing
+	// recording that this breach has already been announced. A journal row
+	// can absorb that; a pager cannot. Debouncing it to once per breach is
+	// tracked separately — until then, wire it to something that tolerates
+	// repeats.
 	EventOnApprovalRequested  Event = "on_approval_requested"
 	EventOnBudgetExceeded     Event = "on_budget_exceeded"
 	EventOnGuardrailTriggered Event = "on_guardrail_triggered"
