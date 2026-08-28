@@ -321,6 +321,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **`claim-issue.sh` produced permanent phantom locks in the majority of
+  cases — measured at 19 of 35 live claims, with 6 issues double-claimed
+  (#2107).** Two compounding bugs. First, the RELEASE parser cancelled a
+  CLAIM only when both clone and branch matched it; CONTRIBUTING says to
+  claim an issue *before* the first commit, i.e. before the feature branch
+  exists, so the ordinary claim → work → release sequence posts the RELEASE
+  from a different branch than the CLAIM and the cancellation never fired.
+  Second, `detect_branch` recorded a `git worktree`'s auto-minted
+  `worktree-agent-<hash>` branch verbatim, which guaranteed that mismatch for
+  every well-behaved worktree session and told a reader nothing besides. A
+  lock that stays stuck more than half the time trains sessions to reach for
+  `--force`, and forcing a live claim looks identical to forcing a dead one.
+  Cancellation now matches on clone identity alone — a release from clone X
+  ends X's open claims regardless of branch, and a release naming neither
+  clone nor branch still ends everything, unchanged. `detect_branch` now
+  refuses a `worktree-agent-*` value, preferring the upstream/tracking
+  branch when one is already configured and otherwise falling back to the
+  worktree path, which does not change between CLAIM and RELEASE.
+
 - **The crew-scoped file download served the exact bytes the agent door had
   just been taught to refuse (#2142).** #2069 added a check to
   `GET /agents/{agentId}/files/download` denying the six generated per-agent
