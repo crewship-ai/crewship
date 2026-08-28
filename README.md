@@ -31,9 +31,9 @@
 Crewship gives every crew of agents its own **real Linux container** — a fully
 sandboxed machine where the agent runs and can install *literally anything*:
 system packages, databases, build tools, whole workspaces. You choose what
-drives it — a **local model via Ollama**, **OpenCode**, or **Claude Code** — so
-you are never locked to one vendor or forced to push your code into someone
-else's cloud.
+drives it — **Claude Code**, **OpenCode**, or OpenCode running a **local model
+via Ollama** — so you are never locked to one vendor or forced to push your
+code into someone else's cloud.
 
 Around that runtime, Crewship is the control plane a team actually needs to run
 agents for real: **missions** where a lead plans a task breakdown and agents
@@ -49,8 +49,12 @@ anyone: a **Lead** agent directs the work and can **hire** specialists on demand
 while member **Agents** do the tasks. Every participant — human and agent — has
 their own **chat**, their own **inbox**, and a place in the org.
 
-You bring the keys — or run fully local. Crewship keeps them off disk, off the
-wire, and out of the agent process.
+You bring the keys — or run fully local. Crewship keeps them encrypted at
+rest and, for proxied API-key auth (Claude Code, Codex, Gemini, and any
+OpenCode provider actually routed through the sidecar), out of the agent
+process too; OAuth tokens and other non-proxied auth modes or adapters put
+the real key in the container's environment (see [what's ready vs.
+WIP](#whats-ready-vs-wip)).
 
 ---
 
@@ -141,11 +145,14 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 
 **1 · The runtime**
 
-- ✅ **Real Linux containers** — one per crew: isolated network, non-root UID,
-  read-only root, cap-drop ALL. Install, build, and run anything Linux
-  supports. [→ devcontainers](docs/guides/devcontainers.mdx)
-- ✅ **Pick your engine** — drive a crew with a **local model via Ollama**,
-  **OpenCode**, or **Claude Code**. No API key required if you run local.
+- ✅ **Real Linux containers** — one per crew: non-root UID, read-only root,
+  cap-drop ALL. Network is not isolated per crew — every crew's container
+  joins one shared Docker bridge network on the host. Install, build, and run
+  anything Linux supports. [→ devcontainers](docs/guides/devcontainers.mdx)
+- ✅ **Pick your engine** — drive a crew with **Claude Code**, **OpenCode**, or
+  OpenCode running a **local model via Ollama** (no API key required). Ollama
+  is a model provider you pair with the OpenCode adapter, not a standalone
+  engine — Claude Code itself always calls the Anthropic API.
   [→ CLI adapters](docs/guides/cli-adapters.mdx)
 - 🟡 **Bring your own provider** — an embedded catalogue of models and their
   prices, two configurable wire codecs, and `crewship model price` to see what a
@@ -160,12 +167,17 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   agent or a whole crew; an agent can also turn a workflow it just performed
   into one. [→ skills](docs/guides/skills.mdx)
   · [agent-authored](docs/guides/skills-agent-authored.mdx)
-- 🟡 **Hooks** — shell, HTTP or subagent callbacks on lifecycle events, able to
-  block the action that fired them. [→ hooks](docs/guides/hooks.mdx)
-- ✅ **Manifests** — declare your whole org (workspace, crews, agents, skills,
-  integrations, issues, projects) as files and `crewship apply` it. GitOps for
-  your agent fleet — or read a crew manifest straight into the New-crew form in
-  the browser, which tells you up front what it will fill in and what the file
+- 🟡 **Hooks** — shell, HTTP or subagent callbacks on lifecycle events. 4 of
+  the 15 declared events are ever dispatched — agent start, agent stop, an
+  approval request, and a guardrail trip — and only the agent-start hook can
+  block the action that fired it; the other three fire but their result is
+  discarded or only logged. [→ hooks](docs/guides/hooks.mdx)
+- ✅ **Manifests** — declare your whole org as files and `crewship apply` it:
+  21 kinds, from workspace, crews, agents, skills, integrations, issues, and
+  projects down to labels, milestones, workflow templates, triage rules,
+  routines, feature flags, connectors, and hooks. GitOps for your agent
+  fleet — or read a crew manifest straight into the New-crew form in the
+  browser, which tells you up front what it will fill in and what the file
   declares that the form cannot create. [→ manifests](docs/guides/manifests.mdx)
 
 **2 · Working with agents (the "company")**
@@ -178,6 +190,14 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   clone. [→ API: missions](docs/api-reference/missions.mdx)
 - ✅ **Per-agent chat** — every agent has its own conversation, resumable across
   sessions. [→ chat sessions](docs/guides/chat-sessions.mdx)
+- ✅ **Inbound webhooks** — `POST /api/v1/webhooks/{crewId}/{agentId}/trigger`
+  wakes a specific agent from outside Crewship: HMAC-SHA256 over the body,
+  keyed by the agent's webhook secret. Sending `X-Timestamp` upgrades the
+  signature to `timestamp.body` with a 5-minute replay window; a sender that
+  omits it gets accepted on body-only HMAC, which has no replay protection.
+  An agent can be set to require the timestamped scheme, closing that gap for
+  its callers. It starts the crew container if needed and opens or continues
+  a chat turn. [→ API: webhooks](docs/api-reference/webhooks.mdx)
 - 🟡 **Ask forms** — when an agent needs answers before it can start, it offers a
   short questionnaire instead of a paragraph of questions; what you fill in is
   sent as an ordinary message. [→ ask forms](docs/guides/ask-forms.mdx)
@@ -211,22 +231,40 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 
 - ✅ **Role-based access control** — OWNER › ADMIN › MANAGER › MEMBER › VIEWER,
   enforced on every route. [→ auth](docs/guides/auth.mdx)
-- ✅ **Approvals** — risky tool calls pause for human sign-off; the agent waits.
+- 🟡 **Approvals** — a human sign-off gate on starting an agent run, and on
+  marking a finished mission task complete. Starting a run blocks
+  synchronously — the caller polls until someone decides or it times out.
+  Finishing a task does not block a call; it marks the task
+  `AWAITING_APPROVAL` and the mission holds by never advancing that task's
+  dependents until someone decides. A risky tool call mid-run is not paused
+  before it executes — it runs, then gets logged and journaled.
   *(Harbormaster)* [→ harbormaster](docs/guides/harbormaster.mdx)
 - ✅ **Keeper** — optional rule-based gate + watchdog on what agents pull and do:
   it sits between an agent and the vault and can refuse a secret the job does not
   justify asking for, with snitch-to-admin alerts. How often the watchdog reviews
   a tool call is a workspace setting (`crewship keeper sampling`), not a constant
   compiled into the build. Off by default. [→ keeper](docs/guides/keeper.mdx)
-- ✅ **Cost ledger** — every LLM call priced with token counts; per-workspace
-  budgets enforced. *(Paymaster)* [→ paymaster](docs/guides/paymaster.mdx)
-- ✅ **Input guard** — argument- and prompt-injection guardrails on LLM inputs.
+- 🟡 **Cost ledger** — every LLM call priced with token counts and written to
+  an auditable ledger. Hierarchical workspace → crew → mission → agent budget
+  enforcement is implemented in the pricing middleware and runs ahead of every
+  call, but no API, CLI, or UI surface yet lets you create a budget — so there
+  is no way to configure one, and the enforcement code never fires today.
+  *(Paymaster)* [→ paymaster](docs/guides/paymaster.mdx)
+- 🟡 **Input guard** — prompt-injection scanning (regex + zero-width/RTL
+  heuristics, English-language patterns) runs on every user message and
+  tool-result fed back to the model. An argument-schema validator exists in
+  the same package but is not wired into any live request path yet.
   *(Lookout)* [→ lookout](docs/guides/lookout.mdx)
 - ✅ **Audit journal** — append-only, searchable (FTS5), exportable stream of
-  every LLM call, tool use, and decision. *(Crew Journal)* [→ crew journal](docs/guides/crew-journal.mdx)
-- ✅ **Replay & regression** — replay a mission deterministically or diff two
-  runs for regressions in tool success, cost, and step signature.
-  *(Quartermaster)* [→ API: eval](docs/api-reference/eval.mdx)
+  every LLM call, tool use, and decision, chained with a keyed HMAC-SHA256
+  signature per entry so tampering is detectable end to end; `crewship journal
+  verify` walks the chain and exits non-zero on a break. *(Crew Journal)*
+  [→ crew journal](docs/guides/crew-journal.mdx)
+- 🟡 **Replay & regression** — observational replay rehydrates a mission's
+  trajectory from the journal and recomputes its metrics; it does not
+  re-execute the agents. Regression diff compares tool success rate, steps
+  to goal, cost, and hallucination count between two runs. *(Quartermaster)*
+  [→ API: eval](docs/api-reference/eval.mdx)
 - ✅ **Checkpoints & fork** — snapshot a mission's state, advisory-restore it, or
   fork a fresh mission from any point. *(Cartographer)* [→ API: checkpoints](docs/api-reference/checkpoints.mdx)
 - ✅ **Admin console** — instance security posture, plus rate limits and memory
@@ -237,11 +275,18 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
 
 **4 · Your data, your keys**
 
-- ✅ **Encrypted credential vault** — AES-256-GCM at rest, piped over a Unix
-  socket to a sidecar that injects per-request, never to the agent process.
+- 🟡 **Encrypted credential vault** — AES-256-GCM at rest. Bare API keys for
+  Claude Code, Codex, and Gemini are proxied per-request over a loopback TCP
+  sidecar (`127.0.0.1:9119`) and never reach the agent process; OAuth tokens
+  (any adapter, including Claude Code), Cursor CLI, Factory Droid, and
+  non-proxied OpenCode providers land in the container's environment instead
+  — and so does any `SECRET`-type credential, since Keeper, which gates
+  `SECRET` behind a request/execute flow, is off by default.
   [→ credentials](docs/guides/credentials.mdx) · [encryption at rest](docs/guides/encryption-at-rest.mdx)
-- ✅ **Outbound scrubber** — credential patterns redacted from agent output
-  before it leaves the container.
+- 🟡 **Outbound scrubber** — the assistant's chat-facing response stream is
+  redacted for credential patterns before it's journaled or shown. Raw
+  container exec stdout/stderr is journaled unscrubbed first (up to 16 KB per
+  chunk), for the internal replay snapshot.
 - ✅ **Agent memory** — file-first memory that recalls across sessions, plus
   crew-shared facts with cross-crew isolation. Vector recall over the journal and
   keyword search across past chats sit on top of it.
@@ -252,10 +297,11 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   another harness. The point of the whole design — nothing here is a format only
   Crewship can read. [→ memory portability](docs/guides/memory-portability.mdx)
 - ✅ **Encrypted backups** — Age-encrypted bundles capture a whole workspace or
-  crew — code, data, conversations, journal, memory — so nothing agents create
-  disappears. A bundle from a newer build restores on an older one, and the
-  restore **reports the values it had to drop** instead of counting them as
-  success. [→ backup](docs/guides/backup.mdx)
+  crew: the container is paused for a consistent snapshot, then its real
+  filesystem is tarred out — code, data, conversations, journal, memory — so
+  nothing agents create disappears. A bundle from a newer build restores on an
+  older one, and the restore **reports the values it had to drop** instead of
+  counting them as success. [→ backup](docs/guides/backup.mdx)
 - 🟡 **Integrations** — connect agents to external tools via MCP and Composio.
   [→ integrations](docs/guides/integrations.mdx)
 
@@ -419,7 +465,7 @@ saying the web UI was not built. That is deliberate — see
 | Auth | NextAuth.js v5 (Auth.js), JWT + refresh tokens |
 | Database | SQLite via `modernc.org/sqlite`, Go-side migrations (no Prisma at runtime) |
 | Backend | Go 1.26 (`crewship`) — REST + WebSocket, Docker orchestration |
-| Agent runtime | Docker containers; Ollama / OpenCode / Claude Code adapters (plus scaffolds) |
+| Agent runtime | Docker containers; Claude Code / OpenCode adapters, Ollama as a local-model provider under OpenCode (plus scaffolds) |
 | IPC | HTTP-over-Unix-socket, `<data dir>/crewship.sock` — `/tmp/crewship.sock` only for the packaged `/var/lib/crewship` install (X-Internal-Token auth) |
 
 > **Prisma is TypeScript-types only.** All schema changes go through
