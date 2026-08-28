@@ -12,6 +12,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // endOfStreamEmitTimeout bounds the fallback context used when the request
@@ -381,7 +382,14 @@ type eventDelta struct {
 // code. The 16 KB cap and the capture buffer itself already existed for the
 // Crow's Nest end-of-stream journal entry below; this just stops throwing
 // the same bytes away a second time.
-func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecResult, req AgentRunRequest, handler EventHandler) string {
+// secretValues are the run's loaded credential values (see the caller in
+// orchestrator_run.go) — the same slice fed to wrapScrubHandler's stream
+// scrubber and to the adapter-exec-error scrubber below. This capture is a
+// separate raw byte buffer read directly off the process's stdout/stderr, so
+// it never passes through wrapScrubHandler (which only ever sees parsed
+// AgentEvents) and needs its own pass through the scrubber before it reaches
+// the journal.
+func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecResult, req AgentRunRequest, handler EventHandler, secretValues []string) string {
 	var closeOnce sync.Once
 	closeReader := func() {
 		closeOnce.Do(func() {
@@ -556,8 +564,21 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		emitCtx, cancelEmit = context.WithTimeout(context.Background(), endOfStreamEmitTimeout)
 		defer cancelEmit()
 	}
+	// The journal is hash-chained and append-only: whatever lands in
+	// "output" here can never be redacted later, so it must go through the
+	// same credential scrubber the rest of the outbound path uses BEFORE it
+	// is written, not after. total_bytes and truncated describe the raw
+	// stream (they are computed from captureBuf/totalBytes above, untouched
+	// by scrubbing) — scrubbing only rewrites the "output" field's content
+	// and can change its length (a redaction marker is rarely the same size
+	// as the secret it replaces), so those two fields intentionally keep
+	// reporting the pre-scrub numbers.
+	outScrub := scrubber.New()
+	if len(secretValues) > 0 {
+		outScrub.AddSecretValues(secretValues...)
+	}
 	payload := map[string]any{
-		"output":      string(captureBuf),
+		"output":      outScrub.Scrub(string(captureBuf)),
 		"total_bytes": totalBytes,
 		"truncated":   totalBytes > int64(len(captureBuf)),
 	}

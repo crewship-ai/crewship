@@ -1,15 +1,21 @@
 package hooks
 
 import (
+	"context"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestEveryOfferedEventHasADispatchSite is a source-scan invariant, not a
@@ -49,8 +55,8 @@ import (
 // subsystem that never calls Dispatch — and the bare-presence regexp
 // counted those as a dispatch site. Requiring the identifier (or literal)
 // to actually be an ARGUMENT of a call to something named Dispatch closes
-// that gap: post_tool_call now correctly reports no dispatch site (see
-// preExistingGaps below).
+// that gap: post_tool_call stopped reading as covered until Observe was
+// given a real hooks.Dispatch call.
 //
 // This is still a heuristic, not full data-flow analysis — a value routed
 // through an intermediate variable before reaching Dispatch, or a Dispatch
@@ -65,7 +71,7 @@ func TestEveryOfferedEventHasADispatchSite(t *testing.T) {
 	constNames := collectEventConstNames(t, root)
 
 	// No escape hatch: every event in AllEvents is required to have a real
-	// dispatch site. This test used to carry a preExistingGaps allowlist —
+	// dispatch site. This test used to carry a preExistingDispatchGaps allowlist —
 	// ten events (post_tool_call, pre/post_task_delegation, pre/post_llm_call,
 	// pre/post_memory_write, pre/post_peer_conversation, on_budget_exceeded)
 	// found undispatched by the AST-based rewrite of eventHasDispatchSite,
@@ -174,7 +180,7 @@ func dispatchArgMatchesEvent(arg ast.Expr, constName, literal string) bool {
 // snakeToPascal("pre_llm_call") produced "PreLlmCall", but the real
 // constant is EventPreLLMCall. That bug was silent only because every
 // event whose name contains an acronym (LLM) was, at the time, also in
-// preExistingGaps — the moment one of those events gets a real Dispatch
+// preExistingDispatchGaps — the moment one of those events gets a real Dispatch
 // call site wired up, the guessed name stops matching the real one and
 // the test fails with a confusing "no dispatch site" even though a
 // dispatch site exists. Reading the identifier directly out of the const
@@ -305,5 +311,210 @@ func repoRootForTest(t *testing.T) string {
 			t.Fatalf("go.mod not found above %s", dir)
 		}
 		dir = parent
+	}
+}
+
+// TestDispatchSiteScanIsNotVacuous is the anti-vacuity guard that used to
+// live in TestPreExistingDispatchGapsAreStillGaps. With the gap allowlist
+// gone, TestEveryOfferedEventHasADispatchSite passes when the scan finds a
+// site for all fourteen events — and would ALSO pass if a broken scan
+// somehow reported "found" for everything. So pin both directions: the scan
+// must be able to answer "no", and it must find a real site through each of
+// its two matching branches.
+func TestDispatchSiteScanIsNotVacuous(t *testing.T) {
+	root := repoRootForTest(t)
+	files := collectScanFiles(t, root)
+	constNames := collectEventConstNames(t, root)
+
+	// "no" direction: an event nothing has ever declared has neither a
+	// constant nor a literal anywhere in the tree. A scan that reports a
+	// site for it is matching something other than what it claims, and
+	// every pass above means nothing.
+	if eventHasDispatchSite(Event("no_such_event_9f2c1a"), files, "") {
+		t.Fatal("the dispatch-site scan found a site for an event that does not exist — " +
+			"it is matching something other than a Dispatch argument, so every other " +
+			"assertion in this file is vacuous")
+	}
+
+	// pre_tool_call is not in AllEvents, so the loop above never looks at
+	// it. If a dispatch site for it ever appears, the constant belongs back
+	// in AllEvents — a live dispatch site for an event nobody can register
+	// is the mirror image of the bug this file exists for.
+	if eventHasDispatchSite(EventPreToolCall, files, constNames[EventPreToolCall]) {
+		t.Errorf("pre_tool_call now has a dispatch site but is absent from AllEvents — " +
+			"nobody can register a hook for it, so the site is dead code; put the constant " +
+			"back in AllEvents (and update the docs) or remove the dispatch call")
+	}
+
+	// "yes" direction, both branches. pre_agent_start is only ever
+	// dispatched as a bare string literal through the orchestrator's
+	// HookDispatcher interface; on_guardrail_triggered is only ever
+	// dispatched as the typed constant. If either branch regresses, one of
+	// these goes red with a precise cause instead of the whole event list
+	// going red with a vague one.
+	if !eventHasDispatchSite(EventPreAgentStart, files, constNames[EventPreAgentStart]) {
+		t.Error("string-literal branch of the scan found no site for pre_agent_start " +
+			"(orchestrator_run.go dispatches it as a plain string)")
+	}
+	if !eventHasDispatchSite(EventOnGuardrailTriggered, files, constNames[EventOnGuardrailTriggered]) {
+		t.Error("typed-constant branch of the scan found no site for on_guardrail_triggered " +
+			"(runner_llm.go dispatches hooks.EventOnGuardrailTriggered)")
+	}
+
+	// The acronym fix, pinned directly rather than via its symptom: the
+	// constant name is read out of the const declaration, so an event whose
+	// value contains an acronym resolves to the real identifier and not a
+	// snakeToPascal guess ("PreLlmCall").
+	if got := constNames[EventPreLLMCall]; got != "EventPreLLMCall" {
+		t.Errorf("constNames[pre_llm_call] = %q, want %q — the identifier is being guessed, "+
+			"not read from the const declaration, and acronym events will read as permanent gaps", got, "EventPreLLMCall")
+	}
+}
+
+// ---------------------------------------------------------------------
+// The dynamic half: registration is not observation
+// ---------------------------------------------------------------------
+
+// TestEveryOfferedEventActuallyReachesItsHandler is the counterweight to
+// the source scan above. The scan answers "is there a Dispatch call for
+// this event somewhere?"; it cannot answer "and if that call runs, does a
+// hook registered on the event actually execute?" — which is the half that
+// let pre_tool_call ship. Every test that covered it asserted the
+// REGISTRATION succeeded (201, row present, ValidateEvent happy); nothing
+// asserted a handler ran. So this one registers a real hook per event and
+// fails unless the handler is hit.
+//
+// Gate-capable events (Event.SupportsBlocking) are registered blocking, so
+// Dispatch runs the handler inline and the assertion is a plain read.
+// Observation events cannot be registered blocking any more — Register
+// rejects that with ErrEventCannotBlock — and their handlers run in a
+// goroutine Dispatch never waits on, so those subtests synchronise on the
+// handler itself. Reading hits.Load() straight after Dispatch would pass
+// for the wrong reason there: it would be a race, not an assertion, and a
+// hook that never fired at all would look identical to one that had not
+// fired yet.
+//
+// It also pins the other end of the original failure mode: the bug report
+// for the misspelled-event class was "inserts cleanly, then never selected
+// by ListByEvent". So each subtest additionally dispatches a DIFFERENT
+// event and requires the hook not to fire — proving the event value
+// round-trips through Register -> hooks_config -> ListByEvent -> Dispatch
+// as an exact match rather than firing on everything (or nothing).
+func TestEveryOfferedEventActuallyReachesItsHandler(t *testing.T) {
+	observed := 0
+
+	for _, ev := range AllEvents {
+		t.Run(string(ev), func(t *testing.T) {
+			t.Setenv(allowPrivateEnvVar, "true") // httptest listens on loopback
+			db := openTestDB(t)
+			defer db.Close()
+			ctx := context.Background()
+
+			var hits atomic.Int64
+			fired := make(chan struct{}, 8)
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				hits.Add(1)
+				w.WriteHeader(http.StatusOK)
+				select {
+				case fired <- struct{}{}:
+				default:
+				}
+			}))
+			defer ts.Close()
+
+			blocking := ev.SupportsBlocking()
+			if _, err := Register(ctx, db, Hook{
+				WorkspaceID:   "ws_test",
+				Event:         ev,
+				HandlerKind:   HandlerKindHTTP,
+				HandlerConfig: map[string]any{"url": ts.URL},
+				Blocking:      blocking,
+				Enabled:       true,
+			}, false); err != nil {
+				t.Fatalf("Register(%q) = %v — every event in AllEvents must be registerable", ev, err)
+			}
+
+			rec := &recordingEmitter{}
+			if err := Dispatch(ctx, db, rec, ev, EventContext{WorkspaceID: "ws_test"}); err != nil {
+				t.Fatalf("Dispatch(%q) = %v", ev, err)
+			}
+			if blocking {
+				// Ran inline: the handler must already have been hit.
+				if got := hits.Load(); got != 1 {
+					t.Fatalf("handler ran %d times for %q, want 1 — the hook registered fine and never fired, "+
+						"which is exactly the pre_tool_call failure mode", got, ev)
+				}
+			}
+			select {
+			case <-fired:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("handler never ran for %q — the hook registered fine and never fired, "+
+					"which is exactly the pre_tool_call failure mode", ev)
+			}
+
+			// A different event must NOT reach this hook.
+			other := EventPreAgentStart
+			if ev == EventPreAgentStart {
+				other = EventPostAgentStop
+			}
+			if err := Dispatch(ctx, db, rec, other, EventContext{WorkspaceID: "ws_test"}); err != nil {
+				t.Fatalf("Dispatch(%q) = %v", other, err)
+			}
+			select {
+			case <-fired:
+				t.Errorf("hook registered on %q also fired for %q (%d total hits) — "+
+					"ListByEvent is not matching on the exact event value", ev, other, hits.Load())
+			case <-time.After(250 * time.Millisecond):
+			}
+
+			observed++
+		})
+	}
+
+	// Anti-vacuity, and it is read: a t.Run body that never executes (or
+	// an empty AllEvents) would leave every assertion above unrun while
+	// the test still reported PASS.
+	if observed == 0 || observed != len(AllEvents) {
+		t.Fatalf("observed a firing handler for %d of %d events in AllEvents — "+
+			"the loop did not actually exercise every event", observed, len(AllEvents))
+	}
+}
+
+// TestPreToolCallCannotBeRegisteredAtAll is the negative half of the same
+// question. There is no "did it fire" to assert for pre_tool_call, because
+// the fix makes the registration itself impossible — so assert that, and
+// assert nothing lands in hooks_config, rather than leaving the retirement
+// pinned only by the doc comment on AllEvents.
+func TestPreToolCallCannotBeRegisteredAtAll(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	if err := ValidateEvent(EventPreToolCall); !errors.Is(err, ErrUnknownEvent) {
+		t.Fatalf("ValidateEvent(pre_tool_call) = %v, want ErrUnknownEvent", err)
+	}
+	for _, name := range EventNames() {
+		if name == string(EventPreToolCall) {
+			t.Fatalf("EventNames() still advertises %q to the CLI and API", name)
+		}
+	}
+
+	_, err := Register(ctx, db, Hook{
+		WorkspaceID:   "ws_test",
+		Event:         EventPreToolCall,
+		HandlerKind:   HandlerKindHTTP,
+		HandlerConfig: map[string]any{"url": "https://example.test/h"},
+		Enabled:       true,
+	}, false)
+	if !errors.Is(err, ErrUnknownEvent) {
+		t.Fatalf("Register(pre_tool_call) = %v, want ErrUnknownEvent", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("pre_tool_call hook landed in hooks_config anyway (%d rows)", n)
 	}
 }

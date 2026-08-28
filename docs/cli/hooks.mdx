@@ -98,7 +98,7 @@ crewship hooks create --event pre_agent_start --handler shell \
     --crew backend-team --blocking
 
 # Anything the convenience flags don't cover
-crewship hooks create --event pre_llm_call --handler http \
+crewship hooks create --event on_guardrail_triggered --handler http \
     --handler-config '{"url":"https://x.test/h","method":"PUT","hmac_secret":"..."}' \
     --matcher '{"agent_ids":["ag_1"],"severities":["warn","error"]}'
 ```

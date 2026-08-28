@@ -2,10 +2,13 @@ package api
 
 // oauth_token.go coverage top-up #2 — the request-construction error
 // branches (control character in the token URL) and the
-// refreshExpiringTokens query-error fork. The HTTP-response branches of
-// exchangeOAuthCode / refreshOAuthToken stay uncovered on purpose: the
-// ssrfSafeTransport blocks loopback addresses, so an httptest server
-// cannot stand in for the token endpoint without production changes.
+// refreshExpiringTokens query-error fork. refreshOAuthToken's HTTP-response
+// branches stay uncovered on purpose: its client is a local var and
+// ssrfSafeTransport blocks loopback addresses, so an httptest server cannot
+// stand in for the token endpoint without production changes.
+// exchangeOAuthCode's HTTP-response branches (including the RFC 8707
+// `resource` parameter) are covered in oauth_resource_iss_test.go via the
+// swappable oauthTokenClient package var.
 //
 // All tests are prefixed TestCov2OT.
 
@@ -18,7 +21,7 @@ import (
 func TestCov2OTExchangeOAuthCode_BadURLRequestError(t *testing.T) {
 	t.Parallel()
 	_, err := exchangeOAuthCode(context.Background(),
-		"http://exa\nmple.com/token", "cid", "", "code", "https://app/cb", "")
+		"http://exa\nmple.com/token", "cid", "", "code", "https://app/cb", "", "")
 	if err == nil {
 		t.Fatal("expected request-construction error for control-char URL")
 	}
@@ -30,7 +33,7 @@ func TestCov2OTExchangeOAuthCode_BadURLRequestError(t *testing.T) {
 func TestCov2OTRefreshOAuthToken_BadURLRequestError(t *testing.T) {
 	t.Parallel()
 	_, err := refreshOAuthToken(context.Background(),
-		"http://exa\nmple.com/token", "cid", "", "rt")
+		"http://exa\nmple.com/token", "cid", "", "rt", "")
 	if err == nil {
 		t.Fatal("expected request-construction error for control-char URL")
 	}

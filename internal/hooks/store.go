@@ -163,8 +163,10 @@ func validateWorkspaceAndHandler(h Hook, allowedShell bool) error {
 // Update rewrites the mutable columns of an existing hook. The caller
 // supplies the FULL desired state (an already-merged Hook, not a patch) —
 // merging partial input against the current row is the HTTP layer's job,
-// so this function stays a single UPDATE with no read-modify-write race
-// of its own.
+// so this function does not re-derive the desired column values from the
+// row. It does read one column first (event — see below), and the UPDATE
+// carries that value as a WHERE predicate so the read and the write cannot
+// disagree.
 //
 // Three things are deliberately NOT taken from h:
 //
@@ -229,6 +231,14 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		return err
 	}
 
+	// Test seam for the TOCTOU the `AND event = ?` predicate below closes.
+	// Always nil in production; a test sets it to mutate the row in the
+	// window between the read above and the UPDATE, so the race can be
+	// asserted deterministically instead of being raced for.
+	if updateEventRaceHookForTest != nil {
+		updateEventRaceHookForTest()
+	}
+
 	matcherJSON, err := json.Marshal(h.Matcher)
 	if err != nil {
 		return fmt.Errorf("hooks: marshal matcher: %w", err)
@@ -245,7 +255,7 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 	res, err := db.ExecContext(ctx, `UPDATE hooks_config SET
 		crew_id = ?, event = ?, matcher = ?, handler_kind = ?, handler_config = ?,
 		blocking = ?, enabled = ?, updated_at = ?
-		WHERE id = ? AND workspace_id = ?`,
+		WHERE id = ? AND workspace_id = ? AND event = ?`,
 		nullableStr(h.CrewID),
 		string(h.Event),
 		string(matcherJSON),
@@ -256,6 +266,13 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		tsformat.Format(time.Now()),
 		h.ID,
 		workspaceID,
+		// The event we validated against, not the one we are writing:
+		// this pins the UPDATE to the exact row state the check above
+		// was made on. Without it, a concurrent write that moves a
+		// legacy pre_tool_call row onto a valid event could be undone
+		// by this (now stale) update, putting the retired event back
+		// without ever passing validateEventForWrite.
+		string(currentEvent),
 	)
 	if err != nil {
 		return fmt.Errorf("hooks: update: %w", err)
@@ -265,6 +282,12 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		return fmt.Errorf("hooks: rows affected: %w", err)
 	}
 	if n == 0 {
+		// Either the row is gone or its event changed under us. Both
+		// mean "the row you computed this patch from no longer exists
+		// in that state"; both are reported as ErrNoRows so the caller
+		// (and the 404 the HTTP layer maps it to) keeps one meaning,
+		// and a racing client re-reads and retries rather than having
+		// its stale write silently win.
 		return sql.ErrNoRows
 	}
 
@@ -285,6 +308,19 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 	}
 	return nil
 }
+
+// updateEventRaceHookForTest is nil in production. Update calls it (when
+// set) between reading the row's current event and issuing the guarded
+// UPDATE, which is the only way to land another writer inside that window
+// deterministically. Kept in the non-test file because the seam has to sit
+// in the function it guards.
+//
+// Unsynchronised on purpose — same shape as the stdlib's testHook* vars.
+// A test that sets it must not run under t.Parallel(), and no test may set
+// it while another goroutine is inside Update, or the race detector will
+// (correctly) object. No test in this package does either today; if that
+// changes, the seam needs an atomic, not a comment.
+var updateEventRaceHookForTest func()
 
 // currentEventFor returns the event a row currently has, scoped to
 // workspaceID so a cross-tenant id reads back as "not found" rather than

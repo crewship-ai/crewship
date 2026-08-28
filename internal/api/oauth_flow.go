@@ -110,7 +110,7 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build auth URL with PKCE
-	fullURL := buildOAuthURL(cred.AuthURL, cred.ClientID, redirectURI, state, codeChallenge, cred.Scopes)
+	fullURL := buildOAuthURL(cred.AuthURL, cred.ClientID, redirectURI, state, codeChallenge, cred.Scopes, cred.Resource)
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"auth_url": fullURL,
@@ -124,6 +124,10 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 	errParam := r.URL.Query().Get("error")
+	// RFC 9207: the authorization server MAY echo its issuer identifier back
+	// on the redirect. Validated below, once the credential (and therefore
+	// its expected issuer) has been loaded.
+	issParam := r.URL.Query().Get("iss")
 
 	if errParam != "" {
 		http.Error(w, fmt.Sprintf("OAuth error: %s", html.EscapeString(errParam)), http.StatusBadRequest)
@@ -179,8 +183,17 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 9207 mix-up defence: reject before ever exchanging the code if the
+	// authorization response's issuer doesn't match the one this credential
+	// was bound to at connect time.
+	if issErr := validateIssuer(cred.Issuer, issParam); issErr != nil {
+		h.logger.Warn("OAuth issuer validation failed", "error", issErr, "credential_id", credentialID)
+		http.Error(w, "Issuer validation failed", http.StatusBadRequest)
+		return
+	}
+
 	// Exchange code for tokens (with PKCE verifier if present)
-	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, code, redirectURI, codeVerifier)
+	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, code, redirectURI, codeVerifier, cred.Resource)
 	if err != nil {
 		h.logger.Error("OAuth token exchange failed", "error", err, "credential_id", credentialID)
 		http.Error(w, "Token exchange failed", http.StatusBadGateway)
@@ -287,7 +300,14 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange code for tokens (with PKCE verifier if available)
-	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, redirectURI, codeVerifier)
+	//
+	// NOTE: this manual fallback (used when the automatic redirect can't
+	// reach Crewship — private IP, firewall) has no `iss` to validate: the
+	// frontend only extracts `code` from the pasted redirect URL, so RFC
+	// 9207 validation is only enforced on the Callback/Loopback paths that
+	// see the full authorization response. Documented as a known gap in the
+	// PR rather than silently declared fixed.
+	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, redirectURI, codeVerifier, cred.Resource)
 	if err != nil {
 		h.logger.Error("OAuth manual code exchange failed", "error", err, "credential_id", req.CredentialID)
 		replyError(w, http.StatusBadGateway, "Token exchange failed")
@@ -374,11 +394,11 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build auth URL with PKCE
-	fullAuthURL := buildOAuthURL(cred.AuthURL, cred.ClientID, redirectURI, state, codeChallenge, cred.Scopes)
+	fullAuthURL := buildOAuthURL(cred.AuthURL, cred.ClientID, redirectURI, state, codeChallenge, cred.Scopes, cred.Resource)
 
 	// Start loopback callback server in background
 	credID := req.CredentialID
-	go h.runLoopbackServer(listener, state, credID, workspaceID, cred.ClientID, cred.ClientSecret, cred.TokenURL, redirectURI, codeVerifier)
+	go h.runLoopbackServer(listener, state, credID, workspaceID, cred.ClientID, cred.ClientSecret, cred.TokenURL, redirectURI, codeVerifier, cred.Resource, cred.Issuer)
 
 	h.logger.Info("OAuth loopback started", "port", port, "credential_id", credID)
 
@@ -401,6 +421,8 @@ func (h *OAuthHandler) runLoopbackServer(
 	tokenURL string,
 	redirectURI string,
 	codeVerifier string,
+	resource string,
+	expectedIssuer string,
 ) {
 	defer listener.Close()
 
@@ -426,8 +448,16 @@ func (h *OAuthHandler) runLoopbackServer(
 			return
 		}
 
+		// RFC 9207 mix-up defence — same check as the Callback handler.
+		if issErr := validateIssuer(expectedIssuer, r.URL.Query().Get("iss")); issErr != nil {
+			h.logger.Warn("OAuth loopback issuer validation failed", "error", issErr, "credential_id", credentialID)
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<html><body><h2>Issuer validation failed</h2><p>You can close this window.</p></body></html>`)
+			return
+		}
+
 		// Exchange code for tokens (with PKCE verifier)
-		tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier)
+		tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier, resource)
 		if err != nil {
 			h.logger.Error("OAuth loopback token exchange", "error", err, "credential_id", credentialID)
 			w.Header().Set("Content-Type", "text/html")

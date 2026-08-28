@@ -26,7 +26,23 @@ type tokenResponse struct {
 	Scope        string `json:"scope"`
 }
 
-func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier string) (*tokenResponse, error) {
+// oauthTokenClient is the prod HTTP client for the token endpoint. It is a
+// package-level var (same pattern as discoveryClient in oauth_discovery.go)
+// so tests can swap its Transport with httpsafe.RewriteRoundTripper and
+// assert on the actual request body — including the RFC 8707 `resource`
+// parameter — without weakening the SSRF guard for production traffic.
+var oauthTokenClient = &http.Client{
+	Timeout:   15 * time.Second,
+	Transport: ssrfSafeTransport(),
+}
+
+// exchangeOAuthCode performs the authorization_code token exchange.
+//
+// resource is the RFC 8707 resource indicator for the MCP server this token
+// must be bound to (from the credential's discovered protected-resource
+// metadata). An empty resource omits the parameter, so non-MCP OAuth
+// credentials are unaffected.
+func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier, resource string) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
@@ -39,6 +55,9 @@ func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, co
 	if codeVerifier != "" {
 		data.Set("code_verifier", codeVerifier)
 	}
+	if resource != "" {
+		data.Set("resource", resource)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
@@ -47,8 +66,7 @@ func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, co
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second, Transport: ssrfSafeTransport()}
-	resp, err := client.Do(req)
+	resp, err := oauthTokenClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}
@@ -101,7 +119,8 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 	// Find tokens expiring within 10 minutes
 	threshold := time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, workspace_id, oauth_client_id, oauth_client_secret_enc, oauth_token_url, oauth_refresh_token_enc
+		SELECT id, workspace_id, oauth_client_id, oauth_client_secret_enc, oauth_token_url,
+			oauth_refresh_token_enc, COALESCE(oauth_resource, '')
 		FROM credentials
 		WHERE type = 'OAUTH2' AND status = 'ACTIVE'
 			AND oauth_token_expires_at != '' AND oauth_token_expires_at < ?
@@ -113,8 +132,8 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 	defer rows.Close()
 
 	for rows.Next() {
-		var id, wsID, clientID, clientSecretEnc, tokenURL, refreshTokenEnc string
-		if err := rows.Scan(&id, &wsID, &clientID, &clientSecretEnc, &tokenURL, &refreshTokenEnc); err != nil {
+		var id, wsID, clientID, clientSecretEnc, tokenURL, refreshTokenEnc, resource string
+		if err := rows.Scan(&id, &wsID, &clientID, &clientSecretEnc, &tokenURL, &refreshTokenEnc, &resource); err != nil {
 			continue
 		}
 
@@ -140,7 +159,7 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 		}
 
 		// Refresh the token
-		newToken, err := refreshOAuthToken(ctx, tokenURL, clientID, clientSecret, refreshToken)
+		newToken, err := refreshOAuthToken(ctx, tokenURL, clientID, clientSecret, refreshToken, resource)
 		if err != nil {
 			logger.Error("OAuth token refresh failed", "credential_id", id, "error", err)
 			if _, dbErr := db.ExecContext(ctx, "UPDATE credentials SET status = 'EXPIRED', updated_at = datetime('now') WHERE id = ?", id); dbErr != nil {
@@ -188,7 +207,7 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 	}
 }
 
-func refreshOAuthToken(ctx context.Context, tokenURL, clientID, clientSecret, refreshToken string) (*tokenResponse, error) {
+func refreshOAuthToken(ctx context.Context, tokenURL, clientID, clientSecret, refreshToken, resource string) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
@@ -196,6 +215,9 @@ func refreshOAuthToken(ctx context.Context, tokenURL, clientID, clientSecret, re
 	}
 	if clientSecret != "" {
 		data.Set("client_secret", clientSecret)
+	}
+	if resource != "" {
+		data.Set("resource", resource)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
@@ -205,8 +227,7 @@ func refreshOAuthToken(ctx context.Context, tokenURL, clientID, clientSecret, re
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second, Transport: ssrfSafeTransport()}
-	resp, err := client.Do(req)
+	resp, err := oauthTokenClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", err)
 	}

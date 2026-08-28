@@ -146,6 +146,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // Hooks
   "hook.fired": Zap,
   "hook.blocked": ShieldOff,
+  "hook.dispatch_error": AlertTriangle,
 
   // Eval
   "eval.run_started": Microscope,

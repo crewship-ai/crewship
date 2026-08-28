@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -189,6 +190,125 @@ func TestDeleteMyUserModel_RemovesEverything(t *testing.T) {
 	}
 	if body := r.userModelOnDisk(t, "u1"); body != "" {
 		t.Errorf("model survived a delete: %q", body)
+	}
+}
+
+// A crew change leaves an orphan: the writer's ON CONFLICT DO UPDATE
+// (user_model_writer.go) moves the index row's crew_id forward to the
+// operator's new most-active crew but never removes the file it left
+// behind in the old crew's shared directory. A purge keyed on the row's
+// single (current) crew_id therefore only ever reaches the newest copy,
+// and the erasure request this test exercises must not do the same —
+// nothing addressable to this user may survive in ANY crew.
+func TestDeleteMyUserModel_RemovesOrphanFromPriorCrew(t *testing.T) {
+	r := peerTestSetup(t)
+	if _, err := r.db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, network_mode, allowed_domains)
+		VALUES ('crew2','ws1','C2','c2','free','[]')`); err != nil {
+		t.Fatalf("seed crew2: %v", err)
+	}
+
+	// The operator's model was originally written while crew1 was their
+	// most-active crew.
+	oldPaths := memory.UserModelPaths{SharedDir: filepath.Join(r.output, "crews", "crew1", "shared", ".memory")}
+	if err := memory.WriteUserModel(oldPaths, "u1", r.wsID, "- role: runs the platform team"); err != nil {
+		t.Fatalf("seed old crew model: %v", err)
+	}
+
+	// The operator moves to crew2. A later sweep writes the refreshed
+	// model under crew2 and upserts the index row's crew_id — mirroring
+	// consolidate.SyncUserModel, which moves crew_id but never deletes
+	// the crew1 file.
+	newPaths := memory.UserModelPaths{SharedDir: filepath.Join(r.output, "crews", "crew2", "shared", ".memory")}
+	if err := memory.WriteUserModel(newPaths, "u1", r.wsID, "- role: runs the platform team\n- timezone: UTC+1"); err != nil {
+		t.Fatalf("seed new crew model: %v", err)
+	}
+	slug := memory.UserSlug("u1", r.wsID)
+	if _, err := r.db.Exec(`
+		INSERT INTO user_models (id, workspace_id, crew_id, user_id, user_slug, path, bytes)
+		VALUES ('um-u1', ?, 'crew2', 'u1', ?, ?, 40)
+	`, r.wsID, slug, newPaths.ModelPath(slug)); err != nil {
+		t.Fatalf("seed db row: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	r.privacy.DeleteMyUserModel(rec, r.req(t, http.MethodDelete, "", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
+	}
+
+	if body, _ := memory.LoadUserModel(oldPaths, "u1", r.wsID); body != "" {
+		t.Errorf("crew1's orphaned copy survived the erasure: %q", body)
+	}
+	if body, _ := memory.LoadUserModel(newPaths, "u1", r.wsID); body != "" {
+		t.Errorf("crew2's copy survived the erasure: %q", body)
+	}
+	var rows int
+	_ = r.db.QueryRow(`SELECT COUNT(*) FROM user_models WHERE user_id='u1'`).Scan(&rows)
+	if rows != 0 {
+		t.Errorf("index row survived the erasure (%d rows)", rows)
+	}
+}
+
+// If deletion fails in ONE of several crew directories, the caller must
+// not be told the erasure succeeded, and the index row must survive so a
+// retry can find this model again and finish the job.
+//
+// Before the fix, purgeUserModel logged the DeleteUserModelEverywhere
+// error and fell through to an unconditional `DELETE FROM user_models`,
+// so DeleteMyUserModel returned 200 while a readable copy remained on
+// disk — the PR's own exhaustive, multi-directory delete reproducing the
+// exact "erasure reports success" bug it was written to fix, one level
+// up, the moment more than one directory is involved.
+func TestDeleteMyUserModel_PartialFileFailureIsNotReportedAsSuccess(t *testing.T) {
+	r := peerTestSetup(t)
+	if _, err := r.db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, network_mode, allowed_domains)
+		VALUES ('crew2','ws1','C2','c2','free','[]')`); err != nil {
+		t.Fatalf("seed crew2: %v", err)
+	}
+
+	// A real, deletable copy in crew1 — the row's current crew.
+	r.seedUserModel(t, "u1", "- role: runs the platform team")
+
+	// A copy in crew2 that CANNOT be deleted: the model path is occupied
+	// by a non-empty directory, so os.Remove fails. "crew1" < "crew2"
+	// lexicographically, so DeleteUserModelEverywhere's directory walk
+	// reaches (and successfully clears) crew1 before it hits this one —
+	// a genuine partial failure, not a first-directory abort.
+	slug := memory.UserSlug("u1", r.wsID)
+	poisoned := filepath.Join(r.output, "crews", "crew2", "shared", ".memory", "users", slug+".md")
+	if err := os.MkdirAll(poisoned, 0o755); err != nil {
+		t.Fatalf("mkdir model-as-dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(poisoned, "child"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed child: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	r.privacy.DeleteMyUserModel(rec, r.req(t, http.MethodDelete, "", nil))
+	if rec.Code == http.StatusOK {
+		t.Fatalf("a partial file-delete failure must not report success; got 200 %s", rec.Body.String())
+	}
+
+	// The directory that COULD be cleared was — partial progress isn't
+	// undone just because another directory failed.
+	if body := r.userModelOnDisk(t, "u1"); body != "" {
+		t.Errorf("the deletable crew1 copy was not removed: %q", body)
+	}
+	// The undeletable directory is still there — sanity check the
+	// failure is real and not a fluke of the fixture.
+	if _, err := os.Stat(poisoned); err != nil {
+		t.Fatalf("expected the poisoned crew2 directory to still exist: %v", err)
+	}
+	// The index row must survive: purgeUserModel is reached by looking
+	// this row up first, so deleting it here would make the crew2
+	// leftover permanently unfindable by any retry of this same
+	// endpoint.
+	var rows int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM user_models WHERE user_id='u1'`).Scan(&rows); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rows != 1 {
+		t.Errorf("index row was deleted despite a file-delete failure (%d rows); a retry can no longer find this model", rows)
 	}
 }
 

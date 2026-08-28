@@ -153,6 +153,34 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   seed ships four pages, one per producer door (script, routine, agent,
   webhook) instead of showing one door of the four.
 
+- **The wake-time system prompt now shows its own memory budget (#2135).** Every
+  tier injected into a session's opening prompt — `Pins`, `Crew`,
+  `Workspace`, `Agent` — now reports how many bytes of its allotted
+  slice it used and what percent that is, plus a `Total` line, in a new
+  `[MEMORY BUDGET]` block placed right before `[MEMORY INSTRUCTIONS]`. The
+  wording matches `memory.write`'s existing overflow-guidance usage string
+  byte for byte, unit included (`<used> of <cap> bytes, <pct>%`): both
+  meters count `len(string)` bytes, and the budget these tiers are
+  actually enforced against is itself byte-denominated, so "bytes" is the
+  only label that describes what is measured and capped — an earlier
+  draft of this meter said "chars" while still counting and enforcing
+  bytes, which reads as accurate for pure-ASCII content but is wrong for
+  anything else (this product carries Czech text throughout). A
+  percentage that would round down to 0% for real, non-zero usage now
+  floors to 1% instead. When the budget forced a tier's trailing content
+  to be dropped — previously silent — the meter now says so by name
+  (`Truncated to fit: Agent — trailing content in it was dropped, not
+  just hidden.`), and truncation itself is now rune-aligned so a cut can
+  never sever a multi-byte UTF-8 character and hand the model invalid
+  text. A separate `Read incomplete: Workspace` clause covers a distinct
+  failure the truncation notice can't: a stalled or slow workspace
+  filesystem read that times out mid-scan, which previously came back
+  indistinguishable from "there just wasn't much workspace memory" — the
+  model is now told the read did not finish rather than being left to
+  assume it saw everything. The default 15,000-byte budget, the per-tier
+  allocation ratios, and the truncation policy itself are unchanged; this
+  only makes the existing behaviour visible to the model, honestly.
+
 ### Changed
 
 - **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
@@ -293,6 +321,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The crew-scoped file download served the exact bytes the agent door had
+  just been taught to refuse (#2142).** #2069 added a check to
+  `GET /agents/{agentId}/files/download` denying the six generated per-agent
+  files that hold resolved MCP credentials, but that check had exactly one
+  call site. `GET /crews/{crewId}/files/download` reads the identical
+  crewshipd storage — the same `<crewID>/<agentSlug>/.mcp.json` key resolves
+  on either door — and forwarded it unguarded, so the same 0600 credential
+  bytes any workspace role with read access was refused on one URL were
+  served whole on the other. The check now also runs in crewshipd's single
+  download funnel, which both HTTP doors proxy through, so a future caller
+  that reaches it inherits the denial rather than needing to remember to add
+  it again.
+
 - **Agent file downloads no longer expose generated MCP credentials (#2069,
   #2140).** Crewship writes resolved HTTP headers and process environment
   values into each CLI's native MCP config with mode `0600`. The Files API's
@@ -301,6 +342,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   now reject the six exact generated config paths before IPC, while ordinary
   dotfiles and user-authored skills below `.codex/`, `.gemini/`, and similar
   directories remain available.
+- **The agent's raw stdout+stderr capture reached the audit journal without
+  passing through the credential scrubber (#2133).** `streamOutput`'s
+  end-of-stream `exec.output_chunk` emit wrote `captureBuf` — the process's
+  raw combined output — straight into the journal payload. `wrapScrubHandler`'s
+  stream scrubber only ever sees parsed `AgentEvent`s; `captureBuf` is a
+  second, separate raw-byte capture read directly off the process's
+  stdout/stderr, so it bypassed the scrubber entirely. A credential an agent
+  printed — its own, or one echoed back by a poisoned tool result — landed in
+  a hash-chained, append-only journal row that can never be redacted after the
+  fact. The capture now runs through the same `internal/scrubber` the rest of
+  the outbound path uses, seeded with the run's own loaded credential values,
+  the same way the adapter-exec-error path already scrubs its copy of this
+  same raw output. `total_bytes` and `truncated` still describe the raw
+  stream and are computed before scrubbing, since redaction changes the
+  string's length.
 - **`pre_tool_call` was a hook event you could register that would never
   fire.** `crewship hooks create --event pre_tool_call` (and the matching
   `POST /api/v1/hooks`) returned 201 and listed the hook as enabled and
@@ -309,8 +365,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   CLI (Claude Code, Cursor, ...) emits, so by the time a tool call is
   observable the tool has already run; there is no "before the tool runs"
   interception point to hook. (`post_tool_call` fires after the tool runs
-  in principle, but as of this change nothing dispatches it for
-  user-registered hooks either — see the Hooks guide's coverage table.)
+  and, since the dispatch-gap fix below landed in this same release, now
+  reaches user-registered hooks — see the Hooks guide's coverage table.)
   `pre_tool_call` is no longer a valid `--event` / `event` — the CLI and
   the API now reject it the same way they reject any other unknown event
   name, echoing the same list of legal ones. The `hooks.EventPreToolCall`
@@ -318,8 +374,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   change still lists, toggles, and can be edited via `PATCH` for any
   field other than `event` — the store only re-validates `event` when a
   write actually changes it, so a legacy row isn't frozen out of every
-  edit just because its event predates this change. It still never
-  dispatches.
+  edit just because its event predates this change. (That check reads the
+  row's current event first, so the `UPDATE` it guards now also matches on
+  that event — a concurrent write that moves a legacy row onto a valid
+  event can no longer be undone by a stale update putting the retired one
+  back.) It still never dispatches.
 
   ⚠️ **Behaviour change:** a script or manifest that registers a
   `pre_tool_call` hook now gets a 400 instead of a silently-dead 201.
@@ -364,6 +423,62 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   layer (not only to the ledger), HTTP and shell handlers receive the LLM
   provider/model/cost fields, and `post_peer_conversation` fires only after
   the terminal query state is committed.
+
+- **A forked mission could never run a task.** `Fork` wrote the mission, its
+  tasks and its checkpoint, but not the synthetic `chats` row that
+  `assignments.chat_id NOT NULL REFERENCES chats(id)` requires — the row the
+  normal mission-create path stamps in the same transaction. The fork itself
+  reported success; the failure surfaced later, as a `FOREIGN KEY constraint
+  failed` the first time the orchestrator tried to dispatch one of the copied
+  tasks. It went unnoticed for the feature's whole life because the package's
+  tests built their own fixture schema with no `chats` table at all, so the
+  constraint could not fire. Those tests now run against the real migration
+  chain, which also surfaced a second case seeding an assignment against a
+  chat that did not exist.
+- **Erasing an operator model reported success while leaving a readable copy
+  behind (#2131).** The user model is stored per crew, at
+  `crews/{crewID}/shared/.memory/users/{slug}.md`, but its index row is keyed
+  `UNIQUE(workspace_id, user_slug)` with `crew_id` merely informational — and
+  the consolidation sweep recomputes that `crew_id` as the operator's
+  *most-active* crew. So a crew change moved the row's pointer forward and
+  wrote a fresh file, without ever removing the one it left behind. All three
+  erasure triggers — the self-service `DELETE /api/v1/users/me/user-model`
+  (`crewship privacy user-model delete`), the admin GDPR subject-access
+  cascade, and the daily sweep's own opt-out purge (`consolidate.SyncUserModel`)
+  — reconstructed a single expected path from a current `crew_id`, so each
+  reached only the newest copy and reported deletion while every prior crew's
+  copy stayed on disk and readable by that crew's agents. Erasure now
+  enumerates the crew directories that actually exist and removes the slug's
+  file from each, rather than trusting one row's idea of where the file
+  should be — including the opt-out path, which the first pass of this fix
+  had not yet reached.
+
+  A second defect in the same fix: the two API surfaces widened the delete
+  from one directory to N but still swallowed a per-directory failure into a
+  log line, deleting the index row unconditionally either way — so a single
+  crew directory that could not be cleared (permissions, a stray non-empty
+  path) still came back `200` (self-service) or `202` full-success (admin
+  cascade), the identical "erasure reports success while a copy survives"
+  bug one level up. Both now surface a real partial failure — `500` from the
+  self-service delete, `207 Multi-Status` from the admin cascade — and leave
+  the index row in place when a directory could not be cleared, rather than
+  deleting it and making the survivor unfindable by the next retry (this
+  code is reached by looking the row up in the first place).
+
+  Not changed: an operator moving to a new crew still starts from an empty
+  model there. Carrying content across would cross the same per-crew boundary
+  the erasure fix deliberately does not treat as one address space, and that
+  is an isolation decision to make explicitly, not a side effect of a
+  deletion fix.
+
+  Known remaining gap, not fixed here: each crew's sidecar keeps its own FTS5
+  search index (`index.sqlite`) alongside `.memory/`, rebuilt from whatever is
+  on disk at container startup and every 60 seconds while the container runs.
+  The host-side erasure above never opens that file. A crew whose container
+  is running clears itself on its next tick; a **dormant** crew — typically
+  exactly the one the operator has since left — keeps the erased content's
+  search chunks until its container is next started. See
+  `docs/security/gdpr.mdx` for the proposed fix.
 
 - **Backups were silently short, and `--replace` deleted through the same
   wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
@@ -705,6 +820,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 <!-- End of the #2086 backfill. Entries below were written with their PRs. -->
 
 ### Fixed
+
+- **An agent-created mission dispatched its first task straight into a
+  `FOREIGN KEY constraint failed` (#2139).** `assignments.chat_id` is
+  `NOT NULL REFERENCES chats(id)`, and the mission task dispatcher inserts
+  every assignment with `chat_id` set to the mission's own id —
+  unconditionally, with no fallback. Three of the four mission-creating doors
+  stamp that synthetic `chats` row themselves (`mission_handler_mutate.go`'s
+  `Create`, `issue_handler_workflow.go`'s `Start`, and
+  `internal/cartographer/fork.go`'s `Fork`, fixed independently in #2128,
+  same root cause, different door). `InternalMissionHandler.Create` — the
+  sidecar endpoint an agent uses to plan its own mission — was the one that
+  didn't, so an agent-authored mission's first task hit the FK on every
+  dispatch attempt, and `scheduleReadyTasks` turned that into a silently
+  `FAILED` task rather than surfacing it — a mission whose tasks all failed
+  for a reason nothing in the task list explained.
+
+  Fixed twice, deliberately. `Create` now stamps the chat row itself, in the
+  same transaction as the mission row, mirroring the other three doors. And
+  the dispatcher — the one place every mission's assignments are actually
+  written, regardless of which door created the mission — now creates the
+  row lazily if it is missing, before either assignment insert. Two doors
+  have now independently forgotten this row in production; a per-door insert
+  is correctness at the source but does not close the class, so the
+  dispatcher checks for itself too, at the cost of one indexed lookup per
+  dispatch in the common case where the row already exists.
 
 - **The `admin` family answered from a different database than the server you
   pointed it at.** `openAdminDB()` resolved `~/.crewship/crewship.db` and
@@ -1110,6 +1250,60 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   and the groups AND — "any Anthropic or GitHub certificate this crew can
   reach" is now one pass through the panel.
 
+- **The MCP OAuth client never told an authorization server which MCP server
+  a token was for, and never checked which authorization server actually
+  answered.** Two MUSTs from the MCP authorization spec were both absent:
+  the RFC 8707 `resource` indicator was never sent on the authorization
+  request or the token request, so a token minted for one connected MCP
+  server carried no audience binding an operator running that server could
+  be stopped from replaying against another; and the RFC 9207 `iss`
+  parameter an authorization server returns on the redirect was read
+  nowhere, so nothing defended against a mix-up between the several
+  authorization servers Crewship's MCP connections talk to by construction.
+  PKCE and RFC 9728 protected-resource discovery were already in place —
+  discovery just discarded the two fields (`resource`, `issuer`) that make
+  the other two RFCs possible, instead of ever recording them.
+
+  Both are now carried through the connect flow: `AutoConnect` persists the
+  discovered protected-resource `resource` and authorization-server `issuer`
+  on the credential (`oauth_resource`, `oauth_issuer` — new columns, empty
+  for every credential connected before this and for the plain
+  Google/Slack/GitHub-style provider catalogue, which never had a resource
+  to discover), `resource` is sent on the authorization request, the code
+  exchange, and both background and just-in-time refresh requests whenever one
+  is known, and `Callback`/`Loopback` reject the
+  redirect before ever exchanging the code if `iss` is absent or does not
+  match. Discovery itself now fails closed when an authorization server's
+  metadata omits `issuer` — RFC 8414 makes the field REQUIRED, so a server
+  that omits it gives the mix-up defence nothing to check against, and
+  Crewship's whole reason to check `iss` at all is that MCP servers are
+  third-party-operated and not trusted by default. A provider without Dynamic
+  Client Registration can now continue the same discovered flow with an
+  operator-supplied client ID (and optional secret); the server repeats
+  discovery and persists its resource and issuer instead of sending the
+  operator through the generic credential form that discarded both.
+
+  **Known gap, not fixed here:** the manual "paste the redirect URL/code"
+  fallback (`Exchange`, used when the automatic redirect can't reach
+  Crewship — private IP, firewall) still doesn't validate `iss`, because the
+  frontend only ever extracted `code` from the pasted URL. It still sends
+  `resource` on the token request.
+
+- **`crewship inspect` always printed `tool calls: 0`, no matter how many
+  tools the run actually invoked.** The footer counter recognized a journal
+  entry as a tool call when `entry_type` was `tool_call` or started with
+  `tool.` — neither of which the journal ever writes. A run's individual
+  tool invocations are journaled as `run.agent_span`
+  (`internal/journal/types.go`), the leaf of the run's drillable trace tree,
+  and matched neither check, so the counter stayed at zero on every run that
+  used tools. The `errors:` counter beside it had the same blind spot from
+  a different angle: a failed tool call is journaled at severity `warn`, not
+  `error` (`internal/pipeline/agent_span_emit.go` deliberately does not
+  escalate a span failure to the run's own error severity), so a run whose
+  only failures were failed tool calls also reported `errors: 0`. Both
+  counters now recognize `run.agent_span` entries directly, reading the
+  span's own `status` field for the error count.
+
 ### Added
 
 - **A database write looked exactly like `ls` in the run trace.** Sub-span
@@ -1192,7 +1386,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   it stored; the web UI omits it, so that path fails against any provider that
   enforces PKCE. `oauth auto-connect` treats the server's
   `status: "needs_client_id"` — a `200` that creates nothing — as a failure,
-  and prints the `credential create` to run instead.
+  and prints the `auto-connect --oauth-client-id` retry to run instead.
 
 - **`crewship credential create --type OAUTH2` could not set the OAuth app.**
   `POST /api/v1/credentials` has accepted `oauth_client_id` and its endpoints
@@ -2618,6 +2812,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `Thinking`, and a budget-truncated answer reports `max_tokens` instead of
   `end_turn`, so callers can tell "the model said nothing" from "the model
   reasoned and never reached an answer".
+
+- **A transient database hiccup during hook dispatch was reported to users as
+  "a hook blocked this run".** `hooks.Dispatch` looks up the hooks registered
+  for an event before evaluating any of them; when that lookup itself failed
+  (a closed connection, a busy SQLite file), the error came back wrapped in
+  the same plain `error` that a genuine blocking hook's `*BlockedError`
+  travels in, and every call site — `pre_agent_start` in the orchestrator
+  chief among them — treated any non-nil `Dispatch` error as a block. An
+  infrastructure blip cancelled the agent run and printed "pre_agent_start
+  hook blocked", which was false: no hook ever ran. Registry and handler
+  failures now return a typed `*hooks.DispatchError`; an explicit policy
+  refusal remains `*hooks.BlockedError`. The `pre_agent_start` gate fails
+  closed for either condition but reports "dispatch failed" for infrastructure
+  instead of inventing a policy block. Lookup failures are also logged
+  unconditionally and, when a journal emitter is wired, recorded as a new
+  `hook.dispatch_error` entry so the outage stays observable.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

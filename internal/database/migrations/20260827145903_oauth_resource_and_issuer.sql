@@ -1,0 +1,26 @@
+-- MCP OAuth client was missing the two RFC 8707 / RFC 9207 bindings the MCP
+-- authorization spec makes a MUST:
+--
+--   oauth_resource — the RFC 8707 `resource` indicator sent on both the
+--     authorization request and the token request, so the authorization
+--     server can bind the issued token to one MCP server. Without it, a
+--     token minted for MCP server A can be replayed by A's operator
+--     against MCP server B (confused deputy). Populated from the
+--     credential's RFC 9728 protected-resource metadata at connect time
+--     (AutoConnect) — never invented from config.
+--
+--   oauth_issuer — the RFC 8414 `issuer` recorded for the credential's
+--     authorization server, checked against the RFC 9207 `iss` parameter
+--     the authorization server returns on the redirect. This is the
+--     mix-up defence for a host that talks to more than one authorization
+--     server, which Crewship does by construction (one AS per connected
+--     MCP server).
+--
+-- Both default to '' (not discovered / not applicable) rather than NULL so
+-- existing COALESCE-free call sites can compare directly; the OAuth flow
+-- code treats an empty value as "nothing to send" / "nothing to check",
+-- which keeps every credential connected before this migration — and every
+-- non-MCP OAuth credential (the OAuthProviders catalogue: Google, Slack,
+-- GitHub, ...) — working exactly as before.
+ALTER TABLE credentials ADD COLUMN oauth_resource TEXT NOT NULL DEFAULT '';
+ALTER TABLE credentials ADD COLUMN oauth_issuer TEXT NOT NULL DEFAULT '';

@@ -85,6 +85,11 @@ for `pre_tool_call` (declared, accepted, dispatched by nothing, for months).
   valuable one to gate.
 </Note>
 
+When adding a new event, add it to `AllEvents` in `types.go`, add the
+`hooks.Dispatch` call site that fires it, and add coverage in
+`hooks_test.go`. `TestEveryOfferedEventHasADispatchSite` fails CI if the
+first two ever come apart.
+
 ## Handler kinds
 
 ```go
@@ -97,7 +102,30 @@ const (
 
 ### shell
 
-Runs a command via `exec.CommandContext` under the host shell — `sh -c` on Linux/macOS, `cmd.exe /c` on Windows (write the command line in cmd syntax there). Event context is passed as env vars (`CREWSHIP_EVENT`, `CREWSHIP_AGENT_ID`, `CREWSHIP_MISSION_ID`, `CREWSHIP_PAYLOAD`, ...); the environment is otherwise sanitized to a pinned system PATH (plus `SystemRoot`/`ComSpec` on Windows). Stdout is captured as `Result.Payload`.
+Runs a command via `exec.CommandContext` under the host shell — `sh -c` on Linux/macOS, `cmd.exe /c` on Windows (write the command line in cmd syntax there). The environment is sanitized to a pinned system PATH (plus `SystemRoot`/`ComSpec` on Windows) with the event context added on top. Stdout is captured as `Result.Payload`.
+
+Every variable below is always set, empty when the event carries no value for it — so a command can read them unconditionally without `set -u` tripping:
+
+| Variable | Contents |
+|---|---|
+| `CREWSHIP_EVENT` | The event name, e.g. `pre_llm_call`. |
+| `CREWSHIP_WORKSPACE_ID` | Workspace the event fired in. |
+| `CREWSHIP_CREW_ID` | Crew scope, empty for workspace-wide events. |
+| `CREWSHIP_AGENT_ID` | Agent the event is about, when there is one. |
+| `CREWSHIP_MISSION_ID` | Mission the event belongs to, when there is one. |
+| `CREWSHIP_TOOL_NAME` | Tool name on `post_tool_call`; empty elsewhere. |
+| `CREWSHIP_LLM_PROVIDER` | Provider name on `pre_llm_call` / `post_llm_call` (`anthropic`, `bedrock`, ...); empty elsewhere. |
+| `CREWSHIP_LLM_MODEL` | Model id on `pre_llm_call` / `post_llm_call`; empty elsewhere. |
+| `CREWSHIP_COST_USD` | Call cost in USD on `post_llm_call`, formatted with `%g`. `0` on `pre_llm_call` (nothing has been spent yet) and on every event that carries no cost. |
+| `CREWSHIP_PAYLOAD` | The event's JSON payload. Capped — a payload over the cap is replaced by `{"_truncated":true,...}` and the full body stays in the `hook.fired` journal entry. |
+
+<Warning>
+  Quote `"$CREWSHIP_PAYLOAD"` (and every other variable above). An unquoted
+  expansion is word-split and glob-expanded by the shell, which is both a
+  correctness bug and an injection vector on a handler that runs as the
+  `crewship` process on the host. `hooks.Register` lints for this and logs a
+  warning, but it does not refuse the command.
+</Warning>
 
 Shell hooks require `OWNER` role at registration time -- an ADMIN cannot create a shell hook because arbitrary code execution on the host is a privilege escalation vector. The store enforces this via a register-time argument, not a row property:
 
@@ -186,7 +214,15 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
 
 ### Event names are validated on write
 
-`hooks_config` has a `CHECK` constraint on `handler_kind` but **not** on `event`. A misspelled event therefore used to insert cleanly, never match `ListByEvent`'s predicate, and silently never fire — the hook listed, toggled, and looked healthy. `hooks.Register` and `hooks.Update` now reject any event outside the fourteen above (including `pre_tool_call`, which is no longer one of them), and the error message enumerates the legal values. The CLI checks the same list client-side before it sends anything.
+`hooks_config` has a `CHECK` constraint on `handler_kind` but **not** on `event`. A misspelled event therefore used to insert cleanly, never match `ListByEvent`'s predicate, and silently never fire — the hook listed, toggled, and looked healthy. `hooks.Register` now rejects any event outside the fourteen above (including `pre_tool_call`, which is no longer one of them), and the error message enumerates the legal values. The CLI checks the same list client-side before it sends anything.
+
+`hooks.Update` applies the same check, but **only when the write actually changes `event`**. It re-reads the row's current event from the database and compares — it does not trust the caller to say whether `event` was touched. A `PATCH` that omits `event`, or sends the value the row already has, skips event validation entirely, which is what keeps a legacy `pre_tool_call` row editable for every other field instead of frozen behind a permanent `unknown event` error. An update that *changes* `event` to something outside the fourteen is rejected exactly as `Register` would reject it. (Pinned by `TestUpdate_LegacyEventRowStaysEditableForOtherFields` and `TestUpdate_LegacyEventRowRejectsChangingToAnotherUnknownEvent` in `internal/hooks/store_write_test.go`.)
+
+Because that read and the `UPDATE` are two statements, the `UPDATE` also carries `AND event = <the value just read>`: if another writer changes the row's event in between, this update matches no rows and returns "not found" rather than writing a stale (and unvalidated) event back over the new one.
+
+### `--blocking` is only accepted on gate-capable events
+
+`blocking: true` is a promise the call site has to be able to keep. Only the `pre_*` events whose dispatch site can still cancel the operation honour it — `pre_task_delegation`, `pre_agent_start`, `pre_llm_call`, `pre_memory_write`, `pre_peer_conversation` (`Event.SupportsBlocking()` in `types.go`). `post_*` and `on_*` events are observations: their dispatch site has already done the thing, so a synchronous wait would only add latency and a `Block` outcome would arrive too late to undo anything. `Register`/`Update` reject `blocking: true` on those with `hooks: event cannot block`, and the CLI catches it client-side. Rows created before this check exists may still carry `blocking = 1` on an observation event; they keep that value for display, but `Dispatch` demotes them to non-blocking rather than pretending the gate is real.
 
 ## Endpoints
 

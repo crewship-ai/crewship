@@ -106,8 +106,8 @@ curl -X DELETE \
 | `memory_versions` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
 | `memory_versions` (blob store) | content-addressed blobs deduplicated across the workspace | **NOT** auto-deleted in v107 — rows go but blobs left for cross-tenant dedup safety; tracked as PR-F16 for a separate orphan-GC sweep |
 | `inbox_items` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
-| `user_models` (DB) | row WHERE `user_id = $USER_ID` in this workspace | Hard delete |
-| `user_models` (disk file) | `/crew/shared/.memory/users/{user_slug}.md` **and its `.lock` sentinel** in the subject's most-active crew | Best-effort — `outputBasePath` must be configured. Failures logged but do not block the DB delete. |
+| `user_models` (DB) | row WHERE `user_id = $USER_ID` in this workspace | Hard delete — UNLESS the on-disk delete below failed for that model, in which case the row is left in place (see the disk-file row) |
+| `user_models` (disk file) | `/crew/shared/.memory/users/{user_slug}.md` **and its `.lock` sentinel**, in EVERY crew directory found under `outputBasePath` — not just the subject's current most-active crew. The index row only ever names the CURRENT crew, and an operator's most-active crew changes over time, so a delete keyed on that one row would leave every earlier copy an unreachable orphan. | `outputBasePath` must be configured. A directory that fails to delete is NOT masked: the cascade reports a partial failure (`207 Multi-Status`) instead of `202`, and the `user_models` row for that model is left in place — deleting it would make the surviving copy unfindable by any retry, since this cascade (and the self-service delete) locates a model by looking up that same row. |
 | `keeper_requests` | All rows | **Excluded** — these record sidecar decisions and don't carry user-attributable content beyond the agent_id |
 | `lessons.md` content scan | Per-crew lessons files | **Manual** — the handler logs a warning naming the subject when it finds the user_slug in any lessons.md; operator decides whether to edit the file by hand |
 | `chats` | All rows owned by subject | **NOT** auto-deleted — operator runs a separate query if the data subject was also a Crewship user; see [Chat sessions](/guides/chat-sessions#sessions) |
@@ -126,6 +126,28 @@ the record itself was erased. A purge for a subject who never had a card or a
 model now writes nothing at all, rather than creating the sentinel it was
 called to remove.
 </Note>
+
+<Warning>
+**Known gap: a dormant crew's search index is not purged.** Every crew's
+sidecar keeps an FTS5 index (`index.sqlite`) alongside `.memory/`, built by
+walking the memory tree — including `users/{user_slug}.md` — at container
+startup and on a 60-second tick while the sidecar is running. The Art. 17 and
+Art. 15 cascades and `crewship privacy user-model delete` all run **host-side**
+and only touch the `.md` file and its `.lock` sentinel; none of them open
+`index.sqlite`. For a crew whose container is running when the erasure
+happens, the next 60-second reindex tick naturally drops the erased content
+from the index — it walks the tree fresh and the file is gone. For a
+**dormant** crew (a container that is stopped — typically because the
+operator has since moved to a different crew, the exact condition this page's
+per-crew-directory delete exists to reach), the erased content's search chunks
+persist in that crew's `index.sqlite` until its container is next started, and
+`memory.search` scoped to that crew would still surface them. Proposed fix:
+extend the host-side delete to also open each crew's `index.sqlite` (when
+present) and remove rows for `users/{user_slug}.md`, matching what
+`Engine.ReindexPath` already does for a file that has disappeared from disk —
+gated on the index file already existing, so a crew with no engine yet never
+gets one created just to record an absence.
+</Warning>
 
 The response confirms what landed:
 

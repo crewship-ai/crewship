@@ -15,9 +15,9 @@ Request schema quality: 251 operations have request bodies; 247 have concrete JS
 
 CLI flag quality: 386 commands define flags; 386 document all of their flags and 0 still have undocumented flag(s).
 
-Environment variables: 102 discovered, 0 missing documentation. Manifest kinds: 21 discovered, 0 missing documentation.
+Environment variables: 105 discovered, 0 missing documentation. Manifest kinds: 21 discovered, 0 missing documentation.
 
-Docs → code references: 4555 commands, 2198 API paths, 447 environment variables, 231 manifest kinds, and 2183 flags; missing symbols: 0, 0, 0, 0, and 0 respectively.
+Docs → code references: 4557 commands, 2198 API paths, 454 environment variables, 231 manifest kinds, and 2184 flags; missing symbols: 0, 0, 0, 0, and 0 respectively.
 
 ## API operations needing attention
 

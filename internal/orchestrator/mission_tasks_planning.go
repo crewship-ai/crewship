@@ -241,6 +241,13 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	// (assigned_by = assigned_to = the lead, chat = the mission, no parent),
 	// and `depth > 0` is what keeps delegation_limits.go from counting it as
 	// one. See TestMissionAssignmentRowsCarryDepthZero.
+	//
+	// Same FK as scheduleTask's assignment insert (chat_id NOT NULL
+	// REFERENCES chats(id), chat_id = mission id) — see ensureMissionChat's
+	// doc comment in mission_tasks.go for why this checks rather than trusts.
+	if err := e.ensureMissionChat(ctx, ms); err != nil {
+		return fmt.Errorf("ensure mission chat: %w", err)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	assignmentID := generateID()
 	_, err = e.db.ExecContext(ctx, `

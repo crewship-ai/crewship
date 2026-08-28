@@ -18,7 +18,6 @@ package api
 //     nothing, which is the failure mode the whole track exists to fix.
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -68,7 +67,7 @@ func TestHooksCreate_UnknownEventIsRejectedAndListsTheValidOnes(t *testing.T) {
 	}
 
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
@@ -101,7 +100,7 @@ func TestHooksCreate_PreToolCallIsRejected(t *testing.T) {
 	}
 
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
@@ -131,7 +130,7 @@ func TestHooksCreate_ShellHandlerRequiresOwner(t *testing.T) {
 		t.Errorf("403 should say which role is required: %s", rr.Body.String())
 	}
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config`).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
@@ -210,7 +209,15 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	rr := postHook(t, h, userID, wsID, "OWNER", map[string]any{
-		"event":          string(hooks.EventPostToolCall),
+		// pre_agent_start specifically: it reaches Dispatch through the
+		// orchestrator's string-typed HookDispatcher pass-through
+		// (internal/orchestrator/orchestrator_run.go) rather than a typed
+		// hooks.EventXxx constant, which is the call-site shape the
+		// dispatch-site scan is weakest at seeing. Driving the API →
+		// hooks_config → Dispatch round trip on that shape is what keeps an
+		// API-created hook from going silently dead the way this whole
+		// track exists to catch.
+		"event":          string(hooks.EventPreAgentStart),
 		"handler_kind":   "http",
 		"handler_config": map[string]any{"url": target.URL},
 		"matcher":        map[string]any{"tools": []string{"Bash"}},
@@ -229,9 +236,12 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 		t.Error("hook should default to enabled — a hook nobody enables never fires")
 	}
 
-	// Now drive the real dispatcher over the real table.
+	// Now drive the real dispatcher over the real table. ToolName/matcher
+	// still apply here even though pre_agent_start carries no ToolName in
+	// production — Matches evaluates EventContext fields independently of
+	// Event, so this still pins that the stored matcher round-trips.
 	ec := hooks.EventContext{WorkspaceID: wsID, ToolName: "Bash"}
-	if err := hooks.Dispatch(context.Background(), db, nil, hooks.EventPostToolCall, ec); err != nil {
+	if err := hooks.Dispatch(t.Context(), db, nil, hooks.EventPreAgentStart, ec); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
 	select {
@@ -244,7 +254,7 @@ func TestHooksCreate_CreatedHookReachesTheDispatcher(t *testing.T) {
 	}
 
 	// And the matcher round-tripped: a tool the matcher excludes must not fire.
-	if err := hooks.Dispatch(context.Background(), db, nil, hooks.EventPostToolCall,
+	if err := hooks.Dispatch(t.Context(), db, nil, hooks.EventPreAgentStart,
 		hooks.EventContext{WorkspaceID: wsID, ToolName: "Read"}); err != nil {
 		t.Fatalf("Dispatch (non-matching): %v", err)
 	}
@@ -301,7 +311,7 @@ func TestHooksCreate_CrossTenantCrewIs404(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
 		t.Fatalf("seed other ws: %v", err)
 	}
 	otherCrew := seedCrewRow(t, db, "crew-other", "ws-other", "Other Crew", "other-crew")
@@ -440,7 +450,7 @@ func TestHooksUpdate_LegacyPreToolCallRowSurvivesUnrelatedPatch(t *testing.T) {
 	h := NewHooksHandler(db, newTestLogger())
 
 	const id = "hk_legacy_pretool"
-	_, err := db.Exec(`INSERT INTO hooks_config
+	_, err := db.ExecContext(t.Context(), `INSERT INTO hooks_config
 		(id, workspace_id, event, matcher, handler_kind, handler_config, blocking, enabled)
 		VALUES (?, ?, 'pre_tool_call', '{}', 'http', ?, 0, 1)`,
 		id, wsID, `{"url":"https://legacy.test"}`)
@@ -468,7 +478,7 @@ func TestHooksUpdate_LegacyPreToolCallRowSurvivesUnrelatedPatch(t *testing.T) {
 	}
 
 	var event string
-	if err := db.QueryRow(`SELECT event FROM hooks_config WHERE id = ?`, id).Scan(&event); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT event FROM hooks_config WHERE id = ?`, id).Scan(&event); err != nil {
 		t.Fatalf("read back: %v", err)
 	}
 	if event != "pre_tool_call" {
@@ -502,7 +512,7 @@ func TestHooksUpdate_NonOwnerCannotConvertAHookToShell(t *testing.T) {
 	}
 
 	var kind string
-	if err := db.QueryRow(`SELECT handler_kind FROM hooks_config WHERE id = ?`, created.ID).Scan(&kind); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT handler_kind FROM hooks_config WHERE id = ?`, created.ID).Scan(&kind); err != nil {
 		t.Fatalf("read back: %v", err)
 	}
 	if kind != "http" {
@@ -530,7 +540,7 @@ func TestHooksUpdate_CrossTenantIs404(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
 		t.Fatalf("seed other ws: %v", err)
 	}
 	foreign := seedHook(t, db, "ws-other", "")
@@ -567,7 +577,7 @@ func TestHooksDelete_RemovesTheRowThenIs404(t *testing.T) {
 		t.Fatalf("delete status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config WHERE id = ?`, id).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config WHERE id = ?`, id).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 0 {
@@ -583,7 +593,7 @@ func TestHooksDelete_CrossTenantIs404AndLeavesTheRow(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces (id, name, slug) VALUES ('ws-other','Other','other')`); err != nil {
 		t.Fatalf("seed other ws: %v", err)
 	}
 	foreign := seedHook(t, db, "ws-other", "")
@@ -593,7 +603,7 @@ func TestHooksDelete_CrossTenantIs404AndLeavesTheRow(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rr.Code)
 	}
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM hooks_config WHERE id = ?`, foreign).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM hooks_config WHERE id = ?`, foreign).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 1 {

@@ -39,14 +39,23 @@ type covHooks struct {
 	mu      sync.Mutex
 	events  []string
 	blockOn string
+	failOn  string
 }
+
+type covHookBlockedError struct{}
+
+func (covHookBlockedError) Error() string     { return "blocked by policy hook" }
+func (covHookBlockedError) HookBlocked() bool { return true }
 
 func (h *covHooks) Dispatch(_ context.Context, event string, _ HookEventContext) error {
 	h.mu.Lock()
 	h.events = append(h.events, event)
 	h.mu.Unlock()
 	if h.blockOn != "" && event == h.blockOn {
-		return errors.New("blocked by policy hook")
+		return covHookBlockedError{}
+	}
+	if h.failOn != "" && event == h.failOn {
+		return errors.New("hook registry offline")
 	}
 	return nil
 }
@@ -347,6 +356,19 @@ func TestRunAgent_PreAgentStartHookBlocks(t *testing.T) {
 	}
 }
 
+func TestRunAgent_PreAgentStartDispatchFailureIsNotReportedAsBlock(t *testing.T) {
+	t.Parallel()
+	o := New(covNewRunContainer(covRunOpts{}), newMemState(), covQuietLogger())
+	o.SetHooksDispatcher(&covHooks{failOn: "pre_agent_start"})
+	err := o.RunAgent(context.Background(), covRunReq(), nil)
+	if err == nil || !strings.Contains(err.Error(), "pre_agent_start hook dispatch failed") {
+		t.Fatalf("expected honest dispatch failure, got %v", err)
+	}
+	if strings.Contains(err.Error(), "hook blocked") {
+		t.Fatalf("infrastructure error was mislabeled as a policy block: %v", err)
+	}
+}
+
 // ---- journal + state branches ----
 
 func TestRunAgent_LongUserMessageJournalTruncation(t *testing.T) {
@@ -568,8 +590,10 @@ func TestRunAgent_SidecarReusedInFreeMode(t *testing.T) {
 	if err := o.RunAgent(context.Background(), covRunReq(), nil); err != nil {
 		t.Fatalf("RunAgent: %v", err)
 	}
-	for _, call := range c.snapshotCalls() {
-		if strings.Contains(covScript(call), "crewship-sidecar --addr") {
+	// The launch script (including "crewship-sidecar --addr") rides stdin,
+	// not argv, so scan the combined Cmd+stdin text snapshotScripts builds.
+	for _, script := range c.snapshotScripts() {
+		if strings.Contains(script, "crewship-sidecar --addr") {
 			t.Fatal("healthy free-mode sidecar must be reused, not restarted")
 		}
 	}
@@ -597,8 +621,9 @@ func TestRunAgent_RestrictedModeRestartsSidecarWithDomains(t *testing.T) {
 
 	var sawPkill bool
 	var launchScript string
-	for _, call := range c.snapshotCalls() {
-		script := covScript(call)
+	// The launch script (including "crewship-sidecar --addr") rides stdin,
+	// not argv, so scan the combined Cmd+stdin text snapshotScripts builds.
+	for _, script := range c.snapshotScripts() {
 		if strings.Contains(script, "pkill -f '^crewship-sidecar'") {
 			sawPkill = true
 		}
@@ -920,8 +945,10 @@ func TestRunAgent_EmptySlugRejectedBeforeSidecarMemoryConfig(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid agent slug") {
 		t.Fatalf("expected empty slug rejection, got %v", err)
 	}
-	for _, call := range c.snapshotCalls() {
-		if strings.Contains(covScript(call), "crewship-sidecar --addr") {
+	// The launch script (including "crewship-sidecar --addr") rides stdin,
+	// not argv, so scan the combined Cmd+stdin text snapshotScripts builds.
+	for _, script := range c.snapshotScripts() {
+		if strings.Contains(script, "crewship-sidecar --addr") {
 			t.Fatal("sidecar started with an empty agent slug: the slug check no longer " +
 				"precedes SidecarMemoryConfig construction, so memory_guard.go's comment is stale")
 		}

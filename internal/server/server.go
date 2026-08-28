@@ -1134,7 +1134,7 @@ func buildOrchestrator(cfg *config.Config, logger *slog.Logger, ctr provider.Con
 	// lazy registry and adapt it to the orchestrator's interface. The
 	// adapter is a one-liner because *memory.WorkspaceMemory already
 	// satisfies orchestrator.WorkspaceMemoryReader by structural match
-	// (GetContext(int) (string, int)). The typed-nil-interface gotcha
+	// (GetContext(ctx, int) (string, int, bool)). The typed-nil-interface gotcha
 	// is handled here: if the registry returns a nil concrete pointer
 	// we return a nil interface, not a non-nil interface wrapping nil.
 	if cfg.Storage.MemoryRoot != "" {

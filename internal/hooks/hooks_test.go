@@ -1069,3 +1069,168 @@ func TestSubagentHandlerConfigured(t *testing.T) {
 		t.Errorf("outcome: %s", res.Outcome)
 	}
 }
+
+// ---------------------------------------------------------------------
+// Dispatch: ListByEvent (infra) failure must be distinguishable from both
+// "no hooks registered" and "a hook blocked this".
+// ---------------------------------------------------------------------
+
+// TestDispatchDistinguishesInfraErrorFromBlock is table-driven across the
+// two causes Dispatch can return a non-nil verdict for: a broken
+// hook lookup (infrastructure) and a blocking hook actually saying Block
+// (policy). A caller — orchestrator_run.go's pre_agent_start gate chief
+// among them — must abort on either error but report the cause honestly.
+func TestDispatchDistinguishesInfraErrorFromBlock(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
+
+	t.Run("ListByEvent failure returns a typed error and is journaled", func(t *testing.T) {
+		db := openTestDB(t)
+		// Close the DB so the lookup itself fails the way a real infra
+		// hiccup would — QueryContext returns sql.ErrConnDone rather
+		// than a normal "no rows" result.
+		if err := db.Close(); err != nil {
+			t.Fatalf("close db: %v", err)
+		}
+
+		rec := &recordingEmitter{}
+		err := Dispatch(context.Background(), db, rec, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		if err == nil {
+			t.Fatal("infra error was swallowed")
+		}
+		var de *DispatchError
+		if !errors.As(err, &de) {
+			t.Fatalf("infra error = %T, want *DispatchError: %v", err, err)
+		}
+		var be *BlockedError
+		if errors.As(err, &be) {
+			t.Fatalf("infra error also presents as *BlockedError: %v", err)
+		}
+
+		// It must still be observable — not silently swallowed.
+		var sawDispatchError bool
+		for _, e := range rec.entries {
+			if e.Type == journal.EntryHookDispatchError {
+				sawDispatchError = true
+				if e.Severity != journal.SeverityWarn {
+					t.Errorf("dispatch error entry severity = %s, want warn", e.Severity)
+				}
+			}
+		}
+		if !sawDispatchError {
+			t.Errorf("expected a hook.dispatch_error journal entry, got types=%v", rec.typesSeen())
+		}
+	})
+
+	t.Run("blocking handler failure is typed infrastructure, not policy", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+		id, err := Register(context.Background(), db, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": "://invalid"},
+			Blocking:      true,
+			Enabled:       true,
+		}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = Dispatch(context.Background(), db, &recordingEmitter{}, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		var dispatchErr *DispatchError
+		if !errors.As(err, &dispatchErr) {
+			t.Fatalf("handler error = %T, want *DispatchError: %v", err, err)
+		}
+		if dispatchErr.HookID != id {
+			t.Fatalf("DispatchError.HookID = %q, want %q", dispatchErr.HookID, id)
+		}
+		var blockedErr *BlockedError
+		if errors.As(err, &blockedErr) {
+			t.Fatalf("handler failure masquerades as a policy block: %v", err)
+		}
+	})
+
+	t.Run("a genuine blocking hook still stops the caller", func(t *testing.T) {
+		db := openTestDB(t)
+		defer db.Close()
+		ctx := context.Background()
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(503)
+		}))
+		defer ts.Close()
+
+		if _, err := Register(ctx, db, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": ts.URL},
+			Blocking:      true,
+			Enabled:       true,
+		}, false); err != nil {
+			t.Fatal(err)
+		}
+
+		rec := &recordingEmitter{}
+		err := Dispatch(ctx, db, rec, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		if err == nil {
+			t.Fatal("expected a *BlockedError, got nil")
+		}
+		var be *BlockedError
+		if !errors.As(err, &be) {
+			t.Fatalf("expected *BlockedError, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("a caller can tell the two apart programmatically", func(t *testing.T) {
+		// Infra error: errors.As recovers DispatchError, never BlockedError.
+		db := openTestDB(t)
+		if err := db.Close(); err != nil {
+			t.Fatalf("close db: %v", err)
+		}
+		infraErr := Dispatch(context.Background(), db, &recordingEmitter{}, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		var be *BlockedError
+		if errors.As(infraErr, &be) {
+			t.Fatal("an infra lookup error must never present as *BlockedError")
+		}
+		var de *DispatchError
+		if !errors.As(infraErr, &de) {
+			t.Fatalf("an infra lookup error must present as *DispatchError, got: %T: %v", infraErr, infraErr)
+		}
+
+		// Block: Dispatch returns non-nil and errors.As recovers the
+		// concrete *BlockedError — this is the one case a call site
+		// should treat as "stop".
+		db2 := openTestDB(t)
+		defer db2.Close()
+		ctx := context.Background()
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(503)
+		}))
+		defer ts.Close()
+		if _, err := Register(ctx, db2, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": ts.URL},
+			Blocking:      true,
+			Enabled:       true,
+		}, false); err != nil {
+			t.Fatal(err)
+		}
+		blockErr := Dispatch(ctx, db2, &recordingEmitter{}, EventPreAgentStart, EventContext{
+			WorkspaceID: "ws_test",
+		})
+		if !errors.As(blockErr, &be) {
+			t.Fatalf("expected *BlockedError, got %T: %v", blockErr, blockErr)
+		}
+	})
+}

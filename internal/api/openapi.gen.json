@@ -4636,7 +4636,19 @@
           "credential_id": {
             "type": "string"
           },
+          "message": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "string"
+          },
           "status": {
+            "type": "string"
+          },
+          "token_url": {
             "type": "string"
           }
         },
@@ -6828,6 +6840,12 @@
       "IntegrationsAuthOAuthAutoConnectRequest": {
         "properties": {
           "mcp_url": {
+            "type": "string"
+          },
+          "oauth_client_id": {
+            "type": "string"
+          },
+          "oauth_client_secret": {
             "type": "string"
           },
           "provider_hint": {
@@ -71449,6 +71467,14 @@
           {
             "in": "query",
             "name": "error",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "iss",
             "required": false,
             "schema": {
               "type": "string"

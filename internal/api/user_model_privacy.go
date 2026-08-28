@@ -319,10 +319,25 @@ func dropUserModelField(body, key string) (string, bool) {
 // row, returning how many models were removed (0 or 1 — the index is
 // UNIQUE on (workspace_id, user_slug)).
 //
-// Row deletion is unconditional; the on-disk delete only runs when a
-// storage path is configured. Gating the DB purge on storage config would
-// leave a stale user_models row after an opt-out, which is the same GDPR
-// bug purgeUserCards documents avoiding.
+// The on-disk delete is best-effort in the sense that it tries every crew
+// directory rather than stopping at the first miss (DeleteUserModelEverywhere
+// itself is best-effort across directories), but a FAILURE from it is not
+// swallowed here any more. It used to be: the DB row went unconditionally
+// and the file error was only logged, so a caller who could not delete one
+// of N crew copies still got back "deleted" — the exact erasure-reports-
+// success bug the exhaustive, multi-directory delete was supposed to fix,
+// one level up. Two things follow from treating it as a real failure:
+//
+//  1. The error propagates to the caller, which already turns a non-nil
+//     error into a 500 (DeleteMyUserModel) rather than 200.
+//  2. The index row is NOT deleted on that failure. Deleting it anyway
+//     would make the orphan permanently unfindable: this function is
+//     reached by looking the row up first (loadMyUserModelRow), so once
+//     the row is gone nothing ever asks "does this slug still have files
+//     anywhere" again — not a retry of this same endpoint, not a future
+//     sweep. Leaving the row in place means a second DELETE call retries
+//     the file cleanup (DeleteUserModelEverywhere is idempotent: crews it
+//     already cleared are silent no-ops) instead of silently giving up.
 func (h *UserPeerPrivacyHandler) purgeUserModel(r *http.Request, userID, wsID, reason string) (int, error) {
 	row, found, err := h.loadMyUserModelRow(r, userID, wsID)
 	if err != nil {
@@ -332,12 +347,16 @@ func (h *UserPeerPrivacyHandler) purgeUserModel(r *http.Request, userID, wsID, r
 		return 0, nil
 	}
 	if h.outputBasePath != "" {
-		if err := memory.DeleteUserModelBySlug(
-			userModelPathsFor(h.outputBasePath, row.crewID), row.userSlug); err != nil {
-			// Fall through: the index row still goes, so a "show me what
-			// you have" answers nothing.
+		// Deletes from EVERY crew directory on disk, not just row.crewID.
+		// A prior sweep's crew reassignment moves the row's crew_id
+		// forward without removing the file it left behind in the crew
+		// the operator has since left, and a purge that reconstructed a
+		// single "expected" path from row.crewID would miss exactly that
+		// orphan (#1701).
+		if _, err := memory.DeleteUserModelEverywhere(h.outputBasePath, row.userSlug); err != nil {
 			h.logger.Warn("user model file delete failed",
 				"user_id", userID, "reason", reason, "err", err)
+			return 0, fmt.Errorf("delete user model files: %w", err)
 		}
 	}
 	if _, err := h.db.ExecContext(r.Context(),

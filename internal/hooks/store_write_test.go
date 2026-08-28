@@ -317,6 +317,81 @@ func TestUpdate_LegacyEventRowRejectsChangingToAnotherUnknownEvent(t *testing.T)
 	}
 }
 
+// TestUpdate_ConcurrentEventChangeCannotReviveARetiredEvent pins the
+// WHERE-clause half of the legacy-event exemption. Update has to read the
+// row's current event before it can decide whether this write is changing
+// it — and a read followed by a write is a window. In that window another
+// writer can move a legacy pre_tool_call row onto a real event; if the
+// UPDATE then fired unconditionally on (id, workspace_id), this call's
+// stale h.Event would be written straight back over it, restoring
+// pre_tool_call without ever passing validateEventForWrite. That is the
+// original bug re-entering through the door built to accommodate it.
+//
+// The window is reproduced deterministically through
+// updateEventRaceHookForTest rather than by racing goroutines, so this
+// test fails 100% of the time against an unguarded UPDATE instead of
+// flaking into green.
+func TestUpdate_ConcurrentEventChangeCannotReviveARetiredEvent(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	const id = "hk_legacy_race"
+	if _, err := db.ExecContext(ctx, `INSERT INTO hooks_config
+		(id, workspace_id, event, matcher, handler_kind, handler_config, blocking, enabled)
+		VALUES (?, 'ws_test', 'pre_tool_call', '{}', 'http', ?, 0, 1)`,
+		id, `{"url":"https://old.test"}`); err != nil {
+		t.Fatalf("raw insert: %v", err)
+	}
+
+	before, err := Get(ctx, db, "ws_test", id)
+	if err != nil || before == nil {
+		t.Fatalf("Get before: %v (hook=%v)", err, before)
+	}
+
+	// The interloper: between our read and our write, someone repoints the
+	// row at a real event. Runs once — a second firing would mean Update
+	// re-entered the window, which it must not.
+	fired := 0
+	updateEventRaceHookForTest = func() {
+		fired++
+		if fired > 1 {
+			return
+		}
+		if _, err := db.ExecContext(ctx,
+			`UPDATE hooks_config SET event = ? WHERE id = ?`,
+			string(EventPostAgentStop), id); err != nil {
+			t.Errorf("interloping update: %v", err)
+		}
+	}
+	t.Cleanup(func() { updateEventRaceHookForTest = nil })
+
+	// Our PATCH: only blocking changes, event carries the stale value.
+	next := *before
+	next.Blocking = true
+	err = Update(ctx, db, "ws_test", next, false)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("Update over a concurrently-changed event = %v, want sql.ErrNoRows", err)
+	}
+	if fired != 1 {
+		t.Fatalf("race seam fired %d times, want 1 — the test did not exercise the window it claims to", fired)
+	}
+
+	var event string
+	var blocking int
+	if err := db.QueryRowContext(ctx,
+		`SELECT event, blocking FROM hooks_config WHERE id = ?`, id).Scan(&event, &blocking); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if event != string(EventPostAgentStop) {
+		t.Errorf("event = %q, want the interloper's %q — the stale update overwrote a newer, validated value",
+			event, EventPostAgentStop)
+	}
+	if blocking != 0 {
+		t.Errorf("blocking = %d, want 0 — the update reported ErrNoRows but wrote anyway", blocking)
+	}
+}
+
 func TestUpdate_RequiresAnID(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
