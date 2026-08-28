@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestEveryOfferedEventHasADispatchSite is a source-scan invariant, not a
@@ -54,8 +55,8 @@ import (
 // subsystem that never calls Dispatch — and the bare-presence regexp
 // counted those as a dispatch site. Requiring the identifier (or literal)
 // to actually be an ARGUMENT of a call to something named Dispatch closes
-// that gap: post_tool_call now correctly reports no dispatch site (see
-// preExistingDispatchGaps below).
+// that gap: post_tool_call stopped reading as covered until Observe was
+// given a real hooks.Dispatch call.
 //
 // This is still a heuristic, not full data-flow analysis — a value routed
 // through an intermediate variable before reaching Dispatch, or a Dispatch
@@ -69,13 +70,31 @@ func TestEveryOfferedEventHasADispatchSite(t *testing.T) {
 	files := collectScanFiles(t, root)
 	constNames := collectEventConstNames(t, root)
 
+	// No escape hatch: every event in AllEvents is required to have a real
+	// dispatch site. This test used to carry a preExistingDispatchGaps allowlist —
+	// ten events (post_tool_call, pre/post_task_delegation, pre/post_llm_call,
+	// pre/post_memory_write, pre/post_peer_conversation, on_budget_exceeded)
+	// found undispatched by the AST-based rewrite of eventHasDispatchSite,
+	// which closed the false-positive that had let post_tool_call read as
+	// covered (see the package doc above): internal/server and
+	// internal/keeper/behaviorhook only ever referenced the
+	// EventPostToolCall constant as a struct field, never called Dispatch
+	// with it. Logged rather than failed at the time because fixing all
+	// ten was out of scope for that change. That follow-up landed: every
+	// one of the ten now has a genuine Dispatch call passing the typed
+	// constant directly (runAssignment's pre/post_task_delegation,
+	// llm.Middleware's hooksCaller for pre/post_llm_call,
+	// Consolidator.Run's appendRules write for pre/post_memory_write,
+	// QueryHandler.Create/finishQuery for pre/post_peer_conversation,
+	// paymaster.Enforce for on_budget_exceeded, and
+	// postToolCallObserver.Observe for post_tool_call). Removing the
+	// allowlist is what turns "we know about these gaps" into "these gaps
+	// cannot recur without a red test": a future event added to AllEvents
+	// with no Dispatch call now fails here immediately, the same as it
+	// would have for pre_tool_call had this test existed sooner.
 	var undispatched []string
 	for _, ev := range AllEvents {
 		if eventHasDispatchSite(ev, files, constNames[ev]) {
-			continue
-		}
-		if preExistingDispatchGaps[ev] {
-			t.Logf("known pre-existing gap (not introduced by this test, not fixed by it either): %q has no dispatch site outside internal/hooks", ev)
 			continue
 		}
 		undispatched = append(undispatched, string(ev))
@@ -86,101 +105,6 @@ func TestEveryOfferedEventHasADispatchSite(t *testing.T) {
 		t.Errorf("event(s) offered to users (in hooks.AllEvents) with no dispatch site anywhere outside internal/hooks: %s\n"+
 			"each of these registers cleanly via Register/the API and then never fires — either wire a real Dispatch call "+
 			"for it, or remove it from AllEvents the way pre_tool_call was removed.", strings.Join(undispatched, ", "))
-	}
-}
-
-// preExistingDispatchGaps lists the events that already had zero production
-// dispatch site before this test was written, discovered by the same
-// investigation that removed pre_tool_call from AllEvents. Fixing ten
-// independently-dead events at once is out of scope for that change, so
-// they are logged rather than failed by
-// TestEveryOfferedEventHasADispatchSite — but they are not swept under the
-// rug: every one of them is named here, with the same "no dispatch site"
-// finding that test would otherwise report as a failure. Removing an event
-// from this map is part of the diff that wires up its dispatch, the same
-// discipline the test applies to every event added from here on.
-//
-// post_tool_call IS one of the ten. It used to look dispatched only because
-// of the whole-file-regexp false positive described above; closing that gap
-// makes the scan newly (and correctly) classify it as undispatched, same as
-// the other nine. The four events NOT listed here — pre_agent_start,
-// post_agent_stop, on_approval_requested, on_guardrail_triggered — are the
-// ones with real dispatch sites, and the map must stay exactly
-// complementary to them: an entry left here for an event that has since
-// been wired up would silently downgrade a real regression to a log line,
-// which is why TestPreExistingDispatchGapsAreStillGaps asserts the two
-// agree.
-var preExistingDispatchGaps = map[Event]bool{
-	EventPostToolCall:         true,
-	EventPreTaskDelegation:    true,
-	EventPostTaskDelegation:   true,
-	EventPreLLMCall:           true,
-	EventPostLLMCall:          true,
-	EventPreMemoryWrite:       true,
-	EventPostMemoryWrite:      true,
-	EventPrePeerConversation:  true,
-	EventPostPeerConversation: true,
-	EventOnBudgetExceeded:     true,
-}
-
-// TestPreExistingDispatchGapsAreStillGaps keeps the exception list above
-// from rotting into a blindfold. Every entry in preExistingDispatchGaps is
-// a promise that the event has no dispatch site; the moment someone wires
-// one up without deleting the entry, TestEveryOfferedEventHasADispatchSite
-// stops guarding that event forever and nobody finds out. So: assert the
-// map is exactly the set of AllEvents members the scan finds no site for.
-//
-// It also pins the fix this PR made: pre_tool_call is not in AllEvents, so
-// the scan above never looks at it. If a dispatch site for it ever appears,
-// the constant belongs back in AllEvents — silently having a live dispatch
-// site for an event nobody can register is the mirror image of the bug.
-func TestPreExistingDispatchGapsAreStillGaps(t *testing.T) {
-	root := repoRootForTest(t)
-	files := collectScanFiles(t, root)
-	constNames := collectEventConstNames(t, root)
-
-	for ev := range preExistingDispatchGaps {
-		if eventHasDispatchSite(ev, files, constNames[ev]) {
-			t.Errorf("%q now HAS a dispatch site but is still listed in preExistingDispatchGaps — "+
-				"delete the entry, otherwise TestEveryOfferedEventHasADispatchSite will never "+
-				"notice if that site is later removed again", ev)
-		}
-	}
-
-	var wired []string
-	for _, ev := range AllEvents {
-		if eventHasDispatchSite(ev, files, constNames[ev]) {
-			if preExistingDispatchGaps[ev] {
-				continue // already reported above
-			}
-			wired = append(wired, string(ev))
-			continue
-		}
-		if !preExistingDispatchGaps[ev] {
-			t.Errorf("%q has no dispatch site and no preExistingDispatchGaps entry — "+
-				"TestEveryOfferedEventHasADispatchSite should already be failing on it", ev)
-		}
-	}
-	sort.Strings(wired)
-
-	// Anti-vacuity: if the scan silently found nothing (bad root, walk
-	// misconfigured, parser change), every event would look like a
-	// pre-existing gap and both loops above would pass while checking
-	// nothing. The four wired events are the floor.
-	want := []string{"on_approval_requested", "on_guardrail_triggered", "post_agent_stop", "pre_agent_start"}
-	if len(wired) != len(want) {
-		t.Fatalf("events with a dispatch site = %v, want %v — if this changed on purpose, update both this list and the docs coverage tables", wired, want)
-	}
-	for i := range want {
-		if wired[i] != want[i] {
-			t.Fatalf("events with a dispatch site = %v, want %v", wired, want)
-		}
-	}
-
-	if eventHasDispatchSite(EventPreToolCall, files, constNames[EventPreToolCall]) {
-		t.Errorf("pre_tool_call now has a dispatch site but is absent from AllEvents — " +
-			"nobody can register a hook for it, so the site is dead code; put the constant " +
-			"back in AllEvents (and update the docs) or remove the dispatch call")
 	}
 }
 
@@ -256,7 +180,7 @@ func dispatchArgMatchesEvent(arg ast.Expr, constName, literal string) bool {
 // snakeToPascal("pre_llm_call") produced "PreLlmCall", but the real
 // constant is EventPreLLMCall. That bug was silent only because every
 // event whose name contains an acronym (LLM) was, at the time, also in
-// preExistingGaps — the moment one of those events gets a real Dispatch
+// preExistingDispatchGaps — the moment one of those events gets a real Dispatch
 // call site wired up, the guessed name stops matching the real one and
 // the test fails with a confusing "no dispatch site" even though a
 // dispatch site exists. Reading the identifier directly out of the const
@@ -390,6 +314,63 @@ func repoRootForTest(t *testing.T) string {
 	}
 }
 
+// TestDispatchSiteScanIsNotVacuous is the anti-vacuity guard that used to
+// live in TestPreExistingDispatchGapsAreStillGaps. With the gap allowlist
+// gone, TestEveryOfferedEventHasADispatchSite passes when the scan finds a
+// site for all fourteen events — and would ALSO pass if a broken scan
+// somehow reported "found" for everything. So pin both directions: the scan
+// must be able to answer "no", and it must find a real site through each of
+// its two matching branches.
+func TestDispatchSiteScanIsNotVacuous(t *testing.T) {
+	root := repoRootForTest(t)
+	files := collectScanFiles(t, root)
+	constNames := collectEventConstNames(t, root)
+
+	// "no" direction: an event nothing has ever declared has neither a
+	// constant nor a literal anywhere in the tree. A scan that reports a
+	// site for it is matching something other than what it claims, and
+	// every pass above means nothing.
+	if eventHasDispatchSite(Event("no_such_event_9f2c1a"), files, "") {
+		t.Fatal("the dispatch-site scan found a site for an event that does not exist — " +
+			"it is matching something other than a Dispatch argument, so every other " +
+			"assertion in this file is vacuous")
+	}
+
+	// pre_tool_call is not in AllEvents, so the loop above never looks at
+	// it. If a dispatch site for it ever appears, the constant belongs back
+	// in AllEvents — a live dispatch site for an event nobody can register
+	// is the mirror image of the bug this file exists for.
+	if eventHasDispatchSite(EventPreToolCall, files, constNames[EventPreToolCall]) {
+		t.Errorf("pre_tool_call now has a dispatch site but is absent from AllEvents — " +
+			"nobody can register a hook for it, so the site is dead code; put the constant " +
+			"back in AllEvents (and update the docs) or remove the dispatch call")
+	}
+
+	// "yes" direction, both branches. pre_agent_start is only ever
+	// dispatched as a bare string literal through the orchestrator's
+	// HookDispatcher interface; on_guardrail_triggered is only ever
+	// dispatched as the typed constant. If either branch regresses, one of
+	// these goes red with a precise cause instead of the whole event list
+	// going red with a vague one.
+	if !eventHasDispatchSite(EventPreAgentStart, files, constNames[EventPreAgentStart]) {
+		t.Error("string-literal branch of the scan found no site for pre_agent_start " +
+			"(orchestrator_run.go dispatches it as a plain string)")
+	}
+	if !eventHasDispatchSite(EventOnGuardrailTriggered, files, constNames[EventOnGuardrailTriggered]) {
+		t.Error("typed-constant branch of the scan found no site for on_guardrail_triggered " +
+			"(runner_llm.go dispatches hooks.EventOnGuardrailTriggered)")
+	}
+
+	// The acronym fix, pinned directly rather than via its symptom: the
+	// constant name is read out of the const declaration, so an event whose
+	// value contains an acronym resolves to the real identifier and not a
+	// snakeToPascal guess ("PreLlmCall").
+	if got := constNames[EventPreLLMCall]; got != "EventPreLLMCall" {
+		t.Errorf("constNames[pre_llm_call] = %q, want %q — the identifier is being guessed, "+
+			"not read from the const declaration, and acronym events will read as permanent gaps", got, "EventPreLLMCall")
+	}
+}
+
 // ---------------------------------------------------------------------
 // The dynamic half: registration is not observation
 // ---------------------------------------------------------------------
@@ -402,6 +383,16 @@ func repoRootForTest(t *testing.T) string {
 // REGISTRATION succeeded (201, row present, ValidateEvent happy); nothing
 // asserted a handler ran. So this one registers a real hook per event and
 // fails unless the handler is hit.
+//
+// Gate-capable events (Event.SupportsBlocking) are registered blocking, so
+// Dispatch runs the handler inline and the assertion is a plain read.
+// Observation events cannot be registered blocking any more — Register
+// rejects that with ErrEventCannotBlock — and their handlers run in a
+// goroutine Dispatch never waits on, so those subtests synchronise on the
+// handler itself. Reading hits.Load() straight after Dispatch would pass
+// for the wrong reason there: it would be a race, not an assertion, and a
+// hook that never fired at all would look identical to one that had not
+// fired yet.
 //
 // It also pins the other end of the original failure mode: the bug report
 // for the misspelled-event class was "inserts cleanly, then never selected
@@ -420,22 +411,24 @@ func TestEveryOfferedEventActuallyReachesItsHandler(t *testing.T) {
 			ctx := context.Background()
 
 			var hits atomic.Int64
+			fired := make(chan struct{}, 8)
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				hits.Add(1)
 				w.WriteHeader(http.StatusOK)
+				select {
+				case fired <- struct{}{}:
+				default:
+				}
 			}))
 			defer ts.Close()
 
-			// Blocking so Dispatch runs the handler synchronously —
-			// a non-blocking hook is fired in a goroutine Dispatch
-			// does not wait on, which would make "did it fire?" a
-			// race rather than an assertion.
+			blocking := ev.SupportsBlocking()
 			if _, err := Register(ctx, db, Hook{
 				WorkspaceID:   "ws_test",
 				Event:         ev,
 				HandlerKind:   HandlerKindHTTP,
 				HandlerConfig: map[string]any{"url": ts.URL},
-				Blocking:      true,
+				Blocking:      blocking,
 				Enabled:       true,
 			}, false); err != nil {
 				t.Fatalf("Register(%q) = %v — every event in AllEvents must be registerable", ev, err)
@@ -445,9 +438,18 @@ func TestEveryOfferedEventActuallyReachesItsHandler(t *testing.T) {
 			if err := Dispatch(ctx, db, rec, ev, EventContext{WorkspaceID: "ws_test"}); err != nil {
 				t.Fatalf("Dispatch(%q) = %v", ev, err)
 			}
-			if got := hits.Load(); got != 1 {
-				t.Fatalf("handler ran %d times for %q, want 1 — the hook registered fine and never fired, "+
-					"which is exactly the pre_tool_call failure mode", got, ev)
+			if blocking {
+				// Ran inline: the handler must already have been hit.
+				if got := hits.Load(); got != 1 {
+					t.Fatalf("handler ran %d times for %q, want 1 — the hook registered fine and never fired, "+
+						"which is exactly the pre_tool_call failure mode", got, ev)
+				}
+			}
+			select {
+			case <-fired:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("handler never ran for %q — the hook registered fine and never fired, "+
+					"which is exactly the pre_tool_call failure mode", ev)
 			}
 
 			// A different event must NOT reach this hook.
@@ -458,9 +460,11 @@ func TestEveryOfferedEventActuallyReachesItsHandler(t *testing.T) {
 			if err := Dispatch(ctx, db, rec, other, EventContext{WorkspaceID: "ws_test"}); err != nil {
 				t.Fatalf("Dispatch(%q) = %v", other, err)
 			}
-			if got := hits.Load(); got != 1 {
+			select {
+			case <-fired:
 				t.Errorf("hook registered on %q also fired for %q (%d total hits) — "+
-					"ListByEvent is not matching on the exact event value", ev, other, got)
+					"ListByEvent is not matching on the exact event value", ev, other, hits.Load())
+			case <-time.After(250 * time.Millisecond):
 			}
 
 			observed++

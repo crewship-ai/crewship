@@ -36,12 +36,17 @@ Defined in `internal/hooks/types.go` (14 events offered to users):
   `ValidateEvent` rejects it for new writes.
 </Note>
 
-### Coverage status (as of PR #210)
+### Coverage status
 
-**Currently dispatched** (call sites wired):
+All 14 events offered to users are dispatched from a real call site.
+`internal/hooks/dispatch_site_test.go`'s `TestEveryOfferedEventHasADispatchSite`
+enforces this as an invariant, not a claim to take on faith: it source-scans
+the tree for a real `hooks.Dispatch` call for every event in `AllEvents` and
+fails if one is missing, so this table cannot silently drift the way it did
+for `pre_tool_call` (declared, accepted, dispatched by nothing, for months).
 
-- `pre_agent_start`, `post_agent_stop` -- orchestrator agent lifecycle. **Both payloads carry `mission_id` since PR #210** so a hook can scope its action to the running mission without a separate join.
-- `on_approval_requested` -- fires when [Harbormaster](/guides/harbormaster)'s `Gate` returns `Required=true`, before the request lands in the approvals queue. The hook receives the same scope (`workspace_id`, `crew_id`, `agent_id`, `mission_id`), the credential ID, and the `intent` string. Use this to forward HITL notifications to Slack / PagerDuty / your own pager-of-choice. PR #210 finally wired this dispatch site — earlier docs claimed it fired but the call site was missing.
+- `pre_agent_start`, `post_agent_stop` -- orchestrator agent lifecycle (`internal/orchestrator/orchestrator_run.go`). Both payloads carry `mission_id` so a hook can scope its action to the running mission without a separate join.
+- `on_approval_requested` -- fires when [Harbormaster](/guides/harbormaster)'s `Gate` returns `Required=true`, before the request lands in the approvals queue. The hook receives the same scope (`workspace_id`, `crew_id`, `agent_id`, `mission_id`), the credential ID, and the `intent` string. Use this to forward HITL notifications to Slack / PagerDuty / your own pager-of-choice.
 - `on_guardrail_triggered` -- fires from [Lookout](/guides/lookout)'s `InputGuard` on every finding (block, sanitize, AND log mode — log isn't "guard disabled," it's observability + alerting without breaking the call). Wired via a `GuardListener` context callback in `internal/pipeline/runner_llm.go` so the integration path stays decoupled (lookout has no dep on the hooks package). Payload:
 
   ```json
@@ -59,18 +64,50 @@ Defined in `internal/hooks/types.go` (14 events offered to users):
 
   Severity on the `HookEventContext` is the finding's severity (`low` | `medium` | `high` | `critical`) so a webhook can throttle by criticality. Dispatch failures are logged but never change the guard's verdict — a blocked call stays blocked even if the alert channel is down.
 
-<Accordion title="Defined but not yet dispatched">
-Add a `hooks.Dispatch` call at the relevant point when the corresponding platform path wires through:
+- `pre_task_delegation`, `post_task_delegation` -- `AssignmentHandler.runAssignment` (`internal/api/assignments_run.go`), the one function every delegation door (the sidecar's `/assign`, its dispatch-pump retry, the mission engine's `DispatchAssignment`, and `@mention`'s `DispatchMention`) converges on before a delegated task runs. `pre_task_delegation` is blocking-capable and fires before anything is spent on the run; `post_task_delegation` fires once the hand-off is journaled, fire-and-forget.
+- `post_tool_call` -- `postToolCallObserver.Observe` (`internal/server/post_tool_call_adapter.go`), the same observation the built-in F4.2 behavior monitor rides, but dispatched independent of that monitor's governance/sampling gate: a workspace with the watchdog OFF (the default) still gets its own registered `post_tool_call` hooks on every observed call.
+- `pre_llm_call`, `post_llm_call` -- a new outermost layer (`hooksCaller`) in `llm.Middleware`'s caller chain (`internal/llm/middleware.go`), wrapping every `Complete` and `Stream` call ahead of telemetry, paymaster, and lookout. `pre_llm_call` is blocking-capable and can refuse a call before any of those layers spend anything on it.
+- `pre_memory_write`, `post_memory_write` -- `Consolidator.Run` (`internal/consolidate/consolidator.go`), around the canonical `appendRules` write that lands an LLM-summarized batch of "learned rules" into a crew's `learned-*.md` with no human in the loop. This is the automated half of memory writing, not an agent's own `memory.write` tool call — that path executes inside the sidecar container, which has no database connection `hooks.Dispatch` could use, so it isn't covered (see the FAQ below). `pre_memory_write` is blocking-capable — the seam a future write-approval gate for agent memory would use.
+- `pre_peer_conversation`, `post_peer_conversation` -- `QueryHandler.Create` / `finishQuery` (`internal/api/query_handler.go`), the single entry point every `curl localhost:9119/query` peer question converges on. `pre_peer_conversation` is blocking-capable and fires before the `peer_conversations` row exists.
+- `on_budget_exceeded` -- `paymaster.Enforce` (`internal/paymaster/budgets.go`), fired alongside the `budget.exceeded` journal entry whenever a hard- or tiered-mode budget check blocks a call. Not (yet) fired from `EnforceQuota`'s provider-quota-exhaustion path (the 429 case) — that would need a `*sql.DB` threaded into a function that doesn't currently take one.
 
-- `pre_task_delegation`, `post_task_delegation` -- hook into the assignment path (`orchestrator.RunAgentForAssignment`).
-- `post_tool_call` -- the observation exists (`orchestrator.PostToolCallObserver`, wired to the built-in F4.2 behavior monitor), but nothing forwards it to `hooks.Dispatch` for user-registered hooks yet.
-- `pre_llm_call`, `post_llm_call` -- fits cleanly into `llm.Middleware`.
-- `pre_memory_write`, `post_memory_write` -- memory consolidation path.
-- `pre_peer_conversation`, `post_peer_conversation` -- peer bridge.
-- `on_budget_exceeded` -- Paymaster already emits journal entries; hooks are the natural next step.
-</Accordion>
+  <Warning>
+    **This one is not debounced.** `Enforce` runs on every LLM call, and
+    nothing records that a breach has already been announced — so the hook
+    fires on *every* call made while a budget is over, and twice on a call
+    that breaches two budgets, until the window rolls. The other two policy
+    events (`on_approval_requested`, `on_guardrail_triggered`) fire once per
+    triggering condition; this one does not. A journal row absorbs that
+    cadence; a pager, a Slack channel, or a `shell` handler running a command
+    on the crewshipd host does not. Wire it to something that tolerates
+    repeats, or debounce on your side, until once-per-breach lands.
+  </Warning>
 
-When adding a new dispatch site, also add a row to `AllEvents` in `types.go` and test coverage in `hooks_test.go`.
+<Note>
+  **Why isn't there a hook for an agent's own memory write?** `memory.write` /
+  `memory.append_daily` (the MCP tools an agent calls) execute inside the
+  sidecar process running in the agent's container, which has no database
+  connection — `hooks.Dispatch` needs one to look up registered hooks. Wiring
+  it would mean adding new plumbing (a DB connection in the sidecar, or a
+  callback endpoint to crewshipd) rather than calling `hooks.Dispatch` from an
+  existing call site, which is out of scope for a 1.0-stabilizing hooks
+  surface. `pre_memory_write` / `post_memory_write` cover the *other* memory
+  write this platform makes without a human approving it — the background
+  consolidator's automated `learned-*.md` append — which is arguably the more
+  valuable one to gate.
+
+  Two other writes to that same canonical file are also uncovered, both by
+  design: the consolidator's **proposal** path (`proposal_mode`, which stages
+  rules under `.proposed/` instead of appending) and
+  `consolidate.ApproveProposal`, which merges an approved proposal in. Both
+  already have a human in the loop, which is what `pre_memory_write` exists to
+  add — a hook there would gate a decision an operator has already made.
+</Note>
+
+When adding a new event, add it to `AllEvents` in `types.go`, add the
+`hooks.Dispatch` call site that fires it, and add coverage in
+`hooks_test.go`. `TestEveryOfferedEventHasADispatchSite` fails CI if the
+first two ever come apart.
 
 ## Handler kinds
 
@@ -84,7 +121,30 @@ const (
 
 ### shell
 
-Runs a command via `exec.CommandContext` under the host shell — `sh -c` on Linux/macOS, `cmd.exe /c` on Windows (write the command line in cmd syntax there). Event context is passed as env vars (`CREWSHIP_EVENT`, `CREWSHIP_AGENT_ID`, `CREWSHIP_MISSION_ID`, `CREWSHIP_PAYLOAD`, ...); the environment is otherwise sanitized to a pinned system PATH (plus `SystemRoot`/`ComSpec` on Windows). Stdout is captured as `Result.Payload`.
+Runs a command via `exec.CommandContext` under the host shell — `sh -c` on Linux/macOS, `cmd.exe /c` on Windows (write the command line in cmd syntax there). The environment is sanitized to a pinned system PATH (plus `SystemRoot`/`ComSpec` on Windows) with the event context added on top. Stdout is captured as `Result.Payload`.
+
+Every variable below is always set, empty when the event carries no value for it — so a command can read them unconditionally without `set -u` tripping:
+
+| Variable | Contents |
+|---|---|
+| `CREWSHIP_EVENT` | The event name, e.g. `pre_llm_call`. |
+| `CREWSHIP_WORKSPACE_ID` | Workspace the event fired in. |
+| `CREWSHIP_CREW_ID` | Crew scope, empty for workspace-wide events. |
+| `CREWSHIP_AGENT_ID` | Agent the event is about, when there is one. |
+| `CREWSHIP_MISSION_ID` | Mission the event belongs to, when there is one. |
+| `CREWSHIP_TOOL_NAME` | Tool name on `post_tool_call`; empty elsewhere. |
+| `CREWSHIP_LLM_PROVIDER` | Provider name on `pre_llm_call` / `post_llm_call` (`anthropic`, `bedrock`, ...); empty elsewhere. |
+| `CREWSHIP_LLM_MODEL` | Model id on `pre_llm_call` / `post_llm_call`; empty elsewhere. |
+| `CREWSHIP_COST_USD` | Call cost in USD on `post_llm_call`, formatted with `%g`. `0` on `pre_llm_call` (nothing has been spent yet) and on every event that carries no cost. |
+| `CREWSHIP_PAYLOAD` | The event's JSON payload. Capped — a payload over the cap is replaced by `{"_truncated":true,...}` and the full body stays in the `hook.fired` journal entry. |
+
+<Warning>
+  Quote `"$CREWSHIP_PAYLOAD"` (and every other variable above). An unquoted
+  expansion is word-split and glob-expanded by the shell, which is both a
+  correctness bug and an injection vector on a handler that runs as the
+  `crewship` process on the host. `hooks.Register` lints for this and logs a
+  warning, but it does not refuse the command.
+</Warning>
 
 Shell hooks require `OWNER` role at registration time -- an ADMIN cannot create a shell hook because arbitrary code execution on the host is a privilege escalation vector. The store enforces this via a register-time argument, not a row property:
 
@@ -179,6 +239,10 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
 
 Because that read and the `UPDATE` are two statements, the `UPDATE` also carries `AND event = <the value just read>`: if another writer changes the row's event in between, this update matches no rows and returns "not found" rather than writing a stale (and unvalidated) event back over the new one.
 
+### `--blocking` is only accepted on gate-capable events
+
+`blocking: true` is a promise the call site has to be able to keep. Only the `pre_*` events whose dispatch site can still cancel the operation honour it — `pre_task_delegation`, `pre_agent_start`, `pre_llm_call`, `pre_memory_write`, `pre_peer_conversation` (`Event.SupportsBlocking()` in `types.go`). `post_*` and `on_*` events are observations: their dispatch site has already done the thing, so a synchronous wait would only add latency and a `Block` outcome would arrive too late to undo anything. `Register`/`Update` reject `blocking: true` on those with `hooks: event cannot block`. The CLI catches it client-side only when the same command also supplies `--event` — `buildHookBody` has no event to check against otherwise, so `crewship hooks update <id> --blocking` is sent and refused by the server against the event the row already has. Rows created before this check existed may still carry `blocking = 1` on an observation event; they keep that value for display, but `Dispatch` demotes them to non-blocking rather than pretending the gate is real.
+
 ## Endpoints
 
 - `GET /api/v1/hooks[?crew_id=...]` -- list registered hooks (workspace-scoped).
@@ -230,7 +294,7 @@ Payload includes `hook_id`, `handler_kind`, `outcome`, `latency_ms`, `blocking`,
 ## Related
 
 - [Harbormaster](/guides/harbormaster) -- emits `on_approval_requested`.
-- [Paymaster](/guides/paymaster) -- future `on_budget_exceeded` source.
+- [Paymaster](/guides/paymaster) -- emits `on_budget_exceeded` from `Enforce`.
 - [Lookout](/guides/lookout) -- emits `on_guardrail_triggered` via the GuardListener context callback.
 - [Crew Journal](/guides/crew-journal) -- `hook.fired`, `hook.blocked`, `system.hook_toggled`.
 - [`crewship hooks`](/cli/hooks), [Hooks API](/api-reference/hooks).

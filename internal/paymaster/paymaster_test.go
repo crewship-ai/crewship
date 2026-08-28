@@ -584,14 +584,24 @@ func TestMiddlewareSuccess(t *testing.T) {
 	if resp.InputTokens != 1000 {
 		t.Errorf("response not passed through: %+v", resp)
 	}
+	if resp.CostUSD <= 0 {
+		t.Errorf("response cost = %v, want the same estimate written to the ledger", resp.CostUSD)
+	}
+	if resp.Confidence != ConfidenceEstimate {
+		t.Errorf("response confidence = %q, want %q", resp.Confidence, ConfidenceEstimate)
+	}
 
 	// Ledger row written?
 	var n int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM cost_ledger`).Scan(&n); err != nil {
+	var ledgerCost float64
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MAX(cost_usd), 0) FROM cost_ledger`).Scan(&n, &ledgerCost); err != nil {
 		t.Fatal(err)
 	}
 	if n != 1 {
 		t.Errorf("expected 1 ledger row, got %d", n)
+	}
+	if !nearly(resp.CostUSD, ledgerCost, 1e-12) {
+		t.Errorf("response cost %v differs from ledger cost %v", resp.CostUSD, ledgerCost)
 	}
 }
 

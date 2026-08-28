@@ -20,7 +20,7 @@
     "cli_with_all_flags_documented": 386,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
-    "environment_variables": 102,
+    "environment_variables": 105,
     "environment_variables_missing": 0,
     "manifest_kinds": 21,
     "manifest_kinds_missing": 0,
@@ -4028,7 +4028,8 @@
       "test_signals": [
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/main_test.go",
-        "cmd/gen-openapi/schemas_admin_integrations_test.go"
+        "cmd/gen-openapi/schemas_admin_integrations_test.go",
+        "internal/api/proxy_files_crew_door_sec_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -4048,7 +4049,8 @@
           "test_signals": [
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/main_test.go",
-            "cmd/gen-openapi/schemas_admin_integrations_test.go"
+            "cmd/gen-openapi/schemas_admin_integrations_test.go",
+            "internal/api/proxy_files_crew_door_sec_test.go"
           ]
         }
       }
@@ -4067,7 +4069,8 @@
       ],
       "status": "documented_exact",
       "test_signals": [
-        "cmd/gen-openapi/handler_resolution_test.go"
+        "cmd/gen-openapi/handler_resolution_test.go",
+        "internal/api/proxy_files_crew_door_sec_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -4085,7 +4088,8 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
-            "cmd/gen-openapi/handler_resolution_test.go"
+            "cmd/gen-openapi/handler_resolution_test.go",
+            "internal/api/proxy_files_crew_door_sec_test.go"
           ]
         }
       }
@@ -9638,7 +9642,8 @@
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/required_minlength_test.go",
-        "cmd/gen-openapi/schemas_admin_integrations_test.go"
+        "cmd/gen-openapi/schemas_admin_integrations_test.go",
+        "internal/api/proxy_files_crew_door_sec_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -9660,7 +9665,8 @@
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/required_minlength_test.go",
-            "cmd/gen-openapi/schemas_admin_integrations_test.go"
+            "cmd/gen-openapi/schemas_admin_integrations_test.go",
+            "internal/api/proxy_files_crew_door_sec_test.go"
           ]
         }
       }
@@ -9723,7 +9729,8 @@
       ],
       "status": "documented_exact",
       "test_signals": [
-        "cmd/gen-openapi/handler_resolution_test.go"
+        "cmd/gen-openapi/handler_resolution_test.go",
+        "internal/api/proxy_files_crew_door_sec_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -9741,7 +9748,8 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
-            "cmd/gen-openapi/handler_resolution_test.go"
+            "cmd/gen-openapi/handler_resolution_test.go",
+            "internal/api/proxy_files_crew_door_sec_test.go"
           ]
         }
       }
@@ -17132,14 +17140,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "internal/api/connectors_handler_test.go",
         "internal/api/oauth_creds_cov_test.go",
         "internal/api/oauth_flow_cov2_test.go",
         "internal/api/oauth_flow_cov_test.go",
+        "internal/api/oauth_resource_iss_test.go",
         "internal/api/oauth_test.go",
-        "internal/api/openapi_unauthenticated_set_test.go",
-        "internal/api/route_read_scope_invariant_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -17158,14 +17166,14 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "cmd/crewship/acceptance_oauth_connect_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "internal/api/connectors_handler_test.go",
             "internal/api/oauth_creds_cov_test.go",
             "internal/api/oauth_flow_cov2_test.go",
             "internal/api/oauth_flow_cov_test.go",
+            "internal/api/oauth_resource_iss_test.go",
             "internal/api/oauth_test.go",
-            "internal/api/openapi_unauthenticated_set_test.go",
-            "internal/api/route_read_scope_invariant_test.go",
             "…"
           ]
         }
@@ -17272,6 +17280,7 @@
         "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/oauth_flow_cov2_test.go",
         "internal/api/oauth_flow_cov_test.go",
+        "internal/api/oauth_resource_iss_test.go",
         "internal/api/oauth_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
@@ -17296,6 +17305,7 @@
             "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/oauth_flow_cov2_test.go",
             "internal/api/oauth_flow_cov_test.go",
+            "internal/api/oauth_resource_iss_test.go",
             "internal/api/oauth_test.go",
             "internal/api/unauth_reachability_test.go"
           ]
@@ -33193,6 +33203,7 @@
       "test_signals": [
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_inspect_cov_test.go",
+        "cmd/crewship/cmd_inspect_toolcalls_test.go",
         "cmd/crewship/cmd_run_id_namespace_test.go"
       ],
       "flags": [
@@ -36320,11 +36331,11 @@
         "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_credential_endpoint_headeronly_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_journal_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
-        "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "…"
       ]
     },
@@ -36446,11 +36457,11 @@
         "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_credential_endpoint_headeronly_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_journal_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
-        "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "…"
       ],
       "flags": [
@@ -38983,11 +38994,11 @@
         "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_credential_endpoint_headeronly_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_journal_test.go",
         "cmd/crewship/cmd_notify_cov_test.go",
-        "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "…"
       ]
     },
@@ -39583,10 +39594,16 @@
         "cmd/crewship/cmd_oauth_test.go"
       ],
       "flags": [
-        "name"
+        "name",
+        "oauth-client-id",
+        "oauth-client-secret",
+        "oauth-client-secret-stdin"
       ],
       "documented_flags": [
-        "name"
+        "name",
+        "oauth-client-id",
+        "oauth-client-secret",
+        "oauth-client-secret-stdin"
       ]
     },
     {
@@ -48201,9 +48218,17 @@
       "status": "documented"
     },
     {
+      "name": "CREWSHIP_COST_USD",
+      "docs": [
+        "docs/guides/hooks.mdx"
+      ],
+      "status": "documented"
+    },
+    {
       "name": "CREWSHIP_CREW_ID",
       "docs": [
-        "docs/configuration/environment.mdx"
+        "docs/configuration/environment.mdx",
+        "docs/guides/hooks.mdx"
       ],
       "status": "documented"
     },
@@ -48386,6 +48411,20 @@
       "name": "CREWSHIP_LICENSE_FILE",
       "docs": [
         "docs/configuration/environment.mdx"
+      ],
+      "status": "documented"
+    },
+    {
+      "name": "CREWSHIP_LLM_MODEL",
+      "docs": [
+        "docs/guides/hooks.mdx"
+      ],
+      "status": "documented"
+    },
+    {
+      "name": "CREWSHIP_LLM_PROVIDER",
+      "docs": [
+        "docs/guides/hooks.mdx"
       ],
       "status": "documented"
     },
@@ -48847,7 +48886,8 @@
     {
       "name": "CREWSHIP_TOOL_NAME",
       "docs": [
-        "docs/configuration/environment.mdx"
+        "docs/configuration/environment.mdx",
+        "docs/guides/hooks.mdx"
       ],
       "status": "documented"
     },
@@ -48892,7 +48932,8 @@
     {
       "name": "CREWSHIP_WORKSPACE_ID",
       "docs": [
-        "docs/configuration/environment.mdx"
+        "docs/configuration/environment.mdx",
+        "docs/guides/hooks.mdx"
       ],
       "status": "documented"
     }
@@ -49593,6 +49634,7 @@
         "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/admin-cli.mdx",
+        "docs/guides/agent-memory.mdx",
         "docs/guides/backup.mdx",
         "docs/guides/cartographer.mdx",
         "docs/guides/chat-demo-walkthrough.mdx",
@@ -49601,6 +49643,7 @@
         "docs/guides/crew-journal.mdx",
         "docs/guides/episodic-memory.mdx",
         "docs/guides/feedback.mdx",
+        "docs/guides/hooks.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/notifications.mdx",
@@ -49628,11 +49671,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4555,
+    "command_references": 4558,
     "api_path_references": 2198,
-    "environment_references": 447,
+    "environment_references": 454,
     "manifest_kind_references": 231,
-    "flag_references": 2183,
+    "flag_references": 2185,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

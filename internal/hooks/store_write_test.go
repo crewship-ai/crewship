@@ -95,7 +95,7 @@ func TestUpdate_RewritesFieldsAndBumpsUpdatedAt(t *testing.T) {
 	time.Sleep(2 * time.Millisecond)
 
 	next := *before
-	next.Event = EventPostToolCall
+	next.Event = EventPreLLMCall
 	next.HandlerConfig = map[string]any{"url": "https://new.test"}
 	next.Matcher = Matcher{Tools: []string{"Bash"}}
 	next.Blocking = true
@@ -108,8 +108,8 @@ func TestUpdate_RewritesFieldsAndBumpsUpdatedAt(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("Get after: %v (hook=%v)", err, got)
 	}
-	if got.Event != EventPostToolCall {
-		t.Errorf("event = %q, want %q", got.Event, EventPostToolCall)
+	if got.Event != EventPreLLMCall {
+		t.Errorf("event = %q, want %q", got.Event, EventPreLLMCall)
 	}
 	if got.HandlerConfig["url"] != "https://new.test" {
 		t.Errorf("handler_config = %v, want the new url", got.HandlerConfig)

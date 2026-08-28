@@ -384,8 +384,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   CLI (Claude Code, Cursor, ...) emits, so by the time a tool call is
   observable the tool has already run; there is no "before the tool runs"
   interception point to hook. (`post_tool_call` fires after the tool runs
-  in principle, but as of this change nothing dispatches it for
-  user-registered hooks either — see the Hooks guide's coverage table.)
+  and, since the dispatch-gap fix below landed in this same release, now
+  reaches user-registered hooks — see the Hooks guide's coverage table.)
   `pre_tool_call` is no longer a valid `--event` / `event` — the CLI and
   the API now reject it the same way they reject any other unknown event
   name, echoing the same list of legal ones. The `hooks.EventPreToolCall`
@@ -401,6 +401,91 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
   ⚠️ **Behaviour change:** a script or manifest that registers a
   `pre_tool_call` hook now gets a 400 instead of a silently-dead 201.
+
+- **Ten more hook events registered cleanly and never fired — the same
+  defect class `pre_tool_call` was, minus the one that had no possible
+  fix.** `pre_task_delegation`, `post_task_delegation`, `post_tool_call`,
+  `pre_llm_call`, `post_llm_call`, `pre_memory_write`, `post_memory_write`,
+  `pre_peer_conversation`, `post_peer_conversation`, and
+  `on_budget_exceeded` were all declared in `hooks.AllEvents`, accepted by
+  `crewship hooks create` / `POST /api/v1/hooks`, and reached by zero
+  `hooks.Dispatch` calls anywhere in the tree — a registered hook listed,
+  toggled, and looked healthy while never once running. Unlike
+  `pre_tool_call`, a real dispatch point existed for every one of these
+  ten; each is now wired to it:
+
+  - `pre_task_delegation` / `post_task_delegation` — `AssignmentHandler.runAssignment`, the one function every delegation door (sidecar `/assign`, its retry pump, the mission engine, and `@mention`) converges on.
+  - `post_tool_call` — `postToolCallObserver.Observe`, decoupled from the built-in behavior monitor's governance/sampling gate so a user's own hook fires on every observed tool call regardless of that monitor's settings.
+  - `pre_llm_call` / `post_llm_call` — a new outermost layer in `llm.Middleware`'s caller chain, wrapping every `Complete` and `Stream` call.
+  - `pre_memory_write` / `post_memory_write` — `Consolidator.Run`, around the automated `learned-*.md` write the background consolidator makes with no human in the loop (an agent's own `memory.write` tool call runs inside the sidecar container, which has no database connection to dispatch from, so that path is not covered — see the [Hooks guide](/guides/hooks#coverage-status)).
+  - `pre_peer_conversation` / `post_peer_conversation` — `QueryHandler.Create` / `finishQuery`, the sidecar's `/query` peer-question path.
+  - `on_budget_exceeded` — `paymaster.Enforce`, alongside the `budget.exceeded` journal entry it already wrote on a hard/tiered budget breach.
+
+  `internal/hooks/dispatch_site_test.go`'s `TestEveryOfferedEventHasADispatchSite`
+  — added by the `pre_tool_call` fix as a source-scan invariant, but left
+  logging rather than failing on these ten known gaps — now fails CI if
+  any offered event ever loses its dispatch site again.
+
+  ⚠️ **Behaviour change:** a `Blocking: true` hook registered against any
+  of these ten events previously had no effect no matter what its handler
+  returned. It can now actually refuse the operation it's attached to
+  (`pre_task_delegation` refuses the delegation, `pre_llm_call` refuses
+  the LLM call, `pre_peer_conversation` refuses the peer question,
+  `pre_memory_write` refuses the consolidator's write) — a workspace with
+  such a hook already registered will see it start enforcing on upgrade.
+
+- **Newly wired observation hooks could delay operations, report zero LLM
+  cost, and observe stale peer-query state.** `post_*` and `on_*` events now
+  always dispatch asynchronously; new or edited observation hooks reject
+  `blocking: true`, while legacy rows with that flag are safely treated as
+  non-blocking. The paymaster returns its estimated cost to the LLM hook
+  layer (not only to the ledger), HTTP and shell handlers receive the LLM
+  provider/model/cost fields, and `post_peer_conversation` fires only after
+  the terminal query state is committed.
+
+  Getting the cost to that hook layer meant `paymaster.recordFromResponse`
+  now returns the enriched `CallResponse` rather than computing its numbers
+  into locals — so the cost/confidence/timestamp the ledger records are the
+  same values every layer *above* paymaster sees. Two visible consequences
+  beyond hooks, neither a ledger change (`Record` already forced the
+  flat-rate invariants on disk): the OpenTelemetry LLM span's `cost_usd`
+  attribute now carries the backfilled rate-card estimate instead of the
+  provider's raw — usually zero — number, so spans and the ledger finally
+  agree; and `Confidence` comes back populated (`precise`/`estimate`/
+  `unknown`) where it used to be empty. Dashboards that charted span
+  `cost_usd` will show non-zero where they showed nothing.
+
+- **Two of the new gates called a broken hook a policy refusal.** `Dispatch`
+  distinguishes a hook deciding *no* (`*hooks.BlockedError`) from the hook
+  registry being unreadable or a handler being broken (`*hooks.DispatchError`)
+  — #2138 introduced that split precisely so gate call sites could report the
+  two differently. The new `pre_task_delegation` and `pre_peer_conversation`
+  gates collapsed them: a subagent hook with no handler installed, or a
+  webhook whose lookup failed, marked the assignment `FAILED` with
+  "pre_task_delegation hook blocked", and answered a peer query with `403`
+  plus the raw error (which wraps the underlying DB error) in the response
+  body — sending the operator hunting for a policy that does not exist, and
+  telling the caller it was refused when nothing refused it. Both still fail
+  closed, because a gate that cannot be evaluated is not a gate that passed;
+  they now say which happened, and the peer-query path answers `500` with a
+  generic body rather than `403` with the cause.
+
+  The check is also *ordered*, which the first pass of this fix got wrong.
+  `Dispatch` returns `errors.Join(dispatchErrs..., blocked)` when one blocking
+  hook fails to run and a **later** one blocks, so the joined error satisfies
+  `errors.As` for both types. Asking about `BlockedError` first reported a
+  tidy policy refusal and silently discarded the fact that another hook never
+  executed at all — the half an operator actually has to go fix. `DispatchError`
+  is now checked first at both gates.
+
+- **`post_task_delegation` announced a delegation the database did not yet
+  agree had started.** The dispatch sat immediately before `UPDATE assignments
+  SET status='RUNNING'`, so a handler that read the row back could find it
+  still `PENDING` — for an event whose entire meaning is "this delegation
+  began". It now fires after the transition, the same rule `finishQuery`
+  already follows for `post_peer_conversation`, and on `context.Background()`
+  like the other `post_*` sites so a cancelled caller cannot drop the
+  observation during the registry lookup.
 
 - **A forked mission could never run a task.** `Fork` wrote the mission, its
   tasks and its checkpoint, but not the synthetic `chats` row that

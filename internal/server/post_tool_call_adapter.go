@@ -55,6 +55,40 @@ func newPostToolCallObserver(logger *slog.Logger, j journal.Emitter, db *sql.DB)
 // by the slot timeout and is strictly preferable to losing audit data on
 // every cancelled run.
 func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
+	ec := hooks.EventContext{
+		Event:       hooks.EventPostToolCall,
+		WorkspaceID: obs.WorkspaceID,
+		CrewID:      obs.CrewID,
+		AgentID:     obs.AgentID,
+		MissionID:   obs.MissionID,
+		ToolName:    obs.ToolName,
+		Payload:     obs.Payload,
+	}
+
+	// User-registered post_tool_call hooks (crewship hooks create --event
+	// post_tool_call) fire on EVERY observed tool call, independent of the
+	// built-in behavior-monitor path below. That path is gated by
+	// workspace-level watchdog settings and a sampling cadence — both are
+	// policy for the F4.2 monitor specifically, not a precondition for a
+	// user's own hook to run. Wiring it here (rather than a new tap) is
+	// what closes the gap: this Observe is already the one place every
+	// tool_call event reaches for post_tool_call, per
+	// dispatchToolCallObservers in orchestrator.go. Best-effort: a
+	// dispatch error is logged, never lets a hook failure affect the
+	// (already-completed) tool call.
+	if obs.WorkspaceID != "" {
+		if hookErr := hooks.Dispatch(context.Background(), o.db, o.journ, hooks.EventPostToolCall, ec); hookErr != nil {
+			// A Block outcome on post_tool_call cannot un-run the tool call
+			// that already happened (see the package doc comment above) —
+			// BlockedError is still surfaced via the journal entry the
+			// dispatcher's blocking pass writes, same as any other blocking
+			// hook, so an operator sees it. Nothing further to abort here;
+			// just log so a broken handler (not a Block) is diagnosable.
+			o.logger.Warn("post_tool_call hook dispatch reported an error",
+				"workspace_id", obs.WorkspaceID, "tool", obs.ToolName, "error", hookErr)
+		}
+	}
+
 	hook := behaviorhook.Get()
 	if hook == nil {
 		return
@@ -76,15 +110,6 @@ func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 
-	ec := hooks.EventContext{
-		Event:       hooks.EventPostToolCall,
-		WorkspaceID: obs.WorkspaceID,
-		CrewID:      obs.CrewID,
-		AgentID:     obs.AgentID,
-		MissionID:   obs.MissionID,
-		ToolName:    obs.ToolName,
-		Payload:     obs.Payload,
-	}
 	// The sampling cadence rides out of the SAME row read that gated Enabled
 	// above (#1001 M3). Handing it to the hook per call — rather than pushing it
 	// onto the hook once at boot — is what makes it a setting: the hook is a
