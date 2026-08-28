@@ -94,4 +94,40 @@ describe("OAuthAutoConnect", () => {
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/network error/i))
   })
+
+  it("continues a discovered flow with an operator-supplied client ID", async () => {
+    openSpy.mockReturnValue({} as Window)
+    apiFetch
+      .mockResolvedValueOnce(json(200, {
+        status: "needs_client_id",
+        message: "Register an OAuth app and provide its Client ID.",
+        redirect_uri: "https://crewship.example/api/v1/oauth/callback",
+      }))
+      .mockResolvedValueOnce(json(200, {
+        status: "authorize",
+        auth_url: "https://issuer.example/authorize?resource=mcp",
+        credential_id: "cred-manual",
+      }))
+    renderCard()
+
+    connect()
+
+    const clientID = await screen.findByLabelText(/client id/i)
+    expect(screen.getByLabelText(/redirect uri/i)).toHaveValue(
+      "https://crewship.example/api/v1/oauth/callback",
+    )
+    fireEvent.change(clientID, { target: { value: "client-123" } })
+    fireEvent.change(screen.getByLabelText(/client secret/i), {
+      target: { value: "secret-456" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /continue with client id/i }))
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalled())
+    const [, request] = apiFetch.mock.calls[1]
+    expect(JSON.parse(request.body)).toMatchObject({
+      mcp_url: "https://mcp.linear.app/sse",
+      oauth_client_id: "client-123",
+      oauth_client_secret: "secret-456",
+    })
+  })
 })

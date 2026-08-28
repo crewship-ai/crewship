@@ -155,7 +155,7 @@ func TestCovOTRefreshExpiring_RefreshFailsMarksExpired(t *testing.T) {
 func TestCovOTExchangeOAuthCode_SetsOptionalParams(t *testing.T) {
 	t.Parallel()
 	_, err := exchangeOAuthCode(context.Background(),
-		"http://192.0.2.1:1/token", "client-id", "client-secret", "auth-code", "https://app/cb", "pkce-verifier")
+		"http://192.0.2.1:1/token", "client-id", "client-secret", "auth-code", "https://app/cb", "pkce-verifier", "res-x")
 	if err == nil {
 		t.Error("expected connection error to unroutable token endpoint")
 	}
@@ -166,7 +166,7 @@ func TestCovOTExchangeOAuthCode_SetsOptionalParams(t *testing.T) {
 func TestCovOTRefreshOAuthToken_SetsClientSecret(t *testing.T) {
 	t.Parallel()
 	_, err := refreshOAuthToken(context.Background(),
-		"http://192.0.2.1:1/token", "client-id", "client-secret", "refresh-token")
+		"http://192.0.2.1:1/token", "client-id", "client-secret", "refresh-token", "")
 	if err == nil {
 		t.Error("expected connection error to unroutable token endpoint")
 	}

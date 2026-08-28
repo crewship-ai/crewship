@@ -381,7 +381,7 @@ func TestCovNAO_SignOut_HTTPSClearsSecureCookies(t *testing.T) {
 func TestCovNAO_ExchangeOAuthCode_WithSecretAndVerifier(t *testing.T) {
 	t.Parallel()
 	_, err := exchangeOAuthCode(context.Background(),
-		"http://192.0.2.1:1/token", "cid", "the-secret", "the-code", "https://app/cb", "the-verifier")
+		"http://192.0.2.1:1/token", "cid", "the-secret", "the-code", "https://app/cb", "the-verifier", "")
 	if err == nil {
 		t.Error("expected connection error against unroutable host")
 	}
@@ -392,7 +392,7 @@ func TestCovNAO_ExchangeOAuthCode_WithSecretAndVerifier(t *testing.T) {
 func TestCovNAO_RefreshOAuthToken_WithSecret(t *testing.T) {
 	t.Parallel()
 	_, err := refreshOAuthToken(context.Background(),
-		"http://192.0.2.1:1/token", "cid", "the-secret", "the-refresh-token")
+		"http://192.0.2.1:1/token", "cid", "the-secret", "the-refresh-token", "")
 	if err == nil {
 		t.Error("expected connection error against unroutable host")
 	}

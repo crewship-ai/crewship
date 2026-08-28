@@ -72,6 +72,7 @@ func integrationsAuthRequestBodySchemaCatalog() (map[string]DomainSchema, map[st
 		"IntegrationsAuthOAuthDiscoveryRequest": object(map[string]any{"mcp_url": str()}, "mcp_url"),
 		"IntegrationsAuthOAuthAutoConnectRequest": object(map[string]any{
 			"mcp_url": str(), "server_name": str(), "provider_hint": str(),
+			"oauth_client_id": str(), "oauth_client_secret": str(),
 		}, "mcp_url"),
 		"IntegrationsAuthNotificationChannelCreateRequest": object(channelFields, "type"),
 		"IntegrationsAuthNotificationChannelPatchRequest": object(map[string]any{

@@ -556,6 +556,28 @@ func TestAcceptance_OAuthAutoConnectReportsCredentialID(t *testing.T) {
 	}
 }
 
+func TestAcceptance_OAuthAutoConnectSendsManualClient(t *testing.T) {
+	stub := &oauthStubServer{}
+	srv := stub.start(t)
+	cfg := oauthStubConfig(t, srv.URL)
+
+	out, err := runOAuthCLI(t, cfg, "oauth", "auto-connect", "https://mcp.example/sse",
+		"--name", "example-mcp",
+		"--oauth-client-id", "client-abc",
+		"--oauth-client-secret", "secret-xyz")
+	if err != nil {
+		t.Fatalf("auto-connect with manual client: %v\noutput: %s", err, out)
+	}
+
+	body := stub.body(t, "/api/v1/oauth/auto-connect")
+	if body["oauth_client_id"] != "client-abc" {
+		t.Errorf("oauth_client_id = %v", body["oauth_client_id"])
+	}
+	if body["oauth_client_secret"] != "secret-xyz" {
+		t.Errorf("oauth_client_secret = %v", body["oauth_client_secret"])
+	}
+}
+
 // --provider on auto-connect is a trap, not a feature, and must not exist.
 // AutoConnect fills authURL from the catalogue when provider_hint matches
 // (internal/api/oauth_creds.go:185-191), which makes the `if authURL == ""`
@@ -834,6 +856,7 @@ func TestAcceptance_OAuthAutoConnectNeedsClientIDIsNotSuccess(t *testing.T) {
 	stub := &oauthStubServer{
 		autoConnectBody: `{"status":"needs_client_id","auth_url":"https://idp.example/authorize",` +
 			`"token_url":"https://idp.example/token","scopes":"read",` +
+			`"redirect_uri":"https://crewship.example/api/v1/oauth/callback",` +
 			`"message":"This provider requires a Client ID. Create an OAuth app in the provider's settings."}`,
 	}
 	srv := stub.start(t)
@@ -845,6 +868,9 @@ func TestAcceptance_OAuthAutoConnectNeedsClientIDIsNotSuccess(t *testing.T) {
 	}
 	if !strings.Contains(out, "requires a Client ID") {
 		t.Errorf("output does not relay the server's explanation:\n%s", out)
+	}
+	if !strings.Contains(out, "https://crewship.example/api/v1/oauth/callback") {
+		t.Errorf("output omits the redirect URI the OAuth app must register:\n%s", out)
 	}
 	if strings.Contains(out, "cred_") {
 		t.Errorf("output names a credential that was never created:\n%s", out)

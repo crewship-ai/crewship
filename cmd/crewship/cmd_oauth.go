@@ -598,9 +598,11 @@ Dynamic Client Registration (RFC 7591), create an OAUTH2 credential in PENDING
 state, and print the URL to authorize.
 
 This only works where the provider offers a registration endpoint. When it does
-not, the server answers with what it found and an explanation instead — this
-command treats that as a failure rather than a success, because no credential
-was created and nothing is connected.
+not, register an OAuth app with the provider and pass --oauth-client-id. The
+server repeats discovery before creating the credential, so the protected MCP
+resource and authorization-server issuer remain bound to the flow. Public PKCE
+clients need no secret; confidential clients can read one from stdin with
+--oauth-client-secret-stdin.
 
 Finish the flow afterwards with:
 
@@ -622,6 +624,20 @@ Examples:
 		if name, _ := cmd.Flags().GetString("name"); name != "" {
 			body["server_name"] = name
 		}
+		clientID, _ := cmd.Flags().GetString("oauth-client-id")
+		if clientID == "" && (cmd.Flags().Changed("oauth-client-secret") || cmd.Flags().Changed("oauth-client-secret-stdin")) {
+			return cli.WithExitCode(fmt.Errorf("--oauth-client-id is required when a client secret is provided"), cli.ExitValidation)
+		}
+		if clientID != "" {
+			clientSecret, err := readOAuthClientSecret(cmd.Flags())
+			if err != nil {
+				return err
+			}
+			body["oauth_client_id"] = clientID
+			if clientSecret != "" {
+				body["oauth_client_secret"] = clientSecret
+			}
+		}
 		// provider_hint is never sent — see the note in init().
 
 		client := newAPIClient()
@@ -639,6 +655,7 @@ Examples:
 			AuthURL      string `json:"auth_url"`
 			TokenURL     string `json:"token_url"`
 			Scopes       string `json:"scopes"`
+			RedirectURI  string `json:"redirect_uri"`
 			CredentialID string `json:"credential_id"`
 			Message      string `json:"message"`
 		}
@@ -661,12 +678,15 @@ Examples:
 			if msg == "" {
 				msg = "the provider does not support Dynamic Client Registration"
 			}
+			redirectHint := ""
+			if out.RedirectURI != "" {
+				redirectHint = "\nRegister this redirect URI on the OAuth app: " + out.RedirectURI
+			}
 			return cli.WithExitCode(fmt.Errorf(
-				"no credential was created: %s\n"+
-					"Create an OAuth app in the provider's settings, then:\n"+
-					"  crewship credential create --name <name> --type OAUTH2 \\\n"+
-					"    --oauth-client-id <id> --oauth-auth-url %s --oauth-token-url %s",
-				msg, out.AuthURL, out.TokenURL), cli.ExitValidation)
+				"no credential was created: %s%s\n"+
+					"Create an OAuth app in the provider's settings, then retry this command with "+
+					"--oauth-client-id <id> (and --oauth-client-secret-stdin when required).",
+				msg, redirectHint), cli.ExitValidation)
 		}
 
 		f := newFormatter()
@@ -924,6 +944,9 @@ func init() {
 	oauthConnectCmd.Flags().Bool("open", false, "Open the authorize URL in a browser")
 
 	oauthAutoConnectCmd.Flags().String("name", "", "Name for the MCP server (default: mcp-server)")
+	oauthAutoConnectCmd.Flags().String("oauth-client-id", "", "Existing OAuth app client ID when the provider has no dynamic registration")
+	oauthAutoConnectCmd.Flags().String("oauth-client-secret", "", "OAuth app client secret (prefer --oauth-client-secret-stdin)")
+	oauthAutoConnectCmd.Flags().Bool("oauth-client-secret-stdin", false, "Read the OAuth app client secret from stdin")
 	// Deliberately no --provider. The endpoint takes a provider_hint, but
 	// sending one fills authURL from the catalogue, which makes AutoConnect
 	// skip discovery (internal/api/oauth_creds.go:185-192), which leaves

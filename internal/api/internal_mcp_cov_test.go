@@ -42,7 +42,7 @@ func TestEnsureFreshOAuthToken_StillFresh_NoRefresh(t *testing.T) {
 	current := covEnc(t, "access-token")
 	expiry := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
 	got := ensureFreshOAuthToken(context.Background(), db, newTestLogger(),
-		"cred-x", current, "cid", "", "https://token.example", covEnc(t, "refresh"), expiry)
+		"cred-x", current, "cid", "", "https://token.example", covEnc(t, "refresh"), expiry, "")
 	if got != current {
 		t.Errorf("fresh token must be returned unchanged")
 	}
@@ -55,7 +55,7 @@ func TestEnsureFreshOAuthToken_BadClientSecret_ReturnsCurrent(t *testing.T) {
 	// ciphertext aborts it before any network call.
 	expired := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
 	got := ensureFreshOAuthToken(context.Background(), db, newTestLogger(),
-		"cred-x", current, "cid", "garbage-not-encrypted", "https://token.example", covEnc(t, "refresh"), expired)
+		"cred-x", current, "cid", "garbage-not-encrypted", "https://token.example", covEnc(t, "refresh"), expired, "")
 	if got != current {
 		t.Errorf("decrypt failure must return current value")
 	}
@@ -65,7 +65,7 @@ func TestEnsureFreshOAuthToken_BadRefreshToken_ReturnsCurrent(t *testing.T) {
 	db, _, _ := covMCPRig(t)
 	current := covEnc(t, "access-token")
 	got := ensureFreshOAuthToken(context.Background(), db, newTestLogger(),
-		"cred-x", current, "cid", "", "https://token.example", "garbage-refresh", "")
+		"cred-x", current, "cid", "", "https://token.example", "garbage-refresh", "", "")
 	if got != current {
 		t.Errorf("refresh decrypt failure must return current value")
 	}
@@ -76,7 +76,7 @@ func TestEnsureFreshOAuthToken_RefreshCallFails_ReturnsCurrent(t *testing.T) {
 	current := covEnc(t, "access-token")
 	// Invalid token URL → http.NewRequest fails immediately, no network.
 	got := ensureFreshOAuthToken(context.Background(), db, newTestLogger(),
-		"cred-x", current, "cid", covEnc(t, "secret"), "://bad", covEnc(t, "refresh"), "")
+		"cred-x", current, "cid", covEnc(t, "secret"), "://bad", covEnc(t, "refresh"), "", "")
 	if got != current {
 		t.Errorf("refresh failure must return current value")
 	}
@@ -88,7 +88,7 @@ func TestEnsureFreshOAuthToken_UnparseableExpiryStillRefreshes(t *testing.T) {
 	// Bad expiry string → treated as "needs refresh"; refresh then fails
 	// on the invalid URL, so current comes back. Pins the fail-open parse.
 	got := ensureFreshOAuthToken(context.Background(), db, newTestLogger(),
-		"cred-x", current, "cid", "", "://bad", covEnc(t, "refresh"), "not-a-timestamp")
+		"cred-x", current, "cid", "", "://bad", covEnc(t, "refresh"), "not-a-timestamp", "")
 	if got != current {
 		t.Errorf("got different value after failed refresh")
 	}

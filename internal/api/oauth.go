@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -116,8 +117,15 @@ func generateOAuthState() (string, error) {
 
 // buildOAuthURL constructs the full authorization URL with PKCE and standard params.
 // If authURL already contains query parameters, they are preserved and merged.
+//
+// resource is the RFC 8707 resource indicator — the canonical identifier of
+// the MCP server this grant must be bound to, sourced from the credential's
+// discovered RFC 9728 protected-resource metadata (never invented here). An
+// empty resource omits the parameter, which keeps non-MCP OAuth credentials
+// (plain provider connections that never went through MCP discovery)
+// byte-for-byte unchanged.
 
-func buildOAuthURL(authURL, clientID, redirectURI, state, codeChallenge, scopes string) string {
+func buildOAuthURL(authURL, clientID, redirectURI, state, codeChallenge, scopes, resource string) string {
 	parsed, err := url.Parse(authURL)
 	if err != nil {
 		parsed = &url.URL{Path: authURL}
@@ -135,8 +143,36 @@ func buildOAuthURL(authURL, clientID, redirectURI, state, codeChallenge, scopes 
 	if scopes != "" {
 		params.Set("scope", scopes)
 	}
+	if resource != "" {
+		params.Set("resource", resource)
+	}
 	parsed.RawQuery = params.Encode()
 	return parsed.String()
+}
+
+// validateIssuer implements the RFC 9207 mix-up defence: when the credential
+// was connected through discovery and carries a known authorization-server
+// issuer, the authorization response's `iss` parameter MUST be present and
+// MUST match it — otherwise a different (possibly attacker-controlled)
+// authorization server could complete the flow in place of the one the user
+// actually consented at.
+//
+// expectedIssuer == "" means no issuer was recorded for this credential
+// (manually configured OAuth, or a hardcoded single-AS provider from the
+// OAuthProviders table) — there is nothing to bind the response to, so
+// there is nothing to check. This keeps every non-MCP-discovery OAuth path
+// working exactly as before.
+func validateIssuer(expectedIssuer, gotIssuer string) error {
+	if expectedIssuer == "" {
+		return nil
+	}
+	if gotIssuer == "" {
+		return fmt.Errorf("authorization response missing iss parameter, expected %q", expectedIssuer)
+	}
+	if gotIssuer != expectedIssuer {
+		return fmt.Errorf("issuer mismatch: expected %q, got %q", expectedIssuer, gotIssuer)
+	}
+	return nil
 }
 
 // loadOAuthCredential loads and decrypts the full OAuth configuration for a credential.
