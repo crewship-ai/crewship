@@ -83,6 +83,13 @@ for `pre_tool_call` (declared, accepted, dispatched by nothing, for months).
   write this platform makes without a human approving it — the background
   consolidator's automated `learned-*.md` append — which is arguably the more
   valuable one to gate.
+
+  Two other writes to that same canonical file are also uncovered, both by
+  design: the consolidator's **proposal** path (`proposal_mode`, which stages
+  rules under `.proposed/` instead of appending) and
+  `consolidate.ApproveProposal`, which merges an approved proposal in. Both
+  already have a human in the loop, which is what `pre_memory_write` exists to
+  add — a hook there would gate a decision an operator has already made.
 </Note>
 
 When adding a new event, add it to `AllEvents` in `types.go`, add the
