@@ -71,6 +71,18 @@ for `pre_tool_call` (declared, accepted, dispatched by nothing, for months).
 - `pre_peer_conversation`, `post_peer_conversation` -- `QueryHandler.Create` / `finishQuery` (`internal/api/query_handler.go`), the single entry point every `curl localhost:9119/query` peer question converges on. `pre_peer_conversation` is blocking-capable and fires before the `peer_conversations` row exists.
 - `on_budget_exceeded` -- `paymaster.Enforce` (`internal/paymaster/budgets.go`), fired alongside the `budget.exceeded` journal entry whenever a hard- or tiered-mode budget check blocks a call. Not (yet) fired from `EnforceQuota`'s provider-quota-exhaustion path (the 429 case) — that would need a `*sql.DB` threaded into a function that doesn't currently take one.
 
+  <Warning>
+    **This one is not debounced.** `Enforce` runs on every LLM call, and
+    nothing records that a breach has already been announced — so the hook
+    fires on *every* call made while a budget is over, and twice on a call
+    that breaches two budgets, until the window rolls. The other two policy
+    events (`on_approval_requested`, `on_guardrail_triggered`) fire once per
+    triggering condition; this one does not. A journal row absorbs that
+    cadence; a pager, a Slack channel, or a `shell` handler running a command
+    on the crewshipd host does not. Wire it to something that tolerates
+    repeats, or debounce on your side, until once-per-breach lands.
+  </Warning>
+
 <Note>
   **Why isn't there a hook for an agent's own memory write?** `memory.write` /
   `memory.append_daily` (the MCP tools an agent calls) execute inside the
