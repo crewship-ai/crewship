@@ -169,6 +169,15 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// synchronous handler behind the sidecar's /query, and there is no
 	// second entry point the way task delegation has three). A blocking
 	// hook can refuse the whole peer question here.
+	//
+	// Both error kinds fail closed — a gate that cannot be evaluated must
+	// not read as passed — but they are different answers and get different
+	// statuses. A *hooks.BlockedError is a policy decision: 403, and the
+	// handler's message goes back so the asking agent learns why. A
+	// *hooks.DispatchError means the registry could not be read or a handler
+	// is broken: that is our fault, not the caller's, so it is a 500 with a
+	// generic body (hookErr wraps the raw DB error, which does not belong in
+	// a response) and the detail stays in the log.
 	if hookErr := hooks.Dispatch(r.Context(), h.db, h.journal, hooks.EventPrePeerConversation, hooks.EventContext{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID,
@@ -179,9 +188,18 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 			"chat_id":     body.ChatID,
 		},
 	}); hookErr != nil {
-		h.logger.Info("peer query refused: pre_peer_conversation hook blocked",
+		var blocked *hooks.BlockedError
+		if errors.As(hookErr, &blocked) {
+			h.logger.Info("peer query refused: pre_peer_conversation hook blocked",
+				"from_slug", body.FromSlug, "target_slug", body.TargetSlug, "error", hookErr)
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": hookErr.Error()})
+			return
+		}
+		h.logger.Error("peer query refused: pre_peer_conversation hook could not be evaluated",
 			"from_slug", body.FromSlug, "target_slug", body.TargetSlug, "error", hookErr)
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": hookErr.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "pre_peer_conversation hook could not be evaluated",
+		})
 		return
 	}
 

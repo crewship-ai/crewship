@@ -12,6 +12,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,5 +193,54 @@ func TestQueryCreate_PrePeerConversationHookBlocksTheQuery(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("expected no peer_conversations row when pre_peer_conversation blocks, got %d", n)
+	}
+}
+
+// TestQueryCreate_PrePeerConversationDispatchFailureIsA500NotA403 pins the
+// other half of the gate contract. A *hooks.BlockedError is the caller
+// being refused (403, with the handler's reason). A *hooks.DispatchError is
+// the registry being unreadable or a handler being broken — our fault, not
+// the caller's — so it must not come back as "you are not allowed", and the
+// raw cause (which wraps a DB error) must not be echoed into the response
+// body. Both still fail closed: an unevaluable gate is not a passed gate.
+//
+// Induced with a subagent hook and no SubagentHandler installed: the one
+// handler kind that fails with a plain error and no network, so the
+// DispatchError arm is deterministic.
+func TestQueryCreate_PrePeerConversationDispatchFailureIsA500NotA403(t *testing.T) {
+	h, wsID, body := newPeerQueryRig(t)
+
+	if _, err := hooks.Register(context.Background(), h.db, hooks.Hook{
+		WorkspaceID:   wsID,
+		Event:         hooks.EventPrePeerConversation,
+		HandlerKind:   hooks.HandlerKindSubagent,
+		HandlerConfig: map[string]any{"agent_id": "nobody"},
+		Blocking:      true,
+		Enabled:       true,
+	}, false); err != nil {
+		t.Fatalf("register hook: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/queries", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 — a hook that could not be evaluated is not the caller being refused; body=%s",
+			w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "blocked by") {
+		t.Errorf("body = %s — a dispatch failure is being reported as a policy block", w.Body.String())
+	}
+
+	// Still fails closed.
+	var n int
+	if err := h.db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM peer_conversations WHERE to_agent_id = 'to1'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("peer_conversations row created despite an unevaluable pre_peer_conversation gate (%d rows)", n)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,7 +113,56 @@ func TestRunAssignment_PreTaskDelegationHookBlocksTheRun(t *testing.T) {
 	if err := h.db.QueryRow(`SELECT COALESCE(error_message,'') FROM assignments WHERE id = ?`, "asg-hook-2").Scan(&errMsg); err != nil {
 		t.Fatalf("query error_message: %v", err)
 	}
-	if errMsg == "" {
-		t.Fatal("expected error_message to name the pre_task_delegation block")
+	if !strings.Contains(errMsg, "pre_task_delegation hook blocked") {
+		t.Fatalf("error_message = %q, want it to name the pre_task_delegation block", errMsg)
+	}
+}
+
+// TestRunAssignment_PreTaskDelegationDispatchFailureIsNotReportedAsABlock
+// pins the distinction internal/hooks/types.go's DispatchError doc asks
+// call sites to preserve. Both kinds fail the delegation closed — a gate
+// that could not be evaluated must not read as passed — but they are
+// different answers, and an operator told "a hook blocked this" goes
+// looking for a policy that does not exist when the real cause is a broken
+// handler or an unreadable registry.
+//
+// The failure is induced with a subagent hook and no SubagentHandler
+// installed: that is the one handler kind that returns a plain error
+// (ErrSubagentHandlerNotConfigured) with no network involved, so the
+// DispatchError arm is reached deterministically rather than raced for.
+func TestRunAssignment_PreTaskDelegationDispatchFailureIsNotReportedAsABlock(t *testing.T) {
+	h, wsID, _, leadID, workerID, chatID := covAsgRig(t)
+	insertAssignment(t, h.db, "asg-hook-3", wsID, chatID, leadID, workerID, "PENDING")
+
+	if _, err := hooks.Register(context.Background(), h.db, hooks.Hook{
+		WorkspaceID:   wsID,
+		Event:         hooks.EventPreTaskDelegation,
+		HandlerKind:   hooks.HandlerKindSubagent,
+		HandlerConfig: map[string]any{"agent_id": "nobody"},
+		Blocking:      true,
+		Enabled:       true,
+	}, false); err != nil {
+		t.Fatalf("register hook: %v", err)
+	}
+
+	body := createAssignmentBody{
+		TargetSlug: "asg-worker", Task: "t", CrewID: "crew-asg", WorkspaceID: wsID, ChatID: chatID,
+	}
+	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
+	h.runAssignment(context.Background(), "asg-hook-3", body, target)
+
+	// Still fails closed: an unevaluable gate is not a passed gate.
+	if got := assignmentStatus(t, h.db, "asg-hook-3"); got != "FAILED" {
+		t.Fatalf("status = %q, want FAILED — an unevaluable pre_task_delegation gate must not let the delegation through", got)
+	}
+	var errMsg string
+	if err := h.db.QueryRow(`SELECT COALESCE(error_message,'') FROM assignments WHERE id = ?`, "asg-hook-3").Scan(&errMsg); err != nil {
+		t.Fatalf("query error_message: %v", err)
+	}
+	if strings.Contains(errMsg, "blocked") {
+		t.Errorf("error_message = %q — a dispatch failure is being reported as a policy block", errMsg)
+	}
+	if !strings.Contains(errMsg, "could not be evaluated") {
+		t.Errorf("error_message = %q, want it to say the hook could not be evaluated", errMsg)
 	}
 }

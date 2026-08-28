@@ -463,10 +463,18 @@ func (h *AssignmentHandler) runAssignment(
 	// already exists by the time we get here, but nothing has been spent on
 	// it yet (no container exec, no LLM call). A blocking hook can refuse
 	// the hand-off here; a non-blocking one just observes it. Dispatched
-	// before runID exists, so a block is reported through finishAssignment
-	// the same way the "orchestrator not available" early-bail below is:
-	// runID="" skips the run.* terminal entry (no run ever started) but
-	// still lands the assignment.* terminal entry and status update.
+	// before runID exists, so a refusal is reported through finishAssignment
+	// on the runID=="" path it already documents for early dispatch failures:
+	// no run.* terminal entry (no run ever started), but the assignment.*
+	// terminal entry and the status update still land.
+	//
+	// We fail closed on BOTH error kinds — a gate that cannot be evaluated
+	// must not be treated as passed — but say which happened. A
+	// *hooks.BlockedError is a hook deciding no; a *hooks.DispatchError is
+	// the registry being unreadable or a handler being broken, and calling
+	// that "blocked" sends the operator hunting for a policy that does not
+	// exist (this is the distinction internal/hooks/types.go's DispatchError
+	// doc asks call sites to preserve).
 	if hookErr := hooks.Dispatch(ctx, h.db, h.journal, hooks.EventPreTaskDelegation, hooks.EventContext{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID,
@@ -477,10 +485,15 @@ func (h *AssignmentHandler) runAssignment(
 			"chat_id":       body.ChatID,
 		},
 	}); hookErr != nil {
-		h.logger.Info("assignment refused: pre_task_delegation hook blocked",
+		reason := "pre_task_delegation hook could not be evaluated"
+		var blocked *hooks.BlockedError
+		if errors.As(hookErr, &blocked) {
+			reason = "pre_task_delegation hook blocked"
+		}
+		h.logger.Info("assignment refused: "+reason,
 			"assignment_id", assignmentID, "target", body.TargetSlug, "error", hookErr)
 		h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "",
-			fmt.Sprintf("pre_task_delegation hook blocked: %v", hookErr), nil)
+			fmt.Sprintf("%s: %v", reason, hookErr), nil)
 		return
 	}
 

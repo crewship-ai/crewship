@@ -424,6 +424,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   provider/model/cost fields, and `post_peer_conversation` fires only after
   the terminal query state is committed.
 
+- **Two of the new gates called a broken hook a policy refusal.** `Dispatch`
+  distinguishes a hook deciding *no* (`*hooks.BlockedError`) from the hook
+  registry being unreadable or a handler being broken (`*hooks.DispatchError`)
+  — #2138 introduced that split precisely so gate call sites could report the
+  two differently. The new `pre_task_delegation` and `pre_peer_conversation`
+  gates collapsed them: a subagent hook with no handler installed, or a
+  webhook whose lookup failed, marked the assignment `FAILED` with
+  "pre_task_delegation hook blocked", and answered a peer query with `403`
+  plus the raw error (which wraps the underlying DB error) in the response
+  body — sending the operator hunting for a policy that does not exist, and
+  telling the caller it was refused when nothing refused it. Both still fail
+  closed, because a gate that cannot be evaluated is not a gate that passed;
+  they now say which happened, and the peer-query path answers `500` with a
+  generic body rather than `403` with the cause.
+
 - **A forked mission could never run a task.** `Fork` wrote the mission, its
   tasks and its checkpoint, but not the synthetic `chats` row that
   `assignments.chat_id NOT NULL REFERENCES chats(id)` requires — the row the
