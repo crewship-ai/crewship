@@ -255,6 +255,42 @@ func TestAcceptance_FeatureFlagUpdate_PartialBody(t *testing.T) {
 	}
 }
 
+// `--description ""` is a deliberate clear, not "the flag was never passed" —
+// pflag's Changed() reports true whenever the flag appears in argv, even when
+// its value equals the zero value, so this must send the empty string rather
+// than omitting the key (the server's Update maps an empty *string to
+// ub.SetNull("description")).
+func TestAcceptance_FeatureFlagUpdate_ClearsDescriptionWithEmptyString(t *testing.T) {
+	stub := newFlagsAdminStub()
+	srv := stub.start(t)
+	cfg := flagsAdminConfig(t, srv.URL)
+
+	stub.on("PATCH", "/api/v1/feature-flags/provisioner-v2", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"ff_1","key":"provisioner-v2","description":null,"enabled":true,"percentage":10,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-02T00:00:00Z"}`))
+	})
+
+	out, err := runFlagsAdminCLI(t, cfg, "feature-flag", "update", "provisioner-v2", "--description", "")
+	if err != nil {
+		t.Fatalf("update: %v\noutput: %s", err, out)
+	}
+
+	bodies := stub.bodiesFor("PATCH", "/api/v1/feature-flags/provisioner-v2")
+	if len(bodies) != 1 {
+		t.Fatalf("want 1 PATCH, got %d", len(bodies))
+	}
+	body := bodies[0]
+	desc, ok := body["description"]
+	if !ok {
+		t.Fatalf("description key omitted entirely — an explicit --description \"\" must still be sent, got %v", body)
+	}
+	if desc != "" {
+		t.Errorf("description = %v, want empty string", desc)
+	}
+	if len(body) != 1 {
+		t.Errorf("must send ONLY the one changed field, got %v", body)
+	}
+}
+
 func TestAcceptance_FeatureFlagUpdate_MultipleFields(t *testing.T) {
 	stub := newFlagsAdminStub()
 	srv := stub.start(t)
