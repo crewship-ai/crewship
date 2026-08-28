@@ -25,6 +25,8 @@ crewship agent <subcommand> [flags]
 | `rotate-webhook-secret` | Mint a new webhook signing secret (shown once) |
 | `delete` | Delete an agent |
 | `runs` | List runs for an agent |
+| `status` | Fleet-wide agent status counts (total / running / error / idle / queued) |
+| `load` | Per-agent workload: active/pending tasks, tokens used today, budget |
 | `chats` | List recent chats for an agent (alias: `sessions`) |
 | `stop` | Stop a running agent |
 | `logs` | Show agent container logs |
@@ -329,6 +331,36 @@ crewship agent runs <slug-or-id>
 ```
 
 **Output columns:** ID, STATUS, TRIGGER, CREATED, FINISHED
+
+---
+
+## `crewship agent status`
+
+Fleet-wide agent status counts: every agent in the workspace bucketed by status, plus the number of `QUEUED` assignments waiting on one. This is the workspace toolbar snapshot — for one agent or one crew's detail, see [`agent get`](#crewship-agent-get) and [`crew status`](/cli/crew#crewship-crew-status) instead.
+
+```bash
+crewship agent status
+crewship agent status -f json | jq .queued
+```
+
+**Output columns:** TOTAL, RUNNING, ERROR, IDLE, QUEUED
+
+<Note>
+The route this calls is `GET /api/v1/agents/crews-status` — despite the "crews" in the path, the payload counts **agents**, not crews; the CLI command is named for what it returns.
+</Note>
+
+---
+
+## `crewship agent load`
+
+Per-agent workload: every agent in the workspace with its live task counts (active, pending), today's completions, and today's token usage vs. budget — the per-agent breakdown behind [`agent status`](#crewship-agent-status). `agent get` has an agent's static config; this is the live load view across the whole fleet.
+
+```bash
+crewship agent load
+crewship agent load -f json | jq '.[] | select(.active_tasks > 0)'
+```
+
+**Output columns:** SLUG, NAME, STATUS, ACTIVE, PENDING, DONE_TODAY, TOKENS_TODAY, BUDGET
 
 ---
 
