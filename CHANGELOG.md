@@ -424,6 +424,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   provider/model/cost fields, and `post_peer_conversation` fires only after
   the terminal query state is committed.
 
+  Getting the cost to that hook layer meant `paymaster.recordFromResponse`
+  now returns the enriched `CallResponse` rather than computing its numbers
+  into locals — so the cost/confidence/timestamp the ledger records are the
+  same values every layer *above* paymaster sees. Two visible consequences
+  beyond hooks, neither a ledger change (`Record` already forced the
+  flat-rate invariants on disk): the OpenTelemetry LLM span's `cost_usd`
+  attribute now carries the backfilled rate-card estimate instead of the
+  provider's raw — usually zero — number, so spans and the ledger finally
+  agree; and `Confidence` comes back populated (`precise`/`estimate`/
+  `unknown`) where it used to be empty. Dashboards that charted span
+  `cost_usd` will show non-zero where they showed nothing.
+
 - **Two of the new gates called a broken hook a policy refusal.** `Dispatch`
   distinguishes a hook deciding *no* (`*hooks.BlockedError`) from the hook
   registry being unreadable or a handler being broken (`*hooks.DispatchError`)
