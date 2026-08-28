@@ -360,31 +360,9 @@ func TestShellHandlerPass(t *testing.T) {
 	}
 }
 
-func TestShellHandlerExportsLLMContext(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell handler requires sh")
-	}
-	h := Hook{
-		HandlerKind: HandlerKindShell,
-		HandlerConfig: map[string]any{
-			"command": `printf '%s|%s|%s' "$CREWSHIP_LLM_PROVIDER" "$CREWSHIP_LLM_MODEL" "$CREWSHIP_COST_USD"`,
-		},
-	}
-	res, err := shellHandler(context.Background(), h, EventContext{
-		Event:       EventPostLLMCall,
-		WorkspaceID: "ws_test",
-		LLMProvider: "anthropic",
-		LLMModel:    "claude-test",
-		CostUSD:     0.0105,
-	})
-	if err != nil {
-		t.Fatalf("shell: %v", err)
-	}
-	payload, _ := res.Payload.(map[string]any)
-	if got := payload["stdout"]; got != "anthropic|claude-test|0.0105" {
-		t.Fatalf("LLM env output = %q", got)
-	}
-}
+// TestShellHandlerExportsLLMContext lives in shell_llm_env_unix_test.go —
+// it is `unix`-tagged rather than guarded with runtime.GOOS, so it compiles
+// out on Windows instead of reporting a skip that reads as a pass.
 
 func TestShellHandlerBlockOnExit(t *testing.T) {
 	if runtime.GOOS == "windows" {
