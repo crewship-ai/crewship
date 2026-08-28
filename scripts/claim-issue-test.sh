@@ -80,6 +80,21 @@ got="$(parse "$(thread \
   "$(comment 2026-07-30T11:00:00Z Srbino '**RELEASE** — clone `crewship_1` · branch `fix/something-else-entirely` · 2026-07-30T11:00Z')")")"
 expect_eq "release from a different branch, SAME clone, clears it (#2107)" "" "$got"
 
+# Keying cancellation on clone must not swallow the branch-only release. A
+# hand-written RELEASE naming a branch and no clone used to cancel that
+# branch's claims and leave the rest; reading "no clone" as "names nothing"
+# would turn it into a global cancel, which is the one form the contract
+# reserves for a release that names neither field.
+got="$(parse "$(thread \
+  "$(comment 2026-07-30T09:00:00Z Srbino "$CLAIM_A")" \
+  "$(comment 2026-07-30T11:00:00Z Srbino '**RELEASE** — branch `fix/beta` · 2026-07-30T11:00Z')")")"
+expect_contains "a branch-only release does NOT clear a claim on another branch" "$got" "crewship_1"
+
+got="$(parse "$(thread \
+  "$(comment 2026-07-30T09:00:00Z Srbino "$CLAIM_A")" \
+  "$(comment 2026-07-30T11:00:00Z Srbino '**RELEASE** — branch `fix/alpha` · 2026-07-30T11:00Z')")")"
+expect_eq "a branch-only release DOES clear a claim on that branch" "" "$got"
+
 # The exact shape from the issue: claim under the auto-minted worktree
 # branch, release under the real feature branch that replaced it.
 got="$(parse "$(thread \

@@ -510,8 +510,11 @@ in what you would otherwise mistype:
 A release ends the claim(s) it names by **clone alone** (#2107) — branch is
 recorded for readability but is not part of the match, because a claim is
 posted before the feature branch exists (see below) and would otherwise
-never be released from the branch that replaced it. A release naming no
-clone at all ends every open claim on that issue.
+never be released from the branch that replaced it. A hand-written release
+that names a branch but no clone still ends that branch's claims and leaves
+the rest — global cancellation is reserved for a release that names neither
+field, which is what "released it" means when someone types it without
+ceremony.
 
 **Release even when you failed.** #1482 was claimed, the hypothesis did
 not hold, and the session said so and released — so the next one started

@@ -188,7 +188,12 @@ parse_claims() {
     | map(select(.kind != "skip"))
     | reduce .[] as $c ([];
         if $c.kind == "claim" then . + [$c]
-        else map(select(($c.clone != "") and ($c.clone != .clone)))
+        else map(select(
+          if $c.clone != "" then $c.clone != .clone
+          elif $c.branch != "" then $c.branch != .branch
+          else false
+          end
+        ))
         end)
     # Placeholders, not empty fields: `read -r a b c` with a tab IFS drops a
     # leading empty field and shifts every column left.
