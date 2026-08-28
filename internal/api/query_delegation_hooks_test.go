@@ -103,11 +103,12 @@ func TestFinishQuery_PersistsTerminalStateBeforePostHook(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	observedStatus := make(chan string, 1)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(entered)
 		<-release
 		var status string
-		if err := h.db.QueryRow(`SELECT status FROM peer_conversations WHERE id = 'conv-order'`).Scan(&status); err != nil {
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT status FROM peer_conversations WHERE id = 'conv-order'`).Scan(&status); err != nil {
 			status = "query-error: " + err.Error()
 		}
 		observedStatus <- status
@@ -242,5 +243,69 @@ func TestQueryCreate_PrePeerConversationDispatchFailureIsA500NotA403(t *testing.
 	}
 	if n != 0 {
 		t.Errorf("peer_conversations row created despite an unevaluable pre_peer_conversation gate (%d rows)", n)
+	}
+}
+
+// TestQueryCreate_PrePeerConversationJoinedErrorReportsTheDispatchFailure
+// covers the case that makes the ORDER of the two errors.As checks
+// load-bearing rather than cosmetic.
+//
+// Dispatch runs blocking hooks in registration order, accumulating a
+// DispatchError per hook that failed to run, and returns
+// errors.Join(dispatchErrs..., blocked) as soon as a LATER hook blocks. That
+// joined error satisfies errors.As for BOTH types. Asking about BlockedError
+// first therefore answers 403 — a tidy policy refusal — while throwing away
+// the fact that another hook never executed at all. The operator sees a
+// policy they can find and not the broken handler they cannot.
+//
+// Two hooks, in registration order (ListByEvent sorts by created_at, id):
+// a subagent hook with no handler installed, which fails, then an HTTP hook
+// that blocks. Both blocking, so both run in the synchronous pass.
+func TestQueryCreate_PrePeerConversationJoinedErrorReportsTheDispatchFailure(t *testing.T) {
+	t.Setenv("CREWSHIP_HOOKS_ALLOW_PRIVATE", "true")
+
+	h, wsID, body := newPeerQueryRig(t)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(503) // Block outcome
+	}))
+	defer ts.Close()
+
+	// Registered first: fails to run (no SubagentHandler installed).
+	if _, err := hooks.Register(context.Background(), h.db, hooks.Hook{
+		ID:            "hk_aaa_broken",
+		WorkspaceID:   wsID,
+		Event:         hooks.EventPrePeerConversation,
+		HandlerKind:   hooks.HandlerKindSubagent,
+		HandlerConfig: map[string]any{"agent_id": "nobody"},
+		Blocking:      true,
+		Enabled:       true,
+	}, false); err != nil {
+		t.Fatalf("register broken hook: %v", err)
+	}
+	// Registered second: blocks.
+	if _, err := hooks.Register(context.Background(), h.db, hooks.Hook{
+		ID:            "hk_bbb_blocks",
+		WorkspaceID:   wsID,
+		Event:         hooks.EventPrePeerConversation,
+		HandlerKind:   hooks.HandlerKindHTTP,
+		HandlerConfig: map[string]any{"url": ts.URL},
+		Blocking:      true,
+		Enabled:       true,
+	}, false); err != nil {
+		t.Fatalf("register blocking hook: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/queries", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 — a hook that could not run is present in the joined error and must win over the block; body=%s",
+			w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "blocked by") {
+		t.Errorf("body = %s — reported as a policy refusal while a hook never ran", w.Body.String())
 	}
 }

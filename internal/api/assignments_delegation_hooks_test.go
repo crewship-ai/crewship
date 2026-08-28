@@ -166,3 +166,62 @@ func TestRunAssignment_PreTaskDelegationDispatchFailureIsNotReportedAsABlock(t *
 		t.Errorf("error_message = %q, want it to say the hook could not be evaluated", errMsg)
 	}
 }
+
+// TestRunAssignment_PreTaskDelegationJoinedErrorReportsTheDispatchFailure is
+// why the two errors.As checks are ordered rather than merely present.
+//
+// Dispatch runs blocking hooks in registration order and returns
+// errors.Join(dispatchErrs..., blocked) when one hook fails to run and a
+// LATER one blocks — a single error satisfying errors.As for both types.
+// Asking about BlockedError first reports a tidy policy refusal and discards
+// the fact that another hook never executed, which is the half an operator
+// actually has to go fix.
+func TestRunAssignment_PreTaskDelegationJoinedErrorReportsTheDispatchFailure(t *testing.T) {
+	t.Setenv("CREWSHIP_HOOKS_ALLOW_PRIVATE", "true")
+
+	h, wsID, _, leadID, workerID, chatID := covAsgRig(t)
+	insertAssignment(t, h.db, "asg-hook-4", wsID, chatID, leadID, workerID, "PENDING")
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(503) // Block outcome
+	}))
+	defer ts.Close()
+
+	// ListByEvent orders by created_at then id, so hk_aaa_* runs first.
+	if _, err := hooks.Register(context.Background(), h.db, hooks.Hook{
+		ID:            "hk_aaa_broken",
+		WorkspaceID:   wsID,
+		Event:         hooks.EventPreTaskDelegation,
+		HandlerKind:   hooks.HandlerKindSubagent,
+		HandlerConfig: map[string]any{"agent_id": "nobody"},
+		Blocking:      true,
+		Enabled:       true,
+	}, false); err != nil {
+		t.Fatalf("register broken hook: %v", err)
+	}
+	if _, err := hooks.Register(context.Background(), h.db, hooks.Hook{
+		ID:            "hk_bbb_blocks",
+		WorkspaceID:   wsID,
+		Event:         hooks.EventPreTaskDelegation,
+		HandlerKind:   hooks.HandlerKindHTTP,
+		HandlerConfig: map[string]any{"url": ts.URL},
+		Blocking:      true,
+		Enabled:       true,
+	}, false); err != nil {
+		t.Fatalf("register blocking hook: %v", err)
+	}
+
+	body := createAssignmentBody{
+		TargetSlug: "asg-worker", Task: "t", CrewID: "crew-asg", WorkspaceID: wsID, ChatID: chatID,
+	}
+	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
+	h.runAssignment(context.Background(), "asg-hook-4", body, target)
+
+	var errMsg string
+	if err := h.db.QueryRow(`SELECT COALESCE(error_message,'') FROM assignments WHERE id = ?`, "asg-hook-4").Scan(&errMsg); err != nil {
+		t.Fatalf("query error_message: %v", err)
+	}
+	if !strings.Contains(errMsg, "could not be evaluated") {
+		t.Errorf("error_message = %q — the joined error carries a hook that never ran, and that must win over the block", errMsg)
+	}
+}

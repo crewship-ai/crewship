@@ -178,6 +178,14 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// is broken: that is our fault, not the caller's, so it is a 500 with a
 	// generic body (hookErr wraps the raw DB error, which does not belong in
 	// a response) and the detail stays in the log.
+	//
+	// DispatchError is checked FIRST, and that order is load-bearing.
+	// Dispatch returns errors.Join(dispatchErrs..., blocked) when one
+	// blocking hook fails to run and a LATER one blocks, so the joined error
+	// satisfies errors.As for both. Asking about BlockedError first would
+	// answer 403 — a clean policy refusal — while silently swallowing the
+	// fact that a hook never ran at all, which is the louder of the two
+	// facts and the one the operator has to fix.
 	if hookErr := hooks.Dispatch(r.Context(), h.db, h.journal, hooks.EventPrePeerConversation, hooks.EventContext{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID,
@@ -188,8 +196,9 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 			"chat_id":     body.ChatID,
 		},
 	}); hookErr != nil {
+		var dispatchErr *hooks.DispatchError
 		var blocked *hooks.BlockedError
-		if errors.As(hookErr, &blocked) {
+		if !errors.As(hookErr, &dispatchErr) && errors.As(hookErr, &blocked) {
 			h.logger.Info("peer query refused: pre_peer_conversation hook blocked",
 				"from_slug", body.FromSlug, "target_slug", body.TargetSlug, "error", hookErr)
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": hookErr.Error()})

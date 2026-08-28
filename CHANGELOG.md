@@ -439,6 +439,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   they now say which happened, and the peer-query path answers `500` with a
   generic body rather than `403` with the cause.
 
+  The check is also *ordered*, which the first pass of this fix got wrong.
+  `Dispatch` returns `errors.Join(dispatchErrs..., blocked)` when one blocking
+  hook fails to run and a **later** one blocks, so the joined error satisfies
+  `errors.As` for both types. Asking about `BlockedError` first reported a
+  tidy policy refusal and silently discarded the fact that another hook never
+  executed at all — the half an operator actually has to go fix. `DispatchError`
+  is now checked first at both gates.
+
+- **`post_task_delegation` announced a delegation the database did not yet
+  agree had started.** The dispatch sat immediately before `UPDATE assignments
+  SET status='RUNNING'`, so a handler that read the row back could find it
+  still `PENDING` — for an event whose entire meaning is "this delegation
+  began". It now fires after the transition, the same rule `finishQuery`
+  already follows for `post_peer_conversation`, and on `context.Background()`
+  like the other `post_*` sites so a cancelled caller cannot drop the
+  observation during the registry lookup.
+
 - **A forked mission could never run a task.** `Fork` wrote the mission, its
   tasks and its checkpoint, but not the synthetic `chats` row that
   `assignments.chat_id NOT NULL REFERENCES chats(id)` requires — the row the

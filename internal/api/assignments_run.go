@@ -475,6 +475,13 @@ func (h *AssignmentHandler) runAssignment(
 	// that "blocked" sends the operator hunting for a policy that does not
 	// exist (this is the distinction internal/hooks/types.go's DispatchError
 	// doc asks call sites to preserve).
+	//
+	// DispatchError is checked FIRST, and that order is load-bearing.
+	// Dispatch returns errors.Join(dispatchErrs..., blocked) when one
+	// blocking hook fails to run and a LATER one blocks — so the joined
+	// error satisfies errors.As for both. Asking about BlockedError first
+	// would report a clean policy refusal and silently swallow the fact
+	// that a hook never ran at all, which is the louder of the two facts.
 	if hookErr := hooks.Dispatch(ctx, h.db, h.journal, hooks.EventPreTaskDelegation, hooks.EventContext{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID,
@@ -485,10 +492,11 @@ func (h *AssignmentHandler) runAssignment(
 			"chat_id":       body.ChatID,
 		},
 	}); hookErr != nil {
-		reason := "pre_task_delegation hook could not be evaluated"
+		reason := "pre_task_delegation hook blocked"
+		var dispatchErr *hooks.DispatchError
 		var blocked *hooks.BlockedError
-		if errors.As(hookErr, &blocked) {
-			reason = "pre_task_delegation hook blocked"
+		if errors.As(hookErr, &dispatchErr) || !errors.As(hookErr, &blocked) {
+			reason = "pre_task_delegation hook could not be evaluated"
 		}
 		h.logger.Info("assignment refused: "+reason,
 			"assignment_id", assignmentID, "target", body.TargetSlug, "error", hookErr)
@@ -562,12 +570,29 @@ func (h *AssignmentHandler) runAssignment(
 		ctx = journal.WithMission(ctx, missionID)
 	}
 
+	// Mark assignment as RUNNING
+	if _, err := h.db.ExecContext(ctx,
+		`UPDATE assignments SET status='RUNNING', started_at=? WHERE id=?`, now, assignmentID); err != nil {
+		h.logger.Error("update assignment to running", "error", err, "assignment_id", assignmentID)
+	}
+
 	// post_task_delegation: the hand-off itself is done — the assignment
-	// exists, the run record is journaled, and the target is about to
-	// execute. Fire-and-forget like post_agent_stop below: a hook here
-	// observes that delegation happened, it does not gate what already
-	// has a runID.
-	_ = hooks.Dispatch(ctx, h.db, h.journal, hooks.EventPostTaskDelegation, hooks.EventContext{
+	// exists, the run record is journaled, and the row now says RUNNING.
+	// Fire-and-forget like post_agent_stop below: a hook here observes that
+	// delegation happened, it does not gate what already has a runID.
+	//
+	// Dispatched AFTER the RUNNING update, not before it, for the same
+	// reason post_peer_conversation waits for its terminal state: an
+	// observation hook that reads back the row it was told about must not
+	// see a status the platform has already moved past. Fired before the
+	// update, every handler that queried `assignments` saw PENDING for a
+	// delegation the event itself declared had started.
+	//
+	// context.Background(), not ctx, matching the other post_* sites: the
+	// dispatcher runs observation handlers on a background context but does
+	// the registry lookup on the one it is given, so a caller cancelled
+	// mid-flight would silently drop the observation rather than record it.
+	_ = hooks.Dispatch(context.Background(), h.db, h.journal, hooks.EventPostTaskDelegation, hooks.EventContext{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID,
 		AgentID:     target.ID,
@@ -578,12 +603,6 @@ func (h *AssignmentHandler) runAssignment(
 			"run_id":        runID,
 		},
 	})
-
-	// Mark assignment as RUNNING
-	if _, err := h.db.ExecContext(ctx,
-		`UPDATE assignments SET status='RUNNING', started_at=? WHERE id=?`, now, assignmentID); err != nil {
-		h.logger.Error("update assignment to running", "error", err, "assignment_id", assignmentID)
-	}
 	// Resolve the assigner (assigned_by_id) so the RUNNING entry carries
 	// the same "from" the created entry does. Without this the emit left
 	// actor_id empty, and every activity-feed reader (CLI + dashboard)
