@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { AlertTriangle, Clock, Eye, EyeOff } from "lucide-react"
 
 import { Appear, DetailCard, Pill, type DetailTone } from "@/components/ui/detail"
@@ -499,9 +500,11 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
               </button>
             )}
             {jump && (
-              <Button size="xs" variant="ghost" className="ml-auto gap-1.5 text-primary">
-                <jump.icon className="h-3 w-3" />
-                {jump.label}
+              <Button asChild size="xs" variant="ghost" className="ml-auto gap-1.5 text-primary">
+                <Link href={jump.href}>
+                  <jump.icon className="h-3 w-3" />
+                  {jump.label}
+                </Link>
               </Button>
             )}
           </div>

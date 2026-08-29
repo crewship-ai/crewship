@@ -259,12 +259,47 @@ export function decisionMetaFor(item: InboxItem): DecisionMeta | null {
   return null
 }
 
-/** Non-decision rows still have somewhere to go. */
-export function jumpFor(item: InboxItem): { label: string; icon: LucideIcon } | null {
-  if (payloadString(item, "chat_url")) return { label: "Open chat", icon: MessageSquare }
+/**
+ * Valid in-app chat deep link from a reply notification's payload, or null.
+ *
+ * The guard has to reject "//evil.example/x" as well as "https://…": a
+ * protocol-relative URL starts with "/" and the browser resolves it against
+ * the current scheme, so a payload an agent controls could navigate a manager
+ * off-origin from a link that looks internal. One leading slash, not two, and
+ * no backslash either — some parsers fold "/\" onto "//".
+ *
+ * Exported and shared with kind-actions, which had the only copy. Keeping two
+ * is exactly the shape that drifts, and the half that had no guard was the one
+ * deciding whether a destination got named at all.
+ */
+export function safeChatURL(item: InboxItem): string | null {
+  const v = payloadString(item, "chat_url")
+  if (!v || !v.startsWith("/")) return null
+  if (v.startsWith("//") || v.startsWith("/\\")) return null
+  return v
+}
+
+/**
+ * Non-decision rows still have somewhere to go.
+ *
+ * `href` is not optional decoration: this returned a label and an icon only,
+ * so the detail pane rendered a button that NAMED a destination and went
+ * nowhere — the one control on the pane for reaching the run it describes.
+ * A jump target without an href is not a jump target.
+ */
+export function jumpFor(
+  item: InboxItem,
+): { label: string; icon: LucideIcon; href: string } | null {
+  const chat = safeChatURL(item)
+  if (chat) return { label: "Open chat", icon: MessageSquare, href: chat }
   const issue = payloadString(item, "issue_identifier")
-  if (issue) return { label: `Open ${issue}`, icon: CircleDot }
-  if (payloadString(item, "pipeline_run_id")) return { label: "Open run", icon: ArrowUpRight }
+  if (issue) {
+    return { label: `Open ${issue}`, icon: CircleDot, href: `/issues/${encodeURIComponent(issue)}` }
+  }
+  const run = payloadString(item, "pipeline_run_id")
+  if (run) {
+    return { label: "Open run", icon: ArrowUpRight, href: `/activity?run=${encodeURIComponent(run)}` }
+  }
   return null
 }
 
