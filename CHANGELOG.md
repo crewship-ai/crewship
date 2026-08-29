@@ -405,6 +405,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The app shell clipped the last 64px of every page that had a wide
+  descendant (#2156).** `SidebarInset` renders `<main>` as a flex item
+  (`w-full flex-1`) with no `min-w-0`, so it kept `min-width: auto` and could
+  not shrink below its content's min-content width. A page wide enough pushed
+  it past the 64px icon rail: the inset measured a full viewport wide while
+  starting at x=64, and everything past the right edge went off-screen.
+
+  Nothing on the path scrolls horizontally, so there was no scrollbar to
+  reach the overhang — it was clipped, not scrolled. On `/activity?run=<id>`
+  that cut the run stat strip's `COMPOSED` column, the right edge of the
+  steps rail, and the account menu in the top bar, which read "DU D". At a
+  1600px viewport the inset measured 1600px starting at x=64 (overflowing to
+  1664) where `/inbox` correctly measured 1536px; both are 1536px now.
+
+  The regression test is geometric rather than a class assertion, because the
+  markup was always correct and only the layout was wrong: jsdom sees nothing,
+  and an overflow check on `<html>` finds nothing either, since there is no
+  overflow — only clipping.
+
 - **`claim-issue.sh` produced permanent phantom locks in the majority of
   cases — measured at 19 of 35 live claims, with 6 issues double-claimed
   (#2107).** Two compounding bugs. First, the RELEASE parser cancelled a

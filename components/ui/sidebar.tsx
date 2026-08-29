@@ -421,7 +421,12 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "bg-card relative flex w-full flex-1 flex-col min-h-0 border-l border-white/[0.1]",
+        // min-w-0: without it the inset keeps its `min-width: auto` as a flex
+        // item, so any page with a wide min-content descendant (the Activity
+        // run rail's step lines were the first) pushes it past the rail's 64px
+        // and the last 64px of EVERY page — the account menu included — is
+        // clipped with no scrollbar to reach it.
+        "bg-card relative flex w-full min-w-0 flex-1 flex-col min-h-0 border-l border-white/[0.1]",
         "md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
