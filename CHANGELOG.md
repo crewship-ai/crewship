@@ -31,6 +31,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **The lifecycle-hook registry has a screen (#2162).** `/api/v1/hooks` has
+  had full CRUD and a CLI since the engine landed and no web UI at any role —
+  while a `shell` handler runs `sh -c` on the crewshipd host with a 30s
+  timeout and no container around it, and #2137 wired ten events that
+  previously registered but never fired. Settings → Workspace → Lifecycle
+  hooks lists every hook with its event, handler, target, crew scope and last
+  result, and carries the per-hook enable switch. The row is readable by every
+  workspace member, matching `GET /api/v1/hooks`; the switch renders for
+  ADMIN+, matching the write tier. Three things the screen refuses to fake:
+  `blocking` is read off the event rather than the row, so a post-event that
+  carries `blocking: true` in the database reads `n/a` instead of promising a
+  veto the dispatcher never asks for; `pre_tool_call` rows are marked retired
+  with the reason, because `ValidateEvent` refuses the event and those rows can
+  never fire; and a failed read says so rather than rendering an empty
+  registry. Registration, editing and a workspace-wide pause are not included —
+  the last has no endpoint at all.
+
 - **Five read routes had no CLI command; now they do (#2147).** The run
   *list* was the one pipeline-run sub-resource missing a command — `logs`,
   `tree`, `metadata` and `signal` all had one, `GET
