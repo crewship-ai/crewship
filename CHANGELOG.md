@@ -424,6 +424,29 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   and an overflow check on `<html>` finds nothing either, since there is no
   overflow — only clipping.
 
+- **The inbox detail pane's jump control named a destination and went
+  nowhere (#2157).** `jumpFor` returned `{ label, icon }` and no href, and
+  the pane rendered it as a plain `<Button>` with no `onClick`: it worked out
+  which destination to name, named it, and did nothing when clicked. All
+  three variants were dead — `Open chat`, `Open <identifier>`, `Open run` —
+  and `Open run` is the only control on the pane for reaching the run an
+  approval describes, so a reviewer reading a waitpoint had no way through to
+  its activity.
+
+  It survived because the test asserted `jumpFor(...)?.label` and nothing
+  else: the derivation was right the whole time and the integration was
+  missing, so a test of the return value went green against it. The new spec
+  asserts the rendered DOM — an `<a>` carrying an href.
+
+  `chat_url` is attacker-influenced payload, and the guard against an
+  off-origin jump lived in `kind-actions` only. `jumpFor` had none, so it
+  would return `Open chat` for an absolute URL — harmless while the button
+  was dead, and not harmless the moment an href was added. The guard is now
+  one exported function both call sites share, since two copies of a security
+  check drift and the copy without it was the one deciding whether a
+  destination got named at all. Identifiers are URL-encoded into the path and
+  the query.
+
 - **`claim-issue.sh` produced permanent phantom locks in the majority of
   cases — measured at 19 of 35 live claims, with 6 issues double-claimed
   (#2107).** Two compounding bugs. First, the RELEASE parser cancelled a
