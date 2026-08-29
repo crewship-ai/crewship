@@ -19,6 +19,8 @@ Implementation: `internal/api/user_preferences.go`. Persisted in `user_preferenc
 | GET | [`/api/v1/me/preferences`](#list-preferences) | List all preferences for the user |
 | PUT | [`/api/v1/me/preferences/{key}`](#set-one-preference) | Upsert one preference key |
 | DELETE | [`/api/v1/me/preferences/{key}`](#delete-one-preference) | Delete one preference key |
+| GET | [`/api/v1/me/notification-prefs`](#notification-preferences) | Get your category × channel notification matrix |
+| PUT | [`/api/v1/me/notification-prefs`](#notification-preferences) | Upsert cells in your notification matrix |
 
 ## Auth and limits
 
@@ -141,6 +143,116 @@ The server does not enforce these names, but the frontend uses them consistently
 | `chat.last_session_per_agent` | object | Map `agentId → chatId` so the chat surface re-opens the last session per agent. |
 
 Adding a new key is purely a frontend change — no API or migration work needed. Use the dotted-namespace convention (`<surface>.<setting>`) so a future grep stays scannable.
+
+---
+
+## Notification preferences
+
+```
+GET  /api/v1/me/notification-prefs
+PUT  /api/v1/me/notification-prefs
+```
+
+Not the same store as the section above. `/me/preferences` is a schemaless,
+never-workspace-scoped UI blob; `/me/notification-prefs` is a **workspace-scoped**
+category × channel matrix — which of your notification channels (email,
+webhook, Slack, Discord, Telegram, …) get pinged for which category of event
+(approvals, escalations, failed routines, chat replies, …). See the
+[Outbound notifications guide](/guides/notifications) for the full category
+list, channel setup, and the two-layer (admin allowlist + user preference)
+model. CLI parity: [`crewship notify prefs`](/cli/notify#crewship-notify-prefs-—-server-side-notification-preferences).
+
+Implementation: `internal/api/notification_prefs.go`, backed by
+`internal/notifyroute.PrefStore` over the `user_notification_prefs` table
+(migration v154).
+
+**Auth:** authenticated session with workspace context (`GET`/`PUT` both
+require `workspace_id` + the caller's own user id from context — there is no
+path or body parameter naming a different user).
+
+### Get your matrix
+
+```
+GET /api/v1/me/notification-prefs
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "cells": [
+    { "category": "agents.approval", "channel_id": "nch_abc123", "state": "immediate" },
+    { "category": "*", "channel_id": "nch_def456", "state": "off" }
+  ]
+}
+```
+
+`cells` is `[]` (never `null`) when nothing has been set. Each cell's `state`
+is `off` or `immediate` (`digest` is schema-reserved for a v2 digest window;
+this MVP never reads or writes it).
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | Not authenticated, or no workspace context. |
+| 500 | DB error. |
+
+### Set cells in your matrix
+
+```
+PUT /api/v1/me/notification-prefs
+Content-Type: application/json
+```
+
+**Request body:** `{ "cells": [{ "category", "channel_id", "state" }] }` — one
+or more cells to upsert.
+
+```json
+{ "cells": [
+  { "category": "agents.approval", "channel_id": "nch_abc123", "state": "immediate" },
+  { "category": "*", "channel_id": "nch_def456", "state": "immediate" }
+] }
+```
+
+`PUT` **upserts** the cells you send — it is not a full-matrix replace, so a
+single-cell edit never needs to resend every other cell (unsent cells keep
+whatever state they already had).
+
+`category` is one of the values in [Conventional categories](#conventional-categories)
+below, or `*` — the per-channel "mute everything" sentinel cell. `channel_id`
+must name a channel the workspace already has (`crewship notifychannel add`).
+`state` is `off` or `immediate`.
+
+**Response:** `200 OK` — `{ "ok": true }`.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid JSON body, `cells` empty, or a cell fails validation (unknown category, empty `channel_id`, or a `state` outside `off`/`immediate`). |
+| 401 | Not authenticated, or no workspace context. |
+
+### Conventional categories
+
+The fixed vocabulary — shared by this matrix, the admin per-channel
+allowlist, and the delivery log. `internal/notify.AllCategories`, grouped
+the same way the settings UI and `crewship notify prefs` render them:
+
+| Group | Categories |
+|---|---|
+| Routines | `routines.completed`, `routines.failed`, `routines.skipped`, `routines.missed` |
+| Issues | `issues.created`, `issues.state`, `issues.assigned`, `issues.comment` |
+| Agents | `agents.approval`, `agents.escalation`, `agents.error`, `agents.budget` |
+| System | `system.health`, `system.migration`, `security`, `pages.stale` |
+| Chat & memory | `chat.replies`, `memory` |
+
+`*` is a sentinel, not a real category — legal as a cell's `category` (mutes
+every category on that channel) but never appears in the allowlist or a
+delivery log row. `agents.message` (an agent's own `notify_send` tool call)
+is deliberately **not** in this matrix at all — it is routed by the
+[agent-channel pairing](/api-reference/internal#agent-notifications) that
+authorized it, not by a user's mute state.
 
 ## Related
 

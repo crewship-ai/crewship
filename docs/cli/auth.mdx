@@ -24,6 +24,8 @@ crewship auth <subcommand>
 | --- | --- |
 | `auth passwd` | Change your own account password. |
 | `auth avatar` | Upload or clear your profile picture. |
+| `auth profile` | Update your display name. |
+
 | `auth pair` | Issue a device-code so another CLI can log in without a browser. |
 
 ## `auth passwd`
@@ -68,6 +70,23 @@ crewship auth avatar ./me.png
 # Remove, back to initials:
 crewship auth avatar --clear
 ```
+
+## `auth profile`
+
+Update your display name. `--full-name` is the only editable field — the
+API accepts nothing else on this endpoint, so there is no `--email` flag
+here to promise something the server would silently ignore. Backed by
+[`PATCH /api/v1/users/me`](/api-reference/auth#patch-/api/v1/users/me).
+
+Prints the updated profile and honors the global `--format` flag (table
+by default, or `json`/`yaml`/`ndjson` for scripts).
+
+```bash
+crewship auth profile --full-name "Jane Doe"
+```
+
+Editing your display name is also available in the web UI (Settings →
+Profile).
 
 <Note>
 Editing your display name is available in the web UI (Settings → Profile),

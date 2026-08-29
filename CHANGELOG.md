@@ -228,6 +228,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   allocation ratios, and the truncation policy itself are unchanged; this
   only makes the existing behaviour visible to the model, honestly.
 
+- **`crewship auth profile` — the one self-service profile mutation with no
+  CLI command (#2147).** `PATCH /api/v1/users/me` (edit your own display
+  name) has existed alongside `auth passwd` and `auth avatar` since #867.1,
+  but had no CLI surface. `crewship auth profile --full-name "Jane Doe"`
+  fills the gap, printing the updated profile and honoring the global
+  `--format` flag like every other reporting command.
+
 - **Three more endpoints get the CLI command the "every endpoint gets a
   command" rule requires (#2147).** `crewship feature-flag` could list,
   delete, enable, disable and inherit a flag but had no way to create or
