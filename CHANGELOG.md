@@ -309,6 +309,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   route, `components/features/design/`, the sidebar row and the `design`
   concept icon go with it, and 26 comments that cited the page as their
   specification now cite a section of the document.
+- **The per-tool MCP toggle now says what it does (#2168).**
+  `mcp_tool_bindings.enabled` was documented and labeled as if disabling a
+  tool blocked it. On the self-hosted/legacy MCP path it never did: the
+  sidecar gateway's `CallTool` has no per-tool check, so a "disabled" tool
+  could still be called directly — the flag only decided whether the tool's
+  name was listed in the agent's `[CONNECTED INTEGRATIONS]` prompt block.
+  `crewship integration tools enable/disable --help`, the API reference, and
+  the legacy integrations UI (behind `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS`,
+  default off) now say this is advisory, not access control — Composio-
+  routed integrations remain the exception, enforced through Composio's own
+  `allowed_tools` scope. No behaviour changed; only the claim about it.
 
 - **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
   ⚠️ **Behaviour change: the left column navigates between conversations, and
