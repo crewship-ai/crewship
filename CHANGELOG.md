@@ -555,6 +555,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   credential (`grant_source: "crew"`) still resolves to a non-empty,
   `ACTIVE` array and stays quiet.
 
+- **The create-agent dialog no longer promises a "Coordinator" role it
+  cannot deliver (#2166).** The empty-workspace banner, the crew-required
+  validation hint, and the crew field's hint text all told the user they
+  could set an agent as a workspace-wide "Coordinator" needing no crew — a
+  role `CreateSurfaceChoice`'s Role picker has never offered; it is AGENT or
+  LEAD, full stop. A user in a brand-new workspace, the exact moment the
+  empty-crews banner fires, followed the product's own instructions into a
+  dead end. All three strings now describe what the form actually does.
+  Whether to let the UI create a crewless AGENT (the API already allows one
+  for non-LEAD roles, and `crewship agent create --crew` is optional) is a
+  separate capability decision, filed as #2170.
+
 - **`claim-issue.sh` produced permanent phantom locks in the majority of
   cases — measured at 19 of 35 live claims, with 6 issues double-claimed
   (#2107).** Two compounding bugs. First, the RELEASE parser cancelled a
