@@ -4,9 +4,9 @@
     "api_exact_docs": 588,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 821,
-    "cli_exact_docs": 821,
-    "cli_root_docs_present": 821,
+    "cli_operations": 822,
+    "cli_exact_docs": 822,
+    "cli_root_docs_present": 822,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 445,
     "api_with_concrete_response_schemas": 573,
@@ -15,9 +15,9 @@
     "api_with_concrete_json_requests": 247,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 806,
-    "cli_with_flags": 388,
-    "cli_with_all_flags_documented": 388,
+    "cli_with_test_signals": 807,
+    "cli_with_flags": 389,
+    "cli_with_all_flags_documented": 389,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 105,
@@ -2705,6 +2705,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_orphan_test.go",
         "internal/api/agents_query_delete_load_test.go",
         "internal/api/dberr_crews_cov_test.go"
       ],
@@ -2725,6 +2726,7 @@
           "openapi_operation": true,
           "source_file": "cmd/gen-openapi/schemas_remaining_crew_agent.go",
           "test_signals": [
+            "cmd/crewship/cli_route_orphan_test.go",
             "internal/api/agents_query_delete_load_test.go",
             "internal/api/dberr_crews_cov_test.go"
           ]
@@ -5674,6 +5676,7 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/openapi.mdx",
+        "docs/cli/auth.mdx",
         "docs/guides/auth.mdx",
         "docs/guides/cli-pairing.mdx",
         "docs/security/threat-model.mdx"
@@ -5683,6 +5686,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/param_inference_test.go",
         "internal/api/cli_pair_test.go",
@@ -5704,6 +5708,7 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "cmd/crewship/acceptance_auth_pair_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/param_inference_test.go",
             "internal/api/cli_pair_test.go",
@@ -5720,6 +5725,7 @@
       "source_file": "cmd/crewship/cmd_login.go",
       "exact_docs": [
         "docs/api-reference/auth.mdx",
+        "docs/cli/auth.mdx",
         "docs/guides/auth.mdx",
         "docs/guides/cli-pairing.mdx",
         "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
@@ -5730,6 +5736,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/cmd_login_cov_test.go",
         "internal/api/cli_pair_test.go",
         "internal/api/openapi_unauthenticated_set_test.go",
@@ -5752,6 +5759,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_login.go",
           "test_signals": [
+            "cmd/crewship/acceptance_auth_pair_test.go",
             "cmd/crewship/cmd_login_cov_test.go",
             "internal/api/cli_pair_test.go",
             "internal/api/openapi_unauthenticated_set_test.go",
@@ -5765,9 +5773,10 @@
       "path": "/api/v1/auth/pair/start",
       "operation_id": "post_api_v1_auth_pair_start",
       "tag": "auth",
-      "source_file": "internal/api/router_auth.go",
+      "source_file": "cmd/crewship/cmd_auth.go",
       "exact_docs": [
         "docs/api-reference/auth.mdx",
+        "docs/cli/auth.mdx",
         "docs/guides/auth.mdx",
         "docs/guides/cli-pairing.mdx"
       ],
@@ -5776,6 +5785,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
         "internal/api/cli_pair_test.go"
       ],
@@ -5794,8 +5804,9 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_auth.go",
+          "source_file": "cmd/crewship/cmd_auth.go",
           "test_signals": [
+            "cmd/crewship/acceptance_auth_pair_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
             "internal/api/cli_pair_test.go"
           ]
@@ -7389,12 +7400,12 @@
       "test_signals": [
         "cmd/crewship/acceptance_credential_openrouter_test.go",
         "cmd/crewship/acceptance_oauth_connect_test.go",
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_credential_assignment_cov_test.go",
         "cmd/crewship/cmd_credential_binding_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_credential_cov_test.go",
-        "cmd/crewship/cmd_credential_crews_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -7416,12 +7427,12 @@
           "test_signals": [
             "cmd/crewship/acceptance_credential_openrouter_test.go",
             "cmd/crewship/acceptance_oauth_connect_test.go",
+            "cmd/crewship/cli_route_orphan_test.go",
             "cmd/crewship/cmd_agent_introspect_cov_test.go",
             "cmd/crewship/cmd_credential_assignment_cov_test.go",
             "cmd/crewship/cmd_credential_binding_test.go",
             "cmd/crewship/cmd_credential_cov2_test.go",
             "cmd/crewship/cmd_credential_cov_test.go",
-            "cmd/crewship/cmd_credential_crews_test.go",
             "…"
           ]
         }
@@ -7448,12 +7459,12 @@
       "test_signals": [
         "cmd/crewship/acceptance_credential_openrouter_test.go",
         "cmd/crewship/acceptance_oauth_connect_test.go",
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_credential_assignment_cov_test.go",
         "cmd/crewship/cmd_credential_binding_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_credential_cov_test.go",
-        "cmd/crewship/cmd_credential_crews_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -7475,12 +7486,12 @@
           "test_signals": [
             "cmd/crewship/acceptance_credential_openrouter_test.go",
             "cmd/crewship/acceptance_oauth_connect_test.go",
+            "cmd/crewship/cli_route_orphan_test.go",
             "cmd/crewship/cmd_agent_introspect_cov_test.go",
             "cmd/crewship/cmd_credential_assignment_cov_test.go",
             "cmd/crewship/cmd_credential_binding_test.go",
             "cmd/crewship/cmd_credential_cov2_test.go",
             "cmd/crewship/cmd_credential_cov_test.go",
-            "cmd/crewship/cmd_credential_crews_test.go",
             "…"
           ]
         }
@@ -8758,6 +8769,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -8765,7 +8777,6 @@
         "cmd/crewship/acceptance_local_db_review_test.go",
         "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/acceptance_oauth_connect_test.go",
-        "cmd/crewship/api_helpers_cov2_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -8785,6 +8796,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_crew.go",
           "test_signals": [
+            "cmd/crewship/acceptance_auth_pair_test.go",
             "cmd/crewship/acceptance_cli_resolve_test.go",
             "cmd/crewship/acceptance_consolidate_review_test.go",
             "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -8792,7 +8804,6 @@
             "cmd/crewship/acceptance_local_db_review_test.go",
             "cmd/crewship/acceptance_local_db_target_test.go",
             "cmd/crewship/acceptance_oauth_connect_test.go",
-            "cmd/crewship/api_helpers_cov2_test.go",
             "…"
           ]
         }
@@ -8858,6 +8869,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -8865,7 +8877,6 @@
         "cmd/crewship/acceptance_local_db_review_test.go",
         "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/acceptance_oauth_connect_test.go",
-        "cmd/crewship/api_helpers_cov2_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -8885,6 +8896,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_crew.go",
           "test_signals": [
+            "cmd/crewship/acceptance_auth_pair_test.go",
             "cmd/crewship/acceptance_cli_resolve_test.go",
             "cmd/crewship/acceptance_consolidate_review_test.go",
             "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -8892,7 +8904,6 @@
             "cmd/crewship/acceptance_local_db_review_test.go",
             "cmd/crewship/acceptance_local_db_target_test.go",
             "cmd/crewship/acceptance_oauth_connect_test.go",
-            "cmd/crewship/api_helpers_cov2_test.go",
             "…"
           ]
         }
@@ -12097,6 +12108,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_orphan_test.go",
         "internal/orchestrator/delegation_subagent_test.go",
         "internal/sidecar/mcp_gateway_cov_test.go"
       ],
@@ -12117,6 +12129,7 @@
           "openapi_operation": true,
           "source_file": "cmd/gen-openapi/schemas_remaining_crew_agent.go",
           "test_signals": [
+            "cmd/crewship/cli_route_orphan_test.go",
             "internal/orchestrator/delegation_subagent_test.go",
             "internal/sidecar/mcp_gateway_cov_test.go"
           ]
@@ -12958,13 +12971,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cli_route_contract_test.go",
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_hooks_cov_test.go",
         "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_hooks_write_test.go",
-        "cmd/crewship/cmd_notifychannel_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -12985,13 +12998,13 @@
           "source_file": "cmd/crewship/cmd_hooks.go",
           "test_signals": [
             "cmd/crewship/cli_route_contract_test.go",
+            "cmd/crewship/cli_route_orphan_test.go",
             "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
             "cmd/crewship/cmd_format_sweep_batch2_test.go",
             "cmd/crewship/cmd_format_sweep_batch4_test.go",
             "cmd/crewship/cmd_hooks_cov_test.go",
             "cmd/crewship/cmd_hooks_test.go",
             "cmd/crewship/cmd_hooks_write_test.go",
-            "cmd/crewship/cmd_notifychannel_cov_test.go",
             "…"
           ]
         }
@@ -13014,13 +13027,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cli_route_contract_test.go",
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_hooks_cov_test.go",
         "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_hooks_write_test.go",
-        "cmd/crewship/cmd_notifychannel_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -13041,13 +13054,13 @@
           "source_file": "cmd/crewship/cmd_hooks.go",
           "test_signals": [
             "cmd/crewship/cli_route_contract_test.go",
+            "cmd/crewship/cli_route_orphan_test.go",
             "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
             "cmd/crewship/cmd_format_sweep_batch2_test.go",
             "cmd/crewship/cmd_format_sweep_batch4_test.go",
             "cmd/crewship/cmd_hooks_cov_test.go",
             "cmd/crewship/cmd_hooks_test.go",
             "cmd/crewship/cmd_hooks_write_test.go",
-            "cmd/crewship/cmd_notifychannel_cov_test.go",
             "…"
           ]
         }
@@ -13700,13 +13713,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/acceptance_integration_tools_refresh_test.go",
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "cmd/crewship/cmd_helpers_cov_test.go",
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_cov_test.go",
-        "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -13727,13 +13740,13 @@
           "source_file": "cmd/crewship/cmd_helpers.go",
           "test_signals": [
             "cmd/crewship/acceptance_integration_tools_refresh_test.go",
+            "cmd/crewship/cli_route_orphan_test.go",
             "cmd/crewship/cmd_agent_mcp_cov_test.go",
             "cmd/crewship/cmd_format_sweep_batch6_test.go",
             "cmd/crewship/cmd_helpers_cov_test.go",
             "cmd/crewship/cmd_integration_agent_cov_test.go",
             "cmd/crewship/cmd_integration_cov2_test.go",
             "cmd/crewship/cmd_integration_cov_test.go",
-            "cmd/crewship/cmd_integration_crew_cov_test.go",
             "…"
           ]
         }
@@ -13758,13 +13771,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/acceptance_integration_tools_refresh_test.go",
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "cmd/crewship/cmd_helpers_cov_test.go",
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_cov_test.go",
-        "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -13785,13 +13798,13 @@
           "source_file": "cmd/crewship/cmd_helpers.go",
           "test_signals": [
             "cmd/crewship/acceptance_integration_tools_refresh_test.go",
+            "cmd/crewship/cli_route_orphan_test.go",
             "cmd/crewship/cmd_agent_mcp_cov_test.go",
             "cmd/crewship/cmd_format_sweep_batch6_test.go",
             "cmd/crewship/cmd_helpers_cov_test.go",
             "cmd/crewship/cmd_integration_agent_cov_test.go",
             "cmd/crewship/cmd_integration_cov2_test.go",
             "cmd/crewship/cmd_integration_cov_test.go",
-            "cmd/crewship/cmd_integration_crew_cov_test.go",
             "…"
           ]
         }
@@ -17173,13 +17186,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/acceptance_oauth_connect_test.go",
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "internal/api/connectors_handler_test.go",
         "internal/api/oauth_creds_cov_test.go",
         "internal/api/oauth_flow_cov2_test.go",
         "internal/api/oauth_flow_cov_test.go",
         "internal/api/oauth_resource_iss_test.go",
-        "internal/api/oauth_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -17199,13 +17212,13 @@
           "openapi_operation": true,
           "test_signals": [
             "cmd/crewship/acceptance_oauth_connect_test.go",
+            "cmd/crewship/cli_route_orphan_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "internal/api/connectors_handler_test.go",
             "internal/api/oauth_creds_cov_test.go",
             "internal/api/oauth_flow_cov2_test.go",
             "internal/api/oauth_flow_cov_test.go",
             "internal/api/oauth_resource_iss_test.go",
-            "internal/api/oauth_test.go",
             "…"
           ]
         }
@@ -17783,6 +17796,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
@@ -17790,7 +17804,6 @@
         "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
-        "cmd/crewship/cmd_page_wake_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -17810,6 +17823,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_page.go",
           "test_signals": [
+            "cmd/crewship/cli_route_orphan_test.go",
             "cmd/crewship/cmd_export_page_test.go",
             "cmd/crewship/cmd_page_action_test.go",
             "cmd/crewship/cmd_page_grants_test.go",
@@ -17817,7 +17831,6 @@
             "cmd/crewship/cmd_page_refresh_test.go",
             "cmd/crewship/cmd_page_test.go",
             "cmd/crewship/cmd_page_transfer_test.go",
-            "cmd/crewship/cmd_page_wake_test.go",
             "…"
           ]
         }
@@ -17841,6 +17854,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
@@ -17848,7 +17862,6 @@
         "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
-        "cmd/crewship/cmd_page_wake_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -17868,6 +17881,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_page.go",
           "test_signals": [
+            "cmd/crewship/cli_route_orphan_test.go",
             "cmd/crewship/cmd_export_page_test.go",
             "cmd/crewship/cmd_page_action_test.go",
             "cmd/crewship/cmd_page_grants_test.go",
@@ -17875,7 +17889,6 @@
             "cmd/crewship/cmd_page_refresh_test.go",
             "cmd/crewship/cmd_page_test.go",
             "cmd/crewship/cmd_page_transfer_test.go",
-            "cmd/crewship/cmd_page_wake_test.go",
             "…"
           ]
         }
@@ -27316,6 +27329,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/cmd_auth_test.go",
         "cmd/crewship/cmd_conversation_cov_test.go",
         "cmd/crewship/cmd_logs_cov_test.go",
@@ -27336,6 +27350,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/cmd_auth_test.go"
       ],
       "flags": [
@@ -27343,6 +27358,35 @@
       ],
       "documented_flags": [
         "clear"
+      ]
+    },
+    {
+      "path": "auth pair",
+      "use": "pair",
+      "short": "Issue a device-code so another crewship CLI can log in without a browser",
+      "root": "auth",
+      "exact_docs": [
+        "docs/cli/auth.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/auth.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
+        "cmd/crewship/cmd_auth_test.go"
+      ],
+      "flags": [
+        "adapter",
+        "no-wait",
+        "poll-interval",
+        "timeout"
+      ],
+      "documented_flags": [
+        "adapter",
+        "no-wait",
+        "poll-interval",
+        "timeout"
       ]
     },
     {
@@ -27358,6 +27402,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/cmd_auth_test.go"
       ]
     },
@@ -27873,6 +27918,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -27880,7 +27926,6 @@
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_admin_extras_cov_test.go",
-        "cmd/crewship/cmd_admin_extras_test.go",
         "…"
       ]
     },
@@ -36110,6 +36155,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -36117,7 +36163,6 @@
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_admin_extras_cov_test.go",
-        "cmd/crewship/cmd_admin_extras_test.go",
         "…"
       ]
     },
@@ -37140,6 +37185,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -37147,7 +37193,6 @@
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_admin_extras_cov_test.go",
-        "cmd/crewship/cmd_admin_extras_test.go",
         "…"
       ]
     },
@@ -37237,6 +37282,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -37244,7 +37290,6 @@
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_admin_extras_cov_test.go",
-        "cmd/crewship/cmd_admin_extras_test.go",
         "…"
       ]
     },
@@ -37908,6 +37953,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -37915,7 +37961,6 @@
         "cmd/crewship/acceptance_integration_tools_refresh_test.go",
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cmd_activity_test.go",
-        "cmd/crewship/cmd_approvals_test.go",
         "…"
       ]
     },
@@ -38315,6 +38360,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -38322,7 +38368,6 @@
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_admin_extras_cov_test.go",
-        "cmd/crewship/cmd_admin_extras_test.go",
         "…"
       ],
       "flags": [
@@ -39087,6 +39132,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -39094,7 +39140,6 @@
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_admin_extras_cov_test.go",
-        "cmd/crewship/cmd_admin_extras_test.go",
         "…"
       ]
     },
@@ -42170,6 +42215,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/acceptance_credential_openrouter_test.go",
+        "cmd/crewship/cli_route_orphan_test.go",
         "cmd/crewship/cmd_provider_check_test.go",
         "cmd/crewship/cmd_provider_route_test.go",
         "cmd/crewship/cmd_provider_test.go"
@@ -43526,6 +43572,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_approvals_cov_test.go",
@@ -43533,7 +43580,6 @@
         "cmd/crewship/cmd_crew_provision_cov_test.go",
         "cmd/crewship/cmd_crew_relations_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch5_test.go",
-        "cmd/crewship/cmd_quickactions_cov_test.go",
         "…"
       ]
     },
@@ -46753,6 +46799,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -46760,7 +46807,6 @@
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_admin_extras_cov_test.go",
-        "cmd/crewship/cmd_admin_extras_test.go",
         "…"
       ]
     },
@@ -46913,6 +46959,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/acceptance_auth_pair_test.go",
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/acceptance_credential_openrouter_test.go",
@@ -46920,7 +46967,6 @@
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_admin_extras_cov_test.go",
-        "cmd/crewship/cmd_admin_extras_test.go",
         "…"
       ]
     },
@@ -49549,6 +49595,7 @@
         "docs/api-reference/websocket.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/changelog/overview.mdx",
+        "docs/cli/auth.mdx",
         "docs/cli/credential.mdx",
         "docs/cli/crew.mdx",
         "docs/cli/issue.mdx",
@@ -49920,11 +49967,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4571,
-    "api_path_references": 2200,
+    "command_references": 4577,
+    "api_path_references": 2206,
     "environment_references": 454,
     "manifest_kind_references": 231,
-    "flag_references": 2191,
+    "flag_references": 2197,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

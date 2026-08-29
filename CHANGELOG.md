@@ -31,6 +31,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **`crewship auth pair` issues a device-code, closing a CLI↔route
+  asymmetry (#2147).** `POST /api/v1/auth/pair/redeem` had a CLI caller
+  (`crewship login --pair --code=…`) but the two endpoints that ISSUE a
+  code, `POST /api/v1/auth/pair/start` and `GET /api/v1/auth/pair/poll`,
+  had none — the CLI could redeem a pairing code it had no way to mint. The
+  reverse-direction pass over `cmd/crewship/cli_route_contract_test.go`'s
+  extractor that found this (`TestRoutesWithNoCLICaller`,
+  `cli_route_orphan_test.go`) puts the honest count at 35 registered routes
+  with no CLI caller at all, after excluding `/api/v1/internal/*` sidecar
+  IPC and the browser/inbound-token surface; this PR closes two of them.
+
+  `crewship auth pair` mints a code, prints the paste-elsewhere
+  `crewship login --pair --code=…` snippet, and by default polls until the
+  code is redeemed, expires, or `--timeout` (default `9m`, under the
+  server's 10-minute TTL) runs out — a timeout is always a non-zero exit,
+  never a tick. `--no-wait` returns immediately after issuing the code;
+  `--adapter` tags it with a telemetry-only adapter hint. `--format json`
+  reports `code`, `expires_at`, `status`, `paired`, and `waited`.
+
 - **A provider is now a credential, and two new ones can be created (#2051).**
   The sidecar's LLM proxy routed on a hardcoded three-arm `strings.HasPrefix`
   switch over `/v1`, `/openai` and `/gemini`. It now routes on a compiled-in
