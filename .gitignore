@@ -190,3 +190,22 @@ __pycache__/
 # in-memory example database does not cover it). Build artifact, not input.
 .schemathesis/
 api-contract-artifacts/
+
+# The API/CLI inventory report is derived, not authored: `docs-inventory`
+# rewrites both files from the router table and the cobra tree on every run,
+# so the committed copy carried no information the generator could not
+# reproduce — and it changed on every pull request that touched a command.
+#
+# That made it conflict with itself. Across one five-PR batch it was the only
+# conflicting file in four of them, and in the fifth it conflicted twice: each
+# merge to main regenerated it, which re-conflicted every branch still open.
+# Resolving it always meant discarding both sides and re-running the generator,
+# which is the definition of a build artifact.
+#
+# Nothing reads the committed copy. CI runs `go run ./scripts/docs-inventory
+# -strict` (ci.yml, the "API and CLI documentation is complete" step), which
+# regenerates and then gates on the result, so the report is still verified on
+# every PR — it is simply no longer stored. `make docs-inventory` writes it
+# locally when you want to read it.
+docs/prd/reports/release-1-0-api-cli-inventory.json
+docs/prd/reports/release-1-0-api-cli-inventory.md
