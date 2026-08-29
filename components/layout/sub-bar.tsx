@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import type { LucideIcon } from "lucide-react"
+import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -208,21 +209,21 @@ function SubBarTabButton<T extends string>({
 type ActionProps = React.ComponentProps<typeof Button> & { icon?: LucideIcon }
 
 /** Primary CTA — soft/tinted. At most one per page. */
-export function SubBarPrimary({ icon: Icon, className, children, ...props }: ActionProps) {
+export function SubBarPrimary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
   return (
-    <Button variant="soft" size="sm" className={cn("h-7 gap-1.5 text-xs", className)} {...props}>
+    <Button asChild={asChild} variant="soft" size="sm" className={cn("h-7 gap-1.5 text-xs", className)} {...props}>
       {Icon && <Icon className="h-3 w-3" />}
-      {children}
+      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
     </Button>
   )
 }
 
 /** Secondary / neutral action (Import, secondary create). */
-export function SubBarSecondary({ icon: Icon, className, children, ...props }: ActionProps) {
+export function SubBarSecondary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
   return (
-    <Button variant="ghost" size="sm" className={cn("h-7 gap-1.5 text-xs", className)} {...props}>
+    <Button asChild={asChild} variant="ghost" size="sm" className={cn("h-7 gap-1.5 text-xs", className)} {...props}>
       {Icon && <Icon className="h-3 w-3" />}
-      {children}
+      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
     </Button>
   )
 }

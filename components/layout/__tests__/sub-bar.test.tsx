@@ -136,4 +136,25 @@ describe("SubBar", () => {
     expect(screen.getByRole("button", { name: /New Project/ }).getAttribute("data-variant")).toBe("ghost")
     expect(screen.getByRole("button", { name: /Settings/ }).getAttribute("data-variant")).toBe("ghost")
   })
+
+  it("slots an icon and responsive link contents into one asChild element", () => {
+    render(
+      <SubBar
+        title="Dashboard"
+        actions={
+          <>
+            <SubBarSecondary asChild icon={CircleDot}>
+              <a href="/issues?create=1"><span>New</span><span> issue</span></a>
+            </SubBarSecondary>
+            <SubBarPrimary asChild icon={List}>
+              <a href="/chat"><span>Chat with agent</span><span className="hidden">Chat</span></a>
+            </SubBarPrimary>
+          </>
+        }
+      />,
+    )
+
+    expect(screen.getByRole("link", { name: /New issue/ }).getAttribute("data-variant")).toBe("ghost")
+    expect(screen.getByRole("link", { name: /Chat with agent/ }).getAttribute("data-variant")).toBe("soft")
+  })
 })
