@@ -18,7 +18,7 @@ import { EvidenceFacts } from "./evidence-facts"
 import { KindActions } from "./kind-actions"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import {
-  absolute, canRole, categoryOf, decisionMetaFor, expiresIn, jumpFor, payloadNumber, remainingLabel,
+  absolute, canRole, categoryOf, decisionMetaFor, expiresIn, jumpFor, payloadNumber, remainingLabel, riskLevelOf,
   payloadString, payloadStrings, since, subjectOf, type WorkspaceRole,
 } from "./inbox-derive"
 
@@ -107,6 +107,9 @@ const CONTEXT_HIDE_KEYS = new Set([
   "kind",
   "inputs",
   "step_id",
+  // Rendered as a badge beside the decision, so repeating it here as a raw
+  // key/value reads as debug output rather than as the warning it is.
+  "risk_level",
 ])
 
 function humanizeKey(k: string): string {
@@ -160,6 +163,56 @@ function ContextDetails({ payload }: { payload: Record<string, unknown> }) {
 }
 
 
+/**
+ * The message body, bounded.
+ *
+ * A waitpoint's body_md is the whole approval prompt — for a model-drafted
+ * change plan that is several hundred words of unbroken prose, and the card
+ * had no height limit of any kind, so it pushed the identifiers, the run
+ * ladder and the footer off the bottom of the pane. The reader who most
+ * needs the buttons is the one who has to scroll furthest from them.
+ *
+ * So: clamp, and offer the rest. The threshold is deliberately generous —
+ * a short body must not grow a control that does nothing — and the collapsed
+ * height is enough to read the first paragraph, which is where a plan states
+ * what it is going to do.
+ */
+const BODY_CLAMP_CHARS = 600
+
+function MessageBody({ body }: { body: string }) {
+  const [expanded, setExpanded] = useState(false)
+  // Character count, not rendered height: the decision has to be made before
+  // paint, and a body this long is long whatever it renders to.
+  const long = body.length > BODY_CLAMP_CHARS
+
+  if (!long) return <MarkdownContent compact>{body}</MarkdownContent>
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className={cn(
+          "relative",
+          !expanded && "max-h-[16rem] overflow-hidden",
+        )}
+      >
+        <MarkdownContent compact>{body}</MarkdownContent>
+        {/* Fades rather than cutting mid-glyph, so the clamp reads as
+            "there is more" instead of as a rendering fault. */}
+        {!expanded && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-card to-transparent" />
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="self-start type-meta font-medium text-primary hover:underline"
+      >
+        {expanded ? "Show less" : "Show the whole message"}
+      </button>
+    </div>
+  )
+}
+
 export function DecisionCard({
   item, role, onResolve, onRefresh,
 }: {
@@ -186,6 +239,15 @@ export function DecisionCard({
           <span className={cn("type-section", meta.tone === "warn" ? "text-warn" : "text-foreground/70")}>
             {meta.heading}
           </span>
+          {/* Author-declared, never inferred. Sits with the heading rather
+              than in the Context dump because it changes how the sentence
+              below it should be read, and a reader who scrolls past the
+              buttons has already decided. */}
+          {riskLevelOf(item) === "destructive" && (
+            <span className="type-meta rounded bg-destructive/15 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-destructive">
+              destructive · cannot be undone by re-running
+            </span>
+          )}
           {mins != null && (
             <span
               className={cn(
@@ -455,7 +517,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
       {item.body_md && (
         <Appear order={3}>
           <DetailCard title="Message" icon={CONCEPT_ICON.inbox}>
-            <MarkdownContent compact>{item.body_md}</MarkdownContent>
+            <MessageBody body={item.body_md} />
           </DetailCard>
         </Appear>
       )}

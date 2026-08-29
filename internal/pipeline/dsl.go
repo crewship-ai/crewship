@@ -481,6 +481,7 @@ func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}
 		walk(base+"/wait/until", st.Wait.Until)
 		walk(base+"/wait/event_filter", st.Wait.EventFilter)
 		walk(base+"/wait/approval_prompt", st.Wait.ApprovalPrompt)
+		walk(base+"/wait/approval_title", st.Wait.ApprovalTitle)
 	}
 
 	// Code step fields

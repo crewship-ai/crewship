@@ -646,10 +646,17 @@ type WaitpointStatusReader interface {
 // WaitpointApprovalRequest is the metadata stored alongside the
 // waitpoint so the inbox/UI can render a meaningful approval card.
 type WaitpointApprovalRequest struct {
-	WorkspaceID    string
-	PipelineRunID  string
-	StepID         string
-	Prompt         string
+	WorkspaceID   string
+	PipelineRunID string
+	StepID        string
+	Prompt        string
+	// Title is the rendered WaitStep.ApprovalTitle — the one-line label
+	// the inbox row shows. Empty falls back to the prompt's first line,
+	// which is what every routine authored before this field did.
+	Title string
+	// RiskLevel is the step's author-declared blast radius, carried
+	// verbatim (already validated at save time).
+	RiskLevel      string
 	InvokingCrewID string
 	TimeoutSec     int
 }

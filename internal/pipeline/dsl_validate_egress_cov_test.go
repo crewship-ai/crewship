@@ -59,6 +59,22 @@ func TestValidateStepEgress_Branches(t *testing.T) {
 		{"wait event missing type", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "event"}}, "missing event_type"},
 		{"wait event valid", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "event", EventType: "deploy.done"}}, ""},
 		{"wait invalid kind", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "nap"}}, `kind "nap" invalid`},
+		// approval_title is optional — a routine written before it existed
+		// must keep validating, and the inbox falls back to the prompt.
+		{"wait approval title optional", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "approval", ApprovalPrompt: "ok?"}}, ""},
+		{"wait approval with title", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "approval", ApprovalPrompt: "ok?", ApprovalTitle: "Scale payments-api to 12 replicas"}}, ""},
+		// risk_level is author-declared and closed: a typo must fail at save
+		// time, because the failure it guards against is silent — an
+		// unrecognised value read as "normal" is a destructive action
+		// rendered as an ordinary one.
+		{"wait risk normal", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "approval", ApprovalPrompt: "ok?", RiskLevel: "normal"}}, ""},
+		{"wait risk destructive", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "approval", ApprovalPrompt: "ok?", RiskLevel: "destructive"}}, ""},
+		{"wait risk empty ok", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "approval", ApprovalPrompt: "ok?", RiskLevel: ""}}, ""},
+		{"wait risk typo rejected", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "approval", ApprovalPrompt: "ok?", RiskLevel: "destrucive"}}, `risk_level "destrucive" invalid`},
+		{"wait risk case sensitive", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "approval", ApprovalPrompt: "ok?", RiskLevel: "Destructive"}}, `risk_level "Destructive" invalid`},
+		// The risk check runs before the kind switch, so it guards a
+		// datetime or event wait too — those also land in the inbox.
+		{"wait risk checked on datetime", Step{ID: "w", Type: StepWait, Wait: &WaitStep{Kind: "datetime", Until: "2030-01-01T00:00:00Z", RiskLevel: "nope"}}, `risk_level "nope" invalid`},
 
 		// --- transform ---
 		{"transform missing body", Step{ID: "t", Type: StepTransform}, "missing transform body"},

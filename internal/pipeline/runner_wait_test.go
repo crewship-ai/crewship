@@ -413,3 +413,55 @@ func TestRunWaitStep_Approval_PromptRenderedFromTemplate(t *testing.T) {
 		t.Errorf("CreateApproval Prompt = %q, want \"Ship to production?\" (template should have rendered)", store.lastCreateReq.Prompt)
 	}
 }
+
+func TestRunWaitStep_Approval_TitleAndRiskReachTheStore(t *testing.T) {
+	// ApprovalTitle is templated for the same reason the prompt is, and
+	// for a sharper one: the whole point of the field is that the row
+	// says what THIS run would do, so `Approve: {{ inputs.action }}`
+	// rendering literally would leave every row identical again — the
+	// exact defect the field exists to fix (#2160).
+	//
+	// RiskLevel is carried verbatim; it is author-declared and already
+	// validated at save time.
+	store := &fakeWaitpointStore{waitApprove: true}
+	e := &Executor{waitpoints: store}
+	step := waitStepReq("approval")
+	step.Wait.ApprovalPrompt = "Approve this production action?"
+	step.Wait.ApprovalTitle = "Approve: {{ inputs.action }}"
+	step.Wait.RiskLevel = "destructive"
+
+	render := emptyRender()
+	render.Inputs["action"] = "Delete the staging bucket"
+
+	_, _, _, err := e.runWaitStep(context.Background(), step, render, RunInput{}, "run-1", 0)
+	if err != nil {
+		t.Fatalf("approval with title: %v", err)
+	}
+	if got, want := store.lastCreateReq.Title, "Approve: Delete the staging bucket"; got != want {
+		t.Errorf("CreateApproval Title = %q, want %q (template should have rendered)", got, want)
+	}
+	if got, want := store.lastCreateReq.RiskLevel, "destructive"; got != want {
+		t.Errorf("CreateApproval RiskLevel = %q, want %q", got, want)
+	}
+}
+
+func TestRunWaitStep_Approval_NoTitleSendsEmpty(t *testing.T) {
+	// A routine authored before approval_title existed must send an
+	// empty Title, not the rendered empty-string of some other field —
+	// the store keys its fallback to the prompt on exactly that.
+	store := &fakeWaitpointStore{waitApprove: true}
+	e := &Executor{waitpoints: store}
+	step := waitStepReq("approval")
+	step.Wait.ApprovalPrompt = "Approve this production action?"
+
+	_, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{}, "run-1", 0)
+	if err != nil {
+		t.Fatalf("approval without title: %v", err)
+	}
+	if store.lastCreateReq.Title != "" {
+		t.Errorf("CreateApproval Title = %q, want empty so the store falls back to the prompt", store.lastCreateReq.Title)
+	}
+	if store.lastCreateReq.RiskLevel != "" {
+		t.Errorf("CreateApproval RiskLevel = %q, want empty (the store defaults it)", store.lastCreateReq.RiskLevel)
+	}
+}

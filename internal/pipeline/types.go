@@ -549,6 +549,29 @@ type WaitStep struct {
 	Kind string `json:"kind"` // approval | datetime | event
 	// approval fields
 	ApprovalPrompt string `json:"approval_prompt,omitempty"`
+	// ApprovalTitle is the one-line label the inbox row carries — what
+	// this approval would DO, e.g. "Scale payments-api to 12 replicas".
+	// Templated like ApprovalPrompt, so `Approve: {{ inputs.action }}`
+	// yields a different row per run.
+	//
+	// Without it the inbox falls back to the first line of the prompt,
+	// which is authored boilerplate and therefore identical on every
+	// invocation: three pending approvals for a credential rotation, a
+	// bucket deletion and a scale-out all read "Approve this production
+	// action?" and cannot be told apart in the list.
+	ApprovalTitle string `json:"approval_title,omitempty"`
+	// RiskLevel is author-declared, never inferred. "destructive" marks
+	// an approval whose action cannot be undone by re-running it.
+	//
+	// Deliberately not derived from the prompt text: a heuristic that
+	// looks for "delete" is wrong in both directions, and the direction
+	// that matters — calling a destructive action normal — fails silently.
+	// Empty means "normal"; see RiskLevels for the accepted set.
+	//
+	// Unrelated to internal/pipeline/risk.go, which scores a routine at
+	// SAVE time to decide whether it needs approval to exist at all. This
+	// describes one step's blast radius at RUN time.
+	RiskLevel string `json:"risk_level,omitempty"`
 	// datetime fields
 	Until string `json:"until,omitempty"` // RFC3339 or template
 	// event fields
@@ -556,6 +579,27 @@ type WaitStep struct {
 	EventFilter string `json:"event_filter,omitempty"` // simple equality match on payload
 	// TimeoutSec wraps the wait — exhausting it falls through to OnFail.
 	// 0 = no timeout (wait forever).
+}
+
+// RiskLevels is the accepted vocabulary for WaitStep.RiskLevel, in
+// increasing blast radius. Deliberately two values, not a scale: the
+// only question a reader of an inbox row needs answered is whether
+// approving this can be taken back, and a five-point scale invites
+// authors to split hairs the surface cannot render.
+//
+// "" (unset) means normal — a routine written before this field existed
+// is not silently marked risky.
+var RiskLevels = []string{"normal", "destructive"}
+
+// ValidRiskLevel reports whether s is one of RiskLevels. Empty is
+// handled by the caller, which treats it as "normal".
+func ValidRiskLevel(s string) bool {
+	for _, r := range RiskLevels {
+		if s == r {
+			return true
+		}
+	}
+	return false
 }
 
 // TransformStep is pure-Go data reshaping. No LLM, no network,

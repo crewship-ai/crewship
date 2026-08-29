@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/notify"
 )
 
 // TestRoutineSchema_ValidJSON proves the published JSON Schema file is
@@ -104,6 +106,38 @@ func TestRoutineSchema_AllFieldsCovered(t *testing.T) {
 		{"DSL", reflect.TypeOf(DSL{}), propsOf(doc)},
 		{"Step", reflect.TypeOf(Step{}), propsOf(stepDef)},
 	}
+
+	// Every step BODY too — WaitStep, HTTPStep, CodeStep, TransformStep…
+	//
+	// Walking DSL and Step alone left the bodies unguarded, which is
+	// where the fields actually get added: WaitStep.ApprovalTitle could
+	// be introduced in Go, omitted from the schema, and ship green,
+	// while `additionalProperties: false` on the $def silently rejected
+	// every routine that used it for anyone validating against the
+	// published schema.
+	//
+	// Derived from Step's own pointer fields rather than a hand-kept
+	// list, so a NEW step body is covered the day it is declared and
+	// cannot be forgotten here.
+	stepType := reflect.TypeOf(Step{})
+	for i := 0; i < stepType.NumField(); i++ {
+		f := stepType.Field(i)
+		if f.Type.Kind() != reflect.Pointer || f.Type.Elem().Kind() != reflect.Struct {
+			continue
+		}
+		bodyName := f.Type.Elem().Name()
+		bodyDef, ok := defs[bodyName].(map[string]interface{})
+		if !ok {
+			t.Errorf("Step field %s is a *%s body but schemas/routine.v1.json has no $defs/%s",
+				f.Name, bodyName, bodyName)
+			continue
+		}
+		cases = append(cases, struct {
+			name  string
+			typ   reflect.Type
+			props map[string]interface{}
+		}{bodyName, f.Type.Elem(), propsOf(bodyDef)})
+	}
 	for _, c := range cases {
 		for i := 0; i < c.typ.NumField(); i++ {
 			tag := c.typ.Field(i).Tag.Get("json")
@@ -120,6 +154,136 @@ func TestRoutineSchema_AllFieldsCovered(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestRoutineSchema_EnumsPinnedToGo keeps every schema enum whose vocabulary
+// has a Go source of truth from drifting away from it.
+//
+// AllFieldsCovered proves a field EXISTS in the schema. It says nothing about
+// the field's accepted VALUES, and two of the enums here were hand-copied out
+// of Go when they were written — so adding a notification category in Go would
+// leave the published schema rejecting every routine that used it, which is the
+// same silent-rejection failure AllFieldsCovered exists to prevent, one level
+// down. Nothing caught that, including the change that added these enums.
+//
+// Each case names the schema location and the Go slice that governs it. A new
+// enum backed by Go constants belongs here on the day it is added.
+func TestRoutineSchema_EnumsPinnedToGo(t *testing.T) {
+	raw, err := os.ReadFile(schemaPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]interface{}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	defs, _ := doc["$defs"].(map[string]interface{})
+
+	// enumAt walks $defs/<def>/properties/<prop>/enum.
+	enumAt := func(t *testing.T, def, prop string) []string {
+		t.Helper()
+		d, ok := defs[def].(map[string]interface{})
+		if !ok {
+			t.Fatalf("schemas/routine.v1.json has no $defs/%s", def)
+		}
+		props, _ := d["properties"].(map[string]interface{})
+		p, ok := props[prop].(map[string]interface{})
+		if !ok {
+			t.Fatalf("$defs/%s has no property %q", def, prop)
+		}
+		rawEnum, ok := p["enum"].([]interface{})
+		if !ok {
+			t.Fatalf("$defs/%s/properties/%s has no enum", def, prop)
+		}
+		out := make([]string, 0, len(rawEnum))
+		for _, v := range rawEnum {
+			s, _ := v.(string)
+			out = append(out, s)
+		}
+		return out
+	}
+
+	cases := []struct {
+		name   string
+		def    string
+		prop   string
+		want   []string
+		source string
+	}{
+		{
+			name:   "wait risk_level",
+			def:    "WaitStep",
+			prop:   "risk_level",
+			want:   RiskLevels,
+			source: "pipeline.RiskLevels",
+		},
+		{
+			name:   "notify category",
+			def:    "NotifyStep",
+			prop:   "category",
+			want:   notify.AllCategories,
+			source: "notify.AllCategories",
+		},
+		{
+			name: "notify priority",
+			def:  "NotifyStep",
+			prop: "priority",
+			// isValidNotifyPriority is a switch rather than a slice, so this
+			// is the one vocabulary with no Go value to read. Pinned as a
+			// literal that the validator's own cases must match — if they
+			// diverge, one of the two assertions below fails.
+			want:   []string{"urgent", "high", "medium", "low"},
+			source: "isValidNotifyPriority",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := enumAt(t, tc.def, tc.prop)
+
+			inGo := make(map[string]bool, len(tc.want))
+			for _, v := range tc.want {
+				inGo[v] = true
+			}
+			inSchema := make(map[string]bool, len(got))
+			for _, v := range got {
+				inSchema[v] = true
+			}
+
+			for _, v := range tc.want {
+				if !inSchema[v] {
+					t.Errorf("%s accepts %q but $defs/%s/properties/%s does not list it — "+
+						"a routine using it validates in Go and is rejected by the published schema; "+
+						"add it to schemas/routine.v1.json", tc.source, v, tc.def, tc.prop)
+				}
+			}
+			for _, v := range got {
+				if !inGo[v] {
+					t.Errorf("$defs/%s/properties/%s lists %q but %s does not accept it — "+
+						"a routine using it passes schema validation and is refused at save",
+						tc.def, tc.prop, v, tc.source)
+				}
+			}
+		})
+	}
+
+	// The priority literal above is only meaningful if the validator agrees
+	// with it, so check both directions against the real function.
+	t.Run("notify priority literal matches the validator", func(t *testing.T) {
+		t.Parallel()
+		for _, v := range []string{"urgent", "high", "medium", "low"} {
+			if !isValidNotifyPriority(v) {
+				t.Errorf("isValidNotifyPriority(%q) = false, but the schema and this test list it", v)
+			}
+		}
+		for _, v := range []string{"", "URGENT", "critical", "none"} {
+			if isValidNotifyPriority(v) {
+				t.Errorf("isValidNotifyPriority(%q) = true, but it is not in the schema enum", v)
+			}
+		}
+	})
 }
 
 // schemaPath returns the path to the routine.v1.json file relative

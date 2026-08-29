@@ -70,6 +70,10 @@ func validateStepEgress(st Step) error {
 		if st.Wait == nil {
 			return fmt.Errorf("pipeline: step %q (wait) missing wait body", st.ID)
 		}
+		if st.Wait.RiskLevel != "" && !ValidRiskLevel(st.Wait.RiskLevel) {
+			return fmt.Errorf("pipeline: step %q (wait) risk_level %q invalid (allowed: %s)",
+				st.ID, st.Wait.RiskLevel, strings.Join(RiskLevels, " "))
+		}
 		switch st.Wait.Kind {
 		case "approval":
 			if st.Wait.ApprovalPrompt == "" {

@@ -64,6 +64,11 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 
 	case "approval":
 		prompt := Render(step.Wait.ApprovalPrompt, parentRender)
+		// Rendered with the same context as the prompt, so
+		// `Approve: {{ inputs.action }}` names THIS run's action rather
+		// than the routine's boilerplate. Empty stays empty; the store
+		// falls back to the prompt's first line.
+		title := Render(step.Wait.ApprovalTitle, parentRender)
 		if e.waitpoints == nil {
 			// No store wired — production should always have one.
 			// For dev/tests we time-out at 60s with a clear marker
@@ -98,6 +103,8 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 				PipelineRunID:  runID,
 				StepID:         step.ID,
 				Prompt:         prompt,
+				Title:          title,
+				RiskLevel:      step.Wait.RiskLevel,
 				InvokingCrewID: in.InvokingCrewID,
 				TimeoutSec:     step.TimeoutSec,
 			})
