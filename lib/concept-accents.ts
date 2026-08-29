@@ -106,7 +106,6 @@ export const CONCEPT_ACCENT = {
 
   // ── System ──
   marketplace: "slate",
-  design: "purple",
   settings: "slate",
   admin: "red",
   workspace: "slate",

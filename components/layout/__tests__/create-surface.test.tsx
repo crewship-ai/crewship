@@ -179,9 +179,9 @@ describe("CreateSurfaceFrame", () => {
 
   it("renders the same header outside a Dialog", () => {
     // Regression: the header used Radix's DialogTitle unconditionally, and
-    // those primitives THROW outside a Dialog root. The phone preview on
-    // /design is exactly that — no Dialog — so every handset render crashed
-    // into the route's error boundary.
+    // those primitives THROW outside a Dialog root. A handset preview frame
+    // is exactly that — no Dialog — so every such render crashed into the
+    // route's error boundary (docs/prd/create-surface-parity.md §6.13).
     expect(() =>
       render(
         <CreateSurfaceFrame mobile>

@@ -92,7 +92,8 @@ export function StepContainer({ state, setState, onPickImage }: StepProps) {
        * inside it — a navigation model no other door has, and the reason
        * Container kept reading as a different product from the rest of the
        * wizard. `layout="sections"` renders the same controls as the two
-       * sections /design leads with, plus three disclosures for what it does
+       * sections docs/prd/create-surface-parity.md §6.3 leads with, plus
+       * three disclosures for what it does
        * not show. Nothing is removed; see the note on the prop. */}
       <RuntimeConfig
         value={{

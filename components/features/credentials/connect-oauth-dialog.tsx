@@ -10,7 +10,8 @@
 //
 // The chrome is CreateSurface at size `sm` (480px). It used to be a bare
 // `sm:max-w-md` DialogContent carrying the shared dialog DEFAULTS — 448px,
-// `p-6`, an 18px DialogTitle — which is why the audit on /design counted it as
+// `p-6`, an 18px DialogTitle — which is why the audit in
+// docs/prd/create-surface-parity.md §2 counted it as
 // reading like a different design system rather than merely a different width.
 //
 // The primary is the shell's now. It used to stay inside the body, because

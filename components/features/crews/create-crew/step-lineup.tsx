@@ -14,7 +14,8 @@ import type { CrewTemplate } from "./api"
 import { asCrewColor, type WizardState } from "./types"
 
 /**
- * Who the crew starts with — one grid of tiles, the shape /design specifies.
+ * Who the crew starts with — one grid of tiles, the shape
+ * docs/prd/create-surface-parity.md §6.4 specifies.
  *
  * It was a two-pane browser: a mode tab strip (Browse / Empty), a search row,
  * four source tabs (Built-in · Mine · Workspace · Marketplace-soon), a row of

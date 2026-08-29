@@ -80,10 +80,6 @@ export const navSections = [
     label: "System",
     items: [
       { title: "Marketplace", href: "/marketplace", icon: CONCEPT_ICON.marketplace, badge: "FUTURE" as const },
-      // Scaffolding, and in the rail on purpose: the create-surface proposal
-      // argues about how the product's own doors look, so it has to be reachable
-      // the same way they are. It leaves with components/features/design.
-      { title: "Design", href: "/design", icon: CONCEPT_ICON.design },
       { title: "Settings", href: "/settings", icon: CONCEPT_ICON.settings },
       { title: "Admin", href: "/admin", icon: CONCEPT_ICON.admin, badge: "ADMIN" as const },
     ],

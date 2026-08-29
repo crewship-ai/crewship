@@ -113,8 +113,9 @@ describe("<StepReview>", () => {
   // says nothing about which one won is the one place the choice can be
   // checked before it is committed. The row used to appear only when the
   // state carried an override, so a crew taking the default — the common
-  // case — reviewed a container with no image in it. /design's specimen
-  // spells this row "RUNS ON" and always shows it.
+  // case — reviewed a container with no image in it. The specimen
+  // (docs/prd/create-surface-parity.md §6.3) spells this row "Runs on" and
+  // always shows it.
   it("always says what the crew runs on, default included", () => {
     render(<StepReview state={filledState} lineupSummary={baseSummary} />)
     expect(screen.getByText("Runs on")).toBeInTheDocument()

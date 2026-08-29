@@ -111,8 +111,8 @@ export interface OAuthFormProps {
    *
    * `inline` (default) is the pill row the MCP credential picker has always
    * shown, where this form is one control inside a larger config panel.
-   * `surface` is the tile list /design specifies for Credentials → Connect via
-   * OAuth: glyph, name, and the scopes the provider will be asked for, which
+   * `surface` is the tile list docs/prd/create-surface-parity.md §6.8
+   * specifies for Credentials → Connect via OAuth: glyph, name, and the scopes the provider will be asked for, which
    * is the fact a person needs before handing over access and the one a pill
    * has no room to carry.
    */

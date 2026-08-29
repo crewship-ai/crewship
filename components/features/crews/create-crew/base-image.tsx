@@ -13,8 +13,9 @@ import type { WizardState } from "./types"
  * The base image, as a row you read and a panel you pick in.
  *
  * The wizard used to render the catalogue inline: nine radio rows and a search
- * box, on a step that also carries tooling, network and sizing. /design shows
- * one summary row saying what the crew runs on with "Change" on the right,
+ * box, on a step that also carries tooling, network and sizing.
+ * docs/prd/create-surface-parity.md §6.3 shows one summary row saying what the
+ * crew runs on with "Change" on the right,
  * and the catalogue as a PANEL the surface swaps to — the same shape as the
  * icon picker, and the reason a create surface can hold a nine-item catalogue
  * without the step becoming a list of lists.

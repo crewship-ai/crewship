@@ -433,7 +433,8 @@ describe("<CreateCrewDialog> full wizard flow", () => {
 
   // ── The base-image catalogue is a panel, not a list on the step ──────────
   //
-  // /design opens the catalogue the way the icon picker opens: the surface
+  // docs/prd/create-surface-parity.md §6.3 opens the catalogue the way the
+  // icon picker opens: the surface
   // swaps its header, body and footer, and the back arrow returns. Rendering
   // nine radio rows inline on a step that also carries tooling, network and
   // sizing is what made Container read as a list of lists.
