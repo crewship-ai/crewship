@@ -135,11 +135,15 @@ function lastResults(entries: JournalEntry[]): Record<string, LastResult> {
     const payload = e.payload ?? {}
     const hookID = typeof payload.hook_id === "string" ? payload.hook_id : e.actor_id
     if (!hookID) continue
+    // An entry we cannot place in time cannot be compared, and letting it
+    // through would mean the last unorderable row always wins.
+    const ts = Date.parse(e.ts)
+    if (Number.isNaN(ts)) continue
     const outcome = typeof payload.outcome === "string" ? payload.outcome : "fired"
     const prev = out[hookID]
     // The API orders newest first, but a client that sorts is a client that
     // survives the day someone adds a cursor or changes the default order.
-    if (prev && Date.parse(prev.ts) >= Date.parse(e.ts)) continue
+    if (prev && Date.parse(prev.ts) >= ts) continue
     out[hookID] = {
       outcome,
       ts: e.ts,
@@ -192,8 +196,13 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
 
   const [hooks, setHooks] = React.useState<HookRow[] | null>(null)
   const [results, setResults] = React.useState<Record<string, LastResult>>({})
-  /** The journal had more matching entries than the page we asked for. */
-  const [windowCapped, setWindowCapped] = React.useState(false)
+  /**
+   * True while we cannot back a claim about a hook's whole history: before the
+   * journal has answered, when it failed, and when it returned a capped page.
+   * Starts true because the registry and the journal race — the table can be on
+   * screen before the journal has said anything at all.
+   */
+  const [windowCapped, setWindowCapped] = React.useState(true)
   const [readError, setReadError] = React.useState<string | null>(null)
   const [toggleError, setToggleError] = React.useState<string | null>(null)
   // One id per in-flight request. A single id re-enabled every switch as soon
@@ -383,7 +392,9 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
                             checked={hook.enabled}
                             disabled={pending.has(hook.id)}
                             onCheckedChange={() => toggle(hook)}
-                            aria-label={`${hook.enabled ? "Disable" : "Enable"} ${hook.event} hook`}
+                            // Two hooks may share an event, so the event alone
+                            // is not a name. The target is what tells them apart.
+                            aria-label={`${hook.enabled ? "Disable" : "Enable"} ${hook.event} hook (${target})`}
                           />
                         </td>
                       )}

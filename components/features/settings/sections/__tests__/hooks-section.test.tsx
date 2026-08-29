@@ -106,6 +106,7 @@ function route({
   toggleFail = false,
   journalTruncated = false,
   deferToggle = false,
+  deferJournal = false,
 }: {
   hooks?: unknown[]
   journal?: unknown[]
@@ -116,6 +117,8 @@ function route({
   journalTruncated?: boolean
   /** Hold every toggle open so two can be in flight at once. */
   deferToggle?: boolean
+  /** Never resolve the journal read, to inspect the pre-answer render. */
+  deferJournal?: boolean
 } = {}) {
   h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
     const u = String(url)
@@ -132,6 +135,7 @@ function route({
       return hooksFail ? fail() : ok({ rows: hooks, count: hooks.length })
     }
     if (u.includes("/api/v1/journal")) {
+      if (deferJournal) return new Promise<Response>(() => {})
       if (journalFail) return fail()
       return ok({
         entries: journal,
@@ -292,6 +296,48 @@ describe("HooksSection — a truncated journal window", () => {
   })
 })
 
+describe("HooksSection — before the journal answers", () => {
+  it("does not claim a hook never fired while the read is still in flight", async () => {
+    // The registry and the journal are fetched in the same effect and race. If
+    // the registry lands first, the table must not assert a history it has not
+    // been told yet.
+    route({ deferJournal: true })
+    renderSection()
+
+    await table()
+    expect(screen.queryByText(/never fired/i)).not.toBeInTheDocument()
+    expect(within(rowFor(/pre_llm_call/)).getByText(/no recent activity/i)).toBeInTheDocument()
+  })
+})
+
+describe("HooksSection — a malformed journal entry", () => {
+  it("cannot displace a good result with an unparseable timestamp", async () => {
+    route({
+      journal: [
+        {
+          id: "jgood",
+          ts: "2026-08-29T11:00:00Z",
+          entry_type: "hook.fired",
+          actor_id: "hk_guard",
+          payload: { hook_id: "hk_guard", outcome: "pass" },
+        },
+        {
+          id: "jbad",
+          ts: "not-a-timestamp",
+          entry_type: "hook.fired",
+          actor_id: "hk_guard",
+          payload: { hook_id: "hk_guard", outcome: "error" },
+        },
+      ],
+    })
+    renderSection()
+
+    await table()
+    expect(within(rowFor(/pre_llm_call/)).getByText(/pass/i)).toBeInTheDocument()
+    expect(within(rowFor(/pre_llm_call/)).queryByText(/error/i)).not.toBeInTheDocument()
+  })
+})
+
 describe("HooksSection — the switch", () => {
   it("disables an enabled hook through the disable route", async () => {
     route()
@@ -380,6 +426,24 @@ describe("HooksSection — who may change what", () => {
     renderSection("MANAGER")
     await waitFor(() => expect(screen.getByText("pre_llm_call")).toBeInTheDocument())
     expect(screen.queryByRole("switch")).not.toBeInTheDocument()
+  })
+
+  it("names each switch distinguishably when two hooks share an event", async () => {
+    // Two hooks may be registered on the same event with different handlers.
+    // Labelling both "Disable pre_llm_call hook" leaves a screen-reader user
+    // with two identical controls and no way to tell which is which.
+    route({
+      hooks: [
+        HOOKS[0],
+        { ...HOOKS[0], id: "hk_second", handler_config: { command: "scripts/other-guard.sh" } },
+      ],
+      journal: [],
+    })
+    renderSection("OWNER")
+
+    await table()
+    const labels = screen.getAllByRole("switch").map((el) => el.getAttribute("aria-label"))
+    expect(new Set(labels).size).toBe(2)
   })
 
   it("offers the switch to an OWNER", async () => {
