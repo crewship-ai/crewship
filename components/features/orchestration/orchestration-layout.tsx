@@ -214,6 +214,16 @@ export function OrchestrationLayout({
   const [showCreateIssue, setShowCreateIssue] = useState(false)
   const [showCreateProject, setShowCreateProject] = useState(false)
 
+  // Cross-surface create affordance. The dashboard's "New issue" CTA lands
+  // here with ?create=1 so it opens the existing full composer instead of
+  // dropping the user on the board and making them click a second time.
+  useEffect(() => {
+    if (mode !== "issues" || typeof window === "undefined") return
+    if (new URLSearchParams(window.location.search).get("create") === "1") {
+      setShowCreateIssue(true)
+    }
+  }, [mode])
+
   // Saved views
   const [savedViews, setSavedViews] = useState<SavedView[]>([])
   const [activeViewId, setActiveViewId] = useState<string | null>(null)
