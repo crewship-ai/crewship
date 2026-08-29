@@ -104,6 +104,38 @@ func TestRoutineSchema_AllFieldsCovered(t *testing.T) {
 		{"DSL", reflect.TypeOf(DSL{}), propsOf(doc)},
 		{"Step", reflect.TypeOf(Step{}), propsOf(stepDef)},
 	}
+
+	// Every step BODY too — WaitStep, HTTPStep, CodeStep, TransformStep…
+	//
+	// Walking DSL and Step alone left the bodies unguarded, which is
+	// where the fields actually get added: WaitStep.ApprovalTitle could
+	// be introduced in Go, omitted from the schema, and ship green,
+	// while `additionalProperties: false` on the $def silently rejected
+	// every routine that used it for anyone validating against the
+	// published schema.
+	//
+	// Derived from Step's own pointer fields rather than a hand-kept
+	// list, so a NEW step body is covered the day it is declared and
+	// cannot be forgotten here.
+	stepType := reflect.TypeOf(Step{})
+	for i := 0; i < stepType.NumField(); i++ {
+		f := stepType.Field(i)
+		if f.Type.Kind() != reflect.Pointer || f.Type.Elem().Kind() != reflect.Struct {
+			continue
+		}
+		bodyName := f.Type.Elem().Name()
+		bodyDef, ok := defs[bodyName].(map[string]interface{})
+		if !ok {
+			t.Errorf("Step field %s is a *%s body but schemas/routine.v1.json has no $defs/%s",
+				f.Name, bodyName, bodyName)
+			continue
+		}
+		cases = append(cases, struct {
+			name  string
+			typ   reflect.Type
+			props map[string]interface{}
+		}{bodyName, f.Type.Elem(), propsOf(bodyDef)})
+	}
 	for _, c := range cases {
 		for i := 0; i < c.typ.NumField(); i++ {
 			tag := c.typ.Field(i).Tag.Get("json")

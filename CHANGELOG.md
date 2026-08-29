@@ -48,6 +48,32 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   registry. Registration, editing and a workspace-wide pause are not included —
   the last has no endpoint at all.
 
+- **An approval can say what it would approve (#2160).** Every pending
+  approval in an inbox rendered the same row. The title was the first line
+  of the wait step's `approval_prompt`, which is authored boilerplate, so a
+  credential rotation, a bucket deletion and a replica scale-out all read
+  `"Approve this production action?"` and could not be told apart — and
+  nothing on the row said what any of them would do. The concrete action
+  lived in the run's inputs and never reached the inbox.
+
+  Two author-declared fields on the wait step. **`approval_title`** is the
+  one line the row shows, templated like `approval_prompt` is, so
+  `"Approve: {{ inputs.action }}"` renders a different row per run. Omitting
+  it keeps the old behaviour, so routines written before it are unaffected;
+  the rendered title is secret-redacted and truncated on the same path the
+  fallback is, because a template can just as easily interpolate a token as
+  an action. **`risk_level`** is `normal` or `destructive`, and marks an
+  approval whose action cannot be undone by re-running it — the row and the
+  decision card both carry it.
+
+  Both are declared, never inferred. A heuristic that reads the prompt for
+  "delete" is wrong in both directions, and the direction that matters —
+  calling a destructive action ordinary — fails silently. An unrecognised
+  `risk_level` is rejected at save time rather than being read as `normal`.
+
+  The seeded `approval-gate-demo` routine now declares a title, so the
+  behaviour is visible on a fresh workspace.
+
 - **Five read routes had no CLI command; now they do (#2147).** The run
   *list* was the one pipeline-run sub-resource missing a command — `logs`,
   `tree`, `metadata` and `signal` all had one, `GET
@@ -463,6 +489,27 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   check drift and the copy without it was the one deciding whether a
   destination got named at all. Identifiers are URL-encoded into the path and
   the query.
+
+- **A long approval message pushed the decision off the screen (#2160).**
+  An inbox item's `body_md` had no height limit of any kind — for a waitpoint
+  it is the whole approval prompt, which for a model-drafted change plan is
+  several hundred words of unbroken prose. The card grew to fit it and pushed
+  the run ladder, the identifiers and the footer below the fold, so the reader
+  who most needed the buttons was the one who had to scroll furthest from
+  them. Long bodies now clamp with an explicit "show the whole message"; the
+  full text stays in the DOM so find-in-page and copy still reach it.
+
+- **A field added to a routine step body could ship without its schema
+  (#2160).** `TestRoutineSchema_AllFieldsCovered` reflected over `DSL` and
+  `Step` only, never over the step bodies — which is where fields are
+  actually added. A Go field with no matching property in
+  `schemas/routine.v1.json` passed CI green while `additionalProperties:
+  false` silently rejected every routine that used it for anyone validating
+  against the published schema. The guard now walks every step body,
+  derived from `Step`'s own pointer fields so a new body type is covered the
+  day it is declared. It immediately caught one live instance:
+  `NotifyStep.Category` (shipped with the notification taxonomy) had no
+  schema property, which is fixed here.
 
 - **`claim-issue.sh` produced permanent phantom locks in the majority of
   cases — measured at 19 of 35 live claims, with 6 issues double-claimed

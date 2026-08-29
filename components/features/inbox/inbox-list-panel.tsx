@@ -20,7 +20,7 @@ import type { InboxItem } from "@/hooks/use-inbox"
 import { ActorAvatar } from "./inbox-actor"
 import { SubjectPicker, type DirectoryEntry } from "./inbox-subject-picker"
 import {
-  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, remainingLabel, since, subjectOf,
+  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, remainingLabel, riskLevelOf, since, subjectOf,
   type WorkspaceRole,
 } from "./inbox-derive"
 import type { Bucket, GroupBy, InboxView, SubjectFacet } from "./inbox-types"
@@ -626,6 +626,7 @@ function MailRow({
   const blocked = spec != null && !canRole(role, spec.requires)
   const mins = expiresIn(item)
   const subject = subjectOf(item)
+  const risk = riskLevelOf(item)
 
   return (
     <ListRow
@@ -672,6 +673,11 @@ function MailRow({
           {mins != null && (
             <span className="shrink-0 font-medium text-destructive">
               {mins > 0 ? `· expires in ${remainingLabel(mins)}` : "· expired"}
+            </span>
+          )}
+          {risk === "destructive" && (
+            <span className="shrink-0 rounded bg-destructive/15 px-1 py-px font-semibold uppercase tracking-wide text-destructive">
+              destructive
             </span>
           )}
           {blocked && <span className="shrink-0">· admin decides</span>}

@@ -725,6 +725,7 @@ This is the shape to reach for whenever a routine both *reasons* and *acts*: tri
       "needs": ["classify"],
       "wait": {
         "kind": "approval",
+        "approval_title": "Publish triage for {{ inputs.ticket_id }}",
         "approval_prompt": "Publish this triage?\n\n{{ steps.classify.output }}"
       },
       "timeout_seconds": 86400,
@@ -772,6 +773,7 @@ Do not give an approval gate an `on_fail` that continues the run. A gate that au
 | Gate fires but the card is blank | `approval_prompt` interpolates a step that produced no output | Interpolate the validated step, and keep the schema on it |
 | Run stuck in `waiting` forever | `timeout_seconds: 0` (wait forever) with nobody watching | Set a real timeout plus `on_fail: abort` |
 | Approver can't tell what changed | Prompt shows the verdict but not the input | Put both in `approval_prompt` — the reviewer is checking the *reasoning*, not just the conclusion |
+| Every pending approval looks the same in the inbox | No `approval_title`, so the row falls back to the prompt's first line — the same string on every run | Set `approval_title` to something templated, e.g. `"Publish triage for {{ inputs.ticket_id }}"` |
 
 ### When the gate stops earning its keep
 

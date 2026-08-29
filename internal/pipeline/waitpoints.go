@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -272,10 +273,25 @@ INSERT INTO pipeline_waitpoints (
 	// Redact the prompt before deriving the title — CleanTitle takes the
 	// first line verbatim, so a credential quoted there would otherwise
 	// land in the title even though the body below is redacted.
+	//
+	// An author-declared approval_title wins when there is one: the
+	// prompt's first line is boilerplate and identical on every
+	// invocation, so three pending approvals for three different
+	// production changes were indistinguishable in the list. The title
+	// is redacted and cleaned on the same path as the fallback, because
+	// it is templated and `{{ inputs.token }}` renders just as happily
+	// as `{{ inputs.action }}`.
 	title := inbox.CleanTitle(inbox.RedactSecrets(req.Prompt), 80, "Waitpoint pending approval")
+	if strings.TrimSpace(req.Title) != "" {
+		title = inbox.CleanTitle(inbox.RedactSecrets(req.Title), 80, title)
+	}
 	// Give the row a sender so the UI can render an icon + "From" line
 	// instead of a blank. The invoking crew is the most meaningful actor
 	// behind a pipeline approval; fall back to a generic label.
+	riskLevel := req.RiskLevel
+	if riskLevel == "" {
+		riskLevel = "normal"
+	}
 	senderName := "Approval required"
 	if req.InvokingCrewID != "" {
 		var name string
@@ -305,6 +321,10 @@ INSERT INTO pipeline_waitpoints (
 			// so the surface asking the question never has to re-derive
 			// which routine body was on screen.
 			"trust_offer": s.trustOffer(ctx, req, trustCtx),
+			// Author-declared, defaulted here rather than in the UI so
+			// every consumer (inbox, CLI, notification channels) reads
+			// the same value instead of each inventing its own default.
+			"risk_level": riskLevel,
 		},
 	})
 	// Pre-create the listener channel so a fast CompleteApproval

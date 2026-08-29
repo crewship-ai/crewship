@@ -1070,7 +1070,13 @@ var Routines = []RoutineDef{
 					"type":  "wait",
 					"needs": []string{"draft"},
 					"wait": map[string]interface{}{
-						"kind":            "approval",
+						"kind": "approval",
+						// The title is what the inbox row shows, so it names
+						// THIS run's action. Without it the row falls back to
+						// the prompt's first line, which is the same string on
+						// every invocation — three pending approvals then read
+						// identically and none of them says what it would do.
+						"approval_title":  "{{ inputs.action }}",
 						"approval_prompt": "Approve this production action?\n\n{{ steps.draft.output }}",
 					},
 					"timeout_seconds": 86400,

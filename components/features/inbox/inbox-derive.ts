@@ -260,6 +260,23 @@ export function decisionMetaFor(item: InboxItem): DecisionMeta | null {
 }
 
 /**
+ * The author-declared blast radius of an approval, or null when the item
+ * carries none.
+ *
+ * Server-defaulted to "normal" at write time, so anything else here was
+ * declared deliberately in the routine's wait step. Nothing infers it from
+ * the prompt text: a heuristic looking for "delete" is wrong in both
+ * directions, and the direction that matters — calling a destructive action
+ * ordinary — fails silently.
+ *
+ * Returns null for "normal" as well as for absent, because the row only has
+ * room to mark the exception.
+ */
+export function riskLevelOf(item: InboxItem): "destructive" | null {
+  return payloadString(item, "risk_level") === "destructive" ? "destructive" : null
+}
+
+/**
  * Valid in-app chat deep link from a reply notification's payload, or null.
  *
  * The guard has to reject "//evil.example/x" as well as "https://…": a

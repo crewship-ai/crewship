@@ -249,7 +249,7 @@ Anywhere a string is interpolated (prompt, http URL/body/headers, wait until, co
 - `secrets.<type>` — a workspace-vault credential, resolved at run time **by type** (see [Secrets](#secrets-secrets-type) below)
 - `routine.state.<key>` — durable cross-run state carried forward from a **previous** run (see [Cross-run state](#cross-run-state-routine-state-key) below)
 
-Save-time validator walks **every** template-bearing field (prompt, nested inputs, http url/body/headers, wait until, event_filter, approval_prompt, code body, code env values, transform input, transform expression, if condition) and rejects placeholders that reference unknown inputs or unseen-yet steps.
+Save-time validator walks **every** template-bearing field (prompt, nested inputs, http url/body/headers, wait until, event_filter, approval_prompt, approval_title, code body, code env values, transform input, transform expression, if condition) and rejects placeholders that reference unknown inputs or unseen-yet steps.
 
 ### Secrets (`{{ secrets.<type> }}`)
 
@@ -730,11 +730,35 @@ credentials (public endpoints keep working). Injection schemes: `bearer`
   "type": "wait",
   "wait": {
     "kind": "approval",
+    "approval_title": "Approve: {{ inputs.action }}",
     "approval_prompt": "Approve summary?",
+    "risk_level": "destructive",
     "timeout_sec": 86400
   }
 }
 ```
+
+**Name what the approval would do.** `approval_title` is the one line the
+inbox row shows. It is templated like `approval_prompt`, and that is the
+point: `"Approve: {{ inputs.action }}"` renders a different row per run,
+where the prompt's first line is authored boilerplate and therefore
+identical on every invocation. Without it, three pending approvals for a
+credential rotation, a bucket deletion and a scale-out all read
+`"Approve this production action?"` and cannot be told apart in the list.
+
+Omitting it keeps the old behaviour — the row falls back to the prompt's
+first line — so routines written before the field exists are unaffected.
+The rendered title is secret-redacted and truncated to 80 characters on
+the same path the fallback is.
+
+**Declare the blast radius.** `risk_level` is `normal` (the default when
+unset) or `destructive`. `destructive` marks an approval whose action
+cannot be undone by re-running it, and the inbox marks that row and its
+decision card. It is author-declared and never inferred: a heuristic that
+looks for "delete" in the prompt is wrong in both directions, and the
+direction that matters — reading a destructive action as an ordinary one
+— fails silently. An unrecognised value is rejected at save time rather
+than being read as `normal`.
 
 Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (external signal via `POST /api/v1/workspaces/{ws}/pipeline-runs/{runId}/signal`). Both `approval` and `event` survive a process restart: a top-level run parks (`status: WAITING`) with durable state — `pipeline_waitpoints` for approval, `pipeline_signal_waits` for event (migration v154, #1409) — and at boot the parked run is resumed from that state. For `event` specifically, a signal delivered while the process was down (or a hair before the step even reached the wait) is not lost: the signal endpoint records the delivery durably before attempting any in-process wake, and the resumed step reads it straight back out (see [Durability and restart recovery](#durability-and-restart-recovery)).
 

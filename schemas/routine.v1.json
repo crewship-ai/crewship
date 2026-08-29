@@ -511,6 +511,15 @@
       "properties": {
         "kind": { "type": "string", "enum": ["approval", "datetime", "event"] },
         "approval_prompt": { "type": "string" },
+        "approval_title": {
+          "type": "string",
+          "description": "One-line label for the inbox row — what this approval would DO, e.g. \"Scale payments-api to 12 replicas\". Templated like approval_prompt. Without it the row falls back to the prompt's first line, which is identical on every invocation."
+        },
+        "risk_level": {
+          "type": "string",
+          "enum": ["normal", "destructive"],
+          "description": "Author-declared blast radius, never inferred from the prompt text. \"destructive\" marks an approval whose action cannot be undone by re-running it. Unset means normal."
+        },
         "until": { "type": "string", "description": "RFC3339 timestamp or template (datetime kind)." },
         "event_type": { "type": "string" },
         "event_filter": { "type": "string", "description": "Simple equality match on payload." },
@@ -560,6 +569,11 @@
           "type": "string",
           "enum": ["urgent", "high", "medium", "low"],
           "description": "Inbox priority. Default medium."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["routines.completed", "routines.failed", "routines.skipped", "routines.missed", "issues.created", "issues.state", "issues.assigned", "issues.comment", "agents.approval", "agents.escalation", "agents.error", "agents.budget", "system.health", "system.migration", "security", "pages.stale", "chat.replies", "memory"],
+          "description": "Notification category this notice routes under. A routing label, not a privilege: it selects which row of a recipient's preference matrix the notice is matched against, and every row stays opt-in per user. Empty keeps the default."
         }
       },
       "anyOf": [
