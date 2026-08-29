@@ -53,6 +53,16 @@ export interface ParityRow {
    * four hours — that is the argument for the guard, not a footnote to it.
    */
   fixed?: { on: string; how: string }
+  /**
+   * The claim itself was WRONG, or has gone stale since it was written.
+   *
+   * Distinct from `fixed`, and the distinction is the point: `fixed` means the
+   * product changed, `corrected` means the ledger was mistaken and something
+   * else in the tree already said so. A row that quietly flips to `fixed` when
+   * nobody touched the product is how an audit launders its own errors into a
+   * record of progress.
+   */
+  corrected?: { on: string; how: string }
 }
 
 /**
@@ -64,6 +74,33 @@ export interface ParityRow {
  * `Issues → New issue` still reads 0/6 here even though the proposed surface on
  * this page now carries due date, estimate, milestone and parent — measuring
  * the fix instead of the defect is how a ledger stops being worth reading.
+ *
+ * ── Re-verified 2026-08-29, and it did not survive intact ─────────────────
+ *
+ * Forty of these claims were re-read against the tree by six parallel audits,
+ * each asked to come back with FALSE, TRUE-BUT-DELIBERATE, or TRUE-DEFECT
+ * rather than to confirm. Roughly one in six did not hold:
+ *
+ *   · three were simply wrong (sidecar services, skill→crew, the missing
+ *     cascade — the last one fixed by a migration three days AFTER the row
+ *     was written);
+ *   · four Issues rows had gone stale because the fix shipped in #2056;
+ *   · three were real but graded as bugs when they are documented decisions
+ *     (raw MCP behind the Composio flag, Pages payloads, the default
+ *     connector);
+ *   · one cited an event, `pre_tool_call`, that does not exist.
+ *
+ * Those rows now carry `corrected`. The rest held up — the credentials rows
+ * were, if anything, understated. Two lessons worth keeping: a ledger that is
+ * never re-read decays at a measurable rate, and "the UI cannot do this" and
+ * "we decided the UI should not do this" look identical in a table that has no
+ * column for intent. This one now has one.
+ *
+ * The subset that matches the release-1.0 bar is narrow, because that bar
+ * (docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md) says nothing about UI↔CLI
+ * parity. What it does contain, in the shape of #1781 and #1783, is "enforce
+ * it or remove the claim" — so the rows that ship as 1.0 work are the ones
+ * where the product asserts something untrue: #2166, #2167, #2168, #2169.
  */
 export const PARITY: ParityRow[] = [
   /* ── Issues → New issue ───────────────────────────────────────────────── */
@@ -76,6 +113,10 @@ export const PARITY: ParityRow[] = [
     ui: "none",
     severity: "gap",
     note: "The API fences it and guards cycles, and the UI RENDERS sub-issue trees it cannot create. Breaking an epic apart means dropping to the CLI.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Stale. It landed in the real modal in #2056: create-issue-modal.tsx declares the state at :157-166, renders a picker for it, and posts it at :464-467. The header note below the PARITY array explains that these rows deliberately measured the shipped product rather than the proposal on this page — that was right when written, and the shipped product then caught up without anyone ticking the row. The parent picker fetches crew-scoped candidates with the same three-state pattern as Assignee (:336-360).",
+    },
   },
   {
     surface: "Issues → New issue",
@@ -86,6 +127,10 @@ export const PARITY: ParityRow[] = [
     ui: "detail",
     severity: "gap",
     note: "Every issue filed from the UI starts undated, so planning is a second editing pass over issues you just typed.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Stale. It landed in the real modal in #2056: create-issue-modal.tsx declares the state at :157-166, renders a picker for it, and posts it at :464-467. The header note below the PARITY array explains that these rows deliberately measured the shipped product rather than the proposal on this page — that was right when written, and the shipped product then caught up without anyone ticking the row.",
+    },
   },
   {
     surface: "Issues → New issue",
@@ -96,6 +141,10 @@ export const PARITY: ParityRow[] = [
     ui: "detail",
     severity: "gap",
     note: "Same shape as due date — accepted at create by the API, missing from the modal.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Stale. It landed in the real modal in #2056: create-issue-modal.tsx declares the state at :157-166, renders a picker for it, and posts it at :464-467. The header note below the PARITY array explains that these rows deliberately measured the shipped product rather than the proposal on this page — that was right when written, and the shipped product then caught up without anyone ticking the row.",
+    },
   },
   {
     surface: "Issues → New issue",
@@ -106,6 +155,10 @@ export const PARITY: ParityRow[] = [
     ui: "detail",
     severity: "gap",
     note: "Accepted at create; the modal has no control, so milestone assignment is always a follow-up edit.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Stale. It landed in the real modal in #2056: create-issue-modal.tsx declares the state at :157-166, renders a picker for it, and posts it at :464-467. The header note below the PARITY array explains that these rows deliberately measured the shipped product rather than the proposal on this page — that was right when written, and the shipped product then caught up without anyone ticking the row.",
+    },
   },
   {
     surface: "Issues → New issue",
@@ -293,6 +346,10 @@ export const PARITY: ParityRow[] = [
     ui: "none",
     severity: "gap",
     note: "Reachable from neither the UI nor the CLI — `crew services` only lists what someone else set. The only field in this audit with no operator surface at all.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Wrong. `crewship apply` writes it: internal/manifest/kinds/crew.go:190-193 has a typed Services spec with validation, serialised into services_json for crew create and update (:771-874), and examples/manifests/python-with-services.crew.yaml is a maintained example referenced from docs/guides/auto-managed-credentials.mdx. What is missing is a --services flag on `crew create` — a flag gap, not an operator-surface gap. The row was written from the handler struct and never checked `apply`.",
+    },
   },
   {
     surface: "Crews → New crew",
@@ -438,6 +495,10 @@ export const PARITY: ParityRow[] = [
     ui: "none",
     severity: "gap",
     note: "The UI offers per-agent checkboxes only, so a ten-agent crew is ten clicks.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Wrong. AssignToCrewDialog (skills-detail-panel.tsx:202, :594-660) picks one crew and applies the skill to every agent in it in a single submit — it has existed since the first skills sprint (baa7d8e5). The real, much smaller limitation is that it does not cover agents added to the crew later, documented at :400-405.",
+    },
   },
 
   /* ── Integrations → Add integration ───────────────────────────────────── */
@@ -522,6 +583,10 @@ export const PARITY: ParityRow[] = [
     ui: "none",
     severity: "gap",
     note: "mcp_tool_bindings has no foreign key to crew_mcp_servers, so no cascade. Deletion clears agent bindings and the server row and never the tool bindings — every deleted integration orphans its rows permanently. Not a UI gap; found while looking at one.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Already fixed when this was re-read, and fixed three days AFTER the row was written: migration 20260826190607_mcp_default_access.sql adds cascade triggers for both the workspace and crew server deletes plus an insert-time FK guard, and sweeps the existing orphans. Covered by migrate_mcp_default_access_test.go:176-246 and documented in docs/guides/migrations.mdx:635-642. The clearest argument in this file for re-verifying a ledger instead of trusting it.",
+    },
   },
   {
     surface: "Integrations → Add integration",
@@ -546,8 +611,12 @@ export const PARITY: ParityRow[] = [
     ref: "router_pages.go:63",
     cli: "page set <slug>/<panel> --data -",
     ui: "none",
-    severity: "blocker",
+    severity: "deferred",
     note: "Every option in every payload schema is unreachable from the browser. You can author the frame and never fill it — a panel is fed only by a producer routine, the CLI, or an inbound webhook.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Re-graded from blocker to deferred. Feeding a panel by hand from the browser was never in the design: pages_handler.go:4-10 states a page holds no query, no datasource, no connection string and no credentials, and renders the last payload a producer pushed; docs/prd/pages.md:5-8 specifies panel data as produced by a routine or a script in a crew container, pushed via CLI or sidecar. The empty-state copy already points at `crewship page set`. The resulting gap is real — a page authored entirely in the UI is inert until someone touches the CLI — but it is the architecture working as specified, not a missing screen.",
+    },
   },
   {
     surface: "Pages → New page",
@@ -577,8 +646,12 @@ export const PARITY: ParityRow[] = [
     ref: "app/(dashboard)/integrations/page.tsx:69 · lib/feature-flags.ts:25",
     cli: "integration add",
     ui: "none",
-    severity: "blocker",
+    severity: "deferred",
     note: "The MCP wizard, detail sheet and expanded panel only render behind NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS, which is off by default. In the shipped build there is NO way to add an MCP server from the browser — only the CLI. The doc comments still describe the flag-off path as a “coming soon placeholder”; it actually renders the full Composio UI.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Re-graded from blocker to deferred. This is a documented product decision, not an oversight: commit cec5fc7a states that the hand-rolled self-hosted MCP connector UI is being retired in favour of a managed platform (Composio) and hidden behind a build-time flag, default OFF; docs/guides/integrations.mdx:9-16 tells users the Composio UI is now the default and that the legacy UI is restorable with NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS=true, with no legacy code or API removed. The flag is named LEGACY_, not DISABLED_, which only makes sense as a deliberate rollback path. CODEX-WORK-ORDER-RELEASE-1-0.md:610 lists whether the legacy catalogue is part of the 1.0 surface as an open ask-first decision. What IS a genuine defect is the stale copy around it — page.tsx:543 still calls the flag-off path a coming-soon placeholder when it renders the full Composio UI.",
+    },
   },
   {
     surface: "Integrations → Composio",
@@ -586,8 +659,12 @@ export const PARITY: ParityRow[] = [
     where: "api",
     ref: "agent_config.go:1254-1256",
     ui: "none",
-    severity: "blocker",
+    severity: "gap",
     note: "With COMPOSIO_DEFAULT_CONNECTOR on, every non-Composio workspace and crew MCP server is dropped from the resolved runtime config without the rows being deleted — and GET …/integrations/resolved does not model this, so the screen that exists to answer “what will this agent get” shows servers the container will not receive.",
+    corrected: {
+      on: "2026-08-29",
+      how: "Re-graded from blocker to gap. The drop itself is documented and matches the code: docs/guides/integrations.mdx:104-105 says legacy non-Composio servers are turned off at resolve time while the flag is on and are not deleted, and agent_config.go:1254-1256/:1391-1395 does exactly that. COMPOSIO_DEFAULT_CONNECTOR defaults to false (config.go:207) and is set nowhere in this repo or in ~/crewship-infra. What survives is narrower than the row claims: ResolveAgentIntegrations (integration_resolve.go:72) genuinely does not model the flag — but no frontend calls that endpoint, so the inconsistency is CLI-side, not the misleading screen the note describes.",
+    },
   },
   {
     surface: "Crews → New agent",
@@ -632,6 +709,10 @@ export const PARITY: ParityRow[] = [
     ui: "none",
     severity: "blocker",
     note: "Three so far, found by three separate audits: 697 lines of milestone CRUD, the whole connector catalogue, and the credential-assignment dialog that would have exposed priority. Each is finished work that no route imports — which means the gap is not “nobody built it” but “nobody hooked it up”, and that is a much cheaper fix than it looks.",
+    corrected: {
+      on: "2026-08-29",
+      how: "The roster is out of date in both directions. project-sidebar.tsx and assign-credential-dialog.tsx were DELETED in #2116, so two of the three named files no longer exist. ConnectorCatalog/ConnectorConnectSheet are still orphaned — built 2026-05-14 (9d592616, 069a27f1) and superseded by the Composio pivot (cec5fc7a) six weeks later, so this one is abandoned-in-place rather than unfinished. And a fourth has surfaced: CredentialsManager (agent-canvas-managers.tsx:167-260) is exported and imported nowhere, which is why an agent cannot be given a credential from any screen — tracked as #2169.",
+    },
   },
   {
     surface: "Chat",
@@ -728,6 +809,10 @@ export const PARITY: ParityRow[] = [
     ui: "none",
     severity: "gap",
     note: "Arbitrary shell and webhook code fires on platform events like pre_tool_call. The registry is invisible and unkillable from the browser.",
+    corrected: {
+      on: "2026-08-29",
+      how: "The gap is real; the framing was not. `pre_tool_call` DOES NOT EXIST — cmd_hooks.go:33-35 says so outright: there is no interception point before a tool executes, so nothing could ever fire it. Only post_tool_call exists (internal/hooks/types.go:65). Registration is roleManage (OWNER/ADMIN) and handler_kind: shell is OWNER-only (hooks_write.go:79-92). So this is an operability gap — an OWNER cannot review or disable from the browser what they registered from a terminal — not the low-privilege shell-execution hole the note implies.",
+    },
   },
   {
     surface: "Admin",

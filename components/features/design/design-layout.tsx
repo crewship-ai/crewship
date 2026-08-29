@@ -446,13 +446,18 @@ function Parity() {
         </CreateSurfaceNotice>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-7">
             <Stat value={totals.capabilities} label="capabilities" tone="neutral" />
             <Stat value={totals.reachable} label="reachable in the UI" tone="neutral" />
             <Stat value={totals.deferred} label="only after creating" tone="bad" />
             <Stat value={totals.unreachable} label="nowhere in the UI" tone="bad" />
             <Stat value={totals.blockers} label="blockers" tone="bad" />
             <Stat value={PARITY.filter((r) => r.fixed).length} label="closed today" tone="neutral" />
+            {/* The ledger's own error rate, on the page the ledger is on. It
+                belongs next to the other numbers rather than in a footnote:
+                a reader deciding how much to trust this table needs it before
+                they read the table, not after. */}
+            <Stat value={PARITY.filter((r) => r.corrected).length} label="claims corrected" tone="bad" />
           </div>
 
           {/* Per-surface bars: which door is furthest behind its own endpoint. */}
@@ -550,6 +555,18 @@ function Parity() {
                             <span className="min-w-0">
                               <span className="font-medium text-success">Closed {r.fixed.on}</span>
                               <span className="text-foreground/75"> — {r.fixed.how}</span>
+                            </span>
+                          </span>
+                        )}
+                        {/* Deliberately NOT the same colour as `fixed`. Green
+                            here would read as progress, and nothing about the
+                            product changed — the row was wrong. */}
+                        {r.corrected && (
+                          <span className="mt-1.5 flex items-start gap-1.5 rounded-md border border-warn/25 bg-warn/[0.07] p-1.5">
+                            <AlertTriangle className="mt-px h-3 w-3 shrink-0 text-warn" />
+                            <span className="min-w-0">
+                              <span className="font-medium text-warn">Claim corrected {r.corrected.on}</span>
+                              <span className="text-foreground/75"> — {r.corrected.how}</span>
                             </span>
                           </span>
                         )}
