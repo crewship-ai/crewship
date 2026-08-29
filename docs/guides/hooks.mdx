@@ -271,6 +271,33 @@ crewship hooks disable hk_abc
 
 `crewship hook` (singular) is an alias for the whole group. Full reference: [`crewship hooks`](/cli/hooks).
 
+## Web UI
+
+**Settings → Workspace → Lifecycle hooks** (`/settings?tab=hooks`) is the read-only
+registry: one row per hook with its event, handler kind, target, crew scope, last
+result and enable switch.
+
+- **Every workspace member sees the list.** `GET /api/v1/hooks` is open to any
+  authenticated member, and a member asking "why was my agent's memory write
+  refused" needs exactly this list. The switch is `roleManage`, so it renders for
+  OWNER and ADMIN only.
+- **The shell command is shown in full**, matching what the API already returns
+  to every member and what `crewship hooks list` prints. If a command may carry a
+  secret, redact it server-side rather than in the browser — masking a value that
+  is already on the wire protects nobody.
+- **Last result comes from the journal**, not from a new endpoint: the screen
+  reads `GET /api/v1/journal?entry_type=hook.fired,hook.blocked` and keeps the
+  newest entry per `payload.hook_id`.
+- **`blocking` is read off the event, not off the row.** A post- or on-event may
+  carry `blocking: true` in the database; the column shows `n/a` there, because
+  the dispatcher never asks those handlers for a veto.
+- **`pre_tool_call` rows are marked retired** and explained, rather than listed as
+  if they work. See [Coverage status](#coverage-status).
+
+Registration, editing and a workspace-wide pause are not in the UI. The first two
+are a follow-up; the third has no endpoint — the API has per-hook enable and
+disable only.
+
 ## Journal entries
 
 - `hook.fired` -- every dispatch lands this. Severity escalates to `warn` on non-pass outcomes.
@@ -298,3 +325,4 @@ Payload includes `hook_id`, `handler_kind`, `outcome`, `latency_ms`, `blocking`,
 - [Lookout](/guides/lookout) -- emits `on_guardrail_triggered` via the GuardListener context callback.
 - [Crew Journal](/guides/crew-journal) -- `hook.fired`, `hook.blocked`, `system.hook_toggled`.
 - [`crewship hooks`](/cli/hooks), [Hooks API](/api-reference/hooks).
+- Settings → Workspace → Lifecycle hooks (`/settings?tab=hooks`) -- the registry in the browser.

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import {
   User, Building, Users,
-  Link2, Activity, Shield, KeyRound,
+  Link2, Activity, Shield, KeyRound, Webhook,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { isManagerTier } from "@/lib/permissions/tiers"
@@ -101,6 +101,14 @@ const sections: NavSection[] = [
       // read the policy at all (GET is MANAGER+), so the row is hidden
       // rather than rendered over a 403.
       { key: "access-secrets", label: "Access & Secrets", icon: KeyRound, visibleTo: isManagerTier },
+      // Ungated on purpose. GET /api/v1/hooks is `authed(wsCtx(...))` — every
+      // workspace member may read the registry, and a member debugging "why
+      // did my agent's tool call get refused" needs exactly this list. The
+      // enable/disable switch inside is roleManage and renders only for
+      // ADMIN+, matching the read-only-beats-hidden rule at the top of this
+      // file: a shell hook running on the host is information a member is
+      // entitled to, and the switch is the part they are not.
+      { key: "hooks", label: "Lifecycle hooks", icon: Webhook },
       // The audit log is not readable below MANAGER, so the pane would be
       // empty — the one section where hiding beats read-only.
       { key: "audit", label: "Audit Log", icon: Activity, visibleTo: isManagerTier },

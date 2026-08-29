@@ -21,6 +21,7 @@ import { MembersSection } from "./sections/members-section"
 import { ConnectionsSection } from "./sections/connections-section"
 import { CrewAuditSection } from "./sections/crew-audit-section"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
+import { HooksSection } from "./sections/hooks-section"
 import { SectionMoved } from "./sections/section-moved"
 
 interface Org {
@@ -48,6 +49,10 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   "access-secrets": {
     title: "Access & Secrets",
     description: "Who may read a stored secret in plaintext, and what each classification means",
+  },
+  hooks: {
+    title: "Lifecycle hooks",
+    description: "Code this workspace runs on platform events — shell handlers run on the host",
   },
   audit: { title: "Audit Log", description: "Track workspace activity" },
 }
@@ -261,6 +266,9 @@ export function SettingsLayout() {
     }
     if (activeTab === "connections" && workspaceId) {
       return <ConnectionsSection workspaceId={workspaceId} />
+    }
+    if (activeTab === "hooks" && workspaceId) {
+      return <HooksSection workspaceId={workspaceId} role={role} />
     }
     if (activeTab === "access-secrets" && workspaceId) {
       return <AccessSecretsSection workspaceId={workspaceId} role={role} members={members} />
