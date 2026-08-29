@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/spf13/cobra"
 )
 
 // Structure-only tests — the RunE handlers require auth + a live server,
@@ -43,6 +44,26 @@ func TestHooksEnableArgsValidation(t *testing.T) {
 	}
 	if err := hooksEnableCmd.Args(hooksEnableCmd, []string{"h-1"}); err != nil {
 		t.Errorf("enable with one arg should pass; got %v", err)
+	}
+}
+
+func TestBuildHookBodyRejectsBlockingObservation(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	hookWriteFlags(cmd)
+	for name, value := range map[string]string{
+		"event":    "post_tool_call",
+		"handler":  "http",
+		"url":      "https://example.test/hook",
+		"blocking": "true",
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+
+	_, err := buildHookBody(cmd, nil, false)
+	if err == nil || !strings.Contains(err.Error(), "observation event") {
+		t.Fatalf("buildHookBody error = %v, want observation-event rejection", err)
 	}
 }
 

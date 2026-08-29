@@ -507,8 +507,14 @@ in what you would otherwise mistype:
 **RELEASE** — clone `crewship_3` · branch `fix/schedule-editor-save` · 2026-07-30T22:10Z
 ```
 
-A release names the claim it ends (same clone + branch). A release naming
-neither ends every open claim on that issue.
+A release ends the claim(s) it names by **clone alone** (#2107) — branch is
+recorded for readability but is not part of the match, because a claim is
+posted before the feature branch exists (see below) and would otherwise
+never be released from the branch that replaced it. A hand-written release
+that names a branch but no clone still ends that branch's claims and leaves
+the rest — global cancellation is reserved for a release that names neither
+field, which is what "released it" means when someone types it without
+ceremony.
 
 **Release even when you failed.** #1482 was claimed, the hypothesis did
 not hold, and the session said so and released — so the next one started
@@ -531,11 +537,14 @@ worth more than a silent unassign.
   a record, not a reservation: re-claim it, and say in the thread what
   you are picking up from the previous attempt.
 - **The script guesses your identity wrong.** It reads the clone from the
-  checkout path (`crewship_3`) and the branch from `git rev-parse`. In a
-  detached-HEAD worktree that branch is the literal `HEAD`, and in a
-  container the path may carry no `crewship_N` at all — either way every
-  such session claims under the same name and the gate stops telling them
-  apart. Set `CLAIM_CLONE` / `CLAIM_BRANCH` to state it instead:
+  checkout path (`crewship_3`) and the branch from `git rev-parse`. A fresh
+  `git worktree` (the normal way an agent session starts, before its first
+  commit) checks out an auto-minted `worktree-agent-<hash>` branch; the
+  script refuses that value on sight and falls back to the upstream branch
+  if one is already tracked, otherwise the worktree path — no action needed
+  from you. A detached-HEAD checkout (branch is the literal `HEAD`) or a
+  container path with no `crewship_N` in it still guesses badly. Set
+  `CLAIM_CLONE` / `CLAIM_BRANCH` to state it instead:
 
   ```bash
   CLAIM_CLONE=crewship_3 CLAIM_BRANCH=fix/aux-status scripts/claim-issue.sh 1488

@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship feature-flag
 
-Manage feature flags for the current workspace. The CLI surfaces the **override** layer (per-workspace on/off) plus a `list` view that includes the instance default, and a `delete` for removing a flag **definition** outright. Creating or renaming a flag definition is still an instance-admin operation that lives in the web UI, direct API calls, or a [manifest `apply`](/manifest/feature_flag) — see [the API reference below](#api).
+Manage feature flags for the current workspace. The CLI surfaces the flag **definition** lifecycle (`create`/`update`/`delete`) plus the **override** layer (per-workspace on/off) and a `list` view that includes the instance default. Creating or renaming a flag definition can also be done via the web UI, direct API calls, or a [manifest `apply`](/manifest/feature_flag) — see [the API reference below](#api).
 
 ```bash
 crewship feature-flag <subcommand> [flags]
@@ -21,10 +21,50 @@ The command accepts the alias `crewship flag`.
 | Command | Description |
 |---------|-------------|
 | `list` | Show every flag with its instance default, this workspace's override, and the effective value. |
+| `create` | Create a new flag **definition**, instance-wide. ADMIN-only. |
+| `update <key>` | Update one or more fields of an existing flag **definition**. ADMIN-only. |
 | `enable <key>` | Force the flag on for the current workspace (PUT override). |
 | `disable <key>` | Force the flag off for the current workspace (PUT override). |
 | `inherit <key>` | Drop the override and revert to the instance default. |
 | `delete <key>` | Delete the flag **definition** — cascades to every workspace's override. |
+
+---
+
+## `crewship feature-flag create`
+
+```bash
+crewship feature-flag create --key provisioner-v2 \
+  --description "gradual rollout of the v2 provisioner" \
+  --enabled --percentage 25
+```
+
+Creates a new instance-global flag definition — the row that `list`'s `DEFAULT` column reads and that `enable`/`disable`/`inherit` target with a per-workspace override. ADMIN-only (`canRole "manage"`) and instance-wide: the flag becomes visible to every workspace on the instance, not only the one the CLI is pointed at.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--key` | ✓ | Flag identifier. Must be unique on the instance — the server returns `409 Conflict` for a duplicate key. |
+| `--description` | no | Free-form text shown in `list`'s `DESCRIPTION` column. Omitted entirely (not sent as `""`) when the flag isn't passed. |
+| `--enabled` | no | Instance default value. Defaults to `false` — a workspace override still wins regardless of this setting. |
+| `--percentage` | no | Gradual-rollout percentage, `0`-`100`. Defaults to `0`. Bypassed entirely by any workspace override. |
+
+---
+
+## `crewship feature-flag update`
+
+```bash
+crewship feature-flag update provisioner-v2 --percentage 50
+crewship feature-flag update noisy-experiment --enabled --description "now the default"
+```
+
+Updates one or more fields of an existing flag **definition** — the instance-wide default, not this workspace's override (use `enable`/`disable` for that). Only the flags you pass are sent as a partial `PATCH`, so omitting `--percentage` leaves the stored value untouched rather than resetting it to `0`.
+
+| Flag | Description |
+|---|---|
+| `--description` | New description. Pass `--description ""` to clear it. |
+| `--enabled` | New instance default value. |
+| `--percentage` | New gradual-rollout percentage, `0`-`100`. |
+
+At least one of the three is required — running `update <key>` with no flags exits `2` (`ExitValidation`) without contacting the server. ADMIN-only; a `<key>` that doesn't exist returns `404`.
 
 ---
 
@@ -90,20 +130,21 @@ query parameter.
 | Verb | Path | Wrapped by |
 |------|------|------------|
 | `GET` | `/api/v1/feature-flags` | `crewship feature-flag list` |
-| `POST` | `/api/v1/feature-flags` | — (web UI / direct API / manifest `apply`; flag definition create) |
-| `PATCH` | `/api/v1/feature-flags/{key}` | — (web UI / direct API) |
+| `POST` | `/api/v1/feature-flags` | `crewship feature-flag create` |
+| `PATCH` | `/api/v1/feature-flags/{key}` | `crewship feature-flag update` |
 | `DELETE` | `/api/v1/feature-flags/{key}` | `crewship feature-flag delete` |
 | `PUT` | `/api/v1/feature-flags/{key}/override` | `enable` / `disable` |
 | `DELETE` | `/api/v1/feature-flags/{key}/override` | `inherit` |
 
-Flag definition create/update (`POST` / `PATCH`) intentionally still has no CLI wrapper — creating or renaming a flag is an instance-admin event that should land via a code change, a migration, a manifest `apply`, or the admin UI rather than an ad-hoc CLI call. `delete` is the exception: it's the cleanup counterpart needed to safely exercise a flag's full lifecycle (e.g. a throwaway flag created via `apply`) without relying on `apply`'s broader manifest-diff delete semantics.
+Every route in the family now has a CLI wrapper. `create`/`update`/`delete` are ADMIN-only server-side (`canRole "manage"`) and instance-wide — a definition change is visible to every workspace, not only the one the CLI is currently pointed at.
 
 ## Common errors
 
 - **`API error (404): Feature flag not found`** — the `<key>` you passed doesn't exist on this instance. Run `crewship feature-flag list` to see the catalog.
+- **`API error (409): feature flag with this key already exists`** — `create` was given a `--key` already in use. Pick a different key, or `update` the existing one.
 - **`API error (401)`** — authenticate with `crewship login` (or configure a CLI token) and select a workspace.
-- **`API error (403): Forbidden`** — override writes and `delete` require `OWNER` / `ADMIN` (`canRole "manage"`). MEMBER and VIEWER roles can only `list`.
-- **`API error (400)`** — the override request is malformed or has no explicit boolean `enabled` value; `inherit` and `delete` also reject an empty key.
+- **`API error (403): Forbidden`** — definition writes (`create`/`update`/`delete`) and override writes require `OWNER` / `ADMIN` (`canRole "manage"`). MEMBER and VIEWER roles can only `list`.
+- **`API error (400)`** — the override request is malformed or has no explicit boolean `enabled` value; `inherit` and `delete` also reject an empty key. `update` with no flags, or `create`/`update` with `--percentage` outside `0-100`, is rejected client-side before any request is sent (exit `2`).
 
 ## See also
 

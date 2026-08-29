@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -359,6 +360,10 @@ func TestShellHandlerPass(t *testing.T) {
 	}
 }
 
+// TestShellHandlerExportsLLMContext lives in shell_llm_env_unix_test.go —
+// it is `unix`-tagged rather than guarded with runtime.GOOS, so it compiles
+// out on Windows instead of reporting a skip that reads as a pass.
+
 func TestShellHandlerBlockOnExit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip()
@@ -421,8 +426,12 @@ func TestHTTPHandlerPass(t *testing.T) {
 	t.Setenv(allowPrivateEnvVar, "true")
 
 	called := false
+	var gotBody map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
 		if got := r.Header.Get("X-Crewship-Signature"); got == "" {
 			t.Error("expected signature header")
 		}
@@ -439,8 +448,11 @@ func TestHTTPHandlerPass(t *testing.T) {
 		},
 	}
 	res, err := httpHandler(context.Background(), nil, h, EventContext{
-		Event:       EventPreAgentStart,
+		Event:       EventPostLLMCall,
 		WorkspaceID: "ws_test",
+		LLMProvider: "anthropic",
+		LLMModel:    "claude-sonnet-4-6",
+		CostUSD:     0.0042,
 	})
 	if err != nil {
 		t.Fatalf("http: %v", err)
@@ -450,6 +462,12 @@ func TestHTTPHandlerPass(t *testing.T) {
 	}
 	if res.Outcome != OutcomePass {
 		t.Errorf("outcome: %s", res.Outcome)
+	}
+	if gotBody["llm_provider"] != "anthropic" || gotBody["llm_model"] != "claude-sonnet-4-6" {
+		t.Errorf("LLM identity missing from webhook body: %+v", gotBody)
+	}
+	if gotBody["cost_usd"] != 0.0042 {
+		t.Errorf("cost_usd = %v, want 0.0042", gotBody["cost_usd"])
 	}
 }
 
@@ -686,6 +704,76 @@ func TestDispatcherNonBlockingDoesNotBlockCaller(t *testing.T) {
 	elapsed := time.Since(start)
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("non-blocking hook blocked caller for %s", elapsed)
+	}
+}
+
+func TestRegisterRejectsBlockingObservationEvent(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	_, err := Register(context.Background(), db, Hook{
+		WorkspaceID:   "ws_test",
+		Event:         EventPostLLMCall,
+		HandlerKind:   HandlerKindHTTP,
+		HandlerConfig: map[string]any{"url": "https://hooks.example.test/observe"},
+		Blocking:      true,
+		Enabled:       true,
+	}, false)
+	if !errors.Is(err, ErrEventCannotBlock) {
+		t.Fatalf("error = %v, want ErrEventCannotBlock", err)
+	}
+}
+
+func TestDispatcherLegacyBlockingObservationDoesNotGate(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
+	db := openTestDB(t)
+	defer db.Close()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusOK)
+		close(finished)
+	}))
+	defer ts.Close()
+
+	config, _ := json.Marshal(map[string]any{"url": ts.URL})
+	if _, err := db.Exec(`INSERT INTO hooks_config
+		(id, workspace_id, event, matcher, handler_kind, handler_config, blocking, enabled)
+		VALUES ('legacy-post', 'ws_test', ?, '{}', 'http', ?, 1, 1)`,
+		EventPostLLMCall, string(config)); err != nil {
+		t.Fatalf("insert legacy hook: %v", err)
+	}
+
+	dispatched := make(chan error, 1)
+	go func() {
+		dispatched <- Dispatch(context.Background(), db, nil, EventPostLLMCall, EventContext{WorkspaceID: "ws_test"})
+	}()
+
+	select {
+	case err := <-dispatched:
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		close(release)
+		<-dispatched
+		t.Fatal("legacy blocking post hook gated the caller")
+	}
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("observation hook never started")
+	}
+	close(release)
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("observation hook did not finish")
 	}
 }
 

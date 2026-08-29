@@ -124,6 +124,22 @@ func validateWorkspaceAndHandler(h Hook, allowedShell bool) error {
 	if h.WorkspaceID == "" {
 		return errors.New("hooks: workspace_id required")
 	}
+	// The blocking/event-type coupling only applies to events still open
+	// to new writes (ValidateEvent(h.Event) == nil). A row grandfathered
+	// on a retired event like pre_tool_call — see Update's comment on
+	// currentEventFor — already failed (and will keep failing) the event
+	// check the moment anyone tries to move it onto a real event; there
+	// is no valid value the caller could supply here that would clear
+	// this gate, so enforcing it against a retired event would turn
+	// "PATCH blocking on a legacy hook" into a permanent, unfixable 400
+	// the same way re-running the full event check unconditionally
+	// would. Once the caller actually changes h.Event to something
+	// current, validateEventForWrite runs first and this check applies
+	// normally.
+	if h.Blocking && !h.Event.SupportsBlocking() && ValidateEvent(h.Event) == nil {
+		return fmt.Errorf("%w: %s is observation-only; use a pre_* event for a synchronous gate",
+			ErrEventCannotBlock, h.Event)
+	}
 	switch h.HandlerKind {
 	case HandlerKindShell:
 		if !allowedShell {
