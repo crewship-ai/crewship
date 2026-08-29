@@ -14,6 +14,9 @@ import { HooksSection } from "../hooks-section"
 import { isSettingsSectionVisible, visibleSettingsSections } from "../../settings-nav"
 
 const h = vi.hoisted(() => ({ apiFetch: vi.fn() }))
+
+/** Resolvers for in-flight toggles, keyed by hook id — see `deferToggle`. */
+let pendingToggles: Record<string, () => void> = {}
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.apiFetch(...args) }))
 
 function ok(body: unknown) {
@@ -101,23 +104,40 @@ function route({
   hooksFail = false,
   journalFail = false,
   toggleFail = false,
+  journalTruncated = false,
+  deferToggle = false,
 }: {
   hooks?: unknown[]
   journal?: unknown[]
   hooksFail?: boolean
   journalFail?: boolean
   toggleFail?: boolean
+  /** The server had more matching entries than the page we asked for. */
+  journalTruncated?: boolean
+  /** Hold every toggle open so two can be in flight at once. */
+  deferToggle?: boolean
 } = {}) {
   h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
     const u = String(url)
     if (u.includes("/api/v1/hooks/")) {
+      if (deferToggle) {
+        const id = u.split("/api/v1/hooks/")[1].split("/")[0]
+        return new Promise<Response>((resolve) => {
+          pendingToggles[id] = () => resolve(ok({}))
+        })
+      }
       return toggleFail ? fail(403) : ok({})
     }
     if (u.includes("/api/v1/hooks")) {
       return hooksFail ? fail() : ok({ rows: hooks, count: hooks.length })
     }
     if (u.includes("/api/v1/journal")) {
-      return journalFail ? fail() : ok({ entries: journal, count: journal.length })
+      if (journalFail) return fail()
+      return ok({
+        entries: journal,
+        count: journal.length,
+        ...(journalTruncated ? { next_cursor: "cur_more" } : {}),
+      })
     }
     return ok({})
   })
@@ -144,6 +164,7 @@ async function table() {
 
 beforeEach(() => {
   h.apiFetch.mockReset()
+  pendingToggles = {}
 })
 
 describe("HooksSection — the registry", () => {
@@ -248,6 +269,29 @@ describe("HooksSection — last result", () => {
   })
 })
 
+describe("HooksSection — a truncated journal window", () => {
+  it("does not claim a hook never fired when the window was capped", async () => {
+    // The journal read is one page of workspace-wide hook entries. A busy
+    // workspace can bury an older hook's last result past the page, and
+    // "Never fired" is a claim we would have no basis for. next_cursor is the
+    // server saying there is more.
+    route({ journal: [], journalTruncated: true })
+    renderSection()
+
+    await table()
+    expect(within(rowFor(/pre_llm_call/)).getByText(/no recent activity/i)).toBeInTheDocument()
+    expect(screen.queryByText(/never fired/i)).not.toBeInTheDocument()
+  })
+
+  it("still says never fired when the whole window was returned", async () => {
+    route({ journal: [] })
+    renderSection()
+
+    await table()
+    expect(within(rowFor(/pre_llm_call/)).getByText(/never fired/i)).toBeInTheDocument()
+  })
+})
+
 describe("HooksSection — the switch", () => {
   it("disables an enabled hook through the disable route", async () => {
     route()
@@ -290,6 +334,31 @@ describe("HooksSection — the switch", () => {
 
     await waitFor(() => expect(screen.getByText(/couldn't change/i)).toBeInTheDocument())
     expect(within(rowFor(/pre_llm_call/)).getByRole("switch")).toBeChecked()
+  })
+})
+
+describe("HooksSection — two toggles at once", () => {
+  it("keeps the second hook's switch disabled until its own request lands", async () => {
+    // A single `pending` id re-enabled every switch as soon as ANY request
+    // finished, so finishing hook A unlocked hook B mid-flight and a second
+    // click on B could race its own first request.
+    route({ deferToggle: true })
+    renderSection("ADMIN")
+
+    await table()
+    const a = within(rowFor(/pre_llm_call/)).getByRole("switch")
+    const b = within(rowFor(/post_tool_call/)).getByRole("switch")
+
+    fireEvent.click(a)
+    fireEvent.click(b)
+    await waitFor(() => expect(b).toBeDisabled())
+
+    pendingToggles["hk_guard"]?.()
+    await waitFor(() => expect(a).not.toBeDisabled())
+    expect(b).toBeDisabled()
+
+    pendingToggles["hk_audit"]?.()
+    await waitFor(() => expect(b).not.toBeDisabled())
   })
 })
 

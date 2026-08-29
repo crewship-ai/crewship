@@ -160,8 +160,19 @@ function relativeTime(iso: string): string {
   return `${Math.round(secs / 86400)}d ago`
 }
 
-function OutcomeCell({ result }: { result?: LastResult }) {
-  if (!result) return <span className="text-muted-foreground/70">Never fired</span>
+function OutcomeCell({ result, windowCapped }: { result?: LastResult; windowCapped: boolean }) {
+  // "Never fired" is a claim about all of history, and the journal read is one
+  // workspace-wide page of hook entries. When the server says there is more
+  // (next_cursor), an older result for this hook may sit past the page, so the
+  // honest line is that we have not seen one recently — the same rule the
+  // registry read follows for "no hooks" versus "could not ask".
+  if (!result) {
+    return (
+      <span className="text-muted-foreground/70">
+        {windowCapped ? "No recent activity" : "Never fired"}
+      </span>
+    )
+  }
   const tone =
     result.outcome === "pass"
       ? "text-success"
@@ -181,9 +192,13 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
 
   const [hooks, setHooks] = React.useState<HookRow[] | null>(null)
   const [results, setResults] = React.useState<Record<string, LastResult>>({})
+  /** The journal had more matching entries than the page we asked for. */
+  const [windowCapped, setWindowCapped] = React.useState(false)
   const [readError, setReadError] = React.useState<string | null>(null)
   const [toggleError, setToggleError] = React.useState<string | null>(null)
-  const [pending, setPending] = React.useState<string | null>(null)
+  // One id per in-flight request. A single id re-enabled every switch as soon
+  // as ANY toggle finished, so finishing hook A unlocked hook B mid-flight.
+  const [pending, setPending] = React.useState<ReadonlySet<string>>(() => new Set())
 
   React.useEffect(() => {
     let cancelled = false
@@ -214,13 +229,19 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
     )
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status))
-        return (await res.json()) as { entries?: JournalEntry[] }
+        return (await res.json()) as { entries?: JournalEntry[]; next_cursor?: string }
       })
       .then((body) => {
-        if (!cancelled) setResults(lastResults(Array.isArray(body?.entries) ? body.entries : []))
+        if (cancelled) return
+        setResults(lastResults(Array.isArray(body?.entries) ? body.entries : []))
+        setWindowCapped(Boolean(body?.next_cursor))
       })
       .catch(() => {
-        if (!cancelled) setResults({})
+        if (cancelled) return
+        setResults({})
+        // We asked and failed, so we know nothing about any hook's history —
+        // which is the capped case, not the "never fired" one.
+        setWindowCapped(true)
       })
 
     return () => {
@@ -231,7 +252,7 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
   const toggle = React.useCallback(
     async (hook: HookRow) => {
       const next = !hook.enabled
-      setPending(hook.id)
+      setPending((prev) => new Set(prev).add(hook.id))
       setToggleError(null)
       // Optimistic, then reverted on refusal — the switch is the one control
       // here and a control that lags a round trip reads as broken.
@@ -251,7 +272,11 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
             : "Couldn't change the hook — disabling it was refused.",
         )
       } finally {
-        setPending(null)
+        setPending((prev) => {
+          const next = new Set(prev)
+          next.delete(hook.id)
+          return next
+        })
       }
     },
     [workspaceId],
@@ -341,21 +366,22 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
                           <HandlerIcon className="h-3 w-3" />
                           {hook.handler_kind}
                         </span>
-                        <span
-                          className="mt-0.5 block max-w-[20rem] truncate font-mono text-[11px] text-muted-foreground/80"
-                          title={target}
-                        >
+                        {/* Wrapped, not truncated. The whole argument for
+                            printing the command is that someone can audit it,
+                            and an ellipsis with a hover title is neither
+                            readable on a touch device nor selectable. */}
+                        <span className="mt-0.5 block max-w-[22rem] break-all font-mono text-[11px] text-muted-foreground/80">
                           {target}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 align-top whitespace-nowrap">
-                        <OutcomeCell result={results[hook.id]} />
+                        <OutcomeCell result={results[hook.id]} windowCapped={windowCapped} />
                       </td>
                       {mayToggle && (
                         <td className="px-4 py-2.5 text-right align-top">
                           <Switch
                             checked={hook.enabled}
-                            disabled={pending === hook.id}
+                            disabled={pending.has(hook.id)}
                             onCheckedChange={() => toggle(hook)}
                             aria-label={`${hook.enabled ? "Disable" : "Enable"} ${hook.event} hook`}
                           />
