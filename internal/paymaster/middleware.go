@@ -139,7 +139,8 @@ func Middleware(next LLMCaller, j journal.Emitter, db *sql.DB) LLMCaller {
 			// for partial completions and we want the row in the ledger so the
 			// operator sees the cost trail. Token counts default to zero if
 			// the provider didn't return anything useful.
-			recordErr := recordFromResponse(ctx, db, j, req, resp)
+			var recordErr error
+			resp, recordErr = recordFromResponse(ctx, db, j, req, resp)
 			if recordErr != nil {
 				// Don't shadow the call error with a logging error. The audit
 				// gap is unfortunate but secondary to the actual failure.
@@ -148,8 +149,10 @@ func Middleware(next LLMCaller, j journal.Emitter, db *sql.DB) LLMCaller {
 			return resp, callErr
 		}
 
-		if err := recordFromResponse(ctx, db, j, req, resp); err != nil {
-			return resp, err
+		var recordErr error
+		resp, recordErr = recordFromResponse(ctx, db, j, req, resp)
+		if recordErr != nil {
+			return resp, recordErr
 		}
 		return resp, nil
 	})
@@ -159,23 +162,25 @@ func Middleware(next LLMCaller, j journal.Emitter, db *sql.DB) LLMCaller {
 // hands it to Record. Centralised so both the success and the failure paths
 // in Middleware use identical logic — partial billing on failure should look
 // the same as full billing on success, just with smaller numbers.
-func recordFromResponse(ctx context.Context, db *sql.DB, j journal.Emitter, req CallRequest, resp CallResponse) error {
-	cost := resp.CostUSD
-	confidence := resp.Confidence
-	if cost == 0 && req.BillingMode != BillingFlatRate {
+func recordFromResponse(ctx context.Context, db *sql.DB, j journal.Emitter, req CallRequest, resp CallResponse) (CallResponse, error) {
+	if req.BillingMode == BillingFlatRate {
+		resp.CostUSD = 0
+		resp.Confidence = ConfidenceUnknown
+	} else if resp.CostUSD == 0 {
 		// Backfill via the rate card and label as estimate — caller didn't
 		// pre-compute, so we can't claim precision.
-		cost = Estimate(req.Provider, req.Model,
+		resp.CostUSD = Estimate(req.Provider, req.Model,
 			resp.InputTokens, resp.OutputTokens,
 			resp.CachedInputTokens, resp.CacheCreationTokens)
-		if confidence == "" {
-			confidence = ConfidenceEstimate
+		if resp.Confidence == "" {
+			resp.Confidence = ConfidenceEstimate
 		}
+	} else if resp.Confidence == "" {
+		resp.Confidence = ConfidencePrecise
 	}
 
-	ts := resp.CompletedAt
-	if ts.IsZero() {
-		ts = time.Now().UTC()
+	if resp.CompletedAt.IsZero() {
+		resp.CompletedAt = time.Now().UTC()
 	}
 
 	_, err := Record(ctx, db, j, Call{
@@ -186,14 +191,14 @@ func recordFromResponse(ctx context.Context, db *sql.DB, j journal.Emitter, req 
 		OutputTokens:        resp.OutputTokens,
 		CachedInputTokens:   resp.CachedInputTokens,
 		CacheCreationTokens: resp.CacheCreationTokens,
-		CostUSD:             cost,
+		CostUSD:             resp.CostUSD,
 		Tags:                resp.Tags,
-		TS:                  ts,
+		TS:                  resp.CompletedAt,
 		BillingMode:         req.BillingMode,
-		Confidence:          confidence,
+		Confidence:          resp.Confidence,
 		SubscriptionPlan:    req.SubscriptionPlan,
 		QuotaRemainingPct:   resp.QuotaRemainingPct,
 		QuotaWindow:         resp.QuotaWindow,
 	})
-	return err
+	return resp, err
 }

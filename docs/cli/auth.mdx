@@ -1,6 +1,6 @@
 ---
 title: "auth"
-description: "Self-service account management from the CLI — change your own password."
+description: "Self-service account management from the CLI — change your own password, pair another CLI."
 icon: "user-lock"
 stability: experimental
 tag: Experimental
@@ -24,6 +24,7 @@ crewship auth <subcommand>
 | --- | --- |
 | `auth passwd` | Change your own account password. |
 | `auth avatar` | Upload or clear your profile picture. |
+| `auth pair` | Issue a device-code so another CLI can log in without a browser. |
 
 ## `auth passwd`
 
@@ -73,3 +74,52 @@ Editing your display name is available in the web UI (Settings → Profile),
 backed by [`PATCH /api/v1/users/me`](/api-reference/auth#patch-/api/v1/users/me).
 A CLI verb for it may follow.
 </Note>
+
+## `auth pair`
+
+Issue a device-code pairing code, and by default wait for it to be
+redeemed. This is the ISSUING side of the pairing flow — the counterpart
+to `crewship login --pair --code=…` ([`crewship login`](/cli/login)),
+which REDEEMS a code. Backed by
+[`POST /api/v1/auth/pair/start`](/api-reference/auth#post-/api/v1/auth/pair/start)
+and
+[`GET /api/v1/auth/pair/poll`](/api-reference/auth#get-/api/v1/auth/pair/poll).
+
+Run it on a CLI that is already logged in, then paste the printed snippet
+on the second machine — no browser required on either side:
+
+```bash
+# Issue a code and wait (default) for it to be redeemed:
+crewship auth pair
+
+# Issue a code and return immediately, without waiting:
+crewship auth pair --no-wait
+
+# Tag the issuing side with an adapter hint (telemetry only):
+crewship auth pair --adapter CLAUDE_CODE
+
+# Tune how long / how often to poll while waiting:
+crewship auth pair --timeout 5m --poll-interval 3s
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--adapter` | _(none)_ | Adapter hint recorded with the code (`CLAUDE_CODE`, `GEMINI_CLI`, `CODEX_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`). Telemetry only — the server never routes on it. |
+| `--no-wait` | `false` | Print the code and exit immediately, without polling for redemption. |
+| `--timeout` | `9m` | How long to wait for the code to be redeemed. Codes expire after 10 minutes server-side, so the default leaves a margin. |
+| `--poll-interval` | `2s` | How often to poll `GET /api/v1/auth/pair/poll` while waiting. |
+
+<Warning>
+The code **is** the credential for the redeeming side — `POST
+/api/v1/auth/pair/redeem` is intentionally unauthenticated, so anyone who
+has the code can log in as you within its 10-minute window. Treat it like
+a password: read it over a channel you trust, and let an unused code
+expire rather than posting it anywhere public.
+</Warning>
+
+Without `--no-wait`, the command polls until the code is redeemed
+(`status: consumed`, exit `0`), expires before anyone redeemed it (`status:
+expired`, non-zero exit), or the `--timeout` budget runs out while it is
+still pending (also non-zero exit — a timeout is never reported as
+success). `--format json` reports `code`, `expires_at`, `status`, `paired`,
+and `waited`, so a script can branch on `status` without parsing prose.

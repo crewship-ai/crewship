@@ -356,6 +356,8 @@ func (h *HooksHandler) writeStoreError(w http.ResponseWriter, r *http.Request, e
 			"handler_kind 'shell' requires OWNER role — shell hooks execute commands on the crewshipd host")
 	case errors.Is(err, hooks.ErrUnknownEvent):
 		replyError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, hooks.ErrEventCannotBlock):
+		replyError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, hooks.ErrUnknownHandlerKind):
 		replyError(w, http.StatusBadRequest, "invalid handler_kind (valid: shell, http, subagent)")
 	case errors.Is(err, sql.ErrNoRows):

@@ -56,6 +56,28 @@ CREATE TABLE budget_limits (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(workspace_id, scope_kind, scope_id, window)
 );
+-- hooksCaller (see hooks_middleware_test.go) dispatches pre_llm_call /
+-- post_llm_call through the real hooks.Dispatch on every Complete/Stream
+-- call now, so hooks_config has to exist for ANY test in this package to
+-- run — the same way it would in production. Empty table = ListByEvent
+-- returns nothing = hooksCaller is a no-op, so every pre-existing test
+-- below is unaffected unless it registers a hook itself.
+CREATE TABLE hooks_config (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    crew_id TEXT,
+    event TEXT NOT NULL,
+    matcher TEXT NOT NULL DEFAULT '{}',
+    handler_kind TEXT NOT NULL CHECK(handler_kind IN ('shell','http','subagent')),
+    handler_config TEXT NOT NULL DEFAULT '{}',
+    blocking INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_hooks_event ON hooks_config(event, enabled);
+CREATE INDEX idx_hooks_ws ON hooks_config(workspace_id, enabled);
 `
 
 func openLLMTestDB(t *testing.T) *sql.DB {

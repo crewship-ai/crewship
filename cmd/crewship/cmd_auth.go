@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -198,8 +200,226 @@ on the roster and in chat.`,
 	},
 }
 
+// authPairResult is the --format json/yaml/ndjson payload for `auth pair`.
+// Status is reported verbatim (pending/consumed/expired) rather than a bare
+// bool so a script that times out can tell "still pending" from "the code
+// died" without re-parsing the human error text.
+type authPairResult struct {
+	Code        string `json:"code"`
+	ExpiresAt   string `json:"expires_at"`
+	Status      string `json:"status"`
+	AdapterHint string `json:"adapter_hint,omitempty"`
+	Paired      bool   `json:"paired"`
+	Waited      bool   `json:"waited"`
+}
+
+var authPairCmd = &cobra.Command{
+	Use:   "pair",
+	Short: "Issue a device-code so another crewship CLI can log in without a browser",
+	Long: `Issue a device-code pairing code and, by default, wait for it to be redeemed.
+
+This is the other half of ` + "`crewship login --pair --code=…`" + `: that command
+REDEEMS a code, this one ISSUES it. Run this on an already-authenticated CLI,
+paste the printed snippet on the second machine, and — unless --no-wait —
+the command blocks until that machine redeems the code or the 10-minute
+code TTL runs out.
+
+    crewship auth pair
+    crewship auth pair --no-wait
+    crewship auth pair --adapter CLAUDE_CODE
+    crewship auth pair --timeout 5m --poll-interval 3s
+
+The code IS the credential for the redeeming side — POST
+/api/v1/auth/pair/redeem is intentionally unauthenticated, so anyone who has
+the code can log in as you. Treat it like a password: read it over a channel
+you trust, and let an unused code expire rather than posting it anywhere
+public.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+		interval, _ := cmd.Flags().GetDuration("poll-interval")
+		if interval <= 0 {
+			return cli.WithExitCode(fmt.Errorf("--poll-interval must be positive"), cli.ExitValidation)
+		}
+		if timeout <= 0 {
+			return cli.WithExitCode(fmt.Errorf("--timeout must be positive"), cli.ExitValidation)
+		}
+		noWait, _ := cmd.Flags().GetBool("no-wait")
+		adapterHint, _ := cmd.Flags().GetString("adapter")
+
+		client := newAPIClient()
+		// Self-scoped account action — no workspace context, same tier as
+		// `auth passwd` / `auth avatar`.
+		client.WorkspaceID = ""
+
+		payload := map[string]string{}
+		if adapterHint != "" {
+			payload["adapter_hint"] = adapterHint
+		}
+		resp, err := client.Post("/api/v1/auth/pair/start", payload)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var started struct {
+			Code      string `json:"code"`
+			ExpiresAt string `json:"expires_at"`
+		}
+		if err := cli.ReadJSON(resp, &started); err != nil {
+			return err
+		}
+
+		result := authPairResult{
+			Code:        started.Code,
+			ExpiresAt:   started.ExpiresAt,
+			Status:      "pending",
+			AdapterHint: adapterHint,
+		}
+
+		f := newFormatter()
+		// Ask the formatter rather than restating its rule (see `oauth
+		// connect`, cmd_oauth.go): classifying quiet as machine-readable
+		// would suppress the code, without which the flow cannot be
+		// completed on the other machine at all.
+		human := f.RoutesToHuman()
+
+		if human {
+			fmt.Println("Pairing code:")
+			fmt.Println()
+			fmt.Printf("  %s%s%s\n", cli.Bold, result.Code, cli.Reset)
+			fmt.Println()
+			fmt.Println("On the OTHER machine, run:")
+			fmt.Println()
+			snippet := "  crewship login --pair --code=" + result.Code
+			if flagServer != "" {
+				snippet += " --server " + flagServer
+			}
+			fmt.Println(snippet)
+			fmt.Println()
+			fmt.Printf("Expires: %s\n", result.ExpiresAt)
+		}
+
+		if noWait {
+			return f.AutoHuman(result, func() {
+				fmt.Println()
+				fmt.Println("Not waiting for redemption (--no-wait).")
+			})
+		}
+
+		result.Waited = true
+		if human {
+			fmt.Println()
+			fmt.Printf("Waiting up to %s for the code to be redeemed…\n", timeout)
+		}
+
+		status, hint, err := waitForPairRedemption(client, result.Code, timeout, interval)
+		result.Status = status
+		result.Paired = status == "consumed"
+		if hint != "" {
+			result.AdapterHint = hint
+		}
+		if err != nil {
+			// Emit the machine envelope before failing so a --format json
+			// consumer still gets the status the code was stuck in.
+			if !human {
+				_ = f.Machine(result)
+			}
+			return err
+		}
+
+		return f.AutoHuman(result, func() {
+			cli.PrintSuccess(fmt.Sprintf("Paired — code %s was redeemed.", result.Code))
+		})
+	},
+}
+
+// fetchPairStatus polls one pairing code's status.
+func fetchPairStatus(client *cli.Client, code string) (status, adapterHint string, err error) {
+	resp, err := client.Get("/api/v1/auth/pair/poll?code=" + url.QueryEscape(code))
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return "", "", err
+	}
+	var poll struct {
+		Status      string `json:"status"`
+		AdapterHint string `json:"adapter_hint"`
+	}
+	if err := cli.ReadJSON(resp, &poll); err != nil {
+		return "", "", err
+	}
+	return poll.Status, poll.AdapterHint, nil
+}
+
+// waitForPairRedemption polls until the code is consumed, expires, or the
+// deadline passes. Shaped after waitForCredentialActive (cmd_oauth.go),
+// reusing its nextPollDelay/isFatalPollError helpers: the last-seen status
+// travels alongside any error, because "we gave up" and "the code expired"
+// are different operator problems and the status is the only thing that
+// tells them apart.
+func waitForPairRedemption(client *cli.Client, code string, timeout, interval time.Duration) (status, adapterHint string, err error) {
+	deadline := time.Now().Add(timeout)
+	last := "pending"
+	var lastErr error
+	for {
+		st, hint, ferr := fetchPairStatus(client, code)
+		switch {
+		case ferr == nil:
+			lastErr = nil
+			last = st
+			if hint != "" {
+				adapterHint = hint
+			}
+			switch st {
+			case "consumed":
+				return st, adapterHint, nil
+			case "expired":
+				// Terminal, not transient: a code that flipped to expired
+				// will never flip back, so grinding through the rest of the
+				// timeout budget polling it helps nobody.
+				return st, adapterHint, cli.WithExitCode(
+					fmt.Errorf("pairing code %s expired before it was redeemed — codes are valid for 10 minutes; "+
+						"run `crewship auth pair` again for a fresh one", code),
+					cli.ExitGeneric)
+			}
+		case isFatalPollError(ferr):
+			return last, adapterHint, ferr
+		default:
+			lastErr = ferr
+		}
+
+		delay, done := nextPollDelay(time.Now(), deadline, interval)
+		if done {
+			if lastErr != nil {
+				return last, adapterHint, fmt.Errorf(
+					"gave up after %s: the pairing code's status could not be read: %w", timeout, lastErr)
+			}
+			return last, adapterHint, cli.WithExitCode(
+				fmt.Errorf("timed out after %s waiting for pairing code %s to be redeemed; it is still %s",
+					timeout, code, last),
+				cli.ExitGeneric)
+		}
+		time.Sleep(delay)
+	}
+}
+
 func init() {
 	authCmd.AddCommand(authPasswdCmd)
 	authAvatarCmd.Flags().BoolVar(&authAvatarClear, "clear", false, "remove your avatar (back to initials)")
 	authCmd.AddCommand(authAvatarCmd)
+
+	authPairCmd.Flags().String("adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
+	authPairCmd.Flags().Bool("no-wait", false, "Print the code and exit immediately, without waiting for it to be redeemed")
+	authPairCmd.Flags().Duration("timeout", 9*time.Minute, "How long to wait for the code to be redeemed (codes expire after 10 minutes server-side)")
+	authPairCmd.Flags().Duration("poll-interval", 2*time.Second, "How often to poll for redemption while waiting")
+	authCmd.AddCommand(authPairCmd)
 }

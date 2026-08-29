@@ -114,6 +114,9 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 		"CREWSHIP_AGENT_ID="+ec.AgentID,
 		"CREWSHIP_MISSION_ID="+ec.MissionID,
 		"CREWSHIP_TOOL_NAME="+ec.ToolName,
+		"CREWSHIP_LLM_PROVIDER="+ec.LLMProvider,
+		"CREWSHIP_LLM_MODEL="+ec.LLMModel,
+		fmt.Sprintf("CREWSHIP_COST_USD=%g", ec.CostUSD),
 		"CREWSHIP_PAYLOAD="+string(payloadJSON),
 	)
 

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -169,6 +170,36 @@ func Enforce(ctx context.Context, db *sql.DB, j journal.Emitter, scope Scope) er
 					Summary: fmt.Sprintf("budget exceeded: %s/%s at %.1f%% ($%.2f / $%.2f)",
 						s.Budget.ScopeKind, s.Budget.Window, s.UtilPct, s.SpentUSD, s.Budget.LimitUSD),
 					Payload: budgetPayload(s),
+				})
+			}
+			// on_budget_exceeded: fire-and-forget, same shape as
+			// on_approval_requested in orchestrator_run.go — a hard/tiered
+			// budget breach is the "a human needs to know about this"
+			// moment that hook exists for, and Enforce already has db + j
+			// in hand on every call.
+			//
+			// Cadence caveat, because this is the comment someone reads
+			// before wiring a pager to it: Enforce runs on EVERY LLM call,
+			// and this dispatch sits inside the per-status loop with
+			// nothing recording that the breach was already announced. So
+			// it fires on every call made while a budget is over, and twice
+			// on a call that breaches two budgets — unlike
+			// on_approval_requested and on_guardrail_triggered, which fire
+			// once per triggering condition. A journal row absorbs that; a
+			// notification sink generally does not. Debouncing to once per
+			// breach is tracked in #2153; until then this is an
+			// at-least-once signal, not an edge-triggered one.
+			//
+			// Skipped when WorkspaceID is empty rather than dispatched
+			// against a scope hooks.Dispatch would reject outright.
+			if scope.WorkspaceID != "" {
+				_ = hooks.Dispatch(ctx, db, j, hooks.EventOnBudgetExceeded, hooks.EventContext{
+					WorkspaceID: scope.WorkspaceID,
+					CrewID:      scope.CrewID,
+					AgentID:     scope.AgentID,
+					MissionID:   scope.MissionID,
+					Severity:    "error",
+					Payload:     budgetPayload(s),
 				})
 			}
 		}

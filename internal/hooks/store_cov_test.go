@@ -84,7 +84,7 @@ func TestRegister_ShellHookLintsAndPersists(t *testing.T) {
 	// must still register (lint is advisory, not a gate).
 	id, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws1",
-		Event:         "post_tool_call",
+		Event:         EventPreLLMCall,
 		HandlerKind:   HandlerKindShell,
 		HandlerConfig: map[string]any{"command": "echo $CREWSHIP_PAYLOAD"},
 		Blocking:      true,
