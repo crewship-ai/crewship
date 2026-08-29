@@ -428,7 +428,15 @@ function ProvisioningEventSteps({ steps }: { steps: ProvisionStepState[] }) {
               <Spinner className="h-3 w-3 text-primary" />
             )}
           </span>
-          <span className="truncate">
+          <span
+            className="truncate"
+            // The row can be narrower than "label — reason" in the crew canvas
+            // banner and chat card (only the toolbar popover is a fixed
+            // 420px), and this line-clamps rather than wraps. A native
+            // tooltip keeps the reason discoverable even when the ellipsis
+            // eats it — the one thing this row exists to not hide.
+            title={s.reason ? `${s.label} — ${reasonLabel(s.reason)}` : undefined}
+          >
             {s.label}
             {s.reason && (
               <span className="text-muted-foreground-soft" data-testid="provision-step-reason">

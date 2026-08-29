@@ -337,6 +337,45 @@ describe("useProvisioningStatus", () => {
     expect(result.current.detail[0].eventSteps?.[0].status).toBe("completed")
   })
 
+  // A held start (#2167): the wire's `reason` must survive the fold into
+  // ProvisionStepState, and a later frame's reason must win over a stale one
+  // on the same row rather than the row staying pinned to the first cause.
+  it("carries a capacity_hold event's reason onto its step, and lets a later reason win", async () => {
+    mockFetch.mockImplementation(singleCrewBuilding())
+    const { result } = renderHook(() => useProvisioningStatus("ws-hold"))
+    await act(async () => { await flushAsync() })
+
+    act(() => {
+      realtimeCallbacks["provision.event"]?.({
+        payload: { crew_id: "c1", step: "capacity_hold", status: "started", reason: "host_memory" },
+      })
+    })
+    expect(result.current.detail[0].eventSteps).toHaveLength(1)
+    expect(result.current.detail[0].eventSteps?.[0].reason).toBe("host_memory")
+
+    // Same row (same step key) — the binding reason changed, so it must win.
+    act(() => {
+      realtimeCallbacks["provision.event"]?.({
+        payload: { crew_id: "c1", step: "capacity_hold", status: "started", reason: "concurrency" },
+      })
+    })
+    expect(result.current.detail[0].eventSteps).toHaveLength(1)
+    expect(result.current.detail[0].eventSteps?.[0].reason).toBe("concurrency")
+  })
+
+  it("leaves reason undefined for a step the wire never sets it on", async () => {
+    mockFetch.mockImplementation(singleCrewBuilding())
+    const { result } = renderHook(() => useProvisioningStatus("ws-noreason"))
+    await act(async () => { await flushAsync() })
+
+    act(() => {
+      realtimeCallbacks["provision.event"]?.({
+        payload: { crew_id: "c1", step: "feature_install", feature: "ansible", status: "started" },
+      })
+    })
+    expect(result.current.detail[0].eventSteps?.[0].reason).toBeUndefined()
+  })
+
   it("captures the BuildKit log tail from a failed image_build_start event", async () => {
     mockFetch.mockImplementation(singleCrewBuilding())
     const { result } = renderHook(() => useProvisioningStatus("ws-tail"))
