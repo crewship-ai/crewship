@@ -24,6 +24,7 @@ crewship system <subcommand>
 | `onboarding` | Onboarding status / setup / complete (subcommands: `status`, `setup`, `complete`) |
 | `aux-status` | Show auxiliary model assignment and health per subsystem |
 | `openapi` | Print the server's generated OpenAPI spec (JSON) to stdout |
+| `crewshipd` | Probe the crewshipd sidecar daemon's own health (uptime, connections) |
 
 ---
 
@@ -336,6 +337,19 @@ crewship system health -f json | jq '.disk.used_pct'
 ```
 
 `disk` reports `total_bytes` / `free_bytes` / `used_bytes` / `used_pct` for the default data-dir filesystem (`free_bytes` matches `df` "Avail"). A custom `DATABASE_URL` on a different volume isn't reflected — the default location is the volume that fills in practice (DB + agent outputs + logs all live under it).
+
+## `crewship system crewshipd`
+
+Probe the crewshipd sidecar daemon's own health — uptime and connection count. Backs `GET /api/v1/crewshipd`, a thin proxy to the sidecar's `/health` over its Unix socket.
+
+```bash
+crewship system crewshipd
+crewship system crewshipd -f json | jq .status
+```
+
+<Note>
+This is a **different process** from the one `system health` reports on. `system health` is the crewship API server's own health (uptime, log level, disk headroom); `system crewshipd` is the sidecar daemon that runs crew containers, reached over IPC. An unreachable sidecar answers `{"status":"unreachable"}` with **HTTP 200**, not a request failure — check the `status` field rather than the exit code.
+</Note>
 
 ## `crewship system openapi`
 

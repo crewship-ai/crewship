@@ -31,6 +31,34 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Five read routes had no CLI command; now they do (#2147).** The run
+  *list* was the one pipeline-run sub-resource missing a command — `logs`,
+  `tree`, `metadata` and `signal` all had one, `GET
+  /workspaces/{id}/pipeline-runs` did not — alongside its `changes`
+  sub-resource (the Activity dock's Changes tab, a run's crew container's
+  git diff) and three fleet-wide reads with no CLI surface at all.
+
+  **`crewship routine runs-all`** lists runs of any status across every
+  routine in the workspace (`--status`/`--since`/`--limit`), distinct from
+  the existing `routine runs <slug>` / `routine records <slug>` (one
+  routine's history) and `routine active` (in-flight only, no filters).
+  **`crewship routine changes <run_id>`** joins `logs`/`tree`/`metadata`/
+  `signal` as a run-scoped sub-resource; a run with no resolvable crew or
+  whose crew container isn't a live git repo degrades to a plain-English
+  "no git changes" and exits 0, matching the API's own degrade behaviour
+  rather than erroring.
+
+  **`crewship agent status`** and **`crewship agent load`** cover the
+  fleet-wide agent-status histogram (`GET /agents/crews-status` — despite
+  the route name, it counts *agents*, not crews) and the per-agent
+  active/pending/token-budget breakdown behind it (`GET /agent-load`).
+  Homed under `agent` rather than `crew status`, since the payload is an
+  agent metric and `crew status <slug>` is already a different, slug-scoped
+  shape. **`crewship system crewshipd`** probes the crewshipd sidecar
+  daemon's own health (uptime, connections) over its Unix socket — a
+  distinct process from the one `system health` already reports on (the API
+  server itself).
+
 - **`crewship auth pair` issues a device-code, closing a CLI↔route
   asymmetry (#2147).** `POST /api/v1/auth/pair/redeem` had a CLI caller
   (`crewship login --pair --code=…`) but the two endpoints that ISSUE a

@@ -41,6 +41,8 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Runs | `runs <slug>` | List recent runs from journal |
 | Runs | `records <slug>` | List runs from `pipeline_runs` projection (v83) |
 | Runs | `active` | List in-flight runs across the workspace |
+| Runs | `runs-all` | List runs of any status across every routine in the workspace, filterable by `--status`/`--since` |
+| Runs | `changes <run_id>` | Show the git diff a run's crew container produced |
 | Runs | `result <run_id>` | Print a run's final deliverable — output **and the files that changed on its crew during the run** |
 | Runs | `logs <run_id>` | Full journal trace for a run (post-mortem) |
 | Runs | `cancel <run_id>` | Cancel an in-flight run |
@@ -668,6 +670,33 @@ Pair with `routine cancel <run_id>` to terminate any of the listed runs.
 
 ---
 
+## `crewship routine runs-all`
+
+List runs of **any** status across **every** routine in the workspace — not scoped to one slug, and not limited to in-flight runs. Backs the Activity dock's Runs sub-tab.
+
+```bash
+crewship routine runs-all
+crewship routine runs-all --status failed --limit 100
+crewship routine runs-all --since 2026-08-01T00:00:00Z
+crewship routine runs-all --status active   # running+queued+paused+waiting
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--status` | | Filter by status: `queued`\|`running`\|`completed`\|`failed`\|`cancelled`\|`interrupted`\|`dry_run`\|`waiting`\|`paused`, or `active` (`running`+`queued`+`paused`+`waiting`). |
+| `--since` | | RFC3339 lower bound on `created_at`. |
+| `--limit` | `50` | Max rows to return (server cap 200). |
+
+Backed by `GET /api/v1/workspaces/{ws}/pipeline-runs`, sorted `started_at` DESC (newest first).
+
+**Output columns:** RUN_ID (truncated), SLUG, STATUS, MODE, STARTED, DURATION, COST, TRIGGER. Empty list prints `No runs.`
+
+<Note>
+Distinct from `routine runs <slug>` / `routine records <slug>` (one routine's history) and `routine active` (in-flight only, no filters): `runs-all` is the cross-pipeline, any-status feed, filterable server-side.
+</Note>
+
+---
+
 ## `crewship routine logs <run_id>`
 
 Fetch the full journal trace for a single run. Post-mortem and CI-diagnostics surface — every step's prompt, output, validation verdict, and cost in one document.
@@ -1118,6 +1147,25 @@ crewship routine tree run_cmox10oci00016b48aacd
 Backed by `GET /api/v1/workspaces/{ws}/pipeline-runs/{run_id}/tree`.
 
 **Output columns:** RUN ID, PARENT (`(root)` for the top run), ROUTINE, STATUS, VIA (`triggered_via`), COST.
+
+---
+
+## `crewship routine changes <run_id>`
+
+Show the git diff a run's crew container produced: resolves the run to its crew (`invoking_crew_id`, falling back to the routine's `author_crew_id`), then reports that crew container's uncommitted changes — a file list with add/delete counts, plus the unified diff. Powers the Activity dock's Changes tab.
+
+```bash
+crewship routine changes run_cmox10oci00016b48aacd
+crewship routine changes run_cmox10oci00016b48aacd --format json | jq '.files[].path'
+```
+
+Backed by `GET /api/v1/workspaces/{ws}/pipeline-runs/{run_id}/changes`.
+
+**Output columns:** STATUS, PATH, `+`, `-`, followed by the unified diff text.
+
+<Note>
+A run with no resolvable crew, or whose crew container isn't a live git repo, answers `is_repo:false` rather than an error — the CLI prints "No git changes: …" and **exits 0**. That is the normal case for a workspace-level routine with no crew attached, not a failure. An unknown `run_id` is still a 404.
+</Note>
 
 ---
 
