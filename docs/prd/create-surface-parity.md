@@ -5,6 +5,12 @@
 > in the same commit that created this file. Nothing regenerates it. Every count
 > below describes the tree as it stood on the audit date — check a row against the
 > source before acting on it.
+>
+> **Twelve rows were re-verified wrong and are marked `⚠ CORRECTED` in place.**
+> Forty of the 65 were re-read against the tree on 2026-08-29 by six parallel
+> audits, each asked to return FALSE / TRUE-BUT-DELIBERATE / TRUE-DEFECT rather
+> than to confirm. About one in six did not hold. **§7 has the evidence.** Read it
+> before quoting a number out of §4 or §5 — including the headline 90.
 
 ## 1. Provenance
 
@@ -22,6 +28,8 @@ not ship to users and does not need a running frontend to read:
 - **§5** the sweep — the same question measured once across the whole surface
 - **§6** the surface specimens — the shapes the proposal specified, which code
   comments throughout `components/features/` still cite by section number
+- **§7** the 2026-08-29 re-verification — the twelve rows that did not hold, and
+  what the surviving ones mean for release 1.0
 
 The consoles half of this argument — `/settings` and `/admin` — was reworked
 separately and is not in scope here; §4 covers the create surfaces only.
@@ -77,7 +85,7 @@ Counted across `components/**` and `app/**` on 2026-08-23. Not about the modals 
 
 ## 4. Parity ledger
 
-65 rows across 22 surfaces: 22 blocker, 38 gap, 2 deferred, 3 fine. 47 of them are `ui: none` — not reachable anywhere in the web UI. Every row was read out of the source and carries its reference; a row without one is a claim nobody checked.
+65 rows across 22 surfaces: 19 blocker, 39 gap, 4 deferred, 3 fine — after the three re-grades in §7.2; as extracted it read 22/38/2/3. 47 of them are `ui: none` — not reachable anywhere in the web UI. Every row was read out of the source and carries its reference; a row without one is a claim nobody checked.
 
 `ui` states: **create** = the create surface itself can set it · **detail** = only after the thing exists, on its own screen · **none** = not reachable anywhere. `detail` is frequently the right answer, and becomes a defect only when the thing cannot be created in a working state without it.
 
@@ -85,10 +93,10 @@ Counted across `components/**` and `app/**` on 2026-08-23. Not about the modals 
 
 | Capability | Where | Ref | CLI | UI | Severity | Note |
 |---|---|---|---|---|---|---|
-| Sub-issue (parent) | both | `issue_handler_create.go:41` | `--parent-issue-id` | none | **gap** | The API fences it and guards cycles, and the UI RENDERS sub-issue trees it cannot create. Breaking an epic apart means dropping to the CLI. |
-| Due date | both | `issue_handler_create.go:38` | `--due-date` | detail | **gap** | Every issue filed from the UI starts undated, so planning is a second editing pass over issues you just typed. |
-| Estimate | both | `issue_handler_create.go:40` | `--estimate` | detail | **gap** | Same shape as due date — accepted at create by the API, missing from the modal. |
-| Milestone | both | `issue_handler_create.go:42` | `--milestone-id` | detail | **gap** | Accepted at create; the modal has no control, so milestone assignment is always a follow-up edit. |
+| Sub-issue (parent) | both | `issue_handler_create.go:41` | `--parent-issue-id` | none | **gap** | **⚠ CORRECTED (§7)** — The API fences it and guards cycles, and the UI RENDERS sub-issue trees it cannot create. Breaking an epic apart means dropping to the CLI. |
+| Due date | both | `issue_handler_create.go:38` | `--due-date` | detail | **gap** | **⚠ CORRECTED (§7)** — Every issue filed from the UI starts undated, so planning is a second editing pass over issues you just typed. |
+| Estimate | both | `issue_handler_create.go:40` | `--estimate` | detail | **gap** | **⚠ CORRECTED (§7)** — Same shape as due date — accepted at create by the API, missing from the modal. |
+| Milestone | both | `issue_handler_create.go:42` | `--milestone-id` | detail | **gap** | **⚠ CORRECTED (§7)** — Accepted at create; the modal has no control, so milestone assignment is always a follow-up edit. |
 | Routine inputs | api | `issue_handler_create.go:50` | — | none | **gap** | You can bind a routine to an issue from either client but never parameterise it, so it always fires with {}. No CLI flag either. |
 | Assign to a person | api | `issue_handler_create.go:36` | — | none | **gap** | assignee_type accepts "user"; the CLI hard-rejects it and both pickers only fetch /agents. A human cannot be assigned an issue from any client. |
 
@@ -140,7 +148,7 @@ _Closed in the working tree, with a test that fails without the fix. The row sta
 | Capability | Where | Ref | CLI | UI | Severity | Note |
 |---|---|---|---|---|---|---|
 | “Never” auto-stop means 4 hours | both | `submit.ts:30 + crews_create.go:297-301` | `--ttl 0` | create | **blocker** | The wizard omits container_ttl_hours when the chip says “Never”, and the server reads absent as its 4-hour default. The one chip that promises not to stop your crew is the one that stops it. The CLI got this right. |
-| Sidecar services (Postgres, Redis…) | api | `crews_create.go:74` | — | none | **gap** | Reachable from neither the UI nor the CLI — `crew services` only lists what someone else set. The only field in this audit with no operator surface at all. |
+| Sidecar services (Postgres, Redis…) | api | `crews_create.go:74` | — | none | **gap** | **⚠ CORRECTED (§7)** — Reachable from neither the UI nor the CLI — `crew services` only lists what someone else set. The only field in this audit with no operator surface at all. |
 | Private-endpoint egress | both | `crews_create.go:64` | `--allow-private-endpoints` | detail | **deferred** | Deliberately absent from the wizard and documented in cli-parity.test.ts — an ADMIN-tier egress grant does not belong behind a self-serve MANAGER wizard. |
 
 _Closed in the working tree, with a test that fails without the fix. The row stays: a ledger that deletes what it repaired cannot be read as a record of what was wrong._
@@ -179,7 +187,7 @@ _Closed in the working tree, with a test that fails without the fix. The row sta
 |---|---|---|---|---|---|---|
 | Path globs on a repo import | both | `skills_bulk_import.go:37` | `--paths` | none | **gap** | Importing from a monorepo pulls everything or nothing. |
 | Delete a workspace skill | both | `router_crews.go:502` | `skill delete` | none | **gap** | The detail panel only uninstalls from an agent. A bad import cannot be removed from the workspace in the browser. |
-| Assign to a whole crew | cli | `cmd_skill.go:690-692` | `--to-crew` | none | **gap** | The UI offers per-agent checkboxes only, so a ten-agent crew is ten clicks. |
+| Assign to a whole crew | cli | `cmd_skill.go:690-692` | `--to-crew` | none | **gap** | **⚠ CORRECTED (§7)** — The UI offers per-agent checkboxes only, so a ten-agent crew is ten clicks. |
 
 ### 4.11 Integrations → Add integration
 
@@ -192,9 +200,9 @@ _Closed in the working tree, with a test that fails without the fix. The row sta
 | Notification events + raw shoutrrr URL | both | `notification_channels.go:51 / :60` | `--events --url` | none | **gap** | `events` is typed in the hook and rendered by no control, so every UI channel fires on everything. Categories and min-priority are create-only — the UI patches nothing but `enabled`. |
 | Connector catalogue | both | `connectors_handler.go:110-112` | `connector install --field --crew` | none | **blocker** | ConnectorCatalog and ConnectorConnectSheet are built and tested — and mounted on no page. The whole manifest-driven connector flow is dead on arrival in the browser. |
 | “Test” on the Add-MCP wizard | both | `add-mcp-wizard.tsx:213-223 · integration_test_connection.go:42/:54` | `integration crew test <crew> <id>` | detail | **blocker** | A setTimeout(…, 400) that returns a hard-coded “Configuration looks valid.” No network call of any kind. If anyone reports “test passed but the server is broken”, this is why. |
-| Deleting a server leaves its tool rows behind | api | `migrate.go:1107-1117 · crew_integrations_crud.go:309/:333` | — | none | **gap** | mcp_tool_bindings has no foreign key to crew_mcp_servers, so no cascade. Deletion clears agent bindings and the server row and never the tool bindings — every deleted integration orphans its rows permanently. Not a UI gap; found while looking at one. |
+| Deleting a server leaves its tool rows behind | api | `migrate.go:1107-1117 · crew_integrations_crud.go:309/:333` | — | none | **gap** | **⚠ CORRECTED (§7)** — mcp_tool_bindings has no foreign key to crew_mcp_servers, so no cascade. Deletion clears agent bindings and the server row and never the tool bindings — every deleted integration orphans its rows permanently. Not a UI gap; found while looking at one. |
 | Discover a server's tools | api | `mcp_tool_bindings.go:174-295 · cmd_integration_tools.go` | `integration tools refresh --tool/--tools-file (records, does not discover)` | none | **blocker** | Filed first as “the UI is behind the CLI”. That was wrong, and the correction matters: `POST …/tools/refresh` UPSERTS a client-supplied tools[] and performs no discovery. #1884 gave the CLI --tool/--tools-file so it can at least carry a catalogue you already have, but neither surface discovers anything. The only code that speaks tools/list is the sidecar's gateway, whose catalogue never leaves the container — and stdio servers are never discovered at all. This is backend work, not a UI gap. |
-| Add a raw MCP server at all | cli | `app/(dashboard)/integrations/page.tsx:69 · lib/feature-flags.ts:25` | `integration add` | none | **blocker** | The MCP wizard, detail sheet and expanded panel only render behind NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS, which is off by default. In the shipped build there is NO way to add an MCP server from the browser — only the CLI. The doc comments still describe the flag-off path as a “coming soon placeholder”; it actually renders the full Composio UI. |
+| Add a raw MCP server at all | cli | `app/(dashboard)/integrations/page.tsx:69 · lib/feature-flags.ts:25` | `integration add` | none | **deferred** *(was blocker)* | **⚠ CORRECTED (§7)** — The MCP wizard, detail sheet and expanded panel only render behind NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS, which is off by default. In the shipped build there is NO way to add an MCP server from the browser — only the CLI. The doc comments still describe the flag-off path as a “coming soon placeholder”; it actually renders the full Composio UI. |
 | Per-tool switches actually block a tool | api | `agent_config.go:1322 · mcp_gateway.go:398-455` | — | detail | **gap** | mcp_tool_bindings reaches the agent as TEXT in the [CONNECTED INTEGRATIONS] prompt block and nothing else. Neither .mcp.json nor the gateway's CallTool consults it, so a tool switched off in the UI is still callable — the switch is a suggestion to the model, not a control. |
 
 _Closed in the working tree, with a test that fails without the fix. The row stays: a ledger that deletes what it repaired cannot be read as a record of what was wrong._
@@ -206,7 +214,7 @@ _Closed in the working tree, with a test that fails without the fix. The row sta
 
 | Capability | Where | Ref | CLI | UI | Severity | Note |
 |---|---|---|---|---|---|---|
-| Put data into a panel | both | `router_pages.go:63` | `page set <slug>/<panel> --data -` | none | **blocker** | Every option in every payload schema is unreachable from the browser. You can author the frame and never fill it — a panel is fed only by a producer routine, the CLI, or an inbound webhook. |
+| Put data into a panel | both | `router_pages.go:63` | `page set <slug>/<panel> --data -` | none | **deferred** *(was blocker)* | **⚠ CORRECTED (§7)** — Every option in every payload schema is unreachable from the browser. You can author the frame and never fill it — a panel is fed only by a producer routine, the CLI, or an inbound webhook. |
 | Give a page to a crew | both | `pages_handler.go:315` | `page create --owner crew/<slug>` | none | **gap** | The editor deliberately never sends `owner`, so a UI-authored page always belongs to the person who made it. |
 | The rest of the page document | both | `pages_handler.go:122-185` | `page create --file` | create | **fine** | Panels, SLAs, spans, tabs, actions, wake gates, grants, public links, webhooks, versions, rollback and export are all reachable. Spec-side parity is near-total; it is the payload side that is empty. |
 
@@ -214,13 +222,13 @@ _Closed in the working tree, with a test that fails without the fix. The row sta
 
 | Capability | Where | Ref | CLI | UI | Severity | Note |
 |---|---|---|---|---|---|---|
-| The default connector silently drops other servers | api | `agent_config.go:1254-1256` | — | none | **blocker** | With COMPOSIO_DEFAULT_CONNECTOR on, every non-Composio workspace and crew MCP server is dropped from the resolved runtime config without the rows being deleted — and GET …/integrations/resolved does not model this, so the screen that exists to answer “what will this agent get” shows servers the container will not receive. |
+| The default connector silently drops other servers | api | `agent_config.go:1254-1256` | — | none | **gap** *(was blocker)* | **⚠ CORRECTED (§7)** — With COMPOSIO_DEFAULT_CONNECTOR on, every non-Composio workspace and crew MCP server is dropped from the resolved runtime config without the rows being deleted — and GET …/integrations/resolved does not model this, so the screen that exists to answer “what will this agent get” shows servers the container will not receive. |
 
 ### 4.14 Everywhere
 
 | Capability | Where | Ref | CLI | UI | Severity | Note |
 |---|---|---|---|---|---|---|
-| Components built, tested, and mounted nowhere | both | `project-sidebar.tsx · connectors/ · assign-credential-dialog.tsx` | — | none | **blocker** | Three so far, found by three separate audits: 697 lines of milestone CRUD, the whole connector catalogue, and the credential-assignment dialog that would have exposed priority. Each is finished work that no route imports — which means the gap is not “nobody built it” but “nobody hooked it up”, and that is a much cheaper fix than it looks. |
+| Components built, tested, and mounted nowhere | both | `project-sidebar.tsx · connectors/ · assign-credential-dialog.tsx` | — | none | **blocker** | **⚠ CORRECTED (§7)** — Three so far, found by three separate audits: 697 lines of milestone CRUD, the whole connector catalogue, and the credential-assignment dialog that would have exposed priority. Each is finished work that no route imports — which means the gap is not “nobody built it” but “nobody hooked it up”, and that is a much cheaper fix than it looks. |
 
 ### 4.15 Chat
 
@@ -267,7 +275,7 @@ _Closed in the working tree, with a test that fails without the fix. The row sta
 
 | Capability | Where | Ref | CLI | UI | Severity | Note |
 |---|---|---|---|---|---|---|
-| Lifecycle hooks registry | both | `router_orchestration.go:544-549` | `hooks list/add/enable` | none | **gap** | Arbitrary shell and webhook code fires on platform events like pre_tool_call. The registry is invisible and unkillable from the browser. |
+| Lifecycle hooks registry | both | `router_orchestration.go:544-549` | `hooks list/add/enable` | none | **gap** | **⚠ CORRECTED (§7)** — Arbitrary shell and webhook code fires on platform events like pre_tool_call. The registry is invisible and unkillable from the browser. |
 | Feature flags and instance settings | both | `router_orchestration.go:182-193` | `feature-flag · instance settings` | none | **gap** | lib/feature-flags in the frontend is a hardcoded constants module, not this API. Flags cannot be flipped without a shell. |
 
 ### 4.21 Inbox
@@ -454,3 +462,74 @@ use is the one that outlives the page: a create flow that has outgrown a modal
 can be embedded in a route with its geometry intact rather than forked. Its
 header must therefore not use Radix's `DialogTitle`, whose primitives throw
 outside a Dialog root.
+
+## 7. Re-verification, 2026-08-29
+
+Forty of the 65 rows in §4 were re-read against the tree on 2026-08-29 by six
+parallel audits, one per slice. Each was told to return **FALSE**,
+**TRUE-BUT-DELIBERATE** or **TRUE-DEFECT** — that is, to look for reasons the
+row was wrong, not for confirmation. Roughly one in six did not survive.
+
+The rows stay in §4 rather than being deleted or rewritten, marked
+`⚠ CORRECTED`. Deleting a claim you got wrong is how an audit launders its own
+errors into a record of progress, and the corrections are the most useful thing
+in this file: they are the measurement of how fast a ledger nobody re-reads
+decays.
+
+Note the asymmetry before reading further. The credentials rows were re-checked
+by the same method and came back **understated** — the auditor's words. This
+section is not evidence that §4 is alarmist. It is evidence that §4 is
+*unreliable in both directions*, which is a different and more awkward problem.
+
+### 7.1 Simply wrong
+
+| Row | What is actually true |
+|---|---|
+| Crews → New crew · **Sidecar services** | `crewship apply` writes `services_json`: `internal/manifest/kinds/crew.go:190-193` is a typed `Services` spec with validation, serialised for crew create and update at `:771-874`, with a maintained example at `examples/manifests/python-with-services.crew.yaml` referenced from `docs/guides/auto-managed-credentials.mdx`. The real gap is narrow — no `--services` flag on `crew create`. The row was written from the handler struct and never checked `apply`. |
+| Skills → Import · **Assign to a whole crew** | `AssignToCrewDialog` (`skills-detail-panel.tsx:202,594-660`) picks one crew and applies the skill to every agent in it in a single submit, and has since `baa7d8e5`. The actual limitation is much smaller: it does not cover agents added to the crew later (documented at `:400-405`). |
+| Integrations → Add integration · **Deleting a server leaves its tool rows behind** | Fixed by migration `20260826190607_mcp_default_access.sql` — cascade triggers on both the workspace and crew server deletes, an insert-time FK guard, and a sweep of existing orphans. Test at `migrate_mcp_default_access_test.go:176-246`, documented at `docs/guides/migrations.mdx:635-642`. The migration landed **2026-08-26, three days after the row was written.** |
+
+### 7.2 Real, but decisions rather than defects
+
+These were graded `blocker`. Each is intended behaviour with a paper trail, and
+§4 now carries the re-grade. A ledger with no column for intent renders "the UI
+cannot do this" and "we decided the UI should not do this" identically — that is
+the structural fault behind all three, not three separate mistakes.
+
+| Row | The decision, and where it is written down |
+|---|---|
+| Integrations · **Add a raw MCP server at all** → `deferred` | Commit `cec5fc7a`: the hand-rolled self-hosted MCP connector UI "is being retired in favour of a managed integration platform (Composio). Hide it behind a build-time flag (default OFF)." Users are told at `docs/guides/integrations.mdx:9-16`. The flag is named `LEGACY_`, not `DISABLED_`, which only makes sense as a deliberate rollback path. And `CODEX-WORK-ORDER-RELEASE-1-0.md:610` lists whether the legacy catalogue belongs to the 1.0 surface as an open **ask-first** decision — so grading it `blocker` pre-empted a decision that is still open. |
+| Pages → New page · **Put data into a panel** → `deferred` | `pages_handler.go:4-10`: a page "holds no query, no datasource, no connection string and no credentials: it renders the last payload a producer pushed." `docs/prd/pages.md:5-8` specifies panel data as produced by a routine or a container script and pushed via CLI or sidecar. The empty-state copy already points at `crewship page set`. The consequence is real — a page authored wholly in the UI is inert until someone touches the CLI — but that is the specification working, not a missing screen. |
+| Integrations → Composio · **default connector drops other servers** → `gap` | Documented at `docs/guides/integrations.mdx:104-105`, and the code matches (`agent_config.go:1254-1256`, `:1391-1395`). `COMPOSIO_DEFAULT_CONNECTOR` defaults to false (`config.go:207`) and is set nowhere in this repo or in `~/crewship-infra`. What survives is narrower than the row: `ResolveAgentIntegrations` (`integration_resolve.go:72`) genuinely does not model the flag — but no frontend calls that endpoint, so the inconsistency is CLI-side, not the misleading screen the note described. |
+
+### 7.3 Stale, and one that never existed
+
+| Row | Correction |
+|---|---|
+| Issues → New issue · **Sub-issue (parent)**, **Due date**, **Estimate**, **Milestone** | All four shipped in #2056 and are in the real modal: state at `create-issue-modal.tsx:157-166`, posted at `:464-467`, each with a picker; the parent picker fetches crew-scoped candidates on the same three-state pattern as Assignee. §4.1's preamble is right that these rows deliberately measured the shipped product rather than the proposal — that was true when written, and the product then caught up without anyone ticking the rows. |
+| Everywhere · **Components built, tested, and mounted nowhere** | Out of date in both directions. `project-sidebar.tsx` and `assign-credential-dialog.tsx` were **deleted** in #2116, so two of the three named files no longer exist. `ConnectorCatalog`/`ConnectorConnectSheet` are still orphaned, but the shape is different from what the row implies: built 2026-05-14 (`9d592616`, `069a27f1`) and superseded by the Composio pivot (`cec5fc7a`) six weeks later — abandoned in place by a later decision, not unfinished work. A fourth has since surfaced: `CredentialsManager` (`agent-canvas-managers.tsx:167-260`) is exported and imported nowhere, which is why an agent cannot be given a credential from any screen — #2169, with the layout question that blocks mounting it at #2175. |
+| Admin · **Lifecycle hooks registry** | The gap is real; the framing was not. **`pre_tool_call` does not exist.** `cmd_hooks.go:33-35`: "pre_tool_call is not a valid `--event`: there is no interception point before a tool executes, so nothing could ever fire it." Only `post_tool_call` exists (`internal/hooks/types.go:65`). Registration is `roleManage` (OWNER/ADMIN) and `handler_kind: shell` is OWNER-only (`hooks_write.go:79-92`). So this is an operability gap — an OWNER cannot review or disable from the browser what they registered from a terminal — not the low-privilege shell-execution hole the note invited. The screen is being built in #2164. |
+
+### 7.4 What this means for release 1.0
+
+The release-1.0 quality bar (`docs/prd/PRD-RELEASE-1-0-QUALITY-AUDIT.md`) has
+eight conditions and **not one of them is about UI↔CLI parity**. Nothing in
+§4 is a release blocker by that document's own definition, whatever the
+`blocker` column says — that column grades reachability, not release risk, and
+the two have been read as the same thing.
+
+What the 1.0 milestone does contain, in #1781, #1782 and #1783, is a single
+recurring shape: *enforce it, or remove the claim.* A setting that is persisted
+and never consumed; a capability the product asserts and does not have. Judged
+against that bar rather than against parity, the rows that are 1.0 work are the
+ones where the product says something untrue:
+
+| Issue | The untrue claim |
+|---|---|
+| #2166 | The create-agent dialog offers a "Coordinator" role that the form does not have. |
+| #2167 | A held run reports only that it is waiting, dropping the `reason` that already arrives over the wire. |
+| #2168 | `mcp_tool_bindings.enabled` is documented as access control; on the self-hosted path it is a line of prompt text. |
+| #2169 | `agents_create.go` comments a post-201 credential prompt that does not exist, and a keyless agent looks healthy until its first run. |
+
+Everything else in §4 is an ordinary CLI-only gap. Real, worth fixing, and not
+a reason to hold a release.
