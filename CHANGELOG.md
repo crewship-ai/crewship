@@ -392,6 +392,37 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The `/design` parity ledger asserted 65 things about the product and about
+  one in six was wrong (#2172).** Forty rows were re-read against the tree by
+  six parallel audits, each asked to return FALSE, TRUE-BUT-DELIBERATE or
+  TRUE-DEFECT rather than to confirm. Ten did not hold: three were simply wrong
+  (sidecar services are writable via `crewship apply`; `AssignToCrewDialog` has
+  assigned a skill to a whole crew since the first skills sprint; the missing
+  `mcp_tool_bindings` cascade was fixed by migration `20260826190607`, three
+  days *after* the row claiming it was written), four had gone stale when the
+  Issues create fields shipped in #2056, and one cited an event
+  (`pre_tool_call`) that does not exist and never could — `cmd_hooks.go` says
+  so outright.
+
+  Those rows now carry `corrected`, a field deliberately distinct from `fixed`
+  and rendered in a different colour. `fixed` means the product changed;
+  `corrected` means the ledger was wrong. A row that quietly flips to green
+  when nobody touched the product turns an audit's own mistakes into a record
+  of progress.
+
+  Three further rows were re-graded off `blocker`, because they are documented
+  decisions rather than defects: raw MCP sits behind
+  `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS` by an intent stated in `cec5fc7a` and
+  documented for users, Pages panels are producer-fed by specification, and the
+  Composio default connector's drop behaviour is documented with the flag
+  shipping off. A table with no column for intent renders "the UI cannot do
+  this" and "we decided the UI should not do this" identically, which is how
+  three settled decisions came to be tagged as release blockers.
+
+  The correction count now sits on the page beside the other headline numbers,
+  so a reader weighing how much to trust the table gets its error rate before
+  reading it rather than after.
+
 - **`claim-issue.sh` produced permanent phantom locks in the majority of
   cases — measured at 19 of 35 live claims, with 6 issues double-claimed
   (#2107).** Two compounding bugs. First, the RELEASE parser cancelled a
