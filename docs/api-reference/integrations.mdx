@@ -917,6 +917,14 @@ seen via [Refresh](#refresh-crew-integration-tools) have a row; a tool
 with no row is treated as **enabled** by default. This endpoint does
 **not** contact the MCP server.
 
+**This is advisory, not access control.** On the self-hosted/legacy MCP
+path, `enabled` only decides whether a tool's name is listed in the
+agent's `[CONNECTED INTEGRATIONS]` prompt block (a hint of what to
+call) — the sidecar gateway that actually dispatches tool calls does
+no per-tool check, so a disabled tool can still be invoked directly.
+Composio-routed integrations are the exception: those enforce their
+own `allowed_tools` scope server-side, independent of this table.
+
 **Response:** `200 OK` — a JSON **array** of tool-binding objects (no wrapper).
 
 ```json
@@ -931,7 +939,7 @@ with no row is treated as **enabled** by default. This endpoint does
 | `id` | string | Tool-binding row ID |
 | `tool_name` | string | MCP tool name |
 | `description` | string? | Tool description (nullable) |
-| `enabled` | boolean | Per-crew enabled state |
+| `enabled` | boolean | Per-crew enabled state — advisory only, see caveat above |
 | `created_at` | string | ISO 8601 timestamp |
 | `updated_at` | string | ISO 8601 timestamp |
 

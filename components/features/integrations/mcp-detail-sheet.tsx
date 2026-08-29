@@ -108,6 +108,13 @@ export function MCPDetailSheet({
   const overCeiling = enabledCount > TOOL_CEILING_WARNING
 
   const toggleTool = async (tool: ToolBinding) => {
+    // Advisory, not access control: on the self-hosted/legacy MCP path this
+    // flag only decides whether the tool's name is listed in the agent's
+    // [CONNECTED INTEGRATIONS] prompt block. The sidecar gateway that
+    // dispatches tool calls (internal/sidecar/mcp_gateway.go CallTool) does
+    // no per-tool check, so an agent can still call a "disabled" tool
+    // directly. Composio-routed integrations enforce their own
+    // allowed_tools scope separately — see #2168.
     // Optimistic UI
     const next = !tool.enabled
     setTools((prev) => prev.map((t) => t.id === tool.id ? { ...t, enabled: next } : t))
@@ -234,6 +241,13 @@ export function MCPDetailSheet({
                     Reload list
                   </Button>
                 </div>
+
+                {totalCount > 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Advisory only — this controls what the agent is told it can
+                    use, not what it is allowed to call.
+                  </p>
+                )}
 
                 {overCeiling && (
                   <div className="rounded-md border border-warn/30 bg-warn/[0.05] p-3 text-xs flex gap-2">

@@ -102,7 +102,12 @@ func toggleCrewIntegrationTool(crewSlug, integrationID, toolName string, enabled
 var intgToolsEnableCmd = &cobra.Command{
 	Use:   "enable <crew-slug> <integration-id> <tool-name>",
 	Short: "Enable a single tool on a crew-scoped integration",
-	Args:  cobra.ExactArgs(3),
+	Long: `Enable a single tool on a crew-scoped integration.
+
+Advisory, not access control: on the self-hosted/legacy MCP path this
+only adds the tool's name back to the agent's connected-integrations
+prompt block. It does not gate the tool call itself.`,
+	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return toggleCrewIntegrationTool(args[0], args[1], args[2], true)
 	},
@@ -111,7 +116,15 @@ var intgToolsEnableCmd = &cobra.Command{
 var intgToolsDisableCmd = &cobra.Command{
 	Use:   "disable <crew-slug> <integration-id> <tool-name>",
 	Short: "Disable a single tool on a crew-scoped integration",
-	Args:  cobra.ExactArgs(3),
+	Long: `Disable a single tool on a crew-scoped integration.
+
+Advisory, not access control: on the self-hosted/legacy MCP path this
+only removes the tool's name from the agent's connected-integrations
+prompt block. The sidecar gateway that dispatches tool calls does no
+per-tool check, so the tool can still be called directly. Composio-
+routed integrations are enforced separately, through Composio's own
+allowed_tools scope, not through this binding.`,
+	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return toggleCrewIntegrationTool(args[0], args[1], args[2], false)
 	},

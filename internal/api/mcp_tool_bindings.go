@@ -8,13 +8,28 @@ import (
 	"time"
 )
 
-// mcp_tool_bindings backs the per-tool enable/disable affordance copied
-// from Cursor (see CONNECTIONS.md §3.1, §5.5). Each row pins one tool
+// mcp_tool_bindings backs the per-tool enable/disable picker copied from
+// Cursor (see CONNECTIONS.md §3.1, §5.5). Each row pins one tool
 // (`tool_name`) on one MCP server (`mcp_server_id` + `mcp_server_scope`)
 // to enabled / disabled. Default for missing row = enabled (so a tool
 // the user has never seen the picker for still works); the row only
 // materialises when the user explicitly toggles or the FE pushes a
 // refreshed list.
+//
+// This is NOT access control on the self-hosted/legacy MCP path: the
+// sidecar gateway's CallTool (internal/sidecar/mcp_gateway.go) has no
+// per-tool lookup and will happily invoke a tool whose binding is
+// disabled — the enabled set only reaches attachEnabledToolNames
+// (internal/api/agent_config.go), which lists it in the model-facing
+// [CONNECTED INTEGRATIONS] prompt block as a hint of what to call, not
+// a gate on what it CAN call. Disabling a tool here is advisory: it
+// asks the model not to reach for it. It does not stop the model, and
+// it does not stop a direct API/CLI call to the tool.
+//
+// Composio-routed integrations are different: Composio enforces its own
+// allowed_tools scope server-side (internal/composio/client.go
+// CreateMCPServer/UpdateMCPServer), sourced from the app's Read-only/Full
+// access mode, not from this table. See #2168.
 
 type toolBindingResponse struct {
 	ID          string  `json:"id"`
