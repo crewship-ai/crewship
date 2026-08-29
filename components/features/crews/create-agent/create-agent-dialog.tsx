@@ -185,7 +185,7 @@ export function CreateAgentDialog({
     if (!/^[a-z0-9-]{2,}$/.test(draft.slug))
       return "Slug must use only lowercase letters, digits, and hyphens (2+ chars)"
     if (requiresCrew && !draft.crewSlug)
-      return crews.length === 0 ? "Create a crew first — Coordinator role works without one" : "Pick a crew"
+      return crews.length === 0 ? "Create a crew first — agents and leads both need one" : "Pick a crew"
     return null
   })()
   const hasNoCrews = crews.length === 0
@@ -365,10 +365,8 @@ export function CreateAgentDialog({
 
           {!pickerOpen && hasNoCrews && (
             <CreateSurfaceNotice tone="warn" icon={TriangleAlert}>
-              This workspace has <strong className="text-foreground">no crews yet</strong>. Agents (and
-              Leads) live inside a crew — create one first, or set this agent as a{" "}
-              <strong className="text-foreground">Coordinator</strong> (workspace-wide, no crew
-              required).
+              This workspace has <strong className="text-foreground">no crews yet</strong>. Agents and
+              Leads both live inside a crew — create one first.
             </CreateSurfaceNotice>
           )}
 
@@ -540,7 +538,7 @@ export function CreateAgentDialog({
                   />
                 </CreateSurfaceField>
               ) : (
-                <CreateSurfaceField label="Crew" htmlFor="agent-crew" hint="N/A for Coordinator">
+                <CreateSurfaceField label="Crew" htmlFor="agent-crew" hint="workspace-wide, no crew">
                   <input
                     id="agent-crew"
                     className={cn(INPUT_CLASS, "text-muted-foreground")}

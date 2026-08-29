@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { CreateAgentDialog } from "../create-agent-dialog"
@@ -393,6 +396,55 @@ describe("CreateAgentDialog", () => {
       await waitFor(() =>
         expect(screen.getByRole("combobox", { name: "Crew" }).textContent).toContain("Research"),
       )
+    })
+  })
+
+  // -- The copy must not promise a role this door can't deliver ----------
+  //
+  // #2166: the empty-workspace banner, the crew-required validation hint,
+  // and the (unreachable while requiresCrew is a literal `true`) crew-field
+  // hint all told the user about a "Coordinator" role — workspace-wide, no
+  // crew needed. The Role control just above has never offered more than
+  // Agent and Lead. A user in a brand-new workspace — the exact moment the
+  // banner fires — followed the product's own instructions into a dead end.
+  //
+  // These assertions are derived from the Role control's actual rendered
+  // options rather than hardcoded to "Coordinator", so they keep guarding
+  // the real property (copy matches the picker) if the wording changes
+  // again, rather than being a snapshot of today's sentence.
+  describe("role copy matches what the Role control actually offers", () => {
+    it("the empty-crews banner does not name a role the Role control doesn't offer", async () => {
+      renderDialog({ crews: [], defaultCrewSlug: null })
+      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent/ })).toBeInTheDocument())
+      const offeredRoles = screen.getAllByRole("radio").map((r) => r.textContent?.trim())
+
+      const banner = screen.getByText(/no crews yet/i).closest(".rounded-md")!.textContent!
+      const claim = banner.match(/as an? ([A-Z][a-zA-Z]+)/)
+      // If the banner offers to set the agent as some named role, that role
+      // must be one Role actually lets you pick — not a promise the form
+      // can't keep.
+      expect(claim === null || offeredRoles.includes(claim[1])).toBe(true)
+    })
+
+    it("the crew-required validation hint does not name a role the Role control doesn't offer", async () => {
+      renderDialog({ crews: [], defaultCrewSlug: null })
+      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent/ })).toBeInTheDocument())
+      const offeredRoles = screen.getAllByRole("radio").map((r) => r.textContent?.trim())
+
+      const nameInput = screen.getByPlaceholderText("Filip") as HTMLInputElement
+      fireEvent.change(nameInput, { target: { value: "Filip" } })
+      const hint = screen.getByText(/create a crew first|pick a crew/i).textContent!
+      const claim = hint.match(/([A-Z][a-zA-Z]+) role works without one/)
+      expect(claim === null || offeredRoles.includes(claim[1])).toBe(true)
+    })
+
+    // The crew-field hint ("N/A for Coordinator") sits behind
+    // `requiresCrew`, a literal `true` (a separate capability question,
+    // out of scope here) — no prop can make that branch render, so this
+    // door's dead copy can only be guarded by reading the source directly.
+    it("the component source names no role outside Agent/Lead", () => {
+      const src = readFileSync(path.join(__dirname, "..", "create-agent-dialog.tsx"), "utf8")
+      expect(src).not.toMatch(/Coordinator/)
     })
   })
 })
