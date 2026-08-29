@@ -1,6 +1,6 @@
 ---
 title: "Conversations"
-description: "Message reactions and chat attachments — the read/write surface around chat sessions beyond the basic message list."
+description: "Message reactions, group-chat participants, mid-turn steering, and chat attachments — the read/write surface around chat sessions beyond the basic message list."
 icon: "messages-square"
 stability: experimental
 tag: Experimental
@@ -10,9 +10,9 @@ tag: Experimental
 # Conversations
 
 Endpoints for the chat surface beyond the basic message list: conversation
-search, emoji reactions on assistant messages, and file attachments uploaded
-for an agent. See the [Chat & Sessions guide](/guides/chat-sessions) for the
-user-facing model.
+search, emoji reactions on assistant messages, group-chat participants,
+mid-turn steering, and file attachments uploaded for an agent. See the
+[Chat & Sessions guide](/guides/chat-sessions) for the user-facing model.
 
 Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachments`, `chat_branches`, and `workspace_files` tables that back this surface.
 
@@ -27,6 +27,10 @@ Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachmen
 | GET | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#list-reactions) | List aggregated reactions on a message |
 | POST | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#add-reaction) | Add a reaction |
 | DELETE | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}`](#remove-reaction) | Remove a reaction |
+| GET | [`/api/v1/chats/{chatId}/participants`](#list-participants) | List the humans in a group chat |
+| POST | [`/api/v1/chats/{chatId}/participants`](#add-participant) | Add a participant (promotes the chat to a group) |
+| DELETE | [`/api/v1/chats/{chatId}/participants/{userId}`](#remove-participant) | Remove a participant |
+| POST | [`/api/v1/chats/{chatId}/steer`](#steer-a-chat) | Queue a mid-turn steering message |
 | POST | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments`](#upload-attachment) | Upload a chat attachment |
 | GET | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments`](/api-reference/agents#list-chat-attachments) | List a chat's attachments |
 | DELETE | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}`](/api-reference/agents#delete-chat-attachment) | Delete one chat attachment |
@@ -166,6 +170,156 @@ The emoji is **a path segment**, not a query parameter. URL-encode if it contain
 
 **Errors:** `401` not authenticated; `404` chat not found or caller is not a
 workspace member; `500` database error while removing the reaction.
+
+---
+
+## Chat participants
+
+The humans in a multi-user group chat. Adding the first extra participant
+promotes the chat to `visibility='group'`, after which the agent only
+responds when @mentioned rather than to every message — see the
+[Group chats](/guides/chat-sessions#group-chats-multiple-humans-+-the-agent) section of the Chat &
+Sessions guide for the user-facing model. CLI parity:
+[`crewship chat participants`](/cli/chat#manage-group-chat-participants).
+
+Scoped via `chats.workspace_id`, with no `workspace_id` in the path or body —
+the handler resolves the chat's workspace and checks the caller's membership
+itself. A cross-tenant or unknown `chatId` is `404` for every verb below.
+
+**Managing (`POST`/`DELETE`) requires the chat's creator or a workspace
+`OWNER`/`ADMIN`** — a plain member can list participants but not mutate the
+roster, otherwise any member could reshape any chat in the workspace. A
+participant whose per-row `role` is `owner` is **not** thereby granted this
+right; `role` is an informational label only (see [Add
+participant](#add-participant)).
+
+### List participants
+
+```
+GET /api/v1/chats/{chatId}/participants
+```
+
+**Auth:** Any authenticated workspace member with access to the chat.
+
+**Response:** `200 OK`
+
+```json
+{
+  "participants": [
+    { "user_id": "usr_42", "email": "jane@example.com", "full_name": "Jane Doe", "role": "owner", "joined_at": "2026-06-01T10:00:00Z" }
+  ]
+}
+```
+
+`participants` is `[]` for a private (never-promoted) chat, not an error.
+
+**Errors:** `404` unknown or cross-workspace chat, or caller is not a member.
+
+### Add participant
+
+```
+POST /api/v1/chats/{chatId}/participants
+Content-Type: application/json
+```
+
+**Request body:**
+
+```json
+{ "user_id": "usr_42", "role": "member" }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `user_id` | string | **Required.** Must already be a member of the chat's workspace. |
+| `role` | string | Optional, `member` (default) or `owner`. Informational only — it does **not** grant manage-participants rights; that comes solely from being the chat creator or a workspace OWNER/ADMIN. |
+
+The chat's creator is seeded as an `owner` participant row on the first
+`POST` if it isn't already present, so a freshly promoted group lists
+everyone rather than leaving the creator implicit. The chat is promoted to
+`visibility='group'` in the same transaction.
+
+**Response:** `204 No Content`.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `user_id`, or `user_id` does not name a member of this workspace. |
+| 401 | Not authenticated. |
+| 403 | Caller is not the chat creator or a workspace OWNER/ADMIN. |
+| 404 | Unknown or cross-workspace chat. |
+
+### Remove participant
+
+```
+DELETE /api/v1/chats/{chatId}/participants/{userId}
+```
+
+**Path parameters:** `chatId`; `userId` — the participant to remove.
+
+**Response:** `204 No Content`. Idempotent-adjacent: removing a user who
+isn't currently a participant still returns `204` (the `DELETE` has no
+existence check beyond the owner guard below).
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | `userId` is the chat's creator — removing the implicit owner is rejected (`cannot remove the chat owner`) so the roster is never left ownerless. |
+| 401 | Not authenticated. |
+| 403 | Caller is not the chat creator or a workspace OWNER/ADMIN. |
+| 404 | Unknown or cross-workspace chat. |
+
+---
+
+## Mid-turn steering
+
+Redirect an agent that is already mid-turn — "actually, focus on the auth bug
+first" — without waiting for the current run to finish or racing a second run
+into the same container. See [Mid-turn
+steering](/guides/chat-sessions#mid-turn-steering) in the Chat & Sessions
+guide for the full behavioral model. CLI parity: [`crewship chat
+steer`](/cli/chat#chat-steer-<chat-id>).
+
+### Steer a chat
+
+```
+POST /api/v1/chats/{chatId}/steer
+Content-Type: application/json
+```
+
+**Auth:** Any authenticated caller allowed to operate the chat (workspace
+membership via `chats.workspace_id`, checked in-handler — same tenancy
+contract as the reactions endpoints).
+
+**Request body:**
+
+```json
+{ "message": "focus on the auth bug first" }
+```
+
+**Response:** `202 Accepted`
+
+```json
+{ "queued": true, "in_flight": true }
+```
+
+`queued` is `true` once the message is durably queued for the agent's next
+turn. `in_flight` reports whether a run was already live for the chat when
+the request landed — `true` means the steer lands after the current turn
+finishes; `false` means it lands at the start of the next turn you kick off.
+This slice is **queue-for-next-turn, not live injection**: interrupting a
+generation already in progress is a planned follow-up, not implemented here.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing or empty `message`. |
+| 401 | Not authenticated. |
+| 404 | Unknown or cross-workspace chat. |
+| 422 | The steering message was rejected (e.g. a prompt-injection content-scan hit) — nothing is persisted. |
+| 503 | No chat bridge is wired on this server (steering unavailable). |
 
 ---
 
@@ -311,6 +465,8 @@ See [Internal IPC API — Crew messaging and files](/api-reference/internal#crew
   `agent_id`, cross-workspace returns 404; without it, another workspace's
   caller searches only its own agents and simply gets no hits.
 - Reactions: handler joins `chats.workspace_id → workspace_members.role`. No workspace_id in path or body. Cross-workspace returns 404.
+- Participants: same `chats.workspace_id` join as reactions; mutating additionally requires being the chat creator or a workspace OWNER/ADMIN.
+- Steering: same `chats.workspace_id` join; any workspace member with chat access may steer.
 - Attachments: agent-and-chat both validated against the session's workspace. Cross-workspace returns 404; chat-not-on-agent returns 403.
 - Crew messaging is internal-only; the sidecar's `IPCConfig` carries the scope.
 

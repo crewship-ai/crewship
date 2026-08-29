@@ -412,10 +412,81 @@ func waitForPairRedemption(client *cli.Client, code string, timeout, interval ti
 	}
 }
 
+// authProfileFullName backs --full-name on authProfileCmd.
+var authProfileFullName string
+
+// authProfileCmd is the CLI for PATCH /api/v1/users/me — the one
+// self-service profile mutation that shipped with no command (#2147).
+// Password (authPasswdCmd) and avatar (authAvatarCmd) already had theirs;
+// this is the last of the three.
+var authProfileCmd = &cobra.Command{
+	Use:   "profile",
+	Short: "Update your display name",
+	Long: `Update your own profile.
+
+    crewship auth profile --full-name "Jane Doe"
+
+Only your full name is editable this way — the API accepts no other
+field on this endpoint. Email changes require a re-verification flow
+that does not exist yet, so there is no --email flag here to promise
+something the server would silently ignore.
+
+Prints the updated profile and honors the global --format flag (table
+by default, or json/yaml/ndjson for scripts).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		name := strings.TrimSpace(authProfileFullName)
+		if name == "" {
+			return cli.WithExitCode(fmt.Errorf("--full-name is required"), cli.ExitValidation)
+		}
+
+		client := newAPIClient()
+		// User-scoped endpoint — no workspace context.
+		client.WorkspaceID = ""
+		resp, err := client.Patch("/api/v1/users/me", map[string]string{"full_name": name})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var profile struct {
+			ID        string  `json:"id"`
+			Email     string  `json:"email"`
+			FullName  *string `json:"full_name"`
+			AvatarURL *string `json:"avatar_url"`
+		}
+		if err := cli.ReadJSON(resp, &profile); err != nil {
+			return err
+		}
+
+		displayName := ""
+		if profile.FullName != nil {
+			displayName = *profile.FullName
+		}
+		pairs := [][]string{
+			{"ID", profile.ID},
+			{"Email", profile.Email},
+			{"Full name", displayName},
+		}
+		if profile.AvatarURL != nil && *profile.AvatarURL != "" {
+			pairs = append(pairs, []string{"Avatar URL", *profile.AvatarURL})
+		}
+		return resolvedFormatter(cmd).AutoDetail(profile, pairs)
+	},
+}
+
 func init() {
 	authCmd.AddCommand(authPasswdCmd)
 	authAvatarCmd.Flags().BoolVar(&authAvatarClear, "clear", false, "remove your avatar (back to initials)")
 	authCmd.AddCommand(authAvatarCmd)
+
+	authProfileCmd.Flags().StringVar(&authProfileFullName, "full-name", "", "your new display name (1-100 characters)")
+	authCmd.AddCommand(authProfileCmd)
 
 	authPairCmd.Flags().String("adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
 	authPairCmd.Flags().Bool("no-wait", false, "Print the code and exit immediately, without waiting for it to be redeemed")

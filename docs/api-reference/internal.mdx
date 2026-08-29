@@ -78,6 +78,9 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `POST` | [/api/v1/internal/keeper/negative-learning](#keeper) | Evaluate a negative-learning candidate |
 | `POST` | [/api/v1/internal/mcp-tool-calls](#mcp-audit) | Record an MCP tool invocation for audit |
 | `POST` | [/api/v1/internal/port-expose](#port-expose) | Request a capability URL for an internal port |
+| `GET` | [/api/v1/internal/notifications/channels](#agent-notifications) | List channels the calling agent may post to |
+| `POST` | [/api/v1/internal/notifications/send](#agent-notifications) | Agent sends a message to a channel it is paired with |
+| `POST` | [/api/v1/internal/pages/save](#pages) | Agent-authored page creation (name + panels) |
 
 ## Authentication
 
@@ -293,8 +296,9 @@ Keeper Phase 2 (aux-LLM evaluators, PR-C / PRD §6 F4). All four are wrapped in 
 | Method | Path | Purpose |
 |---|---|---|
 | `PUT` | `/api/v1/internal/pages/{page}/data` | Write one panel's payload on behalf of a routine run or a container agent. |
+| `POST` | `/api/v1/internal/pages/save` | Agent-authored page **creation** — build a new page's metadata + panels from inside a container. See [Pages: agent creation](#pages-agent-creation) below. |
 
-The body is an **envelope**, not the payload: `workspace_id`, `crew_id`,
+The body of `PUT .../data` is an **envelope**, not the payload: `workspace_id`, `crew_id`,
 `agent_id` and `author_run_id` are injected by the caller (the dispatcher for
 the `page.write` verb, the sidecar for an agent), `panel` names which panel of
 the page to write, `state` carries the producer's own verdict (`ok` or
@@ -305,6 +309,81 @@ Producer authority is checked here, not upstream: the panel's declared
 `producer:` must name the acting routine or agent, or a human must have issued
 a `produce` grant covering the panel. A refusal writes a journal entry and
 notifies the page owner. See [Pages](/guides/pages).
+
+### Agent notifications
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/internal/notifications/channels?workspace_id=…&agent_id=…&crew_id=…` | Discovery — the channels the calling agent may post to. `workspace_id` and `agent_id` are required; `crew_id` is optional. |
+| `POST` | `/api/v1/internal/notifications/send` | Send a message to a channel the agent is paired with. See [Agent notifications: send](#agent-notifications-send) below. |
+
+An agent posting a status update to a Slack channel a human explicitly wired
+it to — distinct from the outbound routing the [category preference
+matrix](/api-reference/preferences#notification-preferences) governs
+(`agents.message` is deliberately excluded from that matrix; the pairing
+itself is the authorization, see below). Implementation:
+`internal/api/internal_notifications.go` (`AgentNotifyHandler`).
+
+Four gates, checked in order, so a rejected call is told which one it failed:
+
+1. **Identity** — the agent exists in the claimed workspace, and (for a
+   crew-bound token) belongs to that crew. An agent cannot send as another
+   agent.
+2. **Pairing** — the channel must be paired to *this* agent. Default-deny; a
+   workspace admin grants it with `crewship notifychannel agents allow
+   <channel-id> --agent <agent-id>`.
+3. **Rate** — a per-agent token bucket (burst 3, refill 1/60s per
+   agent×channel), tighter than the human-facing preference matrix's, because
+   an agent in a loop can call a tool far faster than a human clicks.
+4. **Scrub** — the title and body are redacted by the same secret scrubber
+   that guards memory and tool output before the message leaves the instance.
+
+#### Agent notifications: send
+
+```
+POST /api/v1/internal/notifications/send
+```
+
+**Request body:** capped at 64 KiB; `body` itself is capped at 8 KiB.
+
+```json
+{
+  "workspace_id": "ws_…",
+  "agent_id": "agt_…",
+  "crew_id": "crw_…",
+  "channel_id": "nch_…",
+  "title": "Deploy finished",
+  "body": "staging is green, 12 tests skipped"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id`, `agent_id`, `channel_id` | string | **Required.** |
+| `crew_id` | string | Optional; when the token is crew-bound it must agree with the token's own crew. |
+| `title` | string | **Required** (trimmed, must be non-empty). |
+| `body` | string | Optional; max 8 KiB. |
+
+**Response:** `200 OK`
+
+```json
+{ "ok": true, "channel_id": "nch_…" }
+```
+
+Delivery is journaled either way — `notification.delivered` on success,
+`notification.failed` (with the dispatch error) otherwise — attributed to the
+agent as actor, so "who sent this to Slack?" has an answer on the Activity
+timeline.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid JSON, missing `workspace_id`/`agent_id`/`channel_id`, empty `title`, `body` over 8 KiB, or the channel is disabled. |
+| 403 | Unknown agent, agent not in the claimed workspace/crew, or the channel is not paired with this agent. |
+| 404 | `channel_id` does not resolve in this workspace. |
+| 429 | The per-agent rate gate tripped. |
+| 502 | The channel's dispatcher failed to deliver (e.g. the webhook/Slack call itself failed). |
 
 ### Port expose
 
@@ -441,6 +520,66 @@ The trusted endpoint the sidecar forwards to when an agent emits a new pipeline 
 **Response:** `201 Created` — the saved pipeline object (`toPipelineResponse`).
 
 **Errors:** `400` (invalid JSON, or missing `workspace_id` / `slug` / `definition`), `409` (slug already exists in the workspace), `422` (DSL parse / validation / cycle-detection failure, or the test-run gate was not satisfied), `500` (DB error).
+
+## Pages: agent creation
+
+```
+POST /api/v1/internal/pages/save
+```
+
+The trusted endpoint the sidecar's `save_page` MCP tool forwards to — the
+route that lets an agent build a Page's metadata + panels from scratch,
+distinct from `PUT /api/v1/internal/pages/{page}/data`, which only pushes one
+panel's payload onto a page a **human** already created. Mirrors
+`pipelines/save`'s trust model as closely as the two domains allow: identity
+is proven against the token binding (never trusted from the body beyond
+that), the request is gated on the authoring crew's `autonomy_level`, and it
+reuses the exact validation/insert machinery `POST /api/v1/pages` (the public
+create route) uses. (`internal/api/pages_internal_save.go:90`)
+
+**Request body:** capped at `pages.MaxSpecBytes` + 8 KiB envelope slack.
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id` | string | **Required.** |
+| `crew_id` | string | **Required** — an agent-created page is always owned by its authoring crew; there is no user fallback on this route. |
+| `agent_id` | string | Optional. Must name a live agent of `crew_id`, or `400`. |
+| `name` | string | **Required.** Slugified to the page's URL slug. |
+| `description` | string | Optional. |
+| `panels` | array | **Required, non-empty** — a page needs at least one panel. Same shape as `POST /api/v1/pages`. |
+| `target_crew_slug` | string | Optional. Re-points ownership at the crew this page is being built FOR — accepted only from the onboarding setup crew (see `internal_delegated_crew.go`); when set, `agent_id` is cleared before the author-agent check. |
+
+**Response:** `201 Created` — the created page document (same shape as
+`GET /api/v1/pages/{slug}`).
+
+**Autonomy gate.** `page_create` is evaluated against the *acting* crew (the
+authoring crew, before any `target_crew_slug` delegation) before validation
+runs, so a held request never has to pass full spec validation to learn it
+will not be created:
+
+- **Held** (autonomy below the level `page_create` requires): unlike
+  `crew_create`/`agent_create`, a page has no "created but inert" staging
+  state — no status column, no `.proposed` directory — so a held request
+  creates **nothing at all**. The response is `403` with `{"error",
+  "reason", "crew_id", "autonomy_level", "policy_action", "pending_review":
+  true, "requested_name", "requested_slug"}`, and a blocking, ADMIN-addressed
+  inbox item records what was attempted.
+- **Allowed:** the page is created; at `full` autonomy a **non-blocking**
+  inbox notice is also left ("worth a glance" even though nothing needs
+  approval).
+
+See [Autonomy gate on agent-driven creation](#autonomy-gate-on-agent-driven-creation)
+for the general model this follows.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid JSON, missing `workspace_id`/`name`, empty `panels`, `crew_id` empty after delegation resolution, `agent_id` not in the authoring crew, or `name` slugifies to nothing. |
+| 403 | Cross-tenant `workspace_id`/`crew_id` against the token binding, or the autonomy gate held the request (see above). |
+| 409 | A page with the resolved slug already exists in the workspace. |
+| 422 | Panel spec validation, reference resolution, or gate-expression resolution failed, or the workspace's page cap (`pages.MaxPagesPerWorkspace`) was reached. |
+| 500 | DB error. |
 
 ## Slash-action mirrors
 

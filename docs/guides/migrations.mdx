@@ -433,6 +433,255 @@ that added the pair. The two definitions only read as redundant once you line
 them up, which is what the machine is better at.
 </Note>
 
+## 20260811122612 — Chain queries get the index they actually use
+
+Replaces `idx_pipeline_runs_chain (workspace_id, chain_depth) WHERE chain_depth
+> 0` — added speculatively for a "show me the chains" query that never got
+written — with `idx_pipeline_runs_chain_origin (workspace_id, chain_origin)`,
+which is the column the three shipping chain queries (`GET
+/api/v1/chains`'s grouped CTE, the pre-migration "any unrecorded runs" probe,
+and the touched-issues fan-out) actually select on. Not a table-scan fix: a
+workspace-leading index already got the planner to the table, so the plan read
+as healthy while re-checking `chain_origin` against every run the workspace
+had ever recorded. `TestChainsList_HotQueriesReachRunsByChainOrigin` pins the
+planner's choice directly rather than asserting on wall-clock time.
+
+No behaviour change. Index-only, reversible from the dropped index's original
+definition (stated in the migration file) if a `chain_depth > 0` query is ever
+written.
+
+## 20260812155322 – 20260813080612 — Pages
+
+Five migrations for [Pages](/guides/pages) (docs/prd/pages.md), a
+workspace-scoped, slug-addressable dashboard record holding an ordered list of
+panels. A page holds no query, no datasource and no credentials — it renders
+the last payload a producer pushed from inside a crew container, which is why
+the producer-authority columns (`owner_crew_id`, `producer_kind`/`producer_ref`)
+carry the whole security model instead of a query to authorize.
+
+| Migration | Adds |
+|---|---|
+| `20260812155322_pages` | The six core tables: `pages`, `page_panels`, `page_panel_data` (a bounded 200-row / 7-day ring, not a time-series store), `page_versions` (every save, last 50 retained), `page_grants` (the first per-object ACL in the schema — `read`/`produce`/`write`, issued only by a human), `page_public_tokens` (hashed, always-expiring `/p/{token}` links). |
+| `20260812180544_page_retention` | `workspaces.page_retention_days` — per-workspace override of the panel-data ring's age cut, same nullable convention as `run_retention_days` (NULL = product default, currently 7 days; it cannot mean "keep forever" or widen the 200-row cap). |
+| `20260812225500_automations_action_kind_issue` | Table-rebuild widening `automations.action_kind`'s CHECK to admit `'issue'` — the original migration's own comment promised this but the CHECK still said `IN ('routine')`, so a Pages wake gate opening an issue was unstorable. `'notify'` stays deliberately unadmitted: nothing implements it yet, and an accepted-but-inert value is how a saved rule silently never fires. |
+| `20260812230000_page_panel_alerts` | `page_panel_alerts(panel_id, gate_key)` — one row per currently-open alert (an SLA lapse, or a firing wake gate), so a once-a-minute sweeper can't re-open a duplicate issue on every tick. A row's absence means clear; history lives in the journal (`page.panel.stale`, `page.wake.fired`), not here. |
+| `20260813080612_page_webhooks` | `page_webhooks` — a hashed token bound to exactly **one panel** (`panel_id`, no `page_id`), so a leaked token writes one panel and nothing else. Unlike `pipeline_webhooks`, this table never had a cleartext column to redact. |
+
+Together these back `crewship page` and the `/api/v1/pages` family — see
+[Pages](/guides/pages) for the operator model and
+[Autonomy gate on agent-driven creation](/api-reference/internal#autonomy-gate-on-agent-driven-creation)
+for `page_create`'s gate, which the setup-agent's [page-save internal
+route](/api-reference/internal#pages) enforces.
+
+## 20260812233006 & 20260813085342 — Chat composer: suggested prompts and ask forms
+
+| Migration | Adds |
+|---|---|
+| `20260812233006_agent_suggested_prompts` | `agents.suggested_prompts` — nullable TEXT, newline-separated. Replaces the hardcoded, per-role chip set every agent showed on an empty chat. Deliberately plain text, not JSON or a table: it is what a textarea produces, so no read path needs an unmarshal that can fail, and there is exactly one agent, no sharing story, no ordering UI to build a table for. |
+| `20260813085342_agent_ask_forms` | `agents.ask_forms` — nullable TEXT, JSON this time. A form (template + typed fields) is a nested shape a textarea format can't express, so the cost of "this can be malformed" is accepted, but paid once, on write, in `internal/askforms.Parse` — the only writer. |
+
+Both are plain `ADD COLUMN`s with no backfill: NULL means "not configured,"
+and an agent with neither column set behaves exactly as it did before either
+migration — the built-in role packs. Caps (8 prompts / 4 forms, character
+limits, template-field validation) live in Go, not in a CHECK, because SQLite
+can express a length bound but not "a template naming a field that doesn't
+exist," and a rule enforced twice — once precisely, once approximately — is
+how the two drift.
+
+## 20260813212500 — Attachments gain a publication state
+
+A `201` from the chat attachment upload used to mean "the bytes landed and
+the row insert was attempted" — `recordChatAttachment` logged a failed INSERT
+and answered success anyway. For the chat arc specifically, whose blobs are
+**not** content-addressed (they live at the agent-visible path outside
+`<root>/attachments/`, which is exactly the tree the reclaimer walks), an
+unrecorded blob was permanent, un-collectable residency bought with a success
+response.
+
+Adds `attachments.state` (`pending` | `stored`, `DEFAULT 'stored'` so every
+existing row — which, under the old ordering, could only exist after its
+bytes were written — backfills to the truthful value). The upload path is
+inverted: the row is written first as `pending`, the bytes are published
+second, and only then does the row become `stored`. The rule is now one
+sentence: *a 201 means there is a `stored` row and bytes at its
+`storage_key`.* Any other outcome leaves a reclaimable `pending` row instead
+of an invisible orphan.
+
+No CHECK constraint (a bookkeeping column doesn't justify the rebuild risk).
+Both readers fail safe on an unrecognised value instead: the list endpoint
+requires `state = 'stored'`, the reclaimer requires `state <> 'stored'` — so
+a typo can only make an attachment disappear, never make an unpublished one
+look published.
+
+## 20260813212851 & 20260818215915 — Escalations get a deadline, then two
+
+An escalation is a question an agent asked a human, and until the first of
+these migrations there was no way for that question to stop being open.
+`internal/sidecar/query.go` gives up its long poll after 300s and the agent
+proceeds without an answer — but nothing told the server, so the row stayed
+`PENDING` forever, and an operator answering three hours later delivered an
+answer to an agent that had already moved on.
+
+**`20260813212851_escalation_deadline`** adds `escalations.deadline_at` and
+two new terminal states beyond the existing `PENDING`→`RESOLVED`: `EXPIRED`
+(the deadline passed, no human decided) and `CANCELLED` (a human withdrew the
+question). The handler set every deadline to `created_at + 300s` — the
+agent's wait bound.
+
+That was also the bug: 300 seconds is right for the *agent's* wait and wrong
+for the *human's* — an operator who saw an inbox item, walked to a password
+manager, and came back seven minutes later got `409` for a question nobody
+had ever answered. Worse for a `CREDENTIAL` escalation: only the resolve path
+disposes of the staged `PENDING_APPROVAL` credential, so an expired-before-
+answered credential escalation left an encrypted secret stranded in the vault
+forever, and the live-name probe counted it against every later proposal of
+that name.
+
+**`20260818215915_escalation_answer_deadline`** splits the one clock into
+two: `deadline_at` stays the agent's 300s wait (bounds the poll and nothing
+else — expiring it only stamps `agent_gave_up_at`, the row stays `PENDING`),
+and a new `answer_deadline_at` (7 days) is the human's answerability window —
+only *that* one expiring moves the row to `EXPIRED`. It also repairs the
+damage: any `PENDING_APPROVAL` credential whose escalation is no longer
+`PENDING` (unreachable by construction — that resolve path is the only door)
+is retired to `REJECTED` + `deleted_at`, the same disposal a real rejection
+performs.
+
+Neither migration backfills the deadline columns on pre-existing rows — NULL
+means "no deadline" and old `PENDING` rows stay answerable indefinitely, the
+behavior they always had. Rows the buggy 300s window already flipped to
+`EXPIRED` are **not** resurrected; their agents are long gone.
+
+## 20260820074400, 20260820124407, 20260820125000 — Two collisions in tenant-scoped uniqueness
+
+Three unrelated tables, one shared shape: something that reads as
+workspace-scoped was not actually constrained that way.
+
+**`20260820074400_issue_counters_crew_not_null`** (#1973): `issue_counters.crew_id
+TEXT PRIMARY KEY REFERENCES crews(id)` reads as "required," but SQLite's rowid
+tables accept `NULL` on any `PRIMARY KEY` column that isn't `INTEGER PRIMARY
+KEY` — a documented compatibility quirk. The backup scoper filters on
+`crew_id` to find a row's workspace, and a filter over a nullable column
+silently omits every `NULL` row: the bundle succeeds, verifies, and comes
+back short a counter, so a restored crew can re-issue an identifier it
+already used. Rebuilds the table with `crew_id TEXT PRIMARY KEY NOT NULL`,
+dropping rows whose `crew_id` is NULL or names a crew already gone (an
+orphan `ON DELETE CASCADE` should already have removed).
+
+**`20260820124407_crew_template_slug_workspace_scope`** (#1796):
+`crew_templates.slug TEXT NOT NULL UNIQUE` predates the table's
+`workspace_id` column (bolted on later by v26) and was never rescoped — one
+global slug namespace on a table that is otherwise workspace-owned.
+Rebuilds into two partial unique indexes,
+`(workspace_id, slug) WHERE workspace_id IS NOT NULL` and
+`(slug) WHERE workspace_id IS NULL` (the builtin namespace). One behavior
+change falls out: before, a user template named `X` permanently suppressed
+the builtin `X` from ever seeding (`INSERT OR IGNORE` hit the old global
+UNIQUE and silently gave up); now the builtin seeds and the user's template
+**shadows** it — every single-row lookup in the codebase reads
+`(is_builtin=1 AND workspace_id IS NULL) OR workspace_id = ?` ordered so the
+more specific row wins.
+
+**`20260820125000_issue_counters_prefix_scope`** (#1797): the *previous*
+migration made `crew_id` required but the counter was still keyed per-crew,
+while the namespace it feeds (`<prefix>-<n>`, unique per workspace) is
+per-**prefix**. `crews.issue_prefix` falls back to the first three letters of
+the crew slug when unset, so `engineering` and `engine` both derive `ENG` —
+two such crews in one workspace both mint `ENG-1`, the loser's mission insert
+is rejected, and because the counter upsert and the mission insert share one
+transaction, the loser's counter never advances either: it retries the same
+identifier forever. Rekeys `issue_counters` to `PRIMARY KEY (workspace_id,
+prefix)`, collapsing colliding crews onto one shared, interleaved sequence,
+and backfills `next_number` as the `MAX` of every surviving per-crew counter
+**and** the high-water mark already found in `missions.number` — so a crew
+that changed its prefix in the past doesn't restart at 1 and collide with its
+own historical identifiers.
+
+All three are the standard SQLite rebuild (`CREATE new` / copy / `DROP` /
+`RENAME`), safe inside the migration runner's wrapper transaction because
+none of the three tables has a dependent foreign key.
+
+## 20260822130000 – 20260824073500 — Conversational onboarding
+
+Six migrations landing the setup-crew onboarding flow
+(docs/prd/conversational-onboarding.md).
+
+| Migration | Adds |
+|---|---|
+| `20260822130000_crews_kind` | `crews.kind` (`'standard'` \| `'setup'`, default `'standard'`) — lets the reserved onboarding crew be excluded from every crew-enumerating surface (list, count badges) without a boolean flag that only answers this one case. |
+| `20260822144843_onboarding_proposals` | `onboarding_proposals` — where a setup-agent's proposed crew (template + model swap, Phase 1 scope) sits between "the agent produced a card" and "the human clicked Create." The agent has no write permission at all; `payload_json` is the fully-resolved agent roster captured at propose time, and `POST .../apply` reads only that column — never a live re-derivation — so the card the human saw and the crew that gets created are provably the same struct. |
+| `20260822203500_add_onboarding_skipped_at` | `users.onboarding_skipped_at` (nullable, no backfill in this migration — see the next row). |
+| `20260822210237_retain_crewship_guide` | Data-only: revives the setup crew/agent/chat that older builds soft-deleted on onboarding completion, renaming them to the permanent "Crewship Guide" so the stable chat id and history survive the upgrade. |
+| `20260823190000_backfill_onboarding_skipped_at` | Backfills the column the previous-but-one migration left NULL. `OnboardingHandler.Status` reopens onboarding for a completed user with no agents **and** a NULL `skipped_at` — reading the absence as "interrupted." Every pre-upgrade completed user has NULL by construction, so anyone whose workspace currently holds no agents (pressed Skip; or finished and later deleted their crews) was thrown back into the setup wizard **and had that regression persisted** on their next status poll. Stamps `onboarding_skipped_at` from `updated_at` (falling back to `created_at`, then now) for every already-completed user — an approximate timestamp is fine because the reopen rule only tests NULL-vs-not-NULL. |
+| `20260824073500_heal_setup_crew_autonomy` | One-time `UPDATE` moved out of application code: the setup crew's default `autonomy_level` changed from `strict` to `full`, but the request-path heal that tried to migrate existing rows (`UPDATE … WHERE autonomy_level = 'strict'`) couldn't distinguish "still on the old default" from "an operator explicitly set strict" — both write the same four bytes — and silently re-escalated a deliberately-hardened crew on every `GET /api/v1/onboarding/status` poll. A migration runs exactly once, so "heal the old default, never an operator's later choice" is true by construction. Scoped to `slug = '_crewship-setup' AND kind = 'setup'`, both of which are unreachable from a user-created crew. |
+
+## 20260826190607 — MCP server audience becomes a stored fact
+
+"Available to every agent" used to be **inferred**: `agent_mcp_bindings` row
+count of zero meant open-to-all. Nothing stored that state, so it evaporated
+the moment the count left zero — one `POST /api/v1/agents/{id}/integrations`
+anywhere in the workspace silently flipped the server to opt-in for every
+*other* agent that had been relying on the default, with no warning (#2072).
+
+Adds `default_access` (`'all'` | `'bound-only'`, `DEFAULT 'all'`, no CHECK —
+see below) to both `workspace_mcp_servers` and `crew_mcp_servers`, then
+freezes each existing server's **actual current** audience: a server with at
+least one binding is pinned to `'bound-only'` (under the old inference it was
+already opt-in in practice; leaving it `'all'` would hand it to every unbound
+agent on first boot), everything else keeps the default `'all'`. Either way,
+nobody's effective access moves on upgrade — a binding is now purely additive
+and can never change what another agent resolves.
+
+Also backfills referential integrity `mcp_tool_bindings` never had: its
+`mcp_server_id` is polymorphic (discriminated by `mcp_server_scope` across
+two separate ID spaces, so no single `REFERENCES` clause is expressible),
+and the hand-written Go delete cascade for an integration never mentioned
+this table — every per-tool toggle on a deleted server outlived it, invisible
+and unreachable, and would be silently re-adopted by a future row reusing the
+same id. This migration sweeps the existing orphans and adds the same
+`BEFORE DELETE` / `BEFORE INSERT` trigger pair v30 already uses for
+`agent_mcp_bindings`'s equally polymorphic FK.
+
+No CHECK on `default_access`: SQLite can't alter one in place, and a two-value
+vocabulary likely to grow a third (per-crew audiences) would force a full
+table rebuild later. The vocabulary is enforced where it's written (workspace
+and crew integration handlers reject anything else) and every resolver fails
+**closed** — only the literal string `'all'` opens a server to an unbound
+agent.
+
+## 20260826205610 — Behaviour-monitor sampling cadence becomes a setting
+
+`internal/keeper/behaviorhook` could always sample at an arbitrary rate
+(`SetSampleEvery`), but nothing in production ever called it — every
+workspace ran the package's hardwired "every 5th tool call." Adds
+`keeper_governance_settings.behavior_sample_every` (default `0`, the *unset*
+sentinel meaning "use `governance.DefaultBehaviorSampleEvery`," not
+"never") alongside the workspace's other Keeper posture knobs. The API
+rejects a written `0` — disabling the monitor is `crewship keeper disable`,
+not a cadence of zero that would leave a workspace reading "enabled" while
+nothing is ever evaluated. Additive column with a `NOT NULL DEFAULT`, so no
+backfill pass.
+
+## 20260827145903 — MCP OAuth gets its RFC 8707 / RFC 9207 bindings
+
+Adds `credentials.oauth_resource` and `credentials.oauth_issuer` (both TEXT,
+`DEFAULT ''`), closing a gap against the MCP authorization spec's **MUST**
+requirements: without a bound resource indicator, a token minted for MCP
+server A could be replayed by A's operator against MCP server B (a confused
+deputy); without a checked issuer, a host talking to more than one
+authorization server — which Crewship does by construction, one AS per
+connected MCP server — has no mix-up defence on the OAuth redirect. See
+[OAuth Commands](/cli/oauth) for the connection flow (#2136).
+
+`oauth_resource` is populated from the credential's RFC 9728 protected-
+resource metadata at connect time (`AutoConnect`) — never invented from
+config — and `oauth_issuer` is checked against the RFC 9207 `iss` redirect
+parameter. Both default to `''` rather than `NULL` so existing
+`COALESCE`-free call sites compare directly; the OAuth flow code treats an
+empty value as "nothing to send" / "nothing to check," so every credential
+connected before this migration — MCP and every other OAuth provider
+(Google, Slack, GitHub, …) alike — keeps working exactly as it did.
+
 ## How to read this in operation
 
 When `crewshipd` starts, it logs each migration as it applies:
