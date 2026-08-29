@@ -267,6 +267,29 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   concept icon go with it, and 26 comments that cited the page as their
   specification now cite a section of the document.
 
+  **Twelve of the 65 rows did not survive re-verification, and §7 of the new
+  document says so.** Forty were re-read against the tree before extraction by
+  six parallel audits, each asked to return FALSE / TRUE-BUT-DELIBERATE /
+  TRUE-DEFECT rather than to confirm. Three were simply wrong — sidecar
+  services are writable through `crewship apply`, `AssignToCrewDialog` has
+  assigned a skill to a whole crew since the first skills sprint, and the
+  missing `mcp_tool_bindings` cascade was fixed by migration `20260826190607`,
+  three days *after* the row claiming it was written. Four had gone stale when
+  the Issues create fields shipped in #2056. One cited an event,
+  `pre_tool_call`, that does not exist and never could. Three more were real
+  but graded `blocker` when they are documented decisions — raw MCP sits behind
+  `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS` by an intent stated in `cec5fc7a`,
+  Pages panels are producer-fed by specification, and the Composio default
+  connector ships with its flag off — and are re-graded in place.
+
+  The rows stay, marked rather than rewritten: deleting a claim you got wrong
+  turns an audit's own errors into a record of progress. Two things are worth
+  carrying forward. A ledger nobody re-reads decays at a rate this one can now
+  measure. And "the UI cannot do this" and "we decided the UI should not do
+  this" rendered identically in a table with no column for intent, which is how
+  three settled decisions came to be tagged as release blockers — including the
+  one `CODEX-WORK-ORDER-RELEASE-1-0.md:610` records as still open.
+
 - **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
   ⚠️ **Behaviour change: the left column navigates between conversations, and
   the per-agent "New session" control it replaced is gone.** The old surface
