@@ -306,11 +306,12 @@ That is a genuinely strong position, and it is *gated*, not merely true today:
 `Go Lint → OpenAPI spec is up to date`, `Go Lint → API and CLI documentation is
 complete`, and `Documentation surface` all fail a pull request.
 
-Minor drift worth one line: the **checked-in** copy of
-`docs/prd/reports/release-1-0-api-cli-inventory.{json,md}` is one commit behind
-the tree (it reports 406 API operations with a test signal, regeneration at
-`69a8ceb9` gives 407). The strict gate checks the invariants, not the freshness
-of the committed report, so the report can drift without failing anything.
+`docs/prd/reports/release-1-0-api-cli-inventory.{json,md}` is no longer
+checked in. It is derived — `docs-inventory` rewrites both files from the
+router table and the cobra tree — so a stored copy could only ever be as fresh
+as the last person who remembered to regenerate it, and the strict gate checks
+the invariants rather than the committed file's freshness. Run
+`make docs-inventory` to write it locally when you want to read it.
 
 ### 3.2 What the inventory does *not* say
 
