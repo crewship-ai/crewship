@@ -91,9 +91,11 @@ crewship admin list-users --local
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
 | `health` | Instance vitals: uptime, database liveness, disk headroom on the data volume, live log level, and where the encryption key came from. **HTTP-backed — needs a running server + login.** |
 | `stats` | Workspace counts read against the licensed ceilings (crews, agents, members, runs in flight). **HTTP-backed — needs a running server + login.** |
+| `workspaces` | The current workspace with member/agent/crew counts. **HTTP-backed — needs a running server + login.** |
 | `gdpr export/delete` | Answer a data-subject request: export everything held about one person, or erase it. **HTTP-backed — needs a running server + login.** |
 | `security-posture` | Read-only view of the instance's env-driven security flags (encryption, egress ceiling, signup, rate limiting). **HTTP-backed — needs a running server + login.** |
 | `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
+| `memory-stats` | `memory_versions` counts and byte totals for the workspace, by tier and by agent. **HTTP-backed — needs a running server + login.** |
 | `ratelimits list/set/reset` | Inspect and tune the instance's rate limiters at runtime (per-IP HTTP buckets, login lockout, notifications, provisioning, agent webhooks). **HTTP-backed — needs a running server + login.** |
 
 ## `crewship admin reencrypt`
@@ -493,6 +495,29 @@ counts still print — losing the ceilings must not cost you the numbers.
 
 ---
 
+## `crewship admin workspaces`
+
+```bash
+crewship admin workspaces
+crewship admin workspaces --format json | jq '.[0]._count_agents'
+```
+
+```
+NAME  SLUG  MEMBERS  AGENTS  CREWS  CREATED
+Acme  acme  3        8       2      2026-01-01T00:00:00Z
+```
+
+`GET /api/v1/admin/workspaces`, scoped server-side to the workspace the CLI is
+currently authenticated against. Despite the plural name and the JSON array
+shape, this is **not** an instance-wide tenant listing — the handler filters
+`WHERE w.id = <caller's workspace>`, so it returns at most one row: the
+caller's own workspace, with member/agent/crew counts. An empty array means
+the workspace context could not be resolved, not "no workspaces exist".
+
+Requires `OWNER` or `ADMIN` (`canRole "manage"`).
+
+---
+
 ## `crewship admin gdpr`
 
 Answers the two requests a person can make about their own data.
@@ -625,6 +650,48 @@ Rows already older than the new window become **eligible for deletion** on the r
 Sent as a **partial `PATCH`** carrying only the key being changed. The server merges it into the stored document and preserves settings this CLI doesn't know about, so an older binary can't silently drop a newer knob by writing a whole document back.
 
 The same data backs the **Admin → Runtime → Memory configuration** card in the dashboard.
+
+---
+
+## `crewship admin memory-stats`
+
+Companion read to `memory-config`: `memory-config` adjusts the retention
+window, `memory-stats` shows what is actually being retained under it.
+
+```bash
+crewship admin memory-stats
+crewship admin memory-stats --format json | jq '.totals.bytes'
+```
+
+```console
+Workspace ws_test
+  42 version(s), 1.0 MB across 30 distinct blob(s)
+  oldest: 2026-01-01T00:00:00Z   newest: 2026-01-10T00:00:00Z
+
+By tier:
+TIER   VERSIONS  BYTES
+agent  30        800.0 kB
+crew   12        248.6 kB
+
+By agent:
+AGENT   VERSIONS  BYTES     NEWEST
+martin  20        600.0 kB  2026-01-10T00:00:00Z
+(shared: crew/workspace tier)  22  448.6 kB  2026-01-09T00:00:00Z
+```
+
+`GET /api/v1/admin/memory/stats`, scoped to the current workspace. Three
+figures:
+
+- **Totals** — version count, byte sum, and distinct blob count (a stale row
+  and a fresh row at the same content share one blob), plus the oldest/newest
+  `written_at` in the window.
+- **By tier** — one row per memory tier (`agent`, `crew`, `workspace`, …);
+  tiers with zero rows are omitted.
+- **By agent** — one row per agent slug that has written memory. Crew- and
+  workspace-tier rows have no agent slug and are collapsed under `(shared:
+  crew/workspace tier)`.
+
+Requires `OWNER` or `ADMIN` (`canRole "manage"`).
 
 ---
 

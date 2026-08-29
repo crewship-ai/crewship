@@ -33,12 +33,16 @@ subagents that fire on platform lifecycle events (post_agent_stop,
 on_approval_requested, on_guardrail_triggered, …).
 
 pre_tool_call is not a valid --event: there is no interception point before
-a tool executes, so nothing could ever fire it. Note that post_tool_call IS
-accepted but is not dispatched to user-registered hooks either — only
-pre_agent_start, post_agent_stop, on_approval_requested and
-on_guardrail_triggered have live dispatch sites today. Registering on any
-other event is legal and silently does nothing — see the Hooks guide's
-coverage table before picking one.
+a tool executes, so nothing could ever fire it. The platform fires
+post_tool_call instead, after the tool has run. Every other event this
+command accepts has a live dispatch site — see the Hooks guide's coverage
+table for the call site behind each one.
+
+--blocking is only accepted on the pre_* events whose call site can still
+cancel the operation (pre_task_delegation, pre_agent_start, pre_llm_call,
+pre_memory_write, pre_peer_conversation). post_*/on_* events are
+observations: they run asynchronously and a Block outcome is recorded in
+the journal rather than enforced.
 
 Examples:
   crewship hooks list
@@ -68,7 +72,7 @@ var hookHandlerKinds = []string{
 }
 
 // validateHookEvent rejects an unknown event locally. The server rejects it
-// too, but a client-side check keeps the fix ("you meant pre_agent_start")
+// too, but a client-side check keeps the fix ("you meant post_tool_call")
 // in the same message as the mistake instead of behind an HTTP 400 — the
 // same reasoning as validateCSV on `crewship journal`.
 func validateHookEvent(event string) error {
@@ -238,6 +242,9 @@ func buildHookBody(cmd *cobra.Command, client *cli.Client, onlyChanged bool) (ma
 	}
 	if changed("blocking") {
 		v, _ := cmd.Flags().GetBool("blocking")
+		if v && event != "" && !hooks.Event(event).SupportsBlocking() {
+			return nil, fmt.Errorf("--blocking is not valid for observation event %q; use a pre_* event for a synchronous gate", event)
+		}
 		body["blocking"] = v
 	}
 	if changed("disabled") {

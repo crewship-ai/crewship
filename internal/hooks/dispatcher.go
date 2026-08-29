@@ -15,10 +15,10 @@ import (
 //  1. Load every enabled hook for (workspaceID, event) whose crew scope is
 //     compatible with ec.CrewID.
 //  2. Filter the list by Matcher.Matches(m, ec).
-//  3. Execute blocking hooks synchronously in registration order. The
+//  3. Execute blocking hooks for pre-events synchronously in registration order. The
 //     first OutcomeBlock short-circuits with a *BlockedError — the
 //     caller uses errors.As to recover and abort the operation.
-//  4. Execute non-blocking hooks in goroutines so the hot path is not
+//  4. Execute non-blocking hooks and every observation event in goroutines so the hot path is not
 //     gated on webhook latency.
 //
 // Non-fatal errors (individual handler failures, journal emit failures)
@@ -50,6 +50,13 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 	filtered := make([]Hook, 0, len(hooks))
 	for _, h := range hooks {
 		if Matches(h.Matcher, ec) {
+			// Rows created before observation events were made explicitly
+			// non-blocking may still carry blocking=1. Preserve their configured
+			// row for display, but dispatch with the only semantics the event's
+			// call site can honestly provide.
+			if !event.SupportsBlocking() {
+				h.Blocking = false
+			}
 			filtered = append(filtered, h)
 		}
 	}

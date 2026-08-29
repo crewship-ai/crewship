@@ -78,7 +78,39 @@ detect_clone() {
 
 detect_branch() {
   if [ -n "${CLAIM_BRANCH:-}" ]; then printf '%s\n' "$CLAIM_BRANCH"; return 0; fi
-  git rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'unknown\n'
+  local branch upstream root
+  branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch=""
+  case "$branch" in
+    worktree-agent-*)
+      # `git worktree add` without an explicit -b mints this branch name
+      # automatically, and CONTRIBUTING says to claim *before* the feature
+      # branch exists — so this is the ordinary, documented sequence, not an
+      # edge case. The hash means nothing to a reader and it is guaranteed to
+      # differ from whatever branch is checked out by the time --release
+      # runs, which is what makes a claim unreleasable (#2107). Prefer the
+      # upstream/tracking branch if one is already configured (rare this
+      # early, but free when it exists); otherwise fall back to the worktree
+      # path — unlike the branch, it does not change between CLAIM and the
+      # matching RELEASE, and unlike a bare "?" it still tells two sessions
+      # on the same clone apart.
+      upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" || upstream=""
+      if [ -n "$upstream" ]; then
+        printf '%s\n' "$upstream"
+        return 0
+      fi
+      root="$(git rev-parse --path-format=absolute --show-toplevel 2>/dev/null)" || root="$PWD"
+      printf '%s\n' "$root"
+      return 0
+      ;;
+    "")
+      printf 'unknown\n'
+      return 0
+      ;;
+    *)
+      printf '%s\n' "$branch"
+      return 0
+      ;;
+  esac
 }
 
 now_stamp() { date -u +'%Y-%m-%dT%H:%MZ'; }
@@ -116,9 +148,21 @@ human_age() { # <seconds>
 # position, though — the marker word has to open the comment, so prose that
 # happens to use "claim" mid-sentence is not a lock.
 #
-# A release cancels the claims it names: same clone and same branch. A release
-# that names neither cancels every open claim on the issue, which is what
-# "released it" means when a human types it without ceremony.
+# A release cancels the claims it names by clone identity alone (#2107): a
+# clone can hold only one live claim on an issue in practice, so matching on
+# clone is enough, and it is the direction that fails safe. Branch is not part
+# of the predicate — a worktree claims before its feature branch exists
+# (CONTRIBUTING says to claim before the first commit), so branch is
+# guaranteed to differ between CLAIM and the matching RELEASE for every
+# well-behaved session; requiring it to match turned most releases into
+# permanent phantom locks. The alternative — cancel only the most recent
+# unreleased claim by that clone — is more precise when one clone legitimately
+# holds two live claims on the same issue (it can, across worktrees), but
+# picking the wrong one of two reintroduces this exact bug. Clone-only
+# matching over-cancels in that rare case, and in the safe direction: a
+# session that still holds the issue just re-claims, cheaply and visibly. A
+# release that names neither clone nor branch cancels every open claim on the
+# issue — the manual escape hatch, kept as-is.
 parse_claims() {
   jq -r '
     def line0: ((.body // "") | split("\n")[0]);
@@ -145,9 +189,11 @@ parse_claims() {
     | reduce .[] as $c ([];
         if $c.kind == "claim" then . + [$c]
         else map(select(
-                 (($c.clone  != "") and ($c.clone  != .clone))
-              or (($c.branch != "") and ($c.branch != .branch))
-             ))
+          if $c.clone != "" then $c.clone != .clone
+          elif $c.branch != "" then $c.branch != .branch
+          else false
+          end
+        ))
         end)
     # Placeholders, not empty fields: `read -r a b c` with a tab IFS drops a
     # leading empty field and shifts every column left.
@@ -270,6 +316,9 @@ case "${1:-}" in
   # the convention a lock rather than a note, so it is reachable on its own.
   --report)    shift; report_claims "" "$(cat)"; exit $? ;;
   --clone-of)  shift; [ $# -eq 1 ] || die "--clone-of takes one path"; clone_of_path "$1"; exit 0 ;;
+  # internal: prints what detect_branch() resolves for the current checkout
+  # (tests use this to drive real worktrees without touching gh/network).
+  --detect-branch) shift; detect_branch; exit 0 ;;
   -h|--help)   usage; exit 0 ;;
   "")          usage >&2; exit 2 ;;
 esac
