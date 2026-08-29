@@ -25,8 +25,8 @@ import {
  *
  * SubBar already unified the DOORS (`New issue`, `Import`, `Add secret`…): one
  * row, one primary, one ghost, identical sizing on every page. What sits BEHIND
- * those doors never got the same treatment, and the audit on /design counts the
- * result: three different modal shells (Radix Dialog, a hand-rolled
+ * those doors never got the same treatment, and the audit in
+ * docs/prd/create-surface-parity.md §2 counts the result: three different modal shells (Radix Dialog, a hand-rolled
  * `fixed inset-0` with `bg-black/50`, and another with
  * `bg-background/70 backdrop-blur-md`), eleven widths, two corner radii, four
  * title sizes and eight ways of drawing the confirm button, across twelve entry
@@ -105,7 +105,8 @@ import {
  * Once as `max-sm:` (the real breakpoint) and once under
  * `data-[mobile=true]` / `group-data-[mobile=true]/surface` (a preview frame
  * that forces the phone layout at desktop width — see `CreateSurfaceFrame`,
- * which is how /design shows both versions side by side). The pair cannot be
+ * which is how the two versions are rendered side by side; §6.13). The pair
+ * cannot be
  * generated at runtime: Tailwind's scanner reads source text, so a composed
  * class name is never emitted. Verbose, and the only version that works.
  *
@@ -361,13 +362,15 @@ export function CreateSurface({
 /**
  * The same chrome without a Dialog around it.
  *
- * Two uses. /design renders the phone version of a surface inside a handset
- * frame at desktop width, which a portalled dialog cannot do; and a create
- * flow that has outgrown a modal (the page editor is the standing candidate)
- * can be embedded in a route with its geometry intact rather than forked.
+ * Two uses. A review surface can render the phone version inside a handset
+ * frame at desktop width, which a portalled dialog cannot do — the retired
+ * proposal page was the first user, see docs/prd/create-surface-parity.md
+ * §6.13; and a create flow that has outgrown a modal (the page editor is the
+ * standing candidate) can be embedded in a route with its geometry intact
+ * rather than forked.
  *
  * `mobile` forces the phone layout regardless of viewport — that is what makes
- * the side-by-side on /design honest, because both columns are this component.
+ * a desktop/phone side-by-side honest, because both columns are this component.
  */
 export function CreateSurfaceFrame({
   size = "md",

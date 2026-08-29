@@ -442,8 +442,8 @@ export function CreateProjectModal({
          * That holds for New issue, which is a compose surface used dozens of
          * times a day where every keystroke counts. A project is created
          * rarely and deliberately, and a popover hides both the options and
-         * the fact that a choice was available: /design shows them as chip
-         * rows and date fields, and this is that. */}
+         * the fact that a choice was available: docs/prd/create-surface-parity.md
+         * §6.2 shows them as chip rows and date fields, and this is that. */}
         <CreateSurfaceSection title="Planning" icon={CalendarDays} accent="amber">
           <CreateSurfaceGrid>
             <CreateSurfaceField label="Status">
@@ -504,8 +504,8 @@ export function CreateProjectModal({
             already exists (milestone_handler.go's projectExists check), and
             there is no post-create screen that can add one either. This used
             to be a code comment only — the user was told nothing. Said
-            out loud instead, matching the read-only reference at
-            components/features/design/surfaces/issues.tsx:341-353. */}
+            out loud instead, matching the read-only reference in
+            docs/prd/create-surface-parity.md §6.2. */}
         <CreateSurfaceSection title="Milestones" icon={Milestone} accent="purple">
           <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
             Milestones cannot be created here — the endpoint refuses until the project exists — and there is
@@ -526,7 +526,7 @@ export function CreateProjectModal({
       {/* The pill row is down to the one control that is a search, not a
           choice: a workspace can have hundreds of agents, and a chip row of
           hundreds is not a chip row. Status, priority and the dates moved into
-          the body's Planning section where /design puts them. */}
+          the body's Planning section where §6.2 puts them. */}
       {!panel && <CreateSurfacePills>
         {/* Lead */}
         <Popover open={leadOpen} onOpenChange={setLeadOpen} modal>

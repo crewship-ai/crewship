@@ -229,8 +229,9 @@ describe("<StepContainer> — size", () => {
 // ── The base image is a row, not a catalogue ─────────────────────────────
 //
 // Nine radio rows and a search box used to sit inline on this step, which
-// also carries tooling, network and sizing — a step made of lists. /design
-// shows one row saying what the crew runs on, with the catalogue behind it as
+// also carries tooling, network and sizing — a step made of lists.
+// docs/prd/create-surface-parity.md §6.3 shows one row saying what the crew
+// runs on, with the catalogue behind it as
 // a panel the surface swaps to.
 describe("<StepContainer> — base image", () => {
   it("says what the crew will run, defaults included", () => {

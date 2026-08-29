@@ -131,7 +131,8 @@ describe("ConnectOAuthDialog — the shell", () => {
 })
 
 describe("ConnectOAuthDialog — the picker is tiles, like every other picker", () => {
-  // /design's blurb for this door is one sentence: "Was a bare 448px form with
+  // The blurb for this door (docs/prd/create-surface-parity.md §6.8) is one
+  // sentence: "Was a bare 448px form with
   // the default dialog padding. Now the same tiles as every other picker." The
   // shell landed and the picker did not — the providers stayed a row of 24px
   // pills carrying a label and nothing else, so the one thing a person needs

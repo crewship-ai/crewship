@@ -94,8 +94,9 @@ describe("<RoutineCreateDialog>", () => {
 // ── The entry tiles are three routes, not one route and two greys ────────
 //
 // Two of the three carried accent="slate" and no meta, so the picker read as
-// "the blue one, and some other options". /design gives each route its own
-// colour and says in a word what you trade: fastest, or full control.
+// "the blue one, and some other options".
+// docs/prd/create-surface-parity.md §6.9 gives each route its own colour and
+// says in a word what you trade: fastest, or full control.
 describe("New routine — the three entry tiles", () => {
   function tile(name: RegExp) {
     return screen.getByRole("button", { name }) as HTMLButtonElement

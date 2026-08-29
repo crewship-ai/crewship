@@ -74,8 +74,9 @@ interface RuntimeConfigProps {
    *
    * `tabs` is the crew Settings editor, where this component is one config
    * panel among several and four tabs read as four aspects of one thing.
-   * `sections` is New crew's Container step: /design puts base image and
-   * preinstalled tooling on the page as sections and folds the rest away, so
+   * `sections` is New crew's Container step: docs/prd/create-surface-parity.md
+   * §6.3 puts base image and preinstalled tooling on the page as sections and
+   * folds the rest away, so
    * the step leads with the two decisions most crews make and the other three
    * are one click deep instead of behind a tab strip a create surface has
    * nowhere else.
@@ -85,7 +86,7 @@ interface RuntimeConfigProps {
    * Suppress the base-image block.
    *
    * New crew renders the image as a summary row plus a picker panel, the way
-   * /design specifies, so the component would otherwise show the catalogue a
+   * §6.3 specifies, so the component would otherwise show the catalogue a
    * second time on the same step. The image itself still flows through
    * `value.devcontainerConfig`, which this component syncs from — so the
    * caller owning the control does not mean the caller owning the state.
@@ -606,7 +607,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
   // Each of the four tabs' bodies, named. They are rendered either as a tab
   // strip (the crew's Settings tab, where this is a config editor among other
   // config editors) or as sections and disclosures (New crew's Container
-  // step, where /design asks for base image and tooling to lead and the rest
+  // step, where §6.3 asks for base image and tooling to lead and the rest
   // to fold away). Same controls either way — the two layouts differ in
   // chrome only, which is the whole point of the split.
 
@@ -853,7 +854,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
   )
 
   /**
-   * The tooling browser, the way /design draws it.
+   * The tooling browser, the way §6.3 draws it.
    *
    * The tabs-era list is a table: a row per feature carrying name, ref,
    * description, publisher, tier, size hint and a Switch. That is the right
@@ -1409,7 +1410,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           {toolingPaneSections}
         </CreateSurfaceSection>
 
-        {/* Folded, not dropped. /design's specimen for this step shows base
+        {/* Folded, not dropped. The specimen for this step (§6.3) shows base
             image and tooling only — but language runtimes and the privileged
             flags ARE settable here today, and quietly removing them from the
             create path would be a capability change wearing a redesign's

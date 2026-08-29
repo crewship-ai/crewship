@@ -254,6 +254,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **`/design` is gone; its audit is now a tracked document (#2165).** The
+  create-surface unification proposal shipped as a page inside the product —
+  no data, no API, no CLI command — and its own header said to delete it once
+  the audit it carried had no rows left to fix. It is removed with rows still
+  open, so the evidence moved to `docs/prd/create-surface-parity.md` rather
+  than leaving with the code: all 65 ledger rows with their severity,
+  reference and `fixed` history, the twelve-door divergence table, the token
+  drift counts and the sweep. The document is headed with the audit date and
+  the source commit so it cannot be mistaken for a regenerated report. The
+  route, `components/features/design/`, the sidebar row and the `design`
+  concept icon go with it, and 26 comments that cited the page as their
+  specification now cite a section of the document.
+
 - **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
   ⚠️ **Behaviour change: the left column navigates between conversations, and
   the per-agent "New session" control it replaced is gone.** The old surface

@@ -276,8 +276,8 @@ describe("CreateAgentDialog", () => {
   // that beats a <select>: every option is visible without opening anything,
   // and on a phone the target is the whole chip rather than a 16px caret.
   // Tool profile further down this same form already used it, so the form
-  // disagreed with itself — and /design's specimen for this door shows the
-  // chip row.
+  // disagreed with itself — and the specimen for this door
+  // (docs/prd/create-surface-parity.md §6.5) shows the chip row.
   describe("the Role control", () => {
     it("offers both roles as visible options rather than a dropdown", async () => {
       renderDialog()

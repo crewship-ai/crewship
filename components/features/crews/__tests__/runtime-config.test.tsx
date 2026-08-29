@@ -138,7 +138,8 @@ describe("<RuntimeConfig> base image search", () => {
 // strip appeared inside a create surface: a navigation model no other door
 // has, and the reason Container kept reading as a different product from the
 // rest of the wizard. The sections layout renders the same controls with the
-// chrome /design specifies — base image and tooling on the page, the rest
+// chrome docs/prd/create-surface-parity.md §6.3 specifies — base image and
+// tooling on the page, the rest
 // folded — and the point of these tests is that folding is all it is.
 describe("RuntimeConfig — sections layout", () => {
   function renderSections() {

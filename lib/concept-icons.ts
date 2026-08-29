@@ -1,6 +1,6 @@
 import {
   Activity, AtSign, Bell, BookOpen, Brain, CircleDot, FolderTree, Inbox, Key,
-  LayoutDashboard, LayoutTemplate, MessageSquare, Palette, Play, Plug,
+  LayoutDashboard, LayoutTemplate, MessageSquare, Play, Plug,
   ScrollText, Settings, ShieldCheck, Store, Users, Zap,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
@@ -41,11 +41,6 @@ export const CONCEPT_ICON = {
   credentials: Key,
   integrations: Plug,
   marketplace: Store,
-  /**
-   * The create-surface unification proposal at /design. Scaffolding — it goes
-   * away with the page once the audit table there has no rows left to fix.
-   */
-  design: Palette,
   settings: Settings,
   admin: ShieldCheck,
 

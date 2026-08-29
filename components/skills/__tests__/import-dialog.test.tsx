@@ -160,8 +160,9 @@ describe("ImportSkillDialog", () => {
   // three sources send `allow_unsafe_license` — so a URL import of a skill
   // whose licence the SPDX scanner cannot identify (skills.go:355 reads the
   // flag on this route too) was refused by the server with the one control
-  // that would let it through rendered on a different tab. /design puts
-  // Licensing in a disclosure below the source, where every source has it.
+  // that would let it through rendered on a different tab.
+  // docs/prd/create-surface-parity.md §6.6 puts Licensing in a disclosure
+  // below the source, where every source has it.
   describe("the licence gate", () => {
     it("is reachable from the URL source, not just the repository one", async () => {
       apiFetch.mockResolvedValue(jsonResponse(IMPORTED))
