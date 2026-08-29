@@ -8,7 +8,7 @@
     "cli_exact_docs": 821,
     "cli_root_docs_present": 821,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 444,
+    "api_with_test_signals": 445,
     "api_with_concrete_response_schemas": 573,
     "api_generic_response_schemas": 0,
     "api_with_request_bodies": 251,
@@ -20,7 +20,7 @@
     "cli_with_all_flags_documented": 388,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
-    "environment_variables": 102,
+    "environment_variables": 105,
     "environment_variables_missing": 0,
     "manifest_kinds": 21,
     "manifest_kinds_missing": 0,
@@ -8946,13 +8946,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/gen-openapi/error_contract_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/required_minlength_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
-        "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -8973,13 +8973,13 @@
           "source_file": "cmd/gen-openapi/main.go",
           "test_signals": [
             "cmd/crewship/cmd_crew_avatar_test.go",
+            "cmd/crewship/cmd_issue_changes_cov_test.go",
             "cmd/gen-openapi/error_contract_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/required_minlength_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
-            "cmd/gen-openapi/schemas_admin_integrations_test.go",
             "…"
           ]
         }
@@ -9033,13 +9033,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/gen-openapi/error_contract_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/required_minlength_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
-        "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -9060,13 +9060,13 @@
           "source_file": "cmd/gen-openapi/main.go",
           "test_signals": [
             "cmd/crewship/cmd_crew_avatar_test.go",
+            "cmd/crewship/cmd_issue_changes_cov_test.go",
             "cmd/gen-openapi/error_contract_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/required_minlength_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
-            "cmd/gen-openapi/schemas_admin_integrations_test.go",
             "…"
           ]
         }
@@ -9120,13 +9120,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/gen-openapi/error_contract_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/required_minlength_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
-        "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -9147,13 +9147,13 @@
           "source_file": "cmd/gen-openapi/main.go",
           "test_signals": [
             "cmd/crewship/cmd_crew_avatar_test.go",
+            "cmd/crewship/cmd_issue_changes_cov_test.go",
             "cmd/gen-openapi/error_contract_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/required_minlength_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
-            "cmd/gen-openapi/schemas_admin_integrations_test.go",
             "…"
           ]
         }
@@ -9207,13 +9207,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/gen-openapi/error_contract_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/required_minlength_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
-        "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -9234,13 +9234,13 @@
           "source_file": "cmd/gen-openapi/main.go",
           "test_signals": [
             "cmd/crewship/cmd_crew_avatar_test.go",
+            "cmd/crewship/cmd_issue_changes_cov_test.go",
             "cmd/gen-openapi/error_contract_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/required_minlength_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
-            "cmd/gen-openapi/schemas_admin_integrations_test.go",
             "…"
           ]
         }
@@ -9822,6 +9822,9 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_issue_changes_cov_test.go"
+      ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
       "request_body_present": false,
@@ -9837,7 +9840,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "cmd/gen-openapi/schemas_crews_workspaces_v1.go"
+          "source_file": "cmd/gen-openapi/schemas_crews_workspaces_v1.go",
+          "test_signals": [
+            "cmd/crewship/cmd_issue_changes_cov_test.go"
+          ]
         }
       }
     },
@@ -14752,10 +14758,10 @@
         "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
         "cmd/crewship/cmd_issue_attachments_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -14779,10 +14785,10 @@
             "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
             "cmd/crewship/cmd_issue_attachments_test.go",
             "cmd/crewship/cmd_issue_cov_test.go",
+            "cmd/crewship/cmd_issue_detach_cov_test.go",
             "cmd/crewship/cmd_issue_extra_cov2_test.go",
             "cmd/crewship/cmd_issue_extra_cov_test.go",
             "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-            "cmd/crewship/cmd_issue_workflow_cov_test.go",
             "…"
           ]
         }
@@ -15597,6 +15603,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
         "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/notification_prefs_test.go",
         "internal/api/notifications_surface_removed_test.go"
@@ -15619,6 +15626,7 @@
           "source_file": "cmd/crewship/cmd_notify_prefs.go",
           "test_signals": [
             "cmd/crewship/cmd_notify_prefs_cov_test.go",
+            "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
             "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/notification_prefs_test.go",
             "internal/api/notifications_surface_removed_test.go"
@@ -15638,6 +15646,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
         "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/notification_prefs_test.go",
         "internal/api/notifications_surface_removed_test.go"
@@ -15660,6 +15669,7 @@
           "source_file": "cmd/crewship/cmd_notify_prefs.go",
           "test_signals": [
             "cmd/crewship/cmd_notify_prefs_cov_test.go",
+            "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
             "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/notification_prefs_test.go",
             "internal/api/notifications_surface_removed_test.go"
@@ -16482,12 +16492,12 @@
       "test_signals": [
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_observability_payments_test.go",
-        "internal/api/agent_notification_channels_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -16509,12 +16519,12 @@
           "test_signals": [
             "cmd/crewship/cmd_agent_channels_test.go",
             "cmd/crewship/cmd_format_sweep_batch2_test.go",
+            "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
             "cmd/crewship/cmd_notifychannel_cov_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_observability_payments_test.go",
-            "internal/api/agent_notification_channels_test.go",
             "…"
           ]
         }
@@ -16537,12 +16547,12 @@
       "test_signals": [
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_observability_payments_test.go",
-        "internal/api/agent_notification_channels_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -16564,12 +16574,12 @@
           "test_signals": [
             "cmd/crewship/cmd_agent_channels_test.go",
             "cmd/crewship/cmd_format_sweep_batch2_test.go",
+            "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
             "cmd/crewship/cmd_notifychannel_cov_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_observability_payments_test.go",
-            "internal/api/agent_notification_channels_test.go",
             "…"
           ]
         }
@@ -16590,6 +16600,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "internal/api/notification_testdraft_test.go"
       ],
       "concrete_response_schema": true,
@@ -16609,6 +16620,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_notifychannel.go",
           "test_signals": [
+            "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
             "internal/api/notification_testdraft_test.go"
           ]
         }
@@ -16978,6 +16990,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notify_templates_cov_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
@@ -17001,6 +17014,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_notify_templates.go",
           "test_signals": [
+            "cmd/crewship/cmd_notify_templates_cov_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
@@ -17022,6 +17036,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notify_templates_cov_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
@@ -17045,6 +17060,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_notify_templates.go",
           "test_signals": [
+            "cmd/crewship/cmd_notify_templates_cov_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
@@ -17066,6 +17082,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notify_templates_cov_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
@@ -17089,6 +17106,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_notify_templates.go",
           "test_signals": [
+            "cmd/crewship/cmd_notify_templates_cov_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
@@ -27017,6 +27035,7 @@
         "cmd/crewship/cmd_approvals_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
         "cmd/crewship/cmd_open_test.go"
       ]
     },
@@ -31436,6 +31455,7 @@
         "cmd/crewship/cli_format_contract_test.go",
         "cmd/crewship/cmd_diff_cov_test.go",
         "cmd/crewship/cmd_eval_baseline_cov2_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_slash_cov_test.go"
       ],
       "flags": [
@@ -33076,7 +33096,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_inbox_cov_test.go",
-        "cmd/crewship/cmd_inbox_foureyes_test.go"
+        "cmd/crewship/cmd_inbox_foureyes_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go"
       ]
     },
     {
@@ -34841,11 +34862,11 @@
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go",
         "…"
       ]
     },
@@ -34863,11 +34884,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -34884,11 +34908,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -34908,11 +34935,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ],
       "flags": [
         "output-file"
@@ -34938,11 +34968,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -34959,11 +34992,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -34980,11 +35016,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35043,11 +35082,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ],
       "flags": [
         "patch"
@@ -35070,11 +35112,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ],
       "flags": [
         "body"
@@ -35097,11 +35142,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35175,11 +35223,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ],
       "flags": [
         "yes"
@@ -35205,11 +35256,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35226,11 +35280,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35250,10 +35307,10 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_crew_issue_prefix_integration_test.go",
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
-        "cmd/crewship/cmd_issue_extra_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ]
     },
@@ -35271,11 +35328,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35296,11 +35356,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35359,11 +35422,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ],
       "flags": [
         "type"
@@ -35389,11 +35455,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35413,11 +35482,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35434,11 +35506,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ],
       "flags": [
         "action",
@@ -35465,11 +35540,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35486,11 +35564,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35507,11 +35588,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35532,11 +35616,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35553,11 +35640,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35574,11 +35664,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35595,11 +35688,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35617,11 +35713,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_attachments_test.go",
+        "cmd/crewship/cmd_issue_changes_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_detach_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_links_cov_test.go",
+        "…"
       ],
       "flags": [
         "assignee",
@@ -36456,11 +36555,11 @@
         "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_credential_endpoint_headeronly_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_journal_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
-        "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "…"
       ]
     },
@@ -36582,11 +36681,11 @@
         "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_credential_endpoint_headeronly_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_journal_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
-        "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "…"
       ],
       "flags": [
@@ -38803,12 +38902,13 @@
       "test_signals": [
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
+        "cmd/crewship/cmd_notify_send_cov_test.go",
+        "cmd/crewship/cmd_notify_templates_cov_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_category_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
-        "cmd/crewship/cmd_routine_report_test.go",
-        "cmd/crewship/cmd_routine_watch_progress_test.go"
+        "…"
       ]
     },
     {
@@ -38831,7 +38931,7 @@
         "cmd/crewship/cmd_keeper_test.go",
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
-        "cmd/crewship/cmd_notifychannel_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
         "…"
       ]
     },
@@ -38855,7 +38955,7 @@
         "cmd/crewship/cmd_keeper_test.go",
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
-        "cmd/crewship/cmd_notifychannel_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
         "…"
       ]
     },
@@ -38876,10 +38976,13 @@
       "test_signals": [
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
+        "cmd/crewship/cmd_notify_send_cov_test.go",
+        "cmd/crewship/cmd_notify_templates_cov_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_category_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+        "…"
       ]
     },
     {
@@ -38956,10 +39059,13 @@
       "test_signals": [
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
+        "cmd/crewship/cmd_notify_send_cov_test.go",
+        "cmd/crewship/cmd_notify_templates_cov_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_category_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+        "…"
       ],
       "flags": [
         "level"
@@ -39007,10 +39113,13 @@
       "test_signals": [
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
+        "cmd/crewship/cmd_notify_send_cov_test.go",
+        "cmd/crewship/cmd_notify_templates_cov_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_category_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+        "…"
       ]
     },
     {
@@ -39053,10 +39162,12 @@
         "cmd/crewship/cmd_label_test.go",
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/crewship/cmd_notify_prefs_group_cov_test.go",
+        "cmd/crewship/cmd_notify_send_cov_test.go",
+        "cmd/crewship/cmd_notify_templates_cov_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
-        "cmd/crewship/cmd_notifychannel_deliveries_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_category_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+        "…"
       ],
       "flags": [
         "category",
@@ -39119,11 +39230,11 @@
         "cmd/crewship/acceptance_local_db_target_test.go",
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_credential_endpoint_headeronly_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_journal_test.go",
         "cmd/crewship/cmd_notify_cov_test.go",
-        "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "…"
       ]
     },
@@ -39147,6 +39258,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notification_removed_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39173,9 +39285,9 @@
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_json_contract_test.go",
         "cmd/crewship/cmd_keeper_watch_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "…"
       ],
       "flags": [
@@ -39240,6 +39352,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39265,6 +39378,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39290,6 +39404,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39309,6 +39424,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39366,6 +39482,7 @@
       "test_signals": [
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39391,6 +39508,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39410,6 +39528,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39433,6 +39552,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39458,6 +39578,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39477,6 +39598,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notifychannel_agents_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -39516,6 +39638,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_schedules_cov_test.go",
+        "cmd/crewship/cmd_routine_schedules_list_update_cov_test.go",
         "cmd/crewship/cmd_routine_watch_progress_test.go",
         "cmd/crewship/cmd_token_classify_test.go"
       ]
@@ -39992,9 +40115,9 @@
         "cmd/crewship/cmd_chat_cov_test.go",
         "cmd/crewship/cmd_crew_files_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
+        "cmd/crewship/cmd_issue_links_cov_test.go",
         "cmd/crewship/cmd_login_cov_test.go",
         "cmd/crewship/cmd_open_cov_test.go",
-        "cmd/crewship/cmd_open_test.go",
         "…"
       ],
       "flags": [
@@ -41800,8 +41923,8 @@
         "cmd/crewship/cmd_prompt_cov_test.go",
         "cmd/crewship/cmd_prompt_test.go",
         "cmd/crewship/cmd_recap_cov_test.go",
+        "cmd/crewship/cmd_routine_stepoverride_cov_test.go",
         "cmd/crewship/cmd_routine_validate_agents_test.go",
-        "cmd/crewship/cmd_routine_validate_cov_test.go",
         "…"
       ]
     },
@@ -42522,8 +42645,8 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_root_headless_multiarg_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
-        "cmd/crewship/cmd_routine_bench_cov_test.go",
         "…"
       ]
     },
@@ -42565,14 +42688,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -42589,14 +42712,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -42613,14 +42736,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42647,14 +42770,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -42671,14 +42794,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42705,14 +42828,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42743,14 +42866,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -42767,14 +42890,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -42791,14 +42914,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42845,14 +42968,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42878,13 +43001,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_json_contract_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "…"
       ]
     },
@@ -42901,14 +43024,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -42925,14 +43048,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42955,14 +43078,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42987,14 +43110,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -43011,14 +43134,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -43035,14 +43158,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43065,14 +43188,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -43120,14 +43243,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43153,13 +43276,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_pipeline_cov_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "…"
       ]
     },
@@ -43176,14 +43299,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43212,12 +43335,12 @@
       "test_signals": [
         "cmd/crewship/cmd_agent_files_cov2_test.go",
         "cmd/crewship/cmd_crew_config_cov_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
-        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43244,14 +43367,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43333,12 +43456,12 @@
       "test_signals": [
         "cmd/crewship/cmd_history_http_test.go",
         "cmd/crewship/cmd_resume_cov_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
-        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43369,14 +43492,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43427,14 +43550,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -43476,14 +43599,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43512,14 +43635,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -43536,14 +43659,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43569,14 +43692,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43601,14 +43724,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43631,14 +43754,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43667,13 +43790,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_commands_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "…"
       ],
       "flags": [
@@ -43731,13 +43854,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_resume_cov_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "…"
       ],
       "flags": [
@@ -43765,9 +43888,9 @@
         "cmd/crewship/cmd_explain_cov_test.go",
         "cmd/crewship/cmd_pipeline_cov_test.go",
         "cmd/crewship/cmd_pipeline_save_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
-        "cmd/crewship/cmd_routine_bench_test.go",
         "…"
       ],
       "flags": [
@@ -43803,14 +43926,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -43883,14 +44006,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43913,14 +44036,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -43937,14 +44060,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -43994,14 +44117,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44018,14 +44141,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44076,10 +44199,10 @@
         "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
-        "cmd/crewship/cmd_routine_budget_test.go",
         "…"
       ],
       "flags": [
@@ -44103,14 +44226,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44138,11 +44261,11 @@
         "cmd/crewship/acceptance_oauth_connect_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_inbox_cov_test.go",
+        "cmd/crewship/cmd_issue_links_cov_test.go",
         "cmd/crewship/cmd_json_contract_test.go",
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_memory_versions_projection_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
-        "cmd/crewship/cmd_page_test.go",
         "…"
       ]
     },
@@ -44159,14 +44282,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44195,14 +44318,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44229,14 +44352,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44261,14 +44384,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44291,14 +44414,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44315,14 +44438,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44339,14 +44462,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44363,14 +44486,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44395,14 +44518,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44429,14 +44552,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44462,14 +44585,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44486,14 +44609,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44510,14 +44633,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44548,14 +44671,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44572,14 +44695,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44602,14 +44725,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44636,14 +44759,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44660,14 +44783,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44691,14 +44814,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44716,14 +44839,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44778,14 +44901,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44808,14 +44931,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -44832,14 +44955,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44875,12 +44998,12 @@
       "test_signals": [
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_webhook_test.go",
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
-        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "…"
       ]
     },
@@ -44940,14 +45063,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -45003,14 +45126,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_routine_appearance_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_bulkreplay_cov_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -46170,6 +46293,7 @@
         "cmd/crewship/acceptance_cli_resolve_test.go",
         "cmd/crewship/acceptance_consolidate_review_test.go",
         "cmd/crewship/cmd_routine_governance_test.go",
+        "cmd/crewship/cmd_routine_waitpoints_group_cov_test.go",
         "cmd/crewship/cmd_skill_authoring_cov_test.go",
         "cmd/crewship/cmd_skill_cov2_test.go",
         "cmd/crewship/cmd_skill_cov_test.go",
@@ -48343,9 +48467,17 @@
       "status": "documented"
     },
     {
+      "name": "CREWSHIP_COST_USD",
+      "docs": [
+        "docs/guides/hooks.mdx"
+      ],
+      "status": "documented"
+    },
+    {
       "name": "CREWSHIP_CREW_ID",
       "docs": [
-        "docs/configuration/environment.mdx"
+        "docs/configuration/environment.mdx",
+        "docs/guides/hooks.mdx"
       ],
       "status": "documented"
     },
@@ -48528,6 +48660,20 @@
       "name": "CREWSHIP_LICENSE_FILE",
       "docs": [
         "docs/configuration/environment.mdx"
+      ],
+      "status": "documented"
+    },
+    {
+      "name": "CREWSHIP_LLM_MODEL",
+      "docs": [
+        "docs/guides/hooks.mdx"
+      ],
+      "status": "documented"
+    },
+    {
+      "name": "CREWSHIP_LLM_PROVIDER",
+      "docs": [
+        "docs/guides/hooks.mdx"
       ],
       "status": "documented"
     },
@@ -48989,7 +49135,8 @@
     {
       "name": "CREWSHIP_TOOL_NAME",
       "docs": [
-        "docs/configuration/environment.mdx"
+        "docs/configuration/environment.mdx",
+        "docs/guides/hooks.mdx"
       ],
       "status": "documented"
     },
@@ -49034,7 +49181,8 @@
     {
       "name": "CREWSHIP_WORKSPACE_ID",
       "docs": [
-        "docs/configuration/environment.mdx"
+        "docs/configuration/environment.mdx",
+        "docs/guides/hooks.mdx"
       ],
       "status": "documented"
     }
@@ -49744,6 +49892,7 @@
         "docs/guides/crew-journal.mdx",
         "docs/guides/episodic-memory.mdx",
         "docs/guides/feedback.mdx",
+        "docs/guides/hooks.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/notifications.mdx",
@@ -49771,11 +49920,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4570,
+    "command_references": 4571,
     "api_path_references": 2200,
-    "environment_references": 447,
+    "environment_references": 454,
     "manifest_kind_references": 231,
-    "flag_references": 2190,
+    "flag_references": 2191,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

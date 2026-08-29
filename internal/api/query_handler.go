@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -159,6 +160,55 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		replyInternalError(w, h.logger, "lookup target agent", err)
+		return
+	}
+
+	// pre_peer_conversation: fires before the peer_conversations row exists
+	// and before the target agent runs — this is the one place every
+	// `curl localhost:9119/query` call converges on (Create is the
+	// synchronous handler behind the sidecar's /query, and there is no
+	// second entry point the way task delegation has three). A blocking
+	// hook can refuse the whole peer question here.
+	//
+	// Both error kinds fail closed — a gate that cannot be evaluated must
+	// not read as passed — but they are different answers and get different
+	// statuses. A *hooks.BlockedError is a policy decision: 403, and the
+	// handler's message goes back so the asking agent learns why. A
+	// *hooks.DispatchError means the registry could not be read or a handler
+	// is broken: that is our fault, not the caller's, so it is a 500 with a
+	// generic body (hookErr wraps the raw DB error, which does not belong in
+	// a response) and the detail stays in the log.
+	//
+	// DispatchError is checked FIRST, and that order is load-bearing.
+	// Dispatch returns errors.Join(dispatchErrs..., blocked) when one
+	// blocking hook fails to run and a LATER one blocks, so the joined error
+	// satisfies errors.As for both. Asking about BlockedError first would
+	// answer 403 — a clean policy refusal — while silently swallowing the
+	// fact that a hook never ran at all, which is the louder of the two
+	// facts and the one the operator has to fix.
+	if hookErr := hooks.Dispatch(r.Context(), h.db, h.journal, hooks.EventPrePeerConversation, hooks.EventContext{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID,
+		AgentID:     target.ID,
+		Payload: map[string]any{
+			"from_slug":   body.FromSlug,
+			"target_slug": body.TargetSlug,
+			"chat_id":     body.ChatID,
+		},
+	}); hookErr != nil {
+		var dispatchErr *hooks.DispatchError
+		var blocked *hooks.BlockedError
+		if !errors.As(hookErr, &dispatchErr) && errors.As(hookErr, &blocked) {
+			h.logger.Info("peer query refused: pre_peer_conversation hook blocked",
+				"from_slug", body.FromSlug, "target_slug", body.TargetSlug, "error", hookErr)
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": hookErr.Error()})
+			return
+		}
+		h.logger.Error("peer query refused: pre_peer_conversation hook could not be evaluated",
+			"from_slug", body.FromSlug, "target_slug", body.TargetSlug, "error", hookErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "pre_peer_conversation hook could not be evaluated",
+		})
 		return
 	}
 
@@ -447,10 +497,30 @@ func (h *QueryHandler) finishQuery(
 	}
 
 	// Update peer_conversations
+	conversationUpdated := true
 	if _, err := h.db.ExecContext(ctx,
 		`UPDATE peer_conversations SET status=?, response=?, duration_ms=?, finished_at=? WHERE id=?`,
 		status, responseVal, durationMs, now, convID); err != nil {
+		conversationUpdated = false
 		h.logger.Error("update peer_conversation", "error", err, "id", convID)
+	}
+
+	// post_peer_conversation is an observation, so publish it only after the
+	// terminal state it describes is durable. A background context keeps a
+	// request cancellation racing the response from dropping the lookup; the
+	// dispatcher itself runs observation handlers asynchronously.
+	if conversationUpdated {
+		_ = hooks.Dispatch(context.Background(), h.db, h.journal, hooks.EventPostPeerConversation, hooks.EventContext{
+			WorkspaceID: workspaceID,
+			CrewID:      crewID,
+			AgentID:     targetAgentID,
+			Payload: map[string]any{
+				"from_slug":   fromSlug,
+				"target_slug": targetSlug,
+				"status":      status,
+				"duration_ms": durationMs,
+			},
+		})
 	}
 
 	// Emit the answer entry on the same thread. Severity elevates to

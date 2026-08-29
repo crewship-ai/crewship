@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/lookout"
 	"github.com/crewship-ai/crewship/internal/paymaster"
@@ -15,7 +16,7 @@ import (
 
 // Middleware wraps base with the full LLM call stack:
 //
-//	telemetry  ->  paymaster  ->  lookout  ->  caching (future)  ->  base
+//	hooks (pre/post_llm_call)  ->  telemetry  ->  paymaster  ->  lookout  ->  caching (future)  ->  base
 //
 // Each layer matches the paymaster.LLMCaller signature so they compose as
 // plain function wrappers. The returned Provider preserves the original
@@ -24,29 +25,34 @@ import (
 // Layer order is deliberate and documented here because getting it wrong
 // produces subtle bugs that only show up under load:
 //
-//  1. telemetry is outermost so the span covers the full request (budget
+//  1. hooks dispatches the generic pre_llm_call / post_llm_call user hooks
+//     outermost, so a blocking pre_llm_call hook refuses the call before
+//     telemetry opens a span or paymaster spends a budget check on it, and
+//     post_llm_call sees the same cost/token numbers every inner layer
+//     already computed.
+//  2. telemetry is next so the span covers the rest of the request (budget
 //     check, guardrails, cache lookup, network). An SRE looking at a slow
 //     trace must see every contributor, not just the last hop.
-//  2. paymaster comes next so the pre-call budget check can refuse a
+//  3. paymaster comes next so the pre-call budget check can refuse a
 //     request before we've paid for a cache lookup. The cost ledger also
 //     records the final bill here, outside the guardrail layer so
 //     sanitization time is not counted toward "provider latency".
-//  3. lookout scans the messages before they hit the provider. Running it
+//  4. lookout scans the messages before they hit the provider. Running it
 //     INSIDE paymaster is important: if lookout blocks the call, no
 //     ledger row is written (because next.Call is never invoked). A
 //     blocked call is not a billable call.
-//  4. caching (not yet implemented at this layer — Anthropic's own prompt
+//  5. caching (not yet implemented at this layer — Anthropic's own prompt
 //     caching is handled wire-side in anthropic.go) would go here so a
 //     cache hit bypasses both lookout and the provider but still flows
 //     through paymaster for the hit-event accounting.
-//  5. base is the raw Provider.
+//  6. base is the raw Provider.
 //
-// Stream() is wired through the same telemetry → paymaster → lookout
-// stack as Complete(). The wrap happens per-call (the handler is closed
-// over by the inner caller) so each streaming response generates exactly
-// one cost_ledger row and exactly one OTel span — built from the final
-// token counts that the underlying Provider.Stream returns alongside the
-// last delta event. Pre-call Enforce, post-call Record, and span
+// Stream() is wired through the same hooks → telemetry → paymaster →
+// lookout stack as Complete(). The wrap happens per-call (the handler is
+// closed over by the inner caller) so each streaming response generates
+// exactly one cost_ledger row and exactly one OTel span — built from the
+// final token counts that the underlying Provider.Stream returns alongside
+// the last delta event. Pre-call Enforce, post-call Record, and span
 // recording all behave identically to the synchronous path.
 func Middleware(base Provider, j journal.Emitter, db *sql.DB) Provider {
 	if base == nil {
@@ -58,8 +64,56 @@ func Middleware(base Provider, j journal.Emitter, db *sql.DB) Provider {
 	caller = lookoutCaller(caller, j)
 	caller = paymaster.Middleware(caller, j, db)
 	caller = telemetry.LLMMiddleware(caller)
+	caller = hooksCaller(caller, db, j)
 
 	return &wrappedProvider{base: base, caller: caller, j: j, db: db}
+}
+
+// hooksCaller dispatches the generic pre_llm_call / post_llm_call user
+// hooks (crewship hooks create --event pre_llm_call|post_llm_call) around
+// next.Call. It is the outermost layer of the chain (see Middleware's doc
+// comment) so a blocking pre_llm_call hook can refuse a call before any
+// inner layer spends anything on it.
+//
+// req.Scope is already resolved by the caller (Complete/Stream, via
+// paymasterScopeFromContext) — an empty WorkspaceID means there is no
+// workspace to scope a hook lookup to (e.g. a background job with no
+// request-scoped workspace), so hooks are skipped rather than dispatched
+// against a scope hooks.Dispatch would reject outright.
+func hooksCaller(next paymaster.LLMCaller, db *sql.DB, j journal.Emitter) paymaster.LLMCaller {
+	if next == nil {
+		return nil
+	}
+	return paymaster.CallerFunc(func(ctx context.Context, req paymaster.CallRequest) (paymaster.CallResponse, error) {
+		if req.Scope.WorkspaceID == "" {
+			return next.Call(ctx, req)
+		}
+		ec := hooks.EventContext{
+			WorkspaceID: req.Scope.WorkspaceID,
+			CrewID:      req.Scope.CrewID,
+			AgentID:     req.Scope.AgentID,
+			MissionID:   req.Scope.MissionID,
+			LLMProvider: req.Provider,
+			LLMModel:    req.Model,
+		}
+		if hookErr := hooks.Dispatch(ctx, db, j, hooks.EventPreLLMCall, ec); hookErr != nil {
+			return paymaster.CallResponse{}, fmt.Errorf("llm/middleware: pre_llm_call hook: %w", hookErr)
+		}
+
+		resp, err := next.Call(ctx, req)
+
+		// post_llm_call fires whether or not the call succeeded — a hook
+		// watching cost/latency wants to see failures too — but carries
+		// the response's cost/token numbers only when we have them. Fired
+		// with context.Background() (not ctx) so a request-scoped cancel
+		// racing the response doesn't drop the observation, matching
+		// paymaster.Middleware's own Record call below this layer.
+		postEC := ec
+		postEC.CostUSD = resp.CostUSD
+		_ = hooks.Dispatch(context.Background(), db, j, hooks.EventPostLLMCall, postEC)
+
+		return resp, err
+	})
 }
 
 // wrappedProvider is the Provider returned by Middleware. Complete() runs
@@ -116,12 +170,15 @@ func (w *wrappedProvider) Stream(ctx context.Context, req Request, handler func(
 	// Build a matching chain bottom-up. lookoutCaller stays inside
 	// paymaster.Middleware so a blocked input does not produce a
 	// ledger row (an LLM that never received the prompt did no work
-	// to bill for). telemetry sits outermost so the span covers
-	// budget enforcement and guardrails too.
+	// to bill for). telemetry sits outermost of those so the span covers
+	// budget enforcement and guardrails too; hooksCaller wraps everything
+	// (see Middleware's doc comment) so pre_llm_call can refuse the call
+	// before any of it runs.
 	var caller paymaster.LLMCaller = &streamCaller{p: w.base, handler: handler}
 	caller = lookoutCaller(caller, w.j)
 	caller = paymaster.Middleware(caller, w.j, w.db)
 	caller = telemetry.LLMMiddleware(caller)
+	caller = hooksCaller(caller, w.db, w.j)
 
 	resp, err := caller.Call(ctx, paymaster.CallRequest{
 		Scope:    scope,

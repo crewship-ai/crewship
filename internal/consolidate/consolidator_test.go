@@ -28,6 +28,10 @@ CREATE TABLE crews (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
     slug TEXT NOT NULL,
+    -- egresspolicy.Check (consulted by hooks' http handler — see
+    -- memory_write_hooks_test.go) fails closed without these columns.
+    network_mode TEXT NOT NULL DEFAULT 'free',
+    allowed_domains TEXT NOT NULL DEFAULT '[]',
     deleted_at TEXT
 );
 CREATE TABLE journal_entries (
@@ -64,6 +68,28 @@ CREATE TABLE journal_chain_checkpoints (
     removed_json TEXT NOT NULL,
     mac TEXT NOT NULL
 );
+-- Run now dispatches pre_memory_write / post_memory_write around
+-- appendRules (see memory_write_hooks_test.go), so hooks_config has to
+-- exist for ANY test in this package to run. Empty table = ListByEvent
+-- returns nothing = the dispatch is a no-op, so every pre-existing test
+-- below is unaffected unless it registers a hook itself.
+CREATE TABLE hooks_config (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    crew_id TEXT,
+    event TEXT NOT NULL,
+    matcher TEXT NOT NULL DEFAULT '{}',
+    handler_kind TEXT NOT NULL CHECK(handler_kind IN ('shell','http','subagent')),
+    handler_config TEXT NOT NULL DEFAULT '{}',
+    blocking INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_hooks_event ON hooks_config(event, enabled);
+CREATE INDEX idx_hooks_ws ON hooks_config(workspace_id, enabled);
+
 INSERT INTO workspaces (id) VALUES ('ws_test');
 INSERT INTO crews (id, workspace_id, slug) VALUES ('crew_test', 'ws_test', 'crew-test');
 `

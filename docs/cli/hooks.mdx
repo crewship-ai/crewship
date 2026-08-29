@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship hooks
 
-Manage the lifecycle-hook registry -- shell commands, HTTP webhooks, or subagents that fire on platform events (`pre_agent_start`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 14-event catalog and the three handler kinds. There is no `pre_tool_call` -- the platform has no interception point before a tool runs. `post_tool_call` is a valid event you can register, but it does not currently fire for user-registered hooks either -- see [Currently-dispatched events](#currently-dispatched-events) below.
+Manage the lifecycle-hook registry -- shell commands, HTTP webhooks, or subagents that fire on platform events (`pre_agent_start`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 14-event catalog and the three handler kinds. There is no `pre_tool_call` -- the platform has no interception point before a tool runs. Every one of the 14 catalog events, including `post_tool_call`, now dispatches from a real call site -- see [Currently-dispatched events](#currently-dispatched-events) below.
 
 ```bash
 crewship hooks <subcommand> [flags]
@@ -84,7 +84,7 @@ New hooks are **enabled** unless you pass `--disabled`.
 | `--matcher-agents` | `string` | Comma-separated agent IDs. |
 | `--matcher-crews` | `string` | Comma-separated crew IDs. |
 | `--matcher-severities` | `string` | Comma-separated severities. |
-| `--blocking` | `bool` | Run synchronously; a `block` outcome cancels the triggering operation. |
+| `--blocking` | `bool` | Run synchronously; valid only for `pre_*` events that can still cancel the operation. `post_*` and `on_*` events are always asynchronous observations. |
 | `--disabled` | `bool` | Register without arming the hook. |
 
 ```bash
@@ -123,7 +123,7 @@ crewship hooks update hk_abc123 --matcher-tools 'Bash,Write'
 crewship hooks update hk_abc123 --disabled
 ```
 
-Takes the same flags as `create`, all optional. **Only the flags you pass are sent** — an omitted flag keeps its current server-side value, so changing the event does not quietly clear your matcher or blocking flag. Passing no flags at all is an error rather than an empty patch.
+Takes the same flags as `create`, all optional. **Only the flags you pass are sent** — an omitted flag keeps its current server-side value. If a blocking `pre_*` hook is changed to a `post_*` or `on_*` event, explicitly pass `--blocking=false`; the server refuses an observation event that retains the old blocking flag. Passing no flags at all is an error rather than an empty patch.
 
 Converting a hook to `--handler shell`, or editing one that is already shell, requires `OWNER`.
 
@@ -171,30 +171,27 @@ Same auth and audit semantics as enable.
 
 | Exit | Meaning |
 |---|---|
-| 400 | Unknown event or handler kind, or a handler with no target. Most of these are caught locally before a request is sent. |
+| 400 | Unknown event or handler kind, a handler with no target, or `--blocking` on an observation event. Most of these are caught locally before a request is sent. |
 | 401 | Not authenticated. |
 | 403 | Logged in but not `OWNER` / `ADMIN`; or a non-`OWNER` touching a shell hook. |
 | 404 | Hook ID not found in your workspace (also returned for cross-tenant IDs). |
 
 ## Currently-dispatched events
 
-<Accordion title="Which events actually fire (as of PR #210)">
-  Dispatched:
+<Accordion title="Which events actually fire">
+  All 14 events in the `--event` catalog now dispatch from a real call
+  site — see the
+  [Hooks guide coverage table](/guides/hooks#coverage-status) for the
+  call site behind each one. `internal/hooks/dispatch_site_test.go`
+  enforces this as an invariant: a source-scan test fails CI if an event
+  is ever added to `AllEvents` without a matching `hooks.Dispatch` call
+  reachable from outside the hooks package.
 
-  - `pre_agent_start`, `post_agent_stop`
-  - `on_approval_requested`
-  - `on_guardrail_triggered`
-
-  The other ten of the fourteen creatable events are defined but not yet
-  dispatched at their call sites — see the
-  [Hooks guide coverage table](/guides/hooks#coverage-status-as-of-pr-%23210),
-  which is the source of truth for this list.
-  Registering a hook on an undispatched event is legal but nothing will
-  fire it — `post_tool_call` included. `pre_tool_call` used to be exactly
-  this trap with no way out (an undispatched event that also had no "wire
-  it up" path on the roadmap) and was removed from the valid event list
-  rather than left there — it is the one undispatched-looking event that
-  is now also a 400, not just a silently-dead 201.
+  `pre_tool_call` used to be exactly the opposite trap — an event that
+  registered cleanly and never fired, with no "wire it up" path on the
+  roadmap — and was removed from the valid event list rather than left
+  there: it is the one event name that is now a 400, not a silently-dead
+  201.
 </Accordion>
 
 ## Related
