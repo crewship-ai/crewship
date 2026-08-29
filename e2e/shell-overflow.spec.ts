@@ -59,37 +59,6 @@ async function insetGeometry(page: Page) {
   })
 }
 
-/**
- * The newest routine run in the workspace, so the Activity run detail — the
- * surface that actually carries the wide content — is exercised with real
- * output rather than an empty state. Null on a workspace with no runs, so the
- * test skips instead of hard-failing on a bare database.
- *
- * The runs endpoint is journal-backed: rows are journal entries whose `id` is
- * the entry (`j_…`), and the run is `run_id`.
- */
-async function newestRunID(page: Page): Promise<string | null> {
-  return page.evaluate(async () => {
-    const ws = await fetch("/api/v1/workspaces").then((r) => r.json())
-    const wsId = (Array.isArray(ws) ? ws : [ws])[0]?.id
-    if (!wsId) return null
-    const pipes = await fetch(`/api/v1/workspaces/${wsId}/pipelines`).then((r) => r.json())
-    const rows: Array<{ slug?: string }> = Array.isArray(pipes) ? pipes : (pipes?.rows ?? [])
-    for (const p of rows) {
-      if (!p.slug) continue
-      const runs = await fetch(
-        `/api/v1/workspaces/${wsId}/pipelines/${encodeURIComponent(p.slug)}/runs?limit=1`,
-      )
-        .then((r) => r.json())
-        .catch(() => null)
-      const entries: Array<{ run_id?: string }> = Array.isArray(runs) ? runs : (runs?.rows ?? [])
-      const runID = entries.find((e) => e.run_id)?.run_id
-      if (runID) return runID
-    }
-    return null
-  })
-}
-
 test.use({ viewport: VIEWPORT })
 
 for (const { name, path } of PAGES) {
@@ -110,36 +79,42 @@ for (const { name, path } of PAGES) {
   })
 }
 
-test("Activity run detail: a wide run does not push the shell off-screen", async ({ page }) => {
+test("a wide descendant does not push the shell inset off-screen", async ({ page }) => {
   await page.goto("/activity")
   await page.waitForLoadState("networkidle")
 
-  const runID = await newestRunID(page)
-  test.skip(runID === null, "no routine runs in this workspace")
+  const before = await insetGeometry(page)
+  expect(before.right).toBeLessThanOrEqual(before.viewport)
 
-  await page.goto(`/activity?run=${encodeURIComponent(runID!)}`)
-  await page.waitForLoadState("networkidle")
-  // The steps rail streams in after the journal fetch; its content is what
-  // makes this page the widest one in the app.
-  await page.waitForTimeout(2500)
+  // Put a known-wide element inside the inset and re-measure.
+  //
+  // This started out as "open a run and hope its steps are wide", which
+  // CodeRabbit rightly flagged: a run that never reached a step renders a
+  // short rail, and the assertion then passes against the broken shell too.
+  // Chasing a guaranteed-wide run through the journal API only moves the
+  // guess. The invariant under test is not "the Activity page is wide" — it
+  // is "a wide descendant must not push the inset past the rail", which is
+  // exactly what min-w-0 buys and what any page can trip. So state it
+  // directly, with content this test owns.
+  const injected = await page.evaluate((): boolean => {
+    const inset = document.querySelector<HTMLElement>("[data-slot=sidebar-inset]")
+    if (!inset) return false
+    const probe = document.createElement("div")
+    probe.id = "shell-overflow-probe"
+    // A fixed width is a min-content floor for a block box, which is the
+    // thing `min-width: auto` was refusing to shrink below.
+    probe.style.width = "3000px"
+    probe.style.height = "1px"
+    inset.appendChild(probe)
+    return true
+  })
+  expect(injected, "the shell inset is present to probe").toBe(true)
 
-  const geo = await insetGeometry(page)
+  const after = await insetGeometry(page)
   expect(
-    geo.right,
-    `run detail: the shell inset's right edge is ${geo.right}px on a ${geo.viewport}px viewport ` +
-      `(starts at x=${geo.left}, measures ${geo.width}px)`,
-  ).toBeLessThanOrEqual(geo.viewport)
-
-  // And the top bar's trailing control is actually on screen — the
-  // user-visible symptom was an account menu cut to "DU D".
-  const account = page.locator("header").first().locator("button").last()
-  if (await account.count()) {
-    const box = await account.boundingBox()
-    if (box) {
-      expect(
-        Math.round(box.x + box.width),
-        "the top bar's trailing control is fully inside the viewport",
-      ).toBeLessThanOrEqual(VIEWPORT.width)
-    }
-  }
+    after.right,
+    `a 3000px descendant pushed the shell inset's right edge to ${after.right}px on a ` +
+      `${after.viewport}px viewport (starts at x=${after.left}, measures ${after.width}px). ` +
+      `The inset must shrink and let the descendant overflow inside it, not grow past the rail.`,
+  ).toBeLessThanOrEqual(after.viewport)
 })
