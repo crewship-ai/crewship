@@ -254,7 +254,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
-- **`/design` is gone; its audit is now a tracked document (#2163).** The
+- **`/design` is gone; its audit is now a tracked document (#2165).** The
   create-surface unification proposal shipped as a page inside the product —
   no data, no API, no CLI command — and its own header said to delete it once
   the audit it carried had no rows left to fix. It is removed with rows still
@@ -266,7 +266,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   route, `components/features/design/`, the sidebar row and the `design`
   concept icon go with it, and 26 comments that cited the page as their
   specification now cite a section of the document.
-
 
 - **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
   ⚠️ **Behaviour change: the left column navigates between conversations, and
