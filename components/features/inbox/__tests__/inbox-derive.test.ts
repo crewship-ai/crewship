@@ -254,4 +254,34 @@ describe("jumpFor", () => {
     expect(jumpFor(item({ kind: "waitpoint", payload: { pipeline_run_id: "r1" } }))?.label).toBe("Open run")
     expect(jumpFor(item({ kind: "message" }))).toBeNull()
   })
+
+  // The label alone was all this ever returned, so the detail pane rendered a
+  // button that NAMED a destination and went nowhere. A jump target without an
+  // href is not a jump target.
+  it("carries the href for each destination it names", () => {
+    expect(jumpFor(item({ kind: "message", payload: { chat_url: "/chat/x" } }))?.href).toBe("/chat/x")
+    expect(jumpFor(item({ kind: "message", payload: { issue_identifier: "ENG-6" } }))?.href).toBe("/issues/ENG-6")
+    expect(jumpFor(item({ kind: "waitpoint", payload: { pipeline_run_id: "r1" } }))?.href)
+      .toBe("/activity?run=r1")
+  })
+
+  it("encodes identifiers that would otherwise break the path or query", () => {
+    expect(jumpFor(item({ kind: "message", payload: { issue_identifier: "ENG/6 7" } }))?.href)
+      .toBe("/issues/ENG%2F6%207")
+    expect(jumpFor(item({ kind: "waitpoint", payload: { pipeline_run_id: "r 1&x=2" } }))?.href)
+      .toBe("/activity?run=r%201%26x%3D2")
+  })
+
+  // Same rule kind-actions applies to chat_url: one leading slash, so a payload
+  // can't turn an in-app jump into an off-origin navigation.
+  it("refuses an off-origin chat_url instead of linking to it", () => {
+    expect(jumpFor(item({ kind: "message", payload: { chat_url: "//evil.example/x" } }))).toBeNull()
+    expect(jumpFor(item({ kind: "message", payload: { chat_url: "/\\evil.example/x" } }))).toBeNull()
+    expect(jumpFor(item({ kind: "message", payload: { chat_url: "https://evil.example" } }))).toBeNull()
+  })
+
+  it("falls through to the run when chat_url is unsafe but a run exists", () => {
+    const j = jumpFor(item({ kind: "waitpoint", payload: { chat_url: "https://evil.example", pipeline_run_id: "r1" } }))
+    expect(j?.href).toBe("/activity?run=r1")
+  })
 })

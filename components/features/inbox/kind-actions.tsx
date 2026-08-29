@@ -11,22 +11,10 @@ import { isAlreadyDecidedError, waitpointDecide } from "@/lib/api/waitpoints"
 import { escalationResolve } from "@/lib/api/escalations"
 import type { InboxItem } from "@/hooks/use-inbox"
 
-/**
- * Valid in-app chat deep link from a reply notification's payload.
- *
- * The guard has to reject "//evil.example/x" as well as "https://…": a
- * protocol-relative URL starts with "/" and the browser resolves it against
- * the current scheme, so a payload an agent controls could navigate a manager
- * off-origin from a link that looks internal. One leading slash, not two, and
- * no backslash either — some parsers fold "/\" onto "//".
- */
-function chatUrlOf(item: InboxItem): string | null {
-  const v = item.payload?.chat_url
-  if (typeof v !== "string") return null
-  if (!v.startsWith("/")) return null
-  if (v.startsWith("//") || v.startsWith("/\\")) return null
-  return v
-}
+import { safeChatURL } from "./inbox-derive"
+
+// The chat_url guard lives in inbox-derive now — jumpFor needs the same rule
+// and two copies of a security check drift. See safeChatURL there.
 
 // =============================================================================
 // KindActions — the buttons that resolve an item, one branch per source.
@@ -768,9 +756,9 @@ export function KindActions({
       // chat_url instead — deep link straight into the session.
       return (
         <div className="flex items-center gap-2">
-          {chatUrlOf(item) && (
+          {safeChatURL(item) && (
               <Button asChild size="sm" className="gap-1.5">
-                <Link href={chatUrlOf(item) as string}>
+                <Link href={safeChatURL(item) as string}>
                   <MessageSquare className="h-3 w-3" />
                   Open chat
                 </Link>
