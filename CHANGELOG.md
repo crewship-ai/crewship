@@ -181,6 +181,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   allocation ratios, and the truncation policy itself are unchanged; this
   only makes the existing behaviour visible to the model, honestly.
 
+- **Three more endpoints get the CLI command the "every endpoint gets a
+  command" rule requires (#2147).** `crewship feature-flag` could list,
+  delete, enable, disable and inherit a flag but had no way to create or
+  update the definition itself — `POST`/`PATCH /api/v1/feature-flags` were
+  reachable only via the web UI, a direct API call or a manifest `apply`.
+  `crewship feature-flag create` and `crewship feature-flag update <key>` now
+  wrap them; `update` sends a partial `PATCH` carrying only the flags you
+  passed, matching the contract `admin memory-config set` already
+  established. Two admin console reads also had no client: `crewship admin
+  workspaces` (`GET /api/v1/admin/workspaces` — the current workspace with
+  member/agent/crew counts) and `crewship admin memory-stats` (`GET
+  /api/v1/admin/memory/stats` — `memory_versions` totals, byte counts and
+  distinct-blob counts, broken down by tier and by agent), the companion read
+  to `admin memory-config`. All three are ADMIN+ (`canRole "manage"`) and, per
+  #2109, target the server the CLI is authenticated against rather than a
+  local database file.
+
 ### Changed
 
 - **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
