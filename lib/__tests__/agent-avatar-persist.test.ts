@@ -210,7 +210,13 @@ describe("queueAvatarBackfill", () => {
     mockFetch.mockImplementation(ok)
     await queueAvatarBackfill("ag-1", "alice", "thumbs", null)
     await queueAvatarBackfill("ag-1", "alice", "thumbs", WS)
+
+    // Exactly one write, and it is the one that carries the workspace — not
+    // the workspace-less attempt with the second call swallowed by `attempted`.
     expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(String(mockFetch.mock.calls[0][0])).toBe(
+      `/api/v1/agents/ag-1/avatar?workspace_id=${WS}`,
+    )
   })
 
   // #2196, second half: a 400 is not a refusal, and refunding the budget for
