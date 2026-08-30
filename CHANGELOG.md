@@ -31,6 +31,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **The dashboard leads with what needs a human (#2185).** The landing page
+  was a wall of tiles that answered "what exists" before "what is stuck". It
+  now opens with a "Needs your attention" strip — approvals waiting, failed
+  runs, crews held for capacity, credential gaps — each linking to the surface
+  that can act on it, above a Running-now / Up-next pair, the run KPIs
+  (completed, success rate, ledger spend, p95), a run-volume chart grouped by
+  crew, and fleet health per crew.
+
+  `hooks/use-dashboard-data.ts` gains the queries behind it (run insights,
+  crew spend, crew service inventory, capacity holds) with the workspace gate
+  and non-ok-to-empty mapping the existing hooks use, so a failed panel is an
+  empty tile rather than an error state. The 24h / 7d / 30d selector drives
+  every windowed query from one place.
+
+  Windowed KPIs read agent runs (`/api/v1/runs`, journal-backed) while
+  Running-now reads routine runs, so on a workspace with only one kind the
+  other reads zero. That is faithful to the API rather than a bug in the page,
+  and it is called out here because the two sit side by side.
+
 - **The lifecycle-hook registry has a screen (#2162).** `/api/v1/hooks` has
   had full CRUD and a CLI since the engine landed and no web UI at any role —
   while a `shell` handler runs `sh -c` on the crewshipd host with a 30s
