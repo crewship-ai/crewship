@@ -670,14 +670,22 @@ Uses AI to suggest a crew configuration based on a natural language description.
 }
 ```
 
-The model's answer is validated before it is returned, so a suggestion is
-always one this API can go on to create: 2–6 agents, exactly one with
+The model's answer is validated before it is returned. What that validation
+guarantees is the roles and the shape: 2–6 agents, exactly one with
 `agent_role` `LEAD` and the rest `AGENT` — the same two values
-[`POST /api/v1/agents`](/api-reference/agents) accepts. Any other role is a
-rejected suggestion (`502`), not a crew you are offered and then cannot
+[`POST /api/v1/agents`](/api-reference/agents) accepts, so every role in a
+returned suggestion is one you can go on to create. Any other role makes the
+whole suggestion a `502`, rather than a crew you are offered and then cannot
 create. Roles are matched case-insensitively and returned in upper case; an
 omitted `agent_role` is `AGENT`. Slugs are normalised, and derived from the
 agent's name when missing or unusable.
+
+It does **not** guarantee that every other field will pass the create
+endpoint. Names and slugs are checked for presence, not length, so a
+suggestion can carry a one-character agent name that `POST /api/v1/agents`
+then refuses with `400 name must be 2-100 characters` (and likewise its
+2–50 rule for slugs). Treat a suggestion as a draft to review, not as a
+validated payload.
 
 | Status | Condition |
 |---|---|

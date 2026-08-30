@@ -557,18 +557,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
   Suggestions are now validated against the same set the create endpoint
   accepts. A role outside it fails the suggestion the way a missing field
-  does, so the wizard cannot show a lineup it cannot build. Casing and
-  surrounding whitespace are normalised rather than refused — the same role
-  written the way a model writes JSON — and an omitted role becomes `AGENT`,
-  the default the create endpoint already applies.
+  does, so the wizard can no longer show a lineup carrying a role it cannot
+  build. (Roles only — `validateSuggestion` still checks names and slugs for
+  presence rather than length, so a suggestion remains a draft to review.)
+  Casing and surrounding whitespace are normalised rather than refused — the
+  same role written the way a model writes JSON — and an omitted role becomes
+  `AGENT`, the default the create endpoint already applies.
 
-  Two renderers printed whatever token arrived, and no longer do: the wizard's
-  lineup preview and the agent roster both present an unrecognised role as an
-  ordinary agent, which is the one thing the form behind them can deliver. The
-  crew-template and AI-suggest response types narrowed to `"AGENT" | "LEAD"`,
-  so a third value has to be added deliberately and is a compile error at
-  every renderer when it is. Stored agent rows predating the retirement stop
-  carrying a badge for a role that no longer exists.
+  Three renderers printed whatever token arrived, and no longer do: the
+  wizard's lineup preview, the agent roster and the crew canvas roster all
+  present an unrecognised role as an ordinary agent, which is the one thing
+  the form behind them can deliver. Stored agent rows predating the retirement
+  stop carrying a badge for a role that no longer exists. The crew-template
+  and AI-suggest response types narrowed to `"AGENT" | "LEAD"`, so a third
+  value has to be added deliberately — a test catches that, not the compiler,
+  because each renderer takes the field as a plain string on purpose.
 
   Fourth surface of the same retired role, after the create-agent dialog copy
   (#2166), `crewship agent create --role` (#2189) and the standalone `Agent`

@@ -6,9 +6,10 @@ import { render, screen, cleanup } from "@testing-library/react"
 
 import { CrewAgentPreviewList } from "../crew-agent-preview-list"
 import { EmptyRoster } from "../empty-roster"
+import { RosterTab } from "../crew-canvas-tabs/roster-tab"
 
-// EmptyRoster's avatars fire a background PUT; vitest.setup.ts fails any
-// unmocked network call. Not what this file is about.
+// The avatars on two of these surfaces fire a background PUT; vitest.setup.ts
+// fails any unmocked network call. Not what this file is about.
 vi.mock("@/lib/agent-avatar-persist", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/agent-avatar-persist")>()),
   queueAvatarBackfill: vi.fn(),
@@ -93,7 +94,21 @@ function rosterAgent(agent_role: string) {
   } as never
 }
 
+function crewRosterAgent(agent_role: string) {
+  return {
+    id: "a1",
+    name: "Nova",
+    slug: "nova",
+    status: "IDLE",
+    role_title: "Writes the docs",
+    agent_role,
+  } as never
+}
+
 const CREWS = [{ id: "crew_ops", slug: "ops", name: "Ops" }]
+
+/** Only the fields RosterTab reads; the rest of CrewRecord is irrelevant here. */
+const CREW_RECORD = { id: "crew_ops", slug: "ops", name: "Ops", avatar_style: null } as never
 
 function renderPreview(role: string) {
   render(<CrewAgentPreviewList agents={[previewAgent(role)]} />)
@@ -103,9 +118,26 @@ function renderRoster(role: string) {
   render(<EmptyRoster agents={[rosterAgent(role)]} crews={CREWS} onAgentSelect={vi.fn()} />)
 }
 
+function renderCrewRoster(role: string) {
+  render(
+    <RosterTab crew={CREW_RECORD} agentsForCrew={[crewRosterAgent(role)]} members={null} onSelectAgent={vi.fn()} />,
+  )
+}
+
+/**
+ * Every surface that turns an `agent_role` into something a person reads.
+ *
+ * RosterTab is the one this guard was extended for: it carried the same
+ * `a.agent_role !== "AGENT" && <span>{a.agent_role}</span>` as EmptyRoster, on
+ * the same API data, and unlike CrewAgentPreviewList — which has no importers
+ * at all — it is mounted today (crew-canvas.tsx). Covering a dead component
+ * and missing its live twin is the failure mode this list exists to prevent:
+ * a new renderer of `agent_role` belongs here on the day it is written.
+ */
 const SURFACES: { name: string; render: (role: string) => void }[] = [
   { name: "CrewAgentPreviewList (the wizard's lineup preview)", render: renderPreview },
   { name: "EmptyRoster (the agent roster)", render: renderRoster },
+  { name: "RosterTab (the crew canvas roster)", render: renderCrewRoster },
 ]
 
 describe("agent role badges name only roles the product can create", () => {
@@ -144,10 +176,18 @@ describe("agent role badges name only roles the product can create", () => {
   }
 })
 
-// The load-bearing half of the type fix: narrowing the declared unions is what
-// makes a future third value a compile error at the renderers instead of a
-// badge. A test cannot see a TypeScript union at runtime, so it reads the
-// declaration.
+// The declared unions, checked here because nothing else checks them.
+//
+// It is tempting to say a third member added to AgentRole would be a compile
+// error at the renderers. It would not: every renderer of a role declares
+// `agent_role: string` on its own props on purpose — the value crosses a
+// network boundary, where a union is a claim rather than a guarantee — so
+// widening AgentRole type-checks tree-wide (`tsc --noEmit`, zero errors). Two
+// individually correct decisions cancel the guarantee between them, which is
+// exactly the kind of thing nobody re-derives while reading a diff.
+//
+// So this is the tripwire. A test cannot see a TypeScript union at runtime,
+// so it reads the declarations.
 describe("create-crew response types declare only creatable roles", () => {
   it("no agent_role literal in create-crew/api.ts names a role the create endpoint refuses", () => {
     const src = readFileSync(path.join(__dirname, "..", "create-crew", "api.ts"), "utf8")

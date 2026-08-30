@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { Plus } from "lucide-react"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { isLeadRole } from "@/lib/agent-role"
 
 import type { AgentSummary, CrewMemberRow, CrewRecord } from "./types"
 
@@ -48,8 +49,14 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                     <div className="flex items-center gap-2">
                       <span className="font-medium truncate">{a.name}</span>
                       <span className="text-[10px] text-muted-foreground">{a.status?.toLowerCase()}</span>
-                      {a.agent_role !== "AGENT" && (
-                        <span className="text-[8px] px-1 rounded bg-purple/20 text-purple-hover">{a.agent_role}</span>
+                      {/* Only a lead earns a badge, and the badge says LEAD
+                        * rather than whatever token the row carries. Printing
+                        * the raw value put a role retired in v0.1 — creatable
+                        * by no path since — on screen as if it were a role the
+                        * product still has (#2197). Anything unrecognised
+                        * reads as an ordinary agent. */}
+                      {isLeadRole(a.agent_role) && (
+                        <span className="text-[8px] px-1 rounded bg-purple/20 text-purple-hover">LEAD</span>
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">{a.role_title || "—"}</div>
