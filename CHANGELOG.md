@@ -509,6 +509,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   that listed `.claude` and descended into it anyway.
 
 
+- **`crewship agent create --role COORDINATOR` warned that it was setting the
+  role, then the server refused it (#2189).** The role was retired in v0.1 and
+  the handler answers `400 agent_role must be AGENT or LEAD`, but the CLI
+  printed *"COORDINATOR role is deprecated; use LEAD instead. Setting role
+  anyway."* and forwarded it — and the function's own comment claimed the value
+  was still accepted for back-compat with v1 templates. So the one audience
+  that path existed for, somebody applying an old template, was told their
+  value would be honoured and then got a server refusal naming neither the
+  template nor the deprecation they had just been warned about. The CLI now
+  refuses it locally with `COORDINATOR was retired in v0.1 and the server
+  rejects it; use --role LEAD`. Every other value still goes to the server,
+  which owns what is valid — this is a removal of one false promise, not a new
+  client-side role validator. Companion to #2166, which removed the same dead
+  promise from the create-agent dialog.
+
 - **An approval could outlive the run it belonged to, and approving it did
   nothing (#2163).** A routine run parked on a `wait` step and then marked
   `interrupted` left its waitpoint `pending`. The inbox kept offering the

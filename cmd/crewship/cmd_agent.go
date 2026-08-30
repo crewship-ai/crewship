@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -196,11 +195,10 @@ func init() {
 	agentCreateCmd.Flags().String("slug", "", "Agent slug (auto-generated from name if empty)")
 	agentCreateCmd.Flags().String("crew", "", "Crew slug or ID")
 	agentCreateCmd.Flags().String("role", "AGENT", "Agent role: AGENT or LEAD")
-	// COORDINATOR is accepted silently for backward compat — the help
-	// text no longer advertises it. Warn the user once on the create
-	// path so they know to migrate to LEAD. Same hook on update.
-	agentCreateCmd.PreRun = warnCoordinatorDeprecated
-	agentUpdateCmd.PreRun = warnCoordinatorDeprecated
+	// COORDINATOR is refused here rather than forwarded — see
+	// refuseRetiredRole. Same hook on update.
+	agentCreateCmd.PreRunE = refuseRetiredRole
+	agentUpdateCmd.PreRunE = refuseRetiredRole
 	agentCreateCmd.Flags().String("role-title", "", "Human-readable role title")
 	agentCreateCmd.Flags().String("cli-adapter", "CLAUDE_CODE", "CLI adapter: CLAUDE_CODE|CODEX_CLI|GEMINI_CLI|OPENCODE|CURSOR_CLI|FACTORY_DROID")
 	agentCreateCmd.Flags().String("system-prompt", "", "System prompt text or @file.txt")
@@ -319,14 +317,30 @@ type agentDetailResponse struct {
 	} `json:"_count"`
 }
 
-// warnCoordinatorDeprecated emits a deprecation notice when the user
-// passes --role COORDINATOR on agent create/update. The role is still
-// accepted (back-compat with v1 templates that used COORDINATOR), but
-// LEAD is the supported value going forward and the help text only
-// advertises LEAD.
-func warnCoordinatorDeprecated(cmd *cobra.Command, _ []string) {
+// refuseRetiredRole rejects --role COORDINATOR on agent create/update
+// before the request is built.
+//
+// #2189: this used to warn "Setting role anyway" and forward the value,
+// and its comment claimed the role was still accepted for back-compat
+// with v1 templates. Neither was true — COORDINATOR was retired in v0.1
+// and the handler answers 400 "agent_role must be AGENT or LEAD"
+// (internal/api/agents.go, pinned by agents_test.go). So the one person
+// that path existed for, applying an old template, was told the value
+// would be honoured and then got a server refusal naming neither the
+// template nor the deprecation they had just been warned about.
+//
+// Refusing locally costs a round trip and, more to the point, lets the
+// message carry the fix. This is NOT a general role validator: every
+// other value goes to the server, which owns what is valid.
+func refuseRetiredRole(cmd *cobra.Command, _ []string) error {
 	v, _ := cmd.Flags().GetString("role")
 	if strings.EqualFold(v, "COORDINATOR") {
-		fmt.Fprintln(os.Stderr, "warning: COORDINATOR role is deprecated; use LEAD instead. Setting role anyway.")
+		// ExitValidation, not the default ExitGeneric: this refusal stands
+		// in for the server's 400, and moving a check from the server to
+		// the client must not change what the shell sees.
+		return cli.WithExitCode(
+			fmt.Errorf("COORDINATOR was retired in v0.1 and the server rejects it; use --role LEAD"),
+			cli.ExitValidation)
 	}
+	return nil
 }
