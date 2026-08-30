@@ -1,13 +1,15 @@
 "use client"
 
 import { useCallback } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
 import type { Mission } from "@/lib/types/mission"
 import type {
   AgentSummary, CrewSummary, ProjectSummary, RunsResponse,
   MissionMetricsResponse, KeeperRequest, TimeseriesResponse,
+  CrewServiceSummary, CrewSpendResponse, DashboardWindow,
+  MemoryHealthResponse, RunInsightsResponse, RuntimeCapacityResponse,
 } from "@/app/(dashboard)/dashboard-types"
 
 /**
@@ -68,6 +70,14 @@ export const dashboardKeys = {
   keeperRequests: (ws: string) => ["keeper-requests", ws, DASHBOARD_KEEPER_PARAMS] as const,
   timeseries: (ws: string, params: TimeseriesParams) =>
     ["metrics-timeseries", ws, params] as const,
+  runInsights: (ws: string, window: DashboardWindow) =>
+    ["runs-insights", ws, { window }] as const,
+  runtimeCapacity: () => ["runtime-capacity"] as const,
+  memoryHealth: (ws: string) => ["memory-health", ws] as const,
+  crewSpend: (ws: string, window: DashboardWindow) =>
+    ["crew-spend", ws, { window }] as const,
+  crewServices: (ws: string, crewId: string) =>
+    ["crew-services", ws, crewId] as const,
 }
 
 interface DashboardQueryOpts {
@@ -219,6 +229,129 @@ export function useMetricsTimeseries(
   })
 }
 
+export function useRunsInsights(
+  workspaceId: string | null,
+  window: DashboardWindow,
+  opts?: DashboardQueryOpts,
+) {
+  return useQuery<RunInsightsResponse | null>({
+    queryKey: dashboardKeys.runInsights(workspaceId ?? "", window),
+    queryFn: ({ signal }) =>
+      fetchOr<RunInsightsResponse | null>(
+        `/api/v1/runs/insights?workspace_id=${encodeURIComponent(workspaceId!)}&window=${window}`,
+        null,
+        signal,
+      ),
+    enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+    retry: false,
+  })
+}
+
+export function useRuntimeCapacity(opts?: DashboardQueryOpts) {
+  return useQuery<RuntimeCapacityResponse | null>({
+    queryKey: dashboardKeys.runtimeCapacity(),
+    queryFn: ({ signal }) =>
+      fetchOr<RuntimeCapacityResponse | null>("/api/v1/runtime/capacity", null, signal),
+    enabled: opts?.enabled ?? true,
+    retry: false,
+    // Capacity is instance-scoped and can change without a workspace event.
+    refetchInterval: 15_000,
+  })
+}
+
+export function useMemoryHealth(workspaceId: string | null, opts?: DashboardQueryOpts) {
+  return useQuery<MemoryHealthResponse | null>({
+    queryKey: dashboardKeys.memoryHealth(workspaceId ?? ""),
+    queryFn: ({ signal }) =>
+      fetchOr<MemoryHealthResponse | null>(
+        `/api/v1/memory/health?workspace_id=${encodeURIComponent(workspaceId!)}`,
+        null,
+        signal,
+      ),
+    enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+    retry: false,
+    staleTime: 60_000,
+  })
+}
+
+export function useCrewSpend(
+  workspaceId: string | null,
+  window: DashboardWindow,
+  opts?: DashboardQueryOpts,
+) {
+  return useQuery<CrewSpendResponse | null>({
+    queryKey: dashboardKeys.crewSpend(workspaceId ?? "", window),
+    queryFn: ({ signal }) =>
+      fetchOr<CrewSpendResponse | null>(
+        `/api/v1/paymaster/spend/by-crew?workspace_id=${encodeURIComponent(workspaceId!)}&range=${window}`,
+        null,
+        signal,
+      ),
+    enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+    retry: false,
+  })
+}
+
+interface CrewServiceWireResponse {
+  services?: Array<{ status?: string }>
+}
+
+/**
+ * Live service health is crew-scoped in the API. Fan out with React Query so
+ * each crew remains independently cached and one Docker lookup failure cannot
+ * turn the whole fleet red. `checked=false` is deliberately distinct from an
+ * honest zero-service crew.
+ */
+export function useCrewServiceSummaries(
+  workspaceId: string | null,
+  crews: CrewSummary[],
+  opts?: DashboardQueryOpts,
+) {
+  const results = useQueries({
+    queries: crews.map((crew) => ({
+      queryKey: dashboardKeys.crewServices(workspaceId ?? "", crew.id),
+      queryFn: async ({ signal }: { signal: AbortSignal }) => {
+        const res = await apiFetch(
+          `/api/v1/crews/${encodeURIComponent(crew.id)}/services?workspace_id=${encodeURIComponent(workspaceId!)}`,
+          { signal },
+        )
+        if (!res.ok) throw new Error(`crew services: ${res.status}`)
+        return (await res.json()) as CrewServiceWireResponse
+      },
+      enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+      retry: false,
+      staleTime: 15_000,
+    })),
+  })
+
+  const byCrew = new Map<string, CrewServiceSummary>()
+  results.forEach((result, index) => {
+    const crew = crews[index]
+    if (!crew) return
+    const services = result.data?.services
+    if (!Array.isArray(services)) {
+      byCrew.set(crew.id, { total: 0, running: 0, degraded: 0, checked: false })
+      return
+    }
+    const running = services.filter((service) => {
+      const status = (service.status ?? "").toLowerCase()
+      return status === "running" || status === "healthy"
+    }).length
+    byCrew.set(crew.id, {
+      total: services.length,
+      running,
+      degraded: Math.max(0, services.length - running),
+      checked: true,
+    })
+  })
+
+  return {
+    byCrew,
+    loading: results.some((result) => result.isPending),
+    checked: results.filter((result) => result.isSuccess).length,
+  }
+}
+
 /**
  * Returns a stable callback that invalidates every dashboard query for
  * the workspace. The page calls it (debounced) from its WS event
@@ -245,5 +378,18 @@ export function useInvalidateDashboard(workspaceId: string | null) {
     for (const queryKey of keys) {
       qc.invalidateQueries({ queryKey })
     }
+    // Windowed queries share these prefixes; invalidate every mounted window.
+    qc.invalidateQueries({ queryKey: ["runs-insights", workspaceId] })
+    // crew-spend is no longer mounted — the cost tile it fed was removed with
+    // #2185, because a dollar figure on a flat-rate subscription is not a
+    // number. Left out of the set rather than invalidating a key nothing reads.
+    qc.invalidateQueries({ queryKey: ["crew-services", workspaceId] })
+    // The run-volume chart mounts under ["metrics-timeseries", ws, {…}] with a
+    // params object that depends on the selected window, and invalidateQueries
+    // compares that object by deep equality — so the two fixed-param keys in
+    // the list above can never match the key the page actually mounts. Without
+    // this the KPIs and Running-now update from the realtime path while the
+    // chart beside them stays frozen until a remount or a window switch.
+    qc.invalidateQueries({ queryKey: ["metrics-timeseries", workspaceId] })
   }, [qc, workspaceId])
 }

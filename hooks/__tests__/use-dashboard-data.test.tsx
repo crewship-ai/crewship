@@ -14,6 +14,11 @@ import {
   usePendingEscalationCount,
   useKeeperRequests,
   useMetricsTimeseries,
+  useRunsInsights,
+  useRuntimeCapacity,
+  useMemoryHealth,
+  useCrewSpend,
+  useCrewServiceSummaries,
   useInvalidateDashboard,
   DASHBOARD_THROUGHPUT_PARAMS,
   DASHBOARD_COST_PARAMS,
@@ -84,6 +89,10 @@ describe("use-dashboard-data", () => {
           usePendingEscalationCount(null)
           useKeeperRequests(null)
           useMetricsTimeseries(null, DASHBOARD_THROUGHPUT_PARAMS)
+          useRunsInsights(null, "24h")
+          useMemoryHealth(null)
+          useCrewSpend(null, "24h")
+          useCrewServiceSummaries(null, [])
         },
         { wrapper: makeWrapper(qc) },
       )
@@ -248,6 +257,67 @@ describe("use-dashboard-data", () => {
     })
   })
 
+  describe("operator overview queries", () => {
+    it("fetches fleet insights under a window-specific cache key", async () => {
+      const payload = {
+        window: "7d",
+        totals: { total: 12, succeeded: 10, failed: 2, running: 0 },
+        duration: { p50_ms: 1000, p95_ms: 5000 },
+        by_trigger: [], by_model: [], by_crew: [], top_agents: [], truncated: false,
+      }
+      mockFetch.mockResolvedValueOnce(okJSON(payload))
+      const { result } = renderHook(() => useRunsInsights("ws-1", "7d"), {
+        wrapper: makeWrapper(qc),
+      })
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(fetchedUrl()).toBe("/api/v1/runs/insights?workspace_id=ws-1&window=7d")
+      expect(qc.getQueryData(dashboardKeys.runInsights("ws-1", "7d"))).toEqual(payload)
+    })
+
+    it("reads runtime capacity as an instance-scoped query", async () => {
+      mockFetch.mockResolvedValueOnce(okJSON({ enabled: true, held: [] }))
+      const { result } = renderHook(() => useRuntimeCapacity(), {
+        wrapper: makeWrapper(qc),
+      })
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(fetchedUrl()).toBe("/api/v1/runtime/capacity")
+      expect(result.current.data?.held).toEqual([])
+    })
+
+    it("fetches memory health and actual Paymaster spend for the selected window", async () => {
+      mockFetch
+        .mockResolvedValueOnce(okJSON({ overall: 87, metrics: {}, details: {} }))
+        .mockResolvedValueOnce(okJSON({ rows: [{ crew_id: "c1", cost_usd: 1.25 }] }))
+
+      const { result } = renderHook(() => ({
+        memory: useMemoryHealth("ws-1"),
+        spend: useCrewSpend("ws-1", "30d"),
+      }), { wrapper: makeWrapper(qc) })
+
+      await waitFor(() => expect(result.current.memory.isSuccess && result.current.spend.isSuccess).toBe(true))
+      const urls = mockFetch.mock.calls.map((call) => call[0])
+      expect(urls).toContain("/api/v1/memory/health?workspace_id=ws-1")
+      expect(urls).toContain("/api/v1/paymaster/spend/by-crew?workspace_id=ws-1&range=30d")
+    })
+
+    it("keeps per-crew service failures distinct from an honest empty inventory", async () => {
+      mockFetch
+        .mockResolvedValueOnce(okJSON({ services: [{ status: "running" }, { status: "exited" }] }))
+        .mockResolvedValueOnce(errStatus(500))
+      const crews = [
+        { id: "c1", name: "Docs", slug: "docs", color: null, icon: null },
+        { id: "c2", name: "Risk", slug: "risk", color: null, icon: null },
+      ]
+      const { result } = renderHook(() => useCrewServiceSummaries("ws-1", crews), {
+        wrapper: makeWrapper(qc),
+      })
+
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current.byCrew.get("c1")).toEqual({ total: 2, running: 1, degraded: 1, checked: true })
+      expect(result.current.byCrew.get("c2")?.checked).toBe(false)
+    })
+  })
+
   describe("useInvalidateDashboard", () => {
     it("invalidates every dashboard query key for the workspace", async () => {
       const invalidateSpy = vi.spyOn(qc, "invalidateQueries")
@@ -270,6 +340,17 @@ describe("use-dashboard-data", () => {
       expect(keys).toContainEqual(dashboardKeys.keeperRequests("ws-1"))
       expect(keys).toContainEqual(dashboardKeys.timeseries("ws-1", DASHBOARD_THROUGHPUT_PARAMS))
       expect(keys).toContainEqual(dashboardKeys.timeseries("ws-1", DASHBOARD_COST_PARAMS))
+      expect(keys).toContainEqual(["runs-insights", "ws-1"])
+      expect(keys).toContainEqual(["crew-services", "ws-1"])
+      // The run-volume chart mounts under a window-dependent params object,
+      // and invalidateQueries compares that object by deep equality — so the
+      // two fixed-param timeseries keys above can never match it. Without the
+      // prefix the chart stayed frozen while everything around it moved.
+      expect(keys).toContainEqual(["metrics-timeseries", "ws-1"])
+      // crew-spend is deliberately absent: nothing mounts it since the cost
+      // tile was removed, and invalidating a key no query uses is noise that
+      // reads as coverage.
+      expect(keys).not.toContainEqual(["crew-spend", "ws-1"])
     })
 
     it("is a no-op without a workspaceId", () => {

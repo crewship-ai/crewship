@@ -1,621 +1,320 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
-import {
-  TrendingUp, Target, Banknote, Gem, Box, Activity, HeartPulse,
-  FolderOpen, Radio, Inbox as InboxIcon, ListChecks, LayoutDashboard,
-} from "lucide-react"
+import { LayoutDashboard, MessageSquare, Plus, Radio } from "lucide-react"
 
-import { Skeleton } from "@/components/ui/skeleton"
-import { SubBar } from "@/components/layout/sub-bar"
-import { useWorkspace } from "@/hooks/use-workspace"
-import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-
-import { KpiCard } from "@/components/features/dashboard/kpi-card"
+import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { Appear, AppearStack } from "@/components/ui/detail"
-import { StatusDonut, type StatusDonutDatum } from "@/components/features/dashboard/status-donut"
-import { ThroughputChart, type ThroughputBucket, type ThroughputSeries } from "@/components/features/dashboard/throughput-chart"
-import { CostBurnChart, type CostBucket, type CostSeries } from "@/components/features/dashboard/cost-burn-chart"
-import { TopMissionsChart, type TopMissionEntry } from "@/components/features/dashboard/top-missions-chart"
-import { ContainerResourcesTile, type ContainerStatsEntry } from "@/components/features/dashboard/container-resources-tile"
-import { AgentHeatmap, type HeatmapBucket, type HeatmapAgent } from "@/components/features/dashboard/agent-heatmap"
-import { CrewRadial, type CrewHealthEntry } from "@/components/features/dashboard/crew-radial"
-import { ProjectProgress, type ProjectProgressEntry } from "@/components/features/dashboard/project-progress"
-import { ActivityFeed } from "@/components/features/dashboard/activity-feed"
-import { InboxTile, type InboxEntry } from "@/components/features/dashboard/inbox-tile"
-import { RecentMissionsTable } from "@/components/features/dashboard/recent-missions-table"
+import {
+  AttentionStrip,
+  heldForWorkspace,
+  FleetHealth,
+  OutcomeKpis,
+  RecentWork,
+  RunningNow,
+  SystemSignals,
+  UpNext,
+  buildAttentionItems,
+  deriveFleetHealth,
+  kpisFromInsights,
+} from "@/components/features/dashboard/dashboard-overview"
+import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
-import { PagesStrip } from "@/components/features/dashboard/pages-strip"
-
+import { Appear } from "@/components/ui/detail"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useWorkspace } from "@/hooks/use-workspace"
+import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
+import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
+import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
+import { useInbox } from "@/hooks/use-inbox"
+import { useRealtimeEvent, useRealtimeStatusSafe } from "@/hooks/use-realtime"
 import {
-  useAgentSummaries, useCrewSummaries, useProjectSummaries,
-  useDashboardMissions, useMissionMetrics, useRecentRuns,
-  usePendingEscalationCount, useKeeperRequests, useMetricsTimeseries,
+  useAgentSummaries,
+  useCrewServiceSummaries,
+  useCrewSummaries,
+  useDashboardMissions,
   useInvalidateDashboard,
-  DASHBOARD_THROUGHPUT_PARAMS, DASHBOARD_COST_PARAMS,
+  useMemoryHealth,
+  useMetricsTimeseries,
+  useRunsInsights,
+  useRuntimeCapacity,
+  type TimeseriesParams,
 } from "@/hooks/use-dashboard-data"
+import type { DashboardWindow } from "./dashboard-types"
+import { crewColor } from "./dashboard-helpers"
+import { cn } from "@/lib/utils"
 import { serverFetch } from "@/lib/server-base"
-import {
-  crewColor, STATUS_PALETTE, formatCost, formatRelativeShort,
-} from "./dashboard-helpers"
+
+const WINDOW_LABELS: DashboardWindow[] = ["24h", "7d", "30d"]
+
+function runVolumeParams(window: DashboardWindow): TimeseriesParams {
+  return {
+    metric: "runs_count",
+    window,
+    bucket: window === "24h" ? "1h" : "1d",
+    group_by: "crew",
+  }
+}
 
 export default function DashboardPage() {
-  const router = useRouter()
-  const { workspaceId, loading: wsLoading } = useWorkspace()
-
-  const [containerStats, setContainerStats] = useState<Map<string, ContainerStatsEntry>>(new Map())
+  const { workspaceId, loading: workspaceLoading } = useWorkspace()
   const [onboardingChecked, setOnboardingChecked] = useState(false)
-  // Post-onboarding breadcrumb — read in an effect, not inline in
-  // render. localStorage access during SSR or in restricted contexts
-  // (private browsing with storage disabled) can throw; reading it in
-  // the JSX would crash the dashboard. Effect-with-try/catch degrades
-  // to "no agent id, show generic CTA" instead.
   const [firstAgentId, setFirstAgentId] = useState<string | null>(null)
+  const [reportWindow, setReportWindow] = useState<DashboardWindow>("24h")
 
-  // ── Onboarding gate ────────────────────────────────────────────────
   useEffect(() => {
-     
     serverFetch("/api/v1/onboarding/status")
-      .then((res) => (res.ok ? res.json() : null))
+      .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (data && !data.completed) {
-          router.push("/onboarding")
+          window.location.assign("/onboarding")
           return
         }
         setOnboardingChecked(true)
       })
       .catch(() => setOnboardingChecked(true))
-  }, [router])
+  }, [])
 
   useEffect(() => {
     try {
-      if (typeof window !== "undefined") {
-        setFirstAgentId(window.localStorage.getItem("crewship.firstAgentId"))
-      }
+      setFirstAgentId(window.localStorage.getItem("crewship.firstAgentId"))
     } catch {
-      // Restricted-storage browsers throw on .getItem. Fall through
-      // to null so WelcomeChecklist shows its generic "Browse agents"
-      // CTA instead of crashing the dashboard render.
       setFirstAgentId(null)
     }
   }, [])
 
-  // ── Queries ─────────────────────────────────────────────────────────
-  //
-  // React Query owns the data layer (see hooks/use-dashboard-data.ts for
-  // the key conventions + error policy). The workspace id lives inside
-  // every query key, so a workspace switch lands on a fresh cache entry
-  // and never shows yesterday's data under today's workspace. Queries
-  // hold (isPending → skeleton) until the onboarding gate resolves.
   const queryOpts = { enabled: onboardingChecked }
   const agentsQ = useAgentSummaries(workspaceId, queryOpts)
   const crewsQ = useCrewSummaries(workspaceId, queryOpts)
-  const projectsQ = useProjectSummaries(workspaceId, queryOpts)
   const missionsQ = useDashboardMissions(workspaceId, queryOpts)
-  const metricsQ = useMissionMetrics(workspaceId, queryOpts)
-  const runsQ = useRecentRuns(workspaceId, queryOpts)
-  const escCountQ = usePendingEscalationCount(workspaceId, queryOpts)
-  const keeperQ = useKeeperRequests(workspaceId, queryOpts)
-  const throughputQ = useMetricsTimeseries(workspaceId, DASHBOARD_THROUGHPUT_PARAMS, queryOpts)
-  const costQ = useMetricsTimeseries(workspaceId, DASHBOARD_COST_PARAMS, queryOpts)
+  const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
+  const capacityQ = useRuntimeCapacity(queryOpts)
+  const memoryQ = useMemoryHealth(workspaceId, queryOpts)
+  const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
+  const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
 
-  // Array slices go through useMemo so the `?? []` fallback yields a
-  // stable reference while a query has no data yet — the derived
-  // useMemos below depend on these.
   const agents = useMemo(() => agentsQ.data ?? [], [agentsQ.data])
   const crews = useMemo(() => crewsQ.data ?? [], [crewsQ.data])
-  const projects = useMemo(() => projectsQ.data ?? [], [projectsQ.data])
   const missions = useMemo(() => missionsQ.data ?? [], [missionsQ.data])
-  const keeperRequests = useMemo(() => keeperQ.data ?? [], [keeperQ.data])
-  const metrics = metricsQ.data ?? null
-  const runsData = runsQ.data ?? null
-  const escalationCount = escCountQ.data ?? 0
-  const throughputData = throughputQ.data ?? null
-  const costData = costQ.data ?? null
+  const services = useCrewServiceSummaries(workspaceId, crews, queryOpts)
+  const activeRuns = useActiveRoutineRuns()
+  const schedules = usePipelineSchedules(workspaceId)
+  const readiness = useCredentialReadiness(workspaceId)
+  const inbox = useInbox(workspaceId, "active")
+  const realtimeStatus = useRealtimeStatusSafe()
 
-  // Reset workspace-scoped state when the user switches workspaces — otherwise
-  // state Maps like `containerStats` accumulate across workspace boundaries
-  // and the live resources tile would render the previous workspace's crews
-  // until a fresh container.stats frame arrives for the new one.
-  useEffect(() => {
-    setContainerStats(new Map())
-  }, [workspaceId])
-
-  // ── Realtime: debounced invalidation so a burst of events doesn't storm
-  // the API. Invalidation refetches in the background (isFetching, not
-  // isPending), so live updates never flash the skeleton — same contract
-  // as the old fetchData(false).
   const invalidateDashboard = useInvalidateDashboard(workspaceId)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const debouncedRefetch = useCallback(() => {
+  const debouncedRefresh = useCallback(() => {
     clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      invalidateDashboard()
-    }, 250)
+    debounceRef.current = setTimeout(invalidateDashboard, 220)
   }, [invalidateDashboard])
 
-  useRealtimeEvent("run.started", debouncedRefetch)
-  useRealtimeEvent("run.completed", debouncedRefetch)
-  useRealtimeEvent("run.failed", debouncedRefetch)
-  useRealtimeEvent("agent.status", debouncedRefetch)
-  // mission.updated covers issue status changes too (issues ARE missions).
-  useRealtimeEvent("mission.updated", debouncedRefetch)
-  useRealtimeEvent("task.updated", debouncedRefetch)
-  useRealtimeEvent("escalation.created", debouncedRefetch)
+  useEffect(() => () => clearTimeout(debounceRef.current), [])
+  useRealtimeEvent("run.started", debouncedRefresh)
+  useRealtimeEvent("run.completed", debouncedRefresh)
+  useRealtimeEvent("run.failed", debouncedRefresh)
+  useRealtimeEvent("agent.status", debouncedRefresh)
+  useRealtimeEvent("mission.updated", debouncedRefresh)
+  useRealtimeEvent("issue.updated", debouncedRefresh)
+  useRealtimeEvent("pipeline.run.started", debouncedRefresh)
+  useRealtimeEvent("pipeline.run.completed", debouncedRefresh)
+  useRealtimeEvent("pipeline.run.failed", debouncedRefresh)
+  useRealtimeEvent("realtime.reconnected", debouncedRefresh)
 
-  // Container stats stream — per-container CPU history for sparklines
-  useRealtimeEvent("container.stats", useCallback((event: RealtimeEvent) => {
-    const p = event.payload
-    const containerId = p.container_id
-    if (typeof containerId !== "string") return
-    setContainerStats((prev) => {
-      const next = new Map(prev)
-      const existing = next.get(containerId)
-      const cpu = Number(p.cpu_percent) || 0
-      const history = existing?.cpu_history ? [...existing.cpu_history, cpu] : [cpu]
-      if (history.length > 30) history.shift()
-      next.set(containerId, {
-        container_id: containerId,
-        crew_id: String(p.crew_id ?? ""),
-        crew_slug: (p.crew_slug as string | undefined) ?? existing?.crew_slug ?? null,
-        crew_name: (p.crew_name as string | undefined) ?? existing?.crew_name ?? null,
-        crew_color: (p.crew_color as string | undefined) ?? existing?.crew_color ?? null,
-        cpu_percent: cpu,
-        memory_used: Number(p.memory_used) || 0,
-        memory_limit: Number(p.memory_limit) || 0,
-        memory_percent: Number(p.memory_percent) || 0,
-        pids: Number(p.pids) || 0,
-        cpu_history: history,
-      })
-      return next
-    })
-  }, []))
-
-  // ── Derived data ────────────────────────────────────────────────────
-  // isPending covers both "fetching for the first time" and "queries held
-  // by the onboarding/workspace gate" — the skeleton shows in both, which
-  // matches the old loading=true initial state.
-  const loading = [
-    agentsQ, crewsQ, projectsQ, missionsQ, metricsQ, runsQ, escCountQ, keeperQ,
-  ].some((q) => q.isPending)
-  const isLoading = wsLoading || loading
-
-  const totalAgents = agents.length
-  const runningNow = agents.filter((a) => a.status === "RUNNING").length
-  const activeMissionCount = metrics?.active_missions ?? 0
-  const totalCost24h = metrics?.total_cost_24h ?? 0
-  const runsToday = runsData?.stats.today ?? 0
-  const runsFailed = runsData?.stats.failed ?? 0
-  // No runs today → "—" rather than a misleading 100% ("100% of 0 = success" is a lie)
-  const successRateDisplay = runsToday > 0
-    ? `${Math.round(((runsToday - runsFailed) / runsToday) * 100)}%`
-    : "—"
-  const successRatePct = runsToday > 0 ? Math.round(((runsToday - runsFailed) / runsToday) * 100) : null
-
-  const openIssues = missions.filter(
-    (m) => (m.mission_type === "issue" || !m.mission_type) && m.status !== "COMPLETED" && m.status !== "CANCELLED" && m.status !== "FAILED",
-  ).length
-
-  // Mission status donut
-  const donutData = useMemo<StatusDonutDatum[]>(() => {
-    const counts: Partial<Record<keyof typeof STATUS_PALETTE, number>> = {}
-    for (const m of missions) {
-      const key = m.status as keyof typeof STATUS_PALETTE
-      counts[key] = (counts[key] ?? 0) + 1
+  const gapsByCrew = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const gaps of readiness.gapsByCredential.values()) {
+      for (const gap of gaps) counts.set(gap.crewId, (counts.get(gap.crewId) ?? 0) + 1)
     }
-    return (Object.keys(STATUS_PALETTE) as Array<keyof typeof STATUS_PALETTE>)
-      .filter((k) => (counts[k] ?? 0) > 0)
-      .map((k) => ({
-        key: k,
-        label: k.charAt(0) + k.slice(1).toLowerCase().replace("_", " "),
-        count: counts[k] ?? 0,
-        color: STATUS_PALETTE[k],
-      }))
-  }, [missions])
+    return counts
+  }, [readiness.gapsByCredential])
 
-  // Throughput chart data — from timeseries API if available, else empty
-  const throughputBuckets = useMemo<ThroughputBucket[]>(() => {
-    if (!throughputData) return []
-    return throughputData.buckets.map((b) => ({
-      ts: b.ts,
-      ...b.series,
-    }))
-  }, [throughputData])
+  const credentialGapCount = useMemo(
+    () => Array.from(gapsByCrew.values()).reduce((total, count) => total + count, 0),
+    [gapsByCrew],
+  )
 
-  const throughputSeries = useMemo<ThroughputSeries[]>(() => {
-    if (!throughputData) return []
-    return Object.keys(throughputData.series_labels).map((crewId) => {
-      const crew = crews.find((c) => c.id === crewId)
-      return {
-        key: crewId,
-        label: throughputData.series_labels[crewId],
-        color: crewColor(crew?.color),
-      }
-    })
-  }, [throughputData, crews])
+  // /runtime/capacity is instance-scoped by design, so its holds can belong to
+  // another workspace's crews — and this page renders a hold's detail string.
+  // Scope to ours, one entry per crew (admission appends one per held START).
+  const heldCrews = useMemo(
+    () => heldForWorkspace(capacityQ.data?.held ?? null, crews),
+    [capacityQ.data, crews],
+  )
 
-  const throughputTotal = useMemo(() => {
-    if (!throughputData) return 0
-    let total = 0
-    for (const b of throughputData.buckets) {
-      for (const v of Object.values(b.series)) total += v
-    }
-    return total
-  }, [throughputData])
+  const attentionItems = useMemo(
+    () => buildAttentionItems({ inbox: inbox.items, heldCrews, credentialGapCount }),
+    [inbox.items, heldCrews, credentialGapCount],
+  )
 
-  // Cost burn chart data
-  const costBuckets = useMemo<CostBucket[]>(() => {
-    if (!costData) return []
-    return costData.buckets.map((b) => ({
-      ts: b.ts,
-      ...b.series,
-    }))
-  }, [costData])
+  const fleet = useMemo(
+    () => deriveFleetHealth({ crews, agents, gapsByCrew, servicesByCrew: services.byCrew }),
+    [crews, agents, gapsByCrew, services.byCrew],
+  )
 
-  const costSeries = useMemo<CostSeries[]>(() => {
-    if (!costData) return []
-    return Object.keys(costData.series_labels).map((key, i) => ({
+
+  const kpis = useMemo(
+    () => kpisFromInsights(insightsQ.data ?? null),
+    [insightsQ.data],
+  )
+
+  const recentWork = useMemo(
+    () => [...missions].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 5),
+    [missions],
+  )
+
+  const runVolumeBuckets = useMemo<RunVolumeBucket[]>(
+    () => (volumeQ.data?.buckets ?? []).map((bucket) => ({ ts: bucket.ts, ...bucket.series })),
+    [volumeQ.data],
+  )
+
+  const runVolumeSeries = useMemo<RunVolumeSeries[]>(() => {
+    // series_labels is typed as required, but the type is a claim about the
+    // wire and fetchOr validates nothing — a 200 with an unexpected body
+    // reaches here, and Object.entries(undefined) throws inside a useMemo,
+    // which unmounts the whole dashboard rather than the one chart. The line
+    // above already tolerates a missing bucket.series for the same reason.
+    if (!volumeQ.data?.series_labels) return []
+    return Object.entries(volumeQ.data.series_labels).map(([key, label]) => ({
       key,
-      label: costData.series_labels[key],
-      color: ["rgb(167, 139, 250)", "rgb(34, 211, 238)", "rgb(52, 211, 153)", "rgb(251, 191, 36)"][i % 4],
+      label,
+      color: crewColor(crews.find((crew) => crew.id === key)?.color),
     }))
-  }, [costData])
+  }, [volumeQ.data, crews])
 
-  const costTotal = useMemo(() => {
-    if (!costData) return 0
+  const runVolumeTotal = useMemo(
+    () => runVolumeBuckets.reduce(
+      (total, bucket) => total + Object.entries(bucket).reduce((sum, [key, value]) => key === "ts" ? sum : sum + Number(value), 0),
+      0,
+    ),
+    [runVolumeBuckets],
+  )
+
+  const serviceTotals = useMemo(() => {
+    let running = 0
     let total = 0
-    for (const b of costData.buckets) {
-      for (const v of Object.values(b.series)) total += v
-    }
-    return total
-  }, [costData])
-
-  // Top cost missions
-  const topMissions = useMemo<TopMissionEntry[]>(() => {
-    const withCost = missions
-      .filter((m) => (m.total_estimated_cost ?? 0) > 0)
-      .sort((a, b) => (b.total_estimated_cost ?? 0) - (a.total_estimated_cost ?? 0))
-      .slice(0, 6)
-    return withCost.map((m) => {
-      const crew = crews.find((c) => c.id === m.crew_id)
-      return {
-        id: m.id,
-        identifier: m.identifier ?? null,
-        title: m.title,
-        crew_id: m.crew_id,
-        // Pass crew palette ID (e.g. "blue"), not a raw hex — TopMissionsChart
-        // resolves it to a Tailwind bg class internally.
-        crew_color: crew?.color ?? null,
-        cost: m.total_estimated_cost ?? 0,
-        href: m.identifier ? `/issues/${m.identifier}` : "/issues",
+    let unchecked = 0
+    for (const summary of services.byCrew.values()) {
+      // A crew whose /services call failed contributes nothing to the
+      // numerator OR the denominator, so without counting it the row can read
+      // a confident "6/6 running" over a fleet it never reached.
+      if (!summary.checked) {
+        unchecked += 1
+        continue
       }
-    })
-  }, [missions, crews])
-
-  // Crew health radial
-  const crewHealth = useMemo<CrewHealthEntry[]>(() => {
-    return crews.map((c) => {
-      const crewAgents = agents.filter((a) => (a.crew_id ?? a.crew?.slug) === c.id || a.crew?.slug === c.slug)
-      const total = crewAgents.length
-      const running = crewAgents.filter((a) => a.status === "RUNNING").length
-      const errored = crewAgents.filter((a) => a.status === "ERROR").length
-      const health = total > 0 ? Math.round(((total - errored) / total) * 100) : 100
-      return {
-        id: c.id,
-        name: c.name,
-        slug: c.slug,
-        color: crewColor(c.color),
-        runningCount: running,
-        totalAgents: total,
-        healthPct: health,
-      }
-    })
-  }, [crews, agents])
-
-  // Projects
-  const projectEntries = useMemo<ProjectProgressEntry[]>(() => {
-    return projects.slice(0, 6).map((p) => ({
-      id: p.id,
-      name: p.name,
-      color: p.color || "#60a5fa",
-      issueCount: p.issue_count,
-      completedCount: Math.round((p.issue_count * p.progress) / 100),
-      href: `/issues?project=${encodeURIComponent(p.id)}`,
-    }))
-  }, [projects])
-
-  // Agent heatmap — 24h grouped by agent × hour from runs
-  const heatmapAgents = useMemo<HeatmapAgent[]>(() => {
-    return agents
-      .filter((a) => a.agent_role !== "LEAD")
-      .slice(0, 12)
-      .map((a) => ({ id: a.id, slug: a.slug, name: a.name }))
-  }, [agents])
-
-  const heatmapBuckets = useMemo<HeatmapBucket[]>(() => {
-    if (!runsData) return []
-    const now = new Date()
-    const buckets: HeatmapBucket[] = []
-    for (let i = 23; i >= 0; i--) {
-      const bucketStart = new Date(now)
-      bucketStart.setMinutes(0, 0, 0)
-      bucketStart.setHours(bucketStart.getHours() - i)
-      buckets.push({ ts: bucketStart.toISOString(), series: {} })
+      running += summary.running
+      total += summary.total
     }
-    for (const run of runsData.data) {
-      const start = new Date(run.started_at ?? run.created_at)
-      if (isNaN(start.getTime())) continue
-      const diffHours = Math.floor((now.getTime() - start.getTime()) / (60 * 60 * 1000))
-      if (diffHours < 0 || diffHours > 23) continue
-      const bucket = buckets[23 - diffHours]
-      if (!bucket) continue
-      bucket.series[run.agent_id] = (bucket.series[run.agent_id] ?? 0) + 1
-    }
-    return buckets
-  }, [runsData])
+    return { running, total, checked: services.checked, unchecked }
+  }, [services.byCrew, services.checked])
 
-  // Container stats → array
-  const containerEntries = useMemo<ContainerStatsEntry[]>(() => {
-    const list = Array.from(containerStats.values())
-    return list.map((e) => {
-      if (e.crew_color) return e
-      const crew = crews.find((c) => c.id === e.crew_id)
-      return { ...e, crew_color: crew?.color ?? null, crew_slug: e.crew_slug ?? crew?.slug ?? null, crew_name: e.crew_name ?? crew?.name ?? null }
-    })
-  }, [containerStats, crews])
+  const loading = workspaceLoading || !onboardingChecked || agentsQ.isPending || crewsQ.isPending || missionsQ.isPending
+  const realtimeMeta = (
+    <span
+      className={cn(
+        "hidden items-center gap-1.5 rounded-full border px-2 py-0.5 text-micro font-medium sm:inline-flex",
+        realtimeStatus === "connected"
+          ? "border-success/25 bg-success/10 text-success"
+          : realtimeStatus === "connecting"
+            ? "border-warn/25 bg-warn/10 text-warn"
+            : "border-destructive/25 bg-destructive/10 text-destructive",
+      )}
+    >
+      <Radio className={cn("h-3 w-3", realtimeStatus === "connected" && "animate-pulse motion-reduce:animate-none")} />
+      {realtimeStatus === "connected" ? "Live" : realtimeStatus === "connecting" ? "Connecting" : "Offline"}
+    </span>
+  )
 
-  // Inbox — mix escalations / keeper / reviews
-  const inboxEntries = useMemo<InboxEntry[]>(() => {
-    const entries: InboxEntry[] = []
-
-    for (const k of keeperRequests.slice(0, 3)) {
-      if (k.decision && k.decision !== "PENDING") continue
-      entries.push({
-        id: `keeper-${k.id}`,
-        kind: "keeper",
-        title: `Keeper request — ${k.credential_name}`,
-        subtitle: `for @${k.agent_name}`,
-        relative: formatRelativeShort(k.created_at),
-        href: "/credentials?filter=pending",
-      })
-    }
-
-    const reviews = missions.filter((m) => m.status === "REVIEW").slice(0, 3)
-    for (const m of reviews) {
-      entries.push({
-        id: `review-${m.id}`,
-        kind: "review",
-        title: m.title,
-        subtitle: m.identifier ? `${m.identifier} · awaiting review` : "awaiting review",
-        relative: formatRelativeShort(m.updated_at),
-        href: m.identifier ? `/issues/${m.identifier}` : "/issues",
-      })
-    }
-
-    if (escalationCount > 0) {
-      entries.unshift({
-        id: "escalation-summary",
-        kind: "escalation",
-        title: `${escalationCount} unresolved escalation${escalationCount === 1 ? "" : "s"}`,
-        subtitle: "click to triage",
-        relative: "",
-        href: "/inbox?filter=escalation",
-      })
-    }
-
-    return entries.slice(0, 6)
-  }, [keeperRequests, missions, escalationCount])
-
-  // Recent missions — 5 newest by updated_at
-  const recentMissions = useMemo(() => {
-    return [...missions]
-      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-      .slice(0, 5)
-  }, [missions])
-
-  // ── Render ──────────────────────────────────────────────────────────
-  // The dashboard was the one page with no sub-bar, so when the global top bar
-  // stopped naming pages it was left with no on-screen name at all. It gets the
-  // same identity strip as everywhere else — rendered in the loading branch too,
-  // so the chrome doesn't pop in once the queries resolve.
-  if (isLoading) {
-    return (
-      <div className="flex flex-col min-h-[calc(100vh-48px)]">
-        <SubBar icon={LayoutDashboard} title="Dashboard" description="Loading…" ariaLabel="Dashboard" />
-        <div className="flex-1 p-4 md:p-6 space-y-4">
-          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[112px] rounded-xl" />)}
-          </div>
-          <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-            <Skeleton className="h-[260px] rounded-xl lg:col-span-2" />
-            <Skeleton className="h-[260px] rounded-xl" />
-          </div>
-          <Skeleton className="h-[200px] rounded-xl" />
-        </div>
-      </div>
-    )
-  }
+  if (loading) return <DashboardSkeleton crews={crews.length} agents={agents.length} />
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-48px)] bg-background">
+    <div className="flex min-h-[calc(100vh-48px)] flex-col bg-background">
       <SubBar
         icon={LayoutDashboard}
         title="Dashboard"
-        description={`${crews.length} crew${crews.length === 1 ? "" : "s"} · ${totalAgents} agent${totalAgents === 1 ? "" : "s"}`}
+        description={`${crews.length} crew${crews.length === 1 ? "" : "s"} · ${agents.length} agent${agents.length === 1 ? "" : "s"}`}
+        meta={realtimeMeta}
         ariaLabel="Dashboard"
+        actions={
+          <>
+            <div className="hidden items-center rounded-md border border-border/60 bg-background/50 p-0.5 md:flex" role="group" aria-label="Dashboard time window">
+              {WINDOW_LABELS.map((item) => (
+                <Button
+                  key={item}
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  aria-pressed={reportWindow === item}
+                  onClick={() => setReportWindow(item)}
+                  className={cn("h-6 min-w-10 px-2 font-mono", reportWindow === item && "bg-primary/15 text-primary-hover")}
+                >
+                  {item}
+                </Button>
+              ))}
+            </div>
+            <SubBarSecondary asChild icon={Plus}>
+              <Link href="/issues?create=1"><span className="hidden sm:inline">New issue</span></Link>
+            </SubBarSecondary>
+            <SubBarPrimary asChild icon={MessageSquare}>
+              <Link href="/chat"><span className="hidden sm:inline">Chat with agent</span><span className="sm:hidden">Chat</span></Link>
+            </SubBarPrimary>
+          </>
+        }
       />
-      <div className="flex-1 p-4 md:p-6 pb-10 space-y-4">
-      {/* Post-onboarding welcome — self-gates on a localStorage flag
-          set at the end of the wizard, dismisses persistently. The
-          firstAgentId state is hydrated in an effect (above) so we
-          never touch storage in render. */}
-      <WelcomeChecklist firstAgentId={firstAgentId} />
 
-      {/* Recipes empty state — only when workspace has 0 crews. */}
-      {crews.length === 0 && workspaceId && (
-        <RecipesEmptyState
-          workspaceId={workspaceId}
-          onInstalled={invalidateDashboard}
-        />
-      )}
+      <main className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col gap-4 p-4 pb-10 md:p-6">
+        <WelcomeChecklist firstAgentId={firstAgentId} />
+        {crews.length === 0 && workspaceId && <RecipesEmptyState workspaceId={workspaceId} onInstalled={invalidateDashboard} />}
 
-      {/* ── Row 1: 6 KPI cards ─ responsive 2→3→6 cols ──────────── */}
-      <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-        <AppearStack>
-        <KpiCard
-          label="Agents"
-          value={totalAgents}
-          subtitle={`${crews.length} crew${crews.length === 1 ? "" : "s"}`}
-        />
-        <KpiCard
-          label="Running"
-          value={runningNow}
-          valueColor={runningNow > 0 ? "rgb(52, 211, 153)" : undefined}
-          subtitle={totalAgents > 0 ? `of ${totalAgents} agents` : undefined}
-        />
-        <KpiCard
-          label="Active missions"
-          value={activeMissionCount}
-          subtitle={`${metrics?.total_missions ?? 0} total`}
-        />
-        <KpiCard
-          label="Open issues"
-          value={openIssues}
-          subtitle={openIssues === 0 ? "nothing open" : "in pipeline"}
-        />
-        <KpiCard
-          label="Cost (24h)"
-          value={totalCost24h > 0 ? formatCost(totalCost24h) : runsToday > 0 ? "—" : "$0.00"}
-          subtitle={
-            runsToday === 0
-              ? "no runs today"
-              : totalCost24h > 0
-                ? `${runsToday} run${runsToday === 1 ? "" : "s"}`
-                : "token tracking not wired"
-          }
-        />
-        <KpiCard
-          label="Success (24h)"
-          value={successRateDisplay}
-          valueColor={
-            successRatePct == null ? undefined
-              : successRatePct >= 90 ? "rgb(52, 211, 153)"
-              : successRatePct >= 70 ? "rgb(251, 191, 36)"
-              : "rgb(248, 113, 113)"
-          }
-          subtitle={runsFailed > 0 ? `${runsFailed} failed` : runsToday > 0 ? "all clean" : "no data"}
-        />
-        </AppearStack>
-      </div>
+        <div className="flex items-center justify-between md:hidden">
+          <span className="text-label font-medium text-muted-foreground">Reporting window</span>
+          <div className="flex items-center rounded-md border border-border/60 bg-card p-0.5" role="group" aria-label="Dashboard time window">
+            {WINDOW_LABELS.map((item) => (
+              <Button key={item} type="button" variant="ghost" size="xs" aria-pressed={reportWindow === item} onClick={() => setReportWindow(item)} className={cn("h-6 min-w-10 px-2 font-mono", reportWindow === item && "bg-primary/15 text-primary-hover")}>{item}</Button>
+            ))}
+          </div>
+        </div>
 
-      {/* ── Row 2: Throughput (2fr) + Status donut (1fr) ─────────── */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-        <AppearStack from={6}>
-        <DashboardCard
-          title="Issue throughput · 24h · by crew"
-          icon={TrendingUp}
-          hint={throughputTotal > 0 ? `${throughputTotal} closed` : "awaiting data"}
-          className="lg:col-span-2"
-        >
-          {throughputData && throughputSeries.length > 0 ? (
-            <ThroughputChart buckets={throughputBuckets} series={throughputSeries} height={180} />
-          ) : (
-            <div className="flex items-center justify-center h-[180px] text-[11px] text-muted-foreground-soft">
-              {throughputData ? "No issues closed in the last 24h" : "Metrics endpoint unavailable"}
-            </div>
-          )}
-        </DashboardCard>
+        <Appear order={0}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
 
-        <DashboardCard title="Mission status" icon={Target} hint={`${missions.length} total`}>
-          {donutData.length > 0 ? (
-            <StatusDonut data={donutData} />
-          ) : (
-            <div className="flex items-center justify-center h-[160px] text-[11px] text-muted-foreground-soft">No missions yet</div>
-          )}
-        </DashboardCard>
-        </AppearStack>
-      </div>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Appear order={1} className="xl:col-span-2"><RunningNow runs={activeRuns.runs} agents={agents} crews={crews} /></Appear>
+          <Appear order={2}><UpNext schedules={schedules.schedules} /></Appear>
+        </div>
 
-      {/* ── Row 3: Cost burn (2fr) + Top missions (1fr) ──────────── */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-        <AppearStack from={8}>
-        <DashboardCard
-          title="Cost burn · 7 days"
-          icon={Banknote}
-          hint={costTotal > 0 ? `${formatCost(costTotal)} total` : "awaiting data"}
-          className="lg:col-span-2"
-        >
-          {costData && costSeries.length > 0 ? (
-            <CostBurnChart buckets={costBuckets} series={costSeries} height={160} />
-          ) : (
-            <div className="flex items-center justify-center h-[160px] text-[11px] text-muted-foreground-soft">
-              {costData ? "No cost data in the last 7 days" : "Metrics endpoint unavailable"}
-            </div>
-          )}
-        </DashboardCard>
+        <Appear order={3}><OutcomeKpis data={kpis} window={reportWindow} /></Appear>
 
-        <DashboardCard title="Top cost missions" icon={Gem} hint={`top ${topMissions.length}`}>
-          <TopMissionsChart missions={topMissions} />
-        </DashboardCard>
-        </AppearStack>
-      </div>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+          <Appear order={4} className="xl:col-span-3">
+            <DashboardCard title={`Run volume · ${reportWindow}`} icon={Radio} hint={volumeQ.data ? `${runVolumeTotal} runs` : "unavailable"} action={<Link href="/activity" className="text-primary-hover hover:underline">Report →</Link>}>
+              <RunVolumeChart buckets={runVolumeBuckets} series={runVolumeSeries} window={reportWindow} />
+            </DashboardCard>
+          </Appear>
+          <Appear order={5} className="xl:col-span-2"><FleetHealth rows={fleet} /></Appear>
+        </div>
 
-      {/* ── Row 4: Container resources (live, full width) ────────── */}
-      <Appear order={9}>
-        <DashboardCard title="Container resources · live" icon={Box} hint="via container.stats">
-          <ContainerResourcesTile entries={containerEntries} />
-        </DashboardCard>
-      </Appear>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <Appear order={6} className="xl:col-span-2"><RecentWork missions={recentWork} /></Appear>
+          <Appear order={7}><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} /></Appear>
+        </div>
+      </main>
+    </div>
+  )
+}
 
-      {/* ── Row 5: Heatmap (2fr) + Crew radial (1fr) + Projects (1fr) ──
-          Mobile: each card on its own row.
-          Tablet: heatmap full width, radial+projects side by side.
-          Desktop: 4-col grid with heatmap spanning 2. */}
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
-        <AppearStack from={9}>
-        <DashboardCard title="Agent activity · 24h" icon={Activity} hint="runs per hour" className="md:col-span-2">
-          <AgentHeatmap agents={heatmapAgents} buckets={heatmapBuckets} />
-        </DashboardCard>
-        <DashboardCard title="Crew health" icon={HeartPulse} hint={`${crews.length} crew${crews.length === 1 ? "" : "s"}`}>
-          <CrewRadial crews={crewHealth} />
-        </DashboardCard>
-        <DashboardCard title="Active projects" icon={FolderOpen} hint={`${projects.length} project${projects.length === 1 ? "" : "s"}`}>
-          <ProjectProgress projects={projectEntries} />
-        </DashboardCard>
-        </AppearStack>
-      </div>
-
-      {/* ── Row 6: Activity feed (2fr) + Inbox (1fr) ─────────────── */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-        <AppearStack from={9}>
-        <DashboardCard title="Live activity" icon={Radio} hint="streaming" className="lg:col-span-2">
-          <ActivityFeed />
-        </DashboardCard>
-        <DashboardCard title="Inbox" icon={InboxIcon} hint={`${inboxEntries.length} item${inboxEntries.length === 1 ? "" : "s"}`}>
-          <InboxTile entries={inboxEntries} />
-        </DashboardCard>
-        </AppearStack>
-      </div>
-
-      {/* ── Row 6b: Pages strip (§10b.5d) ─────────────────────────── */}
-      <Appear order={9}>
-        <PagesStrip />
-      </Appear>
-
-      {/* ── Row 7: Recent missions table ─────────────────────────── */}
-      <Appear order={9}>
-        <DashboardCard
-          title="Recent missions"
-          icon={ListChecks}
-          action={<Link href="/issues" className="text-[10px] hover:text-foreground">Issues →</Link>}
-        >
-          <RecentMissionsTable missions={recentMissions} />
-        </DashboardCard>
-      </Appear>
+function DashboardSkeleton({ crews, agents }: { crews: number; agents: number }) {
+  return (
+    <div className="flex min-h-[calc(100vh-48px)] flex-col">
+      <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
+      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-4 p-4 md:p-6">
+        <Skeleton className="h-[142px] rounded-xl" />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3"><Skeleton className="h-[290px] rounded-xl xl:col-span-2" /><Skeleton className="h-[290px] rounded-xl" /></div>
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[126px] rounded-xl" />)}</div>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-5"><Skeleton className="h-[330px] rounded-xl xl:col-span-3" /><Skeleton className="h-[330px] rounded-xl xl:col-span-2" /></div>
       </div>
     </div>
   )

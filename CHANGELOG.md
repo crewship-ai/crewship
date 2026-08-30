@@ -31,6 +31,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **The dashboard leads with what needs a human (#2185).** The landing page
+  was a wall of tiles that answered "what exists" before "what is stuck". It
+  now opens with a "Needs your attention" strip — approvals waiting, failed
+  runs, crews held for capacity, credential gaps — each linking to the surface
+  that can act on it, above a Running-now / Up-next pair, the run KPIs
+  (completed, success rate, ledger spend, p95), a run-volume chart grouped by
+  crew, and fleet health per crew.
+
+  `hooks/use-dashboard-data.ts` gains the queries behind it (run insights,
+  crew spend, crew service inventory, capacity holds) with the workspace gate
+  and non-ok-to-empty mapping the existing hooks use, so a failed panel is an
+  empty tile rather than an error state. The 24h / 7d / 30d selector drives
+  every windowed query from one place.
+
+  Windowed KPIs read agent runs (`/api/v1/runs`, journal-backed) while
+  Running-now reads routine runs, so on a workspace with only one kind the
+  other reads zero. That is faithful to the API rather than a bug in the page,
+  and it is called out here because the two sit side by side.
+
 - **The lifecycle-hook registry has a screen (#2162).** `/api/v1/hooks` has
   had full CRUD and a CLI since the engine landed and no web UI at any role —
   while a `shell` handler runs `sh -c` on the crewshipd host with a 30s
@@ -523,6 +542,69 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   which owns what is valid — this is a removal of one false promise, not a new
   client-side role validator. Companion to #2166, which removed the same dead
   promise from the create-agent dialog.
+
+- **A missing field on one response took down the whole dashboard (#2185).**
+  `series_labels` is typed as required on the timeseries response, but the
+  type is a claim about the wire and `fetchOr` validates nothing, so a 200
+  with an unexpected body reached `Object.entries(undefined)` inside a
+  `useMemo` — a render-time throw that unmounts the page rather than the one
+  chart it belongs to. The line above it already tolerated a missing
+  `bucket.series` for the same reason.
+
+- **The run-volume chart never refreshed (#2185).** `useInvalidateDashboard`
+  invalidated two fixed-param timeseries keys that nothing mounts, and never
+  the key the page actually uses — `invalidateQueries` compares the params
+  object by deep equality, so the window-dependent key could not match. The
+  KPIs and Running-now updated from the realtime path while the chart beside
+  them stayed frozen until a remount or a window switch.
+
+- **The attention strip dropped items past the third (#2185).** The badge
+  reported the true count, but the order is fixed, so on a workspace with
+  approvals, failures and capacity holds a credential gap could never render
+  — and neither it nor a capacity hold is reachable through the strip's
+  "Open Inbox" link. The remainder is now named, with its links, rather than
+  only counted.
+
+- **The dashboard reported green over failures it could not see (#2185).**
+  Three states were rendered as one. The attention strip said "All clear ·
+  There is nothing blocking your crews right now" whenever `attentionItems`
+  was empty — including while the inbox was still loading, and permanently
+  when the inbox fetch failed, which for an RBAC-gated workspace is a 403 the
+  hook does not retry. The Runtime capacity signal read a green "Available"
+  when its fetch failed, because `capacity?.enabled === false` is also false
+  for a null response, so a dead admission-control endpoint looked like
+  healthy capacity. And the Services row painted "6/6 running" in success
+  green while two of five crews had never been reached.
+
+  Each now has the third state it needed: unknown is not clear. And the strip
+  says so even when it does have something to show: `capacity` and
+  `credentials` come from their own endpoints, so the list can be non-empty
+  while the inbox — which carries approvals and failed runs — was never read,
+  and a confident count over that is the same defect one layer up.
+
+- **The dashboard rendered another workspace's crews (#2185).**
+  `GET /api/v1/runtime/capacity` is deliberately instance-scoped — the host is
+  a property of the instance — and the attention strip rendered
+  `held[0].detail` verbatim. On an instance with more than one tenant that put
+  one workspace's crew detail on another's dashboard, and counted their held
+  starts in its badge. Holds are now filtered to this workspace's crews.
+
+  The same filter fixes the count: `admission.Hold` is appended per held
+  *start*, so five queued starts on one crew read as "5 crews waiting for
+  capacity". It is deduped per crew now.
+
+- **The dashboard showed money that is not money (#2185, #2193).**
+  The "Actual cost" tile is removed. On a flat-rate subscription the marginal
+  cost of a call is structurally not a number — paymaster's own type says so,
+  forcing `CostUSD` to 0 and confidence to Unknown for `BillingFlatRate` — and
+  the tile rendered a ledger figure with no confidence badge, which the same
+  file explicitly forbids. On the workspace it was built against, 25 routine
+  runs carrying $0.83 of adapter-reported usage produced zero ledger rows,
+  because routine runs on the subscription adapter never reach the metered
+  path; the tile showed $0.00 and, with a budget set, a progress bar that
+  filled far slower than reality. The reasoning is left at the call site so
+  it is not re-added without it. #2193 tracks the four other places the same
+  figure is still printed with a `$`.
 
 - **An approval could outlive the run it belonged to, and approving it did
   nothing (#2163).** A routine run parked on a `wait` step and then marked
