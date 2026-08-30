@@ -518,8 +518,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   with `agent_role COORDINATOR was retired in v0.1 and the server rejects it;
   use LEAD` — the message #2191 gave `crewship agent create --role`, one layer
   over. The enum error for other bad values lists only `LEAD, AGENT`. Third
-  and last surface of the same retired role, after #2166 (create-agent dialog)
-  and #2189.
+  surface of the same retired role, after #2166 (create-agent dialog) and
+  #2189 (`crewship agent create --role`); #2197 covers the crew wizard.
 
 - **`go test ./internal/api/...` was red on every dev clone, and green in CI
   (#2188).** `TestEveryCredentialLoader_SplitsTheEndpointObject` walks the
