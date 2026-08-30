@@ -229,24 +229,31 @@ func TestAgentGetRunE_GuardsAndDecodeError(t *testing.T) {
 	}
 }
 
-func TestWarnCoordinatorDeprecated_WarnsOnCoordinator(t *testing.T) {
+// #2189 turned the COORDINATOR deprecation warning into a refusal: the role
+// was retired in v0.1 and the server rejects it, so "Setting role anyway" was
+// a promise the next request broke. The behaviour now under test is the
+// refusal; the fuller contract (message names LEAD, other roles pass through)
+// lives in cmd_agent_retired_role_test.go.
+func TestRefuseRetiredRole_RefusesCoordinator(t *testing.T) {
 	setFlagCovCli10(t, agentCreateCmd, "role", "coordinator")
-	out, _ := captureStderrCov(t, func() error {
-		warnCoordinatorDeprecated(agentCreateCmd, nil)
-		return nil
-	})
-	if !strings.Contains(out, "COORDINATOR role is deprecated") {
-		t.Errorf("expected deprecation warning, got %q", out)
+	err := refuseRetiredRole(agentCreateCmd, nil)
+	if err == nil {
+		t.Fatal("expected COORDINATOR to be refused")
+	}
+	if !strings.Contains(err.Error(), "COORDINATOR") {
+		t.Errorf("expected the refusal to name the role, got %q", err)
 	}
 }
 
-func TestWarnCoordinatorDeprecated_SilentForLead(t *testing.T) {
+func TestRefuseRetiredRole_SilentForLead(t *testing.T) {
 	setFlagCovCli10(t, agentCreateCmd, "role", "LEAD")
-	out, _ := captureStderrCov(t, func() error {
-		warnCoordinatorDeprecated(agentCreateCmd, nil)
-		return nil
+	out, err := captureStderrCov(t, func() error {
+		return refuseRetiredRole(agentCreateCmd, nil)
 	})
+	if err != nil {
+		t.Errorf("LEAD must pass through, got %v", err)
+	}
 	if out != "" {
-		t.Errorf("LEAD must not warn, got %q", out)
+		t.Errorf("LEAD must not write to stderr, got %q", out)
 	}
 }
