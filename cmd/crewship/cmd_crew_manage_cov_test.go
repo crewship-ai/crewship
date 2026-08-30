@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
@@ -591,8 +592,42 @@ func TestCrewSuggestRunE_HappyPath_SanitizesOutput(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("suggest calls = %d, want 1", len(calls))
 	}
-	if !strings.Contains(string(calls[0].Body), `"goal":"grow the userbase"`) {
-		t.Errorf("goal not forwarded: %s", calls[0].Body)
+	// #2201: decode the posted body with the SERVER's own request struct
+	// rather than grepping it for the key the CLI happens to send. The
+	// assertion this replaces read
+	//
+	//	strings.Contains(string(calls[0].Body), `"goal":"grow the userbase"`)
+	//
+	// which pinned the CLI's belief against a stub that answered 200 to any
+	// body — so it stayed green for a command that 400'd on every real
+	// server. Bound to api.CrewAISuggestRequest, a rename on either side is
+	// a failure here instead of a silent break in production.
+	var decoded api.CrewAISuggestRequest
+	if err := json.Unmarshal(calls[0].Body, &decoded); err != nil {
+		t.Fatalf("suggest body is not valid JSON (%v): %s", err, calls[0].Body)
+	}
+	if decoded.Description != "grow the userbase" {
+		t.Errorf("the goal did not arrive in the field the handler reads: "+
+			"api.CrewAISuggestRequest.Description = %q, want %q (body: %s)",
+			decoded.Description, "grow the userbase", calls[0].Body)
+	}
+}
+
+// TestCrewSuggestLocalBounds_MatchTheHandler pins the CLI's pre-flight length
+// check to the server's. The CLI cannot import internal/api — cmd_crew_manage.go
+// is compiled into the `clionly` build, whose whole point is that the daemon
+// dependency graph (api included) is absent — so the numbers are restated
+// there as literals. This test is where the two are held together; the CLI
+// refusal is only allowed to exist because a drift in either bound fails here
+// rather than silently sending a body the server rejects with different words.
+func TestCrewSuggestLocalBounds_MatchTheHandler(t *testing.T) {
+	if crewSuggestMinGoalLen != api.CrewAISuggestMinDescription {
+		t.Errorf("CLI refuses --goal under %d chars, handler under %d",
+			crewSuggestMinGoalLen, api.CrewAISuggestMinDescription)
+	}
+	if crewSuggestMaxGoalLen != api.CrewAISuggestMaxDescription {
+		t.Errorf("CLI refuses --goal over %d chars, handler over %d",
+			crewSuggestMaxGoalLen, api.CrewAISuggestMaxDescription)
 	}
 }
 
@@ -736,7 +771,9 @@ func TestCrewSuggestRunE_ServerAndDecodeErrors(t *testing.T) {
 	stub := covSetupCli4(t)
 	stub.OnPost("/api/v1/crew-ai-suggest", clitest.ErrorResponse(503, "no LLM configured"))
 	c := covFreshCmd(crewSuggestCmd, func(c *cobra.Command) { c.Flags().String("goal", "", "") })
-	covSetFlagsCli4(t, c, map[string]string{"goal": "anything"})
+	// The goal has to clear the local minimum (#2201) or these cases never
+	// reach the transport they exist to cover.
+	covSetFlagsCli4(t, c, map[string]string{"goal": "anything at all, at length"})
 	if err := c.RunE(c, nil); err == nil || !strings.Contains(err.Error(), "no LLM configured") {
 		t.Fatalf("want server error, got %v", err)
 	}

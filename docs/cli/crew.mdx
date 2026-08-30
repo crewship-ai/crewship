@@ -513,12 +513,21 @@ crewship crew peer-conversations backend-team --limit 20
 Get AI-powered crew suggestions based on a goal.
 
 ```bash
-crewship crew suggest --goal "Build a SaaS billing system"
+crewship crew suggest --goal "Build a SaaS billing system with invoicing"
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--goal` | `string` | _(required)_ | What should this crew accomplish? |
+| `--goal` | `string` | _(required)_ | What should this crew accomplish? 10–2000 bytes of UTF-8. |
+
+The goal is sent to [`POST /api/v1/crew-ai-suggest`](/api-reference/skills#ai-crew-wizard)
+as its `description` field; a goal outside 10–2000 bytes is refused
+locally, naming `--goal`, before any request is made.
+
+**Prerequisite:** the workspace needs an `ACTIVE` credential with
+`provider = ANTHROPIC` and `type = API_KEY`. Without one the command exits 2
+with `No Anthropic API key found` — a Claude Code OAuth token does not work
+here, the Messages API needs a plain `sk-ant-api*` key.
 
 ---
 

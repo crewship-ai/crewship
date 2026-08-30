@@ -85,25 +85,54 @@ JSON schema (return exactly this structure):
   ]
 }`
 
+// CrewAISuggestRequest is the body POST /api/v1/crew-ai-suggest decodes.
+//
+// It is exported, and named, so a client's test can bind against the field
+// this handler actually reads instead of restating it as a JSON string
+// literal. The CLI posted {"goal": …} at this {"description": …} for as long
+// as `crewship crew suggest` existed, so every invocation died on the length
+// check below without ever reaching a model — and the stub-server test stayed
+// green because it asserted the CLI's own spelling rather than this struct
+// (#2201).
+type CrewAISuggestRequest struct {
+	Description string `json:"description"`
+}
+
+// Bounds on CrewAISuggestRequest.Description, in BYTES of UTF-8 — the unit
+// len(string) counts, and the unit the error messages name. It is not
+// characters: 501 four-byte emoji are 501 characters and blow the maximum,
+// and a four-character CJK goal is 12 bytes and clears the minimum. Saying
+// "characters" while measuring bytes is what CodeRabbit caught on #2202, and
+// the maximum is the half that actually bites — a CJK description is refused
+// at roughly a third of the length the message promises.
+//
+// Exported so a client-side pre-flight check cannot silently drift from what
+// the handler enforces. Any client mirroring these MUST count bytes too, or
+// it refuses what this handler would accept; cmd/crewship pins both the
+// numbers and the unit (see TestCrewSuggestLocalBounds_MatchTheHandler and
+// TestAcceptance_CrewSuggest_LocalBoundIsBytesLikeTheServer).
+const (
+	CrewAISuggestMinDescription = 10
+	CrewAISuggestMaxDescription = 2000
+)
+
 // Suggest handles POST /api/v1/crew-ai-suggest
 // Calls Anthropic API with workspace's API key to generate a crew definition.
 func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var body struct {
-		Description string `json:"description"`
-	}
+	var body CrewAISuggestRequest
 	if err := readJSON(r, &body); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	body.Description = strings.TrimSpace(body.Description)
-	if len(body.Description) < 10 {
-		writeProblem(w, r, http.StatusBadRequest, "description must be at least 10 characters")
+	if len(body.Description) < CrewAISuggestMinDescription {
+		writeProblem(w, r, http.StatusBadRequest, "description must be at least 10 bytes of UTF-8")
 		return
 	}
-	if len(body.Description) > 2000 {
-		writeProblem(w, r, http.StatusBadRequest, "description must be at most 2000 characters")
+	if len(body.Description) > CrewAISuggestMaxDescription {
+		writeProblem(w, r, http.StatusBadRequest, "description must be at most 2000 bytes of UTF-8")
 		return
 	}
 
