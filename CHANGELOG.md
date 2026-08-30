@@ -489,12 +489,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   sessions leave behind as complete copies of the tree. The guard classifies
   files through `notUpstreamDelivery`, a map keyed by repo-relative path, so a
   copy at `.claude/worktrees/agent-x/internal/api/credentials.go` matched no
-  key and was reported as a brand-new unclassified credential loader. On a
-  clone with five worktrees that is 110 findings, none of them real, and the
-  package cannot be made green locally. CI has no worktrees, so it never saw
-  it — the failure lived exactly where CLAUDE.md says the work happens, and
-  reading it as a security regression costs an hour before the
-  `.claude/worktrees/` prefix on every path gives it away.
+  key and was reported as a brand-new unclassified credential loader — one
+  bogus finding per classified file per worktree, so the package could not be
+  made green locally. CI has no worktrees and never saw it, so the failure
+  existed only on developer machines, where it reads as a security regression
+  until the `.claude/worktrees/` prefix on every path gives it away.
 
   The same omission is now closed in the two other repository walks,
   `internal/hooks/dispatch_site_test.go` and

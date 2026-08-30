@@ -56,8 +56,8 @@ func repoGoFiles(root string) ([]string, error) {
 // agent_config_provider_test.go is the one that bites — sees
 // `.claude/worktrees/agent-x/internal/api/credentials.go`, matches no key, and
 // reports a file that was classified years ago as a brand-new unclassified
-// credential loader. On a clone with five worktrees that is 110 findings, none
-// of them real, and `go test ./internal/api/...` cannot be made green locally.
+// credential loader — one bogus finding per classified file per worktree, so
+// `go test ./internal/api/...` cannot be made green locally.
 //
 // CI has no worktrees, so it never sees this. The failure lives exactly where
 // the work does (#2188).
@@ -82,9 +82,11 @@ func TestRepoWalk_SkipsAgentWorktrees(t *testing.T) {
 	// One real source file, and the same file as it appears inside two agent
 	// worktrees. Plus a directory the walk already skips, as a control.
 	mustWrite("internal/api/credentials.go")
-	mustWrite(".claude/worktrees/agent-a2c8203b2c44b7321/internal/api/credentials.go")
-	mustWrite(".claude/worktrees/agent-afe24ad3e10cca610/internal/api/credentials.go")
-	mustWrite(".claude/settings.local.json.go")
+	mustWrite(".claude/worktrees/agent-one/internal/api/credentials.go")
+	mustWrite(".claude/worktrees/agent-two/internal/api/credentials.go")
+	// A file directly under `.claude`, so the fixture pins the whole directory
+	// and not just the worktrees subtree.
+	mustWrite(".claude/helper.go")
 	mustWrite("vendor/example.com/dep/dep.go")
 
 	got, err := repoGoFiles(root)
