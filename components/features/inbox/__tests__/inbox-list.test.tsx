@@ -10,6 +10,7 @@ let role = "OWNER"
 
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", role }),
+  useCurrentWorkspaceId: () => "ws-test",
 }))
 vi.mock("@/hooks/use-dashboard-data", () => ({
   useAgentSummaries: () => ({

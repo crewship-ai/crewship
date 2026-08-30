@@ -115,6 +115,26 @@ function getServerSnapshot() {
   return ssrSnapshot
 }
 
+/**
+ * The selected workspace id, or null while nothing is selected yet.
+ *
+ * Read-only and, unlike {@link useWorkspace}, it does **not** trigger the
+ * workspace load — it only subscribes, so it re-renders when whoever does own
+ * the load finishes. That distinction matters for leaf presentational
+ * components: `AgentAvatar` renders in ~30 places and needs the id purely to
+ * scope a background write (#2196), and calling `useWorkspace()` there would
+ * turn every avatar on the page into something that can fire
+ * `GET /api/v1/workspaces`. Any surface that can show an agent has already
+ * loaded the store to fetch that agent.
+ */
+export function useCurrentWorkspaceId(): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => snapshot.currentId,
+    () => ssrSnapshot.currentId,
+  )
+}
+
 export function useWorkspace(): UseWorkspaceReturn {
   const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 

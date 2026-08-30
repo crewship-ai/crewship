@@ -16,8 +16,9 @@
 //
 // The backfill runs off ordinary page views, so everything below exists to
 // keep it from becoming a nuisance: it fires at most once per agent per
-// session, is capped per page load, and gives up for the session after a run
-// of refusals.
+// session, is capped per page load, is skipped outright when it has no
+// workspace to scope the write to, and gives up for the session after a run
+// of refusals or a run of failures.
 
 import { getAgentAvatarSVG } from "@/lib/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
@@ -55,8 +56,25 @@ let spent = 0
  */
 const MAX_CONSECUTIVE_REFUSALS = 5
 
+/**
+ * How many writes may fail in a row — for a reason that is *not* a permission
+ * refusal — before we stop asking for the rest of the session.
+ *
+ * A refusal is a fact about one agent and is cheap to keep asking about, so it
+ * is refunded out of the budget. Anything else — a 400 the next agent's write
+ * will earn just as surely, a 5xx, a transport error — is a property of the
+ * endpoint rather than of the agent, and refunding those meant a permanently
+ * broken write path consumed no budget at all: the page re-attempted the full
+ * per-load allowance on every load and never converged on giving up. #2196 is
+ * what that looked like in production — eight failed writes per view of
+ * `/crews`, for the life of the feature. So a run of failures latches the
+ * session off the way a run of refusals does, and a failure spends its budget.
+ */
+const MAX_CONSECUTIVE_FAILURES = 5
+
 let consecutiveRefusals = 0
-let forbidden = false
+let consecutiveFailures = 0
+let stopped = false
 
 /** The per-load upload ceiling. Exported so tests don't hard-code it. */
 export function avatarBackfillBudget(): number {
@@ -88,13 +106,35 @@ export function resolveStoredAvatarSrc(avatarUrl: string | null | undefined): st
  * Safe to call from a render effect for every visible agent: it self-limits
  * (see the module comment) and never rejects — a failed backfill just means
  * the agent keeps generating from its seed, exactly as it does today.
+ *
+ * `workspaceId` is required rather than optional on purpose: the write cannot
+ * succeed without it (see below), and a required parameter is what makes a
+ * call site that has not got one a compile error instead of a 400 nobody
+ * reads.
  */
 export async function queueAvatarBackfill(
   agentId: string,
   seed: string,
   style: string | null | undefined,
+  workspaceId: string | null | undefined,
 ): Promise<void> {
-  if (!agentId || forbidden) return
+  if (!agentId || stopped) return
+  // No workspace, no write. The PUT is registered behind wsCtx, which resolves
+  // the workspace from ?workspace_id, a {workspaceId} path segment, or the
+  // X-Workspace-ID header. This route has no workspace segment and apiFetch
+  // sets no header, so a request without the query param is refused by the
+  // middleware before the handler runs — which is what #2196 was: 8 of 8
+  // agents, 400, on every load, for the life of the feature.
+  //
+  // The read side already applies this rule: agentAvatarURL
+  // (internal/api/agents_avatar.go) returns nil rather than hand the client a
+  // URL it knows will 400. This is the same rule on the write side.
+  //
+  // Returning *before* `attempted` and `spent` are touched is deliberate. The
+  // workspace store resolves asynchronously, so the first paint of a roster
+  // can legitimately have no id yet; burning the agent's one attempt on it
+  // would leave that agent unbackfilled for the rest of the session.
+  if (!workspaceId) return
   if (attempted.has(agentId)) return
   if (spent >= BACKFILL_BUDGET_PER_LOAD) return
 
@@ -116,39 +156,63 @@ export async function queueAvatarBackfill(
     attempted.add(agentId)
     spent++
 
-    const res = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/avatar`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ svg }),
-    })
+    const res = await apiFetch(
+      `/api/v1/agents/${encodeURIComponent(agentId)}/avatar` +
+        `?workspace_id=${encodeURIComponent(workspaceId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ svg }),
+      },
+    )
     if (res.status === 403) {
       consecutiveRefusals++
-      if (consecutiveRefusals >= MAX_CONSECUTIVE_REFUSALS) forbidden = true
+      if (consecutiveRefusals >= MAX_CONSECUTIVE_REFUSALS) stopped = true
       // Refused writes cost nothing to store, so don't let them eat the
-      // budget that successful ones need.
+      // budget that successful ones need; the run-of-refusals latch above is
+      // what bounds them instead.
       spent--
     } else {
       // Any non-403 answer proves the caller can write *somewhere*, so the
       // run of refusals is over.
       consecutiveRefusals = 0
-      if (!res.ok) spent--
+      if (res.status === 409) {
+        // Someone else stored one first. That is the race working as
+        // designed: the endpoint is healthy, so it clears the failure run,
+        // and nothing of ours was stored, so the budget comes back.
+        consecutiveFailures = 0
+        spent--
+      } else if (!res.ok) {
+        noteFailure()
+      } else {
+        consecutiveFailures = 0
+      }
     }
-    // 409 means someone else stored one first. That is the race working as
-    // designed and says nothing about the next agent, so it is deliberately
-    // not treated like a 403.
   } catch {
     // Offline, aborted navigation, server restart. The avatar still renders
-    // from its seed; a later session retries. The agent stays in `attempted`
-    // so a render loop can't hammer a failing endpoint, but the budget is
-    // refunded since nothing was stored.
-    if (spent > 0) spent--
+    // from its seed; a later session retries. Unlike a refusal the attempt
+    // keeps its budget — what the budget limits is requests fired, not bytes
+    // stored — and a run of these gives up for the session.
+    noteFailure()
   }
+}
+
+/**
+ * Record a write that failed for a reason that is not a permission refusal,
+ * and give up for the rest of the session once enough arrive in a row.
+ *
+ * Deliberately does not refund the budget — see MAX_CONSECUTIVE_FAILURES.
+ */
+function noteFailure(): void {
+  consecutiveFailures++
+  if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) stopped = true
 }
 
 /** Test-only: clear the session guards between cases. */
 export function _resetAvatarBackfillForTest(): void {
   attempted.clear()
   spent = 0
-  forbidden = false
+  stopped = false
   consecutiveRefusals = 0
+  consecutiveFailures = 0
 }

@@ -521,6 +521,27 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   surface of the same retired role, after #2166 (create-agent dialog) and
   #2189 (`crewship agent create --role`); #2197 covers the crew wizard.
 
+- **Agent avatars never actually got stored, and `/crews` re-tried the failed
+  writes on every load (#2196).** The backfill that hands the server a
+  rendered avatar for an agent that has none has never stored a single one
+  since it shipped. Its `PUT /api/v1/agents/{id}/avatar` carried no
+  `workspace_id`: the route resolves its workspace from the query string, a
+  path segment, or the `X-Workspace-ID` header, and the client had none of the
+  three, so every write was refused with `400 workspace_id is required` before
+  the handler ran — eight of eight agents, on every view of `/crews`, with
+  `avatar_url` still `null` a day after a seed. The workspace id is now
+  threaded from the component into `queueAvatarBackfill`, and a missing one
+  skips the write entirely instead of sending a request that cannot succeed —
+  the rule the read path (`agentAvatarURL`) has always applied.
+
+  The same function also refunded its per-page-load budget for any non-403
+  failure, so a permanently failing endpoint consumed no budget and the page
+  re-attempted the full allowance every load, forever. A run of failures that
+  are not permission refusals now stops the backfill for the session, the way
+  a run of 403s already did, and a failed write spends its budget. Avatars
+  still render from their seed throughout; nothing on screen changes when a
+  backfill fails.
+
 - **`go test ./internal/api/...` was red on every dev clone, and green in CI
   (#2188).** `TestEveryCredentialLoader_SplitsTheEndpointObject` walks the
   repository from its root and skipped `.git`, `node_modules`, `web`, `vendor`

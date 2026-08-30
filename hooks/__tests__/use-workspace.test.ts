@@ -4,7 +4,11 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 const mockFetch = vi.fn()
 vi.stubGlobal("fetch", mockFetch)
 
-import { useWorkspace, _resetWorkspaceStoreForTests } from "@/hooks/use-workspace"
+import {
+  useCurrentWorkspaceId,
+  useWorkspace,
+  _resetWorkspaceStoreForTests,
+} from "@/hooks/use-workspace"
 
 const WS_A = { id: "ws-a", name: "Acme", slug: "acme", currentUserRole: "OWNER" }
 const WS_B = { id: "ws-b", name: "Beta", slug: "beta", currentUserRole: "MEMBER" }
@@ -196,5 +200,40 @@ describe("useWorkspace", () => {
     })
 
     expect(result.current.workspaces).toEqual([WS_A, WS_B])
+  })
+})
+
+// The subscribe-only reader exists so a leaf component — AgentAvatar renders
+// in ~30 places — can scope a background write to the workspace without every
+// avatar on the page becoming something that can fire GET /api/v1/workspaces.
+describe("useCurrentWorkspaceId", () => {
+  beforeEach(() => {
+    mockFetch.mockReset()
+    _resetWorkspaceStoreForTests()
+  })
+
+  it("does not trigger the workspace load", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => [WS_A] })
+    const { result } = renderHook(() => useCurrentWorkspaceId())
+
+    // Give the effect that useWorkspace() would have run a chance to fire.
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.current).toBeNull()
+  })
+
+  it("reports the id once whoever owns the load has it", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => [WS_A, WS_B] })
+    const reader = renderHook(() => useCurrentWorkspaceId())
+    const owner = renderHook(() => useWorkspace())
+
+    await waitFor(() => expect(owner.result.current.loading).toBe(false))
+    expect(reader.result.current).toBe("ws-a")
+
+    act(() => owner.result.current.setWorkspaceId("ws-b"))
+    expect(reader.result.current).toBe("ws-b")
   })
 })

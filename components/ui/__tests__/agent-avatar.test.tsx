@@ -8,6 +8,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 const h = vi.hoisted(() => ({
   /** Set to make resolveStoredAvatarSrc decline (bearer mode, no stored render). */
   declineStored: false,
+  /** What useWorkspace() reports — null models a store that hasn't resolved. */
+  workspaceId: "ws-1" as string | null,
 }))
 
 vi.mock("@/lib/agent-avatar", () => ({
@@ -27,6 +29,10 @@ vi.mock("@/lib/agent-avatar-persist", () => ({
 
 vi.mock("@/hooks/use-avatar-styles", () => ({ useAvatarStylesVersion: () => 0 }))
 
+vi.mock("@/hooks/use-workspace", () => ({
+  useCurrentWorkspaceId: () => h.workspaceId,
+}))
+
 import { queueAvatarBackfill } from "@/lib/agent-avatar-persist"
 
 import { AgentAvatar } from "../agent-avatar"
@@ -36,6 +42,7 @@ const mockBackfill = vi.mocked(queueAvatarBackfill)
 beforeEach(() => {
   mockBackfill.mockClear()
   h.declineStored = false
+  h.workspaceId = "ws-1"
 })
 
 describe("AgentAvatar", () => {
@@ -109,9 +116,31 @@ describe("AgentAvatar", () => {
     )
   })
 
+  // The workspace id is part of the offer, not decoration: the PUT is
+  // workspace-scoped and the server refuses it outright without one (#2196).
   it("offers a render to the server for an agent that has none", async () => {
     render(<AgentAvatar agentId="ag-1" seed="alice" style="thumbs" />)
-    await waitFor(() => expect(mockBackfill).toHaveBeenCalledWith("ag-1", "alice", "thumbs"))
+    await waitFor(() =>
+      expect(mockBackfill).toHaveBeenCalledWith("ag-1", "alice", "thumbs", "ws-1"),
+    )
+  })
+
+  // The workspace store resolves asynchronously, so a cold first paint has no
+  // id. The component still offers — queueAvatarBackfill is the one place
+  // that decides what a missing workspace means — and re-offers once the id
+  // lands, because workspaceId is in the effect's dependencies.
+  it("re-offers once the workspace store resolves", async () => {
+    h.workspaceId = null
+    const { rerender } = render(<AgentAvatar agentId="ag-1" seed="alice" style="thumbs" />)
+    await waitFor(() =>
+      expect(mockBackfill).toHaveBeenCalledWith("ag-1", "alice", "thumbs", null),
+    )
+
+    h.workspaceId = "ws-1"
+    rerender(<AgentAvatar agentId="ag-1" seed="alice" style="thumbs" />)
+    await waitFor(() =>
+      expect(mockBackfill).toHaveBeenCalledWith("ag-1", "alice", "thumbs", "ws-1"),
+    )
   })
 
   it("does not re-offer a render for an agent that already has one", async () => {

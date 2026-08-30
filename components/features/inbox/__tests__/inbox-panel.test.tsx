@@ -19,7 +19,10 @@ let useInboxState: {
   error: string | null
 }
 
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws", role: "OWNER" }) }))
+vi.mock("@/hooks/use-workspace", () => ({
+  useWorkspace: () => ({ workspaceId: "ws", role: "OWNER" }),
+  useCurrentWorkspaceId: () => "ws",
+}))
 vi.mock("@/hooks/use-dashboard-data", () => ({
   useAgentSummaries: () => ({ data: [{ id: "a1", name: "casey" }, { id: "a2", name: "harper" }] }),
 }))

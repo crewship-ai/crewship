@@ -5,6 +5,7 @@ import { useEffect, useState, type ImgHTMLAttributes } from "react"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { queueAvatarBackfill, resolveStoredAvatarSrc } from "@/lib/agent-avatar-persist"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { useCurrentWorkspaceId } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 
 /**
@@ -73,6 +74,13 @@ export function AgentAvatar({
   // placeholder upgrades to the real avatar.
   useAvatarStylesVersion()
 
+  // The backfill PUT is workspace-scoped and 400s without it (#2196). Read
+  // here rather than inside lib/ so that module stays free of a store import,
+  // matching how lib/conversation-search.ts takes its workspaceId from the
+  // caller — and via the subscribe-only reader, so an avatar never becomes
+  // the thing that fires GET /api/v1/workspaces.
+  const workspaceId = useCurrentWorkspaceId()
+
   // Set when the stored render fails to load, pinning this avatar to
   // generation for the rest of its mount. Keyed off avatarUrl so a genuinely
   // new render (different ?v=) gets a fresh chance rather than inheriting
@@ -85,10 +93,14 @@ export function AgentAvatar({
   // Offer the server a render for an agent that has none. Fire-and-forget:
   // it self-limits per session and per page load, and a failure only means
   // the agent keeps generating from its seed.
+  // workspaceId is in the deps so the attempt re-fires once the workspace
+  // store resolves — on a cold load the first paint has none yet, and
+  // queueAvatarBackfill deliberately does not spend the agent's one attempt
+  // on a call it cannot make.
   useEffect(() => {
     if (!agentId || avatarUrl) return
-    void queueAvatarBackfill(agentId, seed, style)
-  }, [agentId, avatarUrl, seed, style])
+    void queueAvatarBackfill(agentId, seed, style, workspaceId)
+  }, [agentId, avatarUrl, seed, style, workspaceId])
 
   return (
     <img
