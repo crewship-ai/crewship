@@ -28,14 +28,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
-import { useBudgetSummary } from "@/hooks/use-routine-budget"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 import { useInbox } from "@/hooks/use-inbox"
 import { useRealtimeEvent, useRealtimeStatusSafe } from "@/hooks/use-realtime"
 import {
   useAgentSummaries,
   useCrewServiceSummaries,
-  useCrewSpend,
   useCrewSummaries,
   useDashboardMissions,
   useInvalidateDashboard,
@@ -95,7 +93,6 @@ export default function DashboardPage() {
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
   const memoryQ = useMemoryHealth(workspaceId, queryOpts)
-  const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
 
@@ -105,7 +102,6 @@ export default function DashboardPage() {
   const services = useCrewServiceSummaries(workspaceId, crews, queryOpts)
   const activeRuns = useActiveRoutineRuns()
   const schedules = usePipelineSchedules(workspaceId)
-  const budget = useBudgetSummary(workspaceId)
   const readiness = useCredentialReadiness(workspaceId)
   const inbox = useInbox(workspaceId, "active")
   const realtimeStatus = useRealtimeStatusSafe()
@@ -160,19 +156,10 @@ export default function DashboardPage() {
     [crews, agents, gapsByCrew, services.byCrew],
   )
 
-  const actualCost = useMemo(
-    () => (spendQ.data?.rows ?? []).reduce((total, row) => total + row.cost_usd, 0),
-    [spendQ.data],
-  )
 
   const kpis = useMemo(
-    () => kpisFromInsights(
-      insightsQ.data ?? null,
-      actualCost,
-      budget.summary?.total_spent_usd ?? 0,
-      budget.summary?.total_budget_usd ?? 0,
-    ),
-    [insightsQ.data, actualCost, budget.summary],
+    () => kpisFromInsights(insightsQ.data ?? null),
+    [insightsQ.data],
   )
 
   const recentWork = useMemo(

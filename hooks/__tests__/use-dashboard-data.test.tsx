@@ -341,8 +341,16 @@ describe("use-dashboard-data", () => {
       expect(keys).toContainEqual(dashboardKeys.timeseries("ws-1", DASHBOARD_THROUGHPUT_PARAMS))
       expect(keys).toContainEqual(dashboardKeys.timeseries("ws-1", DASHBOARD_COST_PARAMS))
       expect(keys).toContainEqual(["runs-insights", "ws-1"])
-      expect(keys).toContainEqual(["crew-spend", "ws-1"])
       expect(keys).toContainEqual(["crew-services", "ws-1"])
+      // The run-volume chart mounts under a window-dependent params object,
+      // and invalidateQueries compares that object by deep equality — so the
+      // two fixed-param timeseries keys above can never match it. Without the
+      // prefix the chart stayed frozen while everything around it moved.
+      expect(keys).toContainEqual(["metrics-timeseries", "ws-1"])
+      // crew-spend is deliberately absent: nothing mounts it since the cost
+      // tile was removed, and invalidating a key no query uses is noise that
+      // reads as coverage.
+      expect(keys).not.toContainEqual(["crew-spend", "ws-1"])
     })
 
     it("is a no-op without a workspaceId", () => {

@@ -380,7 +380,9 @@ export function useInvalidateDashboard(workspaceId: string | null) {
     }
     // Windowed queries share these prefixes; invalidate every mounted window.
     qc.invalidateQueries({ queryKey: ["runs-insights", workspaceId] })
-    qc.invalidateQueries({ queryKey: ["crew-spend", workspaceId] })
+    // crew-spend is no longer mounted — the cost tile it fed was removed with
+    // #2185, because a dollar figure on a flat-rate subscription is not a
+    // number. Left out of the set rather than invalidating a key nothing reads.
     qc.invalidateQueries({ queryKey: ["crew-services", workspaceId] })
     // The run-volume chart mounts under ["metrics-timeseries", ws, {…}] with a
     // params object that depends on the selected window, and invalidateQueries

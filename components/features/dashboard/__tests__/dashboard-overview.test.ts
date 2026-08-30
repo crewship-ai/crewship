@@ -63,14 +63,14 @@ describe("dashboard overview derivations", () => {
       duration: { p50_ms: 1_000, p95_ms: 9_000 },
       by_trigger: [], by_model: [], by_crew: [], top_agents: [], truncated: false,
     }
-    expect(kpisFromInsights(insights, 2.5, 10, 100)).toEqual({
+    // No cost / budget fields: the tile they fed was removed, and carrying
+    // them through a shape nothing renders is how a dead field starts looking
+    // live to the next reader.
+    expect(kpisFromInsights(insights)).toEqual({
       completed: 9,
       successPct: 90,
       successOk: 9,
       successTotal: 10,
-      cost: 2.5,
-      budgetSpent: 10,
-      budgetTotal: 100,
       p95Ms: 9_000,
     })
   })

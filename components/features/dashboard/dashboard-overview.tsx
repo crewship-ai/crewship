@@ -470,9 +470,6 @@ export interface OutcomeKpiData {
   successPct: number | null
   successOk: number
   successTotal: number
-  cost: number
-  budgetSpent: number
-  budgetTotal: number
   p95Ms: number
 }
 
@@ -821,9 +818,6 @@ export function deriveFleetHealth({
 
 export function kpisFromInsights(
   insights: RunInsightsResponse | null,
-  cost: number,
-  budgetSpent: number,
-  budgetTotal: number,
 ): OutcomeKpiData {
   const ok = insights?.totals.succeeded ?? 0
   const failed = insights?.totals.failed ?? 0
@@ -833,9 +827,6 @@ export function kpisFromInsights(
     successPct: finished > 0 ? Math.round((ok / finished) * 100) : null,
     successOk: ok,
     successTotal: finished,
-    cost,
-    budgetSpent,
-    budgetTotal,
     p95Ms: insights?.duration.p95_ms ?? 0,
   }
 }
