@@ -2,11 +2,9 @@ package api
 
 import (
 	"io"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -212,31 +210,10 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 	// the routine dials. Same leak, different package, invisible to a guard
 	// scoped to one directory.
 	root := repoRoot(t)
-	var files []string
-	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", "web", "vendor", "testdata":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		files = append(files, filepath.ToSlash(rel))
-		return nil
-	}); err != nil {
+	files, err := repoGoFiles(root)
+	if err != nil {
 		t.Fatalf("walk repo: %v", err)
 	}
-	sort.Strings(files)
 
 	// notUpstreamDelivery names files that decrypt a credential but never hand
 	// the value to a third party as an auth credential. Each needs a reason: the
