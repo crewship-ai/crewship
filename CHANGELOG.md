@@ -532,7 +532,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `avatar_url` still `null` a day after a seed. The workspace id is now
   threaded from the component into `queueAvatarBackfill`, and a missing one
   skips the write entirely instead of sending a request that cannot succeed —
-  the rule the read path (`agentAvatarURL`) has always applied.
+  the rule the read path (`agentAvatarURL`) has always applied. `/onboarding`
+  supplies its own workspace id, because that route never loads the workspace
+  store and its Crewship Guide avatar would otherwise be skipped.
 
   The same function also refunded its per-page-load budget for any non-403
   failure, so a permanently failing endpoint consumed no budget and the page

@@ -261,6 +261,47 @@ describe("queueAvatarBackfill", () => {
     expect(mockFetch).toHaveBeenCalledTimes(MAX_CONSECUTIVE_FAILURES_FOR_TEST)
   })
 
+  // The latch is not evidence for the budget half of #2196: the two "stops
+  // re-attempting" cases above both settle at MAX_CONSECUTIVE_FAILURES, which
+  // trips identically whether a failure spends its budget or refunds it —
+  // restoring the refund leaves them green. Interleaving successes keeps the
+  // failure run permanently below the latch, so the budget is the only thing
+  // left that can stop the loop: one call per attempt until it runs out.
+  //
+  // The number is the whole point. Spending gives `budget` calls; refunding
+  // means only the successes cost anything, so it takes twice as many calls to
+  // exhaust the same budget.
+  it("spends the budget on a failed write, not only on a stored one", async () => {
+    let call = 0
+    mockFetch.mockImplementation(() => {
+      call++
+      const stored = call % 2 === 0
+      return Promise.resolve({ ok: stored, status: stored ? 200 : 500 } as Response)
+    })
+    const budget = avatarBackfillBudget()
+    for (let i = 0; i < budget * 4; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs", WS)
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(budget)
+  })
+
+  // Same discrimination for the other refund the catch block used to make.
+  // A transport error costs a request like any other, so it spends too.
+  it("spends the budget on a transport error as well", async () => {
+    let call = 0
+    mockFetch.mockImplementation(() => {
+      call++
+      return call % 2 === 0
+        ? Promise.resolve({ ok: true, status: 200 } as Response)
+        : Promise.reject(new Error("offline"))
+    })
+    const budget = avatarBackfillBudget()
+    for (let i = 0; i < budget * 4; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs", WS)
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(budget)
+  })
+
   it("does nothing without an agent id", async () => {
     mockFetch.mockImplementation(ok)
     await queueAvatarBackfill("", "alice", "thumbs", WS)

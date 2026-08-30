@@ -183,6 +183,21 @@ export async function queueAvatarBackfill(
         consecutiveFailures = 0
         spent--
       } else if (!res.ok) {
+        // Deliberately includes two statuses that are arguably per-agent
+        // rather than per-endpoint, and so could have been exempted the way
+        // 403 and 409 are: a 404 (no such agent in this workspace) and a
+        // validation 400 (this SVG failed the allowlist or the 64 KiB cap).
+        // Both are lumped in with the endpoint-wide failures on purpose.
+        //
+        // Exempting them would mean deciding, from a status code alone, that
+        // the *next* agent will fare better — which is exactly the reasoning
+        // that produced #2196, where every write 400'd and each one was
+        // forgiven individually. And neither is reachable in a way that would
+        // cost anything today: every call site passes a real workspace-scoped
+        // agent id, and a soft-deleted agent keys off `expired_at`, not a
+        // status the roster can still render. If a surface ever does render
+        // agents it cannot write to, revisit this — with a test that tells
+        // the two cases apart.
         noteFailure()
       } else {
         consecutiveFailures = 0

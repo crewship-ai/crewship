@@ -38,6 +38,17 @@ export interface AgentAvatarProps
    * when it has none and should be generated from the seed.
    */
   avatarUrl?: string | null
+  /**
+   * Workspace to scope the backfill write to. Overrides the workspace store;
+   * the dashboard leaves it unset, matching `panel-actions`' `workspaceId`.
+   *
+   * It exists for surfaces that know their workspace but never mount the
+   * store: `/onboarding` renders a real agent's avatar
+   * (`onboarding-setup-chat.tsx`) and nothing in `app/(onboarding)/**` calls
+   * `useWorkspace()`, so the store stays empty for that whole visit and the
+   * backfill would be skipped for the one agent that route shows.
+   */
+  workspaceId?: string | null
 }
 
 /**
@@ -68,6 +79,7 @@ export function AgentAvatar({
   className,
   agentId,
   avatarUrl,
+  workspaceId: workspaceIdProp,
   ...rest
 }: AgentAvatarProps) {
   // Re-render when a lazy DiceBear collection finishes loading so the
@@ -79,7 +91,11 @@ export function AgentAvatar({
   // matching how lib/conversation-search.ts takes its workspaceId from the
   // caller — and via the subscribe-only reader, so an avatar never becomes
   // the thing that fires GET /api/v1/workspaces.
-  const workspaceId = useCurrentWorkspaceId()
+  //
+  // The prop wins where a caller has the id but the store was never loaded —
+  // see AgentAvatarProps.workspaceId. Same shape as panel-actions.
+  const storeWorkspaceId = useCurrentWorkspaceId()
+  const workspaceId = workspaceIdProp ?? storeWorkspaceId
 
   // Set when the stored render fails to load, pinning this avatar to
   // generation for the rest of its mount. Keyed off avatarUrl so a genuinely

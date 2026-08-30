@@ -125,6 +125,18 @@ describe("AgentAvatar", () => {
     )
   })
 
+  // /onboarding renders a real agent's avatar and never mounts the workspace
+  // store, so the store-only read would report null there for the whole visit
+  // and skip the backfill. The prop is how that route supplies the id it
+  // already has.
+  it("prefers an explicit workspaceId over the store", async () => {
+    h.workspaceId = null
+    render(<AgentAvatar agentId="ag-1" seed="alice" style="thumbs" workspaceId="ws-onboarding" />)
+    await waitFor(() =>
+      expect(mockBackfill).toHaveBeenCalledWith("ag-1", "alice", "thumbs", "ws-onboarding"),
+    )
+  })
+
   // The workspace store resolves asynchronously, so a cold first paint has no
   // id. The component still offers — queueAvatarBackfill is the one place
   // that decides what a missing workspace means — and re-offers once the id
