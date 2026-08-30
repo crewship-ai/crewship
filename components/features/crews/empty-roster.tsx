@@ -7,6 +7,7 @@ import { timeAgo } from "@/lib/time"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
+import { isLeadRole } from "@/lib/agent-role"
 
 interface AgentData {
   id: string
@@ -14,6 +15,7 @@ interface AgentData {
   slug: string
   status: string
   role_title: string | null
+  /** Straight from the API, stored rows included — normalised at render. */
   agent_role: string
   crew_id: string | null
   avatar_seed?: string | null
@@ -143,9 +145,16 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
                           className="h-6 w-6 rounded-full shrink-0"
                         />
                         <span className="truncate">{a.name}</span>
-                        {a.agent_role !== "AGENT" && (
+                        {/* Only a lead earns a badge, and the badge says LEAD
+                          * rather than whatever token the row carries. This
+                          * printed the raw value, so COORDINATOR — retired in
+                          * v0.1, creatable by no path since — labelled itself
+                          * on the roster and sent the reader looking for a
+                          * role that no longer exists (#2197). Anything
+                          * unrecognised now reads as an ordinary agent. */}
+                        {isLeadRole(a.agent_role) && (
                           <span className="text-[8px] px-1 rounded bg-purple/20 text-purple-hover shrink-0">
-                            {a.agent_role}
+                            LEAD
                           </span>
                         )}
                         {a.ephemeral && (

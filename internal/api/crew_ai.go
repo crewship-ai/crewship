@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -197,6 +198,19 @@ func stripMarkdownFences(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// acceptedAgentRoles renders validAgentRoles for an error message, sorted so
+// the text is stable. Derived rather than written out: a role added to or
+// removed from the accepted set must not leave this refusal naming the old
+// one.
+func acceptedAgentRoles() []string {
+	roles := make([]string, 0, len(validAgentRoles))
+	for role := range validAgentRoles {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	return roles
+}
+
 func validateSuggestion(s *AISuggestResponse) error {
 	if s.CrewName == "" {
 		return fmt.Errorf("missing crew_name")
@@ -206,11 +220,33 @@ func validateSuggestion(s *AISuggestResponse) error {
 	}
 	leads := 0
 	for i := range s.Agents {
-		if s.Agents[i].AgentRole == "LEAD" {
-			leads++
-		}
 		if s.Agents[i].Name == "" || s.Agents[i].SystemPrompt == "" {
 			return fmt.Errorf("agent missing required fields")
+		}
+		// The system prompt asks for AGENT/LEAD, and a prompt is not a
+		// validator. Until #2197 this loop only counted LEADs, so a model
+		// answering the retired COORDINATOR for a non-lead agent — a plausible
+		// completion, "coordinates" sits in the instruction for the sibling
+		// role — produced a suggestion the wizard rendered as a lineup and
+		// POST /api/v1/agents then refused with 400 "agent_role must be AGENT
+		// or LEAD". A role this API cannot create is an unparseable
+		// suggestion, and fails like any other.
+		//
+		// Casing and padding are normalised rather than refused: they are the
+		// same role written the way a model writes JSON, and the create
+		// endpoint compares the token exactly. An omitted role becomes AGENT,
+		// the default agents_create.go applies to the same field.
+		role := strings.ToUpper(strings.TrimSpace(s.Agents[i].AgentRole))
+		if role == "" {
+			role = "AGENT"
+		}
+		if !validAgentRoles[role] {
+			return fmt.Errorf("agent %q has unsupported agent_role %q (want %s)",
+				s.Agents[i].Name, role, strings.Join(acceptedAgentRoles(), " or "))
+		}
+		s.Agents[i].AgentRole = role
+		if role == "LEAD" {
+			leads++
 		}
 		// Normalize slug; fall back to name-derived slug if empty or invalid
 		s.Agents[i].Slug = slugify(s.Agents[i].Slug)

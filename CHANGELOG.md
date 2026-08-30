@@ -544,6 +544,37 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   still render from their seed throughout; nothing on screen changes when a
   backfill fails.
 
+- **The create-crew wizard could offer a crew it was then unable to create
+  (#2197).** `POST /api/v1/crew-ai-suggest` asks a model for each agent's
+  `agent_role` and constrained it in the prompt only. `validateSuggestion`
+  checked the crew name, the agent count, the required fields, the slugs and
+  that exactly one agent was `LEAD` — never what the other agents claimed to
+  be. A model answering with a role the platform retired in v0.1, a plausible
+  completion given the word "coordinates" sits in the instruction for the
+  sibling role, produced a suggestion that passed validation, rendered as a
+  lineup preview with that role on a badge, and failed at creation:
+  `POST /api/v1/agents` answers `400 agent_role must be AGENT or LEAD`.
+
+  Suggestions are now validated against the same set the create endpoint
+  accepts. A role outside it fails the suggestion the way a missing field
+  does, so the wizard cannot show a lineup it cannot build. Casing and
+  surrounding whitespace are normalised rather than refused — the same role
+  written the way a model writes JSON — and an omitted role becomes `AGENT`,
+  the default the create endpoint already applies.
+
+  Two renderers printed whatever token arrived, and no longer do: the wizard's
+  lineup preview and the agent roster both present an unrecognised role as an
+  ordinary agent, which is the one thing the form behind them can deliver. The
+  crew-template and AI-suggest response types narrowed to `"AGENT" | "LEAD"`,
+  so a third value has to be added deliberately and is a compile error at
+  every renderer when it is. Stored agent rows predating the retirement stop
+  carrying a badge for a role that no longer exists.
+
+  Fourth surface of the same retired role, after the create-agent dialog copy
+  (#2166), `crewship agent create --role` (#2189) and the standalone `Agent`
+  manifest validator (#2195).
+
+
 - **`go test ./internal/api/...` was red on every dev clone, and green in CI
   (#2188).** `TestEveryCredentialLoader_SplitsTheEndpointObject` walks the
   repository from its root and skipped `.git`, `node_modules`, `web`, `vendor`

@@ -1,11 +1,19 @@
 // Server response shapes for /api/v1/crew-templates and /api/v1/crew-ai-suggest.
 // Kept separate so types.ts has zero side-imports beyond this declaration file.
+//
+// agent_role is AgentRole ("AGENT" | "LEAD") — the set POST /api/v1/agents
+// accepts. It used to include the retired "COORDINATOR", which let the wizard
+// render a lineup it could not create (#2197). A third value belongs here only
+// once the create endpoint accepts it, and adding one is then a compile error
+// at every renderer that presents a role.
+
+import type { AgentRole } from "@/lib/agent-personas"
 
 export interface CrewTemplateAgent {
   name: string
   slug: string
   role_title: string
-  agent_role: "AGENT" | "LEAD" | "COORDINATOR"
+  agent_role: AgentRole
   cli_adapter: string
   llm_provider: string
   llm_model: string
@@ -31,7 +39,7 @@ export interface AISuggestedAgent {
   name: string
   slug: string
   role_title: string
-  agent_role: "AGENT" | "LEAD" | "COORDINATOR"
+  agent_role: AgentRole
   system_prompt: string
 }
 
