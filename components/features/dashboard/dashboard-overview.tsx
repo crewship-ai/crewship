@@ -115,15 +115,23 @@ function LiveDot({ tone = "success" }: { tone?: "success" | "warn" | "danger" | 
  *
  * Three states, because there are three: something is wrong, nothing is
  * wrong, and we do not know.
+ *
+ * `inboxKnown` is the fourth thing, and it is not a fourth state. `capacity`
+ * and `credentials` come from their own endpoints, so the list can be
+ * non-empty while the inbox — which carries approvals and failures — was
+ * never read. Rendering a confident count over that is the same defect this
+ * function exists to prevent, one layer up: a partial answer presented as a
+ * complete one. The caller shows the items AND says the rest is unknown.
  */
 export function attentionState(args: {
   items: AttentionItem[]
   inboxLoading: boolean
   inboxError: string | null
-}): { kind: "items" | "clear" | "unknown" } {
-  if (args.items.length > 0) return { kind: "items" }
-  if (args.inboxLoading || args.inboxError) return { kind: "unknown" }
-  return { kind: "clear" }
+}): { kind: "items" | "clear" | "unknown"; inboxKnown: boolean } {
+  const inboxKnown = !args.inboxLoading && !args.inboxError
+  if (args.items.length > 0) return { kind: "items", inboxKnown }
+  if (!inboxKnown) return { kind: "unknown", inboxKnown }
+  return { kind: "clear", inboxKnown }
 }
 
 /**
@@ -208,7 +216,7 @@ export function AttentionStrip({
   const reduce = useReducedMotion()
   const visible = items.slice(0, ATTENTION_VISIBLE)
   const overflow = attentionOverflow(items)
-  const state = attentionState({ items, inboxLoading, inboxError }).kind
+  const { kind: state, inboxKnown } = attentionState({ items, inboxLoading, inboxError })
 
   return (
     <div
@@ -286,6 +294,14 @@ export function AttentionStrip({
           the items past the third are always the same ones — and neither a
           credential gap nor a capacity hold is reachable through the
           "Open Inbox" link above. */}
+      {state === "items" && !inboxKnown && (
+        <div className="border-t border-border/60 px-4 py-2 text-label text-muted-foreground">
+          {inboxError
+            ? "Approvals and failed runs are missing from this list — the inbox could not be read."
+            : "Still counting approvals and failed runs…"}
+        </div>
+      )}
+
       {overflow.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 px-4 py-2 text-label text-muted-foreground">
           <span>{overflow.length} more:</span>

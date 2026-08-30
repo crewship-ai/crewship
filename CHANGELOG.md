@@ -576,7 +576,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   healthy capacity. And the Services row painted "6/6 running" in success
   green while two of five crews had never been reached.
 
-  Each now has the third state it needed: unknown is not clear.
+  Each now has the third state it needed: unknown is not clear. And the strip
+  says so even when it does have something to show: `capacity` and
+  `credentials` come from their own endpoints, so the list can be non-empty
+  while the inbox — which carries approvals and failed runs — was never read,
+  and a confident count over that is the same defect one layer up.
 
 - **The dashboard rendered another workspace's crews (#2185).**
   `GET /api/v1/runtime/capacity` is deliberately instance-scoped — the host is

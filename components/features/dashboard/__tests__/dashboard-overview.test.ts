@@ -179,3 +179,35 @@ describe("the strip does not lose items past the third", () => {
     expect(o[0]).toMatchObject({ id: "credentials", href: "/x" })
   })
 })
+
+// The strip's own fix had the defect it was fixing, one layer up.
+describe("a partial answer is not presented as a complete one", () => {
+  const item = (id: string) => ({
+    id, label: id, detail: "", href: "/x", tone: "warn" as const, icon: (() => null) as never,
+  })
+
+  it("marks the list incomplete when items exist but the inbox failed", () => {
+    // capacity and credentials come from their own endpoints, so items can be
+    // non-empty while the inbox — which carries approvals and failures — was
+    // never read. Rendering a confident count over that hides the half that
+    // is missing.
+    const s = attentionState({ items: [item("capacity")], inboxLoading: false, inboxError: "403" })
+    expect(s.kind).toBe("items")
+    expect(s.inboxKnown).toBe(false)
+  })
+
+  it("marks it incomplete while the inbox is still loading, too", () => {
+    const s = attentionState({ items: [item("capacity")], inboxLoading: true, inboxError: null })
+    expect(s.inboxKnown).toBe(false)
+  })
+
+  it("is complete when the inbox answered", () => {
+    const s = attentionState({ items: [item("approvals")], inboxLoading: false, inboxError: null })
+    expect(s.kind).toBe("items")
+    expect(s.inboxKnown).toBe(true)
+  })
+
+  it("reports the inbox as known on a genuine all-clear", () => {
+    expect(attentionState({ items: [], inboxLoading: false, inboxError: null }).inboxKnown).toBe(true)
+  })
+})
