@@ -73,7 +73,7 @@ Every agent has one of two roles that determines their capabilities:
     Settings -> Credentials -> Add Credential
     ```
 
-    Agents created from templates or through the internal API have credentials auto-assigned (`autoAssignCredentials` matches on provider). Agents created via the CLI or UI assign credentials manually.
+    Agents created from templates or through the internal API have credentials auto-assigned (`autoAssignCredentials` matches on provider). Agents created via the CLI or UI assign credentials manually -- creation does not prompt for one. An agent that ends up with none, and no crew credential to inherit, is flagged on its overview canvas: the Credentials cell warns "No credential assigned" instead of staying quiet.
   </Step>
 </Steps>
 

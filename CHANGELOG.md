@@ -533,6 +533,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   day it is declared. It immediately caught one live instance:
   `NotifyStep.Category` (shipped with the notification taxonomy) had no
   schema property, which is fixed here.
+- **A fresh agent with no credential looked identical to a healthy one
+  (#2169).** The agent overview's Credentials cell warned only when a
+  credential's status was not `ACTIVE`, which never fired for the
+  zero-credential case — an agent with no explicit grant and nothing
+  inherited from its crew showed a quiet empty list, and its first run
+  failed with no warning anywhere on the way there. The cell now flags a
+  genuinely empty credential set with an explicit "No credential
+  assigned" row; an agent that legitimately inherits a crew-scoped
+  credential (`grant_source: "crew"`) still resolves to a non-empty,
+  `ACTIVE` array and stays quiet.
 
 - **`claim-issue.sh` produced permanent phantom locks in the majority of
   cases — measured at 19 of 35 live claims, with 6 issues double-claimed

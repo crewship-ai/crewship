@@ -277,8 +277,12 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// CLI/UI-created agents require explicit credential assignment per
 	// CLAUDE.md policy ("Agents created via CLI/UI assign credentials
-	// manually"). The Create Agent dialog surfaces a follow-up prompt to
-	// link a workspace credential after the 201; the CLI uses
+	// manually"). The Create Agent dialog does NOT surface a follow-up
+	// prompt after the 201 — it toasts, closes, and routes to the new
+	// agent's canvas (create-agent-dialog.tsx submit handler). What flags
+	// the gap instead is the agent overview's Credentials cell, which warns
+	// when the agent has no credential of its own and none inherited from
+	// its crew (agent-canvas-tabs/overview-tab.tsx); the CLI equivalent is
 	// `crewship credential assign`. Auto-assign is reserved for
 	// template, Captain, and internal-API flows (see autoAssignCredentials
 	// callers in crew_templates.go, captain_tools_mutate.go, internal_status.go).
