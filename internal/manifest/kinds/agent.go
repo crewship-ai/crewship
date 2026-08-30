@@ -158,8 +158,10 @@ type LLMSpec struct {
 // prompt back out into a sibling file.
 type AgentSpec struct {
 	// CrewSlug is the parent crew this agent belongs to. REQUIRED for
-	// LEAD; optional for AGENT (a crewless AGENT is a workspace-scoped
-	// utility — uncommon but supported).
+	// every agent in a manifest, AGENT included: the server allows
+	// crewless agents, but Validate refuses an empty crew_slug before
+	// it even looks at the role, so cross-document references stay
+	// unambiguous.
 	CrewSlug string `yaml:"crew_slug,omitempty" json:"crew_slug,omitempty"`
 
 	// RoleTitle is the human-facing title shown in the UI (e.g.
