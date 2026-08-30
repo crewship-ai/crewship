@@ -335,7 +335,12 @@ type agentDetailResponse struct {
 func refuseRetiredRole(cmd *cobra.Command, _ []string) error {
 	v, _ := cmd.Flags().GetString("role")
 	if strings.EqualFold(v, "COORDINATOR") {
-		return fmt.Errorf("COORDINATOR was retired in v0.1 and the server rejects it; use --role LEAD")
+		// ExitValidation, not the default ExitGeneric: this refusal stands
+		// in for the server's 400, and moving a check from the server to
+		// the client must not change what the shell sees.
+		return cli.WithExitCode(
+			fmt.Errorf("COORDINATOR was retired in v0.1 and the server rejects it; use --role LEAD"),
+			cli.ExitValidation)
 	}
 	return nil
 }

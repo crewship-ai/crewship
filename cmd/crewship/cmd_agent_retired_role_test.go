@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // COORDINATOR is retired, and until #2189 the CLI said the opposite.
@@ -73,5 +75,21 @@ func TestRetiredRole_SupportedRolesStillPass(t *testing.T) {
 		if err := retiredRolePreRun(t, agentCreateCmd, v); err != nil {
 			t.Errorf("role %q must pass through to the server, got %v", v, err)
 		}
+	}
+}
+
+// The refusal replaced a server 400, and a 400 maps to ExitValidation (2).
+// Returning a bare error would have quietly demoted this failure to
+// ExitGeneric (1) — invisible in the message, but a different answer for any
+// script that distinguishes "the request was invalid" from "something broke".
+// Moving a check from the server to the client must not change what the shell
+// sees.
+func TestRetiredRole_RefusalKeepsTheValidationExitCode(t *testing.T) {
+	err := retiredRolePreRun(t, agentCreateCmd, "COORDINATOR")
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	if got := cli.ExitCodeFor(err); got != cli.ExitValidation {
+		t.Errorf("exit code = %d, want %d (ExitValidation, what the server 400 produced)", got, cli.ExitValidation)
 	}
 }
