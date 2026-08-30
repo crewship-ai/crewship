@@ -50,7 +50,10 @@ vi.mock("@/hooks/use-auth", () => ({
 // CrewProvisioningCard/AttachmentZone/RealtimeProvider don't each fire a real
 // GET /api/v1/workspaces on mount (vitest.setup.ts fails the test on any
 // unmocked network call escaping it).
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test" }) }))
+vi.mock("@/hooks/use-workspace", () => ({
+  useWorkspace: () => ({ workspaceId: "ws-test" }),
+  useCurrentWorkspaceId: () => "ws-test",
+}))
 
 // AgentAvatar's own render is pure (generates an inline data: URI from the
 // seed), but it also fire-and-forgets a backfill POST when given an agentId

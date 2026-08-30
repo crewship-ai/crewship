@@ -16,7 +16,10 @@ const patch = vi.fn().mockResolvedValue(undefined)
 const refresh = vi.fn().mockResolvedValue(undefined)
 let ITEMS: InboxItem[] = []
 
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws", role: "OWNER" }) }))
+vi.mock("@/hooks/use-workspace", () => ({
+  useWorkspace: () => ({ workspaceId: "ws", role: "OWNER" }),
+  useCurrentWorkspaceId: () => "ws",
+}))
 vi.mock("@/hooks/use-dashboard-data", () => ({
   useAgentSummaries: () => ({
     data: [

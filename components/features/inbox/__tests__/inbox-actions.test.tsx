@@ -16,7 +16,10 @@ const waitpointDecide = vi.fn()
 const escalationResolve = vi.fn()
 const inboxBulk = vi.fn()
 
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test", role: "OWNER" }) }))
+vi.mock("@/hooks/use-workspace", () => ({
+  useWorkspace: () => ({ workspaceId: "ws-test", role: "OWNER" }),
+  useCurrentWorkspaceId: () => "ws-test",
+}))
 vi.mock("@/hooks/use-dashboard-data", () => ({ useAgentSummaries: () => ({ data: [] }) }))
 vi.mock("@/hooks/use-pipelines", () => ({ usePipelines: () => ({ pipelines: [], refresh: vi.fn() }) }))
 // Partial: use-websocket imports broadcastSessionExpired from the same module,

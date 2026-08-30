@@ -604,7 +604,17 @@ function ConnectedSetupChat({
     <div className="flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-[20px] border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-primary/30 bg-primary/15">
-          <AgentAvatar seed={agentId} agentId={agentId} alt="" className="h-full w-full rounded-none" />
+          {/* workspaceId is passed explicitly: this route never mounts the
+              workspace store (nothing in app/(onboarding)/** calls
+              useWorkspace()), so without it the backfill for the one real
+              agent this page shows would be skipped (#2196). */}
+          <AgentAvatar
+            seed={agentId}
+            agentId={agentId}
+            workspaceId={workspaceId}
+            alt=""
+            className="h-full w-full rounded-none"
+          />
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium tracking-tight">Crewship Guide</div>

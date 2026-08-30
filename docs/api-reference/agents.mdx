@@ -1287,7 +1287,7 @@ subresources or execute script even if opened directly.
 ### Store an avatar
 
 ```
-PUT /api/v1/agents/{agentId}/avatar
+PUT /api/v1/agents/{agentId}/avatar?workspace_id={workspaceId}
 ```
 
 ```json
@@ -1296,10 +1296,17 @@ PUT /api/v1/agents/{agentId}/avatar
 
 Requires the same per-agent edit rights as `PATCH /api/v1/agents/{agentId}`.
 
+Workspace context is **required**, exactly as it is on the `GET`. The path has
+no workspace segment, so supply it as the `workspace_id` query parameter or
+the `X-Workspace-ID` header; a request carrying neither is rejected with
+`400 workspace_id is required` before the handler runs — the avatar is never
+stored and the caller keeps generating from the seed forever (#2196).
+
 **Auth:** Authenticated caller with the same per-agent edit rights as
 `PATCH /api/v1/agents/{agentId}`.
 
-**Request:** JSON object with required string field `svg`.
+**Request:** JSON object with required string field `svg`. Workspace context
+is required.
 
 **Response:** `200 OK` with the stored avatar representation.
 
@@ -1316,7 +1323,7 @@ swap a teammate's agent portrait.
 | Status | Meaning |
 |---|---|
 | `200` | Stored. Returns `{ "avatar_url": "…" }`. |
-| `400` | The SVG failed validation or exceeded the size cap. |
+| `400` | Missing workspace context, or the SVG failed validation or exceeded the size cap. |
 | `403` | Caller lacks edit rights on this agent. |
 | `404` | No such agent in this workspace. |
 | `409` | The agent already has a stored avatar. |
@@ -1324,7 +1331,7 @@ swap a teammate's agent portrait.
 ### Clear a stored avatar
 
 ```
-DELETE /api/v1/agents/{agentId}/avatar
+DELETE /api/v1/agents/{agentId}/avatar?workspace_id={workspaceId}
 ```
 
 Returns `204`. The agent reverts to generate-from-seed — which also means
@@ -1333,8 +1340,9 @@ agent that does not exist in this workspace, and `403` without edit rights.
 
 **Auth:** Authenticated caller with per-agent edit rights.
 
-**Request:** No body; `agentId` is required. Workspace context is resolved by
-the authenticated route.
+**Request:** No body; `agentId` is required. Workspace context is required and
+resolved the same way as on the `PUT` — `workspace_id` query parameter or
+`X-Workspace-ID` header.
 
 **Response:** `204 No Content` on success.
 

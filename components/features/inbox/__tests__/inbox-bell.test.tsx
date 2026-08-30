@@ -14,7 +14,10 @@ let stateFilterSeen: string | undefined
 let ITEMS: InboxItem[] = []
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws", role: "OWNER" }) }))
+vi.mock("@/hooks/use-workspace", () => ({
+  useWorkspace: () => ({ workspaceId: "ws", role: "OWNER" }),
+  useCurrentWorkspaceId: () => "ws",
+}))
 vi.mock("@/lib/api/inbox", () => ({ inboxBulk: (...a: unknown[]) => inboxBulk(...a) }))
 vi.mock("@/hooks/use-inbox", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/use-inbox")>()
