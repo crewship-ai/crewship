@@ -67,6 +67,10 @@ export interface ProvisionStepState {
   feature?: string
   status: "started" | "completed" | "failed"
   durationMs?: number
+  /** Machine-readable hold cause, only set while this step is `capacity_hold`
+   *  (host_memory, concurrency, …— see internal/admission/admission.go). Kept
+   *  as the raw wire token here; render it through {@link reasonLabel}. */
+  reason?: string
 }
 
 /** Compact summary of the last finished build, kept after the live feed has
@@ -200,6 +204,25 @@ const STEP_LABELS: Record<string, string> = {
   ready: "Ready",
   "provision.cache_hit": "Cache hit",
   "provision.failed": "Failed",
+}
+
+/** Friendly text for the `reason` a `capacity_hold` step carries — the
+ *  admission.Reason* tokens from internal/admission/admission.go. Mirrors
+ *  admission.ReasonPhrase server-side (kept as a short noun phrase here
+ *  rather than that function's full clause, to fit a single step row). */
+const REASON_LABELS: Record<string, string> = {
+  host_memory: "not enough free host memory",
+  host_pressure: "host memory already under pressure",
+  concurrency: "too many container starts in flight",
+  pacing: "container starts being staggered",
+}
+
+/** Render a `capacity_hold` reason token as UI copy. Falls back to the raw
+ *  token rather than hiding a reason this build doesn't know about yet —
+ *  the point of surfacing it is to never again read "Waiting for host
+ *  capacity" with no way to tell why. */
+export function reasonLabel(reason: string): string {
+  return REASON_LABELS[reason] ?? reason
 }
 
 /**
@@ -493,7 +516,7 @@ function reduceProvisionEvent(d: ProvisioningCrewState, p: ProvisionEventPayload
   const nextStatus: ProvisionStepState["status"] =
     status === "completed" ? "completed" : status === "failed" ? "failed" : "started"
   const eventSteps = upsertStep(d.eventSteps, {
-    key, label, feature: p.feature, status: nextStatus, durationMs: p.duration_ms,
+    key, label, feature: p.feature, status: nextStatus, durationMs: p.duration_ms, reason: p.reason,
   })
 
   let activeFeature = d.activeFeature
@@ -537,6 +560,9 @@ function upsertStep(prev: ProvisionStepState[] | undefined, next: ProvisionStepS
     feature: next.feature ?? cur.feature,
     status: rankStatus(next.status) >= rankStatus(cur.status) ? next.status : cur.status,
     durationMs: next.durationMs ?? cur.durationMs,
+    // The binding reason can change while a hold continues (host memory
+    // frees, concurrency is now what holds it) — a fresh reason always wins.
+    reason: next.reason ?? cur.reason,
   }
   const copy = list.slice()
   copy[idx] = merged

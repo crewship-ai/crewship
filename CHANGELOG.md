@@ -3105,6 +3105,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   unconditionally and, when a journal emitter is wired, recorded as a new
   `hook.dispatch_error` entry so the outage stays observable.
 
+- **A provisioning run held by admission control looked identical to a hung
+  one (#2167).** The `provision.event` wire frame already carries a
+  machine-readable `reason` (`host_memory`, `host_pressure`, `concurrency`,
+  `pacing`) whenever a container start is held for host capacity, but the
+  provisioning popover, the crew canvas banner and the chat provisioning
+  card all built their step label as `p.feature ?? STEP_LABELS[step] ?? step`
+  and never read it — so every held run read "Waiting for host capacity" with
+  no way to tell why, or whether it would ever move. The reason now renders
+  next to that label (e.g. "Waiting for host capacity — not enough free host
+  memory"), mapped from the real `admission.Reason*` tokens and falling back
+  to the raw token for one this build doesn't recognize yet.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security

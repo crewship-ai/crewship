@@ -56,7 +56,9 @@ but the concurrency bound is now what holds you).
 
 The same events land in the run journal as `provision capacity_hold` rows,
 carrying `reason` and the numbers, and on the Activity Bar as
-**Waiting for host capacity**.
+**Waiting for host capacity — \<reason>**, e.g. "Waiting for host capacity —
+not enough free host memory", so a held run reads differently from a hung one
+there too.
 
 <Note>
 The `apple` container provider emits no other container-preparation events —
