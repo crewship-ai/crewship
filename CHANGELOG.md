@@ -586,11 +586,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `--goal`, which is what `docs/cli/crew.mdx`, the OpenAPI request schema and
   the web crew wizard already agreed on.
 
-  A goal outside the endpoint's 10–2000 characters is now refused locally,
+  A goal outside the endpoint's 10–2000 bytes of UTF-8 is now refused locally,
   naming `--goal` and exiting `2` — the same code the server's `400` maps to,
   so moving the check between tiers does not change what a script sees (the
   #2189 precedent). `--goal is required` moves to that exit code too; it
   previously exited `1`.
+
+  Both layers now say **bytes of UTF-8** where they used to say "characters".
+  The bound has always been `len(string)`, so the old wording was a promise the
+  check did not keep — harmless at the minimum, where a non-ASCII goal only
+  ever passes more easily, but wrong at the maximum, where a CJK or emoji
+  description is refused at roughly a third of the 2000 the message named. The
+  limits themselves are unchanged; only `POST /api/v1/crew-ai-suggest`'s two
+  `400` message strings and the docs are.
 
   The bug survived CI because the only test of the payload asserted the CLI's
   own spelling — `strings.Contains(body, "\"goal\":\"grow the userbase\"")` —

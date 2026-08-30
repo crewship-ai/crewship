@@ -98,8 +98,19 @@ type CrewAISuggestRequest struct {
 	Description string `json:"description"`
 }
 
-// Bounds on CrewAISuggestRequest.Description. Exported so a client-side
-// pre-flight check cannot silently drift from what the handler enforces.
+// Bounds on CrewAISuggestRequest.Description, in BYTES of UTF-8 — the unit
+// len(string) counts, and the unit the error messages name. It is not
+// characters: 501 four-byte emoji are 501 characters and blow the maximum,
+// and a four-character CJK goal is 12 bytes and clears the minimum. Saying
+// "characters" while measuring bytes is what CodeRabbit caught on #2202, and
+// the maximum is the half that actually bites — a CJK description is refused
+// at roughly a third of the length the message promises.
+//
+// Exported so a client-side pre-flight check cannot silently drift from what
+// the handler enforces. Any client mirroring these MUST count bytes too, or
+// it refuses what this handler would accept; cmd/crewship pins both the
+// numbers and the unit (see TestCrewSuggestLocalBounds_MatchTheHandler and
+// TestAcceptance_CrewSuggest_LocalBoundIsBytesLikeTheServer).
 const (
 	CrewAISuggestMinDescription = 10
 	CrewAISuggestMaxDescription = 2000
@@ -117,11 +128,11 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	}
 	body.Description = strings.TrimSpace(body.Description)
 	if len(body.Description) < CrewAISuggestMinDescription {
-		writeProblem(w, r, http.StatusBadRequest, "description must be at least 10 characters")
+		writeProblem(w, r, http.StatusBadRequest, "description must be at least 10 bytes of UTF-8")
 		return
 	}
 	if len(body.Description) > CrewAISuggestMaxDescription {
-		writeProblem(w, r, http.StatusBadRequest, "description must be at most 2000 characters")
+		writeProblem(w, r, http.StatusBadRequest, "description must be at most 2000 bytes of UTF-8")
 		return
 	}
 

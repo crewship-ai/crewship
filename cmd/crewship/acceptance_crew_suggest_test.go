@@ -169,7 +169,7 @@ func TestAcceptance_CrewSuggest_ReachesTheProviderLookup(t *testing.T) {
 	if code := exitCodeOf(t, err); code != 2 {
 		t.Errorf("exit code = %d, want 2 (validation); output:\n%s", code, out)
 	}
-	if strings.Contains(out, "description must be at least 10 characters") {
+	if strings.Contains(out, "description must be at least 10 bytes") {
 		t.Errorf("the request never reached the model call — the handler rejected the body "+
 			"before looking at credentials, which is #2201: the CLI is posting a key "+
 			"CrewAISuggestRequest does not read.\noutput:\n%s", out)
@@ -206,6 +206,13 @@ func TestAcceptance_CrewSuggest_RefusesAShortGoalByName(t *testing.T) {
 	}
 	if !strings.Contains(out, "--goal") {
 		t.Errorf("the refusal must name the flag the user typed, got:\n%s", out)
+	}
+	// The bound is len(), so the message has to say bytes. Saying
+	// "characters" while measuring bytes is a promise the check does not
+	// keep, and it is the maximum where that bites: a CJK goal is refused
+	// at roughly a third of the length the message names.
+	if !strings.Contains(out, "bytes") {
+		t.Errorf("the refusal must state the unit it measures in (bytes of UTF-8), got:\n%s", out)
 	}
 	if strings.Contains(out, "description must be at least") {
 		t.Errorf("the user was handed a message about a field they cannot set:\n%s", out)

@@ -645,7 +645,7 @@ Uses AI to suggest a crew configuration based on a natural language description.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `description` | string | Yes | Natural-language description (10–2000 characters) |
+| `description` | string | Yes | Natural-language description (10–2000 bytes of UTF-8, not characters — the check is `len(string)`) |
 
 ```json
 { "description": "A crew that triages GitHub issues and drafts release notes." }
@@ -689,7 +689,7 @@ validated payload.
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid JSON, or `description` shorter than 10 / longer than 2000 characters |
+| `400` | Invalid JSON, or `description` shorter than 10 / longer than 2000 bytes of UTF-8 |
 | `422` | No active Anthropic `API_KEY` credential in the workspace |
 | `502` | AI suggestion call failed, or the model's answer failed validation |
 

@@ -471,11 +471,15 @@ var crewDeleteCmd = &cobra.Command{
 	},
 }
 
-// Length bounds POST /api/v1/crew-ai-suggest enforces on the goal. They are
-// restated here rather than imported because this file is compiled into the
-// `clionly` build, whose entire point is that the daemon dependency graph —
-// internal/api included — is absent. TestCrewSuggestLocalBounds_MatchTheHandler
-// pins them to api.CrewAISuggestMin/MaxDescription so the copy cannot drift.
+// Length bounds POST /api/v1/crew-ai-suggest enforces on the goal, in BYTES of
+// UTF-8 — the unit the handler's len(string) counts. Counting runes here would
+// refuse goals the server accepts, so the checks below use len() too and the
+// messages say bytes rather than "characters". They are restated here rather
+// than imported because this file is compiled into the `clionly` build, whose
+// entire point is that the daemon dependency graph — internal/api included —
+// is absent. TestCrewSuggestLocalBounds_MatchTheHandler pins the numbers to
+// api.CrewAISuggestMin/MaxDescription and
+// TestAcceptance_CrewSuggest_LocalBoundIsBytesLikeTheServer pins the unit.
 const (
 	crewSuggestMinGoalLen = 10
 	crewSuggestMaxGoalLen = 2000
@@ -506,13 +510,13 @@ var crewSuggestCmd = &cobra.Command{
 		// what is valid.
 		if len(goal) < crewSuggestMinGoalLen {
 			return cli.WithExitCode(fmt.Errorf(
-				"--goal must be at least %d characters (got %d) — describe what the crew should accomplish, e.g. --goal %q",
+				"--goal must be at least %d bytes of UTF-8 (got %d) — describe what the crew should accomplish, e.g. --goal %q",
 				crewSuggestMinGoalLen, len(goal), "triage inbound GitHub issues and draft release notes"),
 				cli.ExitValidation)
 		}
 		if len(goal) > crewSuggestMaxGoalLen {
 			return cli.WithExitCode(fmt.Errorf(
-				"--goal must be at most %d characters (got %d)", crewSuggestMaxGoalLen, len(goal)),
+				"--goal must be at most %d bytes of UTF-8 (got %d)", crewSuggestMaxGoalLen, len(goal)),
 				cli.ExitValidation)
 		}
 
