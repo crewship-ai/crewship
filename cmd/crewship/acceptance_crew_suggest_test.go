@@ -214,3 +214,27 @@ func TestAcceptance_CrewSuggest_RefusesAShortGoalByName(t *testing.T) {
 		t.Errorf("a goal that cannot pass validation still cost a round-trip (%d calls)", n)
 	}
 }
+
+// TestAcceptance_CrewSuggest_LocalBoundIsBytesLikeTheServer pins the *unit*,
+// which the constants alone cannot. The handler measures len(string) — bytes —
+// so a local check counting runes would refuse a goal the server accepts, and
+// the pre-flight check would have become a second, stricter rule wearing the
+// server's numbers. Six emoji are 6 runes and 24 bytes: they must go over the
+// wire and be answered by the endpoint, not by the CLI.
+func TestAcceptance_CrewSuggest_LocalBoundIsBytesLikeTheServer(t *testing.T) {
+	srv, cfgPath := startSuggestServer(t)
+
+	const goal = "🚀🚀🚀🚀🚀🚀" // 6 runes, 24 bytes
+	out, err := runSuggestCLI(t, cfgPath, "crew", "suggest", "--goal", goal)
+	if err == nil {
+		t.Fatalf("expected the endpoint's 422, got success:\n%s", out)
+	}
+	if !strings.Contains(out, "No Anthropic API key found") {
+		t.Errorf("the CLI answered instead of the server — the local bound must count "+
+			"bytes, exactly as the handler's len() does, or it refuses what the server "+
+			"would accept.\noutput:\n%s", out)
+	}
+	if posted := srv.posted(t); len(posted) != 1 || posted[0].Description != goal {
+		t.Errorf("posted = %#v, want one body carrying %q", posted, goal)
+	}
+}
