@@ -471,6 +471,16 @@ var crewDeleteCmd = &cobra.Command{
 	},
 }
 
+// Length bounds POST /api/v1/crew-ai-suggest enforces on the goal. They are
+// restated here rather than imported because this file is compiled into the
+// `clionly` build, whose entire point is that the daemon dependency graph —
+// internal/api included — is absent. TestCrewSuggestLocalBounds_MatchTheHandler
+// pins them to api.CrewAISuggestMin/MaxDescription so the copy cannot drift.
+const (
+	crewSuggestMinGoalLen = 10
+	crewSuggestMaxGoalLen = 2000
+)
+
 var crewSuggestCmd = &cobra.Command{
 	Use:   "suggest",
 	Short: "Get AI-powered crew suggestions based on a goal",
@@ -483,12 +493,36 @@ var crewSuggestCmd = &cobra.Command{
 		}
 
 		goal, _ := cmd.Flags().GetString("goal")
+		goal = strings.TrimSpace(goal)
 		if goal == "" {
-			return fmt.Errorf("--goal is required")
+			return cli.WithExitCode(fmt.Errorf("--goal is required"), cli.ExitValidation)
+		}
+		// Refuse locally what the endpoint would refuse anyway, because its
+		// message names `description` — a field this command exposes no flag
+		// for, so the user is told to fix something they cannot see. Same
+		// reasoning as the retired-role refusal in #2191, and the same exit
+		// code, so moving the check between tiers does not change what a
+		// script sees. Everything else still goes to the server, which owns
+		// what is valid.
+		if len(goal) < crewSuggestMinGoalLen {
+			return cli.WithExitCode(fmt.Errorf(
+				"--goal must be at least %d characters (got %d) — describe what the crew should accomplish, e.g. --goal %q",
+				crewSuggestMinGoalLen, len(goal), "triage inbound GitHub issues and draft release notes"),
+				cli.ExitValidation)
+		}
+		if len(goal) > crewSuggestMaxGoalLen {
+			return cli.WithExitCode(fmt.Errorf(
+				"--goal must be at most %d characters (got %d)", crewSuggestMaxGoalLen, len(goal)),
+				cli.ExitValidation)
 		}
 
 		client := newAPIClient()
-		resp, err := client.Post("/api/v1/crew-ai-suggest", map[string]string{"goal": goal})
+		// The key is `description`: that is what CrewAIHandler.Suggest decodes
+		// (api.CrewAISuggestRequest). Posting `goal` here made every
+		// invocation of this command a 400 (#2201). The flag stays --goal —
+		// docs/cli/crew.mdx, the OpenAPI request schema and the web wizard all
+		// already agree the wire field is `description`.
+		resp, err := client.Post("/api/v1/crew-ai-suggest", map[string]string{"description": goal})
 		if err != nil {
 			return err
 		}

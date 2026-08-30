@@ -577,6 +577,30 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   (#2166), `crewship agent create --role` (#2189) and the standalone `Agent`
   manifest validator (#2195).
 
+- **`crewship crew suggest --goal "…"` could never succeed on any server
+  (#2201).** The command posted `{"goal": …}` and
+  `POST /api/v1/crew-ai-suggest` decodes `{"description": …}`, so the handler
+  always saw an empty string and answered `400 description must be at least 10
+  characters` — a message naming a field the CLI has no flag for, on a request
+  that never reached a model. It now posts `description`; the flag stays
+  `--goal`, which is what `docs/cli/crew.mdx`, the OpenAPI request schema and
+  the web crew wizard already agreed on.
+
+  A goal outside the endpoint's 10–2000 characters is now refused locally,
+  naming `--goal` and exiting `2` — the same code the server's `400` maps to,
+  so moving the check between tiers does not change what a script sees (the
+  #2189 precedent). `--goal is required` moves to that exit code too; it
+  previously exited `1`.
+
+  The bug survived CI because the only test of the payload asserted the CLI's
+  own spelling — `strings.Contains(body, "\"goal\":\"grow the userbase\"")` —
+  against a stub server that answered `200` to any body, so it passed
+  *because* the key was wrong. That assertion now decodes the posted body with
+  `api.CrewAISuggestRequest`, the struct the handler itself decodes into, and
+  a new acceptance test drives the built binary against a real `api.NewRouter`
+  to the endpoint's `422` for a workspace with no Anthropic key — the furthest
+  point reachable without spending tokens, and one step past where the bug
+  died.
 
 - **`go test ./internal/api/...` was red on every dev clone, and green in CI
   (#2188).** `TestEveryCredentialLoader_SplitsTheEndpointObject` walks the
