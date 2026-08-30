@@ -73,11 +73,27 @@ var integrationCrewCmd = &cobra.Command{
 	Short: "Crew-scoped integration CRUD (list/create/update/delete/test)",
 }
 
-// integrationToolsCmd groups the per-tool enable/disable affordance
+// integrationToolsCmd groups the per-tool enable/disable picker
 // (mcp_tool_bindings). Tool toggles only apply to crew-scoped servers.
+//
+// Advisory, not access control: on the self-hosted/legacy MCP path this
+// only changes whether a tool's name is listed in the agent's
+// [CONNECTED INTEGRATIONS] prompt block. The sidecar gateway that
+// dispatches tool calls does no per-tool check, so a disabled tool can
+// still be invoked directly. Composio-routed integrations enforce their
+// own allowed_tools scope separately (see #2168).
 var integrationToolsCmd = &cobra.Command{
 	Use:   "tools",
 	Short: "Manage per-tool enable/disable on crew-scoped integrations",
+	Long: `Manage per-tool enable/disable on crew-scoped integrations.
+
+This is advisory, not access control. On the self-hosted/legacy MCP
+path, enable/disable only changes whether a tool's name is listed in
+the agent's connected-integrations prompt block (a hint of what to
+call) — the sidecar gateway that dispatches tool calls does no
+per-tool check, so a disabled tool can still be called directly.
+Composio-routed integrations are enforced separately, through
+Composio's own allowed_tools scope, not through these bindings.`,
 }
 
 // integrationAgentCmd groups agent-binding mutations not covered by the

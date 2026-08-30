@@ -106,6 +106,14 @@ equivalent of `integration access`.
 
 These commands apply only to crew-scoped integrations.
 
+**Advisory, not access control.** On the self-hosted/legacy MCP path,
+`enable`/`disable` here only changes whether the tool's name is listed
+in the agent's connected-integrations prompt block — the sidecar
+gateway that dispatches tool calls does no per-tool check, so a
+disabled tool can still be called directly. Composio-routed
+integrations are enforced separately, through Composio's own
+`allowed_tools` scope, not through these bindings. See [#2168](https://github.com/crewship-ai/crewship/issues/2168).
+
 | Command | Human output | Structured output |
 | --- | --- | --- |
 | `integration tools list <crew-slug> <integration-id>` | Table: `TOOL`, `ENABLED`, `DESCRIPTION`, `UPDATED`; missing descriptions show `-`, and long descriptions are shortened. | The tool-binding list. |
