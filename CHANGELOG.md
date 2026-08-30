@@ -448,6 +448,36 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **An approval could outlive the run it belonged to, and approving it did
+  nothing (#2163).** A routine run parked on a `wait` step and then marked
+  `interrupted` left its waitpoint `pending`. The inbox kept offering the
+  decision, the approve endpoint accepted it and returned
+  `{"approved":true,"ok":true}`, the row flipped to `resolved` — and the run
+  stayed interrupted, so the approved action never ran. The operator was told
+  they had approved a production change that did not happen, and the audit
+  trail recorded the approval.
+
+  Not an exotic race. The commonest way in is ordinary: edit a routine while
+  one of its approvals is pending, and the next restart refuses to resume that
+  run because the definition hash no longer matches — which is the drift gate
+  working correctly. Every such refusal stranded an approvable gate.
+
+  `CancelWaitpointsForRun` already existed for exactly this ("used when a
+  parked or blocking run is cancelled or dies") and was wired to the explicit
+  -cancel path only. It now hangs off the status transition itself rather than
+  off its callers: `resume.go` marks runs interrupted from five places and the
+  boot fallback from two more, and an invariant enforced at seven call sites is
+  one the eighth will miss. The cascade fires only when the guarded write
+  actually moved the row, so a run that finished between the resume scan's read
+  and the write keeps its waitpoints.
+
+  Rows that already carry the defect are repaired at boot rather than only
+  stopped from recurring, since every install upgrading into this fix still
+  holds them: `CancelOrphanedWaitpoints` settles any pending waitpoint whose
+  run is terminal or whose run row is gone, and logs a non-zero count. The
+  existing recovery scan already reported these as `stranded_pending` and did
+  nothing about them.
+
 - **The app shell clipped the last 64px of every page that had a wide
   descendant (#2156).** `SidebarInset` renders `<main>` as a flex item
   (`w-full flex-1`) with no `min-w-0`, so it kept `min-width: auto` and could

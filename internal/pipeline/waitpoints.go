@@ -695,6 +695,62 @@ WHERE token = ? AND status = 'pending'`, now, tok)
 	return cancelled, nil
 }
 
+// CancelOrphanedWaitpoints settles every pending waitpoint whose run can no
+// longer act on it — #2163.
+//
+// A waitpoint is reachable only while its run can still resume. Once the run
+// is terminal (interrupted, failed, completed, cancelled) or its row is gone
+// entirely, no decision on that gate can ever execute: the inbox would keep
+// offering it, the approve endpoint would accept it, the row would flip to
+// resolved, and nothing would run. The operator is told they approved a
+// production change that did not happen.
+//
+// MarkInterrupted now cascades so this cannot recur, but every install that
+// upgrades still carries the rows that already have the defect. This is the
+// repair for those, run once per boot. Idempotent — a second pass finds
+// nothing, because the first left no pending rows behind.
+//
+// Deliberately not scoped to a workspace: the invariant is global and a boot
+// sweep has no workspace context. Returns how many were settled so the wireup
+// can log an abnormal count.
+func (s *SQLWaitpointStore) CancelOrphanedWaitpoints(ctx context.Context) (int, error) {
+	// LEFT JOIN so a waitpoint whose run row was deleted outright is caught
+	// too — that is the same unreachable gate with less evidence.
+	rows, err := s.db.QueryContext(ctx, `
+SELECT w.pipeline_run_id
+  FROM pipeline_waitpoints w
+  LEFT JOIN pipeline_runs r ON r.id = w.pipeline_run_id
+ WHERE w.status = 'pending'
+   AND (r.id IS NULL OR r.status IN ('interrupted','failed','completed','cancelled'))
+ GROUP BY w.pipeline_run_id`)
+	if err != nil {
+		return 0, fmt.Errorf("waitpoints: orphan scan: %w", err)
+	}
+	var runIDs []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			runIDs = append(runIDs, id)
+		}
+	}
+	rows.Close()
+	if rerr := rows.Err(); rerr != nil {
+		return 0, fmt.Errorf("waitpoints: orphan scan: %w", rerr)
+	}
+
+	total := 0
+	for _, runID := range runIDs {
+		// Reuse the cancel path so the inbox cascade and any live listener
+		// wake exactly as they do everywhere else.
+		n, cerr := s.CancelWaitpointsForRun(ctx, runID)
+		if cerr != nil {
+			return total, fmt.Errorf("waitpoints: cancel orphans for run %s: %w", runID, cerr)
+		}
+		total += n
+	}
+	return total, nil
+}
+
 // WaitpointCanceller is the optional capability a WaitpointStore implements to
 // cancel a run's pending waitpoints. Detected via type assertion so test
 // stubs implementing only WaitpointStore keep working.
