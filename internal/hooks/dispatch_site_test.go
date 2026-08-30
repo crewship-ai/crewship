@@ -263,9 +263,9 @@ func collectScanFiles(t *testing.T, root string) []scannedFile {
 			switch info.Name() {
 			// `.claude` holds agent worktrees: whole copies of this tree. This
 			// guard's assertion happens not to be keyed by path, so the
-			// copies pass rather than fail — but it walks six trees to
-			// answer for one, and stops being harmless the day it grows
-			// a path-keyed exemption (#2188).
+			// copies pass rather than fail — but it re-walks one whole
+			// tree per worktree to answer for one, and stops being
+			// harmless the day it grows a path-keyed exemption (#2188).
 			case ".git", ".claude", "node_modules", "web":
 				return filepath.SkipDir
 			}

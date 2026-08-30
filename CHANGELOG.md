@@ -500,9 +500,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `internal/hooks/dispatch_site_test.go` and
   `internal/pipeline/cel_module_path_test.go`. Neither was failing: their
   assertions are not keyed by path, so a copy that satisfies the rule
-  satisfies it under any prefix. Both were walking six trees to answer for
-  one, and would have started failing the day either grew a path-keyed
-  exemption.
+  satisfies it under any prefix. Both were re-walking one whole tree per
+  worktree to answer for one, and would have started failing the day either
+  grew a path-keyed exemption.
 
   The regression test builds a synthetic tree containing
   `.claude/worktrees/agent-*/internal/api/credentials.go` and asserts the walk
