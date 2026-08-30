@@ -543,6 +543,43 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   client-side role validator. Companion to #2166, which removed the same dead
   promise from the create-agent dialog.
 
+- **The dashboard reported green over failures it could not see (#2185).**
+  Three states were rendered as one. The attention strip said "All clear ·
+  There is nothing blocking your crews right now" whenever `attentionItems`
+  was empty — including while the inbox was still loading, and permanently
+  when the inbox fetch failed, which for an RBAC-gated workspace is a 403 the
+  hook does not retry. The Runtime capacity signal read a green "Available"
+  when its fetch failed, because `capacity?.enabled === false` is also false
+  for a null response, so a dead admission-control endpoint looked like
+  healthy capacity. And the Services row painted "6/6 running" in success
+  green while two of five crews had never been reached.
+
+  Each now has the third state it needed: unknown is not clear.
+
+- **The dashboard rendered another workspace's crews (#2185).**
+  `GET /api/v1/runtime/capacity` is deliberately instance-scoped — the host is
+  a property of the instance — and the attention strip rendered
+  `held[0].detail` verbatim. On an instance with more than one tenant that put
+  one workspace's crew detail on another's dashboard, and counted their held
+  starts in its badge. Holds are now filtered to this workspace's crews.
+
+  The same filter fixes the count: `admission.Hold` is appended per held
+  *start*, so five queued starts on one crew read as "5 crews waiting for
+  capacity". It is deduped per crew now.
+
+- **The dashboard showed money that is not money (#2185, #2193).**
+  The "Actual cost" tile is removed. On a flat-rate subscription the marginal
+  cost of a call is structurally not a number — paymaster's own type says so,
+  forcing `CostUSD` to 0 and confidence to Unknown for `BillingFlatRate` — and
+  the tile rendered a ledger figure with no confidence badge, which the same
+  file explicitly forbids. On the workspace it was built against, 25 routine
+  runs carrying $0.83 of adapter-reported usage produced zero ledger rows,
+  because routine runs on the subscription adapter never reach the metered
+  path; the tile showed $0.00 and, with a budget set, a progress bar that
+  filled far slower than reality. The reasoning is left at the call site so
+  it is not re-added without it. #2193 tracks the four other places the same
+  figure is still printed with a `$`.
+
 - **An approval could outlive the run it belonged to, and approving it did
   nothing (#2163).** A routine run parked on a `wait` step and then marked
   `interrupted` left its waitpoint `pending`. The inbox kept offering the

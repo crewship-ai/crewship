@@ -8,6 +8,7 @@ import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import {
   AttentionStrip,
+  heldForWorkspace,
   FleetHealth,
   OutcomeKpis,
   RecentWork,
@@ -141,9 +142,17 @@ export default function DashboardPage() {
     [gapsByCrew],
   )
 
+  // /runtime/capacity is instance-scoped by design, so its holds can belong to
+  // another workspace's crews — and this page renders a hold's detail string.
+  // Scope to ours, one entry per crew (admission appends one per held START).
+  const heldCrews = useMemo(
+    () => heldForWorkspace(capacityQ.data?.held ?? null, crews),
+    [capacityQ.data, crews],
+  )
+
   const attentionItems = useMemo(
-    () => buildAttentionItems({ inbox: inbox.items, capacity: capacityQ.data ?? null, credentialGapCount }),
-    [inbox.items, capacityQ.data, credentialGapCount],
+    () => buildAttentionItems({ inbox: inbox.items, heldCrews, credentialGapCount }),
+    [inbox.items, heldCrews, credentialGapCount],
   )
 
   const fleet = useMemo(
@@ -196,12 +205,19 @@ export default function DashboardPage() {
   const serviceTotals = useMemo(() => {
     let running = 0
     let total = 0
+    let unchecked = 0
     for (const summary of services.byCrew.values()) {
-      if (!summary.checked) continue
+      // A crew whose /services call failed contributes nothing to the
+      // numerator OR the denominator, so without counting it the row can read
+      // a confident "6/6 running" over a fleet it never reached.
+      if (!summary.checked) {
+        unchecked += 1
+        continue
+      }
       running += summary.running
       total += summary.total
     }
-    return { running, total, checked: services.checked }
+    return { running, total, checked: services.checked, unchecked }
   }, [services.byCrew, services.checked])
 
   const loading = workspaceLoading || !onboardingChecked || agentsQ.isPending || crewsQ.isPending || missionsQ.isPending
@@ -271,7 +287,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <Appear order={0}><AttentionStrip items={attentionItems} /></Appear>
+        <Appear order={0}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <Appear order={1} className="xl:col-span-2"><RunningNow runs={activeRuns.runs} agents={agents} crews={crews} /></Appear>
@@ -291,7 +307,7 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <Appear order={6} className="xl:col-span-2"><RecentWork missions={recentWork} /></Appear>
-          <Appear order={7}><SystemSignals capacity={capacityQ.data ?? null} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} /></Appear>
+          <Appear order={7}><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} /></Appear>
         </div>
       </main>
     </div>

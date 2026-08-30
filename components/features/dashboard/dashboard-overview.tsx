@@ -11,9 +11,9 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronRight,
-  CircleDollarSign,
   Clock3,
   Gauge,
+  HelpCircle,
   KeyRound,
   Play,
   ServerCog,
@@ -39,7 +39,6 @@ import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import type { Mission } from "@/lib/types/mission"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
 import { formatDuration, formatRelativeTime } from "@/lib/time"
 
@@ -103,26 +102,112 @@ function LiveDot({ tone = "success" }: { tone?: "success" | "warn" | "danger" | 
   )
 }
 
-export function AttentionStrip({ items }: { items: AttentionItem[] }) {
+/**
+ * What the attention strip is allowed to claim.
+ *
+ * "All clear" is a positive assertion about the workspace, and the strip can
+ * only make it when the inbox actually answered. `useInbox` throws on a non-ok
+ * response with `retry: false`, so a 403 on an RBAC-gated workspace is a
+ * permanent empty list, not a transient one — and rendering green over it
+ * tells an operator with pending approvals that nothing needs them. The same
+ * held for the whole first-paint round trip, which the page's `loading` gate
+ * does not cover.
+ *
+ * Three states, because there are three: something is wrong, nothing is
+ * wrong, and we do not know.
+ */
+export function attentionState(args: {
+  items: AttentionItem[]
+  inboxLoading: boolean
+  inboxError: string | null
+}): { kind: "items" | "clear" | "unknown" } {
+  if (args.items.length > 0) return { kind: "items" }
+  if (args.inboxLoading || args.inboxError) return { kind: "unknown" }
+  return { kind: "clear" }
+}
+
+/**
+ * The capacity holds that belong to THIS workspace, one per crew.
+ *
+ * Two corrections in one place, because they share a cause. The endpoint
+ * (`GET /api/v1/runtime/capacity`) is deliberately instance-scoped — the host
+ * is a property of the instance, not of a workspace — so on an instance with
+ * more than one tenant the raw list carries other workspaces' crews. This
+ * surface is workspace-scoped and renders a hold's `detail` string verbatim,
+ * so filtering is what keeps one tenant's crew names off another's dashboard.
+ *
+ * And `admission.Hold` is appended per held START, not per crew, so five
+ * queued starts on one crew read as "5 crews waiting" without the dedupe.
+ */
+export function heldForWorkspace(
+  held: RuntimeCapacityResponse["held"] | null | undefined,
+  crews: CrewSummary[],
+): NonNullable<RuntimeCapacityResponse["held"]> {
+  if (!held || held.length === 0) return []
+  const mine = new Set(crews.map((c) => c.id))
+  const seen = new Set<string>()
+  const out: NonNullable<RuntimeCapacityResponse["held"]> = []
+  for (const h of held) {
+    if (!h.crew_id || !mine.has(h.crew_id) || seen.has(h.crew_id)) continue
+    seen.add(h.crew_id)
+    out.push(h)
+  }
+  return out
+}
+
+/**
+ * The Runtime capacity signal row.
+ *
+ * A null response means the fetch failed, and `capacity?.enabled === false` is
+ * then also false — so the old expression fell through to a green
+ * "Available", reporting a dead admission-control endpoint as healthy
+ * capacity. That is the one row an operator reads when starts are hanging.
+ * The Memory health row beside it already renders "Unavailable" for exactly
+ * this case.
+ */
+export function capacitySignal(
+  capacity: RuntimeCapacityResponse | null,
+  held: NonNullable<RuntimeCapacityResponse["held"]>,
+): { value: string; tone: string } {
+  if (capacity == null) return { value: "Unavailable", tone: "text-muted-foreground" }
+  if (held.length > 0) {
+    return { value: `${held.length} held`, tone: "text-warn" }
+  }
+  if (capacity.enabled === false) return { value: "Disabled", tone: "text-muted-foreground" }
+  return { value: "Available", tone: "text-success" }
+}
+
+export function AttentionStrip({
+  items,
+  inboxLoading = false,
+  inboxError = null,
+}: {
+  items: AttentionItem[]
+  inboxLoading?: boolean
+  inboxError?: string | null
+}) {
   const reduce = useReducedMotion()
   const visible = items.slice(0, 3)
+  const state = attentionState({ items, inboxLoading, inboxError }).kind
 
   return (
     <div
       className={cn(
         "overflow-hidden rounded-xl border bg-card",
-        visible.length > 0 ? "border-warn/20" : "border-success/20",
+        state === "items" ? "border-warn/20" : state === "clear" ? "border-success/20" : "border-border/60",
       )}
     >
       <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
         <div className="flex items-center gap-2">
-          {visible.length > 0 ? (
+          {state === "items" ? (
             <AlertTriangle className="h-4 w-4 text-warn" />
-          ) : (
+          ) : state === "clear" ? (
             <CheckCircle2 className="h-4 w-4 text-success" />
+          ) : (
+            <HelpCircle className="h-4 w-4 text-muted-foreground" />
           )}
           <h2 className="text-body font-semibold">
-            {visible.length > 0 ? "Needs your attention" : "All clear"}
+            {state === "items" ? "Needs your attention" : state === "clear" ? "All clear" : "Attention status unavailable"}
           </h2>
           {visible.length > 0 && (
             <span className="rounded-full bg-warn/12 px-2 py-0.5 text-micro font-semibold text-warn">
@@ -135,7 +220,13 @@ export function AttentionStrip({ items }: { items: AttentionItem[] }) {
         </Link>
       </div>
 
-      {visible.length === 0 ? (
+      {state === "unknown" ? (
+        <div className="flex items-center gap-2 px-4 py-4 text-body text-muted-foreground">
+          {inboxError
+            ? "The inbox could not be read, so this cannot say whether anything is blocking your crews."
+            : "Checking what needs you…"}
+        </div>
+      ) : visible.length === 0 ? (
         <div className="flex items-center gap-2 px-4 py-4 text-body text-muted-foreground">
           There is nothing blocking your crews right now.
         </div>
@@ -336,7 +427,6 @@ export interface OutcomeKpiData {
 
 export function OutcomeKpis({ data, window }: { data: OutcomeKpiData; window: DashboardWindow }) {
   const reduce = useReducedMotion()
-  const budgetPct = data.budgetTotal > 0 ? Math.min(100, (data.budgetSpent / data.budgetTotal) * 100) : 0
   const cards = [
     {
       label: "Completed",
@@ -352,14 +442,21 @@ export function OutcomeKpis({ data, window }: { data: OutcomeKpiData; window: Da
       value: data.successPct == null ? "—" : `${data.successPct}%`,
       detail: data.successTotal > 0 ? `${data.successOk} of ${data.successTotal} finished` : "no finished runs",
     },
-    {
-      label: "Actual cost",
-      icon: CircleDollarSign,
-      tone: "text-warn bg-warn/10 border-warn/20",
-      value: `$${data.cost.toFixed(2)}`,
-      detail: data.budgetTotal > 0 ? `$${data.budgetSpent.toFixed(2)} of $${data.budgetTotal.toFixed(2)} monthly` : `ledger spend · ${window}`,
-      progress: data.budgetTotal > 0 ? budgetPct : undefined,
-    },
+    // No cost tile. On a flat-rate subscription the marginal cost of a call is
+    // structurally not a number — paymaster says so itself: BillingFlatRate
+    // forces CostUSD to 0 and Confidence to Unknown, and $ budgets do not
+    // apply. Rendering "$0.00" there reads as "this was free", which is a
+    // different claim from "this is not measured here".
+    //
+    // The workspace this was built against makes the point: 25 routine runs
+    // carrying $0.83 of adapter-reported usage produced zero ledger rows,
+    // because routine runs on the subscription adapter never reach the
+    // metered path at all. The tile showed the ledger.
+    //
+    // A cost figure comes back when it follows billing_mode and carries a
+    // cost_confidence badge — which is what paymaster's own type comment
+    // requires ("never display a number without a badge telling the operator
+    // how trustworthy it is") and what this surface never did. See #2193.
     {
       label: "P95 duration",
       icon: TimerReset,
@@ -395,9 +492,6 @@ export function OutcomeKpis({ data, window }: { data: OutcomeKpiData; window: Da
               </motion.span>
             </div>
             <div className="mt-2 text-label text-muted-foreground">{card.detail}</div>
-            {card.progress != null && (
-              <Progress value={card.progress} className="mt-3 h-1 bg-foreground/[0.06]" indicatorClassName={card.progress >= 100 ? "bg-destructive" : "bg-warn"} />
-            )}
           </motion.div>
         )
       })}
@@ -514,21 +608,23 @@ export function SystemSignals({
   capacity,
   memory,
   credentialGapCount,
+  heldCrews,
   services,
 }: {
   capacity: RuntimeCapacityResponse | null
   memory: MemoryHealthResponse | null
   credentialGapCount: number
-  services: { running: number; total: number; checked: number }
+  heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
+  services: { running: number; total: number; checked: number; unchecked: number }
 }) {
-  const held = capacity?.held?.length ?? 0
+  const cap = capacitySignal(capacity, heldCrews)
   const rows = [
     {
       label: "Runtime capacity",
-      value: held > 0 ? `${held} held` : capacity?.enabled === false ? "Disabled" : "Available",
+      value: cap.value,
       href: "/settings",
       icon: ServerCog,
-      tone: held > 0 ? "text-warn" : capacity?.enabled === false ? "text-muted-foreground" : "text-success",
+      tone: cap.tone,
     },
     {
       label: "Memory health",
@@ -546,10 +642,26 @@ export function SystemSignals({
     },
     {
       label: "Services",
-      value: services.checked === 0 ? "Unavailable" : `${services.running}/${services.total} running`,
+      // `total` counts only the crews whose /services call answered, so an
+      // all-green "6/6 running" could be hiding two crews nobody reached.
+      // FleetHealth already renders those per-row as "—"; say so here too
+      // rather than paint success over an unknown.
+      value:
+        services.checked === 0
+          ? "Unavailable"
+          : services.unchecked > 0
+            ? `${services.running}/${services.total} running · ${services.unchecked} unchecked`
+            : `${services.running}/${services.total} running`,
       href: "/crews",
       icon: ServerCog,
-      tone: services.checked === 0 ? "text-muted-foreground" : services.running === services.total ? "text-success" : "text-warn",
+      tone:
+        services.checked === 0
+          ? "text-muted-foreground"
+          : services.unchecked > 0
+            ? "text-warn"
+            : services.running === services.total
+              ? "text-success"
+              : "text-warn",
     },
   ]
 
@@ -588,22 +700,22 @@ function EmptyState({ icon: Icon, title, detail }: { icon: LucideIcon; title: st
 
 export function buildAttentionItems({
   inbox,
-  capacity,
+  heldCrews,
   credentialGapCount,
 }: {
   inbox: InboxItem[]
-  capacity: RuntimeCapacityResponse | null
+  heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
   credentialGapCount: number
 }): AttentionItem[] {
   const items: AttentionItem[] = []
   const approvals = inbox.filter((item) => item.kind === "waitpoint" || item.kind === "escalation")
   const failures = inbox.filter((item) => item.kind === "failed_run" || item.kind === "schedule_circuit_breaker_tripped")
   const scheduleProblems = inbox.filter((item) => item.kind === "schedule_missed")
-  const held = capacity?.held?.length ?? 0
+  const held = heldCrews.length
 
   if (approvals.length > 0) items.push({ id: "approvals", label: `${approvals.length} approval${approvals.length === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: "/inbox", tone: "warn", icon: Clock3 })
   if (failures.length > 0) items.push({ id: "failures", label: `${failures.length} failed run${failures.length === 1 ? "" : "s"}`, detail: "Investigate and retry", href: "/inbox?kind=failed_run", tone: "danger", icon: XCircle })
-  if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: capacity?.held?.[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
+  if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
   if (credentialGapCount > 0) items.push({ id: "credentials", label: `${credentialGapCount} credential tool gap${credentialGapCount === 1 ? "" : "s"}`, detail: "Install missing crew tools", href: "/credentials", tone: "blue", icon: KeyRound })
   if (scheduleProblems.length > 0) items.push({ id: "schedules", label: `${scheduleProblems.length} schedule alert${scheduleProblems.length === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: "/inbox", tone: "warn", icon: CalendarClock })
   return items
