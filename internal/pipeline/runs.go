@@ -198,6 +198,15 @@ type RunStore struct {
 	// notifications; the callback must return promptly (fan out on its
 	// own goroutine) so it never slows the terminal write. Optional.
 	terminalNotifier TerminalNotifier
+	// waitpointCanceller, if set, settles a run's pending waitpoints when the
+	// run is marked interrupted. Optional, and a type assertion away from the
+	// waitpoint store, so a wiring without one (or a test) still works.
+	//
+	// It hangs off the STATUS TRANSITION rather than off its callers because
+	// resume.go marks runs interrupted from five places and the boot fallback
+	// from two more; an invariant enforced at seven call sites is one the
+	// eighth will miss. See MarkInterrupted for what goes wrong when it does.
+	waitpointCanceller WaitpointCanceller
 }
 
 // TerminalNotifier is invoked once a run reaches a completed/failed
@@ -218,6 +227,27 @@ func NewRunStore(db *sql.DB) *RunStore {
 // to clear.
 func (s *RunStore) SetTerminalNotifier(fn TerminalNotifier) {
 	s.terminalNotifier = fn
+}
+
+// SetWaitpointCanceller registers the store used to settle a run's pending
+// waitpoints when it is marked interrupted. Idempotent to overwrite; pass nil
+// to clear.
+func (s *RunStore) SetWaitpointCanceller(c WaitpointCanceller) {
+	s.waitpointCanceller = c
+}
+
+// cancelWaitpointsFor settles every pending waitpoint belonging to runID.
+//
+// Best-effort by design, and deliberately not fatal: the run's status has
+// already been written by the time this runs, and failing the caller would
+// turn "the gate is still listed" into "the run is still marked in-flight",
+// which is the worse of the two. The error is returned for logging.
+func (s *RunStore) cancelWaitpointsFor(ctx context.Context, runID string) error {
+	if s.waitpointCanceller == nil {
+		return nil
+	}
+	_, err := s.waitpointCanceller.CancelWaitpointsForRun(ctx, runID)
+	return err
 }
 
 // ErrRunNotFoundInStore signals that a Get-by-id (or any lookup)
@@ -639,7 +669,7 @@ func (s *RunStore) MarkInterrupted(ctx context.Context, runID, reason string) er
 	if reason == "" {
 		reason = "process restarted with run in flight"
 	}
-	_, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = 'interrupted',
     ended_at = COALESCE(ended_at, datetime('now','subsec')),
@@ -648,6 +678,15 @@ SET status = 'interrupted',
 WHERE id = ? AND status IN ('queued','running','waiting')`, reason, runID)
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: mark interrupted: %w", err)
+	}
+	// Only cascade if the guard let the write through. A run that finished
+	// between the resume scan's read and this write was not interrupted, and
+	// cancelling its waitpoints would settle a gate that is still legitimately
+	// someone's to decide.
+	if n, _ := res.RowsAffected(); n > 0 {
+		if cerr := s.cancelWaitpointsFor(ctx, runID); cerr != nil {
+			return fmt.Errorf("pipeline_runs: mark interrupted: cancel waitpoints for %s: %w", runID, cerr)
+		}
 	}
 	return nil
 }
@@ -665,6 +704,28 @@ WHERE id = ? AND status IN ('queued','running','waiting')`, reason, runID)
 // Returns how many rows were promoted. The boot wireup logs the
 // count so abnormal accumulation is observable.
 func (s *RunStore) RecoverInterruptedAtBoot(ctx context.Context) (int, error) {
+	// Ids first: a bulk UPDATE cannot say which rows it moved, and the
+	// waitpoint cascade below is per-run. Anything that finishes between this
+	// read and the write simply fails the guarded re-check afterwards.
+	var candidates []string
+	if s.waitpointCanceller != nil {
+		rows, qerr := s.db.QueryContext(ctx,
+			`SELECT id FROM pipeline_runs WHERE status IN ('queued','running')`)
+		if qerr != nil {
+			return 0, fmt.Errorf("pipeline_runs: recover scan: %w", qerr)
+		}
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				candidates = append(candidates, id)
+			}
+		}
+		rows.Close()
+		if rerr := rows.Err(); rerr != nil {
+			return 0, fmt.Errorf("pipeline_runs: recover scan: %w", rerr)
+		}
+	}
+
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = 'interrupted',
@@ -676,6 +737,18 @@ WHERE status IN ('queued','running')`)
 		return 0, fmt.Errorf("pipeline_runs: recover: %w", err)
 	}
 	n, _ := res.RowsAffected()
+
+	// Same invariant as MarkInterrupted, and the same reason it is
+	// best-effort: the statuses are already committed, so a cascade failure
+	// must not make the caller think the recovery itself failed.
+	for _, id := range candidates {
+		var status string
+		if serr := s.db.QueryRowContext(ctx,
+			`SELECT status FROM pipeline_runs WHERE id = ?`, id).Scan(&status); serr != nil || status != "interrupted" {
+			continue
+		}
+		_ = s.cancelWaitpointsFor(ctx, id)
+	}
 	return int(n), nil
 }
 

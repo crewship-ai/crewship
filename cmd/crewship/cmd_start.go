@@ -760,6 +760,17 @@ var startCmd = &cobra.Command{
 					logger.Info("pipeline waitpoint store wired (DB-backed; survives restart)",
 						"recovered_timed_out", timedOut, "stranded_pending", pending)
 				}
+				// Repair gates whose run can no longer act on them (#2163).
+				// MarkInterrupted cascades now, so this cannot recur — but
+				// rows that already had the defect before the upgrade are
+				// still approvable and still inert, and a non-zero count
+				// here is worth seeing.
+				if orphans, err := wpStore.CancelOrphanedWaitpoints(ctx); err != nil {
+					logger.Warn("pipeline orphaned-waitpoint repair failed", "error", err)
+				} else if orphans > 0 {
+					logger.Info("cancelled waitpoints whose run had already ended",
+						"count", orphans)
+				}
 
 				// Wire RunStore (migration v83) so the executor
 				// persists per-run state alongside journal_entries
@@ -769,6 +780,13 @@ var startCmd = &cobra.Command{
 				// newExecutor() picks it up via WithRunStore on
 				// every handler path.
 				runStore = pipeline.NewRunStore(deps.DB)
+				// A run marked interrupted must not leave an approvable
+				// gate behind (#2163): without this the inbox keeps
+				// offering a decision on a run that cannot act on it, the
+				// approve endpoint accepts it, and the operator is told
+				// they approved something that never ran. wpStore is
+				// created just above, so the ordering here is load-bearing.
+				runStore.SetWaitpointCanceller(wpStore)
 				srv.APIRouter().PipelinesHandler.SetRunStore(runStore)
 				logger.Info("pipeline_runs store wired (persistent per-run state; v83)")
 
