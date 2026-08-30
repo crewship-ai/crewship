@@ -173,7 +173,12 @@ func TestForbiddenModulePaths_NotImported(t *testing.T) {
 				}
 				if d.IsDir() {
 					switch d.Name() {
-					case ".git", "node_modules", "out", "vendor":
+					// `.claude` holds agent worktrees: whole copies of this tree. This
+					// guard's assertion happens not to be keyed by path, so the
+					// copies pass rather than fail — but it re-walks one whole
+					// tree per worktree to answer for one, and stops being
+					// harmless the day it grows a path-keyed exemption (#2188).
+					case ".git", ".claude", "node_modules", "out", "vendor":
 						return filepath.SkipDir
 					}
 					return nil

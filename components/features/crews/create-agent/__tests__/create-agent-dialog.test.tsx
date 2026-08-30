@@ -412,39 +412,75 @@ describe("CreateAgentDialog", () => {
   // options rather than hardcoded to "Coordinator", so they keep guarding
   // the real property (copy matches the picker) if the wording changes
   // again, rather than being a snapshot of today's sentence.
-  describe("role copy matches what the Role control actually offers", () => {
-    it("the empty-crews banner does not name a role the Role control doesn't offer", async () => {
-      renderDialog({ crews: [], defaultCrewSlug: null })
-      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent/ })).toBeInTheDocument())
-      const offeredRoles = screen.getAllByRole("radio").map((r) => r.textContent?.trim())
+  // Every role name this product has used, and where each one comes from.
+  //
+  // #2190: the first version of this guard parsed one sentence for one
+  // capitalized word and separately grepped the source for the literal
+  // "Coordinator". Both only caught the exact wording that had already been
+  // fixed — "as a coordinator" in lower case, or any newly invented role,
+  // walked straight through, which is the same way the original bug survived.
+  //
+  // So the guard is a containment check over a vocabulary instead of a parse:
+  //   AGENT, LEAD  — the dialog's own options, and what the API accepts
+  //                  (internal/api/agents.go)
+  //   COORDINATOR  — retired in v0.1; still referenced by the CLI's refusal
+  //                  path (cmd/crewship/cmd_agent.go, #2189) and by
+  //                  docs/concepts.mdx's replacement record
+  const KNOWN_ROLE_NAMES = ["Agent", "Lead", "Coordinator"] as const
 
-      const banner = screen.getByText(/no crews yet/i).closest(".rounded-md")!.textContent!
-      const claim = banner.match(/as an? ([A-Z][a-zA-Z]+)/)
-      // If the banner offers to set the agent as some named role, that role
-      // must be one Role actually lets you pick — not a promise the form
-      // can't keep.
-      expect(claim === null || offeredRoles.includes(claim[1])).toBe(true)
+  describe("role copy matches what the Role control actually offers", () => {
+    /** The roles the Role control actually lets you pick, read from the DOM. */
+    async function offeredRoles(): Promise<string[]> {
+      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent/ })).toBeInTheDocument())
+      return screen.getAllByRole("radio").map((r) => r.textContent!.trim())
+    }
+
+    const notOffered = (offered: string[]) =>
+      KNOWN_ROLE_NAMES.filter((r) => !offered.includes(r))
+
+    it("the vocabulary covers every role the control offers", async () => {
+      renderDialog({ crews: [], defaultCrewSlug: null })
+      // Without this, adding a role to the control would silently shrink what
+      // the checks below can catch: an unlisted role is neither offered nor
+      // searched for. Failing here is the prompt to extend KNOWN_ROLE_NAMES.
+      for (const role of await offeredRoles()) {
+        expect(KNOWN_ROLE_NAMES).toContain(role)
+      }
     })
 
-    it("the crew-required validation hint does not name a role the Role control doesn't offer", async () => {
+    it("the offered roles are still rendered", async () => {
       renderDialog({ crews: [], defaultCrewSlug: null })
-      await waitFor(() => expect(screen.getByRole("radio", { name: /^Agent/ })).toBeInTheDocument())
-      const offeredRoles = screen.getAllByRole("radio").map((r) => r.textContent?.trim())
+      expect(await offeredRoles()).toEqual(expect.arrayContaining(["Agent", "Lead"]))
+    })
 
+    it("no visible copy names a role the Role control does not offer", async () => {
+      renderDialog({ crews: [], defaultCrewSlug: null })
+      const offered = await offeredRoles()
+
+      // The whole dialog, not one sentence: the banner, the validation hint
+      // and every label are equally capable of promising a role. Matching is
+      // case-insensitive and word-bounded, so "coordinator" is caught and a
+      // word that merely contains a role name is not.
       const nameInput = screen.getByPlaceholderText("Filip") as HTMLInputElement
       fireEvent.change(nameInput, { target: { value: "Filip" } })
-      const hint = screen.getByText(/create a crew first|pick a crew/i).textContent!
-      const claim = hint.match(/([A-Z][a-zA-Z]+) role works without one/)
-      expect(claim === null || offeredRoles.includes(claim[1])).toBe(true)
+      const copy = document.body.textContent ?? ""
+
+      for (const role of notOffered(offered)) {
+        expect(copy).not.toMatch(new RegExp(`\\b${role}\\b`, "i"))
+      }
     })
 
-    // The crew-field hint ("N/A for Coordinator") sits behind
-    // `requiresCrew`, a literal `true` (a separate capability question,
-    // out of scope here) — no prop can make that branch render, so this
-    // door's dead copy can only be guarded by reading the source directly.
-    it("the component source names no role outside Agent/Lead", () => {
+    // Some of this door's copy sits behind `requiresCrew`, a literal `true`
+    // (a separate capability question — #2170). No prop can make that branch
+    // render, so dead copy is only reachable by reading the source.
+    it("the component source names no role the Role control does not offer", async () => {
+      renderDialog({ crews: [], defaultCrewSlug: null })
+      const offered = await offeredRoles()
       const src = readFileSync(path.join(__dirname, "..", "create-agent-dialog.tsx"), "utf8")
-      expect(src).not.toMatch(/Coordinator/)
+
+      for (const role of notOffered(offered)) {
+        expect(src).not.toMatch(new RegExp(`\\b${role}\\b`, "i"))
+      }
     })
   })
 })

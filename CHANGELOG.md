@@ -482,6 +482,33 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **`go test ./internal/api/...` was red on every dev clone, and green in CI
+  (#2188).** `TestEveryCredentialLoader_SplitsTheEndpointObject` walks the
+  repository from its root and skipped `.git`, `node_modules`, `web`, `vendor`
+  and `testdata` — but not `.claude`, which holds the agent worktrees parallel
+  sessions leave behind as complete copies of the tree. The guard classifies
+  files through `notUpstreamDelivery`, a map keyed by repo-relative path, so a
+  copy at `.claude/worktrees/agent-x/internal/api/credentials.go` matched no
+  key and was reported as a brand-new unclassified credential loader — one
+  bogus finding per classified file per worktree, so the package could not be
+  made green locally. CI has no worktrees and never saw it, so the failure
+  existed only on developer machines, where it reads as a security regression
+  until the `.claude/worktrees/` prefix on every path gives it away.
+
+  The same omission is now closed in the two other repository walks,
+  `internal/hooks/dispatch_site_test.go` and
+  `internal/pipeline/cel_module_path_test.go`. Neither was failing: their
+  assertions are not keyed by path, so a copy that satisfies the rule
+  satisfies it under any prefix. Both were re-walking one whole tree per
+  worktree to answer for one, and would have started failing the day either
+  grew a path-keyed exemption.
+
+  The regression test builds a synthetic tree containing
+  `.claude/worktrees/agent-*/internal/api/credentials.go` and asserts the walk
+  does not return it. Asserting the skip list itself would pass against a walk
+  that listed `.claude` and descended into it anyway.
+
+
 - **`crewship agent create --role COORDINATOR` warned that it was setting the
   role, then the server refused it (#2189).** The role was retired in v0.1 and
   the handler answers `400 agent_role must be AGENT or LEAD`, but the CLI
