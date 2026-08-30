@@ -236,13 +236,17 @@ func validateSuggestion(s *AISuggestResponse) error {
 		// same role written the way a model writes JSON, and the create
 		// endpoint compares the token exactly. An omitted role becomes AGENT,
 		// the default agents_create.go applies to the same field.
-		role := strings.ToUpper(strings.TrimSpace(s.Agents[i].AgentRole))
+		raw := s.Agents[i].AgentRole
+		role := strings.ToUpper(strings.TrimSpace(raw))
 		if role == "" {
 			role = "AGENT"
 		}
 		if !validAgentRoles[role] {
+			// The refusal quotes what the model actually wrote, not the
+			// normalised form: this is read while working out what the model
+			// is doing, and %q keeps a hostile string printable.
 			return fmt.Errorf("agent %q has unsupported agent_role %q (want %s)",
-				s.Agents[i].Name, role, strings.Join(acceptedAgentRoles(), " or "))
+				s.Agents[i].Name, raw, strings.Join(acceptedAgentRoles(), " or "))
 		}
 		s.Agents[i].AgentRole = role
 		if role == "LEAD" {

@@ -5,7 +5,8 @@
 // accepts. It used to include the retired "COORDINATOR", which let the wizard
 // render a lineup it could not create (#2197). A third value belongs here only
 // once the create endpoint accepts it, and adding one is then a compile error
-// at every renderer that presents a role.
+// at every renderer that presents a role. The import below is type-only and
+// erased at build, so this file still contributes no runtime dependency.
 
 import type { AgentRole } from "@/lib/agent-personas"
 
