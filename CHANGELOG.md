@@ -501,6 +501,26 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
+  server refused it (#2195).** The standalone `kind: Agent` validator kept
+  `COORDINATOR` in `validAgentRoles`, so a manifest carrying that role passed
+  `--dry-run` with a green `Plan: 1 to create` and the real apply failed with
+  `400 agent_role must be AGENT or LEAD`. The role was retired in v0.1
+  (`internal/api/agents.go`, pinned by `agents_test.go`); the comment in the
+  validator acknowledged the server rejects it and kept the value anyway, so
+  that a future server rollback would stay a one-line change. That option was
+  never exercised and its price was paid on every run — and a dry-run plan is
+  the artifact CI checks. The validator's own enum error made it worse by
+  advertising `COORDINATOR` among the values to use, so a user who mistyped
+  the role was handed a fix that fails at apply.
+
+  Validation now refuses the retired role before any request, in any casing,
+  with `agent_role COORDINATOR was retired in v0.1 and the server rejects it;
+  use LEAD` — the message #2191 gave `crewship agent create --role`, one layer
+  over. The enum error for other bad values lists only `LEAD, AGENT`. Third
+  and last surface of the same retired role, after #2166 (create-agent dialog)
+  and #2189.
+
 - **`go test ./internal/api/...` was red on every dev clone, and green in CI
   (#2188).** `TestEveryCredentialLoader_SplitsTheEndpointObject` walks the
   repository from its root and skipped `.git`, `node_modules`, `web`, `vendor`

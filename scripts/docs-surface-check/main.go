@@ -83,17 +83,12 @@ var allowedDeprecatedOccurrences = map[string][]string{
 		"Published prose must not introduce `COORDINATOR` outside this replacement record",
 	},
 	"docs/manifest/agent.md": {
-		"LEAD | AGENT | COORDINATOR (server default: AGENT)",
-		"One of `LEAD` \\| `AGENT` \\| `COORDINATOR`.",
-		"**`COORDINATOR` is effectively unsupported — prefer `AGENT`/`LEAD`**",
-		"**`COORDINATOR` is asymmetric — and effectively unsupported.**",
-		"still admits `COORDINATOR`, but:",
-		"`COORDINATOR` survives in the",
+		"The retired `COORDINATOR` value is refused at validate time",
+		"**`COORDINATOR` is retired and refused.**",
 	},
 	"docs/manifest/workspace.md": {
-		"`COORDINATOR` is rejected in the nested form",
-		"**`COORDINATOR` is not valid in nested bundles.**",
-		"accepts `COORDINATOR` in its own front-end validator",
+		"the retired `COORDINATOR` value is rejected",
+		"**`COORDINATOR` is retired and rejected everywhere.**",
 	},
 }
 

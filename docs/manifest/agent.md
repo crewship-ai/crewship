@@ -42,7 +42,7 @@ metadata:
 spec:
   crew_slug: code-review     # required — parent crew (resolved to crew_id)
   role_title: Code Reviewer  # optional — human-facing UI title
-  agent_role: LEAD           # optional — LEAD | AGENT | COORDINATOR (server default: AGENT)
+  agent_role: LEAD           # optional — LEAD | AGENT (server default: AGENT)
   cli_adapter: CLAUDE_CODE   # optional — runtime adapter (see enum below)
   llm:
     provider: ANTHROPIC      # optional — ANTHROPIC | OPENAI | GOOGLE | NONE
@@ -65,7 +65,7 @@ spec:
 | `metadata.description` | string | no | Mapped to `agents.description`. |
 | `spec.crew_slug` | string | **yes** | Parent crew slug. Resolved to `crew_id` at Plan time. The manifest requires it for every agent even though the server allows crewless agents — so cross-document references stay unambiguous. |
 | `spec.role_title` | string | no | Human-facing UI title (e.g. "Technical Architect"). |
-| `spec.agent_role` | enum | no | One of `LEAD` \| `AGENT` \| `COORDINATOR`. Empty → server default `AGENT`. `LEAD` requires a `crew_slug`. **`COORDINATOR` is effectively unsupported — prefer `AGENT`/`LEAD`** (see the note below). |
+| `spec.agent_role` | enum | no | One of `LEAD` \| `AGENT`. Empty → server default `AGENT`. `LEAD` requires a `crew_slug`. The retired `COORDINATOR` value is refused at validate time (see the note below). |
 | `spec.cli_adapter` | enum | no | One of `CLAUDE_CODE` \| `OPENCODE` \| `CODEX_CLI` \| `GEMINI_CLI` \| `CURSOR_CLI` \| `FACTORY_DROID`. |
 | `spec.llm.provider` | enum | no | One of `ANTHROPIC` \| `OPENAI` \| `GOOGLE` \| `NONE`. `NONE` = explicitly no LLM (for adapters that pin their own). |
 | `spec.llm.model` | string | no | Adapter-specific model id. Free-form by design. |
@@ -82,21 +82,18 @@ spec:
 > before Validate runs, so a hand-built document that never went
 > through the loader must set `prompt` directly.
 
-> **`COORDINATOR` is asymmetric — and effectively unsupported.** The
-> standalone `kind: Agent` validator (`validAgentRoles`,
-> `internal/manifest/kinds/agent.go`) still admits `COORDINATOR`, but:
+> **`COORDINATOR` is retired and refused.** The server's agent-role
+> enum was trimmed to `AGENT`/`LEAD` in v0.1, and both manifest
+> validators now match it — the standalone `kind: Agent` form
+> (`validAgentRoles`, `internal/manifest/kinds/agent.go`) and the
+> nested form inside a `kind: Crew` / `kind: Workspace` bundle
+> (`validAgentRole`, `internal/manifest/validate.go`).
 >
-> - The **nested** form — an agent inside a `kind: Crew` or
->   `kind: Workspace` bundle — rejects it outright. Its validator
->   (`validAgentRole`, `internal/manifest/validate.go`) accepts only
->   `AGENT` and `LEAD`.
-> - Even via the standalone kind, the server's agent-role enum was
->   trimmed to `AGENT`/`LEAD` in v0.1, so apply can still fail with a
->   `400` at the `POST /api/v1/agents` call.
->
-> In practice **use `AGENT` or `LEAD`**. `COORDINATOR` survives in the
-> standalone front-end validator only so a future server rollback stays
-> a one-line change; treat it as unsupported today.
+> Until #2195 the standalone form admitted the literal, so
+> `crewship apply --dry-run` planned the agent as creatable and the
+> real apply then failed with `400 agent_role must be AGENT or LEAD`.
+> Validation now refuses it before any request, with a message naming
+> the retirement and pointing at `LEAD`. **Use `AGENT` or `LEAD`.**
 
 ## Examples
 
