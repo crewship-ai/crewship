@@ -186,7 +186,12 @@ export default function DashboardPage() {
   )
 
   const runVolumeSeries = useMemo<RunVolumeSeries[]>(() => {
-    if (!volumeQ.data) return []
+    // series_labels is typed as required, but the type is a claim about the
+    // wire and fetchOr validates nothing — a 200 with an unexpected body
+    // reaches here, and Object.entries(undefined) throws inside a useMemo,
+    // which unmounts the whole dashboard rather than the one chart. The line
+    // above already tolerates a missing bucket.series for the same reason.
+    if (!volumeQ.data?.series_labels) return []
     return Object.entries(volumeQ.data.series_labels).map(([key, label]) => ({
       key,
       label,

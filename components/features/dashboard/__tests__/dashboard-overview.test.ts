@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  attentionOverflow,
   attentionState,
   buildAttentionItems,
   capacitySignal,
@@ -152,5 +153,29 @@ describe("runtime capacity does not report healthy when it could not be read", (
 
   it("says Available only when it answered and nothing is held", () => {
     expect(capacitySignal({ enabled: true, held: [] } as never, []).value).toMatch(/available/i)
+  })
+})
+
+// Nothing in the strip may be silently dropped — #2187.
+describe("the strip does not lose items past the third", () => {
+  const item = (id: string) => ({
+    id, label: id, detail: "", href: "/x", tone: "warn" as const, icon: (() => null) as never,
+  })
+
+  it("reports the overflow when there are more than it can show", () => {
+    const o = attentionOverflow([item("a"), item("b"), item("c"), item("d"), item("e")])
+    expect(o.map((i) => i.id)).toEqual(["d", "e"])
+  })
+
+  it("reports none when everything fits", () => {
+    expect(attentionOverflow([item("a"), item("b"), item("c")])).toHaveLength(0)
+  })
+
+  it("keeps the dropped items addressable, not just counted", () => {
+    // The badge already showed items.length while three rendered, so the
+    // count was never the problem — reachability was. A credential gap is
+    // fourth and "Open Inbox" does not cover it.
+    const o = attentionOverflow([item("a"), item("b"), item("c"), item("credentials")])
+    expect(o[0]).toMatchObject({ id: "credentials", href: "/x" })
   })
 })

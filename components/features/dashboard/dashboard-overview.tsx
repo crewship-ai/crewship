@@ -177,6 +177,25 @@ export function capacitySignal(
   return { value: "Available", tone: "text-success" }
 }
 
+/** How many rows the strip renders as cards before it starts summarising. */
+const ATTENTION_VISIBLE = 3
+
+/**
+ * The items the strip cannot render as cards.
+ *
+ * The badge always showed `items.length`, so the count was never wrong — what
+ * was wrong is that the items past the third had nowhere to go. The order is
+ * fixed (approvals, failures, capacity, credentials, schedules), so on a
+ * workspace with the first three a credential gap could never render, and
+ * "Open Inbox" does not cover credential gaps or capacity holds.
+ *
+ * Returned rather than dropped so the strip can name them and keep their
+ * links.
+ */
+export function attentionOverflow(items: AttentionItem[]): AttentionItem[] {
+  return items.slice(ATTENTION_VISIBLE)
+}
+
 export function AttentionStrip({
   items,
   inboxLoading = false,
@@ -187,7 +206,8 @@ export function AttentionStrip({
   inboxError?: string | null
 }) {
   const reduce = useReducedMotion()
-  const visible = items.slice(0, 3)
+  const visible = items.slice(0, ATTENTION_VISIBLE)
+  const overflow = attentionOverflow(items)
   const state = attentionState({ items, inboxLoading, inboxError }).kind
 
   return (
@@ -259,6 +279,21 @@ export function AttentionStrip({
               )
             })}
           </AnimatePresence>
+        </div>
+      )}
+
+      {/* Named, not just counted. The order is fixed, so on a busy workspace
+          the items past the third are always the same ones — and neither a
+          credential gap nor a capacity hold is reachable through the
+          "Open Inbox" link above. */}
+      {overflow.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 px-4 py-2 text-label text-muted-foreground">
+          <span>{overflow.length} more:</span>
+          {overflow.map((item) => (
+            <Link key={item.id} href={item.href} className="text-primary-hover hover:underline">
+              {item.label}
+            </Link>
+          ))}
         </div>
       )}
     </div>

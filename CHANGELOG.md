@@ -543,6 +543,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   client-side role validator. Companion to #2166, which removed the same dead
   promise from the create-agent dialog.
 
+- **A missing field on one response took down the whole dashboard (#2185).**
+  `series_labels` is typed as required on the timeseries response, but the
+  type is a claim about the wire and `fetchOr` validates nothing, so a 200
+  with an unexpected body reached `Object.entries(undefined)` inside a
+  `useMemo` — a render-time throw that unmounts the page rather than the one
+  chart it belongs to. The line above it already tolerated a missing
+  `bucket.series` for the same reason.
+
+- **The run-volume chart never refreshed (#2185).** `useInvalidateDashboard`
+  invalidated two fixed-param timeseries keys that nothing mounts, and never
+  the key the page actually uses — `invalidateQueries` compares the params
+  object by deep equality, so the window-dependent key could not match. The
+  KPIs and Running-now updated from the realtime path while the chart beside
+  them stayed frozen until a remount or a window switch.
+
+- **The attention strip dropped items past the third (#2185).** The badge
+  reported the true count, but the order is fixed, so on a workspace with
+  approvals, failures and capacity holds a credential gap could never render
+  — and neither it nor a capacity hold is reachable through the strip's
+  "Open Inbox" link. The remainder is now named, with its links, rather than
+  only counted.
+
 - **The dashboard reported green over failures it could not see (#2185).**
   Three states were rendered as one. The attention strip said "All clear ·
   There is nothing blocking your crews right now" whenever `attentionItems`

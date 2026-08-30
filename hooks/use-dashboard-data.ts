@@ -382,5 +382,12 @@ export function useInvalidateDashboard(workspaceId: string | null) {
     qc.invalidateQueries({ queryKey: ["runs-insights", workspaceId] })
     qc.invalidateQueries({ queryKey: ["crew-spend", workspaceId] })
     qc.invalidateQueries({ queryKey: ["crew-services", workspaceId] })
+    // The run-volume chart mounts under ["metrics-timeseries", ws, {…}] with a
+    // params object that depends on the selected window, and invalidateQueries
+    // compares that object by deep equality — so the two fixed-param keys in
+    // the list above can never match the key the page actually mounts. Without
+    // this the KPIs and Running-now update from the realtime path while the
+    // chart beside them stays frozen until a remount or a window switch.
+    qc.invalidateQueries({ queryKey: ["metrics-timeseries", workspaceId] })
   }, [qc, workspaceId])
 }
