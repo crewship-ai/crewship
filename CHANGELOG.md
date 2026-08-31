@@ -316,6 +316,38 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **A `/journal` Timeline row says who acted (#2208).** The row carried a 3px
+  severity bar and a colour-coded text pill and nothing else — no avatar, no
+  crew icon, no entry-type glyph. The agent name appeared only where an emit
+  site happened to write it into the summary string. None of it needed
+  fetching: the avatar seed and style, the crew icon and colour, and an icon
+  for all 127 entry types were already in the browser and already refreshed on
+  realtime events, rendered only inside the two scope dropdowns.
+
+  The row is now seven columns — severity, time, an 18px agent avatar beside a
+  15px crew icon, the entry-type icon with the full dotted `entry_type`, the
+  summary, the age, the chevron. An agent the lookup cannot resolve is seeded
+  from its id rather than left blank; actors that are not agents (system,
+  sidecar, orchestrator, keeper, user) get a labelled glyph. The summary drops
+  a leading `"<agent>: "` when the prefix names the agent now in the avatar,
+  and takes back some of the 40px the identity columns cost it. Long entry
+  types ellipsize — the catalog's median is 18 characters and its tail runs to
+  41 — with the full string on the cell's `title` and in the expanded detail.
+
+  Three signals that were colour-only are now also text: severity carries a
+  visually-hidden level (the bar was `aria-hidden`, and the word appeared only
+  after expanding), the entry-type group carries its name, and the row — a
+  disclosure with no `aria-expanded` — now has one plus `aria-controls`.
+
+  The stats rail's "Top agents" showed shortened uuids behind a flat slate
+  swatch, six agents reading as one series, with the avatar-carrying lookup
+  already mounted. It renders the avatar and the resolved name, and each bar
+  takes a seed-derived hue.
+
+  `LogRow` is memoized and the virtualized list's `itemContent` no longer
+  allocates a fresh closure per item per render, so a keystroke in the search
+  box stops re-rendering every mounted row.
+
 - **`/design` is gone; its audit is now a tracked document (#2165).** The
   create-surface unification proposal shipped as a page inside the product —
   no data, no API, no CLI command — and its own header said to delete it once
