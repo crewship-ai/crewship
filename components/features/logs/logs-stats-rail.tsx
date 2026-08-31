@@ -1,7 +1,9 @@
 "use client"
 
 import { useMemo } from "react"
+import Image from "next/image"
 import { motion } from "motion/react"
+import { cn } from "@/lib/utils"
 import type { JournalEntry } from "@/lib/types/journal"
 import {
   GROUP_COLOR,
@@ -9,12 +11,20 @@ import {
   groupOf,
   severityOf,
 } from "@/lib/journal-style"
+import { getAgentAvatarUrl, seedColor } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { useJournalLookup } from "@/hooks/use-journal-lookup"
 import { LogsNetworkCard } from "./logs-network-card"
 
 interface LogsStatsRailProps {
   /** All entries currently visible (after filters). */
   entries: JournalEntry[]
-  /** id → display name lookup for resolving UUIDs. */
+  /**
+   * id → display name lookup for resolving UUIDs. Scope-limited (the
+   * journal page builds it from the agents in the current crew filter),
+   * so it is only a fallback: the workspace-wide `useJournalLookup`
+   * table below is consulted first and is the one that carries avatars.
+   */
   agentLookup?: Record<string, string>
   /** Render the admin-only Network observability card (open ports, egress). */
   showNetworkCard?: boolean
@@ -26,6 +36,10 @@ interface LogsStatsRailProps {
  */
 export function LogsStatsRail({ entries, agentLookup, showNetworkCard }: LogsStatsRailProps) {
   const stats = useMemo(() => deriveStats(entries), [entries])
+  const lookup = useJournalLookup()
+  // Re-render when a lazy DiceBear collection lands so placeholder discs
+  // become real avatars.
+  useAvatarStylesVersion()
 
   return (
     <motion.div
@@ -82,16 +96,37 @@ export function LogsStatsRail({ entries, agentLookup, showNetworkCard }: LogsSta
           <Empty />
         ) : (
           <div className="space-y-1.5 text-[11px] font-mono">
-            {stats.topAgents.map((row) => (
-              <BarRow
-                key={row.agent}
-                label={agentLookup?.[row.agent] ?? shortenId(row.agent)}
-                title={row.agent}
-                value={row.count}
-                total={stats.maxAgentCount}
-                color="#94a3b8"
-              />
-            ))}
+            {stats.topAgents.map((row) => {
+              const a = lookup.agents.get(row.agent)
+              // Same seed rules as the row avatar and the toolbar's
+              // ScopeBadge: explicit seed, else slug, else the id — which
+              // is a perfectly good deterministic seed for an agent the
+              // lookup has not resolved.
+              const seed = a?.avatar_seed || a?.slug || row.agent
+              return (
+                <BarRow
+                  key={row.agent}
+                  label={a?.name ?? agentLookup?.[row.agent] ?? shortenId(row.agent)}
+                  title={row.agent}
+                  value={row.count}
+                  total={stats.maxAgentCount}
+                  // The flat slate swatch made six agents look like one
+                  // series. A seed-derived hue is stable per agent and
+                  // matches nothing else on the rail by accident.
+                  color={seedColor(seed)}
+                  swatch={
+                    <Image
+                      src={getAgentAvatarUrl(seed, a?.avatar_style ?? null)}
+                      alt=""
+                      width={16}
+                      height={16}
+                      className="h-4 w-4 rounded-[3px] shrink-0 bg-muted/40"
+                      unoptimized
+                    />
+                  }
+                />
+              )
+            })}
           </div>
         )}
       </StatCard>
@@ -136,27 +171,41 @@ function BarRow({
   value,
   total,
   color,
+  swatch,
 }: {
   label: string
   title?: string
   value: number
   total: number
   color: string
+  /**
+   * Replaces the 8px colour square — an agent avatar, say. The bar
+   * beneath indents to stay flush with the label either way.
+   */
+  swatch?: React.ReactNode
 }) {
   const pct = total > 0 ? (value / total) * 100 : 0
   return (
     <div>
       <div className="flex items-center gap-2">
-        <span
-          className="inline-block h-2 w-2 rounded-sm shrink-0"
-          style={{ background: color }}
-        />
+        {swatch ?? (
+          <span
+            className="inline-block h-2 w-2 rounded-sm shrink-0"
+            style={{ background: color }}
+          />
+        )}
         <span className="flex-1 truncate text-foreground/85" title={title ?? label}>
           {label}
         </span>
         <span className="tabular-nums text-muted-foreground/85">{value}</span>
       </div>
-      <div className="ml-4 mt-0.5 h-[3px] rounded-full bg-muted/30 overflow-hidden">
+      <div
+        className={cn(
+          "mt-0.5 h-[3px] rounded-full bg-muted/30 overflow-hidden",
+          // 8px swatch + 8px gap, or 16px avatar + 8px gap.
+          swatch ? "ml-6" : "ml-4",
+        )}
+      >
         <div className="h-full" style={{ width: `${pct}%`, background: color, opacity: 0.6 }} />
       </div>
     </div>
