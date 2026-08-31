@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
+import io
 import sys
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from response_shapes import ROUTES, check, denullable, response_schema  # noqa: E402
+from response_shapes import (  # noqa: E402
+    ROUTES, _RefuseRedirects, check, checked_base, denullable, response_schema,
+)
 
 
 class ResponseShapesTest(unittest.TestCase):
@@ -58,6 +63,43 @@ class ResponseShapesTest(unittest.TestCase):
         # reason a workspace changed.
         for route in ROUTES:
             self.assertTrue(route.startswith("/api/v1/"), route)
+
+    def test_refuses_to_put_the_bearer_token_on_a_cleartext_wire(self):
+        # The token goes on every request this script makes; plain http to
+        # anything but the local host publishes it.
+        for base in ("http://api.example.com", "http://10.0.0.5:8082"):
+            with self.assertRaises(SystemExit, msg=base):
+                checked_base(base)
+
+    def test_keeps_the_documented_localhost_development_path(self):
+        # http://localhost:8082 is what the README tells people to run and what
+        # every dev clone answers on. The token never leaves the host.
+        self.assertEqual(checked_base("http://localhost:8082"), "http://localhost:8082")
+        self.assertEqual(checked_base("http://127.0.0.1:8082"), "http://127.0.0.1:8082")
+        self.assertEqual(
+            checked_base("https://crewship-dev2.unifylab.cz/"),
+            "https://crewship-dev2.unifylab.cz")
+
+    def test_rejects_a_scheme_that_is_neither_http_nor_https(self):
+        for base in ("file:///etc/passwd", "ftp://example.com"):
+            with self.assertRaises(SystemExit, msg=base):
+                checked_base(base)
+
+    def test_refuses_to_follow_a_redirect_rather_than_forward_the_token(self):
+        # urllib copies request headers onto a redirect verbatim, excluding
+        # only content-length and content-type — so Authorization would follow
+        # a 302 to any host. On a GET /api/v1/... a redirect is itself worth
+        # reporting, so this raises rather than silently dropping the header.
+        handler = _RefuseRedirects()
+        request = urllib.request.Request(
+            "https://crewship-dev2.unifylab.cz/api/v1/inbox",
+            headers={"Authorization": "Bearer sekrit"})
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            handler.redirect_request(
+                request, io.BytesIO(b""), 302, "Found",
+                {}, "https://elsewhere.example.com/api/v1/inbox")
+        self.assertIn("elsewhere.example.com", str(caught.exception))
+        self.assertNotIn("sekrit", str(caught.exception))
 
 
 if __name__ == "__main__":

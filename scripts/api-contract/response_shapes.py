@@ -19,6 +19,8 @@ change, and why it needs no new dependency beyond `jsonschema`.
 """
 import json
 import sys
+import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -61,13 +63,56 @@ def check(spec, path, body):
     ]
 
 
+# The token goes on every request in this file, so the two ways urllib gives it
+# away both have to be closed.
+#
+# urllib copies request headers onto a redirect verbatim, excluding only
+# content-length and content-type — Authorization rides along, to any host. And
+# `base` is operator-supplied, so plain http would put the bearer on the wire in
+# cleartext. Neither is exotic for a checker aimed at whatever URL someone
+# passes it.
+#
+# Refusing every redirect rather than allowing same-origin ones is not just the
+# simpler rule: on a GET /api/v1/... a redirect is itself worth reporting, and
+# the exception below names the route it happened on.
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code,
+            f"refused to follow a redirect to {newurl} — the bearer token "
+            "would be forwarded with it",
+            headers, fp)
+
+
+_opener = urllib.request.build_opener(_RefuseRedirects)
+
+
+def checked_base(base):
+    """Reject a base URL that would put the bearer token on the wire in clear.
+
+    http://localhost:8082 stays allowed and is the documented development
+    path — the token never leaves the host.
+    """
+    parsed = urllib.parse.urlparse(base)
+    if parsed.scheme not in ("http", "https"):
+        raise SystemExit(f"base url must be http or https, got {parsed.scheme!r}")
+    if parsed.scheme == "http" and parsed.hostname not in LOOPBACK_HOSTS:
+        raise SystemExit(
+            f"refusing to send a bearer token in cleartext to {parsed.hostname}; "
+            "use https, or a loopback address for local development")
+    return base.rstrip("/")
+
+
 def fetch(base, path, token, workspace):
     sep = "&" if "?" in path else "?"
     req = urllib.request.Request(
         f"{base}{path}{sep}workspace_id={workspace}",
         headers={"Authorization": f"Bearer {token}", "X-Workspace-ID": workspace},
     )
-    with urllib.request.urlopen(req, timeout=20) as r:
+    with _opener.open(req, timeout=20) as r:
         return json.load(r)
 
 
@@ -100,8 +145,8 @@ def main(argv):
     if len(argv) < 4:
         print("usage: response_shapes.py <base-url> <token> <workspace-id>", file=sys.stderr)
         return 2
-    base, token, workspace = argv[1], argv[2], argv[3]
-    with urllib.request.urlopen(f"{base}/openapi.json", timeout=20) as r:
+    base, token, workspace = checked_base(argv[1]), argv[2], argv[3]
+    with _opener.open(f"{base}/openapi.json", timeout=20) as r:
         spec = denullable(json.load(r))
 
     failed = passed = skipped = 0

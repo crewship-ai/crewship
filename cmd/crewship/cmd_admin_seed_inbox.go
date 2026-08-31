@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -158,6 +159,22 @@ func seedInboxRows(now time.Time) []seedRow {
 	}
 }
 
+// seedSuffix mints the per-invocation tag that both identifier families carry:
+// the run id (`run_seed_<suffix>`) and every source id (`seed_<suffix>_<n>`).
+//
+// It was `time.Now().Unix()`, separately in each place, and second precision is
+// not enough for a command people run twice in a row. The second invocation
+// re-minted the same run id and failed on the pipeline_runs primary key; with
+// no pipeline to hang the run on it got further and re-minted the same source
+// ids, where inbox.Insert dedupes silently while the success line still
+// reported them as written.
+//
+// Base 36 keeps it short. The `run_seed_` and `seed_` prefixes are load-bearing
+// and must not move: --clear finds what this wrote by LIKE on exactly those.
+func seedSuffix(now time.Time) string {
+	return strconv.FormatInt(now.UnixNano(), 36)
+}
+
 func runAdminSeedInbox(cmd *cobra.Command, _ []string) error {
 	workspaceID, _ := cmd.Flags().GetString("workspace")
 	clear, _ := cmd.Flags().GetBool("clear")
@@ -173,6 +190,9 @@ func runAdminSeedInbox(cmd *cobra.Command, _ []string) error {
 
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// One suffix for both identifier families, minted once: they have to agree
+	// within an invocation and differ between two of them.
+	suffix := seedSuffix(time.Now())
 
 	if clear {
 		res, err := db.ExecContext(ctx,
@@ -236,7 +256,7 @@ func runAdminSeedInbox(cmd *cobra.Command, _ []string) error {
 	}
 	seedRunID := ""
 	if pipelineID != "" {
-		seedRunID = fmt.Sprintf("run_seed_%d", time.Now().Unix())
+		seedRunID = "run_seed_" + suffix
 		if _, err := db.ExecContext(ctx, `INSERT INTO pipeline_runs
 			(id, workspace_id, pipeline_id, pipeline_slug, status, mode, started_at, current_step_id, triggered_via)
 			VALUES (?, ?, ?, ?, 'running', 'run', ?, 'approve', 'manual')`,
@@ -249,7 +269,7 @@ func runAdminSeedInbox(cmd *cobra.Command, _ []string) error {
 	now := time.Now()
 	written := 0
 	for i, row := range seedInboxRows(now) {
-		sourceID := fmt.Sprintf("seed_%d_%d", now.Unix(), i)
+		sourceID := fmt.Sprintf("seed_%s_%d", suffix, i)
 		payload := row.payload
 		if payload == nil {
 			payload = map[string]any{}

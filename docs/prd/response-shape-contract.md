@@ -25,7 +25,7 @@ generated schema for that row declared `properties` but no `required` and no
 `additionalProperties`. A body with every field renamed satisfies it. Measured
 directly against the shipped spec:
 
-```
+```text
 RESULT: the PascalCase body VALIDATES against the shipped spec
 ```
 

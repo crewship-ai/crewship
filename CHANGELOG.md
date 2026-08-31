@@ -547,6 +547,67 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The client half of the approvals contract accepted a shape the server
+  never sends.** `ApprovalsHandler.List` writes `{rows, status, count,
+  has_more}` as a map literal — all four keys on every response — and the
+  generated spec requires all four. `approvalListResponseSchema` required only
+  `rows`. `useApprovals({loadAll: true})` pages until `has_more` is false, so
+  an envelope missing that key read as `undefined`, the walk stopped after one
+  page, and the UI presented the first 200 rows of approval history as the
+  whole history with no error anywhere. All four are required now. Every list
+  fixture in the hook's tests was hand-written and none was a real envelope,
+  which is why nothing caught it; they go through one helper that builds what
+  the handler actually writes.
+
+- **Decided approvals were filed under Archived instead of Decisions.**
+  `isArchivedNotDecided` looked for the decider on `entry.inboxItem`, but the
+  two entry constructors are disjoint — `inboxEntry` sets `inboxItem`,
+  `approvalEntry` sets `approval`. Every decided approval therefore had no
+  decider to find and was classified as archived noise, which is precisely the
+  mislabelling the function exists to prevent. It reads either field now, and
+  `timeout` — the approvals queue's spelling of its own sweep, distinct from
+  the waitpoint `timed_out` already listed — counts as not-a-decision.
+
+- **Schedule advisories outranked real gates in the inbox bell.** The bell's
+  "Needs a decision" bucket filtered on `isActionableInboxItem`, which answers
+  "is there a source action behind this row?" and rightly says yes to a missed
+  occurrence or a tripped circuit breaker. The bell asks the narrower question
+  its heading promises — is an agent parked until a human answers? — and
+  nothing is parked on either. They move to Recent, where the bucket's own
+  comment always said they belonged.
+
+- **Inbox deep links stopped working after the first render.** `?item=` and
+  `?agent=` were read into `useState` initializers, and the route stays mounted
+  across a same-route navigation. Leaving `/inbox-v2?item=x` for the bare route
+  kept row x in the reading pane — a link naming no row is a request to show no
+  row, and answering it with the previous one is how the wrong request gets
+  decided — and `?agent=riley` after `?agent=casey` kept filtering on casey.
+  Both now track the URL for the life of the route, and neither overwrites a
+  search the user typed or a row they clicked.
+
+- **`source_missing` could not say "checked, and the source is live".** The
+  detail read computes whether a waitpoint or escalation still has a row that
+  can decide it, and the pane offers a way out of an orphaned row on the
+  strength of it. As `bool` with `omitempty` the false arm was unsendable: a
+  live gate and a list row that never ran the probe were the same empty space
+  on the wire. It is a pointer now, so the detail read states both answers and
+  the list still states neither.
+
+- **`limit` and `offset` were published as strings on `/inbox` and
+  `/approvals`.** Both handlers `strconv.Atoi` them and reject anything that is
+  not a non-negative integer, so the document promised generated clients a
+  contract the server does not honour.
+
+- **`crewship admin seed-inbox` collided with itself.** Both identifier
+  families derived from `time.Now().Unix()`, so a second run within the same
+  second re-minted the same run id and failed on the primary key — or, with no
+  pipeline to hang the run on, re-used every source id, where `inbox.Insert`
+  dedupes silently while the success line still claimed sixteen rows written.
+  One nanosecond-derived suffix per invocation, carried by both families, with
+  the `run_seed_` and `seed_` prefixes `--clear` matches on left intact. Its
+  `--clear` flag is also documented now, which is what the strict docs gate was
+  failing on.
+
 - **The approvals API answered in a shape no browser could read.**
   `harbormaster.Request` carried no JSON tags and was serialized straight onto
   the wire, so `GET /api/v1/approvals` returned `"ID"`, `"Kind"`, `"Status"`,

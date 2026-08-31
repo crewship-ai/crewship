@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -72,5 +73,44 @@ func TestSeedInboxRows_IncludeADeadlineAndADestructiveGate(t *testing.T) {
 	}
 	if destructive == 0 {
 		t.Error("no seeded row is destructive — the loudest row the inbox renders is never seen")
+	}
+}
+
+// Two invocations in the same second must not mint the same identifiers.
+// `time.Now().Unix()` did: the second run then failed on the pipeline_runs
+// primary key, or — with no pipeline to hang the run on — got as far as
+// re-using every source id, where inbox.Insert dedupes silently while the
+// success line still claims sixteen rows were written. Seeding twice to get
+// more variety is the obvious thing to try, so it has to work.
+func TestSeedSuffix_DiffersBetweenTwoInvocationsInTheSameSecond(t *testing.T) {
+	first := seedSuffix(time.Now())
+	second := seedSuffix(time.Now())
+
+	if first == second {
+		t.Errorf("seedSuffix twice in a row = %q both times; a second seed run "+
+			"collides with the first", first)
+	}
+}
+
+// The prefixes are the command's cleanup contract: --clear finds what it wrote
+// with LIKE 'run_seed_%' on pipeline_runs and LIKE 'seed_%' on inbox_items and
+// pipeline_waitpoints. A uniqueness scheme that moved either prefix would leave
+// every seeded row unremovable, which is worse than the collision it fixes.
+func TestSeedSuffix_KeepsThePrefixesClearMatchesOn(t *testing.T) {
+	suffix := seedSuffix(time.Now())
+
+	runID := "run_seed_" + suffix
+	sourceID := "seed_" + suffix + "_0"
+
+	if !strings.HasPrefix(runID, "run_seed_") {
+		t.Errorf("run id %q no longer matches LIKE 'run_seed_%%'", runID)
+	}
+	if !strings.HasPrefix(sourceID, "seed_") {
+		t.Errorf("source id %q no longer matches LIKE 'seed_%%'", sourceID)
+	}
+	// A suffix carrying `_` would still match the LIKE, but would make the
+	// `seed_<suffix>_<n>` shape ambiguous to read. Base 36 has no separator.
+	if strings.ContainsAny(suffix, "_%") {
+		t.Errorf("suffix %q contains a separator or a LIKE wildcard", suffix)
 	}
 }
