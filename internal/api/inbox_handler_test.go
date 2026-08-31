@@ -970,7 +970,9 @@ func TestInboxHandler_PatchResolve_HireWaitpointWithAPendingAgentIsStillRefused(
 	if _, err := db.Exec(
 		`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES (?, ?, 'Staged', 'staged', 'PENDING_REVIEW')`,
 		"src-wp-hire", wsID); err != nil {
-		t.Skipf("agents table shape differs here: %v", err)
+		// Not a skip: a fixture this test cannot build is a broken test, and a
+		// skipped test reports the same "ok" as a passing one.
+		t.Fatalf("seed the staged agent: %v", err)
 	}
 	req := withWorkspaceUser(
 		httptest.NewRequest("PATCH", "/api/v1/inbox/wp-hire",
@@ -1098,7 +1100,9 @@ func TestInboxHandler_PatchResolve_MalformedApprovalPayloadDoesNotStrandTheWorks
 		(id, workspace_id, requested_by, kind, reason, payload, status, created_at)
 		VALUES ('ap_bad', ?, ?, 'tool_call', 'hand-rolled row', 'not json', 'pending', ?)`,
 		wsID, userID, now.Format(time.RFC3339Nano)); err != nil {
-		t.Skipf("payload column rejects the malformed value here: %v", err)
+		// Not a skip — see above. If the column refuses this value the guard
+		// below is untested, and silence is the worst way to say so.
+		t.Fatalf("seed the malformed approval payload: %v", err)
 	}
 
 	req := withWorkspaceUser(
