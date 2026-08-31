@@ -1,4 +1,3 @@
-import React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, fireEvent, within } from "@testing-library/react"
 import type { JournalEntry } from "@/lib/types/journal"
@@ -43,14 +42,10 @@ vi.mock("@/hooks/use-abilities", () => ({
   useAbilities: () => ({ abilities: { can: () => true }, role: "OWNER", loading: false }),
 }))
 
-// next/image needs the Next runtime for its loader; the row only ever
-// renders `unoptimized` data URIs, so a plain <img> is a faithful stand-in.
-vi.mock("next/image", () => ({
-  default: ({ src, alt, ...rest }: { src: string; alt: string }) =>
-    // Not JSX <img> on purpose: the next/image lint rule bans the tag
-    // even here, and createElement is the same thing without the fight.
-    React.createElement("img", { src, alt, ...rest }),
-}))
+// next/image is deliberately NOT mocked: the avatar is an `unoptimized`
+// data URI, which is exactly the path next/image passes through
+// untouched, and a stub here would hide a regression in how the row
+// hands it over.
 
 import { LogsList } from "@/components/features/logs/logs-list"
 
