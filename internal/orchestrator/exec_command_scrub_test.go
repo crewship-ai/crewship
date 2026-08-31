@@ -994,3 +994,53 @@ func TestScrubArgv_StillRedactsNonPromptElements(t *testing.T) {
 		t.Errorf("scrubArgv produced no redaction marker: %q", joined)
 	}
 }
+
+// The element and field caps above are per-value. Nothing was asserting the
+// thing the change exists for: the SIZE of the finished payload. Five new
+// fields, each comfortably under its own cap, would put this entry back into
+// kilobytes without turning a single existing test red — and this type was
+// 64% of all journal content at 43 KB per entry, written twice per run.
+//
+// The budget is deliberately loose (2 KiB against a measured 773/817 bytes for
+// a 41,011-char prompt) so ordinary additions do not trip it. It is a
+// tripwire against drifting back toward the old order of magnitude, not a
+// style rule about adding a field.
+func TestExecCommandEmit_PayloadStaysSmall(t *testing.T) {
+	t.Parallel()
+
+	const budget = 2048
+
+	c := covNewRunContainer(covRunOpts{stream: "{}\n"})
+	j := &covJournal{}
+	o := New(c, newMemState(), covQuietLogger())
+	o.SetJournal(j)
+
+	req := covRunReq()
+	req.LLMModel = "test-model"
+	req.ToolProfile = "CODING"
+	// The measured real shape: the system prompt that made these entries
+	// 43 KB, plus a long typed turn.
+	req.SystemPrompt = strings.Repeat("S", 41011)
+	req.UserMessage = strings.Repeat("U", 4000)
+
+	if err := o.RunAgent(context.Background(), req, nil); err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+
+	entries := j.byType("exec.command")
+	if len(entries) == 0 {
+		t.Fatal("no exec.command entries emitted — the test drove nothing")
+	}
+
+	for _, e := range entries {
+		phase, _ := e.Payload["phase"].(string)
+		got := len(execCmdPayloadJSON(t, e))
+		if got > budget {
+			t.Errorf("exec.command (phase=%q) payload is %d bytes, over the %d-byte budget.\n"+
+				"The journal is append-only: an oversized payload here cannot be trimmed later, "+
+				"and this entry type is written twice per run. If the growth is deliberate, "+
+				"raise the budget in this test and say why in the commit.",
+				phase, got, budget)
+		}
+	}
+}
