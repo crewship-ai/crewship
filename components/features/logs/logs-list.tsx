@@ -36,6 +36,7 @@ import {
 } from "@/hooks/use-journal-lookup"
 import { formatRelativeTime } from "@/lib/time"
 import { EgressAllowlistAction } from "./egress-allowlist-action"
+import { shortenId } from "./ids"
 
 /**
  * Row grid, left to right:
@@ -85,7 +86,7 @@ const ACTOR_GLYPH: Record<string, LucideIcon> = {
  * resolved agent's name or slug — never on a generic `"word: "`, which
  * would eat `"exec.command: ..."` and every message with a colon in it.
  */
-export function stripAgentPrefix(summary: string, agent: AgentLookup | undefined): string {
+function stripAgentPrefix(summary: string, agent: AgentLookup | undefined): string {
   if (!summary || !agent) return summary
   const idx = summary.indexOf(":")
   if (idx <= 0) return summary
@@ -255,12 +256,6 @@ function CrewBadge({ crew }: { crew: CrewLookup | undefined }) {
       />
     </span>
   )
-}
-
-/** Shorten an opaque id for display when no lookup name is available. */
-function shortenId(id: string): string {
-  if (id.length <= 12) return id
-  return `${id.slice(0, 6)}…${id.slice(-4)}`
 }
 
 const LogRow = memo(function LogRow({

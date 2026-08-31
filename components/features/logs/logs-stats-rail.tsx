@@ -15,6 +15,7 @@ import { getAgentAvatarUrl, seedColor } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import { useJournalLookup } from "@/hooks/use-journal-lookup"
 import { LogsNetworkCard } from "./logs-network-card"
+import { shortenId } from "./ids"
 
 interface LogsStatsRailProps {
   /** All entries currently visible (after filters). */
@@ -214,12 +215,6 @@ function BarRow({
 
 function Empty() {
   return <div className="text-[11px] text-muted-foreground/60 italic">—</div>
-}
-
-/** Shorten an opaque id for display when no lookup name is available. */
-function shortenId(id: string): string {
-  if (id.length <= 12) return id
-  return `${id.slice(0, 6)}…${id.slice(-4)}`
 }
 
 interface DerivedStats {
