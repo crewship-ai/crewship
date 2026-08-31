@@ -162,8 +162,14 @@ def read_json_200(response, what):
 
 def fetch(base, path, token, workspace):
     sep = "&" if "?" in path else "?"
+    # urlencode, not interpolation. `workspace` is argv: a value carrying `&`
+    # splits into a second parameter and one carrying `#` truncates the rest,
+    # so the URL could name a different workspace than the X-Workspace-ID
+    # header — and the checker would validate one workspace while reporting on
+    # another. Measuring the wrong thing and calling it a pass, again.
+    query = urllib.parse.urlencode({"workspace_id": workspace})
     req = urllib.request.Request(
-        f"{base}{path}{sep}workspace_id={workspace}",
+        f"{base}{path}{sep}{query}",
         headers={"Authorization": f"Bearer {token}", "X-Workspace-ID": workspace},
     )
     with _opener.open(req, timeout=20) as r:

@@ -4,6 +4,7 @@ import io
 import sys
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from unittest import mock
@@ -213,6 +214,32 @@ class StatusCodeTest(unittest.TestCase):
             self.assertEqual(
                 fetch("http://localhost:8082", "/api/v1/approvals", "tok", "ws-1"),
                 {"rows": []})
+
+
+class QueryEncodingTest(unittest.TestCase):
+    def test_the_workspace_id_is_encoded_into_the_query(self):
+        # `workspace` is argv. Interpolated raw, a value carrying `&` splits
+        # into a second parameter and one carrying `#` truncates the rest — so
+        # the URL could name a different workspace than the X-Workspace-ID
+        # header does, and the checker would validate one workspace while
+        # believing it validated another. Same family as the rest of this file:
+        # measuring the wrong thing and reporting a pass.
+        seen = {}
+
+        def capture(req, timeout=None):
+            seen["url"] = req.full_url
+            seen["header"] = req.get_header("X-workspace-id")
+            return _FakeResponse(200)
+
+        with mock.patch.object(response_shapes._opener, "open", capture):
+            fetch("http://localhost:8082", "/api/v1/approvals", "tok", "ws&admin=1#x")
+
+        parsed = urllib.parse.urlparse(seen["url"])
+        self.assertEqual(parsed.fragment, "", seen["url"])
+        params = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(params, {"workspace_id": ["ws&admin=1#x"]})
+        # And the two ways the workspace is stated still agree.
+        self.assertEqual(params["workspace_id"][0], seen["header"])
 
 
 class ExitStatusTest(unittest.TestCase):
