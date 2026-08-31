@@ -912,6 +912,65 @@ func TestChatUserMessageEmit_CapsAndScrubsPayloadContent(t *testing.T) {
 	}
 }
 
+// TestChatUserMessageEmit_OpaqueSecretSurvivesTheScrub pins a LIMITATION, not
+// a property. It asserts the thing this entry still cannot do, so the trade-off
+// lives in code rather than only in a paragraph nobody re-reads.
+//
+// exec.command closed the opaque-secret case by removing the prompt-bearing
+// text outright — it could, because nothing needed a 41 KB system prompt in a
+// journal payload. chat.user_message cannot use the same move without changing
+// what the Timeline renders: the human's message IS the entry, and "what kicked
+// this off" is the whole reason the row exists. So its 240-char preview is
+// scrubbed, and a secret the scrubber does not recognise survives inside it —
+// the exact gap that makes the scrubber defence in depth rather than a
+// boundary.
+//
+// Raised by CodeRabbit on #2212; the decision (drop the text and keep only a
+// length plus chat_id, at the cost of the Timeline row) is #2229.
+//
+// If you are here because this test failed: the limitation was closed, which is
+// good. Replace this test with the assertion CodeRabbit asked for — that the
+// marker appears in neither the payload nor the summary — and update
+// docs/guides/crew-journal.mdx.
+func TestChatUserMessageEmit_OpaqueSecretSurvivesTheScrub(t *testing.T) {
+	t.Parallel()
+
+	j := &covJournal{}
+	o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+	o.SetJournal(j)
+
+	req := covRunReq()
+	// Unregistered, and shaped like nothing the pattern set knows. At the very
+	// front, so the cap is not what would remove it either.
+	req.UserMessage = execCmdPastedSecret + " — deploy with that please"
+
+	if err := o.RunAgent(context.Background(), req, nil); err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+
+	msgs := j.byType("chat.user_message")
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 chat.user_message entry, got %d", len(msgs))
+	}
+	content, _ := msgs[0].Payload["content"].(string)
+
+	if !strings.Contains(content, execCmdPastedSecret) {
+		t.Errorf("the opaque secret is gone from payload content — the limitation this test documents was closed; see the doc comment for what to do now: %q",
+			truncateForFailure(content))
+	}
+	if !strings.Contains(msgs[0].Summary, execCmdPastedSecret) {
+		t.Errorf("the opaque secret is gone from the summary — same as above: %q", truncateForFailure(msgs[0].Summary))
+	}
+	// And the reference that makes closing it cheap is already there: the
+	// message lives in the chat, which unlike this row can be erased.
+	if msgs[0].Payload["chat_id"] != req.ChatID {
+		t.Errorf("payload chat_id = %v, want %q", msgs[0].Payload["chat_id"], req.ChatID)
+	}
+	if msgs[0].Payload["length_chars"] != len([]rune(req.UserMessage)) {
+		t.Errorf("payload length_chars = %v, want %d", msgs[0].Payload["length_chars"], len([]rune(req.UserMessage)))
+	}
+}
+
 // TestScrubArgv_StillRedactsNonPromptElements keeps the #2205 layer honest.
 // Removing the prompt-bearing elements outright means the scrubber no longer
 // sees the argv element that used to carry a pasted token, so the end-to-end

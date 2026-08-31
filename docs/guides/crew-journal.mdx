@@ -184,10 +184,15 @@ journal entry is hash-chained and append-only, so nothing can redact it after
 the write. The scrub still runs — on what is left, for a credential that
 reaches a non-prompt element.
 
-The `chat.user_message` entry beside it follows the same rule: `payload.content`
-is scrubbed and capped to the same 240 characters as the entry summary, with
-`length_chars` recording the message's full length in characters and
-`truncated` saying whether the cap applied. One consequence worth knowing:
+The `chat.user_message` entry beside it is bounded rather than emptied:
+`payload.content` is scrubbed and capped to the same 240 characters as the
+entry summary, with `length_chars` recording the message's full length in
+characters and `truncated` saying whether the cap applied. It keeps the text
+because the message **is** the entry — it is the "why was the agent doing
+this?" anchor for a Timeline of `exec.command` and `network.egress` rows — so
+within those 240 characters the scrubber is the only control, and a secret it
+does not recognise survives. The full message lives in the chat the entry
+references, which unlike this row can be erased. One consequence worth knowing:
 `crewship journal --query` is a full-text search over summary and payload, so
 free-text search now reaches the first 240 characters of a user message and no
 part of a prompt.

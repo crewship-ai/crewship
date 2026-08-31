@@ -528,12 +528,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   run rail's detail line both read a key the orchestrator never wrote, so they
   were blank for every agent exec. Both now accept either payload shape.
 
-  Two behaviour notes. `crewship journal --query` searches summary and payload,
-  so free-text search now reaches the first 240 characters of a user message
-  and no part of a prompt. And this is scoped to the two entries whose whole
-  content was the prompt: `chat.agent_response` still keeps up to 8 KB of the
-  agent's scrubbed reply and `exec.output_chunk` its scrubbed stdout, so an
-  agent that quotes its prompt back still writes that text to the journal.
+  Three behaviour notes. `crewship journal --query` searches summary and
+  payload, so free-text search now reaches the first 240 characters of a user
+  message and no part of a prompt. `chat.user_message` is bounded rather than
+  emptied — the message is what that entry is for — so within those 240
+  characters the scrubber is still the only control. And `chat.agent_response`
+  still keeps up to 8 KB of the agent's scrubbed reply and `exec.output_chunk`
+  its scrubbed stdout, so an agent that quotes its prompt back still writes
+  that text to the journal.
 
 - **The `exec.command` journal entry wrote the CLI argv unscrubbed (#2205).**
   All three emit sites recorded the agent CLI's argv verbatim. That argv

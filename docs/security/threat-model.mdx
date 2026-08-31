@@ -196,9 +196,14 @@ system prompt and the user message are replaced before the entry is
 built, with a placeholder naming the element and its length; what the
 entry keeps is a digest of the system prompt, the lengths, and a
 reference to the chat the message lives in — enough to answer *which
-prompt ran* without storing it. `chat.user_message` is capped and
-scrubbed the same way, and the process log line for a run takes the same
-sanitised argv. Payload shape:
+prompt ran* without storing it. The process log line for a run takes the
+same sanitised argv.
+
+`chat.user_message` is bounded rather than emptied: scrubbed and capped
+to 240 characters, because there the message *is* the entry. Within
+those characters the scrubber is the only control, so an unrecognised
+secret survives — the full text lives in the chat the entry references,
+which can be erased. Payload shape:
 [Crew Journal](/guides/crew-journal#exec-command-payload).
 
 This is scoped, not a claim about the whole table. `chat.agent_response`
