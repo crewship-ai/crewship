@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { ShieldX } from "lucide-react"
@@ -22,6 +22,7 @@ import {
   groupAdvisories, inboxEntry, missionEntries, selectEntry, suppressedApprovalIDs,
   type InboxV2Filters,
 } from "./inbox-v2-derive"
+import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
 import type { InboxV2Confirmation, InboxV2Entry, InboxV2View } from "./inbox-v2-types"
@@ -35,10 +36,14 @@ export function InboxV2() {
   // `request:<id>` rather than `inbox:<id>`: the caller of ?item= knows an id,
   // not which source owns it, and an approval-queue deep link keyed
   // `approval:<id>` could never match. selectEntry resolves it against both.
+  // useInboxV2DeepLink below keeps both this and `filters.search` in step with
+  // the URL after mount.
   const [selectedKey, setSelectedKey] = useState<string | null>(requestedID ? `request:${requestedID}` : null)
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
   const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch })
   const [collapsed, setCollapsed] = useState(false)
+
+  useInboxV2DeepLink(requestedID, requestedSearch, setSelectedKey, setFilters)
 
   const active = useInbox(workspaceId, "active", { loadAll: true })
   const resolved = useInbox(workspaceId, "resolved", { loadAll: true })
@@ -121,13 +126,6 @@ export function InboxV2() {
   const selectionMissing = Boolean(selectedKey) && !selected && feedsSettled
   const selectedInboxID = selected?.source === "inbox" ? selected.inboxItem?.id : null
   const detailedInbox = useInboxItem(workspaceId, selectedInboxID)
-
-  // Reading ?item= only in the useState initializer meant router.push() from
-  // the inbox bell was a no-op whenever the user was already on this route:
-  // the URL changed and the reading pane did not.
-  useEffect(() => {
-    if (requestedID) setSelectedKey(`request:${requestedID}`)
-  }, [requestedID])
 
   const sourceState = sourceHealth({
     inboxError: active.error || resolved.error,
