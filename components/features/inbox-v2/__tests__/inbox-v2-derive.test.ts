@@ -9,6 +9,7 @@ import {
   groupAdvisories,
   inboxEntry,
   isActionableInboxItem,
+  isArchivedNotDecided,
   missionEntries,
   selectEntry,
   suppressedApprovalIDs,
@@ -255,5 +256,33 @@ describe("facets answer to real fields", () => {
     expect(keys({ deadline: "hour" })).toEqual(["inbox:2026-08-30T12:30:00Z", "inbox:read-soon"])
     expect(keys({ type: "waitpoint", unreadOnly: true })).toEqual(["inbox:2026-08-30T12:30:00Z"])
     expect(keys({ type: "message" })).toEqual([])
+  })
+})
+
+describe("a decision has a decider", () => {
+  const settled = (action: string, by?: string) => inboxEntry(item({
+    id: `x-${action}`, kind: "waitpoint", state: "resolved",
+    resolved_action: action, resolved_at: "2026-08-30T10:00:00Z", resolved_by_user_id: by,
+  }))
+
+  it("keeps a real decision in Decisions", () => {
+    expect(isArchivedNotDecided(settled("approved", "u-1"))).toBe(false)
+    expect(isArchivedNotDecided(settled("denied", "u-1"))).toBe(false)
+  })
+
+  it("does not call a sweep a decision", () => {
+    // These are written by the expiry sweep, the waitpoint timeout sweeps and
+    // CancelWaitpointsForRun. Nobody looked at them.
+    for (const action of ["expired", "timed_out", "cancelled"]) {
+      expect(isArchivedNotDecided(settled(action))).toBe(true)
+    }
+  })
+
+  it("does not call the credential auto-resolve a decision, though it says approve", () => {
+    // escalation_autoresolve.go writes "approve" with resolved_by = system, and
+    // its own comment calls that a spurious approval in the audit trail.
+    expect(isArchivedNotDecided(settled("approve"))).toBe(true)
+    // …and the same word WITH a decider is a real one.
+    expect(isArchivedNotDecided(settled("approve", "u-1"))).toBe(false)
   })
 })

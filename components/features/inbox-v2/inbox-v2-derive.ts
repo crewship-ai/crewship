@@ -316,8 +316,24 @@ export function facetCounts(entries: InboxV2Entry[], now = Date.now()) {
  * "Archive 6 updates". Splitting them keeps the receipt list honest and stops
  * the noise burying the decisions it sits next to.
  */
+const NOT_A_DECISION = new Set([
+  // cleared by a person, but not a decision on the request
+  "archived", "dismissed",
+  // settled by the system with nobody looking: the escalation expiry sweep
+  // (escalation_lifecycle.go), the waitpoint timeout sweeps and
+  // CancelWaitpointsForRun (pipeline/waitpoints.go), and the credential
+  // name-match auto-resolve — which writes "approve" with resolved_by=system
+  // and whose own comment calls it "a spurious approval in the audit trail".
+  "expired", "timed_out", "cancelled",
+])
+
 export function isArchivedNotDecided(entry: InboxV2Entry): boolean {
-  return entry.outcome === "archived" || entry.outcome === "dismissed"
+  if (entry.outcome && NOT_A_DECISION.has(entry.outcome)) return true
+  // A decision has a decider. The auto-resolve paths leave resolved_by empty,
+  // which is the only thing that separates "the system gave up on it" from
+  // "somebody approved it" when the action string is the same word.
+  const decided = entry.inboxItem?.resolved_by_user_id
+  return Boolean(entry.outcome) && !decided
 }
 
 export function filterEntries(

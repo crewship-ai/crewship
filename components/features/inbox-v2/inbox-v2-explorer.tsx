@@ -1,5 +1,7 @@
 "use client"
 
+import { useMemo } from "react"
+
 import {
   AlertCircle, AlertTriangle, Bell, Brain, CircleSlash, Clock3, History,
   ListChecks, MessageSquare, ShieldCheck, Workflow, type LucideIcon,
@@ -83,7 +85,11 @@ export function InboxV2Explorer({
   view, onView, viewCounts, entries, visible, filters, onFilters,
   selectedKey, onOpen, onToggleCollapse, onMarkAllRead,
 }: Props) {
-  const counts = facetCounts(entries)
+  // Memoised on the feed, not on the render: the explorer re-renders on every
+  // keystroke in search, and the counts do not depend on the filters at all.
+  // With loadAll the feed is the whole history, so this was an O(n) sweep per
+  // character typed.
+  const counts = useMemo(() => facetCounts(entries), [entries])
   const activeCount = (filters.type ? 1 : 0) + (filters.deadline ? 1 : 0) + (filters.unreadOnly ? 1 : 0)
   const set = (patch: Partial<InboxV2Filters>) => onFilters({ ...filters, ...patch })
 

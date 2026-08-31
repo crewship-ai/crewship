@@ -242,7 +242,13 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	out := make([]inboxItemResponse, 0, limit+1)
+	// Counted separately from len(out): a row that fails Scan is dropped below
+	// (pre-existing, deliberate), and computing has_more from the survivors
+	// would report "this is the last page" one page early — silently truncating
+	// the feed for anything that walks it, including `crewship inbox list --all`.
+	scanned := 0
 	for rows.Next() {
+		scanned++
 		var item inboxItemResponse
 		var blocking int
 		var payloadJSON string
@@ -265,8 +271,11 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
-	hasMore := len(out) > limit
-	if hasMore {
+	hasMore := scanned > limit
+	// Guarded on len(out), not on hasMore: `scanned` counts rows the query
+	// returned and `out` holds the ones that survived Scan, so after a scan
+	// error the two differ and out[:limit] would be out of range.
+	if len(out) > limit {
 		out = out[:limit]
 	}
 	h.enrichAgentAvatars(r.Context(), out)
@@ -630,17 +639,34 @@ func waitpointHasBackingRow(ctx context.Context, tx rowQuerier, workspaceID, sou
 		return false
 	}
 	var exists int
+	// Every arm asks whether a decision is still OPEN, not whether a row was
+	// ever written. pipeline_waitpoints rows are never deleted — retention
+	// prunes pipeline_runs and leaves the tokens — so without the status
+	// filter a settled gate reports "backed" forever. That reopens the trap
+	// this guard exists to close, and reopens it exactly where it is most
+	// likely to matter: ResolveBySource is fire-and-forget (it logs and
+	// swallows), so a failed cascade leaves an unresolved inbox row behind a
+	// terminal token, and the operator could never clear it.
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
-		SELECT 1 FROM pipeline_waitpoints WHERE token = ? AND workspace_id = ?
+		SELECT 1 FROM pipeline_waitpoints
+		 WHERE token = ? AND workspace_id = ? AND status = 'pending'
 		UNION ALL
 		SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'
 		UNION ALL
 		SELECT 1 FROM approvals_queue
 		 WHERE workspace_id = ? AND status = 'pending'
+		   AND json_valid(payload)
 		   AND json_extract(payload, '$.target_id') = ?
 	)`, sourceID, workspaceID, sourceID, workspaceID, workspaceID, sourceID).Scan(&exists); err != nil {
 		// Unreadable means "assume it is backed" — the safe direction is to
 		// keep forcing the source endpoint, never to hand out a free resolve.
+		//
+		// json_valid() above matters for that reason: without it, ONE malformed
+		// approvals_queue payload anywhere in the workspace makes json_extract
+		// error, and this fail-closed branch would then refuse every waitpoint
+		// in that workspace until the row left 'pending'. Every writer today
+		// goes through encodeJSON, so it is latent — but the blast radius of a
+		// future hand-rolled INSERT should not be workspace-wide.
 		return true
 	}
 	return exists == 1
@@ -924,8 +950,15 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 		// Same predicate as PatchState — a bulk archive must not refuse rows
 		// the single-row path accepts, or "select all → archive" silently
 		// leaves the orphans behind.
-		sourceLess := (kind == "escalation" && !escalationHasBackingRow(r.Context(), tx, sourceID)) ||
-			(kind == "waitpoint" && !waitpointHasBackingRow(r.Context(), tx, workspaceID, sourceID))
+		// Only pay for the probe when the answer can change the outcome. A bulk
+		// "mark read" over 500 waitpoints was running 500 three-way queries —
+		// including the json_extract scan — inside the open write transaction,
+		// and discarding every result.
+		sourceLess := false
+		if body.State == "resolved" {
+			sourceLess = (kind == "escalation" && !escalationHasBackingRow(r.Context(), tx, sourceID)) ||
+				(kind == "waitpoint" && !waitpointHasBackingRow(r.Context(), tx, workspaceID, sourceID))
+		}
 		if body.State == "resolved" && !sourceLess && (kind == "waitpoint" || kind == "escalation" || blocking != 0) {
 			skipped = append(skipped, id)
 			continue

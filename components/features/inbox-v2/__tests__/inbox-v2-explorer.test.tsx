@@ -88,7 +88,10 @@ describe("inbox v2 explorer", () => {
 describe("history keeps archived noise out of the decision list", () => {
   const decided = inboxEntry(item({
     id: "d1", kind: "waitpoint", title: "Approve production deploy",
+    // resolved_by_user_id is what makes it a decision rather than a sweep —
+    // the expiry and timeout paths leave it empty.
     state: "resolved", resolved_action: "approved", resolved_at: "2026-08-30T10:00:00Z",
+    resolved_by_user_id: "u-1",
   }))
   const archived = inboxEntry(item({
     id: "a1", kind: "escalation", sender_name: "Skill Curator", title: "Skill review: sk_f9e228c7",

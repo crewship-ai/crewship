@@ -1039,3 +1039,77 @@ func TestInboxHandler_PatchResolve_AutonomyHoldWithAPendingApprovalIsRefused(t *
 			rr2.Code, rr2.Body.String())
 	}
 }
+
+// A settled gate is not a live decision. pipeline_waitpoints rows are never
+// deleted — retention prunes pipeline_runs and leaves the tokens behind — so a
+// guard that asks "does a token exist" instead of "is one pending" refuses the
+// inbox-side resolve forever. That matters most exactly where the trap is real:
+// inbox.ResolveBySource is fire-and-forget, so a failed cascade leaves an
+// unresolved row behind an already-approved token, and nothing could clear it.
+func TestInboxHandler_PatchResolve_SettledWaitpointTokenIsNotALiveSource(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	now := time.Now().UTC()
+
+	seedInboxItem(t, h, wsID, "wp-settled", "waitpoint", "unread", "", "", "Approve deploy", now)
+	seedBackingWaitpoint(t, db, wsID, "src-wp-settled")
+
+	// While it is pending the guard must refuse.
+	resolve := func() *httptest.ResponseRecorder {
+		req := withWorkspaceUser(
+			httptest.NewRequest("PATCH", "/api/v1/inbox/wp-settled",
+				strings.NewReader(`{"state":"resolved","resolved_action":"dismissed"}`)),
+			userID, wsID, "OWNER")
+		req.SetPathValue("id", "wp-settled")
+		rr := httptest.NewRecorder()
+		h.PatchState(rr, req)
+		return rr
+	}
+	if rr := resolve(); rr.Code != http.StatusConflict {
+		t.Fatalf("pending token: status = %d, want 409", rr.Code)
+	}
+
+	// Once the gate is decided at its source, the token is still there and the
+	// inbox row must stop being stuck behind it.
+	if _, err := db.Exec(`UPDATE pipeline_waitpoints SET status = 'approved' WHERE token = 'src-wp-settled'`); err != nil {
+		t.Fatalf("settle the waitpoint: %v", err)
+	}
+	if rr := resolve(); rr.Code != http.StatusOK {
+		t.Errorf("settled token: status = %d, want 200 — the row is stranded behind a decision already made; body=%s",
+			rr.Code, rr.Body.String())
+	}
+}
+
+// A malformed approvals payload must not take the whole workspace with it.
+// Without json_valid() the json_extract arm errors, the probe fails closed, and
+// every waitpoint in that workspace becomes unresolvable until the bad row
+// leaves 'pending'.
+func TestInboxHandler_PatchResolve_MalformedApprovalPayloadDoesNotStrandTheWorkspace(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	now := time.Now().UTC()
+
+	seedInboxItem(t, h, wsID, "wp-innocent", "waitpoint", "unread", "", "", "Unrelated gate", now)
+	if _, err := db.Exec(`INSERT INTO approvals_queue
+		(id, workspace_id, requested_by, kind, reason, payload, status, created_at)
+		VALUES ('ap_bad', ?, ?, 'tool_call', 'hand-rolled row', 'not json', 'pending', ?)`,
+		wsID, userID, now.Format(time.RFC3339Nano)); err != nil {
+		t.Skipf("payload column rejects the malformed value here: %v", err)
+	}
+
+	req := withWorkspaceUser(
+		httptest.NewRequest("PATCH", "/api/v1/inbox/wp-innocent",
+			strings.NewReader(`{"state":"resolved","resolved_action":"dismissed"}`)),
+		userID, wsID, "OWNER")
+	req.SetPathValue("id", "wp-innocent")
+	rr := httptest.NewRecorder()
+	h.PatchState(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 — an unrelated malformed payload must not strand every waitpoint in the workspace; body=%s",
+			rr.Code, rr.Body.String())
+	}
+}
