@@ -74,7 +74,9 @@ bodies, not the check:
 ```bash
 scripts/review-status.sh              # reviewed / throttled / failed / pending / absent per open PR
 scripts/review-status.sh 1568 --checks   # one PR, plus its skipped-but-green checks
-scripts/review-status.sh --retrigger --dry-run   # queued re-review, spaced by the limit
+scripts/review-status.sh --retrigger 2227        # re-review ONE pr — the normal case
+scripts/review-status.sh --retrigger --dry-run   # the queue, spaced by the limit, posting nothing
+scripts/review-status.sh --retrigger --all       # every unreviewed PR — spends a slot on each
 ```
 
 Exit 3 = at least one PR is not reviewed. Same trap, other producers: a check
