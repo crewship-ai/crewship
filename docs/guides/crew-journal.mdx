@@ -240,8 +240,8 @@ Every filter is AND-combined and indexed at the DB level:
 
 | Query param | CLI flag | SQL predicate |
 |---|---|---|
-| `crew_id` | `--crew` | `crew_id = ?` |
-| `agent_id` | `--agent` | `agent_id = ?` |
+| `crew_id` | `--crew` | `crew_id = ?` (name/slug resolved to an id first — see below) |
+| `agent_id` | `--agent` | `agent_id = ?` (name/slug resolved to an id first — see below) |
 | `mission_id` | `--mission` | `mission_id = ?` |
 | `trace_id` | `--trace-id` | `trace_id = ?` (one run's spans) |
 | `crew_ids` | -- | CSV `crew_id IN (?,?,...)` (takes precedence over `crew_id`) |
@@ -259,7 +259,7 @@ Pagination is keyset (compound `ts, id`), not offset, so deep paging stays O(log
 
 ### Full-text search
 
-Migration 55 adds a contentless FTS5 virtual table `journal_entries_fts` mirroring `summary` and `payload`, with insert / update / delete triggers that keep it in sync with the base table. The `?q=` query parameter (CLI: `--query` / `-q`) compiles to a phrase-wrapped `MATCH` against this index:
+Migration 55 adds a contentless FTS5 virtual table `journal_entries_fts` mirroring `summary` and `payload`, with insert / update / delete triggers that keep it in sync with the base table. The `?q=` query parameter (CLI: `--query` / `-q`) compiles to a `MATCH` against this index:
 
 ```bash
 crewship journal --query "OOM" --since 24h
@@ -272,6 +272,33 @@ GET /api/v1/journal/stream?q=approval         # live tail filtered by FTS
 ```
 
 The same parameter works on the SSE stream — the seed slice and every subsequent poll apply the FTS filter, so a "watch for `OOM`" tab stays cheap. `q` is bounded in length (rejected if absurd) and merges with structural filters (`crew_id`, `severity`, ...) via AND.
+
+**How the query is compiled.** The input is split on whitespace, each term is
+wrapped in its own FTS5 phrase literal, and the phrases are `AND`-joined with a
+trailing `*` on the last one. Three consequences:
+
+- Word order is irrelevant — `session morgan` and `morgan session` are the same
+  query. (Before #2206 the whole input was one phrase, so reversing two words
+  returned zero rows.)
+- The last term prefix-matches, so `morg` finds `morgan` while the user is
+  still typing. Earlier terms match whole words.
+- Operators typed by the user stay literal. `alpha OR beta` requires all three
+  of `alpha`, `or` and `beta`; `NEAR(...)`, `NOT`, `summary:x`, `*` and stray
+  quotes cannot restructure the query or error it out. Terms with no letter or
+  digit are dropped; an input made entirely of them matches nothing rather than
+  everything.
+
+The tokenizer is `porter ascii`, so terms are stemmed — which is why a prefix
+on a stemmed word (`runn`) may miss a row whose indexed form is `run`.
+
+**Crew and agent references.** `crew_id` / `agent_id` (and their `_ids` CSV
+forms) accept an id, a slug, or a display name, resolved case-insensitively
+inside the caller's workspace before the SQL is built. A reference that resolves
+to nothing is used as-is against the id column, so entries belonging to a
+deleted agent stay reachable by id and a typo returns zero rows instead of
+silently widening the filter. An ambiguous display name expands to every
+matching id. This is server-side on purpose: the UI search box (`agent:viktor`),
+the CLI (`--agent morgan`) and any direct API caller all get it from one place.
 
 ### Lookup table (card enrichment)
 

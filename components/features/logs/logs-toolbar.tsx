@@ -154,7 +154,7 @@ export function LogsToolbar({
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           placeholder="Search… (try agent:viktor severity:error)"
-          title="Structured tokens go to the server: agent / crew / trace / type / severity / actor / priority. Free text + payload keys (payload.tool_name:Bash) stay client-side."
+          title="Structured tokens go to the server: agent / crew / trace / type / severity / actor / priority. agent: and crew: take a name, slug or id. Free text searches summary + payload; terms match in any order and the last one prefix-matches. Payload keys (payload.tool_name:Bash) stay client-side."
           className="h-7 pl-7 pr-6 text-[12px] font-mono"
         />
         {query && (

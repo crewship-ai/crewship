@@ -6,7 +6,7 @@ import { AlertCircle, ChevronLeft, ChevronRight } from "lucide-react"
 import type { JournalEntry } from "@/lib/types/journal"
 import { type EntryGroup } from "@/lib/journal-style"
 import { annotateEntries, filterEntries, type AnnotatedEntry } from "@/lib/journal-perf"
-import { buildMatcher } from "@/lib/log-search"
+import { buildMatcher, parseStructuredQuery } from "@/lib/log-search"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { LogsToolbar, type SeverityFilter, type ScopeControl } from "./logs-toolbar"
 import { LogsTypeChips } from "./logs-type-chips"
@@ -227,7 +227,18 @@ export function LogsPanel({
   // Pre-attach _tsMs once. Cheap to call repeatedly: the helper
   // short-circuits on entries that already carry the field.
   const annotated = useMemo<AnnotatedEntry[]>(() => annotateEntries(entries), [entries])
-  const matcher = useMemo(() => buildMatcher(query), [query])
+  // The local matcher narrows what is already loaded. When `onServerSearch`
+  // is wired the parent has forwarded the same string to the backend, which
+  // binds the structured tokens (agent:, crew:, severity:, …) as SQL
+  // filters — re-applying them here filters the server's own answer back
+  // out, because `agent:` reads e.agent_id and the user typed a name, not a
+  // UUID. Match on what the server could NOT bind instead (#2206). Without
+  // a server search nothing else applies those tokens, so the raw query
+  // stays the input.
+  const matcher = useMemo(
+    () => buildMatcher(onServerSearch ? parseStructuredQuery(query).clientQuery : query),
+    [query, onServerSearch],
+  )
 
   // One pass for severity counts, group counts, filtered, bucketed.
   const stage = useMemo(

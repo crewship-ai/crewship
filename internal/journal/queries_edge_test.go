@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-// TestFTS5Phrase_PathologicalInputs covers quote escaping, control chars,
-// and operator characters. The current implementation doubles internal
-// quotes and wraps the whole string in quotes; these tests pin that
-// contract so a refactor that switches to a different escaping scheme
-// fails loudly.
-func TestFTS5Phrase_PathologicalInputs(t *testing.T) {
+// TestFTS5Query_PathologicalInputs covers quote escaping, control chars,
+// and operator characters. Every term is doubled-quoted into its own
+// phrase literal, the phrases AND together and the last one carries the
+// prefix `*`; these tests pin that contract so a refactor that switches
+// to a different escaping scheme fails loudly.
+func TestFTS5Query_PathologicalInputs(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
@@ -21,27 +21,35 @@ func TestFTS5Phrase_PathologicalInputs(t *testing.T) {
 		{"empty", "", ""},
 		{"whitespace only", "   ", ""},
 		{"tabs only", "\t\t", ""},
-		{"plain word", "hello", `"hello"`},
-		{"two words", "hello world", `"hello world"`},
-		{"single quote in middle", `foo"bar`, `"foo""bar"`},
-		{"single trailing quote", `foo"`, `"foo"""`},
-		{"single leading quote", `"foo`, `"""foo"`},
-		{"only one quote", `"`, `""""`},
-		{"only two quotes", `""`, `""""""`},
-		{"FTS5 NEAR operator", "NEAR(foo bar)", `"NEAR(foo bar)"`},
-		{"FTS5 wildcard", "foo*", `"foo*"`},
-		{"FTS5 OR", "foo OR bar", `"foo OR bar"`},
-		{"FTS5 column filter", "summary:foo", `"summary:foo"`},
-		{"trim leading/trailing whitespace", "  hello  ", `"hello"`},
-		{"newline inside", "foo\nbar", `"foo` + "\n" + `bar"`},
-		{"colon", "a:b", `"a:b"`},
-		{"unicode", "héllo", `"héllo"`},
+		{"plain word", "hello", `"hello"*`},
+		{"two words", "hello world", `"hello" AND "world"*`},
+		{"single quote in middle", `foo"bar`, `"foo""bar"*`},
+		{"single trailing quote", `foo"`, `"foo"""*`},
+		{"single leading quote", `"foo`, `"""foo"*`},
+		// No letter or digit anywhere: nothing the tokenizer would index,
+		// so the whole expression collapses to an unmatchable empty phrase.
+		{"only one quote", `"`, `""`},
+		{"only two quotes", `""`, `""`},
+		{"lone wildcard", "*", `""`},
+		{"dashes only", "--", `""`},
+		{"FTS5 NEAR operator", "NEAR(foo bar)", `"NEAR(foo" AND "bar)"*`},
+		{"FTS5 wildcard", "foo*", `"foo*"*`},
+		{"FTS5 OR", "foo OR bar", `"foo" AND "OR" AND "bar"*`},
+		{"FTS5 column filter", "summary:foo", `"summary:foo"*`},
+		{"trim leading/trailing whitespace", "  hello  ", `"hello"*`},
+		{"newline is a term separator", "foo\nbar", `"foo" AND "bar"*`},
+		{"colon", "a:b", `"a:b"*`},
+		{"unicode", "héllo", `"héllo"*`},
+		// A tokenless trailing term must not eat the prefix — otherwise
+		// `morgan *` becomes an empty phrase and matches nothing.
+		{"tokenless trailing term", "morgan *", `"morgan"*`},
+		{"tokenless leading term", "* morgan", `"morgan"*`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := fts5Phrase(tt.in)
+			got := fts5Query(tt.in)
 			if got != tt.want {
-				t.Errorf("fts5Phrase(%q) = %q, want %q", tt.in, got, tt.want)
+				t.Errorf("fts5Query(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}

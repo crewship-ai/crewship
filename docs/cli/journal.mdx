@@ -25,8 +25,8 @@ The top-level command is the list view. `--follow` opens an SSE connection to `/
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--lines` | `int` | `50` | Max entries to fetch (1-500). |
-| `--crew` | `string` | | Filter by crew slug or ID. |
-| `--agent` | `string` | | Filter by agent ID. |
+| `--crew` | `string` | | Filter by crew name, slug or ID. |
+| `--agent` | `string` | | Filter by agent name, slug or ID. |
 | `--mission` | `string` | | Filter by mission ID. |
 | `--trace-id` | `string` | | Narrow to entries whose `trace_id` column matches. Reaches ad-hoc **agent** runs only — routine runs never set it. |
 | `--run-id` | `string` | | Narrow to one run whichever engine ran it. Matches `trace_id`, `actor_id` and `payload.run_id`, so it reaches both agent runs and routine runs. Prefer this over `--trace-id`. |
@@ -35,7 +35,7 @@ The top-level command is the list view. `--follow` opens an SSE connection to `/
 | `--severity` | `string` | | Comma-separated severities (`info`, `notice`, `warn`, `error`). |
 | `--actor-type` | `string` | | Comma-separated actors (`agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`). |
 | `--priority` | `string` | | Comma-separated priorities (`normal`, `high`, `pin`, `permanent`). |
-| `--query` / `-q` | `string` | | Server-side FTS5 search across `summary` + `payload`. Bounded to 200 chars. |
+| `--query` / `-q` | `string` | | Server-side FTS5 search across `summary` + `payload`. Terms AND together in any order and the last term prefix-matches. Bounded to 200 chars. |
 | `--since` | `string` | | Time window (`1h`, `24h`, `7d`, or RFC3339). |
 | `--follow` | `bool` | `false` | Live tail via SSE — Ctrl-C to exit, reconnects on transient failure. |
 
@@ -55,6 +55,33 @@ applies to `crewship journal count` and to `crewship watch` — a count prints a
 bare `0` and a live tail prints nothing at all, and neither says the question
 could not be asked.
 
+
+### How `--query` is interpreted
+
+The query is split on whitespace and every term must be present — word order
+does not matter, so `--query 'session morgan'` and `--query 'morgan session'`
+return the same rows. The **last** term also prefix-matches, so a half-typed
+word still finds things: `--query 'morg'` reaches `morgan`. Earlier terms match
+whole words only.
+
+Every term is quoted before it reaches SQLite, so FTS5 operators typed into the
+query are literal text, not syntax. `--query 'alpha OR beta'` looks for entries
+containing all three of `alpha`, `or` and `beta` — it is not a disjunction, and
+neither `NEAR(...)`, `NOT`, `summary:x` nor a stray `"` can restructure the
+search or make it fail. Terms with no letter or digit in them (a lone `*`) are
+dropped rather than making the whole query unmatchable.
+
+The index covers `summary` and `payload` only. It never covers `entry_type`, so
+`-q` is not a way around `--type`'s exact matching.
+
+### Names, slugs and ids
+
+`--crew` and `--agent` accept whichever of the three you have: an id, the slug,
+or the display name (case-insensitive), resolved inside your workspace. A
+reference that matches nothing is left as typed and filters on the id column —
+so an id whose agent has since been deleted still reaches that agent's history,
+and a typo returns nothing rather than silently widening to the whole
+workspace. A display name shared by two agents matches both.
 
 <Note>
   **`--run-id` or `--trace-id`?** A run id reaches the journal by three
