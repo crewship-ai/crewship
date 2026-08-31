@@ -522,10 +522,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   public views and webhook credentials). The rest join the existing chips:
   memory, credentials, approvals-and-trust, notifications, provisioning and
   runtime freshness, missions, runs, chat, skills, system. Every type also
-  gained a short pill label, and the twelve that no frontend map had ever
-  heard of — among them `page.owner_transferred`, `page.published` and
+  gained a short pill label, and the twelve the frontend's entry-type list had
+  never carried — among them `page.owner_transferred`, `page.published` and
   `onboarding.proposal_applied` — gained an icon and a place in the activity
-  sidebar's facets.
+  sidebar's facets. `memory.priority_changed`, emitted as a bare string
+  literal since it shipped, is now a named constant on the Go side, so the
+  entry that records who changed a compaction-surviving marker is visible to
+  anything that reads the backend's declarations.
 
   `hook.dispatch_error` was in the server-side `system` exclusion list but
   not in the client's type→group map, so muting System dropped it on the

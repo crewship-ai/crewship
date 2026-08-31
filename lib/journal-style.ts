@@ -82,10 +82,12 @@ export const GROUP_COLOR: Record<EntryGroup, string> = {
   provisioning: "#7dd3fc", // sky-300 — neighbours indigo/cyan family for "container building"
   chat: "#fdba74",        // orange-300 — warm, distinct from cost yellow
   // green-400. The palette's one wide free hue gap is between memory lime
-  // (83°) and exec emerald (160°); 142° splits it, and the emerald above is
-  // both darker and cyan-cast, so the two do not read as the same dot. Not
-  // any orange — `run` is #fb923c and a routine run must not look like an
-  // agent run at a glance.
+  // (83°) and exec emerald (160°), and 142° splits it. Emerald is the closest
+  // neighbour at ΔE76 ≈ 19 — comfortably the widest separation still
+  // available, and more than 3× the palette's existing file↔system pair, but
+  // green and emerald are not unmistakable at the 6px dot, so the chip's text
+  // label carries the identification. Not any orange: `run` is #fb923c and a
+  // routine run must not look like an agent run at a glance.
   routine: "#4ade80",
   // violet-300 — paler than container indigo-400 (#818cf8) and keeper
   // purple-400 (#c084fc), and deliberately NOT #a78bfa, which is already
@@ -117,8 +119,13 @@ export const GROUP_LABEL: Record<EntryGroup, string> = {
   other: "other",
 }
 
-/** Render order in the type-chip filter row. */
-export const GROUP_ORDER: EntryGroup[] = [
+/**
+ * Render order in the type-chip filter row, and — via journal-perf.ts —
+ * the seed for the per-group counters. `readonly` because those are two
+ * jobs for one array: a consumer calling `.sort()` on it would silently
+ * reorder the chips AND the counter seed together.
+ */
+export const GROUP_ORDER: readonly EntryGroup[] = [
   "exec",
   "network",
   "file",

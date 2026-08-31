@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { readFileSync, readdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 
+import { activitySource, sourceEntryTypes } from "@/lib/activity-stream"
 import { ENTRY_TYPES_BY_GROUP, entryTypesForGroups } from "@/lib/journal-groups"
 import {
   GROUP_COLOR,
@@ -33,10 +34,21 @@ import { JOURNAL_ENTRY_TYPES } from "@/lib/types/journal"
  *  journal.EntryType is a plain string type with no central registry, so a
  *  call site is free to mint its own constant, and several do.
  *
- *  Three patterns cover every emit site in the tree:
- *    1. `EntryFoo EntryType = "foo.bar"`         — the shared vocabulary
- *    2. `journal.EntryType("foo.bar")`           — a file-local constant
- *    3. `Type: "foo.bar"` inside `journal.Entry{…}` — a literal at the emit
+ *  Four patterns cover every emit site in the tree:
+ *    1. `EntryFoo EntryType = "foo.bar"`  — the shared vocabulary
+ *    2. `journal.EntryType("foo.bar")`    — a file-local constant
+ *    3. `Type: "foo.bar"` inside any `…Entry{…}` composite literal — a bare
+ *       literal at the emit site. The needle is `Entry{` rather than
+ *       `journal.Entry{` on purpose: the orchestrator emits through its own
+ *       `orchestrator.JournalEntry{}` (converted at
+ *       internal/server/journal_adapter.go) and those literals must count too.
+ *    4. `emitJournal(ctx, "foo.bar", …)`  — the sidecar's own emit helper
+ *       (internal/sidecar/journal_emit.go), whose callers all pass a literal.
+ *
+ *  Every type reachable through 3 and 4 today is also a types.go constant, so
+ *  the corpus does not currently depend on them — but an orchestrator- or
+ *  sidecar-only type would otherwise be dropped silently, and a ratchet that
+ *  goes green while missing the drift it exists to catch is worse than none.
  * ------------------------------------------------------------------ */
 
 const REPO_ROOT = process.cwd()
@@ -58,12 +70,20 @@ function goFiles(dir: string, out: string[] = []): string[] {
   return out
 }
 
+/**
+ * `journal.Entry{`, the journal package's own unqualified `Entry{`, and the
+ * orchestrator's `JournalEntry{`. The leading boundary is load-bearing:
+ * without it this also matches `mcpCredEntry{`, whose `Type: "OAUTH2"` is
+ * not a journal entry type at all.
+ */
+const ENTRY_LITERAL = /(?<![A-Za-z0-9_])(?:journal\.)?(?:Journal)?Entry\{/g
+
 /** `Type: "x.y"` occurrences inside each brace-balanced composite literal. */
-function typesInCompositeLiterals(src: string, needle: string, sink: Set<string>) {
-  let i = 0
-  while ((i = src.indexOf(needle, i)) !== -1) {
+function typesInCompositeLiterals(src: string, sink: Set<string>) {
+  for (const match of src.matchAll(ENTRY_LITERAL)) {
+    const i = match.index
     let depth = 0
-    let j = i + needle.length - 1
+    let j = i + match[0].length - 1
     for (; j < src.length; j++) {
       if (src[j] === "{") depth++
       else if (src[j] === "}") {
@@ -75,20 +95,23 @@ function typesInCompositeLiterals(src: string, needle: string, sink: Set<string>
       }
     }
     for (const m of src.slice(i, j).matchAll(/\bType:\s*"([^"]+)"/g)) sink.add(m[1])
-    i = j
   }
+}
+
+/** Every entry type one Go source file declares or emits. */
+function scanned(src: string): string[] {
+  const found = new Set<string>()
+  for (const m of src.matchAll(/EntryType\s*(?:=\s*|\(\s*)"([^"]+)"/g)) found.add(m[1])
+  typesInCompositeLiterals(src, found)
+  for (const m of src.matchAll(/\bemitJournal\(\s*[\w.]+\s*,\s*"([^"]+)"/g)) found.add(m[1])
+  return [...found]
 }
 
 const GO_ENTRY_TYPES: string[] = (() => {
   const found = new Set<string>()
   for (const dir of ["internal", "cmd", "ee"]) {
     for (const file of goFiles(resolve(REPO_ROOT, dir))) {
-      const src = readFileSync(file, "utf8")
-      const rel = file.slice(REPO_ROOT.length + 1)
-      for (const m of src.matchAll(/EntryType\s*(?:=\s*|\(\s*)"([^"]+)"/g)) found.add(m[1])
-      typesInCompositeLiterals(src, "journal.Entry{", found)
-      // Inside the journal package itself the literal is unqualified.
-      if (rel.startsWith(join("internal", "journal"))) typesInCompositeLiterals(src, " Entry{", found)
+      for (const t of scanned(readFileSync(file, "utf8"))) found.add(t)
     }
   }
   return [...found].sort()
@@ -102,11 +125,27 @@ describe("the Go corpus scan", () => {
   })
 
   it("picks up types declared outside internal/journal/types.go", () => {
-    // One of each non-shared declaration shape, so a regression in the
-    // scan is a failure here and not a silent narrowing of the corpus.
+    // One of each declaration shape, so a regression in the scan is a
+    // failure here and not a silent narrowing of the corpus.
     expect(GO_ENTRY_TYPES).toContain("page.owner_transferred") // file-local const
     expect(GO_ENTRY_TYPES).toContain("keeper.rule_auto_tuned") // inline conversion
     expect(GO_ENTRY_TYPES).toContain("memory.priority_changed") // types.go, promoted
+  })
+
+  it("reads the orchestrator's and the sidecar's own emit shapes", () => {
+    // Both currently emit only types.go constants, so these would still
+    // pass with the scan narrowed back to `journal.Entry{` — the point is
+    // that the shapes are covered before a type appears that needs them.
+    const orchestrator = readFileSync(
+      resolve(REPO_ROOT, "internal/orchestrator/orchestrator_run.go"),
+      "utf8",
+    )
+    expect(orchestrator).toMatch(/JournalEntry\{/)
+    expect(scanned(orchestrator)).toContain("chat.user_message")
+
+    const sidecar = readFileSync(resolve(REPO_ROOT, "internal/sidecar/memory_write.go"), "utf8")
+    expect(sidecar).toMatch(/emitJournal\(/)
+    expect(scanned(sidecar).some((t) => t.startsWith("memory."))).toBe(true)
   })
 
   it("yields only dotted lower-case type names", () => {
@@ -143,6 +182,17 @@ describe("entry-type coverage", () => {
   it("maps no type the backend cannot emit", () => {
     const go = new Set(GO_ENTRY_TYPES)
     expect(Object.keys(TYPE_TO_GROUP).filter((t) => !go.has(t))).toEqual([])
+  })
+
+  it("gives every backend entry type an activity facet that claims it", () => {
+    // activity-stream.test.ts asserts the same thing against its own scan of
+    // internal/journal/types.go only, so it cannot see a file-local type: all
+    // twelve added here were falling into the System facet unclaimed. This
+    // assertion lives with the wider scan so that gap cannot reopen.
+    const unclaimed = GO_ENTRY_TYPES.filter(
+      (t) => activitySource(t) === "system" && !sourceEntryTypes("system").includes(t),
+    )
+    expect(unclaimed).toEqual([])
   })
 
   it("keeps routine activity on its own chip", () => {
