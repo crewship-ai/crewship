@@ -521,9 +521,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   not run) and **page** (all fifteen `page.*` types, including publishing,
   public views and webhook credentials). The rest join the existing chips:
   memory, credentials, approvals-and-trust, notifications, provisioning and
-  runtime freshness, missions, runs, chat, skills, system. Every type also
-  gained a short pill label, and the twelve the frontend's entry-type list had
-  never carried — among them `page.owner_transferred`, `page.published` and
+  runtime freshness, missions, runs, chat, skills, system. The twelve the
+  frontend's entry-type list had never carried — among them
+  `page.owner_transferred`, `page.published` and
   `onboarding.proposal_applied` — gained an icon and a place in the activity
   sidebar's facets. `memory.priority_changed`, emitted as a bare string
   literal since it shipped, is now a named constant on the Go side, so the

@@ -165,10 +165,6 @@ describe("entry-type coverage", () => {
     expect(GO_ENTRY_TYPES.filter((t) => groupOf(t) === "other")).toEqual([])
   })
 
-  it("gives every backend entry type a short pill label", () => {
-    expect(GO_ENTRY_TYPES.filter((t) => pillLabelOf(t) === t)).toEqual([])
-  })
-
   it("lists every backend entry type in ENTRY_TYPES_BY_GROUP", () => {
     const listed = new Set(Object.values(ENTRY_TYPES_BY_GROUP).flat())
     expect(GO_ENTRY_TYPES.filter((t) => !listed.has(t))).toEqual([])
@@ -330,12 +326,31 @@ describe("entryTypesForGroups", () => {
 })
 
 describe("pillLabelOf", () => {
-  it("falls back to the raw type for something the backend has not shipped yet", () => {
+  /*
+   * There is deliberately NO "every backend type has a pill label" test to
+   * pair with the group/ENTRY_TYPES_BY_GROUP coverage above. #2213 replaces
+   * the type pill in logs-list.tsx — pillLabelOf's only consumer — with an
+   * icon plus the full dotted entry_type, so ratcheting this table would
+   * demand ~65 abbreviations for a surface that is being retired, and the
+   * abbreviation is lossier than the name it replaces (all fourteen
+   * `pipeline.*` types share a stem the short form cannot keep). The
+   * fallback below is what the newly-mapped types use, and it is the same
+   * thing #2213 shows for everything.
+   */
+  it("falls back to the raw type for a type with no abbreviation", () => {
     expect(pillLabelOf("invented.later")).toBe("invented.later")
+    // Including the ones #2207 mapped: they get a group and a colour, not a pill.
+    expect(pillLabelOf("pipeline.step.container_ready")).toBe("pipeline.step.container_ready")
+    expect(pillLabelOf("page.owner_transferred")).toBe("page.owner_transferred")
   })
 
-  it("keeps pill labels short enough for the row", () => {
+  it("keeps the labels that do exist short enough for the row", () => {
     const long = Object.entries(TYPE_PILL_LABEL).filter(([, label]) => label.length > 16)
     expect(long).toEqual([])
+  })
+
+  it("abbreviates only types the backend can emit", () => {
+    const go = new Set(GO_ENTRY_TYPES)
+    expect(Object.keys(TYPE_PILL_LABEL).filter((t) => !go.has(t))).toEqual([])
   })
 })

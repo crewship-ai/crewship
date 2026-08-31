@@ -53,7 +53,7 @@ row (`lib/journal-style.ts`). It is not decoration: muting a chip is pushed to
 the server as an `exclude_entry_type` filter, so a type with no group is one
 you cannot filter out of a busy workspace's 5,000-entry window.
 `lib/__tests__/journal-groups.test.ts` scans the Go tree and fails if any type
-below loses its group, its pill label, or its place in either map.
+below loses its group or its place in either of the two maps that encode it.
 
 <Accordion title="Full entry-type catalog by bucket">
 

@@ -381,7 +381,19 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "policy.changed": "system",
 }
 
-/** Short, dense label rendered inside the type pill on every log row. */
+/**
+ * Short, dense label rendered inside the type pill on every log row.
+ *
+ * DELIBERATELY NOT EXTENDED to the entry types #2207 mapped. `pillLabelOf`
+ * has exactly one consumer in the tree — components/features/logs/logs-list.tsx
+ * — and #2213 replaces the pill there with an icon plus the full dotted
+ * entry_type, so anything added here now would land dead. The abbreviation is
+ * also lossy where it matters most: the fourteen `pipeline.*` types collapse to
+ * one or two labels, while the dotted name at least separates
+ * `pipeline.step.*` from `pipeline.run.*`, and the group is already encoded
+ * twice on the row (icon + colour). Unmapped types fall through to the raw
+ * entry_type below, which is what #2213 shows for everything anyway.
+ */
 export const TYPE_PILL_LABEL: Record<string, string> = {
   "exec.command": "exec",
   "exec.output_chunk": "stdout",
@@ -457,83 +469,6 @@ export const TYPE_PILL_LABEL: Record<string, string> = {
   "chat.user_message": "chat·u",
   "chat.agent_response": "chat·a",
   "agent.error": "agent·err",
-  // Routines
-  "pipeline.run.started": "routine·start",
-  "pipeline.run.completed": "routine·done",
-  "pipeline.run.failed": "routine·fail",
-  "pipeline.step.started": "step·start",
-  "pipeline.step.completed": "step·done",
-  "pipeline.step.failed": "step·fail",
-  "pipeline.step.validation_failed": "step·invalid",
-  "pipeline.step.skipped": "step·skip",
-  "pipeline.step.retrying": "step·retry",
-  "pipeline.step.container_ready": "step·ready",
-  "pipeline.dry_run": "routine·dry",
-  "pipeline.schedule.circuit_breaker_tripped": "sched·breaker",
-  "pipeline.schedule.missed_occurrences": "sched·missed",
-  "pipeline.runs_swept": "routine·swept",
-  "automation.throttled": "auto·throttled",
-  "automation.depth_exceeded": "auto·depth",
-  // Pages
-  "page.produce_denied": "page·denied",
-  "page.panel.updated": "panel",
-  "page.panel.stale": "panel·stale",
-  "page.panel.recovered": "panel·ok",
-  "page.wake.fired": "page·wake",
-  "page.action.dispatched": "page·action",
-  "page.spec.changed": "page·spec",
-  "page.grant_added": "page·grant+",
-  "page.grant_removed": "page·grant−",
-  "page.owner_transferred": "page·owner",
-  "page.published": "page·pub",
-  "page.link_revoked": "page·link−",
-  "page.public_view": "page·view",
-  "page.webhook_issued": "page·hook+",
-  "page.webhook_revoked": "page·hook−",
-  // Memory
-  "memory.write_rejected": "memory·rej",
-  "memory.write_verifier_blocked": "memory·verif",
-  "memory.consolidation_proposed": "consol·prop",
-  "memory.searched": "memory·search",
-  "memory.versions_swept": "memory·swept",
-  "memory.config_updated": "memory·cfg",
-  "memory.skill_proposed": "skill·prop",
-  "memory.skill_approved": "skill·ok",
-  "memory.skill_rejected": "skill·no",
-  // Credentials / keeper
-  "credential.revealed": "cred·reveal",
-  "credential.reveal_policy_changed": "cred·policy",
-  "credential.sensitivity_lowered": "cred·lower",
-  "credential.lease_issued": "cred·lease",
-  "keeper.rule_auto_tuned": "keeper·tune",
-  // Approvals
-  "approval.trust_granted": "trust+",
-  "approval.trust_revoked": "trust−",
-  "approval.auto_tuning_reset": "tune·reset",
-  // Notifications
-  "notification.delivered": "notify",
-  "notification.failed": "notify·fail",
-  "notification.dropped": "notify·drop",
-  // Chat
-  "conversation.compacted": "chat·compact",
-  // Missions
-  "mission.created": "mission+",
-  "mission.assigned": "mission·assign",
-  // Runs
-  "run.session_init": "run·session",
-  "run.agent_span": "span",
-  // Provisioning / runtime freshness
-  "provisioning.build_failed": "prov·build·fail",
-  "provisioning.step": "prov·step",
-  "sidecar.stale": "sidecar·stale",
-  "image.stale": "image·stale",
-  // Skills
-  "skill.invoked": "skill·run",
-  // System
-  "hook.dispatch_error": "hook·err",
-  "onboarding.proposal_applied": "onboard·apply",
-  "queue.sweeper_pumped": "queue·sweep",
-  "policy.changed": "policy",
 }
 
 export function groupOf(entryType: string): EntryGroup {
