@@ -121,6 +121,40 @@ describe("JournalEntryCard — exec.command details", () => {
     expect(screen.queryByText(/^exit /)).not.toBeInTheDocument()
   })
 
+  // The orchestrator emits payload.cmd as the argv ARRAY
+  // (internal/orchestrator/journal_exec_command.go); only the pipeline script
+  // audit writes a joined `command` string. This card read `command` only, so
+  // the terminal line was blank for every agent exec — the one entry type the
+  // card has a special case for.
+  it("renders the argv array the orchestrator emits", () => {
+    render(
+      <JournalEntryCard
+        entry={entry({
+          entry_type: "exec.command",
+          payload: {
+            cmd: ["claude", "--print", "--system-prompt", "[PROMPT:system-prompt omitted, 13561 chars]"],
+            exit_code: 0,
+          },
+        })}
+      />,
+    )
+    expect(
+      screen.getByText("$ claude --print --system-prompt [PROMPT:system-prompt omitted, 13561 chars]"),
+    ).toBeInTheDocument()
+  })
+
+  it("prefers the joined `command` string when a pipeline script audit writes one", () => {
+    render(
+      <JournalEntryCard
+        entry={entry({
+          entry_type: "exec.command",
+          payload: { command: "bash deploy.sh", cmd: ["bash", "deploy.sh"] },
+        })}
+      />,
+    )
+    expect(screen.getByText("$ bash deploy.sh")).toBeInTheDocument()
+  })
+
   it("renders nothing inline when both command and exit_code are missing", () => {
     render(
       <JournalEntryCard
