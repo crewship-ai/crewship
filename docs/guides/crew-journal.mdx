@@ -199,18 +199,35 @@ journal entry is hash-chained and append-only, so nothing can redact it after
 the write. The scrub still runs — on what is left, for a credential that
 reaches a non-prompt element.
 
-The `chat.user_message` entry beside it is bounded rather than emptied:
-`payload.content` is scrubbed and capped to the same 240 characters as the
-entry summary, with `length_chars` recording the message's full length in
-characters and `truncated` saying whether the cap applied. It keeps the text
-because the message **is** the entry — it is the "why was the agent doing
-this?" anchor for a Timeline of `exec.command` and `network.egress` rows — so
-within those 240 characters the scrubber is the only control, and a secret it
-does not recognise survives. The full message lives in the chat the entry
-references, which unlike this row can be erased. One consequence worth knowing:
-`crewship journal --query` is a full-text search over summary and payload, so
-free-text search now reaches the first 240 characters of a user message and no
-part of a prompt.
+The `chat.user_message` entry beside it carries **no message text at all**. Its
+payload is `chat_id`, `agent_slug` and `length_chars` — the message's length in
+characters — and its summary reads `user → morgan: 312 characters`.
+
+It used to keep a scrubbed 240-character preview, on the argument that the
+message **is** the entry. That bounded the exposure without closing it: within
+those characters the scrubber was the only control, and the scrubber cannot
+match a value nobody registered, so a token pasted at the *start* of a message
+survived every layer into a row nothing can redact. The text is removed rather
+than scrubbed harder, for the same reason `exec.command` drops the prompt.
+
+The trade is affordable because the message was never only here. It lives in the
+chat this entry references, which unlike this row **can be erased** — so the
+journal copy was duplicating erasable data into the one table the erasure
+cascade skips. Expand a Timeline row and **Open chat** takes you to it.
+
+There is deliberately **no digest** of the message beside the length, for the
+reason `prompt.user_sha256` does not exist either: a message can be short and
+low-entropy, and a digest of "the token I pasted" is a verifier for exactly the
+value this is meant to keep out of the table. `chat_id` is the safe reference.
+
+Two consequences worth knowing:
+
+- `crewship journal --query` is a full-text search over summary and payload, so
+  free-text search no longer reaches any part of a user message. Search the chat
+  for that.
+- There is no `truncated` field on this entry any more. It described a cap on
+  stored text; with no stored text a `false` there would read as "nothing was
+  cut" about a message that is not present at all.
 
 Two neighbours are bounded but not prompt-free, and are a different decision:
 `chat.agent_response` keeps up to 8 KB of the agent's scrubbed reply, and

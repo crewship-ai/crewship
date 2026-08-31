@@ -284,12 +284,13 @@ reference to the chat the message lives in — enough to answer *which
 prompt ran* without storing it. The process log line for a run takes the
 same sanitised argv.
 
-`chat.user_message` is bounded rather than emptied: scrubbed and capped
-to 240 characters, because there the message *is* the entry. Within
-those characters the scrubber is the only control, so an unrecognised
-secret survives — the full text lives in the chat the entry references,
-which can be erased. Payload shape:
-[Crew Journal](/guides/crew-journal#exec-command-payload).
+`chat.user_message` is emptied too, and for the same reason rather than a
+weaker one. It used to keep a scrubbed 240-character preview, which left
+the scrubber as the only control on that text — and an unrecognised
+secret pasted at the start of a message sits inside 240 characters. It
+now stores a length and a `chat_id`, no message text and no digest of
+it; the message itself stays in the chat, which can be erased. Payload
+shape: [Crew Journal](/guides/crew-journal#exec-command-payload).
 
 This is scoped, not a claim about the whole table. `chat.agent_response`
 still stores up to 8 KB of the agent's reply and `exec.output_chunk`

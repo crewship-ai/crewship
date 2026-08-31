@@ -1070,6 +1070,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   skips the re-sign. A plain or `--replace` restore remaps nothing, re-signs
   nothing, and is unchanged.
 
+- **A chat journal entry kept the first 240 characters of every message you
+  sent, in a row that cannot be erased (#2229).** #2215 left `chat.user_message`
+  bounded rather than emptied: its payload and summary both carried a scrubbed
+  240-character preview, on the argument that the message *is* the entry. That
+  bounded the exposure without closing it. The scrubber is defence in depth and
+  not a boundary — it cannot match a value nobody registered — so a token pasted
+  at the *start* of a message sat well inside the preview and reached a
+  hash-chained, append-only table that erasure requests deliberately skip.
+
+  The entry now records a measurement instead of the message: `chat_id`,
+  `agent_slug` and `length_chars`, with a summary reading
+  `user → morgan: 312 characters`. There is deliberately no digest of the
+  message beside it — for a short message a digest is a verifier for the pasted
+  token — so `chat_id` is the reference, and the message itself stays in the
+  chat, which **can** be erased. Expanding a Timeline row now offers **Open
+  chat** to get there, which nothing did before. Two consequences: free-text
+  journal search no longer reaches any part of a user message, and the entry's
+  `content` and `truncated` fields are gone rather than emptied.
+
 - **The journal stored the prompt text of every run, verbatim and forever
   (#2215).** `exec.command` recorded the CLI argv, and the argv carries the
   run's whole system prompt plus the verbatim user message; `chat.user_message`
@@ -1089,9 +1108,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   "what ran, and with which prompt" without storing the prompt. A measured
   entry drops from about 43 KB to under 1 KB. What remains is capped, with an
   explicit `truncated` flag. `chat.user_message` is scrubbed and capped to the
-  same 240 characters its summary always was, and the run's process log line
-  takes the same sanitised argv. The #2205 scrub is kept and still runs on
-  what is left.
+  same 240 characters its summary always was — superseded by #2229 above, which
+  ships in this same release and removes that text entirely — and the run's
+  process log line takes the same sanitised argv. The #2205 scrub is kept and
+  still runs on what is left.
 
   Two UI readers were fixed with it: the Journal card's terminal line and the
   run rail's detail line both read a key the orchestrator never wrote, so they
