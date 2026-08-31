@@ -96,6 +96,18 @@ func TestResponseSchemas_RejectABodyWithEveryFieldRenamed(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.renamed), &renamed); err != nil {
 				t.Fatalf("fixture: %v", err)
 			}
+			// The empty object first. A renamed BODY can fail inside an item
+			// while the envelope stays permissive — which is how this test
+			// passed while `{}` still validated against GET /approvals. An
+			// envelope whose every property is optional is satisfied by a
+			// handler that returns nothing at all.
+			var empty any = map[string]any{}
+			if err := sch.Validate(empty); err == nil {
+				t.Errorf("`{}` validates against this schema.\n" +
+					"Every property is optional, so a response that returned nothing would satisfy the\n" +
+					"contract. Name the envelope's required properties, not only the row's.")
+			}
+
 			if err := sch.Validate(renamed); err == nil {
 				t.Errorf("a body with EVERY field renamed validates against this schema.\n" +
 					"That is the exact drift that shipped an empty approvals screen, and the\n" +

@@ -173,11 +173,19 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"GET /api/v1/admin/security-posture": {Response: object(map[string]any{"environment": str(), "encryption_key_configured": boolean(), "plaintext_secrets_allowed": boolean(), "private_endpoints_ceiling": boolean(), "signup_open": boolean(), "oauth_configured": boolean(), "email_configured": boolean(), "rate_limit_disabled": boolean(), "rate_limit_effectively_disabled": boolean(), "warnings": array(object(map[string]any{"key": str(), "severity": str(), "message": str()}, "key", "severity", "message"))},
 			"environment", "encryption_key_configured", "plaintext_secrets_allowed", "private_endpoints_ceiling", "signup_open",
 			"oauth_configured", "email_configured", "rate_limit_disabled", "rate_limit_effectively_disabled", "warnings")},
-		"GET /api/v1/admin/log-level":                              {Response: object(map[string]any{"level": str(), "baseline": str(), "expires_at": nullable(str())})},
-		"PUT /api/v1/admin/log-level":                              {Request: object(map[string]any{"level": str(), "ttl_seconds": integer()})},
-		"GET /api/v1/admin/rate-limits":                            {Response: object(map[string]any{"limiters": array(anyObject())})},
-		"PUT /api/v1/admin/rate-limits/{key}":                      {Request: object(map[string]any{"value": integer()})},
-		"GET /api/v1/approvals":                                    {Response: object(map[string]any{"rows": array(approval), "status": str(), "count": integer(), "has_more": map[string]any{"type": "boolean"}})},
+		"GET /api/v1/admin/log-level":         {Response: object(map[string]any{"level": str(), "baseline": str(), "expires_at": nullable(str())})},
+		"PUT /api/v1/admin/log-level":         {Request: object(map[string]any{"level": str(), "ttl_seconds": integer()})},
+		"GET /api/v1/admin/rate-limits":       {Response: object(map[string]any{"limiters": array(anyObject())})},
+		"PUT /api/v1/admin/rate-limits/{key}": {Request: object(map[string]any{"value": integer()})},
+		"GET /api/v1/approvals": {Response: object(map[string]any{"rows": array(approval), "status": str(), "count": integer(), "has_more": map[string]any{"type": "boolean"}},
+			// The ENVELOPE needs its own required list, not just the row. Without
+			// it `{}` validates: an empty object is a valid instance of a schema
+			// whose every property is optional, so a handler that returned
+			// nothing at all would satisfy the contract. ApprovalsHandler.List
+			// writes this envelope as a map literal, so there is no struct to
+			// derive it from — see the DTO note in
+			// docs/prd/response-shape-contract.md.
+			"rows", "status", "count", "has_more")},
 		"GET /api/v1/approvals/{id}":                               {Response: approval},
 		"POST /api/v1/approvals/{id}/decide":                       {Request: object(map[string]any{"status": str(), "comment": str()}), Response: object(map[string]any{"status": str(), "decided_by": str()})},
 		"POST /api/v1/approvals/{id}/cancel":                       {Request: object(map[string]any{"reason": str()}), Response: object(map[string]any{"status": str(), "cancelled_by": str()})},

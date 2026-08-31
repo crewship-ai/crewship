@@ -28763,6 +28763,12 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "rows",
+                    "status",
+                    "count",
+                    "has_more"
+                  ],
                   "type": "object"
                 }
               }
