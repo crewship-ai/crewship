@@ -13,6 +13,16 @@ A saved view is a named bundle of issue filters and sort preferences a user want
 Implementation: `internal/api/saved_view_handler.go`. Backed by the `saved_views` table.
 
 <Note>
+  **Two surfaces share this table.** The issue tracker and the
+  [Crew Journal](/guides/crew-journal#saved-views) both store their bookmarks
+  here, and `List` returns every view in the workspace, so each client filters
+  the list by a `surface` key inside its own `filters_json`. Do **not** reach
+  for `view_type` as the discriminator: the column is
+  `CHECK (view_type IN ('board','list'))`, so a third value fails the insert
+  with a 500 rather than creating a new category.
+</Note>
+
+<Note>
   All endpoints require an authenticated session and workspace context.
 </Note>
 
