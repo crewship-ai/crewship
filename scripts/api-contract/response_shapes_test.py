@@ -11,16 +11,18 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).parent))
 import response_shapes  # noqa: E402
 from response_shapes import (  # noqa: E402
-    ROUTES, NotA200, _RefuseRedirects, check, checked_base, denullable, fetch,
-    response_schema,
+    ROUTES, NotA200, NotJSON, _RefuseRedirects, check, checked_base, denullable,
+    fetch, fetch_spec, response_schema,
 )
 
 
 class _FakeResponse:
     """Enough of an http.client.HTTPResponse for `fetch` to read."""
 
-    def __init__(self, status, payload=b'{"rows": []}'):
+    def __init__(self, status, payload=b'{"rows": []}',
+                 content_type="application/json"):
         self.status = status
+        self.headers = {"Content-Type": content_type} if content_type else {}
         self._payload = io.BytesIO(payload)
 
     def __enter__(self):
@@ -172,6 +174,38 @@ class StatusCodeTest(unittest.TestCase):
                                return_value=_FakeResponse(204, b"")):
             with self.assertRaises(NotA200):
                 fetch("http://localhost:8082", "/api/v1/approvals", "tok", "ws-1")
+
+    def test_the_spec_itself_must_also_be_a_200(self):
+        # The symmetric hole. Requiring 200 of the 17 data routes while
+        # accepting any 2xx for /openapi.json holds the routes to a rule the
+        # DOCUMENT THEY ARE ALL JUDGED AGAINST does not have to meet — the same
+        # defect one level up, where it is worth more.
+        with mock.patch.object(response_shapes._opener, "open",
+                               return_value=_FakeResponse(201, b'{"paths": {}}')):
+            with self.assertRaises(NotA200):
+                fetch_spec("http://localhost:8082")
+
+    def test_a_json_body_under_the_wrong_media_type_is_not_json(self):
+        # `response_schema` reads the schema out of the "application/json" entry
+        # of the documented 200. A text/plain body that happens to parse is
+        # still not the response that schema describes, so grading it against
+        # that schema is comparing against a contract the server did not claim.
+        with mock.patch.object(response_shapes._opener, "open",
+                               return_value=_FakeResponse(200, content_type="text/plain")):
+            with self.assertRaises(NotJSON):
+                fetch("http://localhost:8082", "/api/v1/approvals", "tok", "ws-1")
+
+    def test_a_charset_parameter_is_still_application_json(self):
+        # RFC 9110 media types carry parameters. Rejecting
+        # "application/json; charset=utf-8" would fail every server that spells
+        # it out, which is a checker that cries wolf — the failure mode the PRD
+        # warns about for the whole gate family.
+        with mock.patch.object(
+                response_shapes._opener, "open",
+                return_value=_FakeResponse(200, content_type="application/json; charset=utf-8")):
+            self.assertEqual(
+                fetch("http://localhost:8082", "/api/v1/approvals", "tok", "ws-1"),
+                {"rows": []})
 
     def test_a_200_is_read_normally(self):
         with mock.patch.object(response_shapes._opener, "open",

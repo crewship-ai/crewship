@@ -248,10 +248,16 @@ It fetches `/openapi.json` from the target — not the file in the repo — so i
 measures what that instance actually serves. Read-only GETs only, mirroring
 `run.sh`'s method deny-list.
 
-Only a real `200` counts. urllib raises on 4xx/5xx and redirects are refused,
-which leaves the rest of the 2xx band — and a `201` or `206` read as a body
-would have been graded against the schema documented for `200`, a contract
-never written for it.
+Only a real `200 application/json` counts, and that rule covers `/openapi.json`
+as well as the 17 routes. The schema is read out of the `application/json`
+entry of the documented **200**, so both halves have to hold before a body may
+be compared against it: urllib raises on 4xx/5xx and redirects are refused,
+which leaves the rest of the 2xx band (a `201` read as if it were the 200, a
+`204` surfacing as a decode error that reads like a broken server) and a
+`text/plain` body that happens to parse. Media-type parameters are fine —
+`application/json; charset=utf-8` is application/json, and rejecting it would
+fail every server that spells the charset out. The spec is held to the same
+rule because a wrong `/openapi.json` mis-grades every route at once.
 
 **Exit 0 means every declared route passed — not "nothing failed".** The two
 differ in exactly one case, and it is the case that matters: a run in which

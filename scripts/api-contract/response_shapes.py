@@ -107,13 +107,57 @@ def checked_base(base):
 
 
 def fetch_spec(base):
-    """The document the target instance actually serves, not the file in the repo."""
+    """The document the target instance actually serves, not the file in the repo.
+
+    Held to the same 200-and-JSON rule as the routes. Holding the 17 routes to a
+    rule the document they are ALL judged against does not have to meet is the
+    same defect one level up, where it is worth more: a wrong openapi.json
+    mis-grades every route at once.
+    """
     with _opener.open(f"{base}/openapi.json", timeout=20) as r:
-        return denullable(json.load(r))
+        return denullable(read_json_200(r, "openapi.json"))
 
 
-class NotA200(Exception):
+class Unjudgeable(Exception):
+    """A response there is no documented schema to judge, so it is not a pass."""
+
+
+class NotA200(Unjudgeable):
     """A 2xx that is not 200, which this checker has no schema to judge."""
+
+
+class NotJSON(Unjudgeable):
+    """A body whose media type is not the one the 200 schema was written for."""
+
+
+def read_json_200(response, what):
+    """Read a body only when it is the response the documented 200 describes.
+
+    `response_schema` pulls the schema out of the `application/json` entry of
+    the documented **200** and nothing else, so both halves of that — the status
+    AND the media type — have to hold before the body may be compared against
+    it. Otherwise the checker grades a response against a contract the server
+    never claimed for it and calls that a pass, which is the defect this whole
+    branch exists to remove.
+
+    urllib raises on 4xx/5xx and redirects are refused, so what this actually
+    catches is the rest of the 2xx band and a wrong Content-Type: a 201 or 206
+    read as if it were the 200, a 204 that would otherwise surface as a JSON
+    decode error reading like a broken server, and a text/plain body that
+    happens to parse.
+
+    Media-type PARAMETERS are fine — `application/json; charset=utf-8` is
+    application/json. Rejecting it would fail every server that spells the
+    charset out, and a gate that cries wolf gets switched off, which
+    docs/prd/response-shape-contract.md gives as the reason #1815 is already in
+    that position.
+    """
+    if response.status != 200:
+        raise NotA200(f"{what}: HTTP {response.status}, and only 200 has a documented schema")
+    media = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+    if media != "application/json":
+        raise NotJSON(f"{what}: Content-Type {media or '(absent)'}, not application/json")
+    return json.load(response)
 
 
 def fetch(base, path, token, workspace):
@@ -123,18 +167,7 @@ def fetch(base, path, token, workspace):
         headers={"Authorization": f"Bearer {token}", "X-Workspace-ID": workspace},
     )
     with _opener.open(req, timeout=20) as r:
-        # `check` validates against the schema documented for 200 and nothing
-        # else, so the status has to BE 200 or the comparison is against a
-        # contract never written for this response. urllib raises on 4xx/5xx
-        # and redirects are refused above, which leaves the rest of the 2xx
-        # band: a 201 or a 206 would have been read as a body and graded
-        # against the wrong schema, and a 204 would have surfaced as a JSON
-        # decode error that reads like a broken server. Comparing a response
-        # against the wrong contract and calling it a pass is the defect this
-        # whole branch exists to remove.
-        if r.status != 200:
-            raise NotA200(f"HTTP {r.status}, and only 200 has a documented schema")
-        return json.load(r)
+        return read_json_200(r, path)
 
 
 # Read-only GETs only, mirroring run.sh's method deny-list: this check must
