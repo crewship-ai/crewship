@@ -403,6 +403,12 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Hub is what lets an ephemeral-hire decision (issue #1209) push the
 	// agent status flip to open dashboards without a poll.
 	ah.SetHub(r.hub)
+	// Both handlers strconv.Atoi these and reject anything that is not a
+	// non-negative int, so `type: string` published a contract the server does
+	// not honour — a generated client would happily offer `offset=next`. Same
+	// annotation the chains route above carries, and it has to sit in the
+	// comment run IMMEDIATELY above the registration or it is ignored.
+	// openapi: query limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/approvals", authed(wsCtx(http.HandlerFunc(ah.List))))
 	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
 	r.authedMut("POST", "/api/v1/approvals/{id}/decide", roleManage, ah.Decide)
@@ -415,6 +421,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// through to this table so the bell + /inbox page render from
 	// one query instead of fanning out to four.
 	ih := NewInboxHandler(r.db, r.logger, r.hub)
+	// openapi: query limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
 	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
 	r.mux.Handle("GET /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.Get))))

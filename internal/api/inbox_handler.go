@@ -100,7 +100,16 @@ type inboxItemResponse struct {
 	// was pruned without offering it on a live decision, where the PATCH is
 	// refused and the button would just fail. Absent on list rows — the answer
 	// costs a query per row and only the open row needs it.
-	SourceMissing bool   `json:"source_missing,omitempty"`
+	//
+	// A POINTER, and that is the whole point of the field. As a plain bool with
+	// omitempty the false arm was unsendable: "we checked, the gate is live"
+	// and "this endpoint never ran the probe" were the same empty space on the
+	// wire, and the latter is what every list row is. A client could act on
+	// true and could not distinguish the other two, so it could only ever treat
+	// a live gate as unverified. Same rule the keeper evidence block follows
+	// one file over — a present fact reporting none, never a missing field the
+	// reader can mistake for "not checked".
+	SourceMissing *bool  `json:"source_missing,omitempty"`
 	Title         string `json:"title"`
 	BodyMD        string `json:"body_md,omitempty"`
 	SenderType    string `json:"sender_type,omitempty"`
@@ -394,9 +403,11 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// the answer the server will give cannot disagree.
 	switch batch[0].Kind {
 	case "waitpoint":
-		batch[0].SourceMissing = !waitpointHasBackingRow(r.Context(), h.db, workspaceID, batch[0].SourceID)
+		missing := !waitpointHasBackingRow(r.Context(), h.db, workspaceID, batch[0].SourceID)
+		batch[0].SourceMissing = &missing
 	case "escalation":
-		batch[0].SourceMissing = !escalationHasBackingRow(r.Context(), h.db, batch[0].SourceID)
+		missing := !escalationHasBackingRow(r.Context(), h.db, batch[0].SourceID)
+		batch[0].SourceMissing = &missing
 	}
 	writeJSON(w, http.StatusOK, batch[0])
 }
