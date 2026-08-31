@@ -162,6 +162,24 @@ describe("LogsList row identity", () => {
     expect(within(row).getByRole("img", { name: /Backend/ })).toBeInTheDocument()
   })
 
+  it("keeps the crew badge's <div> out of a <span>", () => {
+    // CrewBadge returns a div once the crew has an icon (CrewIcon is a
+    // div). A div is flow content and cannot legally sit inside a span:
+    // the HTML parser closes the span and reparents the div, which lifts
+    // the badge out of the 38px identity column it was placed in. React
+    // builds the tree with createElement, so the invalid nesting survives
+    // into the DOM here and is assertable.
+    const { getAllByTestId } = renderList([
+      entry({ agent_id: "agt_morgan", crew_id: "crw_backend" }),
+    ])
+    const row = getAllByTestId("virtuoso-row")[0]
+    const badge = within(row).getByRole("img", { name: /Backend/ })
+    expect(badge.tagName.toLowerCase()).toBe("div")
+    expect(badge.closest("span")).toBeNull()
+    // Nothing else in the row smuggles flow content into phrasing content.
+    expect(row.querySelector("span div")).toBeNull()
+  })
+
   it("renders the entry-type icon and the full dotted entry_type", () => {
     const { getAllByTestId } = renderList([entry({ entry_type: "exec.command" })])
     const row = getAllByTestId("virtuoso-row")[0]

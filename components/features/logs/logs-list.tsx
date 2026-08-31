@@ -63,7 +63,9 @@ import { shortenId } from "./ids"
  * detail. Buying the tail would cost the summary another ~90px, which
  * is not a trade this row can afford.
  */
-const ROW_GRID = "3px 84px 38px 124px minmax(0,1fr) 62px 14px"
+// A static class, not an inline `gridTemplateColumns`: the template is
+// one fixed value, so Tailwind can see it at build time.
+const ROW_GRID = "grid-cols-[3px_84px_38px_124px_minmax(0,1fr)_62px_14px]"
 
 /**
  * Glyph stand-ins for the actors that have no avatar because they are
@@ -336,9 +338,9 @@ const LogRow = memo(function LogRow({
       onClick={toggle}
       className={cn(
         "group grid gap-2 px-2 py-[3px] items-start cursor-pointer text-[12px] leading-[18px] border-b border-border/30 hover:bg-accent/20",
+        ROW_GRID,
         expanded && "bg-primary/5",
       )}
-      style={{ gridTemplateColumns: ROW_GRID }}
     >
       {/* The bar is the only severity signal on screen; the sr-only
           child is the only one a screen reader gets. `sr-only` is
@@ -352,10 +354,21 @@ const LogRow = memo(function LogRow({
       >
         {tsLabel}
       </time>
-      <span className="flex items-center gap-1">
+      {/* A div, not a span: CrewBadge renders a div once the crew has an
+          icon, and a div inside a span is invalid — the parser closes the
+          span and reparents the div out of this 38px column. */}
+      <div className="flex items-center gap-1">
         <ActorAvatar agent={agent} agentId={entry.agent_id} actorType={entry.actor_type} />
         <CrewBadge crew={crew} />
-      </span>
+      </div>
+      {/* The group colour stays an inline style on purpose. It is
+          category data, not theme (BRIEF-COLOR-TOKENS-2026 §2), so it has
+          no semantic token; the equivalent static classes would be raw
+          palette classes (`text-emerald-400`, …), which eslint.config.mjs
+          bans in components/**. GROUP_COLOR is also the single source for
+          the same 18 colours in the chips row, stats rail and histogram
+          legend, where they are consumed as a background value — a
+          parallel class map would be a second copy to keep in sync. */}
       <span className="flex items-center gap-1 min-w-0" title={entry.entry_type}>
         <TypeIcon className="h-3 w-3 shrink-0" style={{ color: GROUP_COLOR[grp] }} />
         {/* Group membership is otherwise carried by colour alone. */}
