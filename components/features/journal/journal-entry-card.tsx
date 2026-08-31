@@ -192,10 +192,6 @@ function ExecCommandDetail({ entry }: { entry: JournalEntry }) {
   // empty would suppress `cmd` and leave the line blank again — the exact
   // symptom this fallback exists to fix. Take `command` only when it actually
   // carries something.
-  // `??` falls through on null/undefined only, so a `command` present but
-  // empty would suppress `cmd` and leave the line blank again — the exact
-  // symptom this fallback exists to fix. Take `command` only when it actually
-  // carries something.
   const named = entry.payload?.command
   const raw = typeof named === "string" && named.trim() !== "" ? named : entry.payload?.cmd
   const cmd =
