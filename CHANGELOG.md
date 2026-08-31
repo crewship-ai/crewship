@@ -501,6 +501,37 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Journal search said "no entries match" over a result set that was not
+  empty (#2206).** Three defects in the same search box, each producing a
+  false empty answer. Free-text search wrapped the whole input in one FTS5
+  phrase literal, so it was an ordered phrase rather than a set of terms:
+  on a live instance `morgan session` found 56 rows, `session morgan` found
+  0, and `morg` found 0 against a corpus where `morgan` occurs 1,140 times.
+  Terms are now quoted individually and `AND`-ed, with a prefix `*` on the
+  last one — word order stops mattering (`session morgan` → 119, same as
+  `morgan session`) and a half-typed word still matches (`morg` → 1,140).
+  Quoting every term preserves the operator neutralisation the phrase form
+  bought: `AND`, `OR`, `NOT`, `NEAR(...)`, `*`, `summary:x` and stray quotes
+  stay literal search text and can neither restructure the query nor error
+  it out.
+
+  `agent:` and `crew:` in the search box — and `crewship journal --agent` —
+  bound their value straight into a SQL equality on the id column, so the
+  box's own placeholder example (`agent:viktor`) and `--agent morgan`
+  returned zero. Both parameters now accept an id, a slug or a display name,
+  resolved inside the caller's workspace by the API, so the UI, the CLI and
+  direct API callers all get it. A reference that resolves to nothing is
+  still matched against the id column, so a deleted agent's id keeps
+  reaching its history and a typo stays unmatchable rather than widening to
+  the whole workspace; an ambiguous display name matches every hit.
+
+  The timeline's client-side matcher also re-applied the tokens the server
+  had already bound, filtering the server's own rows back out (`agent:`
+  reads the entry's `agent_id`, which is a UUID, against the name the user
+  typed). It now narrows only on what the backend could not bind, and its
+  free-text matching reaches the payload, which the server's index has
+  always covered.
+
 - **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
   server refused it (#2195).** The standalone `kind: Agent` validator kept
   `COORDINATOR` in `validAgentRoles`, so a manifest carrying that role passed
