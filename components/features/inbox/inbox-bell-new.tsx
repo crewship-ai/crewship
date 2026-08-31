@@ -17,10 +17,11 @@ import {
 import { Pill } from "@/components/ui/detail"
 
 import type { InboxItem } from "@/hooks/use-inbox"
+import { isActionableInboxItem } from "@/components/features/inbox-v2/inbox-v2-derive"
 
 import { ActorAvatar } from "./inbox-actor"
 import {
-  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, remainingLabel, since, subjectOf,
+  canRole, categoryOf, decisionMetaFor, expiresIn, remainingLabel, since, subjectOf,
   type WorkspaceRole,
 } from "./inbox-derive"
 
@@ -78,8 +79,8 @@ export function InboxBellView({ items, role, onOpenItem, onOpenInbox, onMarkAllR
     //
     // Blocking rows stay in scope even once read: being looked at is not being
     // answered, and the agent is parked either way.
-    const blocking = items.filter((i) => bucketOf(i) === "decisions")
-    const rest = items.filter((i) => bucketOf(i) !== "decisions" && i.state === "unread")
+    const blocking = items.filter(isActionableInboxItem)
+    const rest = items.filter((i) => !isActionableInboxItem(i) && i.state === "unread")
 
     const byUrgency = [...blocking].sort((a, b) => {
       const ea = expiresIn(a)

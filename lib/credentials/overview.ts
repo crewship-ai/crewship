@@ -172,7 +172,7 @@ export function attentionQueue(
         provider: c.provider,
         reason,
         tone,
-        ...(kind === "pending" ? { href: "/inbox" } : {}),
+        ...(kind === "pending" ? { href: "/inbox-v2" } : {}),
       },
     })
   }

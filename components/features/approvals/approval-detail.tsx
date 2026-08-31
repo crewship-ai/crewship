@@ -23,6 +23,7 @@ interface ApprovalDetailProps {
   row: ApprovalRow | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  workspaceId?: string | null
   /** Fired after a successful decide — parent does optimistic patching. */
   onDecided: (id: string, status: "approved" | "denied", comment: string) => void
 }
@@ -31,7 +32,7 @@ interface ApprovalDetailProps {
  * Right-side sheet with full approval detail — payload JSON, linked agent /
  * crew / mission, approve / deny form. Parent handles optimistic UI.
  */
-export function ApprovalDetail({ row, open, onOpenChange, onDecided }: ApprovalDetailProps) {
+export function ApprovalDetail({ row, open, onOpenChange, onDecided, workspaceId }: ApprovalDetailProps) {
   const [comment, setComment] = useState("")
   const [submitting, setSubmitting] = useState<null | "approved" | "denied">(null)
 
@@ -45,7 +46,7 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided }: ApprovalD
     if (!row) return
     setSubmitting(status)
     try {
-      await decideApproval(row.id, status, comment)
+      await decideApproval(row.id, status, comment, workspaceId)
       onDecided(row.id, status, comment)
       toast.success(`Approval ${status}`)
       setComment("")
@@ -131,12 +132,12 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided }: ApprovalD
                 </section>
               )}
 
-              {row.status !== "pending" && row.comment && (
+              {row.status !== "pending" && row.decision_comment && (
                 <section>
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 font-semibold mb-1">
                     Decision comment
                   </div>
-                  <p className="text-sm text-foreground/90 whitespace-pre-wrap">{row.comment}</p>
+                  <p className="text-sm text-foreground/90 whitespace-pre-wrap">{row.decision_comment}</p>
                   {row.decided_by && (
                     <p className="mt-1 text-[11px] text-muted-foreground">
                       by <span className="font-mono">{row.decided_by}</span>

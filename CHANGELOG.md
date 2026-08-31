@@ -31,6 +31,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **`crewship admin seed-inbox` fills the inbox with one row of every kind.**
+  The inbox has no create endpoint — every row is written by a producer, so a
+  fresh workspace shows an empty inbox and there is no way to see how the
+  views, facets and reading pane behave against real variety. Reviewing the
+  surface against two rows is guesswork. Rows go in through `inbox.Insert` and
+  `harbormaster.Enqueue`, the same writers the real producers use, so what
+  lands is shaped like production data rather than hand-built SQL that agrees
+  with whatever the UI expects. Host-side like the rest of `admin`, behind the
+  same `--local` gate, and everything it writes carries a `seed_` source id so
+  `--clear` removes exactly what it added and nothing else.
+  `TestSeedInboxRows_CoverEveryInboxKind` fails when a kind is added to
+  `inbox.AllKinds` without a seed row — otherwise the next person reviewing
+  the inbox never sees that kind and concludes it works.
+
 - **The dashboard leads with what needs a human (#2185).** The landing page
   was a wall of tiles that answered "what exists" before "what is stuck". It
   now opens with a "Needs your attention" strip — approvals waiting, failed
@@ -316,6 +330,38 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **The inbox column is the shared explorer now, and its filters are
+  answerable.** `/inbox-v2` had a 190 px rail holding three nav rows and a
+  permanent "all sources connected" block, plus three raw `<select>`s. Two of
+  those three could not be honoured: "type" filtered on which of the three
+  fetches a row arrived in — a client-only field, with an invented "grouped
+  incidents" member — and "subject" was harvested from whatever rows happened
+  to be loaded, meaning three different things at once (sender for inbox rows,
+  a raw user id for approvals, agent name for missions). "Priority" is a real
+  column for inbox rows only; `approvalEntry` and `missionEntries` synthesise
+  it for the other two. None of the three reached the server, so a filter
+  could never find a row that had not already been downloaded.
+
+  The column is rebuilt on `components/layout/sidebar-kit` — the same
+  explorer Routines, Issues, Crews and Pages use, and the same one the OLD
+  `/inbox` was already built on before v2 hand-rolled its own chrome. The
+  three views are a `SidebarSection` of `SidebarRow`s with counts, the way
+  Routines carries its status buckets; the filter is the kit's
+  `SidebarFilterPopover`, which — unlike the dropdown Routines hand-rolls —
+  stays open when a facet is picked, so two facets can be combined in one
+  visit. Active facets come back as removable `SidebarActiveChip`s. The
+  column collapses to `w-9` like the others, and is full-width on a phone,
+  where a fixed column left a dead strip beside it.
+
+  The facets are type (the seven values of `inbox.AllKinds`, plus "approval
+  gate" and "mission signal" named for what they are rather than for the
+  endpoint that answered), deadline (from the real `timeout_at`, and a
+  deadline further out than today answers to neither bucket rather than being
+  folded into "today"), and unread. Subject and priority are not offered:
+  a filter has to be answerable. Counts are exact because the feed is fully
+  loaded — a comment on `facetCounts` says so, and says they must move to a
+  server-side GROUP BY the day it is not.
+
 - **`/design` is gone; its audit is now a tracked document (#2165).** The
   create-surface unification proposal shipped as a page inside the product —
   no data, no API, no CLI command — and its own header said to delete it once
@@ -500,6 +546,68 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+
+- **The approvals API answered in a shape no browser could read.**
+  `harbormaster.Request` carried no JSON tags and was serialized straight onto
+  the wire, so `GET /api/v1/approvals` returned `"ID"`, `"Kind"`, `"Status"`,
+  `"CreatedAt"` — while `lib/types/approvals.ts` and the generated OpenAPI spec
+  both declared snake_case. Every non-empty response failed `safeParse`, so
+  `/approvals` and the inbox's approval feed rendered zero rows behind
+  "Malformed response from /api/v1/approvals". Only the Go CLI worked, because
+  `encoding/json` matches field names case-insensitively on decode — which is
+  also why every Go test passed: they all decoded into structs. The struct now
+  carries snake_case tags, `DecisionComment` serializes as `decision_comment`
+  (the column name, and what the OpenAPI schema already documented), and
+  `TimeoutSecs` — documented as in-memory-only, but leaking to clients as a
+  constant `0` — is `json:"-"`. `TestApprovals_WireShape_IsSnakeCase` asserts
+  the emitted keys rather than what a Go decoder can recover from them.
+  `docs/api-reference/approvals.mdx`, which had documented the PascalCase
+  shape as a known quirk, is updated with it.
+
+- **Four inbox rows advertised a decision they could not take.** Each was a
+  button that called an endpoint the row could never satisfy:
+
+  *Autonomy-gate holds.* `writeAutonomyHold` writes a `kind=waitpoint` row
+  whose `source_id` is a crew, agent or mission id — never a
+  `pipeline_waitpoints` token — so the generic Approve/Deny resolved to
+  `/pipelines/waitpoints/{crew_id}/approve` and 404'd every time. The decision
+  lives in the approvals queue and the row already carries `approval_id` in
+  its payload; it is decided there now. (The inbox's cross-source dedupe
+  suppresses the approvals row this one projects, so until this fix the only
+  working surface was hidden and the broken one was what remained.)
+
+  *A decision whose source is gone.* A waitpoint whose run was pruned, a hire
+  already swept, an escalation whose `escalations` row was deleted: the source
+  endpoint 404s and the inbox PATCH answered 409 "use the source endpoint", so
+  the row could never leave Needs action and never reached History. The PATCH
+  guard now makes the same exception for waitpoints it already made for
+  source-less escalations, and `BulkPatchState` uses the same predicate rather
+  than the escalation-only one it had drifted to.
+
+  *The Archive button that knew nothing.* The client guessed whether a source
+  still existed by looking at the payload — wrong in both directions. The
+  detail read now answers it (`source_missing`), using the same probe the
+  PATCH guard uses, so a live decision still offers no Archive and an orphaned
+  one does.
+
+  *Retry on a failed run.* It read `payload.pipeline_slug`, which the producer
+  never writes, and fell back to `sender_name` — the SCHEDULE's name — posting
+  `/pipelines/{schedule name}/run`. The `!slug` guard never fired because
+  `sender_name` is always set, so the user got a red toast and the row stayed.
+  Retry now needs a real slug, and a Retry that cannot run no longer resolves
+  the row as "cancelled" behind the user's back.
+
+- **History stopped calling archived noise a decision record.** One click on
+  the grouped advisory card's "Archive 6 updates" put six curator advisories
+  into History under a heading that read "Decision records" — telling the
+  reader six decisions had been made when none had. History now splits into
+  Decisions and Archived. Archiving is not deciding; the PRD says History
+  holds both, not that they are the same thing.
+
+  `scripts`-free cross-check, driving the CLI against the same server the
+  browser reads: for each kind, `crewship inbox list --kind <k> --all` must
+  agree with the facet, the kinds must sum to the unfiltered total, and the
+  facet vocabulary must not have drifted from `inbox.AllKinds`.
 
 - **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
   server refused it (#2195).** The standalone `kind: Agent` validator kept
