@@ -540,8 +540,18 @@ func TestExecCommandEmit_DoesNotJournalPromptText(t *testing.T) {
 				if n, _ := ref["system_chars"].(int); n <= 0 {
 					t.Errorf("prompt.system_chars = %v, want the omitted prompt's length", ref["system_chars"])
 				}
-				if n, _ := ref["user_chars"].(int); n != len([]rune(execCmdUserMessageMarker)) {
-					t.Errorf("prompt.user_chars = %v, want %d", ref["user_chars"], len([]rune(execCmdUserMessageMarker)))
+				// user_turn_chars, not user_chars: by the time the argv is
+				// built, req.UserMessage is the composed turn (the human's
+				// message plus the conversation history, recall and nudge
+				// blocks prependSessionContext folded in). Naming it
+				// user_chars invited it to be read as the length of what the
+				// human typed, which is the sibling chat.user_message row.
+				if n, _ := ref["user_turn_chars"].(int); n < len([]rune(execCmdUserMessageMarker)) {
+					t.Errorf("prompt.user_turn_chars = %v, want at least the message's own %d",
+						ref["user_turn_chars"], len([]rune(execCmdUserMessageMarker)))
+				}
+				if _, present := ref["user_chars"]; present {
+					t.Error("prompt.user_chars must not exist — it read as the human's message length when it is the composed turn's")
 				}
 				// A hash of user-typed text is NOT recorded: for a short,
 				// low-entropy message a digest is a verifier for the very
@@ -610,6 +620,64 @@ func TestExecCommandEmit_ArgvIsCapped(t *testing.T) {
 			if n := len([]rune(v)); n > wantExecCmdFieldMaxChars+1 {
 				t.Errorf("exec.command payload %q is %d chars, want it capped at %d", key, n, wantExecCmdFieldMaxChars)
 			}
+		}
+	}
+}
+
+// TestCapArgv_HonoursItsTotalBudget pins the bound the payload doc publishes.
+// capArgv charged only the per-element limit against the budget while appending
+// a "…[truncated, N chars]" suffix it never accounted for, so enough oversized
+// elements walked the total past the number the guard and the docs both quote.
+func TestCapArgv_HonoursItsTotalBudget(t *testing.T) {
+	t.Parallel()
+
+	argv := make([]string, 16)
+	for i := range argv {
+		argv[i] = strings.Repeat("x", 900)
+	}
+	got, truncated := capArgv(argv)
+	if !truncated {
+		t.Fatal("capArgv reported no truncation for an argv far over the budget")
+	}
+	if n := len([]rune(strings.Join(got, ""))); n > wantExecCmdArgvMaxChars {
+		t.Errorf("capArgv produced %d chars, over its own %d budget", n, wantExecCmdArgvMaxChars)
+	}
+}
+
+// TestExecCommandEmit_ShortMessageDoesNotEatTheBinary covers the other side of
+// prompt removal. Exact matching is honoured at any length so a short message
+// delivered as its own argv element is still removed — but argv[0] is the
+// binary, never prompt text, and a chat message of "claude" replacing it left
+// the terminal block with no command name at all.
+func TestExecCommandEmit_ShortMessageDoesNotEatTheBinary(t *testing.T) {
+	t.Parallel()
+
+	j := &covJournal{}
+	o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+	o.SetJournal(j)
+
+	req := covRunReq()
+	req.UserMessage = "claude"
+
+	if err := o.RunAgent(context.Background(), req, nil); err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+
+	entries := j.byType("exec.command")
+	if len(entries) == 0 {
+		t.Fatal("no exec.command entries emitted")
+	}
+	for _, e := range entries {
+		argv := execCmdEntryArgv(t, e)
+		if len(argv) == 0 {
+			t.Fatal("empty argv in payload")
+		}
+		if argv[0] != "claude" {
+			t.Errorf("argv[0] = %q, want the binary name — argv[0] is never prompt text", argv[0])
+		}
+		// The message itself must still be gone.
+		if strings.Contains(strings.Join(argv[1:], " "), "-- claude") {
+			t.Errorf("the user message survived as a positional argument: %v", argv)
 		}
 	}
 }
