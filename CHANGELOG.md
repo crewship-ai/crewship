@@ -501,6 +501,26 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The `exec.command` journal entry wrote the CLI argv unscrubbed (#2205).**
+  All three emit sites recorded `BuildCLICommand`'s argv verbatim, so every
+  entry carried the full `--system-prompt` (41,011 chars of internal
+  operational scaffold naming the sidecar endpoints, the expose-port token
+  mechanics and the `/secrets/{slug}/` mount layout) plus the verbatim user
+  message — 43 KB per entry on average. The Timeline tab is not admin-gated,
+  so any member could expand the row, and Export writes every loaded payload
+  to a file in one click.
+
+  The sibling `exec.output_chunk` emit 180 lines away already scrubbed, under
+  a comment stating the reason: the journal is hash-chained and append-only,
+  so whatever lands in a payload can never be redacted afterwards, and the
+  GDPR erasure cascade deliberately skips `journal_entries`. The argv needed
+  it at least as much, because it carries text a *human* typed — a token
+  pasted into agent chat had nothing between it and permanent storage. Every
+  argv element now goes through the run's own credential scrubber before the
+  entry is written, and two guard tests (one behavioural over all three emit
+  paths, one static over the emit sites themselves) fail if a future site
+  writes the raw argv.
+
 - **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
   server refused it (#2195).** The standalone `kind: Agent` validator kept
   `COORDINATOR` in `validAgentRoles`, so a manifest carrying that role passed
