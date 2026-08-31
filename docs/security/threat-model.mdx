@@ -122,8 +122,14 @@ filesystem and credential scope — not by the network.
 ### Egress: what is enforced, and what only looks enforced
 
 The sidecar's domain allowlist binds clients that honour `HTTP_PROXY`. It is a
-guardrail for cooperating tools, not containment, and `network_mode` defaults
-to `free` (no restriction) for every crew.
+guardrail for cooperating tools, not containment: a process that ignores the
+proxy env vars or opens a raw socket leaves unchecked.
+
+The *policy* default is right — `DefaultCrewNetworkMode` is `restricted`, and
+migration v148 (#1366) both backfilled every grandfathered `free` row and
+rewrote the column DEFAULT, so a crew is restricted by construction whichever
+path creates it. `free` is an explicit opt-out. What is missing is not the
+default; it is enforcement below the cooperating-client layer.
 
 The repository does ship a real L3 control — `docker/crewship-sandbox/init-firewall.sh`
 sets a default `OUTPUT DROP` policy and explicitly refuses to ipset-allow

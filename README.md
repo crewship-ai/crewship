@@ -368,10 +368,10 @@ What the crew boundary does and does not give you today:
 
 | | |
 |---|---|
-| Crew ↔ host | Container isolation, `CapDrop: ALL`, no-new-privileges, read-only root, no Docker socket |
+| Crew ↔ host | Container isolation, `CapDrop: ALL`, no-new-privileges, read-only root, no Docker socket. A crew flagged `Privileged` gives up most of this |
 | Crew ↔ crew | Separate containers, volumes and workspaces. **But every crew shares one Docker network**, so containers can reach each other by IP — the Crewship API is the intended path between crews, not an enforced one |
 | Agent ↔ agent, same crew | **No boundary.** By design, per the rule above |
-| Crew → internet | A domain allowlist enforced by the sidecar proxy for clients that honour `HTTP_PROXY`. New crews default to `free` (no restriction); set a crew to `restricted` to apply the allowlist. There is no network-layer containment by default |
+| Crew → internet | Crews are `restricted` by default: a domain allowlist, enforced by the sidecar proxy for clients that honour `HTTP_PROXY`. It is a guardrail for cooperating tools — a process that ignores the proxy or opens a raw socket is not stopped, because there is no network-layer containment |
 
 Full detail, including what each layer does **not** cover:
 [→ Threat model](docs/security/threat-model.mdx)
