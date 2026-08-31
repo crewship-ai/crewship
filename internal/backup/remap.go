@@ -93,6 +93,35 @@ func newRemapCUID() string {
 	return string(out)
 }
 
+// virtualForeignKeys names columns that are foreign keys in INTENT but carry
+// no REFERENCES clause in the schema, so `PRAGMA foreign_key_list` — and
+// therefore RemapIDs pass 2 — never sees them.
+//
+// A missing REFERENCES clause is not a licence to leave the value alone. Pass
+// 1 regenerates the row's own primary key regardless, so a forked restore
+// INSERTs a brand-new row that still points at the SOURCE workspace: the fork
+// cannot see it, and the source's audit state silently grows a duplicate. That
+// is exactly what happened to journal_chain_checkpoints (#2226).
+//
+// Keep this list to columns whose remap is genuinely required for correctness,
+// and add the real FK in a migration when one becomes possible — this map is a
+// bridge over a schema gap, not a substitute for the schema.
+var virtualForeignKeys = map[string][]foreignKeyEdge{
+	// journal_chain_checkpoints.workspace_id (v152,
+	// migrate_consts_v152_journal_hash_chain.go) is a bare TEXT column:
+	// the table stores removed (seq, hash) JSON rather than row refs, so
+	// it was written with no FK anywhere. Its workspace_id still has to
+	// follow the fork, or the signed record of a legitimate compaction
+	// stays behind and the gap it covered reads as a malicious mid-chain
+	// delete in the new workspace.
+	//
+	// Re-pointing the column is necessary but NOT sufficient: the MAC
+	// frames the workspace id (journal.CheckpointMAC), so the row must
+	// also be re-signed. rechainForkedJournal does that, and it runs
+	// immediately after RemapIDs for that reason.
+	"journal_chain_checkpoints": {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}},
+}
+
 // foreignKeyEdge captures one FK column's destination.
 type foreignKeyEdge struct {
 	column    string // column on the source table
@@ -174,6 +203,23 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 		edges, err := introspectForeignKeys(ctx, db, table)
 		if err != nil {
 			return err
+		}
+		// Union in the columns the schema does not declare (see
+		// virtualForeignKeys), skipping any the target's schema has
+		// since grown a real REFERENCES clause for — a future
+		// migration that adds the FK must not produce a duplicate
+		// edge here.
+		for _, v := range virtualForeignKeys[table] {
+			declared := false
+			for _, e := range edges {
+				if e.column == v.column {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				edges = append(edges, v)
+			}
 		}
 		fks[table] = edges
 	}

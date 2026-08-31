@@ -57,6 +57,7 @@ Defined in `internal/journal/types.go`. Every type is a stable string -- renames
 | Observability | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics`, `container.snapshot` |
 | Presence | `agent.status_change` |
 | Checkpointing | `checkpoint.created`, `checkpoint.restored`, `fork.created` |
+| Backup | `backup.chain_resigned` — a forked restore re-signed this workspace's hash chain at a new genesis. See [Backup & restore](/guides/backup#forked-restores-re-sign-the-journal-chain). |
 | Eval | `eval.run_started`, `eval.metric`, `eval.regression_detected` |
 | Hooks | `hook.fired`, `hook.blocked` |
 | Pipeline | `pipeline.run.started/completed/failed`, `pipeline.step.started/completed/failed/validation_failed`, `pipeline.dry_run` |

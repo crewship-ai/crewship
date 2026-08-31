@@ -150,14 +150,36 @@ func TestJournalChain_SurvivesForkedRestore(t *testing.T) {
 		t.Fatalf("--as-workspace did not remap the workspace id (still %s)", workspaceID)
 	}
 
+	// The five seeded rows, plus ONE entry recording that the chain was
+	// re-signed at restore.
+	//
+	// This assertion was written as `want 5` when the reproduction was
+	// filed, before the fix's shape was chosen. It is tightened here, not
+	// relaxed: the re-sign entry is the whole reason option 1 (re-chain as
+	// a new genesis) was picked over refusing --as-workspace outright. A
+	// fork's chain no longer links back to the source, and a chain that
+	// verified clean while saying nothing about that would assert stronger
+	// provenance than the data supports. So the count is 5 restored + 1
+	// notice, and both halves are checked separately — a bare `want 6`
+	// would pass if the notice landed and a restored row did not.
 	var got int
 	if err := source.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM journal_entries WHERE workspace_id = ?`,
-		res.RestoredWorkspaceID).Scan(&got); err != nil {
+		`SELECT COUNT(*) FROM journal_entries WHERE workspace_id = ? AND entry_type != ?`,
+		res.RestoredWorkspaceID, string(journal.EntryBackupChainResigned)).Scan(&got); err != nil {
 		t.Fatalf("count restored entries: %v", err)
 	}
 	if got != 5 {
-		t.Fatalf("forked workspace has %d journal entries, want 5", got)
+		t.Fatalf("forked workspace has %d restored journal entries, want 5", got)
+	}
+	var resigned int
+	if err := source.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM journal_entries WHERE workspace_id = ? AND entry_type = ?`,
+		res.RestoredWorkspaceID, string(journal.EntryBackupChainResigned)).Scan(&resigned); err != nil {
+		t.Fatalf("count re-sign entries: %v", err)
+	}
+	if resigned != 1 {
+		t.Fatalf("forked workspace has %d %s entries, want exactly 1: a re-signed chain must say so",
+			resigned, journal.EntryBackupChainResigned)
 	}
 
 	// The original must still verify — the fork must not disturb it.

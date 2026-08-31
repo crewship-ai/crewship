@@ -212,6 +212,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "checkpoint.created",
       "checkpoint.restored",
       "fork.created",
+      "backup.chain_resigned",
       "hook.fired",
       "hook.blocked",
       "hook.dispatch_error",

@@ -465,6 +465,10 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// after its key column was dropped is not counted anywhere else.
 		"columns_dropped": result.ColumnsDropped,
 		"dropped_columns": result.DroppedColumns,
+		// A forked restore re-signs the journal chain at a new genesis;
+		// the audit row is where that fact has to be findable later.
+		"journal_entries_resigned":     result.JournalEntriesResigned,
+		"journal_checkpoints_resigned": result.JournalCheckpointsResigned,
 	})
 	if result.ColumnsDropped > 0 {
 		h.logger.Warn("backup restore dropped columns the target schema does not have",
@@ -521,6 +525,14 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// reported nothing.
 		"columns_dropped": result.ColumnsDropped,
 		"dropped_columns": result.DroppedColumns,
+		// A FORKED restore regenerates the ids the journal hash chain
+		// commits to, so it has to re-sign the chain under a new genesis
+		// (#2226). Reported because the fork's journal no longer links
+		// back to the source's history, and an operator who is not told
+		// will read a clean `verify` as provenance it does not have.
+		// Zero on a plain restore, which remaps nothing.
+		"journal_entries_resigned":     result.JournalEntriesResigned,
+		"journal_checkpoints_resigned": result.JournalCheckpointsResigned,
 	})
 }
 

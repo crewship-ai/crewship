@@ -67,6 +67,10 @@ export const JOURNAL_ENTRY_TYPES = [
   "checkpoint.created",
   "checkpoint.restored",
   "fork.created",
+  // A forked restore (--as-workspace/--as-crew) re-signed this workspace's
+  // journal hash chain and started it over at a new genesis (#2226). The row
+  // is the audit record that the chain no longer links back to the source.
+  "backup.chain_resigned",
   // Hooks
   "hook.fired",
   "hook.blocked",
@@ -251,7 +255,14 @@ export const ENTRY_TYPE_GROUPS: { label: string; types: JournalEntryType[] }[] =
   },
   {
     label: "Checkpointing",
-    types: ["checkpoint.created", "checkpoint.restored", "fork.created", "hook.fired", "hook.blocked"],
+    types: [
+      "checkpoint.created",
+      "checkpoint.restored",
+      "fork.created",
+      "backup.chain_resigned",
+      "hook.fired",
+      "hook.blocked",
+    ],
   },
 ]
 

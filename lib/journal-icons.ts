@@ -33,6 +33,7 @@ import {
   Clock,
   Database,
   DollarSign,
+  FileSignature,
   Flag,
   GitFork,
   Globe,
@@ -142,6 +143,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "checkpoint.created": Flag,
   "checkpoint.restored": RotateCcw,
   "fork.created": GitFork,
+  "backup.chain_resigned": FileSignature,
 
   // Hooks
   "hook.fired": Zap,

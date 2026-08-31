@@ -20,6 +20,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // RestoreOptions collects the parameters for RestoreBackup.
@@ -149,6 +150,18 @@ type RestoreResult struct {
 	// DroppedColumns names them — table, column, and how many rows carried
 	// it. Bounded; ColumnsDropped stays exact.
 	DroppedColumns []DroppedColumn
+	// JournalEntriesResigned / JournalCheckpointsResigned count the journal
+	// rows a FORKED restore (--as-workspace / --as-crew) had to re-sign,
+	// because RemapIDs rewrote the ids their hash chain commits to (#2226).
+	// Zero for a plain restore, which remaps nothing and leaves the chain
+	// exactly as the bundle carried it.
+	//
+	// Structured rather than log-only for the reason DroppedCrewFilesystems
+	// is: a re-signed chain attests to THIS instance and no longer links
+	// back to the source, and that is a fact the operator has to be handed
+	// at the moment it happens.
+	JournalEntriesResigned     int
+	JournalCheckpointsResigned int
 }
 
 // warnSecurityLevelClamps emits the operator-facing warning for a restore
@@ -445,10 +458,26 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// would only ever recover the new identity, which is the half we
 	// already know.
 	var bundleCrewSlugs []string
+	// journalChainResigned records what the forked-restore chain re-sign
+	// touched, so RestoreResult can report it rather than leaving the
+	// operator to discover a new genesis by reading the journal.
+	var journalChainResigned journalRechainStats
+	var checkpointSourceWorkspaces []string
 	if extracted.DBDump != nil && !opts.FilesOnly {
 		for _, r := range extracted.DBDump.Tables["crews"] {
 			slug, _ := r["slug"].(string)
 			bundleCrewSlugs = append(bundleCrewSlugs, slug)
+		}
+		// Same trick, same reason, for journal_chain_checkpoints: the
+		// row's MAC commits to the workspace_id the BUNDLE carried, and
+		// RemapIDs is about to overwrite that column in place. Without
+		// this snapshot the re-sign below could not tell a checkpoint
+		// that was validly signed on the source from one somebody
+		// forged there — and re-MACing both would hand the forgery a
+		// signature this installation vouches for (#2226).
+		for _, r := range extracted.DBDump.Tables[journalCheckpointsTable] {
+			ws, _ := r["workspace_id"].(string)
+			checkpointSourceWorkspaces = append(checkpointSourceWorkspaces, ws)
 		}
 		if opts.AsWorkspace != "" {
 			rewriteWorkspaceSlug(extracted.DBDump, opts.AsWorkspace)
@@ -489,6 +518,45 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		if opts.AsWorkspace != "" || opts.AsCrew != "" {
 			if err := RemapIDs(ctx, db, extracted.DBDump); err != nil {
 				return nil, err
+			}
+			// RemapIDs just rewrote identity columns the journal's
+			// keyed hash commits to (the entry's own id, and every FK
+			// column SQLite reports — workspace_id on today's schema)
+			// while seq/prev_hash/entry_hash rode through verbatim, so
+			// every restored row now carries a signature over values it
+			// no longer holds. Left alone, the restore
+			// reports success and the very next integrity check on the
+			// new workspace calls the whole journal tampered (#2226).
+			//
+			// Re-sign the fork as a NEW genesis under this
+			// installation's key, and record that in the journal
+			// itself — see rechainForkedJournal. This runs BEFORE any
+			// insert, so a failure costs nothing; there is deliberately
+			// no branch that skips it and proceeds.
+			var chainProv resignProvenance
+			if manifest.Contents.Workspace != nil {
+				chainProv.SourceWorkspaceID = manifest.Contents.Workspace.ID
+				chainProv.SourceWorkspace = manifest.Contents.Workspace.Slug
+			}
+			chainProv.BundlePath = opts.Path
+			chainProv.BundleSHA256 = manifest.Checksums.PayloadSHA256
+			chainProv.Actor = opts.Actor
+			chainProv.CheckpointSourceWorkspaces = checkpointSourceWorkspaces
+			chainStats, err := rechainForkedJournal(ctx, db, extracted.DBDump, journal.ChainKeyFromEnv(), chainProv)
+			if err != nil {
+				return nil, err
+			}
+			journalChainResigned = chainStats
+			// A checkpoint the re-sign refused to bless is not a fatal
+			// condition — it was already inert on the source, and the
+			// fork inherits it inert — but it is the shape a forged
+			// mid-chain delete takes, so it does not pass in silence.
+			if chainStats.CheckpointsUnverified > 0 && opts.Logger != nil {
+				opts.Logger(fmt.Sprintf(
+					"%d journal compaction checkpoint(s) in this bundle carry a MAC that does not validate for the workspace they came from. "+
+						"They were carried across UNSIGNED rather than re-signed, so any chain gap they claimed to cover still reads as tampering in the fork — "+
+						"which is what it also does on the source. Run `crewship journal verify` on the source workspace.",
+					chainStats.CheckpointsUnverified))
 			}
 			ensureRestoringUserMembership(ctx, db, extracted.DBDump, opts.Actor.UserID, opts.Actor.Role)
 		}
@@ -968,6 +1036,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		SecurityLevelClamps:    stats.SecurityLevelClamps,
 		ColumnsDropped:         stats.ColumnsDropped,
 		DroppedColumns:         stats.DroppedColumns,
+
+		JournalEntriesResigned:     journalChainResigned.Entries,
+		JournalCheckpointsResigned: journalChainResigned.Checkpoints,
 	}, nil
 }
 

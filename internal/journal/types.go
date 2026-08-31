@@ -237,6 +237,26 @@ const (
 	EntryCheckpointRestored EntryType = "checkpoint.restored"
 	EntryForkCreated        EntryType = "fork.created"
 
+	// EntryBackupChainResigned records that a restore re-signed this
+	// workspace's journal hash chain and started it over at a new genesis
+	// (#2226).
+	//
+	// It is emitted by exactly one operation: a FORKED restore
+	// (`--as-workspace` / `--as-crew`), which regenerates every id the
+	// chain's HMAC commits to and therefore has to recompute every
+	// prev_hash/entry_hash under this installation's key. The chain that
+	// results attests to THIS instance from this moment on — it carries no
+	// cryptographic link back to the source workspace, whose signatures
+	// covered ids that no longer exist.
+	//
+	// The entry is not a formality. Without it the fork's journal would
+	// verify clean and read as unbroken provenance all the way back to the
+	// source's genesis, which is a stronger claim than the data supports.
+	// A fork deserves a new genesis; this is the row that says it got one,
+	// and its payload names the bundle and the source workspace it was
+	// forked from.
+	EntryBackupChainResigned EntryType = "backup.chain_resigned"
+
 	// Eval
 	EntryEvalRunStarted EntryType = "eval.run_started"
 	EntryEvalMetric     EntryType = "eval.metric"

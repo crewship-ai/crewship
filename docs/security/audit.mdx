@@ -449,6 +449,24 @@ claim and are unaffected.
   key-unaware edits. Production installs always have a persisted `ENCRYPTION_KEY`.
 </Note>
 
+#### A forked restore starts a new chain
+
+`crewship backup restore --as-workspace` / `--as-crew` regenerates the identity
+columns the hash commits to, so the bundle's signatures no longer describe the
+rows they cover. The restore re-signs the forked chain under this
+installation's key and the fork begins at a **new genesis**: it verifies clean,
+but it attests to *this* instance from the restore onward and carries no
+cryptographic link back to the source workspace's history. Verify the source on
+the source; a plain or `--replace` restore remaps nothing and keeps the original
+signatures.
+
+The fork records this in its own journal — a `backup.chain_resigned` entry at
+the tail of the new chain, naming the source workspace, the bundle digest, and
+how many entries and compaction checkpoints were re-signed. It is inside the
+chain it describes, so it cannot be removed without breaking verification. A
+restore that cannot re-sign the chain fails before writing anything, rather than
+landing a fork whose journal would read as tampered.
+
 ### The audit log outlives what it refers to
 
 A journal entry points at the crew, agent and mission it describes. Until

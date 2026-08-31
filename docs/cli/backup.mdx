@@ -186,6 +186,30 @@ names — the manifest still carries the source crew's slug, so on a
 same-instance restore the distinction is what keeps a sibling's backup
 from being written over the source crew's live data.
 
+A forked restore also **re-signs the workspace's journal hash chain**.
+`--as-workspace` / `--as-crew` regenerate the ids that chain's HMAC
+commits to, so the bundle's signatures can no longer be checked against
+the rows they cover; the restore recomputes them under this
+installation's key and the fork starts at a new genesis. It prints what
+it re-signed, and writes the same fact into the fork's own journal as a
+`backup.chain_resigned` entry:
+
+```
+✓ Journal chain re-signed: 1284 entries, 3 compaction checkpoints.
+  The fork starts a NEW chain under this instance's key — it no longer links back to the source workspace.
+  Recorded in the fork's own journal as a `backup.chain_resigned` entry.
+```
+
+The practical consequence: `crewship journal verify -w <fork>` reports
+`ok` (before this it called every restored row tampered), but it is
+attesting to *this* instance from the restore onward, not to the source
+workspace's history. Verify the source on the source. A plain or
+`--replace` restore remaps nothing, re-signs nothing, and keeps the
+bundle's original signatures — the counts are `0` there. If the chain
+cannot be re-signed the restore fails outright, before any row lands,
+rather than producing a fork whose journal reads as tampered. See
+[Backup & restore](/guides/backup#forked-restores-re-sign-the-journal-chain).
+
 <Warning>
   The server refuses a restore if a workspace (or crew) with the same slug
   already exists. Use `--as-workspace` / `--as-crew` to land the payload

@@ -60,6 +60,7 @@ const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "checkpoint.created",
     "checkpoint.restored",
     "fork.created",
+    "backup.chain_resigned",
     "hook.fired",
     "hook.blocked",
     "hook.dispatch_error",
