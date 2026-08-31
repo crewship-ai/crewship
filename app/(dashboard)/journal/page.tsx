@@ -460,7 +460,11 @@ export default function JournalPage() {
   // carried across a filter change lands on an empty table, and resetting it
   // in a second write would make Back step through a view nobody saw.
   const setRunWindow = useCallback(
-    (next: RunWindow) => setParams({ run_window: next === "24h" ? null : next }),
+    // Clear the page for the same reason status and trigger do: a narrower
+    // window can leave the reader on a page that no longer exists, and an
+    // empty page 3 reads as "no runs" rather than as "you are past the end".
+    (next: RunWindow) =>
+      setParams({ run_window: next === "24h" ? null : next, run_page: null }),
     [setParams],
   )
   const setRunStatus = useCallback(

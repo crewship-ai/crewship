@@ -272,13 +272,22 @@ describe("JournalPage — URL as the source of truth", () => {
 
   // A page number from the previous filter set almost always lands on an
   // empty result. Reset it in the same navigation, not a second one.
-  it("drops the Runs page number when a Runs filter changes", async () => {
+  // Every Runs filter narrows the result set, so any of them can strand the
+  // reader on a page that no longer exists — page 3 of a 7-day window is
+  // routinely empty once the window is 24h. Covered as a table rather than one
+  // case because the original only exercised status, and the window handler
+  // shipped without the reset precisely because nothing asked it for one.
+  it.each([
+    ["status", () => runsViewProps.onStatusFilterChange("FAILED"), "run_status=FAILED"],
+    ["trigger", () => runsViewProps.onTriggerFilterChange("CRON"), "run_trigger=CRON"],
+    ["window", () => runsViewProps.onWindowChange("7d"), "run_window=7d"],
+  ])("drops the Runs page number when the %s filter changes", async (_name, act, expected) => {
     mountAt("tab=runs&run_page=3")
     await screen.findByTestId("runs-view")
 
-    runsViewProps.onStatusFilterChange("FAILED")
+    act()
     await waitFor(() => {
-      expect(lastPushed()).toContain("run_status=FAILED")
+      expect(lastPushed()).toContain(expected)
     })
     expect(lastPushed()).not.toContain("run_page")
   })
