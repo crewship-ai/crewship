@@ -1064,8 +1064,9 @@ func truncateStr(s string, n int) string {
 
 // truncateCmd renders an argv slice into a single-line summary suitable for
 // journal.Entry.Summary. argv is joined with spaces; the result is clipped
-// to n runes with an ellipsis so the UI table row stays one line. Full
-// argv lives in payload.cmd for anyone who needs the unabridged form.
+// to n runes with an ellipsis so the UI table row stays one line. The
+// unabridged form lives in payload.cmd — scrubbed, like this summary: both
+// are fed the scrubArgv output, never the raw argv (see scrubArgv).
 func truncateCmd(argv []string, n int) string {
 	s := strings.Join(argv, " ")
 	if n <= 0 || len(s) <= n {

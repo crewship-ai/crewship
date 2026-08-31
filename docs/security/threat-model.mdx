@@ -177,6 +177,16 @@ A scrub hit replaces the matched substring with a `[REDACTED:<type>]`
 marker. The operator can search journal entries for the marker to
 investigate which agent tried to echo what.
 
+Text a **human** typed is scrubbed on the same path, not just agent
+output. The `exec.command` journal entry records the CLI argv of a run,
+and the argv carries the verbatim user message — so a token pasted into
+agent chat would otherwise be written to a hash-chained, append-only
+table that the [GDPR erasure cascade](/security/gdpr) deliberately
+skips.
+Every argv element is scrubbed *before* the entry is written, against
+the built-in patterns **and** the run's own credential values; there is
+no after-the-fact redaction for a journal entry.
+
 For the keeper credential-use path (`/execute`), the scrubber additionally
 masks the **injected secret's own value** and its common encodings — literal,
 base64 (std/URL, padded and raw), base32, URL-escape, hex (lower/upper), and
