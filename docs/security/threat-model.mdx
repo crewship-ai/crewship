@@ -182,10 +182,22 @@ output. The `exec.command` journal entry records the CLI argv of a run,
 and the argv carries the verbatim user message — so a token pasted into
 agent chat would otherwise be written to a hash-chained, append-only
 table that the [GDPR erasure cascade](/security/gdpr) deliberately
-skips.
-Every argv element is scrubbed *before* the entry is written, against
-the built-in patterns **and** the run's own credential values; there is
-no after-the-fact redaction for a journal entry.
+skips. Every argv element is scrubbed *before* the entry is written,
+against the built-in patterns **and** the run's own credential values;
+there is no after-the-fact redaction for a journal entry.
+
+**And for the prompt itself, the scrub is not what protects it.** Being
+defence in depth cuts both ways: the scrubber cannot match a value
+nobody registered and whose shape we do not know, so an opaque token
+pasted into a prompt would survive it. So the prompt-bearing values are
+not written at all. The argv elements holding the system prompt and the
+user message are replaced before the entry is built, with a placeholder
+naming the element and its length; what the entry keeps is a digest of
+the system prompt, the two lengths, and a reference to the chat the
+message lives in — enough to answer *which prompt ran* without storing
+it. `chat.user_message` is capped and scrubbed the same way, and the
+process log line for a run takes the same sanitised argv. Payload shape:
+[Crew Journal](/guides/crew-journal#exec-command-what-ran-without-the-prompt).
 
 For the keeper credential-use path (`/execute`), the scrubber additionally
 masks the **injected secret's own value** and its common encodings — literal,

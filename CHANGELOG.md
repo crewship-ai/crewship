@@ -501,6 +501,33 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The journal stored the prompt text of every run, verbatim and forever
+  (#2215).** `exec.command` recorded the CLI argv, and the argv carries the
+  run's whole system prompt plus the verbatim user message; `chat.user_message`
+  stored the message body uncapped, while its own summary was capped at 240
+  characters. Both land in a hash-chained, append-only table that erasure
+  requests deliberately skip, and the Timeline tab that renders them is not
+  admin-gated.
+
+  Scrubbing could not close this, and #2205's scrub was never going to: the
+  credential scrubber is defence in depth, not a boundary — it cannot match a
+  value nobody registered and whose shape it does not know, so a token pasted
+  into agent chat survived it. The prompt-bearing values are therefore no
+  longer written. `exec.command` now carries a bounded, typed payload — the
+  argv *shape* with the prompt elements replaced by a placeholder naming the
+  element and its length, plus the adapter, model, tool profile, container,
+  exit code, duration, and a digest and length of the prompt — which answers
+  "what ran, and with which prompt" without storing the prompt. A measured
+  entry drops from about 43 KB to under 1 KB. What remains is capped, with an
+  explicit `truncated` flag. `chat.user_message` is scrubbed and capped to the
+  same 240 characters its summary always was, and the run's process log line
+  takes the same sanitised argv. The #2205 scrub is kept and still runs on
+  what is left.
+
+  Two UI readers were fixed with it: the Journal card's terminal line and the
+  run rail's detail line both read a key the orchestrator never wrote, so they
+  were blank for every agent exec. Both now accept either payload shape.
+
 - **The `exec.command` journal entry wrote the CLI argv unscrubbed (#2205).**
   All three emit sites recorded the agent CLI's argv verbatim. That argv
   carries the run's whole system prompt and the verbatim user message, so
