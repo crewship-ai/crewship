@@ -201,6 +201,15 @@ def main(argv):
     # fail?". Those two differ in exactly one case — the run that checked
     # nothing — and phrasing it this way keeps a future edit from
     # reintroducing a silent skip path without also failing the run.
+    #
+    # `bool(ROUTES)` because `passed == len(ROUTES)` is satisfied by 0 == 0.
+    # An emptied list — a bad merge, a filter that matched nothing, the last
+    # entry commented out during debugging — would otherwise print "0 of 0
+    # routes verified" and exit 0, which is the same false green arrived at
+    # from the other end. A run has to have had something to check.
+    if not ROUTES:
+        print("  no routes declared — this run verified nothing")
+        return 1
     return 0 if passed == len(ROUTES) else 1
 
 

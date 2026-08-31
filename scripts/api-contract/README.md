@@ -260,6 +260,15 @@ verified nothing, reporting success. `response_shapes_test.py` pins that, and
 CI runs it in the `Harness PR subset` job, where the pinned venv provides
 `jsonschema`.
 
+CI runs the checker itself there too, against that job's own ephemeral server,
+immediately after the unit test and before the Schemathesis gate. The two prove
+different things: the unit test proves the checker's logic, the live run proves
+the *server*, and only the second would have caught the defect this exists for —
+every artifact agreed with every other artifact, and only a real 200 body
+disagreed. It is blocking, not advisory: the 17 routes were verified to pass on
+a freshly seeded instance (fresh DB plus `crewship seed --skip-issues`) before
+the step was added, so a red there is drift rather than an empty workspace.
+
 The token rides on every request, so the base URL must be `https://` for
 anything but a loopback address, and a redirect is refused rather than
 followed: `urllib` copies `Authorization` onto a redirect verbatim, to any

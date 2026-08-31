@@ -477,6 +477,38 @@ jobs:
       # unreachable used to print "0 pass, 0 fail, 17 skipped" and exit 0.
       - name: API response-shape checker (exit status + transport guards)
         run: /tmp/crewship-api-contract-venv/bin/python scripts/api-contract/response_shapes_test.py
+      # …and now the same checker against the server this job is already
+      # running. The step above proves the checker's logic; only this proves
+      # the SERVER. They are different claims, and the second is the one the
+      # original defect needed: `harbormaster.Request` had no json tags, so
+      # /api/v1/approvals answered "ID"/"Kind"/"CreatedAt" while the spec, the
+      # web client's schema and the API reference all said snake_case. Every
+      # artifact agreed with every other artifact. Only a real body disagreed.
+      #
+      # Everything it needs already exists here — a booted server, an owner
+      # token, a workspace, and the pinned venv — so the live half cost one
+      # step rather than a job. Deliberately BEFORE the Schemathesis gate
+      # below: this is seconds and blocking, that one is minutes and advisory
+      # (API_CONTRACT_ADVISORY), so failing here first names the problem while
+      # the log is still short.
+      #
+      # It is NOT advisory. 17 read-only GETs against a freshly seeded
+      # instance, verified to pass on exactly this shape of server — fresh DB
+      # plus `crewship seed --skip-issues` — before the step was added, so a
+      # red here is drift, not an empty workspace. A route that cannot answer
+      # is a failure by design: see the exit-status note in
+      # scripts/api-contract/README.md for why a skip is not available.
+      - name: API response shapes against the live server
+        timeout-minutes: 3
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        run: |
+          set -euo pipefail
+          tok="$(./crewship token create api-response-shapes-pr --quiet)"
+          echo "::add-mask::$tok"
+          ws="$(./crewship whoami --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["id"])')"
+          /tmp/crewship-api-contract-venv/bin/python \
+            scripts/api-contract/response_shapes.py http://localhost:8080 "$tok" "$ws"
       #
       # ⚠ INVARIANT: API_CONTRACT_TIMEOUT (seconds) < this step's
       #   timeout-minutes < the job's timeout-minutes. Enforced by

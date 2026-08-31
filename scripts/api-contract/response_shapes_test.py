@@ -174,6 +174,18 @@ class ExitStatusTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("FAIL", out)
 
+    def test_an_empty_route_list_cannot_report_success(self):
+        # `passed == len(ROUTES)` is satisfied by 0 == 0, so emptying the list —
+        # a bad merge, a filter that matched nothing, someone commenting out the
+        # last entry while debugging — printed "0 of 0 routes verified" and
+        # exited 0. Same false green as the one this file was hardened against,
+        # reached from the other side, so the invariant has to say that a run
+        # must have had something to check.
+        code, out = run_main([], self.SPEC, {})
+
+        self.assertEqual(code, 1, out)
+        self.assertIn("no routes", out)
+
     def test_every_route_passing_is_the_only_way_to_exit_zero(self):
         code, out = run_main(
             ["/api/v1/approvals"], self.SPEC, {"/api/v1/approvals": self.GOOD})

@@ -259,7 +259,9 @@ something the handler does not do.
 `scripts/api-contract/response_shapes.py` closes that. It fetches
 `/openapi.json` from the target instance — not the file in the repo — hits a
 list of read-only GETs and validates each body against the schema that instance
-publishes. Run against dev2 after B1–B3: **13 pass, 0 fail.**
+publishes. It covered 13 routes when B1–B3 landed and covers **17 of 17, 0
+fail** now; the count is the length of `ROUTES` in that file, and the summary
+table above carries the current figure.
 
 The first run reported **nine failures**, all `None is not of type 'string'`.
 None of them was real. JSON Schema has no `nullable` keyword; that is OpenAPI
@@ -268,10 +270,19 @@ not. This is the second time that trap cost an hour on this work, which is why
 `denullable()` carries the explanation and the checker has a test for it.
 
 It is deliberately NOT a Go test. A test that needs a running server is the
-undeclared-local-service dependency release-1.0 condition 6 forbids; its unit
-tests run in CI — in the `Harness PR subset` job, where the pinned venv already
-provides `jsonschema` — and the live run belongs to the contract-gate step that
-already boots an ephemeral server.
+undeclared-local-service dependency release-1.0 condition 6 forbids. Both halves
+now run in the `Harness PR subset` job: the unit tests, where the pinned venv
+already provides `jsonschema`, and then the checker itself against that job's
+ephemeral server, which had already been booted, seeded and tokened for the
+Schemathesis gate.
+
+Running only the unit tests would have been the smaller half of the point. They
+prove the checker's logic; they cannot prove the server, and the server is where
+the defect lived — the struct, the schema and the docs were all internally
+consistent and all wrong. The live step is blocking rather than advisory, on the
+strength of a fresh-instance run (fresh DB plus `crewship seed --skip-issues`)
+that passed 17 of 17 before the step existed, so a red there is drift and not an
+empty workspace.
 
 **Exit 0 means every declared route passed, not that nothing failed.** This
 checker had the defect it exists to detect. A request error and a missing 200
