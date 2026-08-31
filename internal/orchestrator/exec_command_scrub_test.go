@@ -253,10 +253,14 @@ func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 				}
 				checked++
 				if !isScrubbedArgvExpr(kv.Value) {
-					t.Errorf("%s: a journal payload writes \"cmd\" from an unscrubbed expression. "+
-						"The journal is hash-chained and append-only — the argv carries the full "+
-						"--system-prompt and the verbatim user message and can never be redacted "+
-						"after the fact. Emit scrubArgv(cmd, secretValues) (bound to journalCmd) instead.",
+					t.Errorf("%s: a map literal writes a \"cmd\" field from an expression the "+
+						"credential scrubber has not been through. If this is a journal payload, "+
+						"emit journalCmd (or scrubArgv(cmd, secretValues)) instead: the journal is "+
+						"hash-chained and append-only, the argv carries the full --system-prompt and "+
+						"the verbatim user message, and nothing can redact it after the write. If it "+
+						"is not a journal payload, name the key something other than \"cmd\" — this "+
+						"guard is deliberately keyed on the field name, because a fourth emit site "+
+						"written raw is exactly the regression it exists to catch.",
 						fset.Position(kv.Value.Pos()))
 				}
 			}
