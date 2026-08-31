@@ -351,13 +351,21 @@ func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, a
 				promptField(node.Rhs[i], "an index assignment")
 			}
 		case *ast.CallExpr:
-			// Structured-logger key/value pairs: log.Info("msg", "cmd", x).
+			// Structured-logger key/value pairs: log.Info("msg", "key", x).
+			//
+			// Keyed on the VALUE, not the key. Keying on `"cmd"` meant
+			// log.Info(..., "prompt", req.UserMessage) walked straight past
+			// the guard -- and the sink this guard exists for is the prompt,
+			// not the spelling of the field someone chose to put it in.
+			if !isStructuredLogCall(node) {
+				break
+			}
 			for i := 0; i+1 < len(node.Args); i++ {
 				lit, ok := node.Args[i].(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING || lit.Value != `"cmd"` {
+				if !ok || lit.Kind != token.STRING {
 					continue
 				}
-				cmdField(node.Args[i+1], "a structured log call")
+				promptField(node.Args[i+1], "a structured log call under key "+lit.Value)
 			}
 		}
 		return true
@@ -407,6 +415,11 @@ var boundingHelpers = map[string]bool{
 	"truncateStr":            true,
 	"len":                    true,
 	"utf8.RuneCountInString": true,
+	// Returns an int, and the guard's own message recommends exactly this
+	// ("records a measurement of it instead of the text"). It was missing
+	// only because rule 2 used to be keyed on the field name, so a log call
+	// under "est_tokens" was never examined.
+	"tokenutil.EstimateTokens": true,
 }
 
 // calleeName renders a call's function as "name" or "pkg.Name", or "" for
@@ -462,17 +475,28 @@ func promptAliases(fn *ast.FuncDecl) map[string]bool {
 	// regardless of the order ast.Inspect happens to visit in.
 	for pass := 0; pass < 2; pass++ {
 		ast.Inspect(fn, func(n ast.Node) bool {
-			assign, ok := n.(*ast.AssignStmt)
-			if !ok {
-				return true
-			}
-			for i, lhs := range assign.Lhs {
-				name, ok := lhs.(*ast.Ident)
-				if !ok || i >= len(assign.Rhs) || name.Name == "_" {
-					continue
+			switch node := n.(type) {
+			case *ast.AssignStmt:
+				for i, lhs := range node.Lhs {
+					name, ok := lhs.(*ast.Ident)
+					if !ok || i >= len(node.Rhs) || name.Name == "_" {
+						continue
+					}
+					if isPromptSource(node.Rhs[i], aliases) {
+						aliases[name.Name] = true
+					}
 				}
-				if isPromptSource(assign.Rhs[i], aliases) {
-					aliases[name.Name] = true
+			case *ast.ValueSpec:
+				// `var preview = req.UserMessage` is a ValueSpec, not an
+				// AssignStmt. Tracking only `:=` left the plainest possible
+				// alias unguarded.
+				for i, name := range node.Names {
+					if name.Name == "_" || i >= len(node.Values) {
+						continue
+					}
+					if isPromptSource(node.Values[i], aliases) {
+						aliases[name.Name] = true
+					}
 				}
 			}
 			return true
@@ -1043,4 +1067,24 @@ func TestExecCommandEmit_PayloadStaysSmall(t *testing.T) {
 				phase, got, budget)
 		}
 	}
+}
+
+// isStructuredLogCall reports whether e is a slog-style logging call.
+//
+// The value-keyed check above must not fire on argv CONSTRUCTION. BuildCLICommand
+// legitimately does append(cmd, "--system-prompt", systemPrompt) -- the prompt has
+// to reach the CLI, that is the whole point. Both are CallExprs with a string
+// literal followed by prompt text, so without this the guard flags the one site
+// that is required to carry it.
+func isStructuredLogCall(call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	switch sel.Sel.Name {
+	case "Debug", "Info", "Warn", "Error",
+		"DebugContext", "InfoContext", "WarnContext", "ErrorContext":
+		return true
+	}
+	return false
 }

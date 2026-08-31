@@ -96,6 +96,33 @@ describe("JournalEntryCard — exec.command details", () => {
     expect(screen.getByText(/exit 0/)).toBeInTheDocument()
   })
 
+  // `command ?? cmd` falls through on null/undefined only, so a `command`
+  // present but empty suppressed `cmd` and left the line blank -- the exact
+  // symptom the fallback was added to fix.
+  it("falls back to cmd when command is present but empty", () => {
+    render(
+      <JournalEntryCard
+        entry={entry({
+          entry_type: "exec.command",
+          payload: { command: "", cmd: ["claude", "--print"], exit_code: 0 },
+        })}
+      />,
+    )
+    expect(screen.getByText(/\$ claude --print/)).toBeInTheDocument()
+  })
+
+  it("prefers command when it actually carries something", () => {
+    render(
+      <JournalEntryCard
+        entry={entry({
+          entry_type: "exec.command",
+          payload: { command: "make build", cmd: ["ignored"], exit_code: 0 },
+        })}
+      />,
+    )
+    expect(screen.getByText(/\$ make build/)).toBeInTheDocument()
+  })
+
   it("non-zero exit gets the red error styling (different class)", () => {
     render(
       <JournalEntryCard
