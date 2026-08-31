@@ -51,6 +51,11 @@ const (
 	// whatever the adapter happened to build.
 	journalArgvTotalMaxChars = 4096
 
+	// journalArgvTailReserve holds part of the total back for the marker that
+	// names the elements dropped at the end. Without it the text saying the
+	// payload was cut is what pushes the payload over the cap.
+	journalArgvTailReserve = 48
+
 	// journalFieldMaxChars caps every string field of the payload beside the
 	// argv — the adapter, the model, the tool profile, and the per-outcome
 	// strings a caller passes in (error, reason). Same reasoning and the same
@@ -146,12 +151,18 @@ func redactPromptArgv(argv []string, req AgentRunRequest) []string {
 		return argv
 	}
 	out := make([]string, len(argv))
-	for i, arg := range argv {
+	// argv[0] is the binary name, taken from a fixed literal in each adapter,
+	// and is never prompt text. Skipping it costs nothing and stops the one
+	// over-redaction that is not merely cosmetic: exact matching is honoured at
+	// any length, so a chat message of "claude" would otherwise replace the
+	// command name and leave the terminal block with no command in it.
+	out[0] = argv[0]
+	for i, arg := range argv[1:] {
 		if labels := promptLabelsIn(arg, values); len(labels) > 0 {
-			out[i] = promptPlaceholder(labels, arg)
+			out[i+1] = promptPlaceholder(labels, arg)
 			continue
 		}
-		out[i] = arg
+		out[i+1] = arg
 	}
 	return out
 }
@@ -185,32 +196,39 @@ func promptPlaceholder(labels []string, arg string) string {
 // first so one long element cannot consume the whole budget and hide the flags
 // after it, then a total budget with a trailing marker for the elements that
 // did not fit.
+//
+// Every marker this writes is charged against the same budget, and the tail
+// marker has its own reserve: a cap whose own "I cut something" text can push
+// the payload over the cap is not a cap.
 func capArgv(argv []string) ([]string, bool) {
 	if len(argv) == 0 {
 		return argv, false
 	}
 	out := make([]string, 0, len(argv))
 	truncated := false
-	budget := journalArgvTotalMaxChars
+	budget := journalArgvTotalMaxChars - journalArgvTailReserve
 	for i, arg := range argv {
-		if budget <= 0 {
-			out = append(out, fmt.Sprintf("[TRUNCATED: %d more argv elements]", len(argv)-i))
-			truncated = true
-			break
+		n := utf8.RuneCountInString(arg)
+		if n <= journalArgvElemMaxChars && n <= budget {
+			out = append(out, arg)
+			budget -= n
+			continue
 		}
-		limit := journalArgvElemMaxChars
-		if budget < limit {
-			limit = budget
+		// This element does not fit whole. The marker that says so is part of
+		// what gets stored, so it is charged too.
+		suffix := fmt.Sprintf("…[truncated, %d chars]", n)
+		keep := journalArgvElemMaxChars
+		if room := budget - utf8.RuneCountInString(suffix); room < keep {
+			keep = room
 		}
-		elem := arg
-		n := utf8.RuneCountInString(elem)
-		if n > limit {
-			elem = string([]rune(elem)[:limit]) + fmt.Sprintf("…[truncated, %d chars]", n)
-			truncated = true
-			n = limit
+		if keep <= 0 {
+			// Nothing useful left of the budget: name what is being dropped
+			// rather than trailing off. The reserve is what pays for this.
+			return append(out, fmt.Sprintf("[TRUNCATED: %d more argv elements]", len(argv)-i)), true
 		}
-		out = append(out, elem)
-		budget -= n
+		out = append(out, string([]rune(arg)[:keep])+suffix)
+		truncated = true
+		budget -= keep + utf8.RuneCountInString(suffix)
 	}
 	return out, truncated
 }
@@ -227,14 +245,21 @@ func capArgv(argv []string) ([]string, bool) {
 // low-entropy, and a digest of "the token I pasted" is a verifier for exactly
 // the value #2215 exists to keep out of this table. chat_id is the safe
 // reference instead: the message lives in the chat, which is erasable.
+//
+// user_turn_chars, not user_chars: by the time the argv is built,
+// req.UserMessage is the composed TURN — the human's message with the
+// conversation history, episodic recall and nudge blocks prependSessionContext
+// folded in front of it. The human's own message length is reported by the
+// sibling chat.user_message entry, and naming this one user_chars invited the
+// two to be read as the same number.
 func promptRef(req AgentRunRequest) map[string]any {
 	sys := crewshipSystemPreamble + req.SystemPrompt
 	digest := sha256.Sum256([]byte(sys))
 	return map[string]any{
-		"system_sha256": hex.EncodeToString(digest[:]),
-		"system_chars":  utf8.RuneCountInString(sys),
-		"user_chars":    utf8.RuneCountInString(req.UserMessage),
-		"chat_id":       req.ChatID,
+		"system_sha256":   hex.EncodeToString(digest[:]),
+		"system_chars":    utf8.RuneCountInString(sys),
+		"user_turn_chars": utf8.RuneCountInString(req.UserMessage),
+		"chat_id":         req.ChatID,
 	}
 }
 
@@ -253,23 +278,25 @@ func execCommandPayload(req AgentRunRequest, journalCmd journalCmdView, phase st
 		}
 		return out
 	}
-	payload := map[string]any{
-		"cmd":          journalCmd.argv,
-		"phase":        phase,
-		"adapter":      bound(req.CLIAdapter),
-		"model":        bound(req.LLMModel),
-		"tool_profile": bound(req.ToolProfile),
-		"container_id": shortID(req.ContainerID),
-		"prompt":       promptRef(req),
-	}
+	payload := map[string]any{}
 	for k, v := range extra {
 		if s, ok := v.(string); ok {
 			v = bound(s)
 		}
 		payload[k] = v
 	}
-	// Written last, so extra cannot override it: a payload must not be able to
-	// claim it is complete when the builder just cut something out of it.
+	// The structural fields are written LAST, so a caller's extra can add
+	// per-outcome detail but cannot overwrite what the entry says it is — the
+	// argv, the prompt reference, the adapter, or whether the builder cut
+	// something out. extra is per-outcome data, not a way to redescribe the
+	// entry.
+	payload["cmd"] = journalCmd.argv
+	payload["phase"] = phase
+	payload["adapter"] = bound(req.CLIAdapter)
+	payload["model"] = bound(req.LLMModel)
+	payload["tool_profile"] = bound(req.ToolProfile)
+	payload["container_id"] = shortID(req.ContainerID)
+	payload["prompt"] = promptRef(req)
 	payload["truncated"] = truncated
 	return payload
 }

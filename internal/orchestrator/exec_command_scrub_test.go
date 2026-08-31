@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -216,16 +217,22 @@ func truncateForFailure(s string) string {
 // with a raw value, which is exactly how the three sites in orchestrator_run.go
 // drifted from their scrubbing sibling.
 //
-//  1. a `"cmd"` key in a map literal (the shape every journal payload uses)
-//     must take its value from the sanitised journalCmd binding;
-//  2. a `"cmd"` key passed to a structured logger must do the same — the
+//  1. a "cmd" field of a journal payload must take its value from the
+//     sanitised journalCmd binding;
+//  2. a "cmd" field passed to a structured logger must do the same — the
 //     process log is a persistent sink too (#2215 item 3);
-//  3. no map literal may carry a prompt-bearing expression (the raw argv,
-//     req.UserMessage, req.SystemPrompt) unless it is wrapped in a helper that
-//     removes or bounds it. Rule 3 is what catches a sink that is NOT keyed on
-//     "cmd" — chat.user_message stored payload["content"] = req.UserMessage for
-//     as long as it existed, one entry type over from the guard that was
-//     watching the argv.
+//  3. no persisted field may carry a prompt-bearing expression (the raw argv,
+//     a request's UserMessage or SystemPrompt, or a local holding either)
+//     unless it is wrapped in a helper that removes or bounds it. Rule 3 is
+//     what catches a sink that is NOT keyed on "cmd" — chat.user_message
+//     stored payload["content"] = req.UserMessage for as long as it existed,
+//     one entry type over from the guard that was watching the argv.
+//
+// "Field" covers the three ways this package writes one: a map literal entry,
+// an index assignment onto a payload map, and the Summary/Payload fields of a
+// JournalEntry literal. The first is how the emit sites are written today; the
+// other two are how they would plausibly be written tomorrow, and a guard that
+// only knows the current spelling is a guard against nothing.
 func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 	t.Parallel()
 
@@ -252,65 +259,110 @@ func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 			t.Fatalf("parse %s: %v", file, err)
 		}
 
-		ast.Inspect(f, func(n ast.Node) bool {
-			switch node := n.(type) {
-			case *ast.CompositeLit:
-				if _, isMap := node.Type.(*ast.MapType); !isMap {
-					return true
-				}
-				for _, elt := range node.Elts {
-					kv, ok := elt.(*ast.KeyValueExpr)
-					if !ok {
-						continue
-					}
-					if key, ok := kv.Key.(*ast.BasicLit); ok && key.Kind == token.STRING && key.Value == `"cmd"` {
-						checked++
-						if !isScrubbedArgvExpr(kv.Value) {
-							t.Errorf("%s: a map literal writes a \"cmd\" field from an expression that is not the "+
-								"sanitised argv. If this is a journal payload, emit journalCmd (or journalArgv(...)) "+
-								"instead: the journal is hash-chained and append-only, the raw argv carries the full "+
-								"system prompt and the verbatim user message, and nothing can redact it after the "+
-								"write. If it is not a journal payload, name the key something other than \"cmd\" — "+
-								"this guard is deliberately keyed on the field name, because a fourth emit site "+
-								"written raw is exactly the regression it exists to catch.",
-								fset.Position(kv.Value.Pos()))
-						}
-						continue
-					}
-					if name, pos, leaked := promptBearingRef(kv.Value); leaked {
-						t.Errorf("%s: a map literal writes %s, which carries prompt text, into a value that can be "+
-							"persisted. The scrubber cannot close this — an opaque secret nobody registered matches "+
-							"no pattern, which is why it is documented as defence in depth and not a boundary "+
-							"(#2215). Wrap it in a helper that removes the prompt (journalArgv), records a "+
-							"measurement of it instead of the text (promptRef), or bounds it to a fixed length "+
-							"(journalUserMessage, truncateStr).",
-							fset.Position(pos), name)
-					}
-				}
-			case *ast.CallExpr:
-				// Structured-logger key/value pairs: log.Info("msg", "cmd", x).
-				for i := 0; i+1 < len(node.Args); i++ {
-					lit, ok := node.Args[i].(*ast.BasicLit)
-					if !ok || lit.Kind != token.STRING || lit.Value != `"cmd"` {
-						continue
-					}
-					checked++
-					if !isScrubbedArgvExpr(node.Args[i+1]) {
-						t.Errorf("%s: a structured log call writes a \"cmd\" field from an expression that is not "+
-							"the sanitised argv. The process log is a persistent sink too (#2215 item 3) — pass "+
-							"journalCmd, which keeps the argv shape an operator needs while the prompt-bearing "+
-							"elements are placeholders.",
-							fset.Position(node.Args[i+1].Pos()))
-					}
-				}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
 			}
-			return true
-		})
+			aliases := promptAliases(fn)
+			checked += auditPersistedFields(t, fset, fn, aliases)
+		}
 	}
 
 	if checked == 0 {
 		t.Fatal(`no journal payload or log call writing a "cmd" field was found — the guard no longer matches the emit sites it is meant to police`)
 	}
+}
+
+// auditPersistedFields walks one function and reports how many "cmd" fields it
+// checked, failing t for each violation found.
+func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, aliases map[string]bool) int {
+	t.Helper()
+	checked := 0
+
+	cmdField := func(value ast.Expr, where string) {
+		checked++
+		if isScrubbedArgvExpr(value) {
+			return
+		}
+		t.Errorf("%s: %s writes a \"cmd\" field from an expression that is not the sanitised "+
+			"argv. Emit journalCmd (or journalArgv(...)): the journal is hash-chained and "+
+			"append-only, the raw argv carries the full system prompt and the verbatim user "+
+			"message, and nothing can redact it after the write. A fourth emit site written raw "+
+			"is the regression this guard exists to catch — if you are here because the guard is "+
+			"in your way, the value is the thing to change, not the key.",
+			fset.Position(value.Pos()), where)
+	}
+
+	promptField := func(value ast.Expr, where string) {
+		name, pos, leaked := promptBearingRef(value, aliases)
+		if !leaked {
+			return
+		}
+		t.Errorf("%s: %s writes %s, which carries prompt text, into a value that can be "+
+			"persisted. The scrubber cannot close this — an opaque secret nobody registered "+
+			"matches no pattern, which is why it is documented as defence in depth and not a "+
+			"boundary (#2215). Wrap it in a helper that removes the prompt (journalArgv), "+
+			"records a measurement of it instead of the text (promptRef), or bounds it to a "+
+			"fixed length (journalUserMessage, truncateStr).",
+			fset.Position(pos), where, name)
+	}
+
+	ast.Inspect(fn, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.CompositeLit:
+			// A map literal is how every payload is written today; a struct
+			// literal is how JournalEntry.Summary and .Payload are.
+			_, isMap := node.Type.(*ast.MapType)
+			for _, elt := range node.Elts {
+				kv, ok := elt.(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				if isMap {
+					if key, ok := kv.Key.(*ast.BasicLit); ok && key.Kind == token.STRING && key.Value == `"cmd"` {
+						cmdField(kv.Value, "a map literal")
+						continue
+					}
+					promptField(kv.Value, "a map literal")
+					continue
+				}
+				// Struct literal: only the fields that get persisted.
+				if key, ok := kv.Key.(*ast.Ident); ok && (key.Name == "Summary" || key.Name == "Payload") {
+					promptField(kv.Value, "a journal entry's "+key.Name)
+				}
+			}
+		case *ast.AssignStmt:
+			// payload["cmd"] = cmd — the spelling the emit sites would take
+			// the day one of them grows a conditional field.
+			for i, lhs := range node.Lhs {
+				idx, ok := lhs.(*ast.IndexExpr)
+				if !ok || i >= len(node.Rhs) {
+					continue
+				}
+				key, ok := idx.Index.(*ast.BasicLit)
+				if !ok || key.Kind != token.STRING {
+					continue
+				}
+				if key.Value == `"cmd"` {
+					cmdField(node.Rhs[i], "an index assignment")
+					continue
+				}
+				promptField(node.Rhs[i], "an index assignment")
+			}
+		case *ast.CallExpr:
+			// Structured-logger key/value pairs: log.Info("msg", "cmd", x).
+			for i := 0; i+1 < len(node.Args); i++ {
+				lit, ok := node.Args[i].(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING || lit.Value != `"cmd"` {
+					continue
+				}
+				cmdField(node.Args[i+1], "a structured log call")
+			}
+		}
+		return true
+	})
+	return checked
 }
 
 // isScrubbedArgvExpr reports whether e is an argv expression the sanitiser has
@@ -336,18 +388,23 @@ func isScrubbedArgvExpr(e ast.Expr) bool {
 }
 
 // boundingHelpers are the calls allowed to carry a prompt-bearing expression
-// into a map literal. Each either removes the prompt text outright
+// into a persisted field. Each either removes the prompt text outright
 // (journalArgv), replaces it with a measurement (promptRef, len,
-// utf8.RuneCountInString), or bounds it to a fixed length after scrubbing
-// (journalUserMessage, truncateStr, truncateCmd). Adding a name here is a
-// deliberate statement that the helper makes the value safe to persist
-// forever — which is why the list is short and the entries are boring.
+// utf8.RuneCountInString), or scrubs and bounds it (journalUserMessage,
+// truncateStr — whose bound is checked, see boundedByHelper). Adding a name
+// here is a deliberate statement that the helper makes the value safe to
+// persist forever, which is why the list is short and the entries are boring.
+//
+// truncateCmd is NOT here. It is a pure join-and-clip of whatever argv it is
+// handed and scrubs nothing, so blessing it would let truncateCmd(cmd, 4096)
+// write 4096 raw characters of a Gemini or Codex argv — whose prompt is its
+// second element. Its only safe caller passes journalCmd.argv, which rule 1
+// already covers.
 var boundingHelpers = map[string]bool{
 	"journalArgv":            true,
 	"journalUserMessage":     true,
 	"promptRef":              true,
 	"truncateStr":            true,
-	"truncateCmd":            true,
 	"len":                    true,
 	"utf8.RuneCountInString": true,
 }
@@ -367,12 +424,80 @@ func calleeName(fun ast.Expr) string {
 	return ""
 }
 
+// boundedByHelper reports whether e is a call to a bounding helper that is
+// actually bounding. For truncateStr the limit is part of the claim, so an
+// untyped integer literal over the payload's own field cap is not accepted —
+// truncateStr(msg, 100000) is a helper call that bounds nothing.
+func boundedByHelper(e ast.Expr) bool {
+	call, ok := e.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	name := calleeName(call.Fun)
+	if !boundingHelpers[name] {
+		return false
+	}
+	if name != "truncateStr" || len(call.Args) < 2 {
+		return true
+	}
+	lit, ok := call.Args[1].(*ast.BasicLit)
+	if !ok || lit.Kind != token.INT {
+		return false
+	}
+	n, err := strconv.Atoi(lit.Value)
+	return err == nil && n > 0 && n <= journalFieldMaxChars
+}
+
+// promptAliases returns the locals in fn that hold prompt text: assigned from a
+// request's UserMessage or SystemPrompt (directly or through a concatenation),
+// or from BuildCLICommand, which folds both into an argv.
+//
+// Propagation deliberately stops at a call. A call is a transformation the
+// author had to write and name, and treating every result as still-prompt
+// would flag promptRef's own sha256 OF the prompt — the thing that exists so
+// the prompt does not have to be stored.
+func promptAliases(fn *ast.FuncDecl) map[string]bool {
+	aliases := map[string]bool{}
+	// Two passes so a chain (a := req.UserMessage; b := a) is caught
+	// regardless of the order ast.Inspect happens to visit in.
+	for pass := 0; pass < 2; pass++ {
+		ast.Inspect(fn, func(n ast.Node) bool {
+			assign, ok := n.(*ast.AssignStmt)
+			if !ok {
+				return true
+			}
+			for i, lhs := range assign.Lhs {
+				name, ok := lhs.(*ast.Ident)
+				if !ok || i >= len(assign.Rhs) || name.Name == "_" {
+					continue
+				}
+				if isPromptSource(assign.Rhs[i], aliases) {
+					aliases[name.Name] = true
+				}
+			}
+			return true
+		})
+	}
+	return aliases
+}
+
+// isPromptSource reports whether an assignment's right-hand side yields prompt
+// text: a bare or concatenated prompt reference, or a BuildCLICommand call.
+func isPromptSource(e ast.Expr, aliases map[string]bool) bool {
+	if call, ok := e.(*ast.CallExpr); ok {
+		return calleeName(call.Fun) == "BuildCLICommand"
+	}
+	_, _, leaked := promptBearingRef(e, aliases)
+	return leaked
+}
+
 // promptBearingRef reports whether e names prompt text without going through a
-// bounding helper. The raw `cmd` argv holds it because BuildCLICommand folds
-// the system prompt and the user message into argv elements; req.UserMessage
-// and req.SystemPrompt are the two fields it folds.
-func promptBearingRef(e ast.Expr) (string, token.Pos, bool) {
-	if call, ok := e.(*ast.CallExpr); ok && boundingHelpers[calleeName(call.Fun)] {
+// bounding helper. A request's UserMessage and SystemPrompt are matched on any
+// receiver, not on the name `req`, so renaming the parameter does not silence
+// the guard; `cmd` and any local alias collected by promptAliases count too,
+// because BuildCLICommand folds both fields into that argv.
+func promptBearingRef(e ast.Expr, aliases map[string]bool) (string, token.Pos, bool) {
+	if boundedByHelper(e) {
 		return "", token.NoPos, false
 	}
 	var name string
@@ -382,17 +507,24 @@ func promptBearingRef(e ast.Expr) (string, token.Pos, bool) {
 			return false
 		}
 		switch v := n.(type) {
+		case *ast.CallExpr:
+			// A nested bounding call is safe on its own subtree.
+			if boundedByHelper(v) {
+				return false
+			}
 		case *ast.SelectorExpr:
-			if id, ok := v.X.(*ast.Ident); ok && id.Name == "req" {
-				switch v.Sel.Name {
-				case "UserMessage", "SystemPrompt":
-					name, pos = "req."+v.Sel.Name, v.Pos()
-					return false
-				}
+			switch v.Sel.Name {
+			case "UserMessage", "SystemPrompt":
+				name, pos = "a request's "+v.Sel.Name, v.Pos()
+				return false
 			}
 		case *ast.Ident:
 			if v.Name == "cmd" {
 				name, pos = "the raw argv `cmd`", v.Pos()
+				return false
+			}
+			if aliases[v.Name] {
+				name, pos = "`"+v.Name+"`, a local holding prompt text", v.Pos()
 				return false
 			}
 		}
@@ -770,9 +902,11 @@ func TestChatUserMessageEmit_CapsAndScrubsPayloadContent(t *testing.T) {
 				t.Errorf("chat.user_message payload truncated = %v, want %v", e.Payload["truncated"], tc.wantTruncated)
 			}
 			// The full length is still recorded — the cap bounds what is
-			// stored, it does not hide that something was cut.
-			if e.Payload["length_chars"] != len(tc.message) {
-				t.Errorf("payload length_chars = %v, want %d", e.Payload["length_chars"], len(tc.message))
+			// stored, it does not hide that something was cut. In runes: the
+			// field is named chars, and one of these messages carries an em
+			// dash, which len() counts three times.
+			if e.Payload["length_chars"] != len([]rune(tc.message)) {
+				t.Errorf("payload length_chars = %v, want %d", e.Payload["length_chars"], len([]rune(tc.message)))
 			}
 		})
 	}

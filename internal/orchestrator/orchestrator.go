@@ -1064,9 +1064,15 @@ func truncateStr(s string, n int) string {
 
 // truncateCmd renders an argv slice into a single-line summary suitable for
 // journal.Entry.Summary. argv is joined with spaces; the result is clipped
-// to n runes with an ellipsis so the UI table row stays one line. The
-// unabridged form lives in payload.cmd — scrubbed, like this summary: both
-// are fed the scrubArgv output, never the raw argv (see scrubArgv).
+// to n runes with an ellipsis so the UI table row stays one line.
+//
+// It joins and clips; it sanitises NOTHING. Callers pass journalCmd.argv, the
+// form whose prompt-bearing elements are already placeholders and whose
+// remainder is scrubbed and capped (journal_exec_command.go) — the summary
+// renders in the same UI row as payload.cmd and must carry no more than it
+// does. Handing this the raw argv would put the whole prompt in a summary,
+// which is why the static guard in exec_command_scrub_test.go does not accept
+// truncateCmd as a bounding helper.
 func truncateCmd(argv []string, n int) string {
 	s := strings.Join(argv, " ")
 	if n <= 0 || len(s) <= n {

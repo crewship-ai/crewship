@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -144,8 +145,12 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 				"agent_slug": req.AgentSlug,
 				"content":    userPreview,
 				// The full length is still recorded: the cap bounds what is
-				// stored, it does not hide that something was cut.
-				"length_chars": len(req.UserMessage),
+				// stored, it does not hide that something was cut. Counted in
+				// runes, because the field is named chars and every other
+				// bound this entry carries is a rune count — len() reported
+				// two to three times the character count for a non-ASCII
+				// message.
+				"length_chars": utf8.RuneCountInString(req.UserMessage),
 				"truncated":    userTruncated,
 			},
 			Refs: map[string]any{"chat_id": req.ChatID},
