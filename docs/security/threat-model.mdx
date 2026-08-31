@@ -1,6 +1,6 @@
 ---
 title: "Threat Model"
-description: "One-page summary of the Crewship trust boundaries: container isolation, sidecar credential broker, output scrubber, and the Keeper policy layer."
+description: "One-page summary of the Crewship trust boundaries: container isolation, sidecar credential broker, output scrubber, and the Keeper credential gate."
 icon: "shield-alert"
 stability: experimental
 tag: Experimental
@@ -14,6 +14,12 @@ defense-in-depth model. Each layer assumes the layer above it can
 fail. This page is the 1-page summary; deep-dive links for each layer
 are at the bottom.
 
+Crewship is a well-instrumented orchestration platform with several strong
+security layers, but it does **not** yet provide an enforced identity boundary
+between agents in the same crew, universal secretless credential delivery, or
+network-layer egress containment. The qualifications below are part of the
+security contract, not deployment footnotes.
+
 ## Adversary
 
 The threat model we design against is an **agent that has been
@@ -23,6 +29,17 @@ have to assume the agent will execute that input verbatim against
 whatever tools it has access to. The attacker is **not** assumed to
 have compromised the host machine, the operator's terminal, or the
 Crewship binary itself.
+
+**The boundary that contains this adversary is the crew, not the agent.**
+A prompt-injected agent is contained from the host and from other crews'
+containers, volumes and workspaces — **but not from them by network**: all
+crews share one Docker bridge (see [the crew-to-crew boundary](#the-crew-to-crew-boundary)).
+It is **not** contained from its own siblings: agents in one crew share a container, a UID and a process
+namespace, so a compromised agent reaches its crewmates' files, environment
+and tokens. That is a deliberate product decision — a crew is a unit that
+trusts itself — and it is the reason the deployment rule is *put only agents
+you would trust with the same secrets in the same crew*. Operators who need
+two domains of trust separate them into two crews.
 
 In practice this means we trust:
 
@@ -45,11 +62,15 @@ We **do not** trust:
 
 ## Layer 1 — Container isolation
 
-Every agent runs in its own Linux container. The defaults applied in
-`internal/provider/docker/docker_container.go`:
+Every **crew** runs in one Linux container. All agents in that crew execute in
+the same container as UID 1001 and share its process namespace and crew
+filesystem; the crew's one sidecar runs there as UID 1002. The container
+boundary isolates the crew from the host, but it is **not** an isolation
+boundary between sibling agents. The defaults applied in
+`internal/provider/docker/docker_container.go` include:
 
-- **UID 1001** (`agent`) for the agent process; UID 1002 for the
-  per-agent sidecar.
+- **UID 1001** (`agent`) for every agent process in the crew; UID 1002 for the
+  shared per-crew sidecar.
 - **`CapDrop: ["ALL"]`** as the starting capability set.
 - **No capabilities are added back by default** — `CapAdd` starts
   empty. `NET_RAW` used to be granted (for `ping`) but was removed:
@@ -65,12 +86,61 @@ Every agent runs in its own Linux container. The defaults applied in
 - **No Docker socket bind-mounted** into the agent container. The
   agent cannot launch sibling containers, mount the host docker.sock,
   or enumerate peers.
-- Mounts: the workspace directory read/write and `/output/<agent>/`
-  for any persistent files; nothing else by default.
+- Agent-writable persistent mounts include `/workspace`, `/output`, `/crew`
+  and `/home/agent`; see [Container isolation](/security/container-isolation)
+  for their different sharing, persistence and `noexec` properties.
 - `NetworkMode` is **instance-wide**, set from the server config
   (`p.cfg.Network`) — *not* per-agent. Operators who need per-agent
   network isolation must build it at the host network layer (e.g.
   per-crew Docker networks) rather than rely on the runtime default.
+
+### The crew-to-crew boundary
+
+Because the crew is the trust boundary, what separates two crews matters more
+than what separates two agents. Today that separation is **resource-level, not
+network-level**:
+
+- **Separated:** container names, volumes and workspaces are namespaced by the
+  globally-unique crew id, so two crews — including two tenants whose crews
+  share a slug — never collide on a container or a volume
+  (`tenant_collision_test.go` locks this).
+- **Not separated:** the Docker network. `NetworkMode` comes from a single
+  instance-wide setting (`p.cfg.Network`, `docker_container.go`), so **every
+  crew container on an instance sits on one bridge** and can reach the others
+  by IP. The Crewship API is the *intended* path between crews; it is not an
+  enforced one.
+- **A concrete consequence:** a crew's service containers register a DNS alias
+  that is the bare service name (`sidecar.go`), not a crew-scoped one. Two
+  crews that each declare a `postgres` service register the same alias on the
+  same bridge, and which one an agent resolves is up to Docker's round-robin.
+
+<Warning>
+Until per-crew networks land, treat **one Crewship instance as one network
+trust domain**. Two crews on the same instance are separated by process,
+filesystem and credential scope — not by the network.
+</Warning>
+
+### Egress: what is enforced, and what only looks enforced
+
+The sidecar's domain allowlist binds clients that honour `HTTP_PROXY`. It is a
+guardrail for cooperating tools, not containment: a process that ignores the
+proxy env vars or opens a raw socket leaves unchecked.
+
+The *policy* default is right — `DefaultCrewNetworkMode` is `restricted`, and
+migration v148 (#1366) both backfilled every grandfathered `free` row and
+rewrote the column DEFAULT, so a crew is restricted by construction whichever
+path creates it. `free` is an explicit opt-out. What is missing is not the
+default; it is enforcement below the cooperating-client layer.
+
+The repository does ship a real L3 control — `docker/crewship-sandbox/init-firewall.sh`
+sets a default `OUTPUT DROP` policy and explicitly refuses to ipset-allow
+private, loopback and link-local ranges, which would close direct cross-crew
+IP reach as well. **It cannot be reached through the supported configuration
+path today:** the script needs `NET_ADMIN`, the sandbox `devcontainer.json`
+requests it through `runArgs`, Crewship's devcontainer parser does not read
+`runArgs` at all, and `internal/devcontainer/config.go` refuses any direct
+capability grant other than `NET_BIND_SERVICE`. Do not count the firewall as
+an active control on a non-privileged crew.
 
 ### Privileged-mode escape hatch
 
@@ -85,42 +155,57 @@ guarantees are whatever the host runtime provides.
 
 ### Blast radius if the agent escapes
 
-If a non-privileged agent breaks out of the container runtime it
-gets the host process namespace as UID 1001, with `CapDrop: ALL` and
-an empty `CapAdd` (no `NET_RAW` unless the crew explicitly opted in),
-no Docker socket, read-only root, and the quotas above. This is the standard rootless-container failure mode;
-operators are expected to layer host hardening (SELinux, AppArmor,
-seccomp, kernel patching) on top.
+The controls above reduce the attack surface available to a non-privileged
+agent, but a successful container-runtime escape crosses this layer's trust
+boundary. The default Docker deployment is not rootless. Operators are
+expected to layer host hardening (rootless Docker where supported, SELinux,
+AppArmor, seccomp and kernel patching) on top.
 
 Detail: [Container isolation](/security/container-isolation).
 
 ## Layer 2 — Sidecar credential broker
 
-The agent never sees raw credentials. Instead:
+Credential delivery is channel-dependent. Proxy-routable provider keys stay in
+the sidecar, while OAuth tokens, CLI tokens, several adapter-specific API keys
+and file-delivered secrets enter the agent's environment or `/secrets` tree.
+Specifically:
 
 1. **Credentials are encrypted at rest in the host database** with
    `AES-256-GCM` using the operator's `ENCRYPTION_KEY` (`internal/encryption`);
    the sidecar holds the decrypted working set in an **in-memory** store
    (`internal/sidecar/credstore`) that never touches disk.
-2. **A per-agent sidecar** runs alongside the agent container, also as
-   a non-root user (UID 1002).
-3. **The agent's outbound HTTP traffic is proxied through the sidecar.**
+2. **One shared per-crew sidecar** runs inside the crew container as the
+   non-root UID 1002.
+3. **Cooperating outbound HTTP clients use the sidecar.**
    When the agent calls `https://api.openai.com/...`, the sidecar:
-   - Checks the destination against the per-agent **allowlist**.
+   - Checks the destination against the per-crew **allowlist**.
    - Looks up the credential mapped to that destination.
    - Injects the `Authorization` header on the way out.
    - Forwards the response back.
-4. **The sidecar's credentials are loaded once at startup over stdin**
+4. **Credentials selected for proxy delivery are loaded into the sidecar over
+   stdin**
    as a JSON payload. In transit the JSON is base64-wrapped inside the
    container launch command (`echo '<b64>' | base64 -d | crewship-sidecar`)
    so the shell never interprets credential bytes; the pipeline decodes it
    before the sidecar reads stdin. They are never written to the
-   agent container's environment.
+   agent environment. Credentials on direct env/file delivery paths are not
+   covered by this property.
 
-The agent therefore cannot:
+Identity-bearing sidecar routes use a per-agent bearer token derived from the
+server's internal master token. This prevents a caller from gaining another
+identity merely by changing a `from` field or URL slug. It does **not** provide
+non-repudiable intra-crew identity: every sibling runs as UID 1001 and can read
+another running sibling's token from the shared process space. The journal can
+therefore record which token identity was accepted for an action, not which
+process originally owned that token.
 
-- Read API keys via `printenv`, `cat /proc/1/environ`, or any other
-  env-var introspection — credentials don't live in the agent's env.
+Subject to those limits, an agent cannot:
+
+- Read a provider key that is actually on a reverse-proxy delivery path from
+  its own environment — only a dummy placeholder is present. This guarantee
+  does not apply to direct-env adapters, OAuth/CLI tokens or file-delivered
+  credentials, and the shared UID means siblings can read each other's direct
+  material while their runs overlap.
 - Reach an HTTP destination not in its allowlist **as long as it uses
   the `HTTP_PROXY` / `HTTPS_PROXY` env vars** that orchestrator
   injects (`http://127.0.0.1:9119`). Well-behaved Go/Python/Node HTTP
@@ -129,9 +214,9 @@ The agent therefore cannot:
   network layer is the operator's responsibility — see
   [Container isolation](/security/container-isolation) for hardening
   options.
-- Exfiltrate credentials by tricking the LLM into echoing them — the
-  scrubber (Layer 3) drops anything that looks like a key in the
-  agent's output before it lands in the journal or web UI.
+- Persist common credential shapes into the journal or web UI without the
+  output scrubber (Layer 3) attempting to redact them. The scrubber is not an
+  exfiltration boundary and cannot protect data sent directly over the network.
 
 When a credential *does* end up in the agent env (OAuth/CLI tokens, or
 SECRET credentials with Keeper off), the Orchestrator logs the exposure at
@@ -194,31 +279,54 @@ dedicated private-bridge + egress-enforcement work is tracked as EPIC #1001 M2b.
 Never treat "the scrubber will catch it" as a safety property.
 </Warning>
 
-## Layer 4 — Keeper policy layer
+## Layer 4 — Keeper credential gate
 
 Even with credentials brokered and output scrubbed, the agent can
 still take legitimate-looking actions the operator wants to gate:
-opening a high-risk file, hitting a paid API endpoint, calling a tool
-that modifies production data.
+using a production credential, running a command that reads one,
+hitting a paid API endpoint.
 
-**Keeper** is the per-workspace policy engine that evaluates each
-tool call against a YAML ruleset _before_ the call is dispatched.
-Rules can:
+**Keeper is a credential gate, not a tool-call gate.** It is **off by
+default**, and it sits on exactly two agent-facing sidecar routes
+(`internal/sidecar/server.go`):
 
-- **Allow** — the call proceeds (default for everything not matched).
-- **Deny** — the call is blocked, the agent receives a structured
-  error, the decision is journalled.
-- **Require approval** — the call pauses, a `waitpoint` lands in
-  the operator's [Inbox](/guides/inbox), and the agent resumes (or
-  is denied) on the operator's choice.
-- **Escalate** — the call routes to a second-opinion agent
-  ("gatekeeper LLM") for a softer decision, with the final answer
-  captured in the journal.
+- **`POST /keeper/request`** — the agent asks for a credential's value.
+- **`POST /keeper/execute`** — the agent asks for a command to be run
+  *with* a credential injected, and receives only the scrubbed output.
+
+On those two routes the gate is genuinely pre-action: nothing is handed
+over or executed until the decision settles. The decision space is
+`ALLOW` / `DENY` / `ESCALATE`. There is **no YAML ruleset and no
+per-tool rule matching** — the judge is a model, and the tier carried by
+the credential (L1–L4) decides how far it is trusted. In the default
+profile an L4 `ALLOW` is converted to an `ESCALATE` so a person
+confirms; an operator can remove that step with `--escalate-from 5`.
+See [Keeper](/guides/keeper). An `ESCALATE` reaches the operator as an
+escalation in the [Inbox](/guides/inbox).
+
+### What Keeper does not gate
+
+<Warning>
+Ordinary tool calls — `Bash`, `Read`, `Edit`, an MCP tool — **do not pass
+through Keeper**, and Crewship has no "before the tool runs" interception
+point at all. The orchestrator drives an external CLI (Claude Code,
+Cursor, …) and parses the stream it emits, so by the time a `tool_call`
+reaches Crewship the tool has already executed. The `pre_tool_call` hook
+event is defined but retired for exactly this reason
+(`internal/hooks/types.go`): a real pre-dispatch hook needs a
+wire-protocol interception point none of the driven CLIs expose today.
+
+The behaviour monitor built on `post_tool_call` is therefore
+**detection, not prevention**. It is opt-in, it samples one call in five
+per crew by default, and a `BLOCK` verdict cannot undo the call that
+triggered it — the verdict is journalled and can interrupt the *next*
+call. Never read it as an authorization boundary.
+</Warning>
 
 Keeper decisions are first-class journal entries (`entry_type =
 keeper.decision`) and are searchable in [Recall](/guides/crew-journal),
-so a postmortem can reconstruct exactly what the agent tried and
-why the policy held the line.
+so a postmortem can reconstruct what the agent asked for and how the
+gate answered — for the credential paths Keeper actually sees.
 
 Detail: [Keeper guide](/guides/keeper).
 
@@ -302,7 +410,7 @@ The list is honest:
 
 - **Cross-language homoglyph beyond Cyrillic/Greek** — Hebrew, Armenian, Mathematical Alphanumeric Symbols block. Low priority because the existing rules target English-language injection patterns and the homoglyph fold table only needs to cover what attackers can substitute for ASCII letters in the existing rule set. Extensions are additive.
 - **Multi-step prompt injection** — content that's benign on its own but builds an instruction when combined with the next read. Out of scope; the scanner is single-pass per file.
-- **Adversarial LLM output mimicking benign content** — content that says "PROCEED" to a downstream agent's heuristic check. That's a Layer 4 (Keeper) defence, not Layer 5.
+- **Adversarial LLM output mimicking benign content** — content that says "PROCEED" to a downstream agent's heuristic check. Out of scope for the scanner, and **not covered by Layer 4 either**: Keeper sees credential requests, not the agent-to-agent content path.
 - **Content the agent SELF-AUTHORED that's later read by another agent** — peer cards are a real attack surface here. The peer-card writer caps content to 1500 B + the GDPR cascade can purge cards, but a malicious agent writing instructions into a peer card today bypasses the inbound-only scan because peer cards are written authoritatively. Tracked as PR-F follow-up: extend ScanContent to peer-card WRITE path.
 - **Inbound content above the per-tier byte cap** — caps are 4000 / 4000 / 1500 / 8000 / 30000 / 1500 / no-cap (lessons) bytes per tier. The scanner runs on whatever fits within the cap; content truncated by cap before reaching the scanner is benignly cut off.
 
@@ -359,10 +467,12 @@ A CI lint-gate (`TestIngressFenceGate`) fails the build if a new caller interpol
 |---|---|
 | External **webhook** payload carries "ignore previous instructions" | **Ingress trust fence** (nonce-fenced as data) + Layer 5 scanner on Crewship's own calls |
 | External **issue/mission or tool-output** payload carries an injection | **Partially** — Layer 5 scanner on Crewship's own LLM calls; the ingress trust fence extends to these sites in **M1** (only the webhook site is fenced today — see the M0/M1 note above) |
-| Agent tries to read API keys from env | Layer 2 (sidecar — keys aren't there) |
-| Agent tries to echo a stolen key in output | Layer 3 (scrubber redacts) |
-| Agent tries to reach an arbitrary URL | Layer 2 (allowlist denies) + container network policy |
-| Agent tries to call a sensitive internal API | Layer 4 (Keeper rule) |
+| Agent tries to read API keys from env | **Adapter-dependent** — Layer 2 keeps a proxy-routed provider key out of the environment (only a dummy is there); OAuth/CLI tokens, file-delivered secrets and the keys of adapters with no endpoint override are readable there. See the [adapter matrix](/guides/credentials#adapter-delivery-matrix) |
+| A sibling agent reads a peer's bearer token or direct credential material | **Not handled** — every agent in the crew runs as UID 1001 in one process namespace, so this is intra-crew theft, not a boundary crossing. See [Per-agent identity on the shared sidecar](#per-agent-identity-on-the-shared-sidecar) |
+| Agent tries to echo a stolen key in output | **Partially** — Layer 3 redacts known key shapes, plus common encodings of the injected secret on the `/execute` path. An unlisted shape, an unanticipated transform, or a tool that never prints the value all pass |
+| Agent tries to reach an arbitrary URL | **Only while it cooperates** — the sidecar allowlist binds clients that honour `HTTP_PROXY`. There is no network-layer containment by default; a raw socket or a proxy-ignoring client leaves unchecked |
+| Agent reaches another crew's container over the network | **Not handled** — all crews share one Docker bridge; separation between crews is by container, volume and credential scope, not by network |
+| Agent tries to call a sensitive internal API | **Not gated as such** — Keeper sees credential requests, not tool calls or arbitrary HTTP. The controls that do apply are the Layer 2 allowlist and host network policy |
 | Agent breaks out of container runtime | Layer 1 — host hardening |
 | Operator's `ENCRYPTION_KEY` is exfiltrated | **Out of scope** — host compromise |
 | Crewship binary is tampered with at install | **Partially mitigated** — `curl \| sh` checks SHA-256, and cosign signature when `cosign` is on PATH; Homebrew + Docker Compose paths rely on upstream channel integrity. See [Install](/guides/install) |
@@ -400,9 +510,26 @@ describes the **current implementation**, with these gaps:
   created, because the proxy filters URL paths and `Privileged: true`
   lives in the request body. The workspace
   `allow_privileged_credentials` gate remains the fence for that.
-- **Keeper rulesets ship empty.** Operators write the rules that
-  matter for their environment; there is no "secure by default"
-  policy yet.
+- **Crews share one Docker network.** Separation between crews is
+  resource-level, not network-level, and service DNS aliases are not
+  crew-scoped. One instance is one network trust domain.
+- **The sandbox egress firewall is unreachable configuration.** It requires
+  `NET_ADMIN` via `runArgs`, which the devcontainer parser does not read and
+  which the capability allowlist would refuse anyway.
+- **Keeper is off by default and is not a tool-call gate.** There is no
+  ruleset to author: it evaluates the two credential routes and nothing
+  else, so an enabled Keeper is not a "secure by default" policy over
+  what the agent does. Ordinary tool calls have no pre-dispatch gate at
+  all — see [Layer 4](#what-keeper-does-not-gate).
+- **There is no identity boundary between agents in one crew.** All of
+  them run as UID 1001 in a shared process namespace, and the per-agent
+  bearer token is delivered in that environment. It stops a caller from
+  claiming another identity by editing a `from` field; it does not stop a
+  sibling that reads the token from replaying it. Per-agent UID is the
+  tracked prerequisite for attested identity.
+- **Secretless delivery is adapter-conditional, not universal.** The
+  reverse-proxy guarantee covers the routes in the adapter matrix. Every
+  other path hands the real value to the agent process.
 
 ## Account enumeration on the public auth surface
 
@@ -488,6 +615,9 @@ passed); the cryptographic binding now enforces it server-side.
 
 ### Per-agent identity on the shared sidecar
 
+The current mechanism is bearer-token attribution; the heading is retained as
+the published deep-link name, not as a claim of an OS-enforced identity boundary.
+
 The sidecar is shared **per crew** — several agents run in one container
 behind one sidecar — so a workspace-bound token (identical for every
 agent in the workspace) and the sidecar's boot identity (`s.ipc.AgentSlug`,
@@ -498,7 +628,8 @@ path `/mcp/memory/<slug>`, and the Keeper credential routes) therefore let
 any sibling in the crew impersonate a peer — including on a `CREDENTIAL`
 escalation, which is a non-repudiation gap for the vault.
 
-To close it, the orchestrator mints a **per-agent token** for every agent
+To close caller-supplied-slug spoofing, the orchestrator mints a **per-agent
+bearer token** for every agent
 — `agtv1.<workspace_id>.<agent_id>.<HMAC-SHA256(master,
 agent_derivation_context || workspace_id || NUL || agent_id)>`, derived by
 `internaltoken.DeriveAgentToken`. It is delivered to each agent as
@@ -519,8 +650,19 @@ presented bearer token against that roster to resolve the **acting** agent:
   deployment falls back to the prior behaviour (membership-validated `from`
   for escalate/query, URL slug for the memory path), so upgrading the binary
   doesn't break crews whose agents don't yet carry tokens. Because the master
-  never enters a container, the token cannot be forged from inside the agent
-  process.
+  never enters a container, a token for an arbitrary identity cannot be
+  computed from inside the agent process.
+
+This is authoritative **token attribution**, not an enforced process identity.
+The token is delivered in the agent environment, and every sibling in the crew
+runs as the same UID in the same process namespace. A sibling that reads a
+peer's token can replay it and be attributed to that peer. The HMAC journal
+protects the integrity of the resulting record, but it cannot repair actor
+authenticity that was never established. Distinct per-agent OS principals are
+the prerequisite for the attested-identity design tracked in
+`docs/prd/agent-identity-signing.md`; container-per-agent was explicitly
+rejected in `docs/prd/agent-isolation-findings-2026-08-01.md` in favour of an
+incremental per-agent UID path inside the shared crew container.
 
 #### Where the memory refusal is enforced (CRE-153)
 
