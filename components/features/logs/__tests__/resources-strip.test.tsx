@@ -8,26 +8,35 @@ import type { JournalEntry } from "@/lib/types/journal"
 // The strip self-fetches, so both data hooks are stubbed: the list hands out
 // a spy prependLive and a fixed buffer, the stream captures whatever onEntry
 // the strip wires to it.
-const prependLive = vi.fn()
-let capturedOnEntry: ((e: JournalEntry) => void) | null = null
-let listEntries: JournalEntry[] = []
+//
+// The shared state lives in vi.hoisted because vi.mock factories are hoisted
+// above every module-level declaration. The factories below only *close over*
+// these bindings — they are read when the mocked hook is called, by which
+// time a plain `const` would have initialised — but relying on that is a trap
+// one edit away from a temporal-dead-zone crash, and vi.hoisted is the
+// documented way to share state with a hoisted factory.
+const mocks = vi.hoisted(() => ({
+  prependLive: vi.fn(),
+  capturedOnEntry: null as ((e: unknown) => void) | null,
+  listEntries: [] as unknown[],
+}))
 
 vi.mock("@/hooks/use-journal-list", () => ({
   useJournalList: () => ({
-    entries: listEntries,
+    entries: mocks.listEntries,
     nextCursor: null,
     loading: false,
     loadingMore: false,
     error: null,
     refresh: vi.fn(),
     loadMore: vi.fn(),
-    prependLive,
+    prependLive: mocks.prependLive,
   }),
 }))
 
 vi.mock("@/hooks/use-journal-stream", () => ({
-  useJournalStream: (opts: { onEntry: (e: JournalEntry) => void }) => {
-    capturedOnEntry = opts.onEntry
+  useJournalStream: (opts: { onEntry: (e: unknown) => void }) => {
+    mocks.capturedOnEntry = opts.onEntry
     return { status: "connected", lastError: null, gapDetected: false, reconnect: vi.fn() }
   },
 }))
@@ -47,9 +56,9 @@ function metric(id: string, cpu: number, offsetMs = 0): JournalEntry {
 }
 
 beforeEach(() => {
-  prependLive.mockClear()
-  capturedOnEntry = null
-  listEntries = []
+  mocks.prependLive.mockClear()
+  mocks.capturedOnEntry = null
+  mocks.listEntries = []
   vi.useFakeTimers({ shouldAdvanceTime: true })
 })
 
@@ -60,27 +69,27 @@ afterEach(() => {
 describe("ResourcesStrip", () => {
   it("batches live metrics into one prepend instead of one per sample", () => {
     render(<ResourcesStrip workspaceId="ws_test" crewId="crew_a" />)
-    expect(capturedOnEntry).toBeTypeOf("function")
+    expect(mocks.capturedOnEntry).toBeTypeOf("function")
 
     act(() => {
-      for (let i = 0; i < 40; i++) capturedOnEntry!(metric(`m${i}`, i))
+      for (let i = 0; i < 40; i++) mocks.capturedOnEntry!(metric(`m${i}`, i))
     })
     // container.metrics is the highest-volume entry type in the product;
     // the strip used to hand prependLive straight to onEntry, so this was
     // 40 state updates and 40 recharts re-renders.
-    expect(prependLive).not.toHaveBeenCalled()
+    expect(mocks.prependLive).not.toHaveBeenCalled()
 
     act(() => {
       vi.advanceTimersByTime(PREPEND_FLUSH_MS)
     })
-    expect(prependLive).toHaveBeenCalledTimes(1)
-    const batch = prependLive.mock.calls[0][0]
+    expect(mocks.prependLive).toHaveBeenCalledTimes(1)
+    const batch = mocks.prependLive.mock.calls[0][0]
     expect(Array.isArray(batch)).toBe(true)
     expect(batch).toHaveLength(40)
   })
 
   it("renders the four cells and the latest reading", () => {
-    listEntries = [metric("m1", 12, 60_000), metric("m2", 37, 0)]
+    mocks.listEntries = [metric("m1", 12, 60_000), metric("m2", 37, 0)]
     render(<ResourcesStrip workspaceId="ws_test" crewId="crew_a" />)
 
     for (const label of ["CPU", "MEM", "NET", "DISK"]) {
@@ -95,6 +104,6 @@ describe("ResourcesStrip", () => {
     act(() => {
       vi.advanceTimersByTime(PREPEND_FLUSH_MS * 2)
     })
-    expect(prependLive).not.toHaveBeenCalled()
+    expect(mocks.prependLive).not.toHaveBeenCalled()
   })
 })

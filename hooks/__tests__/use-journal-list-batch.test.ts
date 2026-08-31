@@ -21,18 +21,23 @@ function entry(id: string, overrides: Partial<JournalEntry> = {}): JournalEntry 
   } as JournalEntry
 }
 
+// stubGlobal, not `global.fetch = …`: vi.restoreAllMocks() does not undo a
+// direct global assignment, so the mock would outlive this file.
+let mockFetch: ReturnType<typeof vi.fn>
+
 beforeEach(() => {
-  global.fetch = vi.fn()
+  mockFetch = vi.fn()
+  vi.stubGlobal("fetch", mockFetch)
 })
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
 /** Mount the hook with a known head page and wait for the initial load. */
 async function mounted(head: JournalEntry[], opts: { maxEntries?: number } = {}) {
-  const fetchMock = global.fetch as ReturnType<typeof vi.fn>
-  fetchMock.mockResolvedValueOnce(okJSON({ entries: head, next_cursor: null }))
+  mockFetch.mockResolvedValueOnce(okJSON({ entries: head, next_cursor: null }))
   let renders = 0
   const hook = renderHook(() => {
     renders++

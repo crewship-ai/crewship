@@ -227,7 +227,7 @@ Emit is asynchronous: entries are queued (buffer 1024), a background goroutine b
 ### HTTP
 
 - `GET /api/v1/journal` -- paginated list, newest first. See the [API reference](/api-reference/journal).
-- `GET /api/v1/journal/stream` -- SSE live tail; seeds with the most recent 50 entries, then wakes on the writer's flush notification (with a 20s fallback ticker, not the 1s poll this line used to claim), emits `event: entry` frames, and heartbeats every 15s. Reconnect with `Last-Event-ID` to skip already-seen rows -- but note that header only rides a browser `EventSource`'s own automatic retry; a client that reopens the stream itself must backfill via `?since=`.
+- `GET /api/v1/journal/stream` -- SSE live tail; seeds with the most recent 50 entries, then wakes on the writer's flush notification (with a 20s fallback ticker, not the 1s poll this line used to claim), emits `event: entry` frames, and heartbeats every 15s. Reconnect with `Last-Event-ID` to skip already-seen rows -- that is how `crewship journal --follow` resumes (`internal/cli/sse.go` sets the header, `followJournal` threads it across reconnects). A **browser** `EventSource` cannot set request headers, so it sends `Last-Event-ID` only on its own built-in retry; a web client that closes and reopens the stream to control its backoff starts clean and must backfill via `?since=`.
 - `GET /api/v1/journal/count` -- total matching count for a filter set; ignores cursor/limit so the badge stays honest.
 - `GET /api/v1/journal/{id}` -- single entry (scoped to workspace; cross-tenant IDs return 404).
 - `POST /api/v1/journal/{id}/priority` -- annotate an entry with `normal`/`high`/`pin`/`permanent`. OWNER or ADMIN only; emits a `memory.priority_changed` audit row.

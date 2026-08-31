@@ -180,13 +180,18 @@ data: {...}
 - **Watermark:** compound (ts, id) so bursts sharing a ms timestamp aren't partially dropped.
 - **Reconnect:** clients send the SSE `Last-Event-ID` header; the server looks the entry up, treats its `ts` as the lower bound, and pages through the gap (up to **500 entries**, 10 × 50-row pages) before going live. A disconnect that produced more than 500 matching entries truncates the older end of the gap and the server logs a `warn` — clients should reconcile by re-fetching `/api/v1/journal?since=<last-known-ts>` if they need a longer window.
 
-  `Last-Event-ID` is only sent by a browser `EventSource` doing its **own**
-  automatic reconnect. A client that closes the connection and constructs a
-  new `EventSource` — which is what the web UI does, so it can control the
-  backoff — starts a fresh stream with no `Last-Event-ID`, and must close its
-  own gap with `/api/v1/journal?since=<last-known-ts>`. The UI's journal
-  hook does exactly that: while the stream is down it polls `since` on a
-  rolling watermark, walking the cursor up to 4 pages per tick, and reports
+  Any client that can set request headers should resume this way, and
+  `crewship journal --follow` does: `internal/cli/sse.go` sets `Last-Event-ID`
+  and `followJournal` threads it across its own bounded-backoff reconnects.
+
+  A **browser** `EventSource` cannot set request headers. It sends
+  `Last-Event-ID` only on its built-in automatic retry — a web client that
+  closes the connection and constructs a new `EventSource` (which is what the
+  web UI does, so it can control the backoff and stop polling on success)
+  starts a fresh stream with no `Last-Event-ID` and must close its own gap
+  with `/api/v1/journal?since=<last-known-ts>`. The UI's journal hook does
+  exactly that: while the stream is down it polls `since` on a rolling
+  watermark, walking the cursor up to 4 pages per tick, and reports
   "Entries missing" if the backlog was deeper than that.
 
 **Errors:**
