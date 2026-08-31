@@ -112,6 +112,10 @@ def fetch_spec(base):
         return denullable(json.load(r))
 
 
+class NotA200(Exception):
+    """A 2xx that is not 200, which this checker has no schema to judge."""
+
+
 def fetch(base, path, token, workspace):
     sep = "&" if "?" in path else "?"
     req = urllib.request.Request(
@@ -119,6 +123,17 @@ def fetch(base, path, token, workspace):
         headers={"Authorization": f"Bearer {token}", "X-Workspace-ID": workspace},
     )
     with _opener.open(req, timeout=20) as r:
+        # `check` validates against the schema documented for 200 and nothing
+        # else, so the status has to BE 200 or the comparison is against a
+        # contract never written for this response. urllib raises on 4xx/5xx
+        # and redirects are refused above, which leaves the rest of the 2xx
+        # band: a 201 or a 206 would have been read as a body and graded
+        # against the wrong schema, and a 204 would have surfaced as a JSON
+        # decode error that reads like a broken server. Comparing a response
+        # against the wrong contract and calling it a pass is the defect this
+        # whole branch exists to remove.
+        if r.status != 200:
+            raise NotA200(f"HTTP {r.status}, and only 200 has a documented schema")
         return json.load(r)
 
 
@@ -179,7 +194,7 @@ def main(argv):
             body = fetch(base, path, token, workspace)
         except Exception as exc:
             failed += 1
-            print(f"  FAIL  {path:38} unreachable: {type(exc).__name__}: {exc}"[:160])
+            print(f"  FAIL  {path:38} no 200 JSON body: {type(exc).__name__}: {exc}"[:170])
             continue
         errors = check(spec, path, body)
         if errors is None:

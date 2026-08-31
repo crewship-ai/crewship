@@ -11,8 +11,26 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).parent))
 import response_shapes  # noqa: E402
 from response_shapes import (  # noqa: E402
-    ROUTES, _RefuseRedirects, check, checked_base, denullable, response_schema,
+    ROUTES, NotA200, _RefuseRedirects, check, checked_base, denullable, fetch,
+    response_schema,
 )
+
+
+class _FakeResponse:
+    """Enough of an http.client.HTTPResponse for `fetch` to read."""
+
+    def __init__(self, status, payload=b'{"rows": []}'):
+        self.status = status
+        self._payload = io.BytesIO(payload)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, *args):
+        return self._payload.read(*args)
 
 
 def run_main(routes, spec, fetched):
@@ -125,6 +143,42 @@ class ResponseShapesTest(unittest.TestCase):
                 {}, "https://elsewhere.example.com/api/v1/inbox")
         self.assertIn("elsewhere.example.com", str(caught.exception))
         self.assertNotIn("sekrit", str(caught.exception))
+
+
+class StatusCodeTest(unittest.TestCase):
+    """Only a real 200 may be measured against the documented 200 schema.
+
+    urllib raises on 4xx/5xx, so those were already failures, and redirects are
+    refused — which left the 2xx band. A 201 or a 206 sailed through `fetch`
+    and its body was then validated against the schema documented for **200**,
+    so the checker would have compared a response against a contract that was
+    never written for it and called that a pass. Comparing against the wrong
+    contract and reporting success is the defect this whole branch is about.
+    """
+
+    def test_a_201_is_not_a_200(self):
+        with mock.patch.object(response_shapes._opener, "open",
+                               return_value=_FakeResponse(201)):
+            with self.assertRaises(NotA200) as caught:
+                fetch("http://localhost:8082", "/api/v1/approvals", "tok", "ws-1")
+
+        self.assertIn("201", str(caught.exception))
+
+    def test_a_204_is_not_a_200_either(self):
+        # The realistic one on a read-only GET: a handler that answers "no
+        # content" has no body to compare, and json.load would have failed with
+        # a decode error that reads like a broken server.
+        with mock.patch.object(response_shapes._opener, "open",
+                               return_value=_FakeResponse(204, b"")):
+            with self.assertRaises(NotA200):
+                fetch("http://localhost:8082", "/api/v1/approvals", "tok", "ws-1")
+
+    def test_a_200_is_read_normally(self):
+        with mock.patch.object(response_shapes._opener, "open",
+                               return_value=_FakeResponse(200)):
+            self.assertEqual(
+                fetch("http://localhost:8082", "/api/v1/approvals", "tok", "ws-1"),
+                {"rows": []})
 
 
 class ExitStatusTest(unittest.TestCase):

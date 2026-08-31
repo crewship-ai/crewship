@@ -248,6 +248,11 @@ It fetches `/openapi.json` from the target — not the file in the repo — so i
 measures what that instance actually serves. Read-only GETs only, mirroring
 `run.sh`'s method deny-list.
 
+Only a real `200` counts. urllib raises on 4xx/5xx and redirects are refused,
+which leaves the rest of the 2xx band — and a `201` or `206` read as a body
+would have been graded against the schema documented for `200`, a contract
+never written for it.
+
 **Exit 0 means every declared route passed — not "nothing failed".** The two
 differ in exactly one case, and it is the case that matters: a run in which
 nothing could be fetched. `ROUTES` is a curated list a reachable server with a
