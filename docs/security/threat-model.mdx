@@ -197,7 +197,7 @@ the system prompt, the two lengths, and a reference to the chat the
 message lives in — enough to answer *which prompt ran* without storing
 it. `chat.user_message` is capped and scrubbed the same way, and the
 process log line for a run takes the same sanitised argv. Payload shape:
-[Crew Journal](/guides/crew-journal#exec-command-what-ran-without-the-prompt).
+[Crew Journal](/guides/crew-journal#exec-command-payload).
 
 For the keeper credential-use path (`/execute`), the scrubber additionally
 masks the **injected secret's own value** and its common encodings — literal,

@@ -130,7 +130,7 @@ The row carries the run's `trace_id`, so `--trace-id <run-id>` narrows it to one
 crewship journal --type provisioning.step --trace-id <run-id>
 ```
 
-#### `exec.command` — what ran, without the prompt
+#### `exec.command` — what ran, without the prompt {#exec-command-payload}
 
 Every agent exec emits a `start` entry and a terminal `end` entry. The payload
 is bounded and typed, and it deliberately does **not** contain the prompt:
