@@ -123,10 +123,12 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// network.egress can't reconstruct WHY the agent was doing those
 	// things. Best-effort: a journal hiccup never aborts the run.
 	if req.UserMessage != "" {
-		userPreview := req.UserMessage
-		if len(userPreview) > 240 {
-			userPreview = userPreview[:240] + "…"
-		}
+		// The summary was already capped at 240 chars; the payload was the
+		// verbatim message, uncapped and unscrubbed, in the same append-only
+		// row (#2215). Both now come from the same bounded, scrubbed preview,
+		// so the payload can never carry more of a pasted secret than the
+		// summary rendered beside it.
+		userPreview, userTruncated := journalUserMessage(req)
 		_, _ = o.getJournal().Emit(ctx, JournalEntry{
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
@@ -138,10 +140,13 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			ActorID:     req.AgentID, // best available; agents-context call sites rarely carry user_id
 			Summary:     fmt.Sprintf("user → %s: %s", req.AgentSlug, userPreview),
 			Payload: map[string]any{
-				"chat_id":      req.ChatID,
-				"agent_slug":   req.AgentSlug,
-				"content":      req.UserMessage,
+				"chat_id":    req.ChatID,
+				"agent_slug": req.AgentSlug,
+				"content":    userPreview,
+				// The full length is still recorded: the cap bounds what is
+				// stored, it does not hide that something was cut.
 				"length_chars": len(req.UserMessage),
+				"truncated":    userTruncated,
 			},
 			Refs: map[string]any{"chat_id": req.ChatID},
 		})
@@ -365,7 +370,6 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	defer cancel()
 
 	cIDShort := shortID(req.ContainerID)
-	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", cmd)
 
 	// The run's credential values, collected once. They feed three sinks: the
 	// streamed-output scrubber (wrapScrubHandler below), the end-of-stream
@@ -373,10 +377,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// emit. Collected here rather than beside the handler wrap because the
 	// start emit fires first and needs them.
 	secretValues := collectSecretValues(req)
-	// journalCmd is the only argv form allowed into a journal payload; see
-	// scrubArgv for why the scrub has to happen before the write rather than
-	// after it.
-	journalCmd := scrubArgv(cmd, secretValues)
+	// journalCmd is the only argv form allowed to leave this function: the
+	// prompt-bearing elements are gone, what remains is scrubbed and capped.
+	// See journal_exec_command.go for why removal rather than scrubbing.
+	journalCmd := journalArgv(cmd, req, secretValues)
+
+	// The process log takes the same form. It is a softer sink than the
+	// journal — operator-only, rotated, not hash-chained — but it is still a
+	// place the whole prompt should not be copied to on every run (#2215),
+	// and the sanitised argv keeps the flags and the command shape an operator
+	// is actually reading it for.
+	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", journalCmd.argv)
 
 	// Crow's Nest: emit the command start so the live terminal UI can
 	// open a new block before any output streams. Payload carries the
@@ -393,15 +404,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		Severity:    "info",
 		ActorType:   "agent",
 		ActorID:     req.AgentID,
-		Summary:     fmt.Sprintf("%s runs %s", req.AgentSlug, truncateCmd(journalCmd, 120)),
-		Payload: map[string]any{
-			"cmd":          journalCmd,
-			"container_id": cIDShort,
-			"adapter":      req.CLIAdapter,
-			"model":        req.LLMModel,
-			"phase":        "start",
-		},
-		Refs: map[string]any{"chat_id": req.ChatID, "container_id": req.ContainerID},
+		Summary:     fmt.Sprintf("%s runs %s", req.AgentSlug, truncateCmd(journalCmd.argv, 120)),
+		Payload:     execCommandPayload(req, journalCmd, "start", nil),
+		Refs:        map[string]any{"chat_id": req.ChatID, "container_id": req.ContainerID},
 	})
 	// Flip agent to busy for the Watch Roster. The presence sweeper
 	// reverts to offline after idle timeout if the agent crashes before
@@ -437,12 +442,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			ActorType:   "agent",
 			ActorID:     req.AgentID,
 			Summary:     fmt.Sprintf("%s exec FAILED: %v", req.AgentSlug, err),
-			Payload: map[string]any{
-				"cmd":         journalCmd,
-				"phase":       "end",
+			Payload: execCommandPayload(req, journalCmd, "end", map[string]any{
 				"error":       err.Error(),
 				"duration_ms": time.Since(execStart).Milliseconds(),
-			},
+			}),
 		})
 		return fmt.Errorf("exec agent: %w", err)
 	}
@@ -1652,21 +1655,24 @@ func scrubArgv(argv []string, secretValues []string) []string {
 }
 
 // emitExecEnd emits the terminal exec.command journal entry that closes a
-// Crow's Nest command block. The payload always carries cmd, phase:"end" and
-// duration_ms; extra holds the per-outcome fields (exit_code, reason, …).
+// Crow's Nest command block. The payload carries the shared exec.command shape
+// plus duration_ms; extra holds the per-outcome fields (exit_code, reason, …).
 //
-// journalCmd MUST already have been through scrubArgv: this helper holds no
-// credential values and cannot scrub for you. Callers pass the run's
-// journalCmd binding, never the raw argv.
-func (o *Orchestrator) emitExecEnd(ctx context.Context, req AgentRunRequest, execID string, journalCmd []string, severity, summary string, execStart time.Time, extra map[string]any) {
-	payload := map[string]any{
-		"cmd":         journalCmd,
-		"phase":       "end",
-		"duration_ms": time.Since(execStart).Milliseconds(),
-	}
+// journalCmd is the journalArgv view, which is the only argv form that may be
+// persisted: this helper holds no credential values and cannot sanitise for
+// you. Passing the raw argv here is what the static guard in
+// exec_command_scrub_test.go exists to catch.
+func (o *Orchestrator) emitExecEnd(ctx context.Context, req AgentRunRequest, execID string, journalCmd journalCmdView, severity, summary string, execStart time.Time, extra map[string]any) {
+	// duration_ms first so a caller's extra can still override it, as it
+	// could before this helper shared a payload builder with the other two
+	// emit sites. Built into a fresh map rather than written into extra: the
+	// callers pass literals today, and a helper that mutates its argument is
+	// a trap for the one that does not.
+	fields := map[string]any{"duration_ms": time.Since(execStart).Milliseconds()}
 	for k, v := range extra {
-		payload[k] = v
+		fields[k] = v
 	}
+	payload := execCommandPayload(req, journalCmd, "end", fields)
 	_, _ = o.getJournal().Emit(ctx, JournalEntry{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,

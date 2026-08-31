@@ -166,7 +166,13 @@ func TestExecCommandEmit_ScrubsArgvBeforeJournalWrite(t *testing.T) {
 						t.Errorf("exec.command (phase=%q) argv[%d] leaked the secret verbatim into the hash-chained journal: %q",
 							phase, i, truncateForFailure(arg))
 					}
-					if strings.Contains(arg, "[REDACTED") {
+					// Either removal marker counts. #2205 scrubbed the element
+					// the pasted secret arrived in; #2215 removes that element
+					// outright, before the scrubber ever sees it, so on this
+					// path the placeholder is the marker. What the assertion is
+					// for is unchanged: a sanitiser that silently stopped doing
+					// anything must fail here rather than pass vacuously.
+					if strings.Contains(arg, "[REDACTED") || strings.Contains(arg, "[PROMPT:") {
 						redacted = true
 					}
 				}
@@ -183,7 +189,7 @@ func TestExecCommandEmit_ScrubsArgvBeforeJournalWrite(t *testing.T) {
 				}
 			}
 			if !redacted {
-				t.Error("no redaction marker anywhere in the emitted argv — the scrubber did not run")
+				t.Error("no redaction marker and no prompt placeholder anywhere in the emitted argv — nothing sanitised it")
 			}
 			for _, want := range tc.wantPhases {
 				if !seenPhases[want] {
@@ -331,17 +337,34 @@ func isScrubbedArgvExpr(e ast.Expr) bool {
 
 // boundingHelpers are the calls allowed to carry a prompt-bearing expression
 // into a map literal. Each either removes the prompt text outright
-// (journalArgv), replaces it with a measurement (promptRef, len), or bounds it
-// to a fixed length after scrubbing (journalUserMessage, truncateStr,
-// truncateCmd). Adding a name here is a deliberate statement that the helper
-// makes the value safe to persist forever.
+// (journalArgv), replaces it with a measurement (promptRef, len,
+// utf8.RuneCountInString), or bounds it to a fixed length after scrubbing
+// (journalUserMessage, truncateStr, truncateCmd). Adding a name here is a
+// deliberate statement that the helper makes the value safe to persist
+// forever — which is why the list is short and the entries are boring.
 var boundingHelpers = map[string]bool{
-	"journalArgv":        true,
-	"journalUserMessage": true,
-	"promptRef":          true,
-	"truncateStr":        true,
-	"truncateCmd":        true,
-	"len":                true,
+	"journalArgv":            true,
+	"journalUserMessage":     true,
+	"promptRef":              true,
+	"truncateStr":            true,
+	"truncateCmd":            true,
+	"len":                    true,
+	"utf8.RuneCountInString": true,
+}
+
+// calleeName renders a call's function as "name" or "pkg.Name", or "" for
+// anything more indirect (a method on a value, a func-typed field). Anything
+// this cannot name is not on the allowlist, which is the safe direction.
+func calleeName(fun ast.Expr) string {
+	switch v := fun.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.SelectorExpr:
+		if id, ok := v.X.(*ast.Ident); ok {
+			return id.Name + "." + v.Sel.Name
+		}
+	}
+	return ""
 }
 
 // promptBearingRef reports whether e names prompt text without going through a
@@ -349,10 +372,8 @@ var boundingHelpers = map[string]bool{
 // the system prompt and the user message into argv elements; req.UserMessage
 // and req.SystemPrompt are the two fields it folds.
 func promptBearingRef(e ast.Expr) (string, token.Pos, bool) {
-	if call, ok := e.(*ast.CallExpr); ok {
-		if fn, ok := call.Fun.(*ast.Ident); ok && boundingHelpers[fn.Name] {
-			return "", token.NoPos, false
-		}
+	if call, ok := e.(*ast.CallExpr); ok && boundingHelpers[calleeName(call.Fun)] {
+		return "", token.NoPos, false
 	}
 	var name string
 	var pos token.Pos
