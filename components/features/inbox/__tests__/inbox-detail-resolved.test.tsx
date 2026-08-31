@@ -11,6 +11,16 @@ import { DecisionCard, InboxDetail } from "../inbox-detail"
 // and a greyed Approve button — which reads as a permissions problem, not as a
 // decision that already happened. Inbox v2 promotes History to a primary
 // destination, so this is now the first thing a customer sees there.
+// DecisionCard computes its countdown from the real Date.now(), so a hardcoded
+// instant is "the future" only until it is not. This fixture said
+// 2026-08-31T21:00:00Z, written a few hours before that — and the suite went red
+// at 21:00Z that day, on a branch nobody had touched since. A test whose pass
+// depends on when it runs reports the calendar, not the code.
+//
+// Relative, so the gate is open whenever this runs. The other dates below are
+// only rendered, never compared, so they can stay fixed.
+const A_DEADLINE_STILL_AHEAD = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+
 function resolved(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
     id: "ibx-1",
@@ -25,7 +35,7 @@ function resolved(overrides: Partial<InboxItem> = {}): InboxItem {
     resolved_at: "2026-08-30T21:05:00Z",
     created_at: "2026-08-30T21:00:00Z",
     updated_at: "2026-08-30T21:05:00Z",
-    payload: { kind: "hire", timeout_at: "2026-08-31T21:00:00Z" },
+    payload: { kind: "hire", timeout_at: A_DEADLINE_STILL_AHEAD },
     ...overrides,
   }
 }
