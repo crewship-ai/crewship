@@ -35,7 +35,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 
 	label := obj(map[string]any{
 		"id": str(), "name": str(), "color": str(), "label_group": nullable("string"),
-	}, "id", "name", "color")
+	}, "id", "name", "color", "label_group")
 	creator := obj(map[string]any{
 		"type": str(), "id": str(), "name": str(),
 	}, "type", "id")
@@ -54,7 +54,9 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"comment_count": integer(), "routine_id": nullable("string"),
 		"routine_slug": nullable("string"), "routine_name": nullable("string"),
 		"created_by": ref("IssueCreator"), "authored_via": nullable("string"),
-	}, "id", "workspace_id", "crew_id", "title", "status", "priority", "sort_order", "mission_type", "lead_agent_id", "created_at", "updated_at", "labels")
+	}, "id", "workspace_id", "crew_id", "title", "status", "priority", "sort_order", "mission_type", "lead_agent_id", "created_at", "updated_at", "labels",
+		"number", "identifier", "description", "assignee_type", "assignee_id", "due_date", "completed_at",
+		"project_id", "estimate", "parent_issue_id", "milestone_id", "sub_issues_count", "comment_count")
 
 	installedAgent := obj(map[string]any{
 		"agent_id": str(), "agent_slug": str(), "agent_name": str(),
@@ -70,7 +72,8 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"vendor": nullable("string"), "homepage": nullable("string"), "spdx_license": nullable("string"),
 		"runtime": str(), "maturity": str(), "scan_status": str(), "description_quality": nullable("string"),
 		"created_at": str(), "updated_at": str(), "installed_on": arrayOf(ref("InstalledSkillAgent")),
-	}, "id", "name", "slug", "display_name", "version", "category", "source", "verification", "downloads", "rating_count", "featured", "pricing_tier", "runtime", "maturity", "scan_status", "created_at", "updated_at")
+	}, "id", "name", "slug", "display_name", "version", "category", "source", "verification", "downloads", "rating_count", "featured", "pricing_tier", "runtime", "maturity", "scan_status", "created_at", "updated_at",
+		"description", "author", "icon", "rating_avg", "tags", "tool_count", "vendor", "homepage", "spdx_license", "description_quality")
 	skillDetail := obj(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "display_name": str(), "description": nullable("string"),
 		"version": str(), "author": nullable("string"), "category": str(), "source": str(), "icon": nullable("string"),
@@ -93,15 +96,17 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"last_error": nullable("string"), "last_used_at": nullable("string"), "last_used_ips": stringArray(), "tags": stringArray(),
 		"created_at": str(), "updated_at": str(), "_count_agent_credentials": integer(), "agent_names": stringArray(), "agent_ids": stringArray(), "mcp_used": boolean(),
 		"created_by_actor_type": nullable("string"), "created_by_actor_id": nullable("string"), "provisioned_for_service": nullable("string"),
-	}, "id", "name", "type", "provider", "status", "scope", "crew_ids", "testable", "sensitivity", "security_level", "security_level_label", "last_used_ips", "tags", "created_at", "updated_at", "_count_agent_credentials", "agent_names", "agent_ids", "mcp_used")
+	}, "id", "name", "type", "provider", "status", "scope", "crew_ids", "testable", "sensitivity", "security_level", "security_level_label", "last_used_ips", "tags", "created_at", "updated_at", "_count_agent_credentials", "agent_names", "agent_ids", "mcp_used",
+		"description", "crew_id", "account_label", "account_email", "username", "token_expires_at",
+		"last_checked_at", "last_error", "last_used_at", "created_by_actor_type", "created_by_actor_id", "provisioned_for_service")
 
 	credentialField := obj(map[string]any{
 		"key": str(), "is_secret": boolean(), "ordinal": integer(), "value": nullable("string"), "created_at": str(), "updated_at": str(),
-	}, "key", "is_secret", "ordinal")
+	}, "key", "is_secret", "ordinal", "value", "created_at", "updated_at")
 	credentialBinding := obj(map[string]any{
 		"id": str(), "credential_id": str(), "credential_name": str(), "scope": str(), "crew_id": nullable("string"),
 		"agent_id": nullable("string"), "slot": str(), "created_at": str(),
-	}, "id", "credential_id", "credential_name", "scope", "slot", "created_at")
+	}, "id", "credential_id", "credential_name", "scope", "slot", "created_at", "crew_id", "agent_id")
 	agentCredential := obj(map[string]any{
 		"id": str(), "agent_id": str(), "credential_id": str(), "credential_name": str(), "credential_type": str(),
 		"credential_provider": str(), "credential_status": str(), "env_var_name": str(), "priority": integer(), "created_at": str(),

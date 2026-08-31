@@ -547,7 +547,26 @@
           "updated_at",
           "crew",
           "_count",
-          "ephemeral"
+          "ephemeral",
+          "crew_id",
+          "description",
+          "role_title",
+          "lead_mode",
+          "llm_provider",
+          "llm_model",
+          "system_prompt",
+          "avatar_seed",
+          "avatar_style",
+          "avatar_url",
+          "cli_tools",
+          "schedule_cron",
+          "schedule_prompt",
+          "schedule_last_run",
+          "schedule_next_run",
+          "expires_at",
+          "expired_at",
+          "parent_lead_id",
+          "hire_reason"
         ],
         "type": "object"
       },
@@ -747,7 +766,9 @@
         },
         "required": [
           "name",
-          "slug"
+          "slug",
+          "color",
+          "avatar_style"
         ],
         "type": "object"
       },
@@ -798,6 +819,21 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "agent_id",
+          "mcp_server_id",
+          "mcp_server_scope",
+          "credential_id",
+          "cred_type",
+          "cred_header",
+          "enabled",
+          "config_override_json",
+          "created_at",
+          "server_name",
+          "server_display_name",
+          "credential_name"
+        ],
         "type": "object"
       },
       "AgentIntegrationBindingRequest": {
@@ -1355,6 +1391,9 @@
             "type": "string"
           }
         },
+        "required": [
+          "integration_id"
+        ],
         "type": "object"
       },
       "ConnectorList": {
@@ -1387,6 +1426,15 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "category",
+          "auth_mode",
+          "brand_logo",
+          "brand_color"
+        ],
         "type": "object"
       },
       "ConnectorVerifyRequest": {
@@ -1413,6 +1461,9 @@
             "type": "boolean"
           }
         },
+        "required": [
+          "ok"
+        ],
         "type": "object"
       },
       "ConsolidateRejectRequest": {
@@ -2678,7 +2729,19 @@
           "_count_agent_credentials",
           "agent_names",
           "agent_ids",
-          "mcp_used"
+          "mcp_used",
+          "description",
+          "crew_id",
+          "account_label",
+          "account_email",
+          "username",
+          "token_expires_at",
+          "last_checked_at",
+          "last_error",
+          "last_used_at",
+          "created_by_actor_type",
+          "created_by_actor_id",
+          "provisioned_for_service"
         ],
         "type": "object"
       },
@@ -2717,7 +2780,9 @@
           "credential_name",
           "scope",
           "slot",
-          "created_at"
+          "created_at",
+          "crew_id",
+          "agent_id"
         ],
         "type": "object"
       },
@@ -2888,7 +2953,10 @@
         "required": [
           "key",
           "is_secret",
-          "ordinal"
+          "ordinal",
+          "value",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -2962,6 +3030,11 @@
             "type": "boolean"
           }
         },
+        "required": [
+          "valid",
+          "status",
+          "supported"
+        ],
         "type": "object"
       },
       "CredentialRotation": {
@@ -2995,6 +3068,16 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "credential_id",
+          "grace_seconds",
+          "rotated_at",
+          "expires_at",
+          "rotated_by",
+          "status",
+          "old_value_gone"
+        ],
         "type": "object"
       },
       "CredentialRotationRequest": {
@@ -3033,6 +3116,9 @@
             "type": "string"
           }
         },
+        "required": [
+          "status"
+        ],
         "type": "object"
       },
       "Crew": {
@@ -3160,7 +3246,13 @@
           "max_ephemeral_agents",
           "created_at",
           "updated_at",
-          "_count"
+          "_count",
+          "description",
+          "color",
+          "icon",
+          "avatar_style",
+          "container_ttl_hours",
+          "issue_prefix"
         ],
         "type": "object"
       },
@@ -5661,6 +5753,9 @@
           "source_id": {
             "type": "string"
           },
+          "source_missing": {
+            "type": "boolean"
+          },
           "state": {
             "type": "string"
           },
@@ -5680,12 +5775,27 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "workspace_id",
+          "kind",
+          "source_id",
+          "title",
+          "state",
+          "priority",
+          "blocking",
+          "created_at",
+          "updated_at"
+        ],
         "type": "object"
       },
       "FinalInboxList": {
         "properties": {
           "count": {
             "type": "integer"
+          },
+          "has_more": {
+            "type": "boolean"
           },
           "rows": {
             "items": {
@@ -5761,6 +5871,9 @@
                 "source_id": {
                   "type": "string"
                 },
+                "source_missing": {
+                  "type": "boolean"
+                },
                 "state": {
                   "type": "string"
                 },
@@ -5780,6 +5893,18 @@
                   "type": "string"
                 }
               },
+              "required": [
+                "id",
+                "workspace_id",
+                "kind",
+                "source_id",
+                "title",
+                "state",
+                "priority",
+                "blocking",
+                "created_at",
+                "updated_at"
+              ],
               "type": "object"
             },
             "type": "array"
@@ -5788,6 +5913,12 @@
             "type": "integer"
           }
         },
+        "required": [
+          "rows",
+          "count",
+          "unread_count",
+          "has_more"
+        ],
         "type": "object"
       },
       "FinalNotificationChannel": {
@@ -6398,6 +6529,14 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "tool_name",
+          "description",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ],
         "type": "object"
       },
       "IntegrationToolUpdateRequest": {
@@ -7142,7 +7281,20 @@
           "lead_agent_id",
           "created_at",
           "updated_at",
-          "labels"
+          "labels",
+          "number",
+          "identifier",
+          "description",
+          "assignee_type",
+          "assignee_id",
+          "due_date",
+          "completed_at",
+          "project_id",
+          "estimate",
+          "parent_issue_id",
+          "milestone_id",
+          "sub_issues_count",
+          "comment_count"
         ],
         "type": "object"
       },
@@ -7374,7 +7526,8 @@
         "required": [
           "id",
           "name",
-          "color"
+          "color",
+          "label_group"
         ],
         "type": "object"
       },
@@ -8178,6 +8331,12 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "email",
+          "full_name",
+          "avatar_url"
+        ],
         "type": "object"
       },
       "ProfileUpdateRequest": {
@@ -8277,7 +8436,13 @@
           "updated_at",
           "issue_count",
           "done_count",
-          "progress"
+          "progress",
+          "description",
+          "icon",
+          "lead_type",
+          "lead_id",
+          "start_date",
+          "target_date"
         ],
         "type": "object"
       },
@@ -8421,7 +8586,13 @@
           "updated_at",
           "issue_count",
           "done_count",
-          "progress"
+          "progress",
+          "description",
+          "icon",
+          "lead_type",
+          "lead_id",
+          "start_date",
+          "target_date"
         ],
         "type": "object"
       },
@@ -10837,7 +11008,17 @@
           "maturity",
           "scan_status",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "description",
+          "author",
+          "icon",
+          "rating_avg",
+          "tags",
+          "tool_count",
+          "vendor",
+          "homepage",
+          "spdx_license",
+          "description_quality"
         ],
         "type": "object"
       },
@@ -12004,7 +12185,12 @@
           "slug",
           "created_at",
           "updated_at",
-          "allow_privileged_credentials"
+          "allow_privileged_credentials",
+          "logo_url",
+          "preferred_language",
+          "run_retention_days",
+          "credential_audit_retention_days",
+          "audit_log_retention_days"
         ],
         "type": "object"
       },
@@ -14627,6 +14813,13 @@
                       "type": "array"
                     }
                   },
+                  "required": [
+                    "slots",
+                    "providers",
+                    "judge_provider",
+                    "judge_model",
+                    "any_overridden"
+                  ],
                   "type": "object"
                 }
               }
@@ -14808,6 +15001,13 @@
                       "type": "array"
                     }
                   },
+                  "required": [
+                    "slots",
+                    "providers",
+                    "judge_provider",
+                    "judge_model",
+                    "any_overridden"
+                  ],
                   "type": "object"
                 }
               }
@@ -14982,6 +15182,13 @@
                       "type": "array"
                     }
                   },
+                  "required": [
+                    "slots",
+                    "providers",
+                    "judge_provider",
+                    "judge_model",
+                    "any_overridden"
+                  ],
                   "type": "object"
                 }
               }
@@ -15193,6 +15400,13 @@
                       "type": "array"
                     }
                   },
+                  "required": [
+                    "slots",
+                    "providers",
+                    "judge_provider",
+                    "judge_model",
+                    "any_overridden"
+                  ],
                   "type": "object"
                 }
               }
@@ -15393,6 +15607,13 @@
                       "type": "array"
                     }
                   },
+                  "required": [
+                    "slots",
+                    "providers",
+                    "judge_provider",
+                    "judge_model",
+                    "any_overridden"
+                  ],
                   "type": "object"
                 }
               }
@@ -15916,6 +16137,17 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "enabled",
+                    "judge_provider",
+                    "judge_endpoint_url",
+                    "judge_wire",
+                    "judge_model",
+                    "judge_timeout_ms",
+                    "judge_profile",
+                    "overridden",
+                    "judge_configured"
+                  ],
                   "type": "object"
                 }
               }
@@ -16251,6 +16483,17 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "enabled",
+                    "judge_provider",
+                    "judge_endpoint_url",
+                    "judge_wire",
+                    "judge_model",
+                    "judge_timeout_ms",
+                    "judge_profile",
+                    "overridden",
+                    "judge_configured"
+                  ],
                   "type": "object"
                 }
               }
@@ -16595,6 +16838,17 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "enabled",
+                    "judge_provider",
+                    "judge_endpoint_url",
+                    "judge_wire",
+                    "judge_model",
+                    "judge_timeout_ms",
+                    "judge_profile",
+                    "overridden",
+                    "judge_configured"
+                  ],
                   "type": "object"
                 }
               }
@@ -17097,6 +17351,23 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "workspace_id",
+                    "samples",
+                    "allow",
+                    "deny",
+                    "escalate",
+                    "judge_failures",
+                    "allow_rate",
+                    "deny_rate",
+                    "escalate_rate",
+                    "progressed_rate",
+                    "judge_failure_rate",
+                    "p95_latency_ms",
+                    "min_samples",
+                    "alarm_progressed_rate",
+                    "alarm_judge_failure_rate"
+                  ],
                   "type": "object"
                 }
               }
@@ -17256,6 +17527,10 @@
                       "type": "array"
                     }
                   },
+                  "required": [
+                    "endpoint",
+                    "models"
+                  ],
                   "type": "object"
                 }
               }
@@ -18715,6 +18990,12 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "workspace_id",
+                    "versions_retention_days",
+                    "is_default",
+                    "raw_config"
+                  ],
                   "type": "object"
                 }
               }
@@ -18840,6 +19121,12 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "workspace_id",
+                    "versions_retention_days",
+                    "is_default",
+                    "raw_config"
+                  ],
                   "type": "object"
                 }
               }
@@ -19005,6 +19292,12 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "workspace_id",
+                    "totals",
+                    "by_tier",
+                    "by_agent"
+                  ],
                   "type": "object"
                 }
               }
@@ -19217,6 +19510,13 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "workspace_id",
+                    "rows",
+                    "next_cursor",
+                    "limit",
+                    "filters_applied"
+                  ],
                   "type": "object"
                 }
               }
@@ -20374,11 +20674,28 @@
                             "type": "string"
                           }
                         },
+                        "required": [
+                          "key",
+                          "severity",
+                          "message"
+                        ],
                         "type": "object"
                       },
                       "type": "array"
                     }
                   },
+                  "required": [
+                    "environment",
+                    "encryption_key_configured",
+                    "plaintext_secrets_allowed",
+                    "private_endpoints_ceiling",
+                    "signup_open",
+                    "oauth_configured",
+                    "email_configured",
+                    "rate_limit_disabled",
+                    "rate_limit_effectively_disabled",
+                    "warnings"
+                  ],
                   "type": "object"
                 }
               }
@@ -28365,6 +28682,9 @@
                     "count": {
                       "type": "integer"
                     },
+                    "has_more": {
+                      "type": "boolean"
+                    },
                     "rows": {
                       "items": {
                         "properties": {
@@ -28418,6 +28738,23 @@
                             "type": "string"
                           }
                         },
+                        "required": [
+                          "id",
+                          "workspace_id",
+                          "crew_id",
+                          "agent_id",
+                          "mission_id",
+                          "requested_by",
+                          "kind",
+                          "reason",
+                          "payload",
+                          "status",
+                          "decided_by",
+                          "decided_at",
+                          "decision_comment",
+                          "timeout_at",
+                          "created_at"
+                        ],
                         "type": "object"
                       },
                       "type": "array"
@@ -28727,6 +29064,23 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "id",
+                    "workspace_id",
+                    "crew_id",
+                    "agent_id",
+                    "mission_id",
+                    "requested_by",
+                    "kind",
+                    "reason",
+                    "payload",
+                    "status",
+                    "decided_by",
+                    "decided_at",
+                    "decision_comment",
+                    "timeout_at",
+                    "created_at"
+                  ],
                   "type": "object"
                 }
               }
@@ -87570,10 +87924,9 @@
         "responses": {
           "200": {
             "content": {
-              "image/svg+xml": {
+              "application/json": {
                 "schema": {
-                  "format": "binary",
-                  "type": "string"
+                  "$ref": "#/components/schemas/Profile"
                 }
               }
             },
@@ -87647,13 +88000,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "avatar_url": {
-                      "nullable": true,
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/Profile"
                 }
               }
             },

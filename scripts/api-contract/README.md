@@ -233,3 +233,28 @@ any reset/bootstrap command as part of this harness.
 The upstream CLI reference and configuration format are documented at
 <https://schemathesis.readthedocs.io/en/stable/reference/cli/> and
 <https://schemathesis.readthedocs.io/en/stable/configuration/>.
+
+## Response shapes against the running server
+
+`response_shapes.py` asks one question Schemathesis is too broad to answer
+quickly: does a real 200 body satisfy the schema the server publishes for that
+route?
+
+```
+python3 scripts/api-contract/response_shapes.py <base-url> <token> <workspace-id>
+```
+
+It fetches `/openapi.json` from the target — not the file in the repo — so it
+measures what that instance actually serves. Read-only GETs only, mirroring
+`run.sh`'s method deny-list. Exit code 1 on any violation.
+
+It exists because of a defect no other gate could see: `/api/v1/approvals`
+serialized a struct with no JSON tags and answered `"ID"`/`"Kind"`/`"CreatedAt"`
+while this document, the web client's schema and `docs/api-reference` all
+described snake_case. Three artifacts agreed with each other and none with the
+server, and the approvals surface rendered zero rows in production.
+
+Note `denullable()`: JSON Schema has no `nullable` keyword — that is OpenAPI
+3.0's spelling. Schemathesis understands it natively; a plain validator does
+not, and reported nine false failures the first time this ran, every one a
+legitimate `null`. See `docs/prd/response-shape-contract.md`.
