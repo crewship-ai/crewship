@@ -246,7 +246,19 @@ python3 scripts/api-contract/response_shapes.py <base-url> <token> <workspace-id
 
 It fetches `/openapi.json` from the target — not the file in the repo — so it
 measures what that instance actually serves. Read-only GETs only, mirroring
-`run.sh`'s method deny-list. Exit code 1 on any violation.
+`run.sh`'s method deny-list.
+
+**Exit 0 means every declared route passed — not "nothing failed".** The two
+differ in exactly one case, and it is the case that matters: a run in which
+nothing could be fetched. `ROUTES` is a curated list a reachable server with a
+workspace-owner token must answer (the routes that cannot be checked are
+commented out of it with reasons), so an unreachable route or an undocumented
+200 is a defect in the server, the document or the credentials — never a skip.
+An earlier version counted both as `SKIP` and returned `1 if failed else 0`, so
+a wrong token printed `0 pass, 0 fail, 17 skipped` and exited 0: a checker that
+verified nothing, reporting success. `response_shapes_test.py` pins that, and
+CI runs it in the `Harness PR subset` job, where the pinned venv provides
+`jsonschema`.
 
 The token rides on every request, so the base URL must be `https://` for
 anything but a loopback address, and a redirect is refused rather than

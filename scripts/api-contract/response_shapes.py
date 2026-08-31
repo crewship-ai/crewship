@@ -106,6 +106,12 @@ def checked_base(base):
     return base.rstrip("/")
 
 
+def fetch_spec(base):
+    """The document the target instance actually serves, not the file in the repo."""
+    with _opener.open(f"{base}/openapi.json", timeout=20) as r:
+        return denullable(json.load(r))
+
+
 def fetch(base, path, token, workspace):
     sep = "&" if "?" in path else "?"
     req = urllib.request.Request(
@@ -146,21 +152,40 @@ def main(argv):
         print("usage: response_shapes.py <base-url> <token> <workspace-id>", file=sys.stderr)
         return 2
     base, token, workspace = checked_base(argv[1]), argv[2], argv[3]
-    with _opener.open(f"{base}/openapi.json", timeout=20) as r:
-        spec = denullable(json.load(r))
+    try:
+        spec = fetch_spec(base)
+    except Exception as exc:
+        print(f"  could not read {base}/openapi.json: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 1
 
-    failed = passed = skipped = 0
+    # NOTHING HERE IS SKIPPABLE, and that is the whole design.
+    #
+    # ROUTES is a hand-curated list of read-only GETs that a reachable server
+    # with a workspace-owner token must answer; the ones that cannot be checked
+    # are commented out of it with reasons. So an unreachable route or an
+    # undocumented 200 is a defect in the server, the document or the
+    # credentials — never an excusable condition — and either way the run
+    # verified less than the summary line claims.
+    #
+    # It used to count both as SKIP and return `1 if failed else 0`. A wrong
+    # token, a server on the wrong port or somebody else's workspace id printed
+    # "0 pass, 0 fail, 17 skipped" and exited 0: a checker that exercised
+    # nothing, reporting success. That is the exact shape of green this file was
+    # written to make impossible, and it had it.
+    failed = passed = 0
     for path in ROUTES:
         try:
             body = fetch(base, path, token, workspace)
-        except Exception as exc:  # unreachable route is not a shape violation
-            print(f"  SKIP  {path:38} {type(exc).__name__}")
-            skipped += 1
+        except Exception as exc:
+            failed += 1
+            print(f"  FAIL  {path:38} unreachable: {type(exc).__name__}: {exc}"[:160])
             continue
         errors = check(spec, path, body)
         if errors is None:
-            print(f"  SKIP  {path:38} no documented 200 json schema")
-            skipped += 1
+            failed += 1
+            print(f"  FAIL  {path:38} the served spec documents no 200 "
+                  "application/json schema for it")
         elif errors:
             failed += 1
             print(f"  FAIL  {path:38} {errors[0][:100]}")
@@ -170,8 +195,13 @@ def main(argv):
             passed += 1
             print(f"  PASS  {path}")
 
-    print(f"\n  {passed} pass, {failed} fail, {skipped} skipped")
-    return 1 if failed else 0
+    print(f"\n  {passed} of {len(ROUTES)} routes verified, {failed} fail")
+
+    # The exit status asks "did every declared route pass?", not "did nothing
+    # fail?". Those two differ in exactly one case — the run that checked
+    # nothing — and phrasing it this way keeps a future edit from
+    # reintroducing a silent skip path without also failing the run.
+    return 0 if passed == len(ROUTES) else 1
 
 
 if __name__ == "__main__":

@@ -463,6 +463,20 @@ jobs:
           python3 -m venv /tmp/crewship-api-contract-venv
           /tmp/crewship-api-contract-venv/bin/python -m pip install \
             --disable-pip-version-check --requirement scripts/api-contract/requirements.txt
+      # response_shapes.py is the only check that compares a REAL 200 body
+      # against the schema the server publishes for it, and its exit status is
+      # what any future CI wiring would trust. It shipped with a test file that
+      # no workflow ran — the same "green because nothing executed it" shape
+      # called out beside summary_test.py in the shell job.
+      #
+      # It runs here rather than there because it needs `jsonschema`, which the
+      # venv above already provides; the shell job is deliberately stdlib-only
+      # so a package index cannot reap it.
+      #
+      # What it pins that nothing else does: a run in which every route was
+      # unreachable used to print "0 pass, 0 fail, 17 skipped" and exit 0.
+      - name: API response-shape checker (exit status + transport guards)
+        run: /tmp/crewship-api-contract-venv/bin/python scripts/api-contract/response_shapes_test.py
       #
       # ⚠ INVARIANT: API_CONTRACT_TIMEOUT (seconds) < this step's
       #   timeout-minutes < the job's timeout-minutes. Enforced by

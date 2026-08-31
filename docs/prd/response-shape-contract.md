@@ -66,7 +66,7 @@ Three tests, all landed:
 | `TestResponseSchemas_RejectABodyWithEveryFieldRenamed` | `cmd/gen-openapi` | The property that matters, stated directly: a body with every field renamed must not validate. |
 | `TestResponseSchemas_WithoutRequired_DoNotGrow` | `cmd/gen-openapi` | The ratchet. 227 today; may fall, may not rise. |
 | `TestOpenAPIResponseComponents_AreGradedOrExcused` | `internal/api` | Coverage. Every component a path uses as its 200 response must have a pair **or a written reason why it cannot**. 203 today. |
-| `scripts/api-contract/response_shapes.py` | live | Reality. Real 200 bodies from a running server against the schema that server publishes. 13/13 on dev2. |
+| `scripts/api-contract/response_shapes.py` | live | Reality. Real 200 bodies from a running server against the schema that server publishes. 17/17 on dev2. |
 
 **The two counts measure different things, and confusing them will waste
 someone's afternoon.** The ratchet counts schemas declared **inline** under a
@@ -269,8 +269,30 @@ not. This is the second time that trap cost an hour on this work, which is why
 
 It is deliberately NOT a Go test. A test that needs a running server is the
 undeclared-local-service dependency release-1.0 condition 6 forbids; its unit
-tests run in CI, and the live run belongs to the contract-gate step that already
-boots an ephemeral server.
+tests run in CI — in the `Harness PR subset` job, where the pinned venv already
+provides `jsonschema` — and the live run belongs to the contract-gate step that
+already boots an ephemeral server.
+
+**Exit 0 means every declared route passed, not that nothing failed.** This
+checker had the defect it exists to detect. A request error and a missing 200
+schema were both counted as `SKIP`, and the exit status was `1 if failed else
+0`, so a wrong token or a server on the wrong port printed
+
+```text
+  0 pass, 0 fail, 17 skipped
+```
+
+and exited 0 — a run that verified nothing, reporting success, in the one tool
+whose job is to notice exactly that. `ROUTES` is a curated list that a reachable
+server with a workspace-owner token must answer, and the routes that cannot be
+checked are commented out of it with reasons, so on that list a skip is never
+excusable. Both cases are failures now, and the status is `passed ==
+len(ROUTES)` rather than `not failed`, so a future edit cannot reintroduce a
+silent skip without also failing the run. `response_shapes_test.py` pins it.
+
+The lesson generalises past this file: every gate in the table above should be
+asked not only "does it fail when the thing is wrong?" but "can it pass without
+having looked?" — the second question is the one that had been going unasked.
 
 ## 6. Exit criteria
 

@@ -1,15 +1,40 @@
 #!/usr/bin/env python3
+import contextlib
 import io
 import sys
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parent))
+import response_shapes  # noqa: E402
 from response_shapes import (  # noqa: E402
     ROUTES, _RefuseRedirects, check, checked_base, denullable, response_schema,
 )
+
+
+def run_main(routes, spec, fetched):
+    """Drive main() over a stubbed server and return (exit code, printed output).
+
+    `fetched` maps a route to the body it answers with, or to an exception to
+    raise for it.
+    """
+    def fake_fetch(base, path, token, workspace):
+        answer = fetched[path]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    buffer = io.StringIO()
+    with mock.patch.object(response_shapes, "ROUTES", routes), \
+            mock.patch.object(response_shapes, "fetch_spec", return_value=denullable(spec)), \
+            mock.patch.object(response_shapes, "fetch", fake_fetch), \
+            contextlib.redirect_stdout(buffer):
+        code = response_shapes.main(
+            ["response_shapes.py", "http://localhost:8082", "token", "ws-1"])
+    return code, buffer.getvalue()
 
 
 class ResponseShapesTest(unittest.TestCase):
@@ -100,6 +125,69 @@ class ResponseShapesTest(unittest.TestCase):
                 {}, "https://elsewhere.example.com/api/v1/inbox")
         self.assertIn("elsewhere.example.com", str(caught.exception))
         self.assertNotIn("sekrit", str(caught.exception))
+
+
+class ExitStatusTest(unittest.TestCase):
+    """What the exit code is allowed to mean.
+
+    `ROUTES` is a hand-curated list of read-only GETs that a reachable server
+    with a workspace-owner token must answer, and the routes that cannot be
+    checked are already commented out of it with reasons. So on this list there
+    is no such thing as an excusable skip: an unreachable route or an
+    undocumented 200 is a defect in the server, the document or the credentials,
+    and in every case the run verified less than it claims to.
+    """
+
+    SPEC = ResponseShapesTest.SPEC
+    GOOD = {"rows": [{"id": "ap_1", "kind": "tool_call", "decided_at": None}]}
+
+    def test_a_run_that_verified_nothing_is_not_a_pass(self):
+        # The regression. Every route unreachable — a wrong token, a server on
+        # the wrong port, a workspace id that is not the operator's — used to
+        # print "0 pass, 0 fail, 17 skipped" and exit 0. A checker that
+        # exercised nothing reported success, which is the exact shape of green
+        # this checker was written to make impossible.
+        code, out = run_main(
+            ["/api/v1/approvals"], self.SPEC,
+            {"/api/v1/approvals": urllib.error.URLError("connection refused")})
+
+        self.assertEqual(code, 1, out)
+        self.assertIn("0 of 1", out)
+
+    def test_an_undocumented_response_is_not_a_pass_either(self):
+        # The other silent exit: the route answers, but the served document has
+        # no 200 schema for it, so nothing was compared. `check` returning None
+        # is the right answer for an arbitrary path and the wrong one to shrug
+        # at for a route this file declares.
+        code, out = run_main(
+            ["/api/v1/not-documented"], self.SPEC,
+            {"/api/v1/not-documented": {"anything": True}})
+
+        self.assertEqual(code, 1, out)
+        self.assertIn("documents no 200", out)
+
+    def test_a_real_violation_still_fails(self):
+        code, out = run_main(
+            ["/api/v1/approvals"], self.SPEC,
+            {"/api/v1/approvals": {"rows": [{"ID": "ap_1", "Kind": "tool_call"}]}})
+
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL", out)
+
+    def test_every_route_passing_is_the_only_way_to_exit_zero(self):
+        code, out = run_main(
+            ["/api/v1/approvals"], self.SPEC, {"/api/v1/approvals": self.GOOD})
+
+        self.assertEqual(code, 0, out)
+        self.assertIn("1 of 1", out)
+
+    def test_one_bad_route_among_good_ones_fails_the_run(self):
+        code, out = run_main(
+            ["/api/v1/approvals", "/api/v1/other"], self.SPEC,
+            {"/api/v1/approvals": self.GOOD,
+             "/api/v1/other": urllib.error.URLError("refused")})
+
+        self.assertEqual(code, 1, out)
 
 
 if __name__ == "__main__":
