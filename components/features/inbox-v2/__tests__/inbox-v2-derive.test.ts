@@ -278,6 +278,34 @@ describe("a decision has a decider", () => {
     }
   })
 
+  // The predicate read the decider off entry.inboxItem, and approvalEntry never
+  // sets one — it sets `approval`. So every decided approval answered
+  // `Boolean(outcome) && !undefined` = true and the explorer filed the entire
+  // approval history under Archived, which is the one thing this function
+  // exists to prevent. The queue's own vocabulary is pending / approved /
+  // denied / timeout / cancelled.
+  const decidedApproval = (status: string, by?: string): ApprovalRow => ({
+    id: `ap-${status}`,
+    kind: "destructive_op",
+    reason: "Remove the staging deployment",
+    status,
+    created_at: "2026-08-30T09:00:00Z",
+    decided_at: "2026-08-30T10:00:00Z",
+    decided_by: by,
+  })
+
+  it("keeps a decided approval in Decisions, not Archived", () => {
+    expect(isArchivedNotDecided(approvalEntry(decidedApproval("approved", "u-1")))).toBe(false)
+    expect(isArchivedNotDecided(approvalEntry(decidedApproval("denied", "u-1")))).toBe(false)
+  })
+
+  it("does not call a settled-without-a-decider approval a decision", () => {
+    // `timeout` is written by the queue's own sweep and `cancelled` by the
+    // caller going away; neither records a decided_by.
+    expect(isArchivedNotDecided(approvalEntry(decidedApproval("timeout")))).toBe(true)
+    expect(isArchivedNotDecided(approvalEntry(decidedApproval("cancelled")))).toBe(true)
+  })
+
   it("does not call the credential auto-resolve a decision, though it says approve", () => {
     // escalation_autoresolve.go writes "approve" with resolved_by = system, and
     // its own comment calls that a spurious approval in the audit trail.

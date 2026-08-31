@@ -17,7 +17,7 @@ import {
 import { Pill } from "@/components/ui/detail"
 
 import type { InboxItem } from "@/hooks/use-inbox"
-import { isActionableInboxItem } from "@/components/features/inbox-v2/inbox-v2-derive"
+import { isBlockingInboxItem } from "@/components/features/inbox-v2/inbox-v2-derive"
 
 import { ActorAvatar } from "./inbox-actor"
 import {
@@ -77,10 +77,16 @@ export function InboxBellView({ items, role, onOpenItem, onOpenInbox, onMarkAllR
     // A tripped circuit breaker also wants action, but nothing is standing
     // still because of it, so it belongs in Recent rather than at the top.
     //
+    // That is isBlockingInboxItem, not isActionableInboxItem. The filter used
+    // the latter, which answers the broader "is there a source action behind
+    // this row?" and says yes to a schedule advisory — so the paragraph above
+    // described behaviour the code did not have, and the advisories ranked
+    // above real gates.
+    //
     // Blocking rows stay in scope even once read: being looked at is not being
     // answered, and the agent is parked either way.
-    const blocking = items.filter(isActionableInboxItem)
-    const rest = items.filter((i) => !isActionableInboxItem(i) && i.state === "unread")
+    const blocking = items.filter(isBlockingInboxItem)
+    const rest = items.filter((i) => !isBlockingInboxItem(i) && i.state === "unread")
 
     const byUrgency = [...blocking].sort((a, b) => {
       const ea = expiresIn(a)

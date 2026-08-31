@@ -28,6 +28,34 @@ export function isActionableInboxItem(item: InboxItem): boolean {
   return false
 }
 
+/**
+ * The kinds that are actionable but block nobody.
+ *
+ * A missed occurrence and a tripped breaker both have a real source action
+ * behind them — re-enable the schedule — so `isActionableInboxItem` says yes,
+ * and for the explorer's Actionable facet that is the right answer. It is the
+ * wrong answer for anything ranking by urgency: no run is parked on either
+ * one, nothing times out, and there is no counterpart waiting for a reply.
+ */
+const NOTHING_IS_PARKED_ON = new Set([
+  "schedule_missed", "schedule_circuit_breaker_tripped",
+])
+
+/**
+ * Is a person the only thing standing between an agent and its next step?
+ *
+ * The stricter half of `isActionableInboxItem`, for surfaces that promise
+ * "waiting on you" rather than "you could act on this" — the bell's decisions
+ * bucket above all, where the count drives a badge and a warn tone. The two
+ * questions are genuinely different and both worth asking; conflating them put
+ * schedule advisories at the top of the bell under a heading that said an
+ * answer was owed.
+ */
+export function isBlockingInboxItem(item: InboxItem): boolean {
+  if (NOTHING_IS_PARKED_ON.has(item.kind)) return false
+  return isActionableInboxItem(item)
+}
+
 export function inboxEntry(item: InboxItem): InboxV2Entry {
   const subject = subjectOf(item)
   const deadline = payloadString(item, "timeout_at")
@@ -325,14 +353,26 @@ const NOT_A_DECISION = new Set([
   // name-match auto-resolve — which writes "approve" with resolved_by=system
   // and whose own comment calls it "a spurious approval in the audit trail".
   "expired", "timed_out", "cancelled",
+  // The approvals queue spells its own sweep differently — harbormaster's
+  // vocabulary is pending/approved/denied/timeout/cancelled, so "timeout"
+  // here is not a duplicate of "timed_out" above. Both entry sources feed
+  // this one set, and neither spelling is a decision.
+  "timeout",
 ])
 
 export function isArchivedNotDecided(entry: InboxV2Entry): boolean {
   if (entry.outcome && NOT_A_DECISION.has(entry.outcome)) return true
-  // A decision has a decider. The auto-resolve paths leave resolved_by empty,
+  // A decision has a decider. The auto-resolve paths leave the decider empty,
   // which is the only thing that separates "the system gave up on it" from
   // "somebody approved it" when the action string is the same word.
-  const decided = entry.inboxItem?.resolved_by_user_id
+  //
+  // Both fields, because the two entry sources are disjoint: inboxEntry sets
+  // `inboxItem` and approvalEntry sets `approval`, never both. Reading only
+  // the inbox one meant every decided approval had no decider to find and the
+  // explorer filed the whole approval history under Archived — the exact
+  // mislabelling the comment above this set is about, just from the other
+  // source.
+  const decided = entry.inboxItem?.resolved_by_user_id ?? entry.approval?.decided_by
   return Boolean(entry.outcome) && !decided
 }
 
