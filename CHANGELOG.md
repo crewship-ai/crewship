@@ -327,17 +327,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   The row is now seven columns — severity, time, an 18px agent avatar beside a
   15px crew icon, the entry-type icon with the full dotted `entry_type`, the
   summary, the age, the chevron. An agent the lookup cannot resolve is seeded
-  from its id rather than left blank; actors that are not agents (system,
-  sidecar, orchestrator, keeper, user) get a labelled glyph. The summary drops
-  a leading `"<agent>: "` when the prefix names the agent now in the avatar,
-  and takes back some of the 40px the identity columns cost it. Long entry
-  types ellipsize — the catalog's median is 18 characters and its tail runs to
-  41 — with the full string on the cell's `title` and in the expanded detail.
+  from its id rather than left blank. The summary drops a leading
+  `"<agent>: "` when the prefix names the agent now in the avatar, and takes
+  back some of the 40px the identity columns cost it. Long entry types
+  ellipsize — the catalog's median is 18 characters and its tail runs to 41 —
+  with the full string on the cell's `title` and in the expanded detail.
+
+  The avatar is gated on `actor_type`, not on whether `agent_id` is set. Four
+  common entry types — `chat.user_message`, `container.snapshot`,
+  `conversation.compacted`, `sidecar.stale` — emit a `user` or `system` actor
+  *with* the agent id populated, because the agent is what the event is about
+  rather than who caused it. Those rows get the labelled glyph, with the agent
+  named in the label, so a human's message is never captioned with an agent's
+  face.
 
   Three signals that were colour-only are now also text: severity carries a
   visually-hidden level (the bar was `aria-hidden`, and the word appeared only
-  after expanding), the entry-type group carries its name, and the row — a
-  disclosure with no `aria-expanded` — now has one plus `aria-controls`.
+  after expanding), the entry-type group carries its name, and the disclosure
+  gets `aria-expanded` plus `aria-controls`. The disclosure is the chevron
+  button rather than the row container — with the detail rendered inside a
+  `role="button"`, the detail's own trace/agent/crew jumps were nested
+  interactive content and the button's accessible name grew to include the
+  entire payload JSON.
 
   The stats rail's "Top agents" showed shortened uuids behind a flat slate
   swatch, six agents reading as one series, with the avatar-carrying lookup

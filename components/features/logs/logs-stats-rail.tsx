@@ -99,15 +99,20 @@ export function LogsStatsRail({ entries, agentLookup, showNetworkCard }: LogsSta
           <div className="space-y-1.5 text-[11px] font-mono">
             {stats.topAgents.map((row) => {
               const a = lookup.agents.get(row.agent)
-              // Same seed rules as the row avatar and the toolbar's
-              // ScopeBadge: explicit seed, else slug, else the id — which
-              // is a perfectly good deterministic seed for an agent the
-              // lookup has not resolved.
-              const seed = a?.avatar_seed || a?.slug || row.agent
+              // Same seed rule as the row avatar and the toolbar's
+              // ScopeBadge — `avatar_seed || name` — because all three
+              // draw the same agent on the same screen and a different
+              // rule anywhere means two faces for one agent. The id is
+              // the last resort, and a fine deterministic seed for an
+              // agent the lookup has not resolved.
+              const seed = a?.avatar_seed || a?.name || row.agent
               return (
                 <BarRow
                   key={row.agent}
-                  label={a?.name ?? agentLookup?.[row.agent] ?? shortenId(row.agent)}
+                  // `||`, not `??`: an agent whose lookup name is the
+                  // empty string must fall through to the next source
+                  // rather than render a blank row.
+                  label={a?.name || agentLookup?.[row.agent] || shortenId(row.agent)}
                   title={row.agent}
                   value={row.count}
                   total={stats.maxAgentCount}

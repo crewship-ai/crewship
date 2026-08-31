@@ -131,6 +131,29 @@ describe("LogsList row identity", () => {
     expect(glyph.tagName.toLowerCase()).not.toBe("img")
   })
 
+  it("shows the glyph, not the agent's face, when a non-agent actor names an agent", () => {
+    // The common shape, not a corner case: chat.user_message,
+    // container.snapshot, conversation.compacted and sidecar.stale all
+    // emit a non-agent actor_type with agent_id populated
+    // (internal/orchestrator/*.go). The avatar answers "who acted", so an
+    // agent_id alone must not put Morgan's face on a human's message.
+    const { getAllByTestId } = renderList([
+      entry({
+        id: "u",
+        actor_type: "user",
+        entry_type: "chat.user_message",
+        agent_id: "agt_morgan",
+        crew_id: "crw_backend",
+      }),
+    ])
+    const row = getAllByTestId("virtuoso-row")[0]
+    expect(within(row).queryByRole("img", { name: "Morgan" })).toBeNull()
+    const glyph = within(row).getByRole("img", { name: /user actor/i })
+    expect(glyph.tagName.toLowerCase()).not.toBe("img")
+    // The agent is still context worth carrying — just not as a face.
+    expect(glyph.getAttribute("aria-label")).toMatch(/Morgan/)
+  })
+
   it("renders the crew icon for an entry that carries a crew", () => {
     const { getAllByTestId } = renderList([
       entry({ agent_id: "agt_morgan", crew_id: "crw_backend" }),
@@ -183,6 +206,22 @@ describe("LogsList accessibility", () => {
     expect(within(row).getByRole("button", { expanded: true })).toBeInTheDocument()
     fireEvent.click(disclosure)
     expect(within(row).getByRole("button", { expanded: false })).toBeInTheDocument()
+  })
+
+  it("keeps the detail region outside the disclosure button", () => {
+    // aria-controls must point at a sibling, not a descendant. With the
+    // region nested inside the button, the button's accessible name grows
+    // to include the whole payload JSON and the detail's own jump buttons
+    // become nested interactive content.
+    const { getAllByTestId } = renderList([
+      entry({ payload: { decision: "ALLOW", risk_score: 2 } }),
+    ])
+    const row = getAllByTestId("virtuoso-row")[0]
+    fireEvent.click(within(row).getByRole("button", { expanded: false }))
+    const disclosure = within(row).getByRole("button", { expanded: true })
+    const detail = within(row).getByRole("region", { name: /entry detail/i })
+    expect(disclosure.contains(detail)).toBe(false)
+    expect(disclosure.textContent ?? "").not.toMatch(/risk_score/)
   })
 
   it("exposes severity as text, not colour alone, without expanding the row", () => {

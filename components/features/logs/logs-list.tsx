@@ -70,6 +70,12 @@ const ROW_GRID = "3px 84px 38px 124px minmax(0,1fr) 62px 14px"
  * not agents. A blank cell here reads as missing data; a labelled glyph
  * reads as "this was the system", which is the truth.
  */
+// Module constants, not inline literals: Virtuoso compares these props
+// by identity, and a fresh object per render is the same mistake the
+// old inline `itemContent` made.
+const computeItemKey = (_: number, e: JournalEntry) => e.id
+const INCREASE_VIEWPORT_BY = { top: 0, bottom: 600 }
+
 const ACTOR_GLYPH: Record<string, LucideIcon> = {
   agent: Bot,
   user: User,
@@ -91,6 +97,9 @@ function stripAgentPrefix(summary: string, agent: AgentLookup | undefined): stri
   const idx = summary.indexOf(":")
   if (idx <= 0) return summary
   const head = summary.slice(0, idx).trim().toLowerCase()
+  // An agent with a blank name would otherwise match a blank head and
+  // eat the prefix of a summary like "  : something".
+  if (!head) return summary
   if (head !== (agent.name ?? "").toLowerCase() && head !== (agent.slug ?? "").toLowerCase()) {
     return summary
   }
@@ -138,10 +147,14 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached,
     })
   }, [])
 
-  // Subscribed once for the whole list rather than once per row: the
-  // rows are memoized, so the version travels down as a prop and is
-  // what re-renders them when a lazily-imported DiceBear collection
-  // lands and the placeholder discs can become real avatars.
+  // Both subscribed once for the whole list, never per row. React.memo
+  // does not stop a context change from re-rendering a component, so a
+  // row that read the lookup itself would re-render on every provider
+  // update — and the provider flips `loading` on and off around each
+  // refetch, so a single `agent.updated` event would sweep the whole
+  // mounted list three times whether or not the data changed. Reading
+  // the maps here means only a real map swap reaches the rows.
+  const { agents, crews } = useJournalLookup()
   const stylesVersion = useAvatarStylesVersion()
 
   // A fresh closure per item per render defeats React.memo on LogRow —
@@ -155,13 +168,15 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached,
         wrap={wrap}
         expanded={expanded.has(e.id)}
         onToggle={toggleExpand}
+        agent={e.agent_id ? agents.get(e.agent_id) : undefined}
+        crew={e.crew_id ? crews.get(e.crew_id) : undefined}
         stylesVersion={stylesVersion}
         onSelectTrace={onSelectTrace}
         onSelectAgent={onSelectAgent}
         onSelectCrew={onSelectCrew}
       />
     ),
-    [wrap, expanded, toggleExpand, stylesVersion, onSelectTrace, onSelectAgent, onSelectCrew],
+    [wrap, expanded, toggleExpand, agents, crews, stylesVersion, onSelectTrace, onSelectAgent, onSelectCrew],
   )
 
   if (entries.length === 0) {
@@ -179,9 +194,9 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached,
       data={entries}
       followOutput={followOutput as false | "auto"}
       defaultItemHeight={26}
-      computeItemKey={(_, e) => e.id}
+      computeItemKey={computeItemKey}
       endReached={onEndReached}
-      increaseViewportBy={{ top: 0, bottom: 600 }}
+      increaseViewportBy={INCREASE_VIEWPORT_BY}
       itemContent={itemContent}
       className="h-full"
     />
@@ -207,14 +222,24 @@ function ActorAvatar({
   agentId: string | undefined
   actorType: string
 }) {
-  if (agentId) {
-    const name = agent?.name ?? shortenId(agentId)
-    const seed = agent?.avatar_seed || agent?.slug || agentId
+  // Gated on the ACTOR, never on `agent_id` alone. A non-agent actor
+  // routinely names an agent — `chat.user_message` (actor `user`),
+  // `container.snapshot`, `conversation.compacted` and `sidecar.stale`
+  // (actor `system`) all emit with `AgentID` set, because the agent is
+  // what the event is *about*. Branching on the id would put the agent's
+  // face on a human's message and tell a screen reader the agent said it.
+  const name = agent?.name || (agentId ? shortenId(agentId) : undefined)
+  if (actorType === "agent" && agentId) {
+    // Seed precedence is `avatar_seed || name`, matching ScopeBadge in
+    // logs-toolbar.tsx. The two render the same agent on the same screen
+    // — the dropdown and the row — so a different rule here would draw
+    // two different faces for one agent. Keep them in lockstep.
+    const seed = agent?.avatar_seed || agent?.name || agentId
     return (
       <Image
         src={getAgentAvatarUrl(seed, agent?.avatar_style ?? null)}
-        alt={name}
-        title={name}
+        alt={name ?? agentId}
+        title={name ?? agentId}
         width={18}
         height={18}
         className="h-[18px] w-[18px] rounded-[4px] shrink-0 bg-muted/40"
@@ -223,7 +248,11 @@ function ActorAvatar({
     )
   }
   const Glyph = ACTOR_GLYPH[actorType] ?? CircleDashed
-  const label = `${actorType || "unknown"} actor`
+  // The agent stays in the label when the entry carries one: a system
+  // row about Morgan's container should still say Morgan, just not
+  // claim Morgan acted.
+  const who = actorType || "unknown"
+  const label = name ? `${who} actor, agent ${name}` : `${who} actor`
   return (
     <span
       role="img"
@@ -247,14 +276,16 @@ function CrewBadge({ crew }: { crew: CrewLookup | undefined }) {
   }
   const label = `Crew ${crew.name}`
   return (
-    <span role="img" aria-label={label} title={label} className="inline-flex shrink-0">
+    // A div, not a span: CrewIcon renders a div, which is not phrasing
+    // content and cannot legally nest inside one.
+    <div role="img" aria-label={label} title={label} className="inline-flex shrink-0">
       <CrewIcon
         icon={crew.icon}
         color={crew.color}
         size="sm"
         className="!h-[15px] !w-[15px] !rounded-[3px] [&>svg]:!h-2.5 [&>svg]:!w-2.5"
       />
-    </span>
+    </div>
   )
 }
 
@@ -263,6 +294,8 @@ const LogRow = memo(function LogRow({
   wrap,
   expanded,
   onToggle,
+  agent,
+  crew,
   onSelectTrace,
   onSelectAgent,
   onSelectCrew,
@@ -271,6 +304,9 @@ const LogRow = memo(function LogRow({
   wrap: boolean
   expanded: boolean
   onToggle: (id: string) => void
+  /** Resolved by the list, so the row never subscribes to the lookup. */
+  agent: AgentLookup | undefined
+  crew: CrewLookup | undefined
   /**
    * Bumped when a lazily-imported DiceBear collection finishes loading.
    * Never read here — it exists so this memo boundary invalidates and
@@ -281,31 +317,23 @@ const LogRow = memo(function LogRow({
   onSelectAgent?: (agentId: string) => void
   onSelectCrew?: (crewId: string) => void
 }) {
-  const lookup = useJournalLookup()
   const sev = severityOf(entry.severity)
   const grp = groupOf(entry.entry_type)
   const TypeIcon = iconForEntryType(entry.entry_type)
   const ts = entry.ts
   const tsLabel = formatTime(ts)
-  const agent = entry.agent_id ? lookup.agents.get(entry.agent_id) : undefined
-  const crew = entry.crew_id ? lookup.crews.get(entry.crew_id) : undefined
-  const summary = stripAgentPrefix(entry.summary ?? "", agent)
+  // The prefix is redundant only because the avatar is showing that
+  // agent — which it only does for an agent actor.
+  const summary =
+    entry.actor_type === "agent"
+      ? stripAgentPrefix(entry.summary ?? "", agent)
+      : entry.summary ?? ""
   const detailId = `log-detail-${entry.id}`
   const toggle = useCallback(() => onToggle(entry.id), [onToggle, entry.id])
 
   return (
     <div
       onClick={toggle}
-      role="button"
-      tabIndex={0}
-      aria-expanded={expanded}
-      aria-controls={expanded ? detailId : undefined}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault()
-          toggle()
-        }
-      }}
       className={cn(
         "group grid gap-2 px-2 py-[3px] items-start cursor-pointer text-[12px] leading-[18px] border-b border-border/30 hover:bg-accent/20",
         expanded && "bg-primary/5",
@@ -347,9 +375,29 @@ const LogRow = memo(function LogRow({
       <span className="text-right font-mono text-[10px] tabular-nums text-muted-foreground/70">
         {formatRelativeTime(ts)}
       </span>
-      <span className="text-muted-foreground/60 text-[10px] leading-[18px]">
+      {/* The disclosure is this button, not the row container. The
+          container used to carry role="button" with the detail rendered
+          *inside* it, which made the detail's own buttons (the trace /
+          agent / crew jumps, the egress allowlist action) nested
+          interactive content, and grew the row's accessible name to
+          include the whole payload JSON once expanded. A real button
+          beside the region it controls is the shape aria-controls
+          expects. The row keeps its click handler for the mouse. */}
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={expanded ? detailId : undefined}
+        aria-label={`${expanded ? "Collapse" : "Expand"} detail for ${entry.entry_type} at ${tsLabel}`}
+        onClick={(e) => {
+          // The container handles the click for mouse users; without
+          // this the row would toggle twice and land back where it was.
+          e.stopPropagation()
+          toggle()
+        }}
+        className="text-muted-foreground/60 text-[10px] leading-[18px] cursor-pointer"
+      >
         {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-      </span>
+      </button>
 
       {expanded && (
         <div
