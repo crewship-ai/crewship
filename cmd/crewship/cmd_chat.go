@@ -522,10 +522,30 @@ func resolveChatAgent(cmd *cobra.Command, client *cli.Client, chatID string) (st
 // SessionsSidebar in the web UI — exposed here so CLI users can pipe
 // chat IDs into other commands (e.g. `crewship chat <id>` to print a
 // transcript).
+var chatListKind string
+
 var chatListCmd = &cobra.Command{
 	Use:   "list <agent-slug-or-id>",
 	Short: "List recent chats for an agent (most recent first)",
-	Args:  cobra.ExactArgs(1),
+	Long: `List an agent's recent chats, most recent first.
+
+An agent's chats are not all the same thing. Four writers land in the same
+list — a person opening a conversation, a routine minting one chat PER STEP,
+an issue starting work, and one agent delegating to another — and on a busy
+agent the routine rows outnumber the rest by an order of magnitude. --kind
+narrows to the ones you meant:
+
+  direct    a person talking to this agent (the ones you opened)
+  routine   routine steps, cron dispatches, webhook triggers
+  issue     the chat an issue runs its work in
+  agent     agent-to-agent delegation
+
+Comma-separate to combine, e.g. --kind direct,issue. Omitted, every kind is
+listed — the filter narrows, it never reorders.
+
+  crewship chat list casey --kind direct
+  crewship chat list casey --kind routine --output json`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
 		if err != nil {
@@ -547,22 +567,38 @@ var chatListCmd = &cobra.Command{
 			Origin         *string `json:"origin"`
 			LastActivityAt string  `json:"last_activity_at"`
 			UnreadCount    int     `json:"unread_count"`
+			Kind           string  `json:"kind"`
 		}
-		if err := getJSON(client, "/api/v1/agents/"+agentID+"/chats", &chats); err != nil {
+		path := "/api/v1/agents/" + agentID + "/chats"
+		// Sent only when asked. An empty `kind` and an absent one mean the
+		// same thing to the server, but sending one anyway would put this
+		// command's default behaviour at the mercy of the parameter's
+		// parsing rather than of the server's default.
+		if k := strings.TrimSpace(chatListKind); k != "" {
+			path += "?kind=" + url.QueryEscape(k)
+		}
+		if err := getJSON(client, path, &chats); err != nil {
 			return err
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "TITLE", "STATUS", "MSGS", "UNREAD", "LAST ACTIVITY", "ORIGIN"}
+		// KIND, not ORIGIN, and it replaces rather than joins it: origin is
+		// the raw provenance token (six values, three of which a reader has
+		// to know mean "a machine did this"), kind is the answer to the
+		// question the column was being read for. `--output json` still
+		// carries both.
+		headers := []string{"ID", "TITLE", "KIND", "STATUS", "MSGS", "UNREAD", "LAST ACTIVITY"}
 		var rows [][]string
 		for _, c := range chats {
 			title := "-"
 			if c.Title != nil && *c.Title != "" {
 				title = truncateString(*c.Title, 36)
 			}
-			origin := "-"
-			if c.Origin != nil && *c.Origin != "" {
-				origin = *c.Origin
+			kind := c.Kind
+			if kind == "" {
+				// A server older than the kind field. Say so rather than
+				// printing an empty cell that reads as "no kind".
+				kind = "-"
 			}
 			// Server orders by last activity and falls back to started_at
 			// when a legacy row predates the column.
@@ -578,9 +614,9 @@ var chatListCmd = &cobra.Command{
 				unread = fmt.Sprintf("%d", c.UnreadCount)
 			}
 			rows = append(rows, []string{
-				c.ID, title, c.Status,
+				c.ID, title, kind, c.Status,
 				fmt.Sprintf("%d", c.MessageCount),
-				unread, activity, origin,
+				unread, activity,
 			})
 		}
 		return f.Auto(chats, headers, rows)
@@ -1104,6 +1140,8 @@ func init() {
 	chatCmd.AddCommand(chatAttachCmd)
 	chatCmd.AddCommand(chatAttachmentsCmd)
 	chatCmd.AddCommand(chatCreateCmd)
+	chatListCmd.Flags().StringVar(&chatListKind, "kind", "",
+		"only chats of these kinds: direct, routine, issue, agent (comma-separated; default all)")
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatReadCmd)
 	chatCmd.AddCommand(chatRenameCmd)

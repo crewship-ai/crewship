@@ -1057,7 +1057,14 @@ type AgentStepRequest struct {
 	Prompt       string
 	TimeoutSec   int
 	// Provenance for the orchestrator's own journal/audit:
-	PipelineID      string
+	PipelineID string
+	// PipelineName is the routine's display name, carried only so the
+	// synthetic per-step chat can be TITLED with it. Without it the title
+	// reads "Pipeline pln_cmtem1pwz000d3e744992 · step summarize" — an id
+	// nobody can match to a routine by eye, in a list a person reads.
+	// Empty falls back to the id, which is what every run before this
+	// field produced.
+	PipelineName    string
 	PipelineRunID   string
 	StepID          string
 	InvokingCrewID  string

@@ -241,16 +241,34 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 
 	// 4. Synthetic chat session. We mint a fresh chat per step so
 	//    journal/audit can join: pipeline_run -> step -> chat ->
-	//    agent_run. The chat title encodes the pipeline + step ID
-	//    so the chats list shows "Pipeline X / step fetch" rather
-	//    than a bare UUID.
+	//    agent_run.
+	//
+	//    Origin ROUTINE is what makes that admission survivable. One chat
+	//    per STEP means a five-step nightly routine writes 150 rows a
+	//    month into the same table a person's conversations live in, and
+	//    `GET /agents/{id}/chats` ordered them all by activity — so the
+	//    conversations column showed machine bookkeeping where somebody
+	//    was looking for the thread they wrote yesterday. The stamp is the
+	//    only thing that lets that column tell the two apart; without it
+	//    the classifier's only evidence would be this title, which a
+	//    rename can change out from under it (see internal/api/chat_kinds.go).
+	//
+	//    The title prefers the routine's NAME over its id for the same
+	//    reason the origin exists: these rows are read by people now, on
+	//    the Routines scope of that column, and "pln_cmtem1pwz000d3e744992"
+	//    identifies a routine to a database and to nobody else.
 	chatID := generateRunID() // reuse run-id minter; format is fine
-	chatTitle := fmt.Sprintf("Pipeline %s · step %s", req.PipelineID, req.StepID)
+	routineLabel := req.PipelineName
+	if routineLabel == "" {
+		routineLabel = req.PipelineID
+	}
+	chatTitle := fmt.Sprintf("%s · %s", routineLabel, req.StepID)
 	if err := r.resolver.CreateChat(ctx, chatbridge.CreateChatRequest{
 		ChatID:      chatID,
 		AgentID:     agentID,
 		WorkspaceID: req.WorkspaceID,
 		Title:       chatTitle,
+		Origin:      "ROUTINE",
 	}); err != nil {
 		// Non-fatal: a missing chat row degrades the audit trail
 		// but doesn't break the run. Log and continue.
@@ -561,13 +579,24 @@ func (r *OrchestratorRunner) persistAssistantTurn(ctx context.Context, chatID, a
 //     unattended paths saying the same thing is worth more than either of them
 //     being individually clever.
 //
-// This is written down because today it is ALSO true by accident, twice, and
-// both accidents are the kind that quietly stop holding: notifyReply is a
-// *Bridge* method and this path does not use the Bridge, and a step's chat is
-// created with no user at all (created_by NULL, no participants) so chatnotify
-// would find no recipients even if it were called. The second one is pinned by
-// chatnotify's TestNotify_SystemInitiatedChatRaisesNothing, because it is the
-// one that changes the day someone gives routine chats an owner.
+// This was written down because it used to be true by accident, twice, and both
+// accidents were the kind that quietly stop holding: notifyReply is a *Bridge*
+// method and this path does not use the Bridge, and a step's chat was created
+// with no user at all (created_by NULL, no participants) so chatnotify would
+// have found no recipients even if it were called.
+//
+// The second accident is gone. chatnotify now classifies the chat with
+// chatkind and returns before resolving a recipient for anything it calls
+// machine — a routine step, a cron or webhook dispatch, an issue's mission
+// chat, a delegation — so an owned routine chat raises nothing either, which is
+// what TestNotify_MachineChatKindsRaiseNothingEvenWithAnOwner pins. That
+// mattered sooner than the comment expected: `POST /agents/{id}/chats` takes a
+// caller-supplied origin AND stamps created_by, so an owned ROUTINE chat is one
+// authenticated request, not a hypothetical future migration.
+//
+// The FIRST accident still stands, and this comment is still the only thing
+// holding it: nothing stops a later author from routing this path through the
+// Bridge. The reasons above are why they should not.
 func (r *OrchestratorRunner) recordChatTurn(ctx context.Context, chatID, agentID, text string, parts []conversation.Part, promptPersisted bool) {
 	written := 0
 	if promptPersisted {

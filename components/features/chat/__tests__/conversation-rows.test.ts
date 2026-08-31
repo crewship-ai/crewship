@@ -4,9 +4,25 @@ import {
   applyReadOverrides,
   buildConversationRows,
   filterConversationRows,
+  groupRowsByRoutine,
   liveThreadIds,
+  NO_FILTERS,
+  type ConversationFilters,
   type ConversationRow,
 } from "../conversations-sidebar"
+
+// The three states the strip can be in. They are no longer exclusive tabs —
+// "unread routines" is a real question, and the segmented control that
+// preceded this could not express it because choosing Unread discarded the
+// scope.
+// Built FROM `NO_FILTERS` rather than re-spelling the shape. These three were
+// written before the per-agent facet existed and never grew an `agentId`;
+// vitest was happy — `undefined` is falsy and the filter never fired — and
+// `tsc` never looked, because tsconfig.json excludes **/*.test.ts. A literal
+// that restates a type is a copy that goes stale silently.
+const NONE: ConversationFilters = { ...NO_FILTERS }
+const UNREAD: ConversationFilters = { ...NO_FILTERS, unreadOnly: true }
+const LIVE: ConversationFilters = { ...NO_FILTERS, liveOnly: true }
 import type { ChatTreeAgent, ChatTreeThread } from "../chat-tree-data"
 
 function agent(partial: Partial<ChatTreeAgent> & { id: string }): ChatTreeAgent {
@@ -135,37 +151,37 @@ describe("filterConversationRows", () => {
   })
   const live = liveThreadIds(rows)
 
-  it("keeps everything under the All facet", () => {
-    expect(filterConversationRows(rows, "all", "", live)).toHaveLength(2)
+  it("keeps everything when no toggle is on", () => {
+    expect(filterConversationRows(rows, NONE, "", live)).toHaveLength(2)
   })
 
   it("keeps only threads with unread messages under Unread", () => {
-    const out = filterConversationRows(rows, "unread", "", live)
+    const out = filterConversationRows(rows, UNREAD, "", live)
     expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
   })
 
   it("keeps only threads whose agent is working under Live", () => {
-    const out = filterConversationRows(rows, "live", "", live)
+    const out = filterConversationRows(rows, LIVE, "", live)
     expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
   })
 
   it("matches on the thread title", () => {
-    const out = filterConversationRows(rows, "all", "seznam", live)
+    const out = filterConversationRows(rows, NONE, "seznam", live)
     expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
   })
 
   it("matches on the agent's name, because that is how people look for threads", () => {
-    const out = filterConversationRows(rows, "all", "riley", live)
+    const out = filterConversationRows(rows, NONE, "riley", live)
     expect(out.map((r) => r.thread.id)).toEqual(["t-stale"])
   })
 
-  it("applies the query to the same fields whichever facet is active", () => {
-    expect(filterConversationRows(rows, "live", "push", live)).toHaveLength(0)
-    expect(filterConversationRows(rows, "all", "push", live)).toHaveLength(1)
+  it("applies the query to the same fields whichever toggle is active", () => {
+    expect(filterConversationRows(rows, LIVE, "push", live)).toHaveLength(0)
+    expect(filterConversationRows(rows, NONE, "push", live)).toHaveLength(1)
   })
 
   it("treats a whitespace-only query as no query", () => {
-    expect(filterConversationRows(rows, "all", "   ", live)).toHaveLength(2)
+    expect(filterConversationRows(rows, NONE, "   ", live)).toHaveLength(2)
   })
 
   describe("the open conversation is never filtered away", () => {
@@ -173,25 +189,25 @@ describe("filterConversationRows", () => {
       // The disorienting one: clicking an unread row marks it read, and
       // without the pin the row you just clicked vanishes from under the
       // cursor. It stays, now without its badge.
-      const out = filterConversationRows(rows, "unread", "", live, "t-stale")
+      const out = filterConversationRows(rows, UNREAD, "", live, "t-stale")
       expect(out.map((r) => r.thread.id).sort()).toEqual(["t-live", "t-stale"])
     })
 
     it("keeps a finished thread visible under Live", () => {
-      const out = filterConversationRows(rows, "live", "", live, "t-stale")
+      const out = filterConversationRows(rows, LIVE, "", live, "t-stale")
       expect(out.map((r) => r.thread.id)).toContain("t-stale")
     })
 
     it("does not pin a thread that is not open", () => {
-      const out = filterConversationRows(rows, "unread", "", live, "t-live")
+      const out = filterConversationRows(rows, UNREAD, "", live, "t-live")
       expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
     })
 
     it("still answers the search honestly", () => {
       // A query is the reader asking for a specific thing. Pinning against
-      // the FACET is help; pinning against the QUERY would be answering a
+      // the TOGGLE is help; pinning against the QUERY would be answering a
       // question with something they did not ask about.
-      const out = filterConversationRows(rows, "all", "seznam", live, "t-stale")
+      const out = filterConversationRows(rows, NONE, "seznam", live, "t-stale")
       expect(out.map((r) => r.thread.id)).toEqual(["t-live"])
     })
   })
@@ -268,5 +284,80 @@ describe("applyReadOverrides", () => {
     )
     expect(Object.keys(out).sort()).toEqual(["a1", "a2"])
     expect(out.a2[0].unread_count).toBe(2)
+  })
+})
+
+describe("groupRowsByRoutine — the Routines scope stacks by routine, not by clock", () => {
+  // Recency headers are right for conversations and wrong for routine steps:
+  // a five-step run writes five rows in the same second, so "Today" over
+  // twenty near-identical rows tells the reader nothing. What they want is
+  // which ROUTINE moved, then which step.
+  const rows = buildConversationRows([agent({ id: "a1", name: "Casey" })], {
+    a1: [
+      thread({ id: "r1", title: "Daily digest · summarize", last_activity_at: "2026-08-31T09:00:00Z" }),
+      thread({ id: "r2", title: "Daily digest · fetch", last_activity_at: "2026-08-31T08:59:00Z" }),
+      thread({ id: "r3", title: "Weekly report · render", last_activity_at: "2026-08-31T08:00:00Z" }),
+    ],
+  })
+
+  it("collapses a run's steps into one heading", () => {
+    const out = groupRowsByRoutine(rows)
+    expect(out.map((g) => g.label)).toEqual(["Daily digest", "Weekly report"])
+    expect(out[0].rows.map((r) => r.thread.id)).toEqual(["r1", "r2"])
+  })
+
+  it("orders groups newest-first without sorting twice", () => {
+    // Insertion order already IS freshest-first, because `rows` arrives
+    // sorted and a group is created when its freshest member is first seen.
+    // A second sort here is a second ordering that could disagree with the
+    // first.
+    const reversed = [...rows].reverse()
+    expect(groupRowsByRoutine(reversed).map((g) => g.label)).toEqual([
+      "Weekly report",
+      "Daily digest",
+    ])
+  })
+
+  it("loses no row when a title does not match the runner's shape", () => {
+    const odd = buildConversationRows([agent({ id: "a1" })], {
+      a1: [
+        thread({ id: "x", title: "no separator here", last_activity_at: "2026-08-31T09:00:00Z" }),
+        thread({ id: "y", title: "no separator here", last_activity_at: "2026-08-31T08:00:00Z" }),
+      ],
+    })
+    const out = groupRowsByRoutine(odd)
+    expect(out).toHaveLength(1)
+    expect(out[0].rows.map((r) => r.thread.id)).toEqual(["x", "y"])
+  })
+
+  it("does not group at all when nothing would actually stack", () => {
+    // Six routines that each ran one step produced six headers over six rows
+    // — twelve lines to say what six were already saying, and the headers
+    // were the longer half. An unlabelled group is the flat list, which is
+    // the honest rendering when no stacking happened.
+    const singles = buildConversationRows([agent({ id: "a1" })], {
+      a1: [
+        thread({ id: "s1", title: "Alpha · fetch", last_activity_at: "2026-08-31T09:00:00Z" }),
+        thread({ id: "s2", title: "Beta · render", last_activity_at: "2026-08-31T08:00:00Z" }),
+        thread({ id: "s3", title: "Gamma · echo", last_activity_at: "2026-08-31T07:00:00Z" }),
+      ],
+    })
+    const out = groupRowsByRoutine(singles)
+    expect(out).toEqual([{ label: null, rows: singles }])
+  })
+
+  it("groups as soon as one routine has more than one step", () => {
+    const mixed = buildConversationRows([agent({ id: "a1" })], {
+      a1: [
+        thread({ id: "m1", title: "Alpha · fetch", last_activity_at: "2026-08-31T09:00:00Z" }),
+        thread({ id: "m2", title: "Alpha · render", last_activity_at: "2026-08-31T08:30:00Z" }),
+        thread({ id: "m3", title: "Beta · echo", last_activity_at: "2026-08-31T08:00:00Z" }),
+      ],
+    })
+    expect(groupRowsByRoutine(mixed).map((g) => g.label)).toEqual(["Alpha", "Beta"])
+  })
+
+  it("answers nothing for nothing", () => {
+    expect(groupRowsByRoutine([])).toEqual([])
   })
 })

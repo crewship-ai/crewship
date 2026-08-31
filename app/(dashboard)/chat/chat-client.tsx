@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { FolderOpen, Menu, MessageSquare, SlidersHorizontal, X } from "lucide-react"
+import { FolderOpen, Menu, MessageSquare, SlidersHorizontal } from "lucide-react"
 
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import {
@@ -16,6 +16,13 @@ import {
   applyReadOverrides,
   ConversationsSidebar,
 } from "@/components/features/chat/conversations-sidebar"
+import {
+  classifyThread,
+  scopeForKind,
+  scopeKindParam,
+  type ChatScope,
+} from "@/components/features/chat/chat-kind"
+import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { Skeleton } from "@/components/ui/skeleton"
 import { deriveSessionTitle } from "@/lib/chat-title"
 import { useComposerStore } from "@/stores/composer-store"
@@ -118,7 +125,54 @@ export function ChatClient() {
   // this page cannot distinguish from "no history" — so it opens a new draft
   // on top of a real conversation. It is deliberately not `agentSlug`, which
   // changes on every pick and would re-run the fan-out for each one.
-  const tree = useChatTreeData<ChatClientAgent>({ ensureSlug: pathAgentSlug })
+  /**
+   * Which KIND of thing the column is listing, and why it lives here rather
+   * than inside the column.
+   *
+   * It is a fetch parameter, not a filter. `GET /agents/{id}/chats` pages
+   * with `LIMIT`, so a routine that mints one chat per step fills the page
+   * before the client sees a row — narrowing afterwards narrows an already-
+   * emptied list and tells the reader they have no conversations. The
+   * narrowing has to happen in the query, which means the page that owns the
+   * fetch has to own the scope.
+   *
+   * Always starts at `direct` on mount, and that is what keeps every deep
+   * link safe: the auto-open effect below resolves `/chat/<slug>` against
+   * whatever the fan-out returned, so a scope that hid an agent's real
+   * threads would have it mint a draft on top of them. Arriving at this page
+   * is arriving at your conversations.
+   */
+  const [scope, setScope] = useState<ChatScope>("direct")
+  /**
+   * True once the reader has picked a bucket themselves.
+   *
+   * The probe below exists for ARRIVING at a conversation the current bucket
+   * cannot hold. Browsing produces the same shape — switch to Routines with a
+   * direct conversation open and that conversation is, correctly, absent — and
+   * without this the probe answered it the same way: it resolved the open
+   * session, found `direct`, and set the bucket back. The strip bounced under
+   * the cursor and Routines was unreachable while any conversation was open.
+   *
+   * A ref, not state: nothing renders from it, and making it state would
+   * re-run the very effect it guards.
+   */
+  const scopeChosenRef = useRef(false)
+  const chooseScope = useCallback((next: ChatScope) => {
+    scopeChosenRef.current = true
+    setScope(next)
+  }, [])
+  /**
+   * Desktop fold, same shape /routines and /issues use — the collapsed rail
+   * stays in flow at `w-9` so the expand button never moves. It is local
+   * state, not a preference: this surface already falls back to a drawer
+   * below CHAT_TREE_BREAKPOINT, so a remembered "collapsed" would be one more
+   * way to arrive at a chat page with no visible way back to the list.
+   */
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const tree = useChatTreeData<ChatClientAgent>({
+    ensureSlug: pathAgentSlug,
+    kind: scopeKindParam(scope),
+  })
 
   const { workspaceId } = useWorkspace()
   const isMobile = useChatCompactLayout()
@@ -465,7 +519,13 @@ export function ChatClient() {
       if (tree.threadErrors[named.id]) return
       const thread = freshestOf(threadsByAgent[named.id] ?? [])
       if (thread) selectThread(named, thread)
-      else startConversation(named)
+      // The same wrong write once more, reached through the SCOPE this time.
+      // Under Routines the fan-out asked for routine chats, so an agent with
+      // a dozen conversations and no routine runs comes back with an empty
+      // list — and "empty" here would mint a draft on top of every one of
+      // them. An empty list only means "this agent has never been talked to"
+      // while the question being asked is about talking.
+      else if (scope === "direct") startConversation(named)
       return
     }
 
@@ -484,6 +544,7 @@ export function ChatClient() {
     tree.threadErrors,
     agents,
     threadsByAgent,
+    scope,
     selectThread,
     startConversation,
   ])
@@ -500,6 +561,78 @@ export function ChatClient() {
     () => (agent && sessionId ? threadsByAgent[agent.id]?.find((t) => t.id === sessionId) ?? null : null),
     [agent, sessionId, threadsByAgent],
   )
+
+  /**
+   * Bring the column to the conversation the URL named.
+   *
+   * The fan-out is scoped, and that is not negotiable: `?kind=` narrows inside
+   * the query, before its LIMIT, which is the only place a routine minting one
+   * chat per step can be stopped from evicting a person's conversations. The
+   * scope starts at `direct` on every mount for the same reason — arriving
+   * here is arriving at your conversations.
+   *
+   * But this page is also arrived at sideways. `/chat/<slug>?session=<id>` is
+   * what internal/chatnotify puts in an inbox item, what `crewship open`
+   * builds, and what every routines / crews / dashboard link points at. A
+   * session of any other kind is then not in the fan-out at all — and the
+   * surface had no way to say so. The transcript rendered, the column showed a
+   * Direct list that did not contain it, nothing was selected, and the
+   * connection bar lost its origin chip, because `activeThread` resolves out of
+   * the same fan-out. Silently absent, exactly the failure `threadErrors`
+   * exists to prevent one layer down.
+   *
+   * So: when the scoped fan-out settles WITHOUT the session the URL named, ask
+   * once what kind it is and move the scope to match.
+   *
+   * Three guards, and each one is load-bearing:
+   *
+   *  · It runs only on a MISS. A direct arrival — the overwhelming majority —
+   *    costs nothing, because a fix for the sideways path must not become a
+   *    tax on the main one.
+   *  · `probedSessions` makes it once per session id, ever. Without it the
+   *    effect is a loop by construction: the probe changes the scope, the
+   *    scope re-runs the fan-out, the fan-out settles, the session is still
+   *    absent (a freshly minted draft has no row until the first send), and
+   *    round it goes.
+   *  · A failed or empty probe changes nothing. The column stays where the
+   *    reader put it; guessing a bucket is worse than not moving.
+   */
+  const probedSessions = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!sessionId || !agent || !workspaceId || !tree.threadsLoaded) return
+    // Once the reader has said where they want to be, they have answered the
+    // question this effect exists to ask.
+    if (scopeChosenRef.current) return
+    if (threadsByAgent[agent.id]?.some((t) => t.id === sessionId)) return
+    // An agent whose list FAILED has an unknown history, not a missing
+    // session. Probing would be asking a second question about the first
+    // one's error.
+    if (tree.threadErrors[agent.id]) return
+    if (probedSessions.current.has(sessionId)) return
+    probedSessions.current.add(sessionId)
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiFetch(
+          `/api/v1/agents/${encodeURIComponent(agent.id)}/chats` +
+            `?workspace_id=${encodeURIComponent(workspaceId)}&kind=all&limit=100`,
+        )
+        if (!res.ok || cancelled) return
+        const rows: unknown = await res.json()
+        if (!Array.isArray(rows) || cancelled) return
+        const found = (rows as ChatTreeThread[]).find((t) => t.id === sessionId)
+        if (!found) return
+        const next = scopeForKind(classifyThread(found))
+        if (next) setScope(next)
+      } catch {
+        /* the column stays where it is, which is the honest answer */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId, agent, workspaceId, tree.threadsLoaded, tree.threadErrors, threadsByAgent])
 
   const chatAgent: ChatAgent | null = useMemo(
     () =>
@@ -529,6 +662,11 @@ export function ChatClient() {
       onRetryRoster={tree.retryRoster}
       onRetryThreads={tree.retryThreads}
       threadsLoaded={tree.threadsLoaded}
+      scope={scope}
+      onScopeChange={chooseScope}
+      // Totals for the scopes this fetch is deliberately NOT returning, so
+      // every bucket carries a count the way /routines' status buckets do.
+      kindCounts={tree.kindCounts}
       activeThreadId={sessionId}
       onSelectThread={(a, t) => {
         selectThread(a, t)
@@ -538,6 +676,11 @@ export function ChatClient() {
         startConversation(a)
         setDrawerOpen(false)
       }}
+      // Same control, same corner, both sizes — it just puts the column away
+      // in whichever way the column exists here: folded to a rail on desktop,
+      // dismissed on a phone, where the column IS the drawer.
+      onToggleCollapse={isMobile ? () => setDrawerOpen(false) : () => setLeftCollapsed(true)}
+      collapseLabel={isMobile ? "Close conversations" : undefined}
     />
   )
 
@@ -642,22 +785,27 @@ export function ChatClient() {
           <>
             <button
               type="button"
-              aria-label="Close conversations"
+              // Distinct from the toolbar's own "Close conversations", the
+              // way routines-layout names its backdrop "Close routine list":
+              // two controls that do the same thing may share a purpose, but
+              // a reader tabbing through should not hear one name twice with
+              // nothing to tell them apart.
+              aria-label="Close conversation list"
               className="fixed inset-0 z-30 bg-black/50"
               onClick={() => setDrawerOpen(false)}
             />
             <div className="fixed inset-y-0 left-0 z-40 flex bg-card">
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setDrawerOpen(false)}
-                  aria-label="Close conversations"
-                  className="absolute right-2 top-3 z-10 rounded p-1 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-                {sidebar}
-              </div>
+              {/* No floating close button. It used to sit `absolute right-2
+                  top-3` over the column, which was survivable while the only
+                  thing under it was a search field — and became a collision
+                  the moment the toolbar gained Filter, because that button is
+                  at exactly that corner. Two controls stacked on one tap
+                  target on the surface where taps are least precise.
+
+                  The drawer closes through the toolbar's own collapse button
+                  instead (wired below to `setDrawerOpen`), which is the same
+                  control in the same place as on desktop, plus the backdrop. */}
+              <div className="w-[280px]">{sidebar}</div>
             </div>
           </>
         )}
@@ -680,7 +828,22 @@ export function ChatClient() {
      * centre is a raised reading surface inside a card-coloured frame.
      */
     <div className="flex h-full min-h-0 overflow-hidden bg-card">
-      {sidebar}
+      {/* The column's frame, matching /routines and /issues: the aside owns
+          the width and the rule, the explorer inside owns the content. */}
+      <aside
+        className={cn(
+          "shrink-0 overflow-hidden border-r border-white/[0.06] transition-all",
+          leftCollapsed ? "w-9" : "w-[280px]",
+        )}
+      >
+        {leftCollapsed ? (
+          <div className="flex h-full flex-col items-center pt-1.5">
+            <SidebarCollapseButton collapsed onToggle={() => setLeftCollapsed(false)} />
+          </div>
+        ) : (
+          sidebar
+        )}
+      </aside>
       {/* The pane is on this element and this element does not scroll — the
           scroll containers are inside it. On a scroll container the gradient
           stretches to the full document height and the top highlight, which

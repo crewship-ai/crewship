@@ -50,6 +50,8 @@ function renderSidebar(props: Partial<Parameters<typeof ConversationsSidebar>[0]
       agents={[riley, morgan]}
       threadsByAgent={{}}
       threadsLoaded
+      scope="direct"
+      onScopeChange={() => {}}
       onSelectThread={() => {}}
       onStartConversation={() => {}}
       {...props}
@@ -160,17 +162,174 @@ describe("<ConversationsSidebar> — 'Not started yet' means we asked and got no
   })
 })
 
-describe("<ConversationsSidebar> — the facet strip counts one kind of thing", () => {
+describe("<ConversationsSidebar> — the primary bucket asks which KIND", () => {
+  // The strip used to be All · Unread · Live: a scope and two predicates in
+  // one exclusive control, two of them permanently reading 0. /issues and
+  // /routines had already settled the shape — one bucket section carrying the
+  // question the page is actually sorted by, everything else in the Filter
+  // popover — and this column was the one that had not adopted it.
+
+  it("offers Direct, Routines and Issues as the bucket section", () => {
+    renderSidebar({ threadsByAgent: { "a-morgan": [morganThread] } })
+
+    expect(screen.getByText("Show")).toBeInTheDocument()
+    for (const label of ["Direct", "Routines", "Issues"]) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+  })
+
+  it("puts a count on every bucket when the server reported the totals", () => {
+    // The reason `X-Chat-Kind-Counts` exists. The fetch is scoped, so the
+    // response holds one kind and the other buckets cannot be counted from
+    // it — and a bucket row without a number is the one thing that would make
+    // this column read differently from /routines' STATUS section.
+    renderSidebar({
+      threadsByAgent: { "a-morgan": [morganThread] },
+      kindCounts: { direct: 1, routine: 182, issue: 0, agent: 3 },
+    })
+
+    // Routines carries routine + agent — delegation rides in that bucket.
+    expect(screen.getByText("185")).toBeInTheDocument()
+    expect(screen.getByText("0")).toBeInTheDocument()
+  })
+
+  it("invents no number when the server did not report totals", () => {
+    // An older server, or a proxy that dropped the header. The selected
+    // bucket falls back to what it can actually see; the others say nothing,
+    // because nothing is what is known.
+    renderSidebar({ threadsByAgent: { "a-morgan": [morganThread] }, kindCounts: null })
+
+    const routines = screen.getByText("Routines").closest("li")
+    expect(routines?.textContent).toBe("Routines")
+  })
+})
+
+describe("<ConversationsSidebar> — state narrowing lives in the Filter popover", () => {
   it("counts unread CONVERSATIONS, not unread messages", () => {
     const noisy = { ...morganThread, id: "morgan-1", unread_count: 7 }
     const quieter = { ...morganThread, id: "morgan-2", unread_count: 2 }
     renderSidebar({ threadsByAgent: { "a-morgan": [noisy, quieter] } })
 
-    // `All` counts rows and `Live` counts rows; summing message counts here
-    // put "Unread 9" above a two-row list and made the middle number in the
-    // strip mean something different from its neighbours.
-    const unread = screen.getByRole("tab", { name: /unread/i })
+    fireEvent.click(screen.getByRole("button", { name: /filter/i }))
+    const unread = screen.getByRole("button", { name: /unread only/i })
+    // Summing message counts put "Unread 9" over a two-row list, so the
+    // number meant something different from every other number on the strip.
     expect(unread.textContent).toContain("2")
     expect(unread.textContent).not.toContain("9")
+  })
+
+  it("badges the trigger so a facet is never hidden by being one click away", () => {
+    // The one real cost of moving these off the surface. The badge is what
+    // pays it — /issues and /routines both rely on it for the same reason.
+    renderSidebar({ threadsByAgent: { "a-morgan": [{ ...morganThread, unread_count: 1 }] } })
+
+    const trigger = screen.getByRole("button", { name: /filter/i })
+    expect(trigger.textContent).not.toContain("1")
+
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole("button", { name: /unread only/i }))
+    expect(screen.getByRole("button", { name: /filter/i }).textContent).toContain("1")
+  })
+
+  it("composes with the bucket instead of replacing it", () => {
+    // The fatal flaw of the exclusive strip: "unread routines" was a real
+    // question it could not express, because choosing Unread threw the scope
+    // away. Here the scope is a fetch parameter and the facet is a predicate
+    // over what came back, so they cannot collide.
+    const onScopeChange = vi.fn()
+    renderSidebar({
+      threadsByAgent: { "a-morgan": [{ ...morganThread, unread_count: 1 }] },
+      scope: "routine",
+      onScopeChange,
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /filter/i }))
+    fireEvent.click(screen.getByRole("button", { name: /unread only/i }))
+
+    expect(onScopeChange).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: /filter/i }).textContent).toContain("1")
+  })
+})
+
+describe("<ConversationsSidebar> — the row does not stretch its children", () => {
+  // `.row-interactive` is `display:flex` with no `align-items`, so children
+  // stretch to the row's height. Every other sidebar in the app has one-line
+  // rows, where stretch and centre are indistinguishable; this is the first
+  // two-line row and it stretched the unread count into a tall capsule and
+  // dropped the live dot to the bottom of the row instead of the portrait.
+  //
+  // jsdom has no layout engine, so this cannot assert the pixels — it pins the
+  // two declarations that produce them, which is what a later edit would
+  // remove. The pixels were checked in a browser.
+
+  it("centres the row's children rather than letting them stretch", () => {
+    renderSidebar({ threadsByAgent: { "a-morgan": [{ ...morganThread, unread_count: 3 }] } })
+
+    const row = screen.getByText("Morgan's thread").closest("li")
+    expect(row?.className).toContain("items-center")
+  })
+
+  it("gives the unread count a square floor, so one digit is a circle", () => {
+    // Same geometry as the bell badge in bar-menu: a 16px box with a 16px
+    // minimum width. Only a two- or three-digit count grows into a capsule.
+    // 7, not 3: the Show section's own count is 3 (one per scope), and a
+    // fixture that collides with the chrome tests the query, not the code.
+    renderSidebar({ threadsByAgent: { "a-morgan": [{ ...morganThread, unread_count: 7 }] } })
+
+    const badge = screen.getByText("7")
+    expect(badge.className).toContain("h-4")
+    expect(badge.className).toContain("min-w-[16px]")
+    expect(badge.className).toContain("rounded-full")
+  })
+})
+
+describe("<ConversationsSidebar> — the collapse control keeps its name", () => {
+  // `SidebarCollapseButton` sets its own aria-label and then spreads
+  // `...props` over it. So forwarding an OPTIONAL override straight through
+  // does not fall back when it is undefined — React removes the attribute and
+  // the control goes nameless. It renders identically, so nothing catches it
+  // but a query by name.
+
+  it("names itself when the caller passes no override", () => {
+    renderSidebar({ onToggleCollapse: () => {} })
+    expect(screen.getByRole("button", { name: /collapse sidebar/i })).toBeInTheDocument()
+  })
+
+  it("takes the caller's name when there is one", () => {
+    // On a phone the column IS the drawer, so "Collapse sidebar" is the wrong
+    // description of what the button does.
+    renderSidebar({ onToggleCollapse: () => {}, collapseLabel: "Close conversations" })
+    expect(screen.getByRole("button", { name: "Close conversations" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /collapse sidebar/i })).toBeNull()
+  })
+
+  it("offers no collapse control where the layout cannot fold", () => {
+    renderSidebar({})
+    expect(screen.queryByRole("button", { name: /collapse|close conversations/i })).toBeNull()
+  })
+})
+
+describe("<ConversationsSidebar> — starting a conversation asks who with", () => {
+  it("opens a picker instead of choosing the first agent in the roster", () => {
+    // `onStartConversation(roster[0])` made the one button on the column
+    // silently pick the agent — and choosing the agent IS the decision.
+    const onStartConversation = vi.fn()
+    renderSidebar({ threadsByAgent: { "a-morgan": [morganThread] }, onStartConversation })
+
+    fireEvent.click(screen.getByRole("button", { name: /new conversation/i }))
+    expect(onStartConversation).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByText("Riley"))
+    expect(onStartConversation).toHaveBeenCalledWith(riley)
+  })
+
+  it("offers every agent, not only the ones with no history", () => {
+    // A second conversation with somebody you already talk to is the common
+    // case, and the roster section this replaced listed only idle agents.
+    renderSidebar({ threadsByAgent: { "a-morgan": [morganThread], "a-riley": [] } })
+
+    fireEvent.click(screen.getByRole("button", { name: /new conversation/i }))
+    expect(screen.getByText("Morgan")).toBeInTheDocument()
+    expect(screen.getByText("Riley")).toBeInTheDocument()
   })
 })

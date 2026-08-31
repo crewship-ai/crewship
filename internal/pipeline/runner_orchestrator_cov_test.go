@@ -330,3 +330,66 @@ func TestOrchestratorRunner_RunStep_OrchestratorErrorPropagates(t *testing.T) {
 		t.Errorf("inner refusal lost: %v", err)
 	}
 }
+
+// TestOrchestratorRunner_StampsRoutineOrigin — the step chat says what it is.
+//
+// The runner mints one chat per step so journal/audit can join, and until this
+// stamp existed those rows were indistinguishable from a conversation a person
+// opened: NULL origin, NULL created_by, and a title as their only evidence. So
+// the conversations column showed machine bookkeeping to somebody looking for
+// the thread they wrote yesterday — and, because the list pages, showed it
+// INSTEAD of that thread.
+//
+// The title is checked in the same test because it is the same decision from
+// the reader's side: these rows are read by people now, on the Routines scope,
+// and "pln_cmtem1pwz000d3e744992" identifies a routine to a database and to
+// nobody else.
+func TestOrchestratorRunner_StampsRoutineOrigin(t *testing.T) {
+	run := func(t *testing.T, name string) chatbridge.CreateChatRequest {
+		t.Helper()
+		container := &orchCovContainer{
+			agentStream: `{"type":"result","subtype":"success"}` + "\n",
+		}
+		resolver := &orchCovResolver{info: covChatInfo()}
+		r := newOrchRunnerRig(t, container, resolver)
+		if _, err := r.RunStep(context.Background(), AgentStepRequest{
+			WorkspaceID:  "ws_cov",
+			AuthorCrewID: "crew_cov",
+			AgentSlug:    "cov-agent",
+			Prompt:       "go",
+			TimeoutSec:   30,
+			PipelineID:   "pln_cmtem1pwz000d3e744992",
+			PipelineName: name,
+			StepID:       "summarize",
+		}); err != nil {
+			t.Fatalf("RunStep: %v", err)
+		}
+		if len(resolver.createChatCalls) != 1 {
+			t.Fatalf("CreateChat calls: %d", len(resolver.createChatCalls))
+		}
+		return resolver.createChatCalls[0]
+	}
+
+	t.Run("origin", func(t *testing.T) {
+		if got := run(t, "Daily digest").Origin; got != "ROUTINE" {
+			t.Errorf("Origin = %q, want ROUTINE", got)
+		}
+	})
+
+	t.Run("titled with the routine's name when it has one", func(t *testing.T) {
+		cc := run(t, "Daily digest")
+		if cc.Title != "Daily digest · summarize" {
+			t.Errorf("Title = %q, want %q", cc.Title, "Daily digest · summarize")
+		}
+	})
+
+	t.Run("falls back to the id rather than to a blank", func(t *testing.T) {
+		// A direct RunStep outside the executor has no DSL to read a name
+		// from. The pre-change title is the right answer there — an
+		// unrecognisable row beats an unnamed one.
+		cc := run(t, "")
+		if !strings.Contains(cc.Title, "pln_cmtem1pwz000d3e744992") {
+			t.Errorf("Title = %q, want it to fall back to the pipeline id", cc.Title)
+		}
+	})
+}

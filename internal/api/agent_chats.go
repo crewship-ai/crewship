@@ -73,6 +73,38 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	// second query below keeps the per-chat plan of the correlated
 	// subquery (same two SEARCHes, driven from the chats pk for each id
 	// in the page) but is bounded by the page.
+	//
+	// The `kind` filter goes INSIDE the statement rather than being applied
+	// to the result, and that is the whole point of it: `LIMIT 100` is
+	// evaluated before any client sees a row, so a routine that mints one
+	// chat per step pushes a person's conversations off the page while the
+	// client still holds an empty filter. Narrowing after the fact would
+	// return 100 routine rows and 0 direct ones and call that "no
+	// conversations". See chat_kinds.go for why the partition is SQL.
+	kindWhere, err := parseChatKinds(r.URL.Query().Get("kind"))
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// The per-kind totals, for the scopes this response deliberately does not
+	// contain. Opt-in: a `chat list` from the terminal has no tab strip to
+	// fill and should not pay for a count over every chat the agent has.
+	//
+	// Set BEFORE the body is written — WriteHeader flushes the header map, and
+	// a header set after it is silently dropped.
+	if r.URL.Query().Get("counts") == "1" {
+		counts, err := h.chatKindCounts(r.Context(), agentID, workspaceID)
+		if err != nil {
+			// Not fatal, and deliberately so: the counts decorate a list that
+			// is otherwise fine, and failing the whole request over a number
+			// on a tab would turn a cosmetic problem into an empty column.
+			h.logger.Warn("list agent chats: kind counts", "error", err, "agent_id", agentID)
+		} else {
+			w.Header().Set(ChatKindCountsHeader, formatChatKindCounts(counts))
+		}
+	}
+
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.agent_id, c.workspace_id, c.title, c.mode, c.status,
 			c.message_count, c.started_at, c.ended_at, c.created_at, c.origin,
@@ -80,7 +112,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 				strftime('%Y-%m-%dT%H:%M:%fZ', c.started_at),
 				c.started_at) AS last_activity_at
 		FROM chats c
-		WHERE c.agent_id = ? AND c.workspace_id = ?
+		WHERE c.agent_id = ? AND c.workspace_id = ?`+kindWhere+`
 		ORDER BY last_activity_at DESC
 		LIMIT 100
 	`, agentID, workspaceID)
@@ -104,6 +136,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "scan chat", err)
 			return
 		}
+		c.Kind = ChatKindOf(c.Mode, derefOr(c.Origin, ""))
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -210,9 +243,11 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"session_id"`
 		// Origin distinguishes how the session was started: "UI" (chat
 		// page in the browser), "CLI" (`crewship run`), "WEBHOOK",
-		// "CRON", "AGENT" (agent-to-agent assignment). The
-		// SessionsSidebar renders a colored chip per origin. Unknown
-		// or empty values are stored as NULL → no chip shown.
+		// "CRON", "ROUTINE" (a routine step), "AGENT" (agent-to-agent
+		// assignment). The chat header renders a colored chip per
+		// origin and the conversations column partitions on it
+		// (chat_kinds.go). Unknown or empty values are stored as NULL
+		// → no chip, and the row classifies as `direct`.
 		Origin string `json:"origin"`
 	}
 	if err := readJSON(r, &body); err != nil {
@@ -227,9 +262,11 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 
 	// Whitelist allowed origin values; anything else becomes NULL so a
 	// rogue caller can't shove arbitrary text into a UI-rendered chip.
+	// The list lives in chat_kinds.go because the SAME vocabulary decides
+	// which bucket the chat lands in — two copies would let a value be
+	// storable here and unclassifiable there.
 	var origin sql.NullString
-	switch body.Origin {
-	case "UI", "CLI", "WEBHOOK", "CRON", "AGENT":
+	if IsChatOrigin(body.Origin) {
 		origin = sql.NullString{String: body.Origin, Valid: true}
 	}
 

@@ -54,11 +54,11 @@ const ITEMS: RailItem[] = RAIL_PANELS.map((item, i) => ({
 /**
  * What each panel is called, in one place.
  *
- * The rail is three unlabelled 16px glyphs, and the drawer it opens had no
- * header of its own — so the only way to know which of the three you were
- * looking at was to recognise the icon. The rail's tooltip, the drawer's
- * accessible name and the panel's own heading all read from here so they
- * cannot say three different things.
+ * The rail's button label, its tooltip, the drawer's accessible name and the
+ * panel's own heading all read from here, so they cannot say four different
+ * things. The rail carried no visible label at all until the label moved onto
+ * the button — before that this map fed a tooltip and an sr-only span, and a
+ * reader looking at the strip had only the glyph.
  *
  * "context" is not a rail button any more (it moved to the agent canvas) but
  * survives in persisted user state, so it keeps a name.
@@ -106,7 +106,7 @@ export function RightRail({ className }: { className?: string }) {
     <TooltipProvider delayDuration={400}>
       <div
         className={cn(
-          "flex flex-col items-center gap-1 w-12 shrink-0 border-l bg-background py-2",
+          "flex flex-col items-center gap-0.5 w-14 shrink-0 border-l bg-background py-2",
           className,
         )}
         role="tablist"
@@ -119,11 +119,21 @@ export function RightRail({ className }: { className?: string }) {
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
-                  size="icon"
+                  // The rail was three unlabelled 16px glyphs on a 48px strip,
+                  // and the only affordances that named them — an sr-only
+                  // span and a hover tooltip — are exactly the two nobody
+                  // LOOKING at the screen has. So the label is on the button.
+                  //
+                  // It costs 8px of width and buys the whole strip: the icons
+                  // (a page, two people) are generic enough that a reader who
+                  // has not opened both panels cannot tell which is which, and
+                  // the first thing everybody did was click one to find out.
+                  // The tooltip stays, because it is where the shortcut lives.
                   className={cn(
-                    "h-9 w-9 relative",
-                    isActive && "text-foreground",
-                    !isActive && "text-muted-foreground hover:text-foreground",
+                    "relative h-auto w-full flex-col gap-1 rounded-md px-0 py-2",
+                    isActive
+                      ? "bg-white/[0.06] text-foreground"
+                      : "text-muted-foreground hover:bg-white/[0.03] hover:text-foreground",
                   )}
                   role="tab"
                   aria-selected={isActive}
@@ -142,7 +152,12 @@ export function RightRail({ className }: { className?: string }) {
                     />
                   )}
                   <Icon className="h-4 w-4" />
-                  <span className="sr-only">{label}</span>
+                  {/* The button's accessible name, not a decoration beside
+                      one — there is no sr-only twin, so the two can never
+                      say different things. */}
+                  <span className="text-[9px] font-medium leading-none tracking-tight">
+                    {label}
+                  </span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="left">

@@ -16,6 +16,14 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID string  `json:"workspace_id"`
 		UserID      *string `json:"user_id"`
 		Title       *string `json:"title"`
+		// Origin is provenance, and this endpoint not accepting one is
+		// why every routine step used to arrive indistinguishable from
+		// a person's conversation. Whitelisted through the shared
+		// IsChatOrigin — an unrecognised value stores NULL rather than
+		// failing the call, because a chat row this endpoint declines
+		// to write costs the run its audit trail (the caller treats
+		// the failure as non-fatal and continues).
+		Origin string `json:"origin"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -32,11 +40,16 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var origin sql.NullString
+	if IsChatOrigin(body.Origin) {
+		origin = sql.NullString{String: body.Origin, Valid: true}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO chats (id, agent_id, workspace_id, created_by, title, mode, status, started_at, created_at)
-		VALUES (?, ?, ?, ?, ?, 'CHAT', 'ACTIVE', ?, ?)`,
-		body.ChatID, body.AgentID, body.WorkspaceID, body.UserID, body.Title, now, now)
+		INSERT INTO chats (id, agent_id, workspace_id, created_by, title, mode, status, origin, started_at, created_at)
+		VALUES (?, ?, ?, ?, ?, 'CHAT', 'ACTIVE', ?, ?, ?)`,
+		body.ChatID, body.AgentID, body.WorkspaceID, body.UserID, body.Title, origin, now, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "create chat", err)
 		return

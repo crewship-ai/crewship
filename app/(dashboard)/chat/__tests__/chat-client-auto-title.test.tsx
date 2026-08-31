@@ -91,8 +91,16 @@ vi.mock("@/lib/api-fetch", () => ({
   apiFetch: (...args: unknown[]) => apiFetchMock(...args),
 }))
 
-function ok(body: unknown) {
-  return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response)
+function ok(body: unknown, headers: Record<string, string> = {}) {
+  // `headers` is real, not omitted: the fan-out reads the per-kind totals off
+  // `X-Chat-Kind-Counts`, and a double thinner than a Response is how a stub
+  // stops testing the code and starts testing itself.
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    headers: new Headers(headers),
+    json: () => Promise.resolve(body),
+  } as Response)
 }
 
 function setUrl(pathname: string, search: string) {
