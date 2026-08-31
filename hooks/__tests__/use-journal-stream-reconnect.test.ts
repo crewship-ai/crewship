@@ -398,6 +398,36 @@ describe("useJournalStream — backfill gap", () => {
     expect(mockFetch.mock.calls.length).toBeLessThanOrEqual(8)
   })
 
+  it("keeps the gap warning when the stream comes back on its own", async () => {
+    useHybridTimers()
+    mockFetch.mockImplementation(async () =>
+      okResponse(
+        Array.from({ length: POLL_LIMIT }, (_, i) => entry(`x${i}`, "2026-01-01T00:10:00.000Z")),
+        "c",
+      ),
+    )
+    const { result } = renderHook(() =>
+      useJournalStream({ workspaceId: "ws_test", onEntry: vi.fn() }),
+    )
+    act(() => {
+      MockEventSource.instances[0].fail()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+    await waitFor(() => expect(result.current.gapDetected).toBe(true))
+
+    // The backoff reconnects and succeeds. That restores the live tail but
+    // does NOT fill the hole, so the warning and its explanation have to
+    // survive — only re-reading the head can clear it.
+    act(() => {
+      MockEventSource.instances[MockEventSource.instances.length - 1].open()
+    })
+    await waitFor(() => expect(result.current.status).toBe("connected"))
+    expect(result.current.gapDetected).toBe(true)
+    expect(result.current.lastError).toMatch(/missing/i)
+  })
+
   it("reconnect() clears the gap warning", async () => {
     useHybridTimers()
     mockFetch.mockImplementation(async () =>

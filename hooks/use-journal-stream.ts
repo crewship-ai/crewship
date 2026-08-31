@@ -47,6 +47,8 @@ const RECONNECT_BASE_MS = 1000
  *  poll fallback keeps the UI fed meanwhile, so giving up entirely would
  *  only strand the user on a slower feed with no way back. */
 const RECONNECT_CEILING_MS = 30000
+/** Shown when the catch-up walk could not reach the watermark. */
+const GAP_MESSAGE = "Some entries may be missing — reconnect to reload the window."
 
 /**
  * Equal-jitter exponential backoff: half of the window is fixed and half is
@@ -108,6 +110,11 @@ export function useJournalStream(opts: UseJournalStreamOptions): UseJournalStrea
     let pollTimer: ReturnType<typeof setInterval> | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let pollInFlight = false
+    // Mirrors the gapDetected state inside this effect's closure, which
+    // cannot read it back. A standing gap warning must survive a
+    // reconnect: re-opening the stream does not fill the hole, only
+    // re-reading the head does.
+    let gapped = false
     let attempt = 0
     // The watermark is tracked as both an instant and the exact string to
     // send back as `since`. It cannot be compared as a string: the API
@@ -120,6 +127,7 @@ export function useJournalStream(opts: UseJournalStreamOptions): UseJournalStrea
     let watermarkMs = Date.now()
     let pollWatermark = new Date(watermarkMs).toISOString()
 
+    gapped = false
     setGapDetected(false)
 
     const query = new URLSearchParams()
@@ -199,8 +207,9 @@ export function useJournalStream(opts: UseJournalStreamOptions): UseJournalStrea
       if (cancelled) return
       for (let i = collected.length - 1; i >= 0; i--) emit(collected[i])
       if (truncated) {
+        gapped = true
         setGapDetected(true)
-        setLastError("Some entries may be missing — reconnect to reload the window.")
+        setLastError(GAP_MESSAGE)
       }
     }
 
@@ -247,7 +256,7 @@ export function useJournalStream(opts: UseJournalStreamOptions): UseJournalStrea
       try {
         es = new EventSource(`/api/v1/journal/stream?${query.toString()}`)
       } catch {
-        setLastError("Failed to open stream")
+        if (!gapped) setLastError("Failed to open stream")
         startPolling()
         scheduleReconnect()
         return
@@ -258,7 +267,7 @@ export function useJournalStream(opts: UseJournalStreamOptions): UseJournalStrea
         attempt = 0
         stopPolling()
         setStatus("connected")
-        setLastError(null)
+        if (!gapped) setLastError(null)
       }
 
       es.addEventListener("entry", (event) => {
@@ -284,7 +293,7 @@ export function useJournalStream(opts: UseJournalStreamOptions): UseJournalStrea
 
       es.onerror = () => {
         if (cancelled) return
-        setLastError("SSE connection lost")
+        if (!gapped) setLastError("SSE connection lost")
         es?.close()
         es = null
         // Poll so the UI doesn't appear frozen, and keep reaching for the
@@ -301,6 +310,7 @@ export function useJournalStream(opts: UseJournalStreamOptions): UseJournalStrea
         reconnectTimer = null
       }
       attempt = 0
+      gapped = false
       setGapDetected(false)
       setLastError(null)
       es?.close()
