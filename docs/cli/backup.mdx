@@ -200,6 +200,10 @@ it re-signed, and writes the same fact into the fork's own journal as a
   Recorded in the fork's own journal as a `backup.chain_resigned` entry.
 ```
 
+`--dry-run` reports the same counts as "would be re-signed" and writes
+nothing, so you can see whether a restore is about to give the
+workspace a new genesis before you commit to it.
+
 The practical consequence: `crewship journal verify -w <fork>` reports
 `ok` (before this it called every restored row tampered), but it is
 attesting to *this* instance from the restore onward, not to the source

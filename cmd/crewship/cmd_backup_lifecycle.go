@@ -351,12 +351,20 @@ var backupRestoreCmd = &cobra.Command{
 		// cryptographic link back to the source's history. Saying nothing
 		// would let a later clean `journal verify` be read as provenance
 		// the fork does not have.
-		if !dryRun && out.JournalEntriesResigned > 0 {
-			note := fmt.Sprintf("Journal chain re-signed: %d entries", out.JournalEntriesResigned)
+		//
+		// Printed on a dry run too, and unlike the docker warning it
+		// belongs there: "this fork would start a new chain" is exactly
+		// what an operator wants to hear BEFORE cutover, not after.
+		if out.JournalEntriesResigned > 0 {
+			verb, tense := "re-signed", "starts"
+			if dryRun {
+				verb, tense = "would be re-signed", "would start"
+			}
+			note := fmt.Sprintf("Journal chain %s: %d entries", verb, out.JournalEntriesResigned)
 			if out.JournalCheckpointsResigned > 0 {
 				note += fmt.Sprintf(", %d compaction checkpoints", out.JournalCheckpointsResigned)
 			}
-			note += ".\n  The fork starts a NEW chain under this instance's key — it no longer links back to the source workspace."
+			note += fmt.Sprintf(".\n  The fork %s a NEW chain under this instance's key — it no longer links back to the source workspace.", tense)
 			note += "\n  Recorded in the fork's own journal as a `backup.chain_resigned` entry."
 			cli.PrintSuccess(note)
 		}

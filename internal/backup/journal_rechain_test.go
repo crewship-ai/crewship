@@ -381,3 +381,67 @@ func TestForkedRestore_DoesNotLaunderAForgedCheckpoint(t *testing.T) {
 		t.Errorf("restore reported %d checkpoints re-signed, want 0", res.JournalCheckpointsResigned)
 	}
 }
+
+// TestForkedDryRun_ReportsWhatWouldBeResigned pins the dry-run half of the
+// reporting. A dry run of a forked restore performs the whole re-sign in
+// memory on its way to the rollback, so it already knows the numbers. Reporting
+// zero would hide the one thing an operator runs a dry run to find out —
+// whether this restore is about to give the workspace a new genesis — and it
+// is the same reason dropped columns and clamped credential tiers are reported
+// on a dry run.
+//
+// And it must write nothing: no rows, so no re-sign notice anywhere.
+func TestForkedDryRun_ReportsWhatWouldBeResigned(t *testing.T) {
+	ctx := context.Background()
+
+	source := openMigratedDB(t)
+	workspaceID := seedWorkspace(t, source)
+	seedJournalChain(t, source, workspaceID, 4)
+
+	const passphrase = "dry-run-resign-pass-123"
+	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
+	created, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope:       backup.ScopeWorkspace,
+		WorkspaceID: workspaceID,
+		OutputDir:   t.TempDir(),
+		Actor:       actor,
+		Passphrase:  passphrase,
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	res, err := backup.RestoreBackup(ctx, source, backup.RestoreOptions{
+		Path:        created.Path,
+		Passphrase:  passphrase,
+		Actor:       actor,
+		AsWorkspace: "e2e-ws-dry",
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("RestoreBackup --as-workspace --dry-run: %v", err)
+	}
+	if res.JournalEntriesResigned != 4 {
+		t.Errorf("dry run reported %d entries would be re-signed, want 4", res.JournalEntriesResigned)
+	}
+
+	// Nothing committed: the source keeps its four entries and gains no
+	// notice, and the fork's workspace id was never written.
+	var total int
+	if err := source.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM journal_entries WHERE workspace_id = ?`, workspaceID).Scan(&total); err != nil {
+		t.Fatalf("count source entries: %v", err)
+	}
+	if total != 4 {
+		t.Errorf("source holds %d journal entries after a dry run, want the 4 it started with", total)
+	}
+	if got := resignNotices(t, source, workspaceID); len(got) != 0 {
+		t.Errorf("dry run wrote %d re-sign entries into the source; a dry run writes nothing", len(got))
+	}
+	if res.RestoredWorkspaceID != "" {
+		if got := resignNotices(t, source, res.RestoredWorkspaceID); len(got) != 0 {
+			t.Errorf("dry run wrote %d re-sign entries into the would-be fork %s; a dry run writes nothing",
+				len(got), res.RestoredWorkspaceID)
+		}
+	}
+}

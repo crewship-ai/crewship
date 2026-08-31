@@ -822,6 +822,15 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			SecurityLevelClamps:    clamps,
 			ColumnsDropped:         columnsDropped,
 			DroppedColumns:         droppedColumns,
+
+			// A dry run of a FORKED restore already performed the
+			// re-sign, in memory, on its way here — reporting 0 would
+			// hide the new genesis the real run is going to create.
+			// Reported for the same reason ColumnsDropped and
+			// SecurityLevelClamped are: "what would happen" is the
+			// entire question a dry run is asked.
+			JournalEntriesResigned:     journalChainResigned.Entries,
+			JournalCheckpointsResigned: journalChainResigned.Checkpoints,
 		}, nil
 	}
 
