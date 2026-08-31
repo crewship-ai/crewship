@@ -51,6 +51,14 @@ const (
 	// whatever the adapter happened to build.
 	journalArgvTotalMaxChars = 4096
 
+	// journalFieldMaxChars caps every string field of the payload beside the
+	// argv — the adapter, the model, the tool profile, and the per-outcome
+	// strings a caller passes in (error, reason). Same reasoning and the same
+	// number as the per-element argv cap: a payload that bounds the argv and
+	// then copies an unbounded model identifier into a scalar next to it has
+	// not bounded anything.
+	journalFieldMaxChars = 512
+
 	// journalUserMessageMaxChars caps what a chat.user_message entry persists
 	// of the message body. It is the bound the entry's SUMMARY has always had;
 	// the payload had none, so the shorter of the two surfaces was the only one
@@ -237,19 +245,32 @@ func promptRef(req AgentRunRequest) map[string]any {
 // in the first place. extra holds the per-outcome fields (exit_code, error,
 // duration_ms, reason).
 func execCommandPayload(req AgentRunRequest, journalCmd journalCmdView, phase string, extra map[string]any) map[string]any {
+	truncated := journalCmd.truncated
+	bound := func(s string) string {
+		out := truncateStr(s, journalFieldMaxChars)
+		if out != s {
+			truncated = true
+		}
+		return out
+	}
 	payload := map[string]any{
 		"cmd":          journalCmd.argv,
-		"truncated":    journalCmd.truncated,
 		"phase":        phase,
-		"adapter":      req.CLIAdapter,
-		"model":        req.LLMModel,
-		"tool_profile": req.ToolProfile,
+		"adapter":      bound(req.CLIAdapter),
+		"model":        bound(req.LLMModel),
+		"tool_profile": bound(req.ToolProfile),
 		"container_id": shortID(req.ContainerID),
 		"prompt":       promptRef(req),
 	}
 	for k, v := range extra {
+		if s, ok := v.(string); ok {
+			v = bound(s)
+		}
 		payload[k] = v
 	}
+	// Written last, so extra cannot override it: a payload must not be able to
+	// claim it is complete when the builder just cut something out of it.
+	payload["truncated"] = truncated
 	return payload
 }
 

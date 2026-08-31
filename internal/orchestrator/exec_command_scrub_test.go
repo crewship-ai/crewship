@@ -428,6 +428,7 @@ const (
 // is guarding cannot notice that constant being raised.
 const (
 	wantExecCmdArgvMaxChars     = 4096
+	wantExecCmdFieldMaxChars    = 512
 	wantChatUserMessageMaxChars = 240
 )
 
@@ -600,6 +601,15 @@ func TestExecCommandEmit_ArgvIsCapped(t *testing.T) {
 		}
 		if truncated, _ := e.Payload["truncated"].(bool); !truncated {
 			t.Errorf("exec.command payload truncated = %v, want true — a capped payload must say it was capped", e.Payload["truncated"])
+		}
+		// The typed fields are caller-controlled too. A cap that bounds the
+		// argv and then copies the same 32 KB into a scalar beside it has not
+		// bounded the payload.
+		for _, key := range []string{"adapter", "model", "tool_profile"} {
+			v, _ := e.Payload[key].(string)
+			if n := len([]rune(v)); n > wantExecCmdFieldMaxChars+1 {
+				t.Errorf("exec.command payload %q is %d chars, want it capped at %d", key, n, wantExecCmdFieldMaxChars)
+			}
 		}
 	}
 }
