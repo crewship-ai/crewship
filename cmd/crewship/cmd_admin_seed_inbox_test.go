@@ -82,13 +82,35 @@ func TestSeedInboxRows_IncludeADeadlineAndADestructiveGate(t *testing.T) {
 // re-using every source id, where inbox.Insert dedupes silently while the
 // success line still claims sixteen rows were written. Seeding twice to get
 // more variety is the obvious thing to try, so it has to work.
-func TestSeedSuffix_DiffersBetweenTwoInvocationsInTheSameSecond(t *testing.T) {
-	first := seedSuffix(time.Now())
-	second := seedSuffix(time.Now())
+//
+// Two FIXED instants inside one second, not two calls to time.Now(). The
+// first draft did the latter and asserted they differed, which tests that the
+// host's clock ticks between two adjacent statements rather than anything
+// about this function — a bet on timer granularity that has no reason to hold
+// on every runner, and it does not: it went red on macos-arm64 while passing
+// everywhere else. What the command actually needs is sub-second resolution,
+// and that is what this states.
+func TestSeedSuffix_SeparatesTwoInstantsInsideOneSecond(t *testing.T) {
+	within := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	later := within.Add(time.Millisecond)
+	if within.Unix() != later.Unix() {
+		t.Fatalf("test is wrong: %v and %v are not in the same second", within, later)
+	}
 
-	if first == second {
-		t.Errorf("seedSuffix twice in a row = %q both times; a second seed run "+
-			"collides with the first", first)
+	if first, second := seedSuffix(within), seedSuffix(later); first == second {
+		t.Errorf("seedSuffix(%v) and seedSuffix(%v) both = %q; two seed runs in "+
+			"one second collide", within, later, first)
+	}
+}
+
+// …and the same instant always mints the same suffix, so the run id and the
+// source ids written by one invocation agree with each other.
+func TestSeedSuffix_IsStableForOneInstant(t *testing.T) {
+	at := time.Date(2026, 8, 31, 12, 0, 0, 123456789, time.UTC)
+
+	if first, second := seedSuffix(at), seedSuffix(at); first != second {
+		t.Errorf("seedSuffix(%v) = %q then %q; one invocation would write a run "+
+			"id its source ids do not match", at, first, second)
 	}
 }
 
