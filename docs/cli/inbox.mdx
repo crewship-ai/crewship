@@ -39,6 +39,8 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | `--state <enum>` | `unread` | Filter by state. One of `unread`, `read`, `resolved`, `all`. |
 | `--kind <enum>` | (unset) | Filter by kind. One of `waitpoint`, `escalation`, `failed_run`, `message`. |
 | `--limit <n>` | `50` | Max rows. Server caps at 500. |
+| `--offset <n>` | `0` | Skip this many rows (server-side offset pagination). |
+| `--all` | `false` | Keep requesting pages until the server reports `has_more: false`. Exact only on a quiet workspace: a row that leaves the filter mid-walk shifts the window and is never returned. |
 
 ### `inbox resolve`
 
@@ -72,6 +74,7 @@ crewship inbox list                       # unread only (default)
 crewship inbox list --state all           # include read + resolved
 crewship inbox list --kind waitpoint      # narrow by kind
 crewship inbox list --limit 200
+crewship inbox list --all          # the whole feed, not just the first page
 crewship inbox list --format json | jq '.[] | {id, kind, title}'
 ```
 

@@ -92,11 +92,20 @@ type inboxItemResponse struct {
 	SourceID     string `json:"source_id"`
 	TargetUserID string `json:"target_user_id,omitempty"`
 	TargetRole   string `json:"target_role,omitempty"`
-	Title        string `json:"title"`
-	BodyMD       string `json:"body_md,omitempty"`
-	SenderType   string `json:"sender_type,omitempty"`
-	SenderID     string `json:"sender_id,omitempty"`
-	SenderName   string `json:"sender_name,omitempty"`
+	// SourceMissing is set on the DETAIL read only, for the two source-managed
+	// kinds. It answers the question the client used to guess at from the
+	// payload: is there still a row anywhere that can decide this?
+	//
+	// It exists so the detail pane can offer a way out of a row whose source
+	// was pruned without offering it on a live decision, where the PATCH is
+	// refused and the button would just fail. Absent on list rows — the answer
+	// costs a query per row and only the open row needs it.
+	SourceMissing bool   `json:"source_missing,omitempty"`
+	Title         string `json:"title"`
+	BodyMD        string `json:"body_md,omitempty"`
+	SenderType    string `json:"sender_type,omitempty"`
+	SenderID      string `json:"sender_id,omitempty"`
+	SenderName    string `json:"sender_name,omitempty"`
 	// AvatarSeed / AvatarStyle are filled (post-query, via enrichAgentAvatars)
 	// only when the sender is a real agent, so the inbox renders that agent's
 	// actual avatar instead of a generic glyph. Blank for system / crew /
@@ -151,6 +160,7 @@ type inboxListResponse struct {
 	Rows        []inboxItemResponse `json:"rows"`
 	Count       int                 `json:"count"`
 	UnreadCount int                 `json:"unread_count"`
+	HasMore     bool                `json:"has_more"`
 }
 
 // List serves GET /api/v1/inbox. Filter by ?state=unread|read|resolved|all
@@ -173,6 +183,12 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
 			limit = n
+		}
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
 		}
 	}
 
@@ -211,8 +227,11 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		q.WriteString(" AND kind = ?")
 		args = append(args, kind)
 	}
-	q.WriteString(" ORDER BY created_at DESC LIMIT ?")
-	args = append(args, limit)
+	// Fetch one extra row so clients can walk the entire feed without guessing
+	// whether a full page was the final page. The id tie-breaker keeps OFFSET
+	// pagination deterministic when several events share one timestamp.
+	q.WriteString(" ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?")
+	args = append(args, limit+1, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), q.String(), args...)
 	if err != nil {
@@ -222,7 +241,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	out := make([]inboxItemResponse, 0, limit)
+	out := make([]inboxItemResponse, 0, limit+1)
 	for rows.Next() {
 		var item inboxItemResponse
 		var blocking int
@@ -246,6 +265,10 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
 	h.enrichAgentAvatars(r.Context(), out)
 	h.enrichEscalationFourEyes(r.Context(), workspaceID, out)
 
@@ -266,6 +289,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		Rows:        out,
 		Count:       len(out),
 		UnreadCount: unreadCount,
+		HasMore:     hasMore,
 	})
 }
 
@@ -357,6 +381,14 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Detail only. Two indexed queries for one item; the list deliberately does
 	// not pay this per row.
 	h.enrichKeeperEvidence(r.Context(), workspaceID, &batch[0])
+	// Same probes the PATCH guard uses, so the button the client renders and
+	// the answer the server will give cannot disagree.
+	switch batch[0].Kind {
+	case "waitpoint":
+		batch[0].SourceMissing = !waitpointHasBackingRow(r.Context(), h.db, workspaceID, batch[0].SourceID)
+	case "escalation":
+		batch[0].SourceMissing = !escalationHasBackingRow(r.Context(), h.db, batch[0].SourceID)
+	}
 	writeJSON(w, http.StatusOK, batch[0])
 }
 
@@ -567,7 +599,54 @@ func (h *InboxHandler) enrichEscalationFourEyes(ctx context.Context, workspaceID
 // no source endpoint, so the inbox row itself is the only handle and may be
 // dismissed directly. On a query error we stay conservative (treat as backed)
 // so the source-managed guard is never weakened by a transient failure.
-func escalationHasBackingRow(ctx context.Context, tx *sql.Tx, sourceID string) bool {
+// Both probes take the package's rowQuerier (issue_handler.go) so the PATCH
+// guard, inside a transaction, and the detail read, outside one, ask the same
+// question with the same code.
+//
+// waitpointHasBackingRow reports whether a waitpoint inbox row still has a
+// source that can decide it. Three shapes, because three producers write this
+// kind and each keys it differently:
+//
+//   - a pipeline waitpoint, keyed by its token (pipeline/waitpoints.go)
+//   - the agent a guided hire staged, while it is still PENDING_REVIEW
+//     (agents_hire.go writes the inbox row with SourceID = agentID)
+//   - an autonomy hold, whose SourceID is a CREW, AGENT or MISSION id and
+//     whose live decision is the pending approvals_queue row that names it
+//     (internal_autonomy_gate.go). Missing this arm is not academic: a crew or
+//     mission hold matches neither table above, so it would have looked
+//     orphaned and become dismissable on the inbox row while its approval was
+//     still pending — handing out exactly the free resolve this guard exists
+//     to refuse.
+//
+// This is the same question escalationHasBackingRow asks, and it is asked for
+// the same reason: the guard below exists so a client cannot flip an inbox row
+// and leave a live decision un-made. When there is no live decision left — the
+// run was pruned, the hire was swept, the row was seeded — refusing is not
+// protecting anything, it is a trap with no way out. The escalation half of
+// that trap was closed; the waitpoint half was not, and a waitpoint is the one
+// kind PATCH refuses outright, so those rows sat in Needs action forever.
+func waitpointHasBackingRow(ctx context.Context, tx rowQuerier, workspaceID, sourceID string) bool {
+	if sourceID == "" {
+		return false
+	}
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM pipeline_waitpoints WHERE token = ? AND workspace_id = ?
+		UNION ALL
+		SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'
+		UNION ALL
+		SELECT 1 FROM approvals_queue
+		 WHERE workspace_id = ? AND status = 'pending'
+		   AND json_extract(payload, '$.target_id') = ?
+	)`, sourceID, workspaceID, sourceID, workspaceID, workspaceID, sourceID).Scan(&exists); err != nil {
+		// Unreadable means "assume it is backed" — the safe direction is to
+		// keep forcing the source endpoint, never to hand out a free resolve.
+		return true
+	}
+	return exists == 1
+}
+
+func escalationHasBackingRow(ctx context.Context, tx rowQuerier, sourceID string) bool {
 	if sourceID == "" {
 		return false
 	}
@@ -659,15 +738,21 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 	// Generic kinds (message) can flip freely too.
 	if kind == "waitpoint" || kind == "escalation" {
 		if body.State != "read" {
-			// Exception: a keeper-synthetic escalation (Skill review, memory
-			// health) carries kind=escalation but has NO backing escalations
-			// row — its source_id is a synthetic key, not an escalations.id —
-			// so there's no /escalations/{id}/resolve endpoint to drive it.
-			// Blocking inbox-resolve would trap it forever; allow the operator
-			// to dismiss it on the inbox row instead. Real agent escalations
-			// (backing row present) still 409 → resolve at source.
-			sourceLess := kind == "escalation" && body.State == "resolved" &&
-				!escalationHasBackingRow(r.Context(), tx, sourceID)
+			// Exception: a row whose SOURCE no longer exists. A keeper-synthetic
+			// escalation (Skill review, memory health) carries kind=escalation
+			// but has NO backing escalations row — its source_id is a synthetic
+			// key — so there is no /escalations/{id}/resolve to drive it. The
+			// same is true of a waitpoint whose pipeline_waitpoints token is
+			// gone, or whose staged hire was already swept: the source endpoint
+			// answers 404 and PATCH answered 409, so the row could never leave
+			// Needs action and never reach History.
+			//
+			// Blocking inbox-resolve traps those forever; allow the operator to
+			// dismiss them on the inbox row instead. Rows that ARE still backed
+			// keep 409ing → decide at the source, which is the whole point of
+			// the guard.
+			sourceLess := body.State == "resolved" && ((kind == "escalation" && !escalationHasBackingRow(r.Context(), tx, sourceID)) ||
+				(kind == "waitpoint" && !waitpointHasBackingRow(r.Context(), tx, workspaceID, sourceID)))
 			if !sourceLess {
 				writeJSON(w, http.StatusConflict, map[string]string{
 					"error": "use the source endpoint for this kind (e.g. /pipelines/waitpoints/{token}/approve) — inbox PATCH only supports 'read' for source-managed items",
@@ -836,7 +921,11 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 		// so dismissing it on the inbox row is the only way to clear it.
 		// Those resolve even under bulk; real escalations/waitpoints/blocking
 		// rows are still skipped.
-		sourceLess := kind == "escalation" && !escalationHasBackingRow(r.Context(), tx, sourceID)
+		// Same predicate as PatchState — a bulk archive must not refuse rows
+		// the single-row path accepts, or "select all → archive" silently
+		// leaves the orphans behind.
+		sourceLess := (kind == "escalation" && !escalationHasBackingRow(r.Context(), tx, sourceID)) ||
+			(kind == "waitpoint" && !waitpointHasBackingRow(r.Context(), tx, workspaceID, sourceID))
 		if body.State == "resolved" && !sourceLess && (kind == "waitpoint" || kind == "escalation" || blocking != 0) {
 			skipped = append(skipped, id)
 			continue

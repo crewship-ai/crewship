@@ -42,12 +42,19 @@ var (
 // approval ID could decide it cross-tenant. Callers MUST pass the
 // workspace they resolved from auth context, not one derived from the row.
 
-func List(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Status, limit int) ([]Request, error) {
+func List(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Status, limit int, offsets ...int) ([]Request, error) {
 	if workspaceID == "" {
 		return nil, errors.New("harbormaster: workspace_id required")
 	}
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	offset := 0
+	if len(offsets) > 0 {
+		offset = offsets[0]
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	var (
 		q    string
@@ -56,14 +63,14 @@ func List(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Stat
 	if statusFilter == "" {
 		q = `SELECT id, workspace_id, crew_id, agent_id, mission_id, requested_by, kind, reason,
 				payload, status, decided_by, decided_at, decision_comment, timeout_at, created_at
-			FROM approvals_queue WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?`
-		args = []any{workspaceID, limit}
+			FROM approvals_queue WHERE workspace_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+		args = []any{workspaceID, limit, offset}
 	} else {
 		q = `SELECT id, workspace_id, crew_id, agent_id, mission_id, requested_by, kind, reason,
 				payload, status, decided_by, decided_at, decision_comment, timeout_at, created_at
 			FROM approvals_queue WHERE workspace_id = ? AND status = ?
-			ORDER BY created_at DESC LIMIT ?`
-		args = []any{workspaceID, string(statusFilter), limit}
+			ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+		args = []any{workspaceID, string(statusFilter), limit, offset}
 	}
 
 	rows, err := db.QueryContext(ctx, q, args...)

@@ -154,6 +154,20 @@ func TestInboxHandler_List_VisibilityAndFilters(t *testing.T) {
 	if resp6.Count != 2 {
 		t.Errorf("limit=2 returned %d rows", resp6.Count)
 	}
+	if !resp6.HasMore {
+		t.Error("limit=2 has_more = false, want true")
+	}
+	req6b := httptest.NewRequest("GET", "/api/v1/inbox?limit=2&offset=2", nil)
+	req6b = withWorkspaceUser(req6b, userID, wsID, "OWNER")
+	rr6b := httptest.NewRecorder()
+	h.List(rr6b, req6b)
+	var resp6b inboxListResponse
+	if err := json.Unmarshal(rr6b.Body.Bytes(), &resp6b); err != nil {
+		t.Fatalf("decode offset response: %v body=%s", err, rr6b.Body.String())
+	}
+	if resp6b.Count != 2 || resp6b.Rows[0].ID == resp6.Rows[0].ID {
+		t.Errorf("offset page = %+v, want a distinct second page", resp6b.Rows)
+	}
 	// limit=99999 clamps silently to default (cap is 500, so bogus high values fall back to 100)
 	req7 := httptest.NewRequest("GET", "/api/v1/inbox?limit=99999", nil)
 	req7 = withWorkspaceUser(req7, userID, wsID, "OWNER")
@@ -418,6 +432,9 @@ func TestInboxHandler_PatchState_SourceManagedKinds(t *testing.T) {
 		if kind == "escalation" {
 			seedBackingEscalation(t, db, wsID, "src-"+id)
 		}
+		if kind == "waitpoint" {
+			seedBackingWaitpoint(t, db, wsID, "src-"+id)
+		}
 
 		// read is allowed
 		req := httptest.NewRequest("PATCH", "/api/v1/inbox/"+id, strings.NewReader(`{"state":"read"}`))
@@ -547,6 +564,24 @@ func TestInboxHandler_List_AgentAvatar(t *testing.T) {
 // seedBackingEscalation inserts a real escalations row so an inbox
 // escalation whose source_id == this id reads as source-managed (resolve
 // at /escalations/{id}/resolve, inbox PATCH→resolved 409s).
+// seedBackingWaitpoint gives a waitpoint inbox row a live source, the way a
+// real pipeline gate has one. Without it the guard now reads the row as
+// orphaned — a run that was pruned, a hire already swept — and lets the
+// operator dismiss it, because refusing a decision nothing can take is a trap
+// rather than a protection. So a test that wants to assert the source-managed
+// 409 has to say which source it means, exactly as the escalation case does.
+func seedBackingWaitpoint(t *testing.T, db *sql.DB, wsID, token string) {
+	t.Helper()
+	_, err := db.Exec(`
+		INSERT INTO pipeline_waitpoints
+			(token, workspace_id, pipeline_run_id, step_id, kind, status, timeout_at)
+		VALUES (?, ?, 'run-x', 'approve', 'approval', 'pending', ?)`,
+		token, wsID, time.Now().UTC().Add(time.Hour).Format(time.RFC3339))
+	if err != nil {
+		t.Fatalf("seed backing waitpoint %s: %v", token, err)
+	}
+}
+
 func seedBackingEscalation(t *testing.T, db *sql.DB, wsID, id string) {
 	t.Helper()
 	_, err := db.Exec(`
@@ -649,6 +684,7 @@ func TestInboxHandler_BulkPatchState(t *testing.T) {
 	//   - waitpoint + escalation (source-managed kinds), and
 	//   - a BLOCKING message (blocking=1, regardless of kind).
 	seedInboxItemBlocking(t, h, wsID, "wp-1", "waitpoint", "approve", 1, now)
+	seedBackingWaitpoint(t, db, wsID, "src-wp-1") // live pipeline gate → stays skipped
 	seedInboxItemBlocking(t, h, wsID, "esc-1", "escalation", "help", 0, now)
 	seedBackingEscalation(t, db, wsID, "src-esc-1") // real agent escalation → stays skipped
 	seedInboxItemBlocking(t, h, wsID, "bmsg-1", "message", "needs decision", 1, now)
@@ -863,5 +899,143 @@ func TestInboxHandler_List_ActiveExcludesResolved(t *testing.T) {
 		if r.State == "resolved" {
 			t.Errorf("state=active leaked a resolved row: %s", r.ID)
 		}
+	}
+}
+
+// A waitpoint is source-managed: PATCH must refuse it so the client cannot
+// flip the inbox row and leave the pipeline waiting. But when the SOURCE is
+// gone — the run pruned, the staged hire swept, the row seeded — there is no
+// live decision left to protect, the source endpoint answers 404, and the
+// refusal becomes a trap: the row can never leave Needs action and never
+// reaches History. Escalations already had that exception; waitpoints did not.
+func TestInboxHandler_PatchResolve_WaitpointWithoutASourceCanBeDismissed(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	now := time.Now().UTC()
+
+	resolve := func(id string) *httptest.ResponseRecorder {
+		req := withWorkspaceUser(
+			httptest.NewRequest("PATCH", "/api/v1/inbox/"+id,
+				strings.NewReader(`{"state":"resolved","resolved_action":"dismissed"}`)),
+			userID, wsID, "OWNER")
+		req.SetPathValue("id", id)
+		rr := httptest.NewRecorder()
+		h.PatchState(rr, req)
+		return rr
+	}
+
+	// Backed by a live pipeline waitpoint → still refused, decide at source.
+	seedInboxItem(t, h, wsID, "wp-live", "waitpoint", "unread", "", "", "Approve deploy", now)
+	if _, err := db.Exec(`INSERT INTO pipeline_waitpoints
+		(token, workspace_id, pipeline_run_id, step_id, kind, status, timeout_at)
+		VALUES (?, ?, 'run-1', 'approve', 'approval', 'pending', ?)`,
+		"src-wp-live", wsID, now.Add(time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed waitpoint token: %v", err)
+	}
+	if rr := resolve("wp-live"); rr.Code != http.StatusConflict {
+		t.Errorf("backed waitpoint: status = %d, want 409 — a live decision must not be bypassable; body=%s",
+			rr.Code, rr.Body.String())
+	}
+
+	// No backing row anywhere → dismissable on the inbox row itself.
+	seedInboxItem(t, h, wsID, "wp-orphan", "waitpoint", "unread", "", "", "Approve a run that is gone", now)
+	if rr := resolve("wp-orphan"); rr.Code != http.StatusOK {
+		t.Fatalf("orphaned waitpoint: status = %d, want 200 — it has no source endpoint and would be stuck forever; body=%s",
+			rr.Code, rr.Body.String())
+	}
+
+	var state, action string
+	if err := db.QueryRow(`SELECT state, COALESCE(resolved_action, '') FROM inbox_items WHERE id = 'wp-orphan'`).
+		Scan(&state, &action); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if state != "resolved" || action != "dismissed" {
+		t.Errorf("state/action = %q/%q, want resolved/dismissed — History reads this row", state, action)
+	}
+}
+
+// The staged agent of a guided hire is a waitpoint's source too: agents_hire.go
+// writes the inbox row with SourceID = agentID. While that agent is still
+// PENDING_REVIEW the hire is a live decision and must be made at the source.
+func TestInboxHandler_PatchResolve_HireWaitpointWithAPendingAgentIsStillRefused(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	now := time.Now().UTC()
+
+	seedInboxItem(t, h, wsID, "wp-hire", "waitpoint", "unread", "", "", "Hire ephemeral agent", now)
+	if _, err := db.Exec(
+		`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES (?, ?, 'Staged', 'staged', 'PENDING_REVIEW')`,
+		"src-wp-hire", wsID); err != nil {
+		t.Skipf("agents table shape differs here: %v", err)
+	}
+	req := withWorkspaceUser(
+		httptest.NewRequest("PATCH", "/api/v1/inbox/wp-hire",
+			strings.NewReader(`{"state":"resolved","resolved_action":"dismissed"}`)),
+		userID, wsID, "OWNER")
+	req.SetPathValue("id", "wp-hire")
+	rr := httptest.NewRecorder()
+	h.PatchState(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 — the hire is still decidable at its source; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// An autonomy hold is a waitpoint whose source_id is a CREW, AGENT or MISSION
+// id — it has no pipeline_waitpoints token and stages no agent, so neither of
+// the first two probes finds it. Its live decision is the pending
+// approvals_queue row that names it in `payload.target_id`.
+//
+// Without that third probe the guard would have read a crew or mission hold as
+// orphaned and let the inbox row be dismissed while the approval was still
+// pending — handing out exactly the free resolve the guard exists to refuse,
+// and leaving a decided-looking inbox with an undecided gate behind it.
+func TestInboxHandler_PatchResolve_AutonomyHoldWithAPendingApprovalIsRefused(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	now := time.Now().UTC()
+
+	// source_id is the crew the hold is about; seedInboxItem prefixes "src-".
+	seedInboxItem(t, h, wsID, "wp-autonomy", "waitpoint", "unread", "", "", "Approve agent-created routine", now)
+	if _, err := db.Exec(`INSERT INTO approvals_queue
+		(id, workspace_id, requested_by, kind, reason, payload, status, created_at)
+		VALUES (?, ?, ?, 'autonomy_gate', 'crew wants a routine', ?, 'pending', ?)`,
+		"ap_autonomy", wsID, userID,
+		`{"target":"pipeline","target_id":"src-wp-autonomy"}`,
+		now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("seed pending autonomy approval: %v", err)
+	}
+
+	req := withWorkspaceUser(
+		httptest.NewRequest("PATCH", "/api/v1/inbox/wp-autonomy",
+			strings.NewReader(`{"state":"resolved","resolved_action":"dismissed"}`)),
+		userID, wsID, "OWNER")
+	req.SetPathValue("id", "wp-autonomy")
+	rr := httptest.NewRecorder()
+	h.PatchState(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 — the approval is still pending; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// …and once that approval is decided, the row stops being a trap.
+	if _, err := db.Exec(`UPDATE approvals_queue SET status = 'approved' WHERE id = 'ap_autonomy'`); err != nil {
+		t.Fatalf("decide the approval: %v", err)
+	}
+	req2 := withWorkspaceUser(
+		httptest.NewRequest("PATCH", "/api/v1/inbox/wp-autonomy",
+			strings.NewReader(`{"state":"resolved","resolved_action":"dismissed"}`)),
+		userID, wsID, "OWNER")
+	req2.SetPathValue("id", "wp-autonomy")
+	rr2 := httptest.NewRecorder()
+	h.PatchState(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("after the approval was decided: status = %d, want 200 — nothing can act on this gate any more; body=%s",
+			rr2.Code, rr2.Body.String())
 	}
 }

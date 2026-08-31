@@ -43,6 +43,22 @@ describe("useApprovals", () => {
     expect(result.current.error).toBeNull()
   })
 
+  it("scopes approval reads to the active workspace", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockResolvedValueOnce(okJSON({ rows: [] }))
+
+    const { result } = renderHook(() => useApprovals({
+      status: "pending",
+      workspaceId: "ws with space",
+      pollMs: 0,
+    }))
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/approvals?status=pending&limit=50&workspace_id=ws+with+space",
+    )
+  })
+
   it("reports notConfigured on 404 (Harbormaster not enabled)", async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(errJSON(404, {}))
 
@@ -116,6 +132,22 @@ describe("useApprovals", () => {
     })
     // initial + 3 polls
     expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it("walks all approval history pages when loadAll is enabled", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock
+      .mockResolvedValueOnce(okJSON({ rows: [sampleRow], has_more: true }))
+      .mockResolvedValueOnce(okJSON({ rows: [{ ...sampleRow, id: "appr_2", status: "approved" }], has_more: false }))
+
+    const { result } = renderHook(() => useApprovals({ status: "all", pollMs: 0, loadAll: true }))
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.rows.map((row) => row.id)).toEqual(["appr_1", "appr_2"])
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/v1/approvals?status=all&limit=200&offset=0",
+      "/api/v1/approvals?status=all&limit=200&offset=1",
+    ])
   })
 
   it("does not fetch when enabled=false but still drops loading", async () => {
@@ -195,6 +227,15 @@ describe("decideApproval", () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
     const url = fetchMock.mock.calls[0][0] as string
     expect(url).toContain("appr%2Fwith%20slash")
+  })
+
+  it("scopes a decision to the active workspace", async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON({ status: "approved" }))
+
+    await decideApproval("appr_1", "approved", "", "ws/1")
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+      "/api/v1/approvals/appr_1/decide?workspace_id=ws%2F1",
+    )
   })
 
   it("throws backend error message on non-OK", async () => {

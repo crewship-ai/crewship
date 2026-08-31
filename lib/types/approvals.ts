@@ -24,7 +24,9 @@ export const approvalRowSchema = z.object({
   timeout_at: z.string().optional().nullable(),
   decided_at: z.string().optional().nullable(),
   decided_by: z.string().optional().nullable(),
-  comment: z.string().optional().nullable(),
+  // The response field is decision_comment (the approvals_queue column
+  // and the Go struct field); the *request* body still sends `comment`.
+  decision_comment: z.string().optional().nullable(),
   crew_id: z.string().optional().nullable(),
   agent_id: z.string().optional().nullable(),
   mission_id: z.string().optional().nullable(),
@@ -37,6 +39,7 @@ export const approvalListResponseSchema = z.object({
   rows: z.array(approvalRowSchema),
   status: z.string().optional(),
   count: z.number().optional(),
+  has_more: z.boolean().optional(),
 })
 export type ApprovalListResponse = z.infer<typeof approvalListResponseSchema>
 

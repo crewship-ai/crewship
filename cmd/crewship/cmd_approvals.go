@@ -109,6 +109,8 @@ var approvalsListCmd = &cobra.Command{
 
 		status, _ := cmd.Flags().GetString("status")
 		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		fetchAll, _ := cmd.Flags().GetBool("all")
 
 		q := url.Values{}
 		if status != "" {
@@ -117,16 +119,6 @@ var approvalsListCmd = &cobra.Command{
 		if limit > 0 {
 			q.Set("limit", fmt.Sprintf("%d", limit))
 		}
-		path := "/api/v1/approvals?" + q.Encode()
-
-		resp, err := client.Get(path)
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
-		}
-
 		var body struct {
 			Rows []struct {
 				ID          string `json:"id"`
@@ -140,12 +132,39 @@ var approvalsListCmd = &cobra.Command{
 				DecidedBy   string `json:"decided_by"`
 				CreatedAt   string `json:"created_at"`
 			} `json:"rows"`
-			Status string `json:"status"`
-			Count  int    `json:"count"`
+			Status  string `json:"status"`
+			Count   int    `json:"count"`
+			HasMore bool   `json:"has_more"`
 		}
-		if err := cli.ReadJSON(resp, &body); err != nil {
-			return err
+
+		// Matches `inbox list --all`: the approvals endpoint grew
+		// offset/has_more for the web inbox, and a CLI that stops at the
+		// first page cannot be the contract agents script against. See the
+		// note there about offset paging over a mutating queue.
+		acc := body.Rows[:0]
+		for {
+			if offset > 0 {
+				q.Set("offset", fmt.Sprintf("%d", offset))
+			}
+			resp, err := client.Get("/api/v1/approvals?" + q.Encode())
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			body.Rows = nil
+			if err := cli.ReadJSON(resp, &body); err != nil {
+				return err
+			}
+			acc = append(acc, body.Rows...)
+			if !fetchAll || !body.HasMore || len(body.Rows) == 0 {
+				break
+			}
+			offset += len(body.Rows)
 		}
+		body.Rows = acc
+		body.Count = len(acc)
 
 		f := newFormatter()
 		return f.AutoHuman(body.Rows, func() {
@@ -285,6 +304,8 @@ func decideApproval(cmd *cobra.Command, id, status string) error {
 func init() {
 	approvalsListCmd.Flags().String("status", "pending", "Filter by status: pending|approved|denied|timeout|cancelled|all")
 	approvalsListCmd.Flags().Int("limit", 50, "Max rows to return (server caps at 200)")
+	approvalsListCmd.Flags().Int("offset", 0, "Skip this many rows (server-side offset pagination)")
+	approvalsListCmd.Flags().Bool("all", false, "Walk every page until the server reports has_more=false")
 
 	approvalsApproveCmd.Flags().String("comment", "", "Optional comment recorded with the decision")
 	approvalsDenyCmd.Flags().String("comment", "", "Optional comment recorded with the decision")

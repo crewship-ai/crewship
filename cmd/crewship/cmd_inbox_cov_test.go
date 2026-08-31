@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -514,5 +515,77 @@ func TestInboxArchiveRunE_MapsToResolvedArchived(t *testing.T) {
 	}
 	if body["resolved_action"] != "archived" {
 		t.Errorf("resolved_action = %q, want archived", body["resolved_action"])
+	}
+}
+
+// The web inbox walks every offset page on load. Until `--all` the CLI could
+// only ever see the first --limit rows, so `crewship inbox list` and the
+// browser disagreed about what the feed contained — and the CLI is the
+// surface agents script against. pagingMock lives in cmd_approvals_test.go.
+func TestInboxList_All_WalksEveryPage(t *testing.T) {
+	saveCLIState(t)
+
+	m := &pagingMock{t: t, path: "/api/v1/inbox", pages: []string{
+		`{"rows":[{"id":"inb_1","kind":"waitpoint","title":"Approve deploy","state":"unread","priority":"high"},{"id":"inb_2","kind":"message","title":"Digest","state":"unread","priority":"low"}],"count":2,"unread_count":5,"has_more":true}`,
+		`{"rows":[{"id":"inb_3","kind":"escalation","title":"Disk full","state":"read","priority":"urgent"}],"count":1,"unread_count":5,"has_more":false}`,
+	}}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: srv.URL}
+
+	covSetFlagCli5(t, inboxListCmd, "all", "true")
+
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = inboxListCmd.RunE(inboxListCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	m.mu.Lock()
+	seen := append([]string(nil), m.seen...)
+	m.mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("requests = %d (%v), want 2 — --all stopped before has_more went false", len(seen), seen)
+	}
+	if strings.Contains(seen[0], "offset=") {
+		t.Errorf("first page sent an offset: %q", seen[0])
+	}
+	if !strings.Contains(seen[1], "offset=2") {
+		t.Errorf("second page offset = %q, want offset=2", seen[1])
+	}
+	for _, want := range []string{"inb_1", "inb_2", "inb_3", "3 items"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q — a walked page was dropped or the count is per-page:\n%s", want, out)
+		}
+	}
+}
+
+// --offset alone is a single request at that offset: the flag has to be
+// usable without --all, which is what a paging script needs.
+func TestInboxList_Offset_IsForwardedVerbatim(t *testing.T) {
+	saveCLIState(t)
+
+	m := &pagingMock{t: t, path: "/api/v1/inbox", pages: []string{
+		`{"rows":[{"id":"inb_9","kind":"message","title":"Late row","state":"read","priority":"low"}],"count":1,"unread_count":0,"has_more":true}`,
+	}}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: srv.URL}
+
+	covSetFlagCli5(t, inboxListCmd, "offset", "40")
+
+	var err error
+	covCaptureStdoutCli5(t, func() { err = inboxListCmd.RunE(inboxListCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	m.mu.Lock()
+	seen := append([]string(nil), m.seen...)
+	m.mu.Unlock()
+	if len(seen) != 1 {
+		t.Fatalf("requests = %d, want 1 — has_more must not paginate without --all", len(seen))
+	}
+	if !strings.Contains(seen[0], "offset=40") {
+		t.Errorf("offset not forwarded: %q", seen[0])
 	}
 }
