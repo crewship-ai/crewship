@@ -32,8 +32,9 @@ Crewship binary itself.
 
 **The boundary that contains this adversary is the crew, not the agent.**
 A prompt-injected agent is contained from the host and from other crews'
-containers, volumes and workspaces. It is **not** contained from its own
-siblings: agents in one crew share a container, a UID and a process
+containers, volumes and workspaces — **but not from them by network**: all
+crews share one Docker bridge (see [the crew-to-crew boundary](#the-crew-to-crew-boundary)).
+It is **not** contained from its own siblings: agents in one crew share a container, a UID and a process
 namespace, so a compromised agent reaches its crewmates' files, environment
 and tokens. That is a deliberate product decision — a crew is a unit that
 trusts itself — and it is the reason the deployment rule is *put only agents

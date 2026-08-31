@@ -239,11 +239,13 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   dependents until someone decides. A risky tool call mid-run is not paused
   before it executes — it runs, then gets logged and journaled.
   *(Harbormaster)* [→ harbormaster](docs/guides/harbormaster.mdx)
-- ✅ **Keeper** — optional rule-based gate + watchdog on what agents pull and do:
-  it sits between an agent and the vault and can refuse a secret the job does not
-  justify asking for, with snitch-to-admin alerts. How often the watchdog reviews
-  a tool call is a workspace setting (`crewship keeper sampling`), not a constant
-  compiled into the build. Off by default. [→ keeper](docs/guides/keeper.mdx)
+- ✅ **Keeper** — optional model-judged gate on the credentials agents *pull*,
+  plus an opt-in post-hoc behaviour watchdog. It sits between an agent and the
+  vault and can refuse a secret the job does not justify asking for, with
+  snitch-to-admin alerts. There is no ruleset to author and it does not gate
+  tool calls: the watchdog samples calls *after* they run (cadence is a
+  workspace setting, `crewship keeper sampling`), so it is detection, not
+  prevention. Off by default. [→ keeper](docs/guides/keeper.mdx)
 - 🟡 **Cost ledger** — every LLM call priced with token counts and written to
   an auditable ledger. Hierarchical workspace → crew → mission → agent budget
   enforcement is implemented in the pricing middleware and runs ahead of every
@@ -375,6 +377,8 @@ What the crew boundary does and does not give you today:
 
 Full detail, including what each layer does **not** cover:
 [→ Threat model](docs/security/threat-model.mdx)
+
+---
 
 ## What's ready vs. WIP
 
