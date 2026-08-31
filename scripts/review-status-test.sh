@@ -607,6 +607,55 @@ done
 expect_contains "--help prints the whole header, not a truncated slice" \
   "$out" "Requires: gh CLI logged in"
 
+# ── the input assembler survives a PR with a lot of review on it ───────────
+#
+# The blobs went to jq as `--argjson` values. Linux caps ONE argv entry at
+# MAX_ARG_STRLEN (32 pages = 131072 bytes) regardless of ARG_MAX, and #2225's
+# inline review comments passed it — 24 comments, ~188 KB, because each carries
+# its diff hunk. jq died with E2BIG and the PR came back
+# `unknown  (GitHub API call failed)` while every API call had in fact
+# succeeded.
+#
+# That failure runs backwards: the more review a PR collects, the more surely
+# this tool refuses to judge it — and `unknown` on the busiest PR is exactly
+# where a reader shrugs and merges. Worse, it is indistinguishable from a
+# genuine network blip, and was in fact misread as one.
+assemble_tmp="$(mktemp -d)"
+trap 'rm -rf "$assemble_tmp"' EXIT
+
+printf '{"number":1,"title":"t","head":{"ref":"b","sha":"deadbeef"},"created_at":"2026-01-01T00:00:00Z"}' \
+  > "$assemble_tmp/pr.json"
+printf '[]' > "$assemble_tmp/comments.json"
+printf '[]' > "$assemble_tmp/reviews.json"
+printf '{"statuses":[]}' > "$assemble_tmp/status.json"
+
+# One inline comment whose diff_hunk alone is 200 KB — past the per-argument
+# limit on its own, so this fails on the old code and cannot pass by accident.
+python3 - "$assemble_tmp/revcomments.json" <<'PYEOF'
+import json, sys
+json.dump([{ "user": {"login": "coderabbitai[bot]"},
+             "created_at": "2026-01-01T00:00:00Z",
+             "diff_hunk": "x" * 200_000 }], open(sys.argv[1], "w"))
+PYEOF
+
+bytes_in="$(wc -c < "$assemble_tmp/revcomments.json")"
+if [ "$bytes_in" -le 131072 ]; then
+  fail "the oversized fixture is actually oversized" "only $bytes_in bytes; MAX_ARG_STRLEN is 131072"
+else
+  pass "the oversized fixture is actually oversized ($bytes_in bytes > 131072)"
+fi
+
+if out="$("$RS" --assemble "$assemble_tmp/pr.json" "$assemble_tmp/comments.json" \
+      "$assemble_tmp/reviews.json" "$assemble_tmp/revcomments.json" \
+      "$assemble_tmp/status.json" false 2>&1)"; then
+  expect_eq "a 200 KB review-comment blob still assembles" \
+    "1" "$(printf '%s' "$out" | jq -r '.number')"
+  expect_eq "and the bot's inline comment is counted, not dropped" \
+    "1" "$(printf '%s' "$out" | jq -r '.reviewComments | length')"
+else
+  fail "a 200 KB review-comment blob still assembles" "$out"
+fi
+
 echo
 if [ "$FAILURES" -gt 0 ]; then
   printf '%d failure(s)\n' "$FAILURES"
