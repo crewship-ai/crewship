@@ -579,9 +579,25 @@ const (
 	// Chat — user↔agent conversation turns. Captures the trigger that
 	// kicks off a series of agent actions, so the Timeline can answer
 	// "what did the user ask?" alongside "what did the agent do?".
-	// Payload contains the message text capped to PreviewLen chars in
-	// summary; full content in payload.content. chat_id + agent_id +
-	// (optional) crew_id wire it back to the conversation surface.
+	// chat_id + agent_id + (optional) crew_id wire both entries back to
+	// the conversation surface.
+	//
+	// The two are NOT symmetrical, and this comment used to claim they
+	// were ("full content in payload.content"), which was wrong for the
+	// user entry even before #2229 and is the kind of promise a reader
+	// gets written against:
+	//
+	//   - chat.user_message carries NO message text at all. Its payload
+	//     is chat_id + agent_slug + length_chars, and its summary reads
+	//     "user → <slug>: <n> characters". The text was removed rather
+	//     than scrubbed because this table is hash-chained, append-only
+	//     and skipped by the GDPR erasure cascade, while the chat the
+	//     entry points at is erasable (#2229).
+	//   - chat.agent_response DOES carry payload.content: up to 8 KB of
+	//     the agent's reply, scrubbed at the stream tap. It is the
+	//     agent's own output rather than text a human typed, so the
+	//     pasted-secret argument does not transfer — but it is text, and
+	//     the scrubber is the only control on it.
 	EntryChatUserMessage   EntryType = "chat.user_message"
 	EntryChatAgentResponse EntryType = "chat.agent_response"
 

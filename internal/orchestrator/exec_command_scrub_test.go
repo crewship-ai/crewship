@@ -244,7 +244,12 @@ func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 		t.Fatal("no package sources found — the guard is scanning the wrong directory")
 	}
 
-	checked := 0
+	// Parse the whole package before auditing any of it. The second rule
+	// below needs to know which package functions read the prompt, and that
+	// cannot be answered one file at a time — the helper and the emit site
+	// that calls it are routinely in different files.
+	fset := token.NewFileSet()
+	var parsed []*ast.File
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {
 			continue
@@ -253,19 +258,24 @@ func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", file, err)
 		}
-		fset := token.NewFileSet()
 		f, err := parser.ParseFile(fset, file, src, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", file, err)
 		}
+		parsed = append(parsed, f)
+	}
 
+	derived := promptDerivedFuncs(parsed)
+
+	checked := 0
+	for _, f := range parsed {
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok {
 				continue
 			}
-			aliases := promptAliases(fn)
-			checked += auditPersistedFields(t, fset, fn, aliases)
+			aliases := promptAliases(fn, derived)
+			checked += auditPersistedFields(t, fset, fn, aliases, derived)
 		}
 	}
 
@@ -276,7 +286,7 @@ func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 
 // auditPersistedFields walks one function and reports how many "cmd" fields it
 // checked, failing t for each violation found.
-func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, aliases map[string]bool) int {
+func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, aliases, derived map[string]bool) int {
 	t.Helper()
 	checked := 0
 
@@ -295,7 +305,7 @@ func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, a
 	}
 
 	promptField := func(value ast.Expr, where string) {
-		name, pos, leaked := promptBearingRef(value, aliases)
+		name, pos, leaked := promptBearingRef(value, aliases, derived, true)
 		if !leaked {
 			return
 		}
@@ -463,6 +473,68 @@ func boundedByHelper(e ast.Expr) bool {
 	return boundingHelpers[calleeName(call.Fun)]
 }
 
+// promptDerivedFuncs returns the package functions whose body reads a request's
+// UserMessage or SystemPrompt without bounding it — functions that therefore
+// carry prompt text out in whatever they return.
+//
+// This closes the hole a planted regression found while #2229 was being
+// written. The guard is a pure AST reader, so it cannot see through a call: a
+// helper as small as
+//
+//	func userPreviewFor(req AgentRunRequest) string { return req.UserMessage }
+//
+// hid the field access completely, and the local holding its result was an
+// alias of nothing, so `{"content": userPreviewFor(req)}` walked past every
+// rule. The behavioural test still caught it — but the static guard exists for
+// the emit site no behavioural test happens to drive, which is the whole reason
+// it was written.
+//
+// It also explains something worth knowing about the allowlist: the
+// journalUserMessage entry #2229 removes had never fired. Nothing ever reached
+// the allowlist check to consult it, because the call it was meant to bless was
+// invisible for this same reason. An allowlist entry that has never been
+// exercised is not a policy, it is a comment.
+//
+// Bounding is honoured here exactly as rule 3 honours it, so this rule is not
+// stricter than the one it extends — a helper that wraps its read in
+// truncateStr or utf8.RuneCountInString is not prompt-derived, which is why
+// promptRef and userMessageSizeLabel do not appear. Names already on
+// boundingHelpers are excluded outright: journalArgv and promptRef read the
+// prompt deliberately, and removing it or measuring it is what they are for.
+func promptDerivedFuncs(files []*ast.File) map[string]bool {
+	derived := map[string]bool{}
+	// Two passes, so a helper that calls another helper is caught whichever
+	// order the files happen to be globbed in.
+	for pass := 0; pass < 2; pass++ {
+		for _, f := range files {
+			for _, decl := range f.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Body == nil || boundingHelpers[fn.Name.Name] {
+					continue
+				}
+				aliases := promptAliases(fn, derived)
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					if derived[fn.Name.Name] {
+						return false
+					}
+					ret, ok := n.(*ast.ReturnStmt)
+					if !ok {
+						return true
+					}
+					for _, r := range ret.Results {
+						if _, _, leaked := promptBearingRef(r, aliases, derived, false); leaked {
+							derived[fn.Name.Name] = true
+							return false
+						}
+					}
+					return true
+				})
+			}
+		}
+	}
+	return derived
+}
+
 // promptAliases returns the locals in fn that hold prompt text: assigned from a
 // request's UserMessage or SystemPrompt (directly or through a concatenation),
 // or from BuildCLICommand, which folds both into an argv.
@@ -471,7 +543,7 @@ func boundedByHelper(e ast.Expr) bool {
 // author had to write and name, and treating every result as still-prompt
 // would flag promptRef's own sha256 OF the prompt — the thing that exists so
 // the prompt does not have to be stored.
-func promptAliases(fn *ast.FuncDecl) map[string]bool {
+func promptAliases(fn *ast.FuncDecl, derived map[string]bool) map[string]bool {
 	aliases := map[string]bool{}
 	// Two passes so a chain (a := req.UserMessage; b := a) is caught
 	// regardless of the order ast.Inspect happens to visit in.
@@ -484,7 +556,7 @@ func promptAliases(fn *ast.FuncDecl) map[string]bool {
 					if !ok || i >= len(node.Rhs) || name.Name == "_" {
 						continue
 					}
-					if isPromptSource(node.Rhs[i], aliases) {
+					if isPromptSource(node.Rhs[i], aliases, derived) {
 						aliases[name.Name] = true
 					}
 				}
@@ -496,7 +568,7 @@ func promptAliases(fn *ast.FuncDecl) map[string]bool {
 					if name.Name == "_" || i >= len(node.Values) {
 						continue
 					}
-					if isPromptSource(node.Values[i], aliases) {
+					if isPromptSource(node.Values[i], aliases, derived) {
 						aliases[name.Name] = true
 					}
 				}
@@ -509,20 +581,28 @@ func promptAliases(fn *ast.FuncDecl) map[string]bool {
 
 // isPromptSource reports whether an assignment's right-hand side yields prompt
 // text: a bare or concatenated prompt reference, or a BuildCLICommand call.
-func isPromptSource(e ast.Expr, aliases map[string]bool) bool {
+func isPromptSource(e ast.Expr, aliases, derived map[string]bool) bool {
 	if call, ok := e.(*ast.CallExpr); ok {
-		return calleeName(call.Fun) == "BuildCLICommand"
+		name := calleeName(call.Fun)
+		return name == "BuildCLICommand" || derived[name]
 	}
-	_, _, leaked := promptBearingRef(e, aliases)
+	_, _, leaked := promptBearingRef(e, aliases, derived, true)
 	return leaked
 }
 
 // promptBearingRef reports whether e names prompt text without going through a
-// bounding helper. A request's UserMessage and SystemPrompt are matched on any
+// bounding helper.
+//
+// bareCmdIsPrompt controls the `cmd` name rule below. At an emit site `cmd` is
+// the argv by convention — often a parameter rather than an assignment, which
+// is why matching the name is the only way to see it. That convention holds at
+// the emit sites and nowhere else, so promptDerivedFuncs passes false: read
+// package-wide it flagged dbEngineForCall, whose `cmd` is a shell string pulled
+// out of a tool call's arguments and has nothing to do with an argv. A request's UserMessage and SystemPrompt are matched on any
 // receiver, not on the name `req`, so renaming the parameter does not silence
 // the guard; `cmd` and any local alias collected by promptAliases count too,
 // because BuildCLICommand folds both fields into that argv.
-func promptBearingRef(e ast.Expr, aliases map[string]bool) (string, token.Pos, bool) {
+func promptBearingRef(e ast.Expr, aliases, derived map[string]bool, bareCmdIsPrompt bool) (string, token.Pos, bool) {
 	if boundedByHelper(e) {
 		return "", token.NoPos, false
 	}
@@ -538,6 +618,14 @@ func promptBearingRef(e ast.Expr, aliases map[string]bool) (string, token.Pos, b
 			if boundedByHelper(v) {
 				return false
 			}
+			// Rule 3b: a package function that reads the prompt without
+			// bounding it carries the prompt out in its result, so calling it
+			// is calling the prompt. Without this the guard could be defeated
+			// by moving the read one call away — see promptDerivedFuncs.
+			if n := calleeName(v.Fun); derived[n] {
+				name, pos = "`"+n+"()`, which reads prompt text without bounding it", v.Pos()
+				return false
+			}
 		case *ast.SelectorExpr:
 			switch v.Sel.Name {
 			case "UserMessage", "SystemPrompt":
@@ -545,7 +633,7 @@ func promptBearingRef(e ast.Expr, aliases map[string]bool) (string, token.Pos, b
 				return false
 			}
 		case *ast.Ident:
-			if v.Name == "cmd" {
+			if v.Name == "cmd" && bareCmdIsPrompt {
 				name, pos = "the raw argv `cmd`", v.Pos()
 				return false
 			}
@@ -585,9 +673,8 @@ const (
 // from the implementation on purpose: a guard that reads the same constant it
 // is guarding cannot notice that constant being raised.
 const (
-	wantExecCmdArgvMaxChars     = 4096
-	wantExecCmdFieldMaxChars    = 512
-	wantChatUserMessageMaxChars = 240
+	wantExecCmdArgvMaxChars  = 4096
+	wantExecCmdFieldMaxChars = 512
 )
 
 // execCmdAdapterNames returns every registered CLI adapter plus the unknown
