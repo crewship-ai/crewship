@@ -59,30 +59,6 @@ All filters are AND-combined; CSV-valued ones expand to `IN (?, ?, ...)` predica
 | `cursor` | string | Opaque pagination token from a prior response. |
 | `limit` | integer | 1-500, default 100. |
 
-### Free-text search
-
-`q` is split on whitespace and the terms are AND-combined, so word order does
-not change the result set: `q=session%20morgan` returns exactly what
-`q=morgan%20session` returns. The **last** term is a prefix match — `q=morg`
-reaches `morgan` — while earlier terms match whole words.
-
-Each term is wrapped in an FTS5 phrase literal before it reaches SQLite, so
-operators inside the input (`AND`, `OR`, `NOT`, `NEAR(...)`, `*`, `column:`, a
-bare `"`) are literal search text. They can neither restructure the query nor
-produce a 500. Terms containing no letter or digit are dropped; input made up
-entirely of such terms matches nothing rather than everything.
-
-The index covers `summary` and `payload` only — never `entry_type`.
-
-### References
-
-`crew_id`, `agent_id`, `crew_ids` and `agent_ids` accept an id, a slug, or a
-display name (case-insensitive), resolved within the caller's workspace. A
-value that resolves to nothing is used as-is against the id column, so an id
-whose row has since been deleted still reaches that entity's history and a typo
-returns zero rows instead of silently widening the filter. A display name shared
-by several agents matches all of them.
-
 **Response:** `200 OK`
 
 ```json
@@ -133,6 +109,30 @@ by several agents matches all of them.
 | 400 | Bad `since` / `until` / `limit` / `cursor`. |
 | 401 | No workspace context. |
 | 500 | DB error. |
+
+### Free-text search
+
+`q` is split on whitespace and the terms are AND-combined, so word order does
+not change the result set: `q=session%20morgan` returns exactly what
+`q=morgan%20session` returns. The **last** term is a prefix match — `q=morg`
+reaches `morgan` — while earlier terms match whole words.
+
+Each term is wrapped in an FTS5 phrase literal before it reaches SQLite, so
+operators inside the input (`AND`, `OR`, `NOT`, `NEAR(...)`, `*`, `column:`, a
+bare `"`) are literal search text. They can neither restructure the query nor
+produce a 500. Terms containing no letter or digit are dropped; input made up
+entirely of such terms matches nothing rather than everything.
+
+The index covers `summary` and `payload` only — never `entry_type`.
+
+### References
+
+`crew_id`, `agent_id`, `crew_ids` and `agent_ids` accept an id, a slug, or a
+display name (case-insensitive), resolved within the caller's workspace. A
+value that resolves to nothing is used as-is against the id column, so an id
+whose row has since been deleted still reaches that entity's history and a typo
+returns zero rows instead of silently widening the filter. A display name shared
+by several agents matches all of them.
 
 ---
 
