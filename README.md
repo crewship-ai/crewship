@@ -348,6 +348,34 @@ large — **85+ guides and 55+ API pages** under [`docs/`](docs/), rendered at
 
 ---
 
+## Security model — the trust boundary is the crew
+
+**Each crew runs in its own container. Agents inside one crew share it.**
+
+That sharing is the design, not an oversight. Agents in a crew run as the same
+OS user in the same process namespace, so they can read each other's files,
+environment variables and tokens. A crew is a team that trusts itself — the way
+a team of people shares one office.
+
+One rule follows from that:
+
+> **Put only agents you would trust with the same secrets in the same crew.**
+> To separate two domains of trust — two environments, two clients, production
+> and experiments — separate them into different crews, not into different
+> roles inside one.
+
+What the crew boundary does and does not give you today:
+
+| | |
+|---|---|
+| Crew ↔ host | Container isolation, `CapDrop: ALL`, no-new-privileges, read-only root, no Docker socket |
+| Crew ↔ crew | Separate containers, volumes and workspaces. **But every crew shares one Docker network**, so containers can reach each other by IP — the Crewship API is the intended path between crews, not an enforced one |
+| Agent ↔ agent, same crew | **No boundary.** By design, per the rule above |
+| Crew → internet | A domain allowlist enforced by the sidecar proxy for clients that honour `HTTP_PROXY`. New crews default to `free` (no restriction); set a crew to `restricted` to apply the allowlist. There is no network-layer containment by default |
+
+Full detail, including what each layer does **not** cover:
+[→ Threat model](docs/security/threat-model.mdx)
+
 ## What's ready vs. WIP
 
 This is an **open beta**. The pieces marked ✅ above have been used by the
@@ -364,6 +392,10 @@ maintainer in production-shaped workloads; 🟡 and 🚧 are still being shaped.
 - **Single host.** One instance manages many crews on its own host. A full
   container per crew is heavy, so scheduling across machines — Kubernetes and
   friends — is future work rather than a flag you can flip.
+- **Network isolation between crews is not enforced yet.** Crews share one
+  Docker network, and the per-crew egress firewall shipped with the sandbox
+  image cannot obtain its capabilities through the supported config path. Treat
+  a single Crewship instance as one network trust domain until this lands.
 - **APIs may break across minor bumps.** Patch bumps inside a minor are
   backwards-compatible. Pin a tag for production.
 - **Telemetry is opt-in on stable builds.** Prerelease/dev builds send anonymous

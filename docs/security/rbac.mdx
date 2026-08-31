@@ -161,14 +161,34 @@ See [Container Isolation](/security/container-isolation) for details.
 
 ## Credential Access Control
 
-Credentials are protected by multiple layers:
+Credentials are protected by multiple layers, but neither assignment nor
+delivery has one universal shape:
 
-1. **Workspace scoping:** Credentials belong to a workspace
-2. **Agent assignment:** Credentials must be explicitly assigned to agents
-3. **Encryption at rest:** AES-256-GCM with versioned keys
-4. **Sidecar injection:** Agents never see raw credential values
-5. **Keeper gating:** L2+ credentials require AI evaluation
-6. **Audit trail:** All credential access is logged
+1. **Workspace scoping:** Every credential belongs to a workspace, and each
+   delivery query proves the receiving agent belongs to that workspace.
+2. **Three delivery sources:** An agent can receive a credential from an
+   explicit `agent_credentials` grant, a resolved binding scoped to an agent,
+   crew or workspace, or a legacy `credential_crews` link. An explicit grant
+   is the most specific source; it is not the only source.
+3. **Encryption at rest:** Secret material uses AES-256-GCM with versioned
+   keys.
+4. **Channel-specific delivery:** Supported reverse-proxy routes keep the real
+   provider key in the sidecar. OAuth/CLI tokens, file credentials and API keys
+   for adapters without a routable endpoint can enter the agent environment or
+   `/secrets` tree. See the [adapter matrix](/guides/credentials#adapter-delivery-matrix).
+5. **Optional Keeper mediation:** Keeper is off by default. When enabled, the
+   delivery-policy table withholds `SECRET` credentials and mediates their use;
+   other known credential types are not Keeper-gated today. L1-L4 changes the
+   decision policy for a Keeper request, not whether every credential type is
+   delivered at boot.
+6. **Audit:** Delivery, Keeper, lease, reveal and mutation paths emit audit
+   records. A direct read by a process that already holds an env/file value is
+   not a new brokered access event and cannot be logged as one.
+
+Agents in one crew share UID 1001. These rules constrain what Crewship delivers
+to a token identity, but do not make sibling agents separate OS principals; a
+running sibling can steal direct credential material or another agent's bearer
+token from the shared process space.
 
 ## JWT Authentication
 
