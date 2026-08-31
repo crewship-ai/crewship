@@ -398,8 +398,8 @@ position rather than a verdict and stalls everything behind it. Review
 the PR yourself instead — a red-first test plus a mutation proving the
 test has teeth is the standard this repo applies anyway, and it is a
 real review where a queue position is not. Then say in the PR what was
-machine-reviewed and what was not, and queue a re-review
-(`scripts/review-status.sh --retrigger`) so it still lands.
+machine-reviewed and what was not, and queue a re-review for **your own
+PR** (`scripts/review-status.sh --retrigger <PR>`) so it still lands.
 
 Red CI is a separate gate and stays absolute: throttled or not, never
 merge on a failing check.
@@ -452,12 +452,16 @@ reviews serially, seeded from the "next review available in N minutes"
 the notice itself carries:
 
 ```bash
-scripts/review-status.sh --retrigger --dry-run   # see the schedule
-scripts/review-status.sh --retrigger             # run it (long-lived; background it)
+scripts/review-status.sh --retrigger --dry-run   # see the schedule, post nothing
+scripts/review-status.sh --retrigger 2227        # re-request that one
+scripts/review-status.sh --retrigger --all       # …or every PR above (long-lived; background it)
 ```
 
-Firing `@coderabbitai review` at every throttled PR at once just
-re-throttles all but the first. And read the answer carefully: a
+`--retrigger` refuses to run without a target, because it posts and each
+post spends the one slot the limit replenishes — an unscoped run spends
+other sessions' slots and pushes your own PR to the back of the queue it
+just filled (#2231). Firing `@coderabbitai review` at every throttled PR
+at once just re-throttles all but the first. And read the answer carefully: a
 re-trigger fired while the limit is still in force comes back with
 
 > ✅ **Action performed** — Review finished.
