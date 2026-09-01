@@ -16,6 +16,7 @@ import { SubBar } from "@/components/layout/sub-bar"
 import { cn } from "@/lib/utils"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useBatchedPrepend, PREPEND_FLUSH_MS } from "@/hooks/use-batched-prepend"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import { useUserPreference } from "@/hooks/use-user-preference"
@@ -38,6 +39,7 @@ import type { RunWindow } from "@/lib/runs-insights"
 import { entryTypesForGroups } from "@/lib/journal-groups"
 import { parseStructuredQuery } from "@/lib/log-search"
 import { apiFetch } from "@/lib/api-fetch"
+import type { JournalEntry } from "@/lib/types/journal"
 
 /**
  * Cap on entries kept in memory. Generous enough to hold a full
@@ -386,38 +388,44 @@ export default function JournalPage() {
   // SSE prepend batching — chatty workspaces can fire 50+ events/sec.
   // Without batching, each event triggers a state update + full filter
   // chain re-render (toolbar counts, histogram 60 buckets, virtuoso
-  // viewport, stats rail). Buffer up to 250 ms and flush as a group.
-  const pendingRef = useRef<Parameters<typeof prependLive>[0][]>([])
-  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const flushPending = useCallback(() => {
-    flushTimerRef.current = null
-    const batch = pendingRef.current
-    if (batch.length === 0) return
-    pendingRef.current = []
-    for (const e of batch) prependLive(e)
-  }, [prependLive])
-  useEffect(() => {
-    return () => {
-      if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
-    }
-  }, [])
-
-  const handleLive = useCallback(
-    (entry: Parameters<typeof prependLive>[0]) => {
-      if (!liveRef.current) return
-      pendingRef.current.push(entry)
-      if (!flushTimerRef.current) {
-        flushTimerRef.current = setTimeout(flushPending, 250)
-      }
-    },
-    [flushPending],
+  // viewport, stats rail). useBatchedPrepend buffers a flush window and
+  // hands the group to prependLive as one array, so the buffer is scanned
+  // once for the whole flush rather than once per event.
+  // Keyed on the query the entries were fetched under AND on the pause
+  // state, so a batch buffered under one filter cannot land in the list that
+  // replaced it, and pausing the tail drops what is still in flight instead
+  // of letting it arrive 250 ms later.
+  const liveScopeKey = useMemo(
+    () => `${live ? "live" : "paused"}|${timelineEnabled ? "on" : "off"}|${JSON.stringify(queryParams)}`,
+    [live, timelineEnabled, queryParams],
   )
-  const { status: streamStatus } = useJournalStream({
+  const pushLive = useBatchedPrepend(prependLive, PREPEND_FLUSH_MS, liveScopeKey)
+  const handleLive = useCallback(
+    (entry: JournalEntry) => {
+      if (!liveRef.current) return // live tail paused
+      pushLive(entry)
+    },
+    [pushLive],
+  )
+  const {
+    status: streamStatus,
+    lastError: streamError,
+    gapDetected: streamGap,
+    reconnect: reconnectStream,
+  } = useJournalStream({
     workspaceId,
     params: queryParams,
     enabled: timelineEnabled,
     onEntry: handleLive,
   })
+
+  // Re-open the stream AND re-read the head: a fallback that could not walk
+  // back far enough left a hole in the buffer, and reconnecting alone would
+  // leave it there permanently.
+  const handleReconnect = useCallback(() => {
+    reconnectStream()
+    void refresh()
+  }, [reconnectStream, refresh])
 
   const handleRefresh = useCallback(() => { void refresh() }, [refresh])
 
@@ -504,7 +512,12 @@ export default function JournalPage() {
         meta={
           activeTab === "timeline" && (
             <>
-              <StreamStatusBadge status={streamStatus} />
+              <StreamStatusBadge
+                status={streamStatus}
+                error={streamError}
+                gapDetected={streamGap}
+                onReconnect={handleReconnect}
+              />
               <AnomalyBadge
                 entries={entries}
                 // One navigation, not two — a pair of writes would leave a
@@ -751,34 +764,77 @@ function MetricsVisibilityChip({
   )
 }
 
-function StreamStatusBadge({ status }: { status: string }) {
-  if (status === "connected") {
+/**
+ * Connection state, and — when the feed is degraded — a way out of it.
+ *
+ * "Polling" used to be a dead end: the hook fell back on the first stream
+ * error and never tried again, so the badge sat there for the rest of the
+ * session with no explanation and nothing to click. It now reconnects on
+ * its own; this surfaces the reason (`error`) and offers an immediate retry
+ * that also re-reads the head, which is the only thing that can fill a gap
+ * the fallback could not backfill.
+ */
+function StreamStatusBadge({
+  status,
+  error,
+  gapDetected = false,
+  onReconnect,
+}: {
+  status: string
+  error?: string | null
+  gapDetected?: boolean
+  onReconnect?: () => void
+}) {
+  if (status === "connected" && !gapDetected) {
     return (
       <Badge variant="outline" className="gap-1 text-[10px] bg-success/10 text-success border-success/30">
         <Zap className="h-3 w-3" /> Live
       </Badge>
     )
   }
-  if (status === "polling") {
-    return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-warn/10 text-warn border-warn/30">
-        <RadioTower className="h-3 w-3" /> Polling
-      </Badge>
-    )
-  }
-  if (status === "connecting") {
+  if (status === "connecting" && !gapDetected) {
     return (
       <Badge variant="outline" className="gap-1 text-[10px] bg-info/10 text-info border-info/30">
         <Radio className="h-3 w-3" /> Connecting
       </Badge>
     )
   }
-  if (status === "error") {
+  if (status === "idle" && !gapDetected) return null
+
+  // Degraded: polling, offline, or live-but-with-a-hole. All of these are
+  // states the user can act on, so the badge becomes a button.
+  const label = gapDetected
+    ? "Entries missing"
+    : status === "polling"
+      ? "Polling"
+      : "Offline"
+  const tone = gapDetected || status === "error"
+    ? "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/20"
+    : "bg-warn/10 text-warn border-warn/30 hover:bg-warn/20"
+  const title = [
+    error ?? (status === "polling" ? "Live stream unavailable — falling back to polling." : null),
+    onReconnect ? "Click to reconnect and reload the window." : null,
+  ]
+    .filter(Boolean)
+    .join(" ")
+
+  const content = (
+    <>
+      <RadioTower className="h-3 w-3" /> {label}
+    </>
+  )
+  if (!onReconnect) {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-destructive/10 text-destructive border-destructive/30">
-        Offline
+      <Badge variant="outline" title={title} className={cn("gap-1 text-[10px]", tone)}>
+        {content}
       </Badge>
     )
   }
-  return null
+  return (
+    <button type="button" onClick={onReconnect} title={title} aria-label={`${label} — reconnect`}>
+      <Badge variant="outline" className={cn("gap-1 text-[10px] cursor-pointer transition-colors", tone)}>
+        {content}
+      </Badge>
+    </button>
+  )
 }

@@ -227,7 +227,7 @@ Emit is asynchronous: entries are queued (buffer 1024), a background goroutine b
 ### HTTP
 
 - `GET /api/v1/journal` -- paginated list, newest first. See the [API reference](/api-reference/journal).
-- `GET /api/v1/journal/stream` -- SSE live tail; seeds with the most recent 50 entries, polls every 1s, emits `event: entry` frames, and heartbeats every 15s. Reconnect with `Last-Event-ID` to skip already-seen rows.
+- `GET /api/v1/journal/stream` -- SSE live tail; seeds with the most recent 50 entries, then wakes on the writer's flush notification (with a 20s fallback ticker, not the 1s poll this line used to claim), emits `event: entry` frames, and heartbeats every 15s. Reconnect with `Last-Event-ID` to skip already-seen rows -- that is how `crewship journal --follow` resumes (`internal/cli/sse.go` sets the header, `followJournal` threads it across reconnects). A **browser** `EventSource` cannot set request headers, so it sends `Last-Event-ID` only on its own built-in retry; a web client that closes and reopens the stream to control its backoff starts clean and must backfill via `?since=`.
 - `GET /api/v1/journal/count` -- total matching count for a filter set; ignores cursor/limit so the badge stays honest.
 - `GET /api/v1/journal/{id}` -- single entry (scoped to workspace; cross-tenant IDs return 404).
 - `POST /api/v1/journal/{id}/priority` -- annotate an entry with `normal`/`high`/`pin`/`permanent`. OWNER or ADMIN only; emits a `memory.priority_changed` audit row.
@@ -258,6 +258,7 @@ Every filter is AND-combined and indexed at the DB level:
 | `agent_id` | `--agent` | `agent_id = ?` (name/slug resolved to an id first — see below) |
 | `mission_id` | `--mission` | `mission_id = ?` |
 | `trace_id` | `--trace-id` | `trace_id = ?` (one run's spans) |
+| `run_id` | `--run-id` | `(trace_id = ? OR actor_id = ? OR run_id = ?)` — a run id reaches the journal by three doors depending on the engine |
 | `crew_ids` | -- | CSV `crew_id IN (?,?,...)` (takes precedence over `crew_id`) |
 | `agent_ids` | -- | CSV `agent_id IN (?,?,...)` (takes precedence over `agent_id`) |
 | `entry_type` | `--type` | CSV `entry_type IN (?,?,...)` |
@@ -270,6 +271,24 @@ Every filter is AND-combined and indexed at the DB level:
 | `cursor` | -- | keyset `(ts, id) <` prior page |
 
 Pagination is keyset (compound `ts, id`), not offset, so deep paging stays O(log n). `limit` is 1-500, default 100 for list, 50 for the SSE seed.
+
+<Note>
+"Indexed at the DB level" is a claim worth re-checking with `EXPLAIN QUERY
+PLAN` whenever a filter or an index changes — a partial index silently stops
+matching when the query's predicate no longer *implies* the index's, and
+nothing errors. `severity IN ('error')` does not imply
+`WHERE severity IN ('warn','error')`, and `priority IN ('high')` does not imply
+`WHERE priority != 'normal'`, so both single-value filters fell back to a
+workspace scan for as long as those partial indexes were the only ones
+(fixed by `20260831093500_journal_filter_indexes.sql`, which adds unconditional
+`(workspace_id, severity, ts)` and `(workspace_id, priority, ts)` twins).
+
+`run_id` has the same shape of trap for a different reason: SQLite turns an OR
+into an index union only when **every** leg is indexable, so the unindexed
+`actor_id` leg cost the whole three-door predicate its indexes — and `count`
+emits no `LIMIT`, so `/journal/count?run_id=` scanned the entire workspace. The
+same migration indexes `actor_id`.
+</Note>
 
 ### Full-text search
 
@@ -285,7 +304,7 @@ GET /api/v1/journal?q=ratelimit&since=2026-04-29T00:00:00Z
 GET /api/v1/journal/stream?q=approval         # live tail filtered by FTS
 ```
 
-The same parameter works on the SSE stream — the seed slice and every subsequent poll apply the FTS filter, so a "watch for `OOM`" tab stays cheap. `q` is bounded in length (rejected if absurd) and merges with structural filters (`crew_id`, `severity`, ...) via AND.
+The same parameter works on the SSE stream — the seed slice and every subsequent wake apply the FTS filter, so a "watch for `OOM`" tab stays cheap. `q` is bounded in length (rejected if absurd) and merges with structural filters (`crew_id`, `severity`, ...) via AND.
 
 **How the query is compiled.** The input is split on whitespace, each term is
 wrapped in its own FTS5 phrase literal, and the phrases are `AND`-joined with a

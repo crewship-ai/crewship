@@ -812,6 +812,58 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   follows it. Verified in a browser: `tab=runs` → row click → Timeline with
   the trace pill, no full page load.
 
+- **The journal Timeline degraded permanently on a real workspace (#2210).**
+  Four faults on one data path, each invisible on a quiet instance.
+
+  *A dropped SSE stream never came back.* On the first `onerror` the hook
+  closed the EventSource, fell back to 5 s polling and never reached for the
+  stream again — only a filter change or a page reload restored the live tail,
+  and the badge read "Polling" for the rest of the session with no explanation
+  and nothing to click. It now reconnects on jittered exponential backoff
+  (1 s doubling to a 30 s ceiling, equal jitter so tabs knocked offline by one
+  server restart do not retry in lockstep), stops polling the moment the
+  stream is back, and the badge is a button that retries immediately and
+  re-reads the head.
+
+  *The polling backfill silently lost the gap it existed to cover.* The
+  watermark was set when the effect mounted and only ever advanced from
+  *polled* entries, never from ones the stream had already delivered — so a
+  stream that dropped after a busy hour re-requested from page-load time and
+  got back one 50-row page, discarding everything in between with nothing
+  saying so. The watermark now advances from stream entries too, each poll
+  walks up to 4 cursor pages to close a deeper backlog, and a backlog deeper
+  still surfaces as "Entries missing" rather than vanishing. `lastError`,
+  which the hook had always computed and the page had always thrown away, is
+  now on the badge.
+
+  *Prepending a live entry was O(n), per event.* Each `prependLive` scanned up
+  to 5,000 buffered entries for a duplicate id and copied the whole array; the
+  page's 250 ms batch then called it once per event, so a 50-event flush was
+  ~250k comparisons and 50 array copies before React rendered once.
+  `prependLive` takes an array: one pass, one update. `ResourcesStrip` was not
+  batching at all — for `container.metrics`, the highest-volume entry type in
+  the product — and now shares the batching hook.
+
+  *Two filters missed the partial indexes built for them, and a third had no
+  index at all.* SQLite uses a partial index only when the query's predicate
+  *implies* the index's, and a single-value `IN` does not: the Timeline sends
+  exactly one severity, so `severity IN ('error')` never matched
+  `idx_journal_ws_sev_ts … WHERE severity IN ('warn','error')` and scanned the
+  workspace partition instead. `priority IN ('high')` missed
+  `idx_journal_entries_priority … WHERE priority != 'normal'` the same way.
+  And `run_id` — `(trace_id = ? OR actor_id = ? OR run_id = ?)` — could not be
+  index-unioned at all, because `actor_id` had no index (`idx_journal_actor_ts`
+  is on actor_*type*), which made every `/journal/count?run_id=` scan the
+  whole workspace partition since `Count()` emits no `LIMIT`. Migration
+  `20260831093500_journal_filter_indexes.sql` adds unconditional
+  `(workspace_id, severity, ts)` and `(workspace_id, priority, ts)` indexes plus
+  a partial `(workspace_id, actor_id, ts)`, drops the now-redundant
+  `idx_journal_entries_priority`, and keeps v146's tiny partial severity index,
+  which still wins the two-value errors-and-warnings shape. Every plan change
+  is pinned by `EXPLAIN QUERY PLAN` assertions against a seeded, `ANALYZE`d
+  database — an index whose plan nobody checked is worse than none, because it
+  looks like the problem is solved.
+
 - **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
   server refused it (#2195).** The standalone `kind: Agent` validator kept
   `COORDINATOR` in `validAgentRoles`, so a manifest carrying that role passed

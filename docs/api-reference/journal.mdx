@@ -138,7 +138,7 @@ by several agents matches all of them.
 
 ## Stream entries (SSE)
 
-Live tail of the journal over Server-Sent Events, seeded with a recent batch then switched to polling.
+Live tail of the journal over Server-Sent Events, seeded with a recent batch then driven by the emitter's flush notifications.
 
 ```
 GET /api/v1/journal/stream
@@ -169,11 +169,30 @@ event: entry
 data: {...}
 ```
 
-- **Seed:** sends the most recent 50 entries matching filters, then switches to live polling.
-- **Poll interval:** 1 second.
+- **Seed:** sends the most recent 50 entries matching filters, then goes live.
+- **Wake-up:** notification-driven. The writer signals the stream as soon as a
+  batch commits, so a new entry is on the wire within milliseconds of the
+  flush rather than on a fixed clock. A **20 s** fallback ticker re-polls
+  regardless, covering the case where a notification is missed or the wired
+  emitter does not support them. (This used to be a flat 1 s poll per
+  connected client, which is what older revisions of this page described.)
 - **Heartbeat:** `: heartbeat` comment every 15s to keep proxies from closing idle connections. Event handlers ignore comments.
 - **Watermark:** compound (ts, id) so bursts sharing a ms timestamp aren't partially dropped.
-- **Reconnect:** clients send the SSE `Last-Event-ID` header; the server looks the entry up, treats its `ts` as the lower bound, and pages through the gap (up to **500 entries**, 10 × 50-row pages) before switching to live polling. A disconnect that produced more than 500 matching entries truncates the older end of the gap and the server logs a `warn` — clients should reconcile by re-fetching `/api/v1/journal?since=<last-known-ts>` if they need a longer window.
+- **Reconnect:** clients send the SSE `Last-Event-ID` header; the server looks the entry up, treats its `ts` as the lower bound, and pages through the gap (up to **500 entries**, 10 × 50-row pages) before going live. A disconnect that produced more than 500 matching entries truncates the older end of the gap and the server logs a `warn` — clients should reconcile by re-fetching `/api/v1/journal?since=<last-known-ts>` if they need a longer window.
+
+  Any client that can set request headers should resume this way, and
+  `crewship journal --follow` does: `internal/cli/sse.go` sets `Last-Event-ID`
+  and `followJournal` threads it across its own bounded-backoff reconnects.
+
+  A **browser** `EventSource` cannot set request headers. It sends
+  `Last-Event-ID` only on its built-in automatic retry — a web client that
+  closes the connection and constructs a new `EventSource` (which is what the
+  web UI does, so it can control the backoff and stop polling on success)
+  starts a fresh stream with no `Last-Event-ID` and must close its own gap
+  with `/api/v1/journal?since=<last-known-ts>`. The UI's journal hook does
+  exactly that: while the stream is down it polls `since` on a rolling
+  watermark, walking the cursor up to 4 pages per tick, and reports
+  "Entries missing" if the backlog was deeper than that.
 
 **Errors:**
 

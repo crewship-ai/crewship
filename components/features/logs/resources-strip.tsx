@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { Cpu, MemoryStick, Network, HardDrive } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useBatchedPrepend } from "@/hooks/use-batched-prepend"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import type { JournalEntry } from "@/lib/types/journal"
@@ -69,11 +70,23 @@ export function ResourcesStrip({ workspaceId, crewId, mode = "single" }: Resourc
     limit: 500,
     maxEntries: 1500,
   })
+  // container.metrics is the highest-volume entry type in the product, and
+  // every sample re-derives the whole series and re-renders four charts.
+  // Coalesce a burst into one prepend; the strip is a 30-minute sparkline,
+  // so a quarter-second of latency is invisible in it.
+  //
+  // The strip keeps its own subscription rather than sharing the page's:
+  // the timeline excludes container.metrics server-side (that is the point
+  // of the "metrics: hidden" default), and it carries the user's severity /
+  // crew / time-range filters, which the strip must not inherit. One shared
+  // stream would have to drop the exclusion and push the noisiest type over
+  // the wire to a list that throws it away.
+  const pushMetric = useBatchedPrepend(prependLive)
   useJournalStream({
     workspaceId,
     params,
     enabled: !!workspaceId,
-    onEntry: prependLive,
+    onEntry: pushMetric,
   })
 
   const s = useMemo<Series>(() => extract(entries, mode), [entries, mode])
