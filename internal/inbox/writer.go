@@ -40,6 +40,19 @@ const (
 	// the constraint and the "your routine was disabled" alert reached
 	// nobody. Requires migration v168.
 	KindScheduleCircuitBreakerTripped = "schedule_circuit_breaker_tripped"
+	// KindWebhookFireFailed surfaces a webhook whose fire has failed to
+	// become a run repeatedly in a row (PRD A4 / F20). Written via Upsert,
+	// not Insert: the same webhook can trip this more than once across its
+	// life (fail, recover, fail again), and each trip is news about the
+	// SAME subject rather than a new one-off event, so a resolved card is
+	// resurrected to unread rather than silently swallowed by the unique
+	// index. See alertWebhookFireFailure, internal/api/pipeline_webhooks.go.
+	KindWebhookFireFailed = "webhook_fire_failed"
+	// KindAutomationEnqueueFailed surfaces an automation rule that matched
+	// but could not park its run repeatedly in a row (PRD A4 / F20) — the
+	// automation-side twin of KindWebhookFireFailed, same Upsert-not-Insert
+	// reasoning. See Registry.emitEnqueueFailed, internal/automation/registry.go.
+	KindAutomationEnqueueFailed = "automation_enqueue_failed"
 )
 
 // AllKinds is the canonical set of inbox_items.kind values the product
@@ -59,6 +72,8 @@ var AllKinds = []string{
 	KindMemoryConsolidation,
 	KindScheduleMissed,
 	KindScheduleCircuitBreakerTripped,
+	KindWebhookFireFailed,
+	KindAutomationEnqueueFailed,
 }
 
 // ExternalNotifier is the injected seam that fans a freshly-committed

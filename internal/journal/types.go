@@ -368,6 +368,23 @@ const (
 	// window_end (RFC3339).
 	EntryPipelineScheduleMissedOccurrences EntryType = "pipeline.schedule.missed_occurrences"
 
+	// EntryPipelineWebhookFireFailed fires whenever a webhook fire fails
+	// to become a run — the pre-run governance/pin/concurrency/idempotency
+	// checks in FireWebhook's synchronous path, or the async dispatch
+	// goroutine's exec.Run returning a Go error (as opposed to Run
+	// executing and the ROUTINE legitimately failing, which already gets
+	// EntryPipelineRunFailed from the executor's own step loop — see
+	// pipeline.pipelineEmitContext.emitRunFailed). This is #2's other
+	// half: "the fire never became a run at all". Emitted on EVERY such
+	// failure (durable per-attempt record, mirrors
+	// EntryAutomationEnqueueFailed); the human-facing alert is separate
+	// and only raised on repetition — see alertWebhookFireFailure in
+	// internal/api/pipeline_webhooks.go. Payload carries webhook_id,
+	// pipeline_id (when known), run_id (when a run was allocated),
+	// reason, and consecutive_failures (the fresh streak length read
+	// back from pipeline_webhooks.consecutive_fire_failures).
+	EntryPipelineWebhookFireFailed EntryType = "pipeline.webhook.fire_failed"
+
 	// EntryPipelineRunsSwept fires when the per-workspace pipeline_runs
 	// retention sweep (internal/pipeline/retention.go) deletes one or more
 	// terminal runs older than the configured window. run_tags cascade-
@@ -395,6 +412,22 @@ const (
 	// dispatcher refuses at the same ceiling, through the same
 	// pipeline.GuardChainDepth, and emits the same type.
 	EntryAutomationDepthExceeded EntryType = "automation.depth_exceeded"
+
+	// EntryAutomationEnqueueFailed fires when a matched automation rule
+	// could not park its deferred run — Flush's Enqueue call returned an
+	// error, meaning the run the rule decided to make genuinely never
+	// exists anywhere (#2's F20: "the same file emits journal entries for
+	// depth and throttle cases... and a bare logger.Error for this one").
+	// Emitted on EVERY enqueue failure, same as EntryAutomationDepthExceeded
+	// is emitted on every refused hop — this is the durable audit trail.
+	// The human-facing inbox alert is a SEPARATE, throttled decision (see
+	// Registry.emitEnqueueFailed): it fires only once a rule has failed to
+	// enqueue automationEnqueueFailureAlertThreshold times in a row, so one
+	// transient DB blip does not page anyone. Payload carries automation_id,
+	// automation_name, routine_slug, workspace_id, error, and
+	// consecutive_failures (the in-memory streak length at the time of this
+	// failure).
+	EntryAutomationEnqueueFailed EntryType = "automation.enqueue_failed"
 
 	// EntryRunSessionInit is the provenance of the agent CLI session a run
 	// happens inside, taken from the CLI's own session-init event and written

@@ -1631,6 +1631,8 @@ crewship routine result run_abc123 --client        # plain: "Acct — Succeeded"
 
 Redelivered events dedupe **synchronously**: a replay (same `Idempotency-Key` / `X-Crewship-Event-ID`, or identical bytes within the dedupe window) answers `202` with `"status": "DEDUPED"` and the **original** run's id — the routine executes exactly once. A `proposed`/`disabled` routine answers `409` (policy block, nothing dispatched). A delivery arriving while the routine's `concurrency_key` gate is at capacity answers `429` with a `Retry-After` header **before** anything is dispatched — a 429 never consumes the idempotency key, so redelivering the same event later executes it normally. Runs that hit a `wait: approval` step park as `WAITING` and resume once the waitpoint is approved, exactly as with other triggers.
 
+**Fire failure visibility.** A fire that never becomes a run — governance/pin/concurrency rejected it, or the dispatch itself errored before a run existed — records a `pipeline.webhook.fire_failed` journal entry **every time**. A single failure is not surfaced beyond that: it is treated as noise-tolerant (a momentary DB busy, a governance load hiccup). Once the **same webhook** fails **3 times in a row**, a MANAGER inbox card is raised; further failures past the third do not raise additional cards, and a later successful fire resets the streak so a future run of failures can alert again. This does not cover a run that started and whose routine then genuinely failed — that already has full per-run visibility via the routine's own failed-run journal entry and the Runs view.
+
 <Warning>
 The signing secret is shown **once**. To rotate it: delete the webhook + create a new one. There is no in-place rotation by design.
 </Warning>

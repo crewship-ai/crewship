@@ -607,15 +607,48 @@ func (s *WebhookStore) SoftDelete(ctx context.Context, id string) error {
 // RecordFire updates a webhook's last_fired_at + last_status +
 // last_run_id + fire_count after a dispatch. Called by the handler
 // after Run returns (success or failure).
-func (s *WebhookStore) RecordFire(ctx context.Context, webhookID, runID, status string) error {
+// RecordFire's second return value is the FRESH consecutive_fire_failures
+// streak for this webhook, read back atomically via RETURNING (#2/A4,
+// F20). A FAILED status increments the streak; any other status
+// (COMPLETED, CANCELLED, WAITING, DEDUPED) resets it to 0 — the same
+// reset-on-success / increment-on-failure shape as
+// pipeline_schedules.consecutive_failures (ScheduleStore.recordRun).
+// Doing the increment and the read in one statement (rather than an
+// ExecContext followed by a separate SELECT) means two fires of the same
+// webhook racing each other each see the true post-increment count, not
+// a stale pre-increment one — so at most one of them can observe the
+// streak crossing the alert threshold. The status value is only ever one
+// of the fixed literals FireWebhook passes (never caller-supplied SQL),
+// so splicing it into the SET clause is safe; it is still passed as a
+// bound parameter, never concatenated into the query text.
+//
+// An unknown webhookID matches zero rows: the UPDATE...RETURNING then
+// returns sql.ErrNoRows, which is swallowed to (0, nil) to preserve the
+// pre-existing "unknown id is silently a no-op" contract (see
+// TestWebhookStore_RecordFire_UnknownID_NoError) — this can legitimately
+// race a concurrent delete of the very webhook that just fired.
+func (s *WebhookStore) RecordFire(ctx context.Context, webhookID, runID, status string) (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx, `
+	streakExpr := "0"
+	if status == "FAILED" {
+		streakExpr = "consecutive_fire_failures + 1"
+	}
+	var streak int64
+	err := s.db.QueryRowContext(ctx, `
 UPDATE pipeline_webhooks
-SET last_fired_at = ?, last_status = ?, last_run_id = ?, fire_count = fire_count + 1, updated_at = ?
-WHERE id = ?`,
+SET last_fired_at = ?, last_status = ?, last_run_id = ?, fire_count = fire_count + 1, updated_at = ?,
+    consecutive_fire_failures = `+streakExpr+`
+WHERE id = ?
+RETURNING consecutive_fire_failures`,
 		now, status, nullStr(runID), now, webhookID,
-	)
-	return err
+	).Scan(&streak)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return streak, nil
 }
 
 // ValidateSignature computes the HMAC-SHA256 of body using the
