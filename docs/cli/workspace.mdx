@@ -78,12 +78,13 @@ Only flags you actually set are sent — passing nothing returns `no fields to u
 | `--allow-privileged-credentials` | Allow credentials in a `--privileged` crew despite the UID isolation boundary. Defaults to `false` (fails closed). |
 | `--credential-audit-retention-days` | Days of `credential_audit` history to keep. `0` means keep forever. Leave unset to use the 90-day default. |
 | `--audit-log-retention-days` | Days of `audit_logs` history to keep. `0` means keep forever, which is the default — `audit_logs` is the compliance trail and its retention obligation is yours to declare. |
+| `--approvals-retention-days` | Days of decided `approvals_queue` history (approved/denied/timeout/cancelled) to keep. `0` means keep forever. Leave unset to use the 90-day default. A pending approval is never swept regardless of age. |
 
 <Warning>
 Only flags you actually pass are sent, and that matters here: `0` is a
-meaningful value on both retention flags (an explicit "keep forever"), so an
-unset flag must not be transmitted as zero. `crewship workspace update --name x`
-never touches your retention windows.
+meaningful value on all three retention flags (an explicit "keep forever"),
+so an unset flag must not be transmitted as zero. `crewship workspace update
+--name x` never touches your retention windows.
 </Warning>
 
 ### `workspace delete`
@@ -349,7 +350,7 @@ The shortcut form (`invite <email>`) and the explicit form (`invite create <emai
 
 - **`workspace "X" not found or not accessible`** — `workspace use` validated against `/api/v1/workspaces` and your token has no membership.
 - **`--name is required`** — `create` needs at least a name.
-- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language` / `--allow-privileged-credentials` / `--credential-audit-retention-days` / `--audit-log-retention-days`.
+- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language` / `--allow-privileged-credentials` / `--credential-audit-retention-days` / `--audit-log-retention-days` / `--approvals-retention-days`.
 - **`no workspace selected`** — `update` ran without an active workspace. Run `crewship workspace use` first or pass `--workspace`.
 
 </Accordion>

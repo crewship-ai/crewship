@@ -693,13 +693,14 @@ See issue #2233.
 
 The sweep (`internal/harbormaster/retention.go`) follows the shape of
 `internal/api/audit_retention.go` — a nullable per-workspace override, a
-daily ticker, bounded batched deletes — but resolves the column like
-`run_retention_days`, **not** like the audit pair:
+daily ticker, bounded batched deletes — and, after a second look prompted by
+review, resolves the column like the audit pair too, **not** like
+`run_retention_days`:
 
-| Column | `NULL` or `0` means | Why |
-| --- | --- | --- |
-| `credential_audit_retention_days` / `audit_log_retention_days` | different things (`NULL` = default, `0` = keep forever) | Both are audit tables; an operator must be able to express "never delete" for a compliance record. |
-| `run_retention_days` / `approvals_retention_days` | the same thing (use the 90-day default) | Neither is a compliance record. Every terminal approval decision is already durably captured in the Crew Journal (`journal_entries`, via `AfterDecide`), so there is no operator intent a plain default can't already carry. |
+| Column | `NULL` means | `0` means | Why |
+| --- | --- | --- | --- |
+| `run_retention_days` | use the 90-day default | rejected (not a legal value) | `pipeline_runs` has no compliance story, so there is no "keep forever" to express. |
+| `credential_audit_retention_days` / `audit_log_retention_days` / `approvals_retention_days` | use the product default | keep forever | All three sit on the same `workspace update` command. Giving `approvals_retention_days` different `0` semantics from its two neighbours would be a footgun: an operator typing `0` out of habit with the audit flags would silently get 90-day deletion instead of "never delete". `approvals_queue` also has a real keep-forever use case of its own — `AfterDecide`'s journal entry carries only `approval_id`/`kind`/comment, not `reason` or the full `payload`, so `approvals_queue` is the only place those survive at all. |
 
 Only terminal rows (`status IN ('approved','denied','timeout','cancelled')`)
 with a non-`NULL` `decided_at` older than the window are ever deleted. A

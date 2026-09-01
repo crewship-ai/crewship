@@ -760,7 +760,7 @@ func init() {
 	workspaceUpdateCmd.Flags().Int("audit-log-retention-days", 0,
 		"Days of audit_logs history to keep; 0 means keep forever, which is the default — audit_logs is the compliance trail (#1887)")
 	workspaceUpdateCmd.Flags().Int("approvals-retention-days", 0,
-		"Days of decided approvals_queue history to keep; must be positive. Unset uses the 90-day default (#2233)")
+		"Days of decided approvals_queue history to keep; 0 means keep forever. Unset uses the 90-day default (#2233)")
 
 	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
 	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")

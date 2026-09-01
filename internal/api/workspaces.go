@@ -180,12 +180,9 @@ type workspaceResponse struct {
 	AuditLogRetentionDays        *int `json:"audit_log_retention_days"`
 	// ApprovalsRetentionDays (#2233) is the per-workspace override for the
 	// approvals_queue retention sweep window in days. nil means "use
-	// harbormaster.DefaultApprovalsRetentionDays (90)" — see
-	// internal/harbormaster/retention.go. Unlike the audit pair above, an
-	// explicit 0 does NOT mean "keep forever"; it is treated the same as
-	// nil (the sweep resolves NULL-or-<=0 to the default) because
-	// approvals_queue is not a compliance record — every terminal decision
-	// is already durably captured in journal_entries.
+	// harbormaster.DefaultApprovalsRetentionDays (90)"; an explicit 0 means
+	// keep forever, same as the audit pair above — see
+	// internal/harbormaster/retention.go.
 	ApprovalsRetentionDays *int `json:"approvals_retention_days"`
 	// Nested `_count` is the canonical shape the frontend consumes
 	// (#866.1). The flat `_count_*` keys are retained one release for

@@ -5,17 +5,19 @@
 -- timeout) was an in-place UPDATE of status/decided_*, so the table only
 -- ever grew. The sweep this column feeds is internal/harbormaster/retention.go.
 --
--- Same shape as workspaces.run_retention_days (v158): a nullable INTEGER
--- override, with NULL or <= 0 meaning "use the product default"
--- (harbormaster.DefaultApprovalsRetentionDays = 90), and no separate
--- "0 = keep forever" sentinel. That is a deliberate divergence from the
--- audit_retention_days pair (20260810170000_audit_retention_windows.sql):
--- those tables are the compliance trail and an operator's retention
--- obligation must be expressible as "never delete". approvals_queue is not
--- that record — every terminal decision it holds is already durably
--- captured in journal_entries via AfterDecide, so there is no operator
--- intent a bare NULL-means-default can't already carry. See the retention.go
--- package comment for the full rationale.
+-- Same shape as the audit_retention_days pair
+-- (20260810170000_audit_retention_windows.sql), NOT workspaces.run_retention_days:
+-- a nullable INTEGER override where NULL means "use the product default"
+-- (harbormaster.DefaultApprovalsRetentionDays = 90) and an explicit 0 means
+-- "keep forever". This column sits on the same `workspace update` command as
+-- credential_audit_retention_days / audit_log_retention_days, where 0
+-- already means keep-forever — giving it different semantics here would be
+-- a footgun (an operator setting 0 out of habit with its neighbours would
+-- silently get 90-day deletion instead of the "never delete" they asked
+-- for). It is also a real operator need on its own: AfterDecide's journal
+-- entry does not carry `reason` or the full `payload`, only approval_id/
+-- kind/comment, so approvals_queue is the only place those survive at all.
+-- See the retention.go package comment for the full rationale.
 
 ALTER TABLE workspaces
     ADD COLUMN approvals_retention_days INTEGER;

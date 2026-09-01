@@ -130,10 +130,14 @@ type updateWorkspaceRequest struct {
 	CredentialAuditRetentionDays *int `json:"credential_audit_retention_days"`
 	AuditLogRetentionDays        *int `json:"audit_log_retention_days"`
 	// ApprovalsRetentionDays (#2233) — window for the approvals_queue
-	// retention sweep. nil leaves the column untouched. Like
-	// RunRetentionDays (and unlike the audit pair), 0 is rejected: there is
-	// no "keep forever" sentinel here, only "use the default" (nil) or a
-	// positive window — see internal/harbormaster/retention.go.
+	// retention sweep. nil leaves the column untouched.
+	//
+	// Like the audit pair above (and unlike RunRetentionDays), 0 IS
+	// accepted and means an explicit "keep forever": this flag sits on the
+	// same `workspace update` command as the two audit ones, where 0
+	// already means keep-forever, so giving it different semantics here
+	// would silently delete what an operator typing 0 out of habit with
+	// its neighbours expected to keep. See internal/harbormaster/retention.go.
 	ApprovalsRetentionDays *int `json:"approvals_retention_days"`
 }
 
@@ -179,8 +183,8 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "audit_log_retention_days must be 0 (keep forever) or a positive number of days")
 		return
 	}
-	if req.ApprovalsRetentionDays != nil && *req.ApprovalsRetentionDays <= 0 {
-		replyError(w, http.StatusBadRequest, "approvals_retention_days must be a positive number of days")
+	if req.ApprovalsRetentionDays != nil && *req.ApprovalsRetentionDays < 0 {
+		replyError(w, http.StatusBadRequest, "approvals_retention_days must be 0 (keep forever) or a positive number of days")
 		return
 	}
 
@@ -252,6 +256,14 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ub.Set("audit_log_retention_days", *req.AuditLogRetentionDays)
 	}
 	if req.ApprovalsRetentionDays != nil {
+		// Opposite direction from audit_logs above but the same rule: the
+		// transition worth a durable line is the one that changes what gets
+		// pruned. approvals_queue defaults to a 90-day window, so setting it
+		// to 0 is what turns pruning OFF.
+		if *req.ApprovalsRetentionDays == 0 {
+			h.logger.Warn("workspace set approvals_queue to keep forever (#2233)",
+				"workspace_id", workspaceID)
+		}
 		ub.Set("approvals_retention_days", *req.ApprovalsRetentionDays)
 	}
 	persisted := !ub.Empty()

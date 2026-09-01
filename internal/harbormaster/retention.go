@@ -31,16 +31,35 @@ package harbormaster
 // One shared number for "how long we keep operational history" beats a
 // fourth number to independently justify.
 //
-// # Why NULL/<=0 means "use the default" rather than "keep forever"
+// # NULL means the default; an explicit 0 means keep forever
 //
-// This deliberately follows workspaces.run_retention_days rather than
-// workspaces.credential_audit_retention_days. The audit pair needed an
-// explicit "0 = keep forever" because collapsing it into the default would
-// make switching off compliance-record pruning inexpressible — a real
-// operator need for a table with a legal retention story. approvals_queue
-// has no such story (see above: the durable record is journal_entries), so
-// there is no operator intent "0" needs to carry that NULL doesn't already
-// carry via the default. Keeping one fewer state to reason about wins.
+// This mirrors workspaces.credential_audit_retention_days /
+// audit_log_retention_days, NOT workspaces.run_retention_days — a reversal
+// from this file's first version, which collapsed both NULL and 0 into the
+// default. That was wrong for two reasons, not one:
+//
+//  1. approvals_retention_days sits on the SAME `workspace update` command
+//     as the two audit flags, where 0 already means "keep forever". A
+//     third retention flag on that command silently meaning something else
+//     is a footgun by construction — an operator who types 0 out of
+//     established habit with its neighbours would get 90-day deletion
+//     instead of the "never delete" they asked for, with no error and no
+//     warning. Consistency within one command's flag family outranks this
+//     file's own internal tidiness argument.
+//  2. The "journal_entries already has the durable record" argument this
+//     comment used to make is only partly true: AfterDecide's journal entry
+//     carries approval_id, kind and the decision comment — NOT `reason` or
+//     the full `payload`. An operator who wants those to survive
+//     indefinitely (e.g. auditing exactly what a destructive tool call's
+//     arguments were, months later) has no other place to keep them, so
+//     "keep forever" is a real, expressible operator intent here too, same
+//     as it is for credential_audit.
+//
+// NULL still means "no opinion recorded, use the 90-day default" — that
+// part is unchanged, and is why the default itself stays 90 rather than
+// unlimited: nobody has to opt in just to get bounded growth on a freshly
+// created workspace, only to opt OUT of pruning if they want the full
+// history kept.
 //
 // # What is NEVER eligible, regardless of age
 //
@@ -61,9 +80,9 @@ import (
 
 const (
 	// DefaultApprovalsRetentionDays is applied when a workspace has no
-	// approvals_retention_days override (NULL or <= 0). See the package
-	// comment for why this mirrors DefaultRunRetentionDays /
-	// DefaultCredentialAuditRetentionDays rather than "keep forever".
+	// approvals_retention_days override recorded (column is NULL). An
+	// explicit 0 is NOT the same as NULL — see the package comment "NULL
+	// means the default; an explicit 0 means keep forever".
 	DefaultApprovalsRetentionDays = 90
 
 	// approvalsRetentionBatchRows bounds how many rows a single DELETE may
@@ -85,10 +104,13 @@ const (
 // bounded batches. Returns the number deleted and whether it stopped at the
 // batch cap with work remaining.
 //
-// retentionDays <= 0 means "use the default" is the CALLER's job to resolve
-// (see SweepAllWorkspacesApprovalsRetention) — this function treats <= 0 as
-// "delete nothing" so it is safe to call directly with a raw column value in
-// tests without re-deriving the default.
+// retentionDays <= 0 means "delete nothing" — this function does not know
+// or care whether the caller passed a literal 0 (explicit keep-forever) or
+// resolved NULL down to something non-positive; either way, nothing is
+// eligible. Resolving NULL to DefaultApprovalsRetentionDays before calling
+// this is the caller's job (see SweepAllWorkspacesApprovalsRetention), which
+// is what makes this function safe to call directly with a raw column value
+// in tests.
 func SweepApprovalsRetention(
 	ctx context.Context,
 	db *sql.DB,
@@ -138,10 +160,11 @@ func SweepApprovalsRetention(
 }
 
 // SweepAllWorkspacesApprovalsRetention enumerates every workspace and sweeps
-// approvals_queue using that workspace's configured window (or
-// DefaultApprovalsRetentionDays when NULL or <= 0). Errors are accumulated
-// rather than returned on the first failure, so one bad workspace does not
-// stop the sweep for the rest — same as SweepAllWorkspacesAuditRetention.
+// approvals_queue using that workspace's configured window: NULL resolves to
+// DefaultApprovalsRetentionDays, a recorded 0 means keep forever (deletes
+// nothing), and n > 0 means n days. Errors are accumulated rather than
+// returned on the first failure, so one bad workspace does not stop the
+// sweep for the rest — same as SweepAllWorkspacesAuditRetention.
 func SweepAllWorkspacesApprovalsRetention(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	if db == nil {
 		return errors.New("harbormaster: sweep approvals retention: db is nil")
@@ -166,8 +189,14 @@ func SweepAllWorkspacesApprovalsRetention(ctx context.Context, db *sql.DB, logge
 			rows.Close()
 			return fmt.Errorf("harbormaster: scan workspace row: %w", scanErr)
 		}
+		// NULL (days.Valid == false) → no opinion recorded, use the
+		// default. A recorded 0 is an explicit "keep forever" and must
+		// pass through as 0, not collapse into the default — see the
+		// package comment. SweepApprovalsRetention already treats any
+		// retentionDays <= 0 as "delete nothing", so passing 0 through
+		// is sufficient; no separate keep-forever branch is needed here.
 		e := wsWindow{id: id, days: DefaultApprovalsRetentionDays}
-		if days.Valid && days.Int64 > 0 {
+		if days.Valid {
 			e.days = int(days.Int64)
 		}
 		entries = append(entries, e)

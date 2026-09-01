@@ -48,6 +48,29 @@ export default function ApprovalsPage() {
     enabled: Boolean(workspaceId) && canRead,
   })
 
+  // "Decided" is pending=no — filter client-side because the backend
+  // enumerates each decided status separately. Plus honour ?agent_id= from
+  // the Crews inbox deep-link so clicking a row count lands on the right
+  // filter rather than the unfiltered queue.
+  //
+  // Both useMemo calls stay ABOVE the `!canRead` early return below: React's
+  // Rules of Hooks require every hook to run, in the same order, on every
+  // render, and a role that resolves from "still loading" (null) to a real
+  // value between renders would otherwise change how many hooks this
+  // component calls. rows is always [] while canRead is false (useApprovals
+  // is enabled:false), so this costs nothing for a non-admin viewer.
+  const visibleRows = useMemo(() => {
+    let out = rows
+    if (filter === "decided") out = out.filter((r) => r.status !== "pending")
+    if (agentFilter) out = out.filter((r) => r.agent_id === agentFilter)
+    return out
+  }, [rows, filter, agentFilter])
+
+  const selectedRow = useMemo(
+    () => visibleRows.find((r) => r.id === selectedId) ?? null,
+    [visibleRows, selectedId],
+  )
+
   if (!canRead) {
     return (
       <div className="flex flex-col items-center gap-2 py-24 text-center">
@@ -61,22 +84,6 @@ export default function ApprovalsPage() {
       </div>
     )
   }
-
-  // "Decided" is pending=no — filter client-side because the backend
-  // enumerates each decided status separately. Plus honour ?agent_id= from
-  // the Crews inbox deep-link so clicking a row count lands on the right
-  // filter rather than the unfiltered queue.
-  const visibleRows = useMemo(() => {
-    let out = rows
-    if (filter === "decided") out = out.filter((r) => r.status !== "pending")
-    if (agentFilter) out = out.filter((r) => r.agent_id === agentFilter)
-    return out
-  }, [rows, filter, agentFilter])
-
-  const selectedRow = useMemo(
-    () => visibleRows.find((r) => r.id === selectedId) ?? null,
-    [visibleRows, selectedId],
-  )
 
   const pendingCount = rows.filter((r) => r.status === "pending").length
 

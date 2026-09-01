@@ -131,12 +131,16 @@ func TestSweepApprovalsRetention_RetentionDaysLEZeroDeletesNothing(t *testing.T)
 	}
 }
 
-// TestSweepAllWorkspacesApprovalsRetention_DefaultsWhenNullOrNonPositive
-// pins how the per-workspace override column resolves: NULL, 0, and a
-// negative value all fall back to DefaultApprovalsRetentionDays, while a
-// positive override is honoured exactly — mirroring
-// workspaces.run_retention_days, not the audit pair's "0 = keep forever".
-func TestSweepAllWorkspacesApprovalsRetention_DefaultsWhenNullOrNonPositive(t *testing.T) {
+// TestSweepAllWorkspacesApprovalsRetention_ResolvesNullVsZeroVsPositive
+// pins how the per-workspace override column resolves, matching
+// credential_audit_retention_days / audit_log_retention_days rather than
+// run_retention_days: NULL (no opinion recorded) falls back to the 90-day
+// default, an explicit 0 means keep forever (never swept, regardless of
+// age), and a positive override is honoured exactly. A negative value is
+// rejected by the API layer (workspaces_mutate.go) so it should never reach
+// this column in practice, but is asserted here too: it fails safe as
+// "delete nothing" rather than being coerced into some other window.
+func TestSweepAllWorkspacesApprovalsRetention_ResolvesNullVsZeroVsPositive(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -146,8 +150,8 @@ func TestSweepAllWorkspacesApprovalsRetention_DefaultsWhenNullOrNonPositive(t *t
 		wantSwept bool
 	}{
 		{"NULL override falls back to the 90-day default", nil, 120, true},
-		{"zero override falls back to the default, NOT keep-forever", 0, 120, true},
-		{"negative override falls back to the default", -5, 120, true},
+		{"zero override means keep forever, not the default", 0, 120, false},
+		{"negative override fails safe as delete-nothing", -5, 120, false},
 		{"positive override narrower than the row's age sweeps it", 10, 30, true},
 		{"positive override wider than the row's age spares it", 365, 120, false},
 	}

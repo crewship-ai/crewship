@@ -3903,7 +3903,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   Decided rows now age out on a per-workspace retention schedule
   (`workspaces.approvals_retention_days`, defaulting to 90 days, swept
   daily by `harbormaster.StartApprovalsRetentionSweeper`; set it with
-  `crewship workspace update --approvals-retention-days`), a pending row is
+  `crewship workspace update --approvals-retention-days`, where `0` means
+  keep forever — the same as its `--credential-audit-retention-days` and
+  `--audit-log-retention-days` neighbours on that command), a pending row is
   never touched regardless of age, and the Article 17 cascade
   (`DELETE /api/v1/admin/users/{userId}/data`) now erases a subject's rows
   by `requested_by`/`decided_by` since the table has no `data_subject_id`
