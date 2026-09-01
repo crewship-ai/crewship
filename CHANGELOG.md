@@ -610,7 +610,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 - **A run is now attributable to the issue that caused it, including
-  delegation hops and mention dispatches (#TBD).** `assignments.mission_id`
+  delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither
   of `AssignmentHandler.Create`'s two real callers — the sidecar's
   `handleAssign` and the routine dispatcher's `crewshipBody` — ever set it,
