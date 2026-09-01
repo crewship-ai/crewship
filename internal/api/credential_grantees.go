@@ -47,14 +47,30 @@ import (
 // every credential it receives is crew-wide by definition and this file does no
 // work for it.
 //
-// THE LOSING CASE, named rather than hidden. A binding at CREW scope that LOSES
-// its slot to a more specific binding for one member is still counted crew-wide
-// here, so that member could select through the sidecar a credential its own
-// delivery did not include. That is exactly today's behaviour, so it is not a
-// regression, and a crew already shares a container and therefore a trust
-// domain (#2052's own framing). Narrowing it would mean re-running the whole
-// delivery query once per member, which is the cost the design above exists to
-// avoid.
+// THE LOSING CASES, named rather than hidden. Both are credentials this file
+// calls crew-wide that ONE member's own delivery would have withheld:
+//
+//   - a binding at CREW scope that LOSES its slot to a more specific binding for
+//     that member;
+//   - a crew-linked credential whose explicit grant to that member has a lapsed
+//     lease — the explicit grant is authoritative and removes the credential
+//     outright for them (see loadDeliveredCredentials' notes), while the crew
+//     link still reaches everyone else.
+//
+// In both, that member could select through the sidecar a credential its own
+// delivery did not include. That is exactly today's behaviour, so neither is a
+// regression, and a crew already shares a container and therefore a trust domain
+// (#2052's own framing). Narrowing them means re-running the whole delivery query
+// once per member, which is the cost the design above exists to avoid.
+//
+// The lease case is NOT rescued by the sidecar's own #1373 gate, and it would be
+// comfortable to claim it is: the store holds the credential as the CREW arm
+// delivered it, and that arm carries no expires_at at all (credential_bindings
+// and credential_crews have no such column), so there is no deadline for Select
+// to refuse. What actually keeps it narrow today is the config fingerprint — the
+// lapsed member's own credential set differs, so its route token does not match
+// the running sidecar's — and that is a different control with a different
+// failure mode. Worth its own issue rather than a claim here.
 
 // crewCredentialGrantees is the agent-scoped ownership of every credential in
 // one crew: credential id -> the member ids holding an explicit claim on it.
