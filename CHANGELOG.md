@@ -937,6 +937,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   taken by the inbound agent webhook route, the direct agent-run route or the
   peer-query path; a run started through one of those can still collide with
   a live run for the same agent.
+- **Inbox read state is now per user, not shared (#TBD).** `PATCH
+  /api/v1/inbox/{id}` with `state=read` wrote the shared `read_at` /
+  `read_by_user_id` columns on `inbox_items` with `COALESCE(existing, now)` —
+  the first person to open a role-targeted item (e.g. a MANAGER escalation
+  every MANAGER can see) marked it read for every other recipient too, so a
+  second manager's inbox silently dropped an item they never saw. A new
+  per-`(item, user)` table, `inbox_item_reads`, is now LEFT JOINed in, and the
+  `state` every response reports (`GET /api/v1/inbox`, `GET /api/v1/inbox/{id}`,
+  and the unread count) is computed for the calling user — `resolved` stays
+  workspace-shared, `read`/`unread` does not. The old shared columns are kept
+  and still written the same way as before; they now answer a narrower,
+  separate question ("has anyone dealt with this") rather than deciding
+  `state`. `inbox.Upsert` resurrecting an item back to unread now also clears
+  every caller's per-user read marker, so a refreshed item reads as unread
+  again for everyone, not just the caller who triggered the refresh.
 
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a

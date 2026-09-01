@@ -55,6 +55,15 @@ unread ──(click row)──> read ──(Archive / action)──> resolved
 - Resolving via an action button (Approve, Deny, Retry, Cancel, Dismiss) stores the shape on `resolved_action` so the audit trail shows *what* you decided, not just that you closed it.
 - "Mark unread" flips a row back; "Restore" un-archives. The bell count and sidebar badge both react.
 
+<Note>
+  **Read vs. unread is per user; resolved is shared.** A workspace- or
+  role-targeted item (e.g. addressed to every MANAGER) shows `unread` for
+  each recipient until *they themselves* open it — one manager clicking a row
+  does not mark it read for the others. **Resolved** is different: it's a
+  workspace-shared outcome, so once anyone resolves an item (Approve, Deny,
+  Archive, …) it's resolved for everyone. See [Reading is per-user](/api-reference/inbox#patch-apiv1inboxid) for the API-level detail.
+</Note>
+
 ## The /inbox page
 
 A two-pane layout:
