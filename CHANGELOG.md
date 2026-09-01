@@ -610,6 +610,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The feedback API docs still described the security hole #1213 had
+  already closed (#1617).** `docs/api-reference/feedback.mdx` and
+  `docs/guides/feedback.mdx` said `POST /api/v1/feedback` fell back to the
+  caller's most-recent workspace when `chat_id` was omitted, and one bullet
+  stated outright that "message_id ownership is not enforced" — the exact
+  cross-tenant message-existence oracle #1213 closed by requiring
+  `message_id` to resolve to a real, visible row in `conversation_messages`
+  (#1208). #1617 investigated the resulting 404 as a possible router bug —
+  POST/DELETE register through `authedSelfMut`, GET through the plain
+  `r.mux.Handle` beside it — but the route was never broken; the docs were
+  just stale. Corrected both pages, and added
+  `internal/api/feedback_route_test.go` (drives POST/GET/DELETE through the
+  real router) plus `cmd/crewship/acceptance_feedback_test.go` (drives
+  `crewship feedback create|list|delete` against a real server) so a real
+  registration regression on this route family fails loudly instead of
+  reading like this one did.
+
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
   conversation: a person opening a thread, a routine minting **one chat per
