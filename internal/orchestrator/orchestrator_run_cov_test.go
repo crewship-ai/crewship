@@ -406,6 +406,69 @@ func TestRunAgent_ApprovalGateScrubsAndBoundsUserPrompt(t *testing.T) {
 	}
 }
 
+// TestRunAgent_ApprovalGateReviewOmittedWhenNoUserMessage guards against a
+// regression review caught in #2250: journalUserMessage(req) was hoisted out
+// of the `if req.UserMessage != ""` guard, so the gate's Review map was built
+// unconditionally. For a run with no UserMessage that produced a non-nil,
+// non-empty map — {"user_prompt": "", "user_prompt_truncated": false} — which
+// harbormaster.Gate's `len(in.Review) > 0` check (gate.go) can't distinguish
+// from real content, so every enqueued approvals_queue row picked up a
+// meaningless "review" key even when nothing was scrubbed. Review must be
+// empty/nil when there is no user message, and still carry the preview when
+// there is one.
+func TestRunAgent_ApprovalGateReviewOmittedWhenNoUserMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty UserMessage produces no Review", func(t *testing.T) {
+		t.Parallel()
+		gate := &covGate{dec: ApprovalDecision{Approved: true}}
+		o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+		o.SetApprovalGate(gate)
+
+		req := covRunReq()
+		req.UserMessage = ""
+
+		if err := o.RunAgent(context.Background(), req, nil); err != nil {
+			t.Fatalf("RunAgent: %v", err)
+		}
+
+		gate.mu.Lock()
+		defer gate.mu.Unlock()
+		if len(gate.got) != 1 {
+			t.Fatalf("want 1 gate check, got %d", len(gate.got))
+		}
+		if len(gate.got[0].Review) != 0 {
+			t.Errorf("Review = %#v, want empty/nil for a run with no UserMessage — harbormaster.Gate's len(in.Review) > 0 check would still stamp a meaningless review key on the enqueued payload", gate.got[0].Review)
+		}
+	})
+
+	t.Run("non-empty UserMessage still produces Review", func(t *testing.T) {
+		t.Parallel()
+		gate := &covGate{dec: ApprovalDecision{Approved: true}}
+		o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+		o.SetApprovalGate(gate)
+
+		req := covRunReq() // UserMessage: "please do the thing"
+
+		if err := o.RunAgent(context.Background(), req, nil); err != nil {
+			t.Fatalf("RunAgent: %v", err)
+		}
+
+		gate.mu.Lock()
+		defer gate.mu.Unlock()
+		if len(gate.got) != 1 {
+			t.Fatalf("want 1 gate check, got %d", len(gate.got))
+		}
+		if len(gate.got[0].Review) == 0 {
+			t.Fatal("Review is empty for a run that has a UserMessage")
+		}
+		preview, _ := gate.got[0].Review["user_prompt"].(string)
+		if preview == "" {
+			t.Error(`Review["user_prompt"] is empty for a run that has a UserMessage`)
+		}
+	})
+}
+
 // openRewardTestDB gives AdjustMode/RecordOutcome somewhere to read and
 // write: just the gate_reward_history table, matching the schema
 // internal/harbormaster's own tests create (approvals_queue is not needed —

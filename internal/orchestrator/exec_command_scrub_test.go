@@ -302,8 +302,10 @@ func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, a
 			"persisted. The scrubber cannot close this — an opaque secret nobody registered "+
 			"matches no pattern, which is why it is documented as defence in depth and not a "+
 			"boundary (#2215). Wrap it in a helper that removes the prompt (journalArgv), "+
-			"records a measurement of it instead of the text (promptRef), or bounds it to a "+
-			"fixed length (journalUserMessage, truncateStr).",
+			"records a measurement of it instead of the text (promptRef, len, "+
+			"utf8.RuneCountInString), or scrubs and bounds it to a fixed length "+
+			"(journalUserMessage) — not truncateStr, which bounds length but scrubs nothing "+
+			"and is deliberately off boundingHelpers for that reason.",
 			fset.Position(pos), where, name)
 	}
 
