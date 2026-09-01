@@ -3908,10 +3908,32 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   value an agent pasted into an escalation sat there permanently, and
   nothing capped how large `context` could be. The journal payload and its
   summary line are now redacted and capped at 4096 characters, the same
-  treatment the inbox copy already got — and so is the `reason` sent in the
-  workspace-wide broadcast, since that goes out live to every connected
-  member the moment the escalation is raised, not just the person who ends
-  up seeing the inbox row.
+  treatment the inbox copy already got — and so is the `reason` sent in
+  `CreateEscalation`'s own workspace-wide broadcast, since that goes out
+  live to every connected member the moment the escalation is raised, not
+  just the person who ends up seeing the inbox row.
+
+  The same gap existed at three other points on the escalation path, closed
+  the same way: the expiry sweeper (`escalation_lifecycle.go`) re-reads
+  `reason` out of the `escalations` table and writes a SECOND permanent
+  `peer.escalation` entry when nobody answers in time — that summary line
+  now gets the identical redact-then-bound treatment, not just the create
+  path's. The auto-confidence escalation path
+  (`confidence_handler.go`) broadcasts its own `escalation.created`
+  workspace-wide with the agent-supplied `reason` — that call site now
+  redacts too. And `ResolveEscalation`'s journal entry redacted
+  `resolution` only when the escalation's type was `CREDENTIAL` and never
+  bounded it for any type, so an operator's free-text resolution on a
+  non-`CREDENTIAL` escalation could carry a secret an operator pasted in
+  ("used token ... to unblock it") into the same permanent entry, verbatim
+  and unbounded — `resolution` is now redacted and capped the same way for
+  every non-`CREDENTIAL` type.
+
+  Left out, deliberately: `CancelEscalation`'s journal entry and broadcasts
+  also carry a raw `reason`, but that text is operator-supplied (the human
+  cancelling, not the agent that raised the question), which is outside
+  this issue's scope of scrubbing agent-supplied text — tracked as a
+  follow-up rather than silently left unredacted.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

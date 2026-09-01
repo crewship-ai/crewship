@@ -26,9 +26,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -190,5 +192,174 @@ func TestCreateEscalation_JournalSummary_Redacted(t *testing.T) {
 	_, summary := createEscForJournal(t, h, jw, wsID, body)
 	if strings.Contains(summary, journalSecretCanary) {
 		t.Errorf("journal entry Summary leaked the raw secret in the clear: %q", summary)
+	}
+}
+
+// TestExpireEscalationRow_JournalSummary_Redacted — the sweeper
+// (escalation_lifecycle.go's expireEscalationRow) writes a SECOND
+// peer.escalation journal entry when a PENDING escalation's answer
+// deadline passes unanswered, built from `row.reason` read straight back
+// out of the escalations table. That is the exact same agent-supplied
+// field CreateEscalation redacts before journaling — but the sweep path
+// wrote `truncate(row.reason, 140)` with no redaction, so a credential
+// that arrived as the FIRST few words of `reason` and was never answered
+// in time rode into a second permanent entry unredacted. Same leak
+// (#2238), different route into the same journal.
+func TestExpireEscalationRow_JournalSummary_Redacted(t *testing.T) {
+	h, rec, _, wsID, crewID, agentID := escLifecycleRig(t)
+	past := time.Now().UTC().Add(-time.Hour)
+	execOrFatal(t, h.db, `INSERT INTO escalations
+		(id, workspace_id, crew_id, chat_id, from_agent_id, reason, type, status,
+		 deadline_at, answer_deadline_at, created_at)
+		VALUES (?, ?, ?, 'lc-chat', ?, ?, 'TEXT', 'PENDING', ?, ?, ?)`,
+		"lc-expire-secret", wsID, crewID, agentID,
+		journalSecretCanary+" needs the API key",
+		past.Format(time.RFC3339), past.Format(time.RFC3339),
+		time.Now().UTC().Add(-2*time.Hour).Format(time.RFC3339))
+
+	if _, err := h.sweepExpiredEscalations(context.Background(), wsID); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+
+	var summary string
+	found := false
+	for _, e := range rec.entries {
+		if e.ActorID == "escalation_deadline" {
+			summary = e.Summary
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no expiry peer.escalation journal entry recorded: %+v", rec.entries)
+	}
+	if strings.Contains(summary, journalSecretCanary) {
+		t.Errorf("expiry journal entry Summary leaked the raw secret in the clear: %q", summary)
+	}
+}
+
+// TestResolveEscalation_JournalResolution_RedactsAndBounds — the resolve
+// path's `resolutionForJournal` was only ever redacted for
+// escalationType == "CREDENTIAL" (a flat marker, since the actual secret is
+// encrypted separately), and was never length-bounded for any type. An
+// admin resolving a non-CREDENTIAL escalation with free text that happens
+// to contain a secret-shaped value ("used token sk-ant-... to unblock it")
+// put it, verbatim and unbounded, into a permanent journal entry visible to
+// every workspace reader. It needs the same RedactSecrets-then-truncate
+// treatment CreateEscalation already gives reason/context/metadata (#2238).
+func TestResolveEscalation_JournalResolution_RedactsAndBounds(t *testing.T) {
+	h, userID, wsID, crewID, _ := covEscFixture(t)
+	seedChat(t, h, "covesc-chat", "covesc-ag", wsID)
+	rec := &recordingEmitter{}
+	h.SetJournal(rec)
+
+	rr := createEsc(h, wsID, map[string]string{
+		"from_slug": "covesc-ag", "reason": "need approval", "crew_id": crewID,
+		"workspace_id": wsID, "chat_id": "covesc-chat", "type": "TEXT",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create escalation: status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		EscalationID string `json:"escalation_id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		resolution string
+	}{
+		{
+			name:       "secret-shaped resolution text must not reach the journal in the clear",
+			resolution: "used token " + journalSecretCanary + " to unblock it",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr2 := covEscResolve(h, userID, wsID, created.EscalationID, map[string]string{
+				"resolution": tc.resolution,
+				"action":     "approve",
+			})
+			if rr2.Code != http.StatusOK {
+				t.Fatalf("resolve status = %d, want 200; body=%s", rr2.Code, rr2.Body.String())
+			}
+
+			var payload map[string]any
+			found := false
+			for _, e := range rec.entries {
+				if e.Type == journal.EntryPeerEscalation && e.Payload != nil {
+					if state, _ := e.Payload["state"].(string); state == "resolved" {
+						payload = e.Payload
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("no resolution peer.escalation journal entry recorded: %+v", rec.entries)
+			}
+			res, ok := payload["resolution"].(string)
+			if !ok {
+				t.Fatalf("resolution journal payload missing/not a string: %v", payload)
+			}
+			if strings.Contains(res, journalSecretCanary) {
+				t.Errorf("resolution journal payload leaked the raw secret in the clear: %q", res)
+			}
+		})
+	}
+}
+
+// TestResolveEscalation_JournalResolution_Bounded pins the length ceiling
+// directly: an unbounded `resolution` field bypasses no BodyCap (this route
+// is a normal authenticated JSON endpoint, but nothing capped this specific
+// field before the fix) and lands in the same permanent, hash-chained entry
+// the sweeper and CreateEscalation now both bound.
+func TestResolveEscalation_JournalResolution_Bounded(t *testing.T) {
+	h, userID, wsID, crewID, _ := covEscFixture(t)
+	seedChat(t, h, "covesc-chat", "covesc-ag", wsID)
+	rec := &recordingEmitter{}
+	h.SetJournal(rec)
+
+	rr := createEsc(h, wsID, map[string]string{
+		"from_slug": "covesc-ag", "reason": "need approval", "crew_id": crewID,
+		"workspace_id": wsID, "chat_id": "covesc-chat", "type": "TEXT",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create escalation: status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		EscalationID string `json:"escalation_id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	rr2 := covEscResolve(h, userID, wsID, created.EscalationID, map[string]string{
+		"resolution": journalOversizedBlob,
+		"action":     "approve",
+	})
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("resolve status = %d, want 200; body=%s", rr2.Code, rr2.Body.String())
+	}
+
+	var payload map[string]any
+	found := false
+	for _, e := range rec.entries {
+		if e.Type == journal.EntryPeerEscalation && e.Payload != nil {
+			if state, _ := e.Payload["state"].(string); state == "resolved" {
+				payload = e.Payload
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no resolution peer.escalation journal entry recorded: %+v", rec.entries)
+	}
+	res, ok := payload["resolution"].(string)
+	if !ok {
+		t.Fatalf("resolution journal payload missing/not a string: %v", payload)
+	}
+	if n := len([]rune(res)); n > journalFieldBoundLen+1 {
+		t.Errorf("resolution journal payload is unbounded: %d runes (want <= %d)", n, journalFieldBoundLen+1)
 	}
 }

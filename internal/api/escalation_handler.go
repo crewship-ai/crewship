@@ -676,7 +676,16 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// stream visible to every workspace reader. Replace with an
 	// opaque marker instead; the encrypted value in `escalations.
 	// resolution` stays the canonical record.
-	resolutionForJournal := body.Resolution
+	//
+	// Every OTHER type still writes body.Resolution — an operator-supplied
+	// free-text field — straight into the same permanent, hash-chained
+	// entry. The type check above only catches a secret the escalation
+	// itself was ABOUT; it says nothing about a secret the resolving human
+	// happens to paste into a TOOL or TEXT resolution ("used token ghp_...
+	// to unblock it"), so it needs the same redact-then-bound treatment
+	// CreateEscalation gives the agent-supplied fields (#2238) rather than a
+	// second policy that only fires on one escalation type.
+	resolutionForJournal := truncate(inbox.RedactSecrets(body.Resolution), maxJournalEscalationFieldLen)
 	if escalationType == "CREDENTIAL" {
 		resolutionForJournal = "***REDACTED:credential***"
 	}
