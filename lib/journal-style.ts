@@ -31,6 +31,8 @@ export type EntryGroup =
   | "audit"
   | "provisioning"
   | "chat"
+  | "routine"
+  | "page"
   | "other"
 
 /**
@@ -42,10 +44,10 @@ export type EntryGroup =
  */
 export type EntryBundle =
   | "runtime"     // exec / network / file / container
-  | "lifecycle"   // run / mission / assignment / approval / provisioning
+  | "lifecycle"   // run / routine / mission / assignment / approval / provisioning
   | "security"    // keeper / audit
   | "ai"          // chat / cost / skill / memory
-  | "workspace"   // peer / system / other
+  | "workspace"   // peer / page / system / other
 
 export const SEVERITY_COLOR: Record<JournalSeverity, string> = {
   info: "#38bdf8",   // sky-400
@@ -79,6 +81,18 @@ export const GROUP_COLOR: Record<EntryGroup, string> = {
   audit: "#e879f9",       // fuchsia — distinct from keeper purple
   provisioning: "#7dd3fc", // sky-300 — neighbours indigo/cyan family for "container building"
   chat: "#fdba74",        // orange-300 — warm, distinct from cost yellow
+  // green-400. The palette's one wide free hue gap is between memory lime
+  // (83°) and exec emerald (160°), and 142° splits it. Emerald is the closest
+  // neighbour at ΔE76 ≈ 19 — comfortably the widest separation still
+  // available, and more than 3× the palette's existing file↔system pair, but
+  // green and emerald are not unmistakable at the 6px dot, so the chip's text
+  // label carries the identification. Not any orange: `run` is #fb923c and a
+  // routine run must not look like an agent run at a glance.
+  routine: "#4ade80",
+  // violet-300 — paler than container indigo-400 (#818cf8) and keeper
+  // purple-400 (#c084fc), and deliberately NOT #a78bfa, which is already
+  // SEVERITY_COLOR.notice: a group dot must never borrow a severity colour.
+  page: "#c4b5fd",
   other: "#9ca3af",
 }
 
@@ -100,17 +114,25 @@ export const GROUP_LABEL: Record<EntryGroup, string> = {
   audit: "audit",
   provisioning: "provisioning",
   chat: "chat",
+  routine: "routine",
+  page: "page",
   other: "other",
 }
 
-/** Render order in the type-chip filter row. */
-export const GROUP_ORDER: EntryGroup[] = [
+/**
+ * Render order in the type-chip filter row, and — via journal-perf.ts —
+ * the seed for the per-group counters. `readonly` because those are two
+ * jobs for one array: a consumer calling `.sort()` on it would silently
+ * reorder the chips AND the counter seed together.
+ */
+export const GROUP_ORDER: readonly EntryGroup[] = [
   "exec",
   "network",
   "file",
   "container",
   "provisioning",
   "run",
+  "routine",
   "mission",
   "assignment",
   "approval",
@@ -121,13 +143,14 @@ export const GROUP_ORDER: EntryGroup[] = [
   "cost",
   "skill",
   "memory",
+  "page",
   "system",
   "other",
 ]
 
 /**
  * Bundle membership — used by the Timeline toolbar's "5-bundle" chip
- * mode to collapse 18 base groups into 5 user-meaningful domains.
+ * mode to collapse the base groups into 5 user-meaningful domains.
  * Toggling a bundle toggles every base group inside it.
  */
 export const GROUP_TO_BUNDLE: Record<EntryGroup, EntryBundle> = {
@@ -136,6 +159,7 @@ export const GROUP_TO_BUNDLE: Record<EntryGroup, EntryBundle> = {
   file: "runtime",
   container: "runtime",
   run: "lifecycle",
+  routine: "lifecycle",
   mission: "lifecycle",
   assignment: "lifecycle",
   approval: "lifecycle",
@@ -147,6 +171,7 @@ export const GROUP_TO_BUNDLE: Record<EntryGroup, EntryBundle> = {
   skill: "ai",
   memory: "ai",
   peer: "workspace",
+  page: "workspace",
   system: "workspace",
   other: "workspace",
 }
@@ -162,7 +187,7 @@ export const BUNDLE_LABEL: Record<EntryBundle, string> = {
 /** Render order for the bundle row when the toolbar is in bundle mode. */
 export const BUNDLE_ORDER: EntryBundle[] = ["runtime", "lifecycle", "security", "ai", "workspace"]
 
-const TYPE_TO_GROUP: Record<string, EntryGroup> = {
+export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "exec.command": "exec",
   "exec.output_chunk": "exec",
   "network.egress": "network",
@@ -241,10 +266,135 @@ const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "chat.agent_response": "chat",
   // Agent runtime errors (panic, provider stream errors, etc.).
   "agent.error": "system",
+
+  // ── Routines. pipeline.* IS the routine engine, and automation.* is the
+  // substrate that fires it: internal/journal/types.go says of both
+  // automation entries that "someone asking 'why did my routine not run'
+  // needs to find these", so they share the chip rather than sitting in
+  // System where they would be filed and forgotten. Same call
+  // lib/activity-stream.ts's "Routines" facet already makes.
+  "pipeline.run.started": "routine",
+  "pipeline.run.completed": "routine",
+  "pipeline.run.failed": "routine",
+  "pipeline.step.started": "routine",
+  "pipeline.step.completed": "routine",
+  "pipeline.step.failed": "routine",
+  "pipeline.step.validation_failed": "routine",
+  "pipeline.step.skipped": "routine",
+  "pipeline.step.retrying": "routine",
+  "pipeline.step.container_ready": "routine",
+  "pipeline.dry_run": "routine",
+  "pipeline.schedule.circuit_breaker_tripped": "routine",
+  "pipeline.schedule.missed_occurrences": "routine",
+  "pipeline.runs_swept": "routine",
+  "automation.throttled": "routine",
+  "automation.depth_exceeded": "routine",
+
+  // ── Pages. The whole surface in one chip: panels, freshness verdicts,
+  // wake gates, action dispatches, spec edits, grants, ownership, and the
+  // three ways a page leaves the product (public link, public view,
+  // webhook). Splitting grants into `audit` and publishing into `keeper`
+  // would answer "what happened to this page" with a third of the evidence.
+  "page.produce_denied": "page",
+  "page.panel.updated": "page",
+  "page.panel.stale": "page",
+  "page.panel.recovered": "page",
+  "page.wake.fired": "page",
+  "page.action.dispatched": "page",
+  "page.spec.changed": "page",
+  "page.grant_added": "page",
+  "page.grant_removed": "page",
+  "page.owner_transferred": "page",
+  "page.published": "page",
+  "page.link_revoked": "page",
+  "page.public_view": "page",
+  "page.webhook_issued": "page",
+  "page.webhook_revoked": "page",
+
+  // ── Memory, beyond the three that were already mapped. The skill_*
+  // trio is the memory→Skills bridge, so it groups with memory (where the
+  // proposal came from) rather than with skill (the imported artefact).
+  "memory.write_rejected": "memory",
+  "memory.write_verifier_blocked": "memory",
+  "memory.consolidation_proposed": "memory",
+  "memory.searched": "memory",
+  "memory.versions_swept": "memory",
+  "memory.config_updated": "memory",
+  "memory.skill_proposed": "memory",
+  "memory.skill_approved": "memory",
+  "memory.skill_rejected": "memory",
+
+  // ── Credentials and keeper policy. credential.auto_assign_* already
+  // lived in keeper; the reveal/lease/classification events are the same
+  // question ("who got reach they did not have") one level up.
+  "credential.revealed": "keeper",
+  "credential.reveal_policy_changed": "keeper",
+  "credential.sensitivity_lowered": "keeper",
+  "credential.lease_issued": "keeper",
+  "keeper.rule_auto_tuned": "keeper",
+
+  // ── Approvals. A trust grant is a STANDING approval decision and an
+  // auto-tuning reset wipes the window those decisions are scored against
+  // — both belong with the one-off decisions, not in a namespace of their
+  // own that hides why later runs stopped asking.
+  "approval.trust_granted": "approval",
+  "approval.trust_revoked": "approval",
+  "approval.auto_tuning_reset": "approval",
+
+  // ── Outbound notification sends. Grouped with peer messaging for the
+  // same reason activity-stream.ts's "Messages" facet holds all of them:
+  // a delivery is a message that left the instance.
+  "notification.delivered": "peer",
+  "notification.failed": "peer",
+  "notification.dropped": "peer",
+
+  // ── Chat. A compaction is the conversation losing its own history, so
+  // it belongs beside the turns it dropped.
+  "conversation.compacted": "chat",
+
+  // ── Missions.
+  "mission.created": "mission",
+  "mission.assigned": "mission",
+
+  // ── Runs. Session provenance and tool spans describe one run each, so
+  // they sit with the run lifecycle rather than under System.
+  "run.session_init": "run",
+  "run.agent_span": "run",
+
+  // ── Provisioning / runtime freshness. sidecar.stale and image.stale are
+  // both "this container is serving something older than the last deploy",
+  // which is the provisioning story, not a system one.
+  "provisioning.build_failed": "provisioning",
+  "provisioning.step": "provisioning",
+  "sidecar.stale": "provisioning",
+  "image.stale": "provisioning",
+
+  // ── Skills.
+  "skill.invoked": "skill",
+
+  // ── System. hook.dispatch_error was already in journal-groups.ts's
+  // system exclusion list but missing here, so muting the System chip
+  // excluded it server-side while the client still called it "other".
+  "hook.dispatch_error": "system",
+  "onboarding.proposal_applied": "system",
+  "queue.sweeper_pumped": "system",
+  "policy.changed": "system",
 }
 
-/** Short, dense label rendered inside the type pill on every log row. */
-const TYPE_PILL_LABEL: Record<string, string> = {
+/**
+ * Short, dense label rendered inside the type pill on every log row.
+ *
+ * DELIBERATELY NOT EXTENDED to the entry types #2207 mapped. `pillLabelOf`
+ * has exactly one consumer in the tree — components/features/logs/logs-list.tsx
+ * — and #2213 replaces the pill there with an icon plus the full dotted
+ * entry_type, so anything added here now would land dead. The abbreviation is
+ * also lossy where it matters most: the fourteen `pipeline.*` types collapse to
+ * one or two labels, while the dotted name at least separates
+ * `pipeline.step.*` from `pipeline.run.*`, and the group is already encoded
+ * twice on the row (icon + colour). Unmapped types fall through to the raw
+ * entry_type below, which is what #2213 shows for everything anyway.
+ */
+export const TYPE_PILL_LABEL: Record<string, string> = {
   "exec.command": "exec",
   "exec.output_chunk": "stdout",
   "network.egress": "egress",

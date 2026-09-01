@@ -136,6 +136,10 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       // hide why later runs stopped asking.
       "approval.trust_granted",
       "approval.trust_revoked",
+      // Keeper's rolling-reward window: the rule that retuned itself, and
+      // the operator who wiped the evidence it tuned against.
+      "keeper.rule_auto_tuned",
+      "approval.auto_tuning_reset",
       "credential.revealed",
       "credential.lease_issued",
       "credential.reveal_policy_changed",
@@ -173,6 +177,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "memory.skill_proposed",
       "memory.skill_approved",
       "memory.skill_rejected",
+      "memory.priority_changed",
       "skill.invoked",
       "skill.assigned",
       "skill.unassigned",
@@ -243,6 +248,18 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "page.wake.fired",
       "page.action.dispatched",
       "page.spec.changed",
+      // The ways a page leaves the product: a public link, a view against
+      // one, and a webhook credential that writes a panel from outside.
+      "page.published",
+      "page.link_revoked",
+      "page.public_view",
+      "page.webhook_issued",
+      "page.webhook_revoked",
+      "page.owner_transferred",
+      // Workspace plumbing with no facet of its own.
+      "onboarding.proposal_applied",
+      "policy.changed",
+      "queue.sweeper_pumped",
     ],
   },
 ]

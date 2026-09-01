@@ -74,7 +74,7 @@
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
-    "@tanstack/react-query": "^5.101.4",
+    "@tanstack/react-query": "^5.102.8",
     "@tiptap/core": "^3.29.2",
     "@tiptap/extension-code-block-lowlight": "^3.29.2",
     "@tiptap/extension-color": "^3.29.2",
@@ -168,7 +168,8 @@
       "postcss": "^8.5.25",
       "uuid": ">=11.1.1",
       "valibot": ">=1.4.2",
-      "sharp": ">=0.35.0"
+      "sharp": ">=0.35.0",
+      "@sentry/nextjs": "<10.72.0"
     }
   },
   "devDependencies": {
@@ -178,7 +179,7 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@typescript-eslint/eslint-plugin": "^8.65.0",

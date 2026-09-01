@@ -811,7 +811,7 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 		CrewID:      existing.CrewID,
 		AgentID:     existing.AgentID,
 		MissionID:   existing.MissionID,
-		Type:        "memory.priority_changed",
+		Type:        journal.EntryMemoryPriorityChanged,
 		ActorType:   journal.ActorUser,
 		ActorID:     actorID,
 		Severity:    journal.SeverityNotice,
