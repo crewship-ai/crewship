@@ -610,6 +610,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Restoring a bundle taken before the `issue_counters` re-key silently
+  dropped every counter row (#2034).** `#1797` re-keyed `issue_counters`
+  from `crew_id` to `(workspace_id, prefix)` — the first non-additive
+  column change the restore path had met. A bundle taken before that
+  migration carries `{crew_id, next_number}`; `crew_id` has no column on
+  the new table, so it was dropped from the `INSERT`, the statement
+  degenerated into `INSERT OR IGNORE INTO issue_counters (next_number)
+  VALUES (?)`, and the `NOT NULL` on the two new key columns turned the
+  drop into a constraint violation `OR IGNORE` swallowed — the restore
+  reported success having landed nothing. Mostly self-healing (the
+  allocator reseeds a missing counter from the highest identifier already
+  restored under that prefix), except for a crew whose issues had ALL been
+  deleted before the backup: its counter was the only remaining record of
+  how far it had counted, so the crew restarted at 1 and re-used
+  identifiers people and external systems still reference. Restore now
+  resolves each row's crew — from the bundle's own `crews` table, or the
+  target's if it already exists there — to its workspace and effective
+  prefix, and writes the counter under the current key; two crews sharing
+  an effective prefix collapse onto the higher `next_number` rather than
+  either individual value, so the allocator can never re-issue an
+  identifier that already exists. A row whose crew cannot be resolved
+  anywhere still cannot be honestly guessed at, so it falls through to the
+  counted, reported column-drop warning (`columns_dropped` /
+  `dropped_columns`) restore already surfaces for schema skew in general
+  (#2108).
 - **The feedback API docs still described the security hole #1213 had
   already closed (#1617).** `docs/api-reference/feedback.mdx` and
   `docs/guides/feedback.mdx` said `POST /api/v1/feedback` fell back to the

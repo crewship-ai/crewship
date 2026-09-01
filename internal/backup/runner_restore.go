@@ -150,6 +150,12 @@ type RestoreResult struct {
 	// DroppedColumns names them — table, column, and how many rows carried
 	// it. Bounded; ColumnsDropped stays exact.
 	DroppedColumns []DroppedColumn
+	// IssueCountersMigrated counts issue_counters rows this restore
+	// translated from a pre-#1797 {crew_id, next_number} shape into the
+	// current {workspace_id, prefix, next_number} shape instead of losing
+	// them to ColumnsDropped (#2034). On a dry run this is what WOULD be
+	// migrated. Zero for a bundle that already carries the current shape.
+	IssueCountersMigrated int
 	// JournalEntriesResigned / JournalCheckpointsResigned count the journal
 	// rows a FORKED restore (--as-workspace / --as-crew) had to re-sign,
 	// because RemapIDs rewrote the ids their hash chain commits to (#2226).
@@ -805,11 +811,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// PRAGMA table_info is a target this bundle is not going to restore
 		// into, and saying "validation OK" about it is the lie a dry run
 		// exists to prevent.
-		columnsDropped, droppedColumns, err := InspectDroppedColumns(ctx, db, extracted.DBDump)
+		columnsDropped, droppedColumns, issueCountersMigrated, err := InspectDroppedColumns(ctx, db, extracted.DBDump)
 		if err != nil {
 			return nil, err
 		}
 		warnDroppedColumns(opts.Logger, droppedColumns, columnsDropped, true)
+		warnIssueCountersMigrated(opts.Logger, issueCountersMigrated, true)
 		return &RestoreResult{
 			Manifest:               manifest,
 			RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
@@ -822,6 +829,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			SecurityLevelClamps:    clamps,
 			ColumnsDropped:         columnsDropped,
 			DroppedColumns:         droppedColumns,
+			IssueCountersMigrated:  issueCountersMigrated,
 
 			// A dry run of a FORKED restore already performed the
 			// re-sign, in memory, on its way here — reporting 0 would
@@ -969,6 +977,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		stats = s
 		warnSecurityLevelClamps(opts.Logger, stats.SecurityLevelClamps, stats.SecurityLevelClamped, false)
 		warnDroppedColumns(opts.Logger, stats.DroppedColumns, stats.ColumnsDropped, false)
+		warnIssueCountersMigrated(opts.Logger, stats.IssueCountersMigrated, false)
 	} else {
 		if err := memoryBlobsRestore(ctx); err != nil {
 			return nil, err
@@ -1024,8 +1033,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			// "every PK collided" message is wrong if what actually
 			// happened is that the key columns were dropped. Carrying the
 			// skew out here is what lets the operator tell them apart.
-			ColumnsDropped: stats.ColumnsDropped,
-			DroppedColumns: stats.DroppedColumns,
+			ColumnsDropped:        stats.ColumnsDropped,
+			DroppedColumns:        stats.DroppedColumns,
+			IssueCountersMigrated: stats.IssueCountersMigrated,
 		}, fmt.Errorf("%w: 0 of %d rows inserted — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", ErrNoOpRestore, stats.RowsSeen)
 	}
 
@@ -1045,6 +1055,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		SecurityLevelClamps:    stats.SecurityLevelClamps,
 		ColumnsDropped:         stats.ColumnsDropped,
 		DroppedColumns:         stats.DroppedColumns,
+		IssueCountersMigrated:  stats.IssueCountersMigrated,
 
 		JournalEntriesResigned:     journalChainResigned.Entries,
 		JournalCheckpointsResigned: journalChainResigned.Checkpoints,

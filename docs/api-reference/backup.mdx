@@ -371,7 +371,8 @@ Restore a bundle into the current workspace.
     { "credential_id": "cred_abc123", "name": "deploy-key", "from": "0", "to": 4 }
   ],
   "columns_dropped": 0,
-  "dropped_columns": []
+  "dropped_columns": [],
+  "issue_counters_migrated": 0
 }
 ```
 
@@ -386,6 +387,8 @@ Re-calling WITHOUT `files_only` after a rename does not work and is not the reco
 `columns_dropped` counts the values this restore discarded because the bundle named a column this instance's schema does not have; `dropped_columns` names them as `{table, column, rows}`, bounded to 20 pairs while the count stays exact. On a `dry_run` both report what *would* be discarded, which is the point at which you can still do something about it.
 
 Dropping unknown columns is deliberate — it is what lets a bundle from a newer Crewship restore into an older instance — but it is not always harmless, and `rows_inserted` cannot show the difference. A row whose remaining columns satisfy the table lands **without** those values. A row that needed a dropped column to satisfy a `NOT NULL` or a primary key does not land **at all**, and `INSERT OR IGNORE` reports neither the violation nor the loss. That is what a non-zero `columns_dropped` is warning about: the bundle was written against a different schema, and this restore is incomplete in a way nothing else in the response records. Check each table named before treating the restore as done. Restoring a bundle taken before a **non-additive** migration (one that re-keys or renames rather than adds) is the case that produces it.
+
+`issue_counters_migrated` (#2034) is the one exception the restore repairs instead of merely reporting: a bundle taken before migration `20260820125000_issue_counters_prefix_scope` (#1797) carries `issue_counters` rows keyed on `crew_id`, which the current table does not have a column for — without this, the row would land in `columns_dropped` and, because `crew_id` was part of the old primary key, never actually restore. Each row is resolved instead, by crew, to its workspace and effective prefix (from the bundle's own `crews` table, or the target's if the crew already exists there) and written under the current `(workspace_id, prefix)` key; two crews sharing an effective prefix collapse onto one row, keeping the higher `next_number`. A row whose crew cannot be resolved anywhere still falls through to `columns_dropped` — it is not guessed at. On a `dry_run`, `issue_counters_migrated` reports what *would* be migrated.
 
 ### Errors
 
