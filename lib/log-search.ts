@@ -9,6 +9,7 @@ import type { JournalEntry } from "@/lib/types/journal"
  *                          mission_id/mission, trace_id/trace, or any
  *                          payload key)
  *   foo bar            → all-tokens substring match on summary + entry_type
+ *                          + the entry's payload JSON
  *
  * Free-text and key:value tokens AND together; bare regex form short-circuits.
  * Returns `null` for an empty/whitespace query so callers can skip filtering.
@@ -43,7 +44,9 @@ export function buildMatcher(q: string): ((e: JournalEntry) => boolean) | null {
   return (e) => {
     const hay = `${e.summary || ""} ${e.entry_type}`.toLowerCase()
     for (const tok of free) {
-      if (!hay.includes(tok)) return false
+      // Fall back to the payload only when the summary misses, so the
+      // common case never pays for the stringify.
+      if (!hay.includes(tok) && !payloadText(e).includes(tok)) return false
     }
     if (kv.length > 0) {
       for (const [k, v] of kv) {
@@ -148,6 +151,37 @@ export function parseStructuredQuery(q: string): StructuredQuery {
   }
   out.clientQuery = remaining.join(" ")
   return out
+}
+
+/**
+ * Lower-cased JSON text of an entry's payload, memoised per payload
+ * object so a 5,000-row buffer is stringified at most once per entry no
+ * matter how many keystrokes the user types.
+ *
+ * Free text has to reach the payload because the server's FTS5 index
+ * covers `summary` AND the raw `payload` JSON (migration 55). A matcher
+ * reading only the summary filters out rows the backend just matched on
+ * a payload field, and the panel then reports "No entries match the
+ * current filters" over a non-empty result set (#2206). Matching the
+ * serialised JSON — keys included — is exactly what the server indexes.
+ */
+const payloadTextCache = new WeakMap<object, string>()
+
+function payloadText(e: JournalEntry): string {
+  const payload = e.payload
+  if (!payload) return ""
+  const cached = payloadTextCache.get(payload)
+  if (cached !== undefined) return cached
+  let text = ""
+  try {
+    text = JSON.stringify(payload).toLowerCase()
+  } catch {
+    // Circular or otherwise unserialisable payload — treat as no text
+    // rather than throwing out of a filter callback.
+    text = ""
+  }
+  payloadTextCache.set(payload, text)
+  return text
 }
 
 function readField(e: JournalEntry, k: string): unknown {
