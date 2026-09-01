@@ -519,7 +519,13 @@ echo "== the API failing is its own state, never a benign one =="
 # pure-stdin test can reach that branch. So drive the real script with a `gh`
 # that fails. Still network-free — the stub is the only `gh` on PATH.
 STUB_DIR="$(mktemp -d)"
-trap 'rm -rf "$STUB_DIR"' EXIT
+# ONE cleanup for every temp dir this file makes. Bash keeps a single action
+# per signal, so a second `trap ... EXIT` further down does not add to this one
+# — it replaces it, and whatever the first was guarding is leaked silently. A
+# later block did exactly that and left one directory behind per run.
+assemble_tmp=""
+cleanup() { rm -rf "$STUB_DIR" ${assemble_tmp:+"$assemble_tmp"}; }
+trap cleanup EXIT
 stub_gh() { printf '%s\n' '#!/bin/sh' "$@" > "$STUB_DIR/gh"; chmod +x "$STUB_DIR/gh"; }
 with_stub() { PATH="$STUB_DIR:$PATH" "$RS" "$@" 2>&1; }
 
@@ -620,8 +626,7 @@ expect_contains "--help prints the whole header, not a truncated slice" \
 # this tool refuses to judge it — and `unknown` on the busiest PR is exactly
 # where a reader shrugs and merges. Worse, it is indistinguishable from a
 # genuine network blip, and was in fact misread as one.
-assemble_tmp="$(mktemp -d)"
-trap 'rm -rf "$assemble_tmp"' EXIT
+assemble_tmp="$(mktemp -d)"   # removed by the cleanup trap above
 
 printf '{"number":1,"title":"t","head":{"ref":"b","sha":"deadbeef"},"created_at":"2026-01-01T00:00:00Z"}' \
   > "$assemble_tmp/pr.json"
