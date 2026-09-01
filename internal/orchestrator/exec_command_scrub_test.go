@@ -27,7 +27,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -303,8 +302,10 @@ func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, a
 			"persisted. The scrubber cannot close this — an opaque secret nobody registered "+
 			"matches no pattern, which is why it is documented as defence in depth and not a "+
 			"boundary (#2215). Wrap it in a helper that removes the prompt (journalArgv), "+
-			"records a measurement of it instead of the text (promptRef), or bounds it to a "+
-			"fixed length (journalUserMessage, truncateStr).",
+			"records a measurement of it instead of the text (promptRef, len, "+
+			"utf8.RuneCountInString), or scrubs and bounds it to a fixed length "+
+			"(journalUserMessage) — not truncateStr, which bounds length but scrubs nothing "+
+			"and is deliberately off boundingHelpers for that reason.",
 			fset.Position(pos), where, name)
 	}
 
@@ -398,21 +399,29 @@ func isScrubbedArgvExpr(e ast.Expr) bool {
 // boundingHelpers are the calls allowed to carry a prompt-bearing expression
 // into a persisted field. Each either removes the prompt text outright
 // (journalArgv), replaces it with a measurement (promptRef, len,
-// utf8.RuneCountInString), or scrubs and bounds it (journalUserMessage,
-// truncateStr — whose bound is checked, see boundedByHelper). Adding a name
-// here is a deliberate statement that the helper makes the value safe to
-// persist forever, which is why the list is short and the entries are boring.
+// utf8.RuneCountInString), or scrubs and bounds it (journalUserMessage).
+// Adding a name here is a deliberate statement that the helper makes the
+// value safe to persist forever, which is why the list is short and the
+// entries are boring.
 //
-// truncateCmd is NOT here. It is a pure join-and-clip of whatever argv it is
-// handed and scrubs nothing, so blessing it would let truncateCmd(cmd, 4096)
-// write 4096 raw characters of a Gemini or Codex argv — whose prompt is its
-// second element. Its only safe caller passes journalCmd.argv, which rule 1
-// already covers.
+// truncateStr is deliberately NOT here (#2228 took it off). It bounds
+// length but scrubs nothing, so blessing it would let a future call site
+// write truncateStr(req.UserMessage, 500) straight past the guard, exactly
+// the shape the approval-gate args carried before #2228 — 500 raw,
+// unscrubbed characters in approvals_queue.payload. Every current call
+// wraps an already-scrubbed value (journalUserMessage's own body) or a
+// non-prompt string, so narrowing the allowlist costs nothing today and
+// stops it from being reached for.
+//
+// truncateCmd is NOT here either. It is a pure join-and-clip of whatever
+// argv it is handed and scrubs nothing, so blessing it would let
+// truncateCmd(cmd, 4096) write 4096 raw characters of a Gemini or Codex
+// argv — whose prompt is its second element. Its only safe caller passes
+// journalCmd.argv, which rule 1 already covers.
 var boundingHelpers = map[string]bool{
 	"journalArgv":            true,
 	"journalUserMessage":     true,
 	"promptRef":              true,
-	"truncateStr":            true,
 	"len":                    true,
 	"utf8.RuneCountInString": true,
 	// Returns an int, and the guard's own message recommends exactly this
@@ -437,28 +446,20 @@ func calleeName(fun ast.Expr) string {
 	return ""
 }
 
-// boundedByHelper reports whether e is a call to a bounding helper that is
-// actually bounding. For truncateStr the limit is part of the claim, so an
-// untyped integer literal over the payload's own field cap is not accepted —
-// truncateStr(msg, 100000) is a helper call that bounds nothing.
+// boundedByHelper reports whether e is a call to a bounding helper.
+//
+// truncateStr used to be one, with an extra check here that its limit
+// argument was a literal within the payload's own field cap (so
+// truncateStr(msg, 100000) would not have counted as bounding). #2228 took
+// truncateStr off boundingHelpers entirely — it bounds length but scrubs
+// nothing — which made that per-argument check unreachable; removed with it
+// rather than left as dead code guarding a name the map no longer allows.
 func boundedByHelper(e ast.Expr) bool {
 	call, ok := e.(*ast.CallExpr)
 	if !ok {
 		return false
 	}
-	name := calleeName(call.Fun)
-	if !boundingHelpers[name] {
-		return false
-	}
-	if name != "truncateStr" || len(call.Args) < 2 {
-		return true
-	}
-	lit, ok := call.Args[1].(*ast.BasicLit)
-	if !ok || lit.Kind != token.INT {
-		return false
-	}
-	n, err := strconv.Atoi(lit.Value)
-	return err == nil && n > 0 && n <= journalFieldMaxChars
+	return boundingHelpers[calleeName(call.Fun)]
 }
 
 // promptAliases returns the locals in fn that hold prompt text: assigned from a

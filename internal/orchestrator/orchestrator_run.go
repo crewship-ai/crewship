@@ -118,18 +118,32 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		span.End()
 	}()
 
+	// journalUserMessage scrubs the message against this run's credential
+	// values and the built-in patterns, then bounds it to
+	// journalUserMessageMaxChars. Computed once, up front, and reused for
+	// both the chat.user_message journal entry below and the approval-gate
+	// review text (#2228) — one policy, not two that can drift. Guarded on
+	// UserMessage being non-empty: a run with nothing to scrub (e.g.
+	// ApprovalMode == "none", or any call site that never had a chat
+	// message) has no journal entry to make and nothing for a human to
+	// review, so userPreview/userTruncated stay zero-valued and Review
+	// below stays nil rather than a map holding an empty preview.
+	var userPreview string
+	var userTruncated bool
+
 	// Capture the user prompt that triggered this run as a journal
 	// entry. Lands in the Timeline as the "what kicked this off"
 	// signal — without it, a viewer scrolling through exec.command +
 	// network.egress can't reconstruct WHY the agent was doing those
 	// things. Best-effort: a journal hiccup never aborts the run.
 	if req.UserMessage != "" {
+		userPreview, userTruncated = journalUserMessage(req)
+
 		// The summary was already capped at 240 chars; the payload was the
 		// verbatim message, uncapped and unscrubbed, in the same append-only
 		// row (#2215). Both now come from the same bounded, scrubbed preview,
 		// so the payload can never carry more of a pasted secret than the
 		// summary rendered beside it.
-		userPreview, userTruncated := journalUserMessage(req)
 		_, _ = o.getJournal().Emit(ctx, JournalEntry{
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
@@ -166,16 +180,41 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if approvalMode == "" {
 		approvalMode = "none"
 	}
+	// Built only when there is an actual user message to show a human —
+	// left nil otherwise so harbormaster.Gate's `len(in.Review) > 0` check
+	// (gate.go) omits the "review" key from the enqueued payload entirely,
+	// rather than storing {"user_prompt": "", "user_prompt_truncated":
+	// false} on every gated run regardless of ApprovalMode.
+	var review map[string]any
+	if req.UserMessage != "" {
+		review = map[string]any{
+			"user_prompt":           userPreview,
+			"user_prompt_truncated": userTruncated,
+		}
+	}
 	gateDecision, gateErr := o.getApprovalGate().Check(ctx, ApprovalCheckInput{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
 		Tool:        "agent_run",
+		// Args is the reward-fingerprint key (harbormaster.HashArgs hashes
+		// it verbatim, key AND value) as well as the rule-evaluator input,
+		// so it may only carry values that are the same across repeated,
+		// unrelated invocations of this agent. agent_slug/agent_role
+		// qualify; the user's message does not — two runs of the same
+		// agent differing only in wording used to hash into disjoint
+		// cohorts, so gate auto-tuning could never reach quorum for
+		// agent_run (#2234).
 		Args: map[string]any{
-			"agent_slug":  req.AgentSlug,
-			"agent_role":  req.AgentRole,
-			"user_prompt": truncateStr(req.UserMessage, 500),
+			"agent_slug": req.AgentSlug,
+			"agent_role": req.AgentRole,
 		},
+		// Review carries context for a human deciding the approval —
+		// scrubbed and bounded by the same journalUserMessage helper the
+		// chat.user_message journal entry uses above (#2228) — without
+		// feeding it into the reward fingerprint. It is not hashed and
+		// does not affect cohorting. nil when there was no user message.
+		Review: review,
 		Mode:   approvalMode,
 		UserID: req.AgentID,
 	})

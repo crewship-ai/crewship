@@ -454,6 +454,15 @@ func generateAutoCredentialValue(bytes int) (string, error) {
 	// TestValidate_OverCeilingLengthDoesNotAllocate pins it.
 	// maxAutoCredentialBytes is already far past any real credential,
 	// so clamping still yields a strong value.
+	//
+	// NOTE for anyone reading this after a CodeQL alert: go/uncontrolled-
+	// allocation-size (alert #867) still names the make() below as
+	// depending on a user-provided value. It does — the reassign-then-
+	// clamp two lines up isn't a pattern its Go model recognizes as a
+	// sanitizer (it looks for early-return/panic guards, not a bound
+	// applied by mutating the tainted variable itself). By the time
+	// execution reaches make(), bytes is provably <= maxAutoCredentialBytes
+	// regardless of the declared length; dismissed as false positive.
 	if bytes > maxAutoCredentialBytes {
 		bytes = maxAutoCredentialBytes
 	}
