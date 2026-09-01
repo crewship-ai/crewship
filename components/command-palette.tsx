@@ -140,7 +140,7 @@ const NAV_ITEMS: Array<{ title: string; href: string; icon: typeof Network; keyw
   { title: "Dashboard", href: "/", icon: LayoutDashboard, keywords: [] },
   { title: "Issues", href: "/issues", icon: CircleDot, keywords: [] },
   { title: "Crews", href: "/crews", icon: Network, keywords: ["agents", "roster", "canvas"] },
-  { title: "Inbox", href: "/inbox", icon: Inbox, keywords: [] },
+  { title: "Inbox", href: "/inbox-v2", icon: Inbox, keywords: [] },
   { title: "Approvals", href: "/approvals", icon: ClipboardCheck, keywords: [] },
   { title: "Activity", href: "/activity", icon: Activity, keywords: ["runs", "traces"] },
   { title: "Routines", href: "/routines", icon: CalendarClock, keywords: ["pipelines"] },

@@ -11,8 +11,16 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 	boolean := func() map[string]any { return map[string]any{"type": "boolean"} }
 	anyJSON := func() map[string]any { return map[string]any{} }
 	anyObject := func() map[string]any { return map[string]any{"type": "object", "additionalProperties": true} }
-	object := func(properties map[string]any) map[string]any {
-		return map[string]any{"type": "object", "properties": properties}
+	// Variadic `required`, matching schemas_core.go. A response schema that
+	// names its properties but not its required ones certifies a body that
+	// shares no field name with what the server sends — which is how an
+	// all-PascalCase approvals response passed every check we own.
+	object := func(properties map[string]any, required ...string) map[string]any {
+		s := map[string]any{"type": "object", "properties": properties}
+		if len(required) > 0 {
+			s["required"] = required
+		}
+		return s
 	}
 	array := func(items map[string]any) map[string]any { return map[string]any{"type": "array", "items": items} }
 	ref := func(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
@@ -28,13 +36,19 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 	})
 	participant := object(map[string]any{"user_id": str(), "email": str(), "full_name": str(), "role": str(), "joined_at": str()})
 	inboxItem := object(map[string]any{
-		"id": str(), "workspace_id": str(), "kind": str(), "source_id": str(), "target_user_id": str(), "target_role": str(),
+		"id": str(), "workspace_id": str(), "kind": str(), "source_id": str(), "target_user_id": str(), "source_missing": map[string]any{"type": "boolean"}, "target_role": str(),
 		"title": str(), "body_md": str(), "sender_type": str(), "sender_id": str(), "sender_name": str(),
 		"avatar_seed": str(), "avatar_style": str(), "avatar_url": str(), "state": str(), "priority": str(), "blocking": boolean(),
 		"payload": anyObject(), "read_at": str(), "resolved_at": str(), "resolved_by_user_id": str(), "resolved_action": str(),
 		"created_at": str(), "updated_at": str(), "second_approver_required": boolean(), "second_approver_by_workspace": boolean(),
 		"second_approver_by_tier": boolean(), "security_level_label": str(), "evidence": anyObject(),
-	})
+	},
+		// Only the fields inboxItemResponse emits unconditionally. Everything
+		// else on that struct carries `,omitempty` — target_user_id, body_md,
+		// the avatar trio, payload, the resolved_* set, the four-eyes fields —
+		// and requiring one of those would fail a row that is perfectly valid.
+		"id", "workspace_id", "kind", "source_id", "title", "state", "priority",
+		"blocking", "created_at", "updated_at")
 
 	components := map[string]any{
 		"FinalComposioInventory":         object(map[string]any{"enabled": boolean(), "auth_configs": array(anyObject()), "users": array(object(map[string]any{"user_id": str(), "connected_accounts": array(anyObject())}))}),
@@ -56,15 +70,18 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 		"FinalChatList":                  array(object(map[string]any{"id": str(), "agent_id": str(), "workspace_id": str(), "title": str(), "mode": str(), "status": str(), "message_count": integer(), "started_at": str(), "ended_at": str(), "created_at": str(), "origin": str(), "last_activity_at": str(), "unread_count": integer()})),
 		"FinalChatSteer":                 object(map[string]any{"queued": boolean(), "in_flight": boolean()}),
 		"FinalChatParticipants":          object(map[string]any{"participants": array(participant)}),
-		"FinalInboxList":                 object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer()}),
-		"FinalInboxItem":                 inboxItem,
-		"FinalInboxBulk":                 object(map[string]any{"updated": integer(), "skipped": integer(), "skipped_ids": array(str()), "state": str()}),
-		"FinalWebhookFire":               object(map[string]any{"run_id": str(), "status": str(), "deduped": boolean()}),
-		"FinalUserModel":                 object(map[string]any{"user_id": str(), "workspace_id": str(), "exists": boolean(), "user_slug": str(), "bytes": integer(), "created_at": str(), "updated_at": str(), "content": str(), "facts": array(object(map[string]any{"key": str(), "value": str()}))}),
-		"FinalUserModelMutation":         object(map[string]any{"user_id": str(), "forgot": str(), "exists": boolean(), "remaining": array(object(map[string]any{"key": str(), "value": str()}))}),
-		"FinalPeerConsent":               object(map[string]any{"user_id": str(), "workspace_id": str(), "opted_out": boolean(), "opted_out_at": str(), "purged": integer(), "purged_models": integer()}),
-		"FinalPreferences":               map[string]any{"type": "object", "additionalProperties": anyJSON()},
-		"FinalStatus":                    object(map[string]any{"status": str()}),
+		"FinalInboxList": object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer(), "has_more": map[string]any{"type": "boolean"}},
+			// Named by TestOpenAPIRequired_MatchesTheStructsOwnJSONTags, which
+			// reads inboxListResponse's json tags rather than anyone's memory.
+			"rows", "count", "unread_count", "has_more"),
+		"FinalInboxItem":         inboxItem,
+		"FinalInboxBulk":         object(map[string]any{"updated": integer(), "skipped": integer(), "skipped_ids": array(str()), "state": str()}),
+		"FinalWebhookFire":       object(map[string]any{"run_id": str(), "status": str(), "deduped": boolean()}),
+		"FinalUserModel":         object(map[string]any{"user_id": str(), "workspace_id": str(), "exists": boolean(), "user_slug": str(), "bytes": integer(), "created_at": str(), "updated_at": str(), "content": str(), "facts": array(object(map[string]any{"key": str(), "value": str()}))}),
+		"FinalUserModelMutation": object(map[string]any{"user_id": str(), "forgot": str(), "exists": boolean(), "remaining": array(object(map[string]any{"key": str(), "value": str()}))}),
+		"FinalPeerConsent":       object(map[string]any{"user_id": str(), "workspace_id": str(), "opted_out": boolean(), "opted_out_at": str(), "purged": integer(), "purged_models": integer()}),
+		"FinalPreferences":       map[string]any{"type": "object", "additionalProperties": anyJSON()},
+		"FinalStatus":            object(map[string]any{"status": str()}),
 	}
 
 	routes := map[string]DomainSchema{

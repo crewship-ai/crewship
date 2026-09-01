@@ -47,7 +47,7 @@ beforeEach(() => {
   inboxBulk.mockResolvedValue({ ok: true, result: { updated: 2, skipped: 0, not_found: 0 } })
   ITEMS = [
     item({ id: "wp", kind: "waitpoint", title: "Approve promote", blocking: true, sender_type: "pipeline", sender_name: "nightly" }),
-    item({ id: "esc", kind: "escalation", title: "Skill review", blocking: true, state: "read", sender_type: "agent", sender_name: "casey" }),
+    item({ id: "esc", kind: "escalation", title: "Skill review", blocking: true, state: "read", sender_type: "agent", sender_name: "casey", payload: { escalation_type: "GENERAL" } }),
     item({ id: "msg", kind: "message", title: "Atlas replied", sender_type: "agent", sender_name: "atlas" }),
   ]
 })
@@ -75,6 +75,22 @@ describe("the badge", () => {
     ITEMS = [item({ id: "m1", kind: "message", title: "one" }), item({ id: "m2", kind: "message", title: "two" })]
     render(<InboxBell />)
     expect(screen.getByTestId("bell-badge")).toHaveTextContent("2")
+  })
+
+  it("does not label a source-less system advisory as a client decision", () => {
+    ITEMS = [item({
+      id: "curator",
+      kind: "escalation",
+      title: "Skill check failed",
+      blocking: true,
+      sender_type: "system",
+      sender_name: "Skill Curator",
+    })]
+    render(<InboxBell />)
+    fireEvent.click(screen.getByTestId("bell-trigger"))
+
+    expect(screen.queryByText("Needs a decision")).not.toBeInTheDocument()
+    expect(screen.getByText("Recent")).toBeInTheDocument()
   })
 
   it("disappears when there is nothing at all", () => {
@@ -115,7 +131,7 @@ describe("the popover", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Open inbox/ }))
 
-    expect(push).toHaveBeenCalledWith("/inbox")
+    expect(push).toHaveBeenCalledWith("/inbox-v2")
     // AnimatePresence keeps the node mounted through its exit transition.
     await waitFor(() => expect(screen.queryByTestId("bell-popover")).not.toBeInTheDocument())
   })
@@ -126,9 +142,9 @@ describe("the popover", () => {
 
     fireEvent.click(screen.getByTestId("bell-row-msg"))
 
-    // Deep-link, not just "/inbox": acting on what the popover showed must not
+    // Deep-link, not just "/inbox-v2": acting on what the popover showed must not
     // start with finding it again.
-    expect(push).toHaveBeenCalledWith("/inbox?item=msg")
+    expect(push).toHaveBeenCalledWith("/inbox-v2?item=msg")
   })
 
   it("closes when the trigger is clicked again", async () => {

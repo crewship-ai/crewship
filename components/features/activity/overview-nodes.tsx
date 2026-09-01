@@ -258,7 +258,7 @@ function InboxNodeBase({ data: d }: NodeProps<Node<OverviewInboxNodeData>>) {
   const KI = inboxKindIcon(d.kind)
   return (
     <Link
-      href={`/inbox?item=${encodeURIComponent(d.itemId)}`}
+      href={`/inbox-v2?item=${encodeURIComponent(d.itemId)}`}
       aria-label={`Inbox ${d.kind.replace(/_/g, " ")}: ${d.title}`}
       className={cn(
         "relative block w-[200px] rounded-lg border border-warn/25 bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-warn/80",

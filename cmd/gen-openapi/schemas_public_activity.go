@@ -17,8 +17,16 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		out["nullable"] = true
 		return out
 	}
-	object := func(properties map[string]any) map[string]any {
-		return map[string]any{"type": "object", "properties": properties}
+	// Variadic `required`, matching schemas_core.go. Without it this file's
+	// schemas cannot say which properties a response always carries, so a body
+	// with every field renamed validates against them — see
+	// docs/prd/response-shape-contract.md.
+	object := func(properties map[string]any, required ...string) map[string]any {
+		s := map[string]any{"type": "object", "properties": properties}
+		if len(required) > 0 {
+			s["required"] = required
+		}
+		return s
 	}
 	array := func(items map[string]any) map[string]any {
 		return map[string]any{"type": "array", "items": items}

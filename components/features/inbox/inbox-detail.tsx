@@ -230,14 +230,17 @@ export function DecisionCard({
 
   return (
     <DetailCard
-      tone={meta.tone === "warn" ? "warn" : "default"}
-      className={meta.tone === "warn" ? "bg-warn/[.06]" : undefined}
+      tone={!isResolved && meta.tone === "warn" ? "warn" : "default"}
+      className={!isResolved && meta.tone === "warn" ? "bg-warn/[.06]" : undefined}
     >
       <div data-testid="decision-card" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <AlertTriangle className={cn("h-4 w-4", meta.tone === "warn" ? "text-warn" : "text-muted-foreground")} />
-          <span className={cn("type-section", meta.tone === "warn" ? "text-warn" : "text-foreground/70")}>
-            {meta.heading}
+          <AlertTriangle className={cn("h-4 w-4", !isResolved && meta.tone === "warn" ? "text-warn" : "text-muted-foreground")} />
+          {/* meta.heading is written for a pending gate ("Waiting on your
+              decision"). History renders the same card, so a decided row used
+              to announce itself as still waiting. */}
+          <span className={cn("type-section", !isResolved && meta.tone === "warn" ? "text-warn" : "text-foreground/70")}>
+            {isResolved ? "Decision record" : meta.heading}
           </span>
           {/* Author-declared, never inferred. Sits with the heading rather
               than in the Context dump because it changes how the sentence
@@ -248,7 +251,12 @@ export function DecisionCard({
               destructive · cannot be undone by re-running
             </span>
           )}
-          {mins != null && (
+          {/* A decided row has no deadline left to run. Showing "expires in
+              24h" beside a resolved decision — which History does for every
+              row — reads as "this is still open", and the greyed Approve
+              button underneath reads as a permissions problem rather than a
+              decision already made. */}
+          {mins != null && !isResolved && (
             <span
               className={cn(
                 "type-meta ml-auto font-mono",
@@ -261,6 +269,12 @@ export function DecisionCard({
               {mins > 0
                 ? `expires ${absolute(payloadString(item, "timeout_at"))} · in ${remainingLabel(mins)}`
                 : `expired ${absolute(payloadString(item, "timeout_at"))}`}
+            </span>
+          )}
+          {isResolved && (
+            <span className="type-meta ml-auto font-mono text-muted-foreground">
+              {item.resolved_action ?? "closed"}
+              {item.resolved_at ? ` · ${since(item.resolved_at)}` : ""}
             </span>
           )}
         </div>
@@ -287,14 +301,19 @@ export function DecisionCard({
             they are read before the click, not after it. */}
         <EvidenceFacts item={item} />
 
-        <KindActions
-          item={item}
-          onResolve={onResolve}
-          onRefresh={onRefresh}
-          disabled={isResolved || !allowed}
-        />
+        {/* Rendering the buttons disabled was the old behaviour, and it made
+            History look like a queue the reader lacked permission to act on.
+            A decided row states its outcome instead. */}
+        {!isResolved && (
+          <KindActions
+            item={item}
+            onResolve={onResolve}
+            onRefresh={onRefresh}
+            disabled={!allowed}
+          />
+        )}
 
-        {!allowed && (
+        {!isResolved && !allowed && (
           <p className="type-meta text-muted-foreground">
             {meta.requires === "manage" ? "OWNER or ADMIN decides this" : "MANAGER and up decides this"}
             {" — you can still archive it."}
@@ -409,7 +428,7 @@ export interface InboxDetailProps {
   onResolve: (action: string) => void | Promise<void>
   onArchive: () => void | Promise<void>
   onMarkUnread: () => void
-  onRefresh: () => void | Promise<void>
+  onRefresh: (action?: string) => void | Promise<void>
 }
 
 /**
@@ -436,13 +455,34 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
   const runID = payloadString(item, "pipeline_run_id")
 
   // Decision items are source-managed: the inbox PATCH rejects anything but
-  // "read" for them, so they cannot be blind-archived. The exception is a
-  // keeper/synthetic escalation, which has no resolve endpoint at all — for
-  // those the inbox row IS the handle.
-  const sourceLess = item.kind === "escalation" && typeof item.payload?.escalation_type !== "string"
+  // "read" while the SOURCE still exists, so they cannot be blind-archived.
+  //
+  // Whether a source still exists is a question only the server can answer —
+  // it is a row in pipeline_waitpoints / escalations / agents. This used to be
+  // guessed from the payload ("an escalation with no escalation_type must be
+  // synthetic"), and the guess was wrong in both directions: a waitpoint whose
+  // run was pruned, and an escalation whose escalations row was deleted, are
+  // both resolvable by the server and were both denied an Archive button here,
+  // leaving them stuck in the inbox with no way out and no way into History.
+  //
+  // So stop guessing — but do not guess in the other direction either, by
+  // offering an Archive that 409s on every live decision. The server answers
+  // the question on the detail read (`source_missing`), using the same probe
+  // its PATCH guard uses, so the button and the outcome cannot disagree.
   const archivable =
     !isResolved &&
-    ((item.kind !== "waitpoint" && item.kind !== "escalation" && !item.blocking) || sourceLess)
+    ((item.kind !== "waitpoint" && item.kind !== "escalation" && !item.blocking) ||
+      item.source_missing === true)
+  // A restore is meaningful only for something the user manually archived and
+  // whose source does not own a terminal lifecycle. Reopening an approved
+  // waitpoint would not re-pend the run; source-less synthetic escalations are
+  // also terminal by backend contract. The old unconditional button sent both
+  // to PATCH unread and silently received 409.
+  const restorable =
+    isResolved &&
+    item.resolved_action === "archived" &&
+    item.kind !== "waitpoint" &&
+    item.kind !== "escalation"
 
   return (
     <div className="flex flex-col gap-3">
@@ -556,7 +596,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
                 {item.resolved_action && item.resolved_action !== "archived" && ` · ${item.resolved_action}`}
               </span>
             )}
-            {isResolved && (
+            {restorable && (
               <button type="button" onClick={onMarkUnread} className="hover:text-foreground">
                 Restore
               </button>

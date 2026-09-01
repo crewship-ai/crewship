@@ -233,3 +233,65 @@ any reset/bootstrap command as part of this harness.
 The upstream CLI reference and configuration format are documented at
 <https://schemathesis.readthedocs.io/en/stable/reference/cli/> and
 <https://schemathesis.readthedocs.io/en/stable/configuration/>.
+
+## Response shapes against the running server
+
+`response_shapes.py` asks one question Schemathesis is too broad to answer
+quickly: does a real 200 body satisfy the schema the server publishes for that
+route?
+
+```bash
+python3 scripts/api-contract/response_shapes.py <base-url> <token> <workspace-id>
+```
+
+It fetches `/openapi.json` from the target — not the file in the repo — so it
+measures what that instance actually serves. Read-only GETs only, mirroring
+`run.sh`'s method deny-list.
+
+Only a real `200 application/json` counts, and that rule covers `/openapi.json`
+as well as the 17 routes. The schema is read out of the `application/json`
+entry of the documented **200**, so both halves have to hold before a body may
+be compared against it: urllib raises on 4xx/5xx and redirects are refused,
+which leaves the rest of the 2xx band (a `201` read as if it were the 200, a
+`204` surfacing as a decode error that reads like a broken server) and a
+`text/plain` body that happens to parse. Media-type parameters are fine —
+`application/json; charset=utf-8` is application/json, and rejecting it would
+fail every server that spells the charset out. The spec is held to the same
+rule because a wrong `/openapi.json` mis-grades every route at once.
+
+**Exit 0 means every declared route passed — not "nothing failed".** The two
+differ in exactly one case, and it is the case that matters: a run in which
+nothing could be fetched. `ROUTES` is a curated list a reachable server with a
+workspace-owner token must answer (the routes that cannot be checked are
+commented out of it with reasons), so an unreachable route or an undocumented
+200 is a defect in the server, the document or the credentials — never a skip.
+An earlier version counted both as `SKIP` and returned `1 if failed else 0`, so
+a wrong token printed `0 pass, 0 fail, 17 skipped` and exited 0: a checker that
+verified nothing, reporting success. `response_shapes_test.py` pins that, and
+CI runs it in the `Harness PR subset` job, where the pinned venv provides
+`jsonschema`.
+
+CI runs the checker itself there too, against that job's own ephemeral server,
+immediately after the unit test and before the Schemathesis gate. The two prove
+different things: the unit test proves the checker's logic, the live run proves
+the *server*, and only the second would have caught the defect this exists for —
+every artifact agreed with every other artifact, and only a real 200 body
+disagreed. It is blocking, not advisory: the 17 routes were verified to pass on
+a freshly seeded instance (fresh DB plus `crewship seed --skip-issues`) before
+the step was added, so a red there is drift rather than an empty workspace.
+
+The token rides on every request, so the base URL must be `https://` for
+anything but a loopback address, and a redirect is refused rather than
+followed: `urllib` copies `Authorization` onto a redirect verbatim, to any
+host. `http://localhost:8082` stays the development path.
+
+It exists because of a defect no other gate could see: `/api/v1/approvals`
+serialized a struct with no JSON tags and answered `"ID"`/`"Kind"`/`"CreatedAt"`
+while this document, the web client's schema and `docs/api-reference` all
+described snake_case. Three artifacts agreed with each other and none with the
+server, and the approvals surface rendered zero rows in production.
+
+Note `denullable()`: JSON Schema has no `nullable` keyword — that is OpenAPI
+3.0's spelling. Schemathesis understands it natively; a plain validator does
+not, and reported nine false failures the first time this ran, every one a
+legitimate `null`. See `docs/prd/response-shape-contract.md`.

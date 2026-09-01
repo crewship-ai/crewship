@@ -399,7 +399,7 @@ describe("pending-approval deep-link (C4)", () => {
     render(<CredentialsPage />)
 
     const link = await screen.findByRole("link", { name: /approve or reject it/i })
-    expect(link).toHaveAttribute("href", "/inbox")
+    expect(link).toHaveAttribute("href", "/inbox-v2")
   })
 })
 

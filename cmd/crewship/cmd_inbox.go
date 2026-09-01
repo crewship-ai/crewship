@@ -40,6 +40,8 @@ Examples:
   crewship inbox list --state all           # include resolved
   crewship inbox list --kind waitpoint      # narrow by kind
   crewship inbox list --format json | jq    # script-friendly output
+  crewship inbox list --all                 # walk every page, not just the first
+  crewship inbox list --offset 50           # skip the first 50 rows
   crewship inbox read <id>                  # mark as read
   crewship inbox resolve <id> --action approved
   crewship inbox unread <id>                # flip back to unread
@@ -68,6 +70,8 @@ var inboxListCmd = &cobra.Command{
 		state, _ := cmd.Flags().GetString("state")
 		kind, _ := cmd.Flags().GetString("kind")
 		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		fetchAll, _ := cmd.Flags().GetBool("all")
 
 		q := url.Values{}
 		q.Set("workspace_id", cli.ResolveWorkspace(flagWorkspace, cliCfg))
@@ -82,16 +86,6 @@ var inboxListCmd = &cobra.Command{
 		if limit > 0 {
 			q.Set("limit", fmt.Sprintf("%d", limit))
 		}
-		path := "/api/v1/inbox?" + q.Encode()
-
-		resp, err := client.Get(path)
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
-		}
-
 		// Field tags carry explicit yaml:"..." matching each json:"..." tag —
 		// gopkg.in/yaml.v3 does NOT fall back to a json tag when no yaml
 		// tag is present, it lowercases the raw Go field name instead
@@ -121,12 +115,48 @@ var inboxListCmd = &cobra.Command{
 				ResolvedBy string `json:"resolved_by_user_id,omitempty" yaml:"resolved_by_user_id,omitempty"`
 				ResolvedAt string `json:"resolved_at,omitempty" yaml:"resolved_at,omitempty"`
 			} `json:"rows" yaml:"rows"`
-			Count       int `json:"count" yaml:"count"`
-			UnreadCount int `json:"unread_count" yaml:"unread_count"`
+			Count       int  `json:"count" yaml:"count"`
+			UnreadCount int  `json:"unread_count" yaml:"unread_count"`
+			HasMore     bool `json:"has_more" yaml:"has_more"`
 		}
-		if err := cli.ReadJSON(resp, &body); err != nil {
-			return err
+
+		// The API grew offset/has_more pagination for the web inbox, which
+		// walks every page on load. Without --offset/--all the CLI could not
+		// reach past the first --limit rows, so the two clients disagreed
+		// about what "the whole feed" is and a scripted triage job silently
+		// worked on a prefix.
+		//
+		// Offset paging is not stable across a mutating feed: a row that
+		// leaves the filter between two requests shifts the window and is
+		// never returned. --all is exact only on a quiet workspace; the real
+		// fix is keyset pagination, server-side.
+		acc := body.Rows[:0]
+		unread := 0
+		for {
+			if offset > 0 {
+				q.Set("offset", fmt.Sprintf("%d", offset))
+			}
+			resp, err := client.Get("/api/v1/inbox?" + q.Encode())
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			body.Rows = nil
+			if err := cli.ReadJSON(resp, &body); err != nil {
+				return err
+			}
+			acc = append(acc, body.Rows...)
+			unread = body.UnreadCount
+			if !fetchAll || !body.HasMore || len(body.Rows) == 0 {
+				break
+			}
+			offset += len(body.Rows)
 		}
+		body.Rows = acc
+		body.Count = len(acc)
+		body.UnreadCount = unread
 
 		f := newFormatter()
 		// "quiet" suppresses table output entirely so a script can
@@ -697,6 +727,8 @@ func init() {
 	inboxListCmd.Flags().String("state", "unread", "Filter by state: unread|read|resolved|all")
 	inboxListCmd.Flags().String("kind", "", "Filter by kind: waitpoint|escalation|failed_run|message")
 	inboxListCmd.Flags().Int("limit", 50, "Max rows to return (server caps at 500)")
+	inboxListCmd.Flags().Int("offset", 0, "Skip this many rows (server-side offset pagination)")
+	inboxListCmd.Flags().Bool("all", false, "Walk every page until the server reports has_more=false")
 
 	inboxResolveCmd.Flags().String("action", "", "Action recorded with resolution: approved|denied|retried|cancelled|acknowledged|dismissed")
 

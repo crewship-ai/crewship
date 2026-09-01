@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAlreadyDecidedError, waitpointDecide } from "@/lib/api/waitpoints"
 import { escalationResolve } from "@/lib/api/escalations"
+import { decideApproval } from "@/hooks/use-approvals"
 import type { InboxItem } from "@/hooks/use-inbox"
 
 import { safeChatURL } from "./inbox-derive"
@@ -39,7 +40,7 @@ export function KindActions({
 }: {
   item: InboxItem
   onResolve: (action: string) => void | Promise<void>
-  onRefresh: () => void | Promise<void>
+  onRefresh: (action?: string) => void | Promise<void>
   disabled: boolean
 }) {
   const [busy, setBusy] = useState<string | null>(null)
@@ -54,6 +55,65 @@ export function KindActions({
 
   switch (item.kind) {
     case "waitpoint": {
+      // An autonomy-gate hold is a waitpoint whose source_id is a CREW, AGENT
+      // or MISSION id — never a pipeline_waitpoints token — so the generic
+      // waitpointDecide() below resolved to
+      // /pipelines/waitpoints/{crew_id}/approve and 404'd every single time.
+      // The decision it is asking for lives in the approvals queue, and the
+      // row already carries the id: writeAutonomyHold puts `approval_id` on
+      // the payload beside `kind: "autonomy_gate"`. Decide it there.
+      //
+      // This also makes the inbox's dedupe honest: the merged feed suppresses
+      // the approvals row whose decision this inbox row projects, which was
+      // only defensible once this row could actually take the decision.
+      const autonomyApprovalID = item.payload?.kind === "autonomy_gate" && typeof item.payload?.approval_id === "string"
+        ? item.payload.approval_id
+        : ""
+      if (autonomyApprovalID) {
+        const decide = (approved: boolean) =>
+          wrap(approved ? "approved" : "denied", async () => {
+            try {
+              await decideApproval(autonomyApprovalID, approved ? "approved" : "denied", "", item.workspace_id)
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "Decision failed"
+              if (isAlreadyDecidedError(409, message)) {
+                toast.info("Already decided elsewhere — refreshing")
+                await onRefresh("resolved")
+                return
+              }
+              toast.error(message)
+              return
+            }
+            toast.success(approved ? "Approved" : "Denied")
+            // The decide endpoint cascades the inbox row via
+            // ResolveBySourceTx, so re-read rather than PATCHing it ourselves.
+            await onRefresh(approved ? "approved" : "denied")
+          })
+        return (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() => decide(true)}
+              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {busy === "approved" ? "Approving…" : "Approve"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled || busy !== null}
+              onClick={() => decide(false)}
+              className="gap-1.5"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              {busy === "denied" ? "Denying…" : "Deny"}
+            </Button>
+          </div>
+        )
+      }
+
       // PR-D hire waitpoints share the inbox kind='waitpoint' shape
       // but live on a different source: source_id is an agent_id, not
       // a pipeline_waitpoints token, and the approve endpoint is
@@ -95,7 +155,7 @@ export function KindActions({
                     return
                   }
                   toast.success("Hire approved — agent is live")
-                  await onRefresh()
+                  await onRefresh("approved")
                 })
               }
               className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
@@ -135,7 +195,7 @@ export function KindActions({
                   // outcome look like a broken button.
                   if (isAlreadyDecidedError(res.status, res.error)) {
                     toast.info("Already decided elsewhere — refreshing")
-                    await onRefresh()
+                    await onRefresh("resolved")
                     return
                   }
                   toast.error(res.error)
@@ -148,7 +208,7 @@ export function KindActions({
                 // any state other than "read" with a 409 ("use the
                 // source endpoint for this kind"). Re-fetch instead, to
                 // match the escalation branch below.
-                await onRefresh()
+                await onRefresh("approved")
               })
             }
             className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
@@ -166,7 +226,7 @@ export function KindActions({
                 if (!res.ok) {
                   if (isAlreadyDecidedError(res.status, res.error)) {
                     toast.info("Already decided elsewhere — refreshing")
-                    await onRefresh()
+                    await onRefresh("resolved")
                     return
                   }
                   toast.error(res.error)
@@ -174,7 +234,7 @@ export function KindActions({
                 }
                 // Same as approve: the server cascades the inbox row;
                 // a self-PATCH to "resolved" would 409 (source-managed).
-                await onRefresh()
+                await onRefresh("denied")
               })
             }
             className="gap-1.5"
@@ -217,7 +277,7 @@ export function KindActions({
               return
             }
             toast.success(action === "approve" ? "Skill approved" : "Skill rejected")
-            await onRefresh()
+            await onRefresh(action === "approve" ? "approved" : "rejected")
           })
         return (
           <div className="flex items-center gap-2">
@@ -286,11 +346,11 @@ export function KindActions({
                   ? `Already decided — this routine is ${b?.status ?? "no longer awaiting approval"}.`
                   : (b?.error ?? `${action} failed (${res.status})`),
               )
-              await onRefresh()
+              await onRefresh("resolved")
               return
             }
             toast.success(action === "approve" ? "Routine approved" : "Routine rejected")
-            await onRefresh()
+            await onRefresh(action === "approve" ? "approved" : "rejected")
           })
 
         return (
@@ -378,7 +438,7 @@ export function KindActions({
               return
             }
             toast.success(action === "approve" ? "Credential approved" : "Credential denied")
-            await onRefresh()
+            await onRefresh(action === "approve" ? "approved" : "denied")
           })
 
         return (
@@ -422,7 +482,7 @@ export function KindActions({
           // The lifecycle cascades the inbox row to resolved via
           // ResolveBySource server-side; refresh to pick that up.
           toast.success(`Escalation ${action === "approve" ? "approved" : "rejected"}`)
-          await onRefresh()
+          await onRefresh(action === "approve" ? "approved" : "rejected")
         })
 
       // CREDENTIAL escalations: when the agent already proposed a value, it is
@@ -525,12 +585,25 @@ export function KindActions({
             disabled={disabled || busy !== null}
             onClick={() =>
               wrap("retried", async () => {
-                const slug = (item.payload?.pipeline_slug ??
-                  item.sender_name) as string | undefined
+                // The writer does NOT put `pipeline_slug` or `inputs` on the
+                // payload — alertFailedScheduledRun emits schedule_id,
+                // pipeline_id and run_id, and nothing else. So the old
+                // `payload.pipeline_slug ?? sender_name` read always fell
+                // through to sender_name, which is the SCHEDULE's name, and
+                // POSTed /pipelines/{schedule name}/run. That 404s unless the
+                // two happen to be spelled the same, and the `!slug` guard
+                // never fired because sender_name is always set: the user got
+                // a red toast and the row stayed put.
+                //
+                // Only a real slug is accepted now. Without one there is
+                // nothing to re-fire, and saying so beats a button that
+                // pretends.
+                const slug = typeof item.payload?.pipeline_slug === "string"
+                  ? item.payload.pipeline_slug
+                  : ""
                 const inputs = (item.payload?.inputs ?? {}) as Record<string, unknown>
                 if (!slug) {
-                  toast.error("Cannot retry — pipeline slug missing in payload")
-                  await onResolve("cancelled")
+                  toast.error("This run cannot be retried from here — open the routine and run it again")
                   return
                 }
                 // Same try/catch pattern as approve-hire above: fetch()

@@ -9,8 +9,16 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 	integer := func() map[string]any { return map[string]any{"type": "integer"} }
 	boolean := func() map[string]any { return map[string]any{"type": "boolean"} }
 	nullableString := func() map[string]any { return map[string]any{"type": "string", "nullable": true} }
-	object := func(properties map[string]any) map[string]any {
-		return map[string]any{"type": "object", "properties": properties}
+	// Variadic `required`, matching schemas_core.go. Without it this file's
+	// schemas cannot say which properties a response always carries, so a body
+	// with every field renamed validates against them — see
+	// docs/prd/response-shape-contract.md.
+	object := func(properties map[string]any, required ...string) map[string]any {
+		s := map[string]any{"type": "object", "properties": properties}
+		if len(required) > 0 {
+			s["required"] = required
+		}
+		return s
 	}
 	array := func(items map[string]any) map[string]any { return map[string]any{"type": "array", "items": items} }
 	stringMap := map[string]any{"type": "object", "additionalProperties": str()}
@@ -45,23 +53,26 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 		"category": str(), "auth_mode": str(), "fields": array(connectorField),
 		"oauth": oauth, "mcp": mcp, "derived": stringMap, "verify": verify, "docs": docs,
 	})
-	profile := object(map[string]any{"id": str(), "email": str(), "full_name": nullableString(), "avatar_url": nullableString()})
+	profile := object(map[string]any{"id": str(), "email": str(), "full_name": nullableString(), "avatar_url": nullableString()},
+		"id", "email", "full_name", "avatar_url")
 	cliToken := object(map[string]any{
 		"id": str(), "name": str(), "tier": str(), "token": nullableString(), "expires_at": nullableString(),
 		"created_at": str(), "last_used_at": nullableString(), "revoked_at": nullableString(), "scopes": array(str()),
 	})
 
 	components := map[string]any{
-		"ConnectorListItem": object(map[string]any{"id": str(), "name": str(), "description": str(), "category": str(), "auth_mode": str(), "brand_logo": str(), "brand_color": str()}),
-		"Connector":         connector, "ConnectorList": array(ref("ConnectorListItem")),
+		"ConnectorListItem": object(map[string]any{"id": str(), "name": str(), "description": str(), "category": str(), "auth_mode": str(), "brand_logo": str(), "brand_color": str()},
+			"id", "name", "description", "category", "auth_mode", "brand_logo", "brand_color"),
+		"Connector": connector, "ConnectorList": array(ref("ConnectorListItem")),
 		"Integration": integration, "IntegrationList": list("Integration"),
-		"CredentialTestResponse":   object(map[string]any{"status": str(), "message": nullableString()}),
-		"CredentialProbeResponse":  object(map[string]any{"valid": boolean(), "status": integer(), "error": nullableString(), "supported": boolean()}),
-		"CredentialRotation":       object(map[string]any{"id": str(), "credential_id": str(), "grace_seconds": integer(), "rotated_at": str(), "expires_at": str(), "rotated_by": str(), "status": str(), "old_value_gone": boolean(), "cancelled_at": nullableString()}),
+		"CredentialTestResponse":  object(map[string]any{"status": str(), "message": nullableString()}, "status"),
+		"CredentialProbeResponse": object(map[string]any{"valid": boolean(), "status": integer(), "error": nullableString(), "supported": boolean()}, "valid", "status", "supported"),
+		"CredentialRotation": object(map[string]any{"id": str(), "credential_id": str(), "grace_seconds": integer(), "rotated_at": str(), "expires_at": str(), "rotated_by": str(), "status": str(), "old_value_gone": boolean(), "cancelled_at": nullableString()},
+			"id", "credential_id", "grace_seconds", "rotated_at", "expires_at", "rotated_by", "status", "old_value_gone"),
 		"ConnectorVerifyRequest":   request(map[string]any{"fields": stringMap}, "fields"),
-		"ConnectorVerifyResponse":  object(map[string]any{"ok": boolean(), "message": nullableString()}),
+		"ConnectorVerifyResponse":  object(map[string]any{"ok": boolean(), "message": nullableString()}, "ok"),
 		"ConnectorInstallRequest":  request(map[string]any{"crew_id": nullableString(), "name": nullableString(), "fields": stringMap}, "fields"),
-		"ConnectorInstallResponse": object(map[string]any{"integration_id": str(), "next_step": nullableString(), "oauth_url": nullableString()}),
+		"ConnectorInstallResponse": object(map[string]any{"integration_id": str(), "next_step": nullableString(), "oauth_url": nullableString()}, "integration_id"),
 		"IntegrationCreateRequest": request(map[string]any{
 			"workspace_mcp_server_id": nullableString(), "name": str(), "display_name": str(), "transport": str(), "endpoint": nullableString(),
 			"command": nullableString(), "args_json": nullableString(), "env_json": nullableString(), "config_json": nullableString(), "icon": nullableString(),
@@ -74,7 +85,9 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 			"id": str(), "agent_id": str(), "mcp_server_id": str(), "mcp_server_scope": str(), "credential_id": nullableString(),
 			"cred_type": nullableString(), "cred_header": nullableString(), "enabled": boolean(), "config_override_json": nullableString(),
 			"created_at": str(), "server_name": str(), "server_display_name": str(), "credential_name": nullableString(),
-		}),
+		},
+			"id", "agent_id", "mcp_server_id", "mcp_server_scope", "credential_id", "cred_type", "cred_header",
+			"enabled", "config_override_json", "created_at", "server_name", "server_display_name", "credential_name"),
 		"AgentIntegrationBindingRequest": request(map[string]any{
 			"mcp_server_id": str(), "mcp_server_scope": str(), "credential_id": nullableString(), "cred_type": nullableString(),
 			"cred_header": nullableString(), "env_var_name": nullableString(), "enabled": map[string]any{"type": "boolean", "nullable": true}, "config_override_json": nullableString(),
@@ -83,7 +96,8 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 			"credential_id": nullableString(), "cred_type": nullableString(), "cred_header": nullableString(), "env_var_name": nullableString(),
 			"enabled": map[string]any{"type": "boolean", "nullable": true}, "config_override_json": nullableString(),
 		}),
-		"IntegrationTool":              object(map[string]any{"id": str(), "tool_name": str(), "description": nullableString(), "enabled": boolean(), "created_at": str(), "updated_at": str()}),
+		"IntegrationTool": object(map[string]any{"id": str(), "tool_name": str(), "description": nullableString(), "enabled": boolean(), "created_at": str(), "updated_at": str()},
+			"id", "tool_name", "description", "enabled", "created_at", "updated_at"),
 		"IntegrationToolUpdateRequest": object(map[string]any{"enabled": map[string]any{"type": "boolean", "nullable": true}, "description": nullableString()}),
 		"CLIToken":                     cliToken, "CLITokenList": object(map[string]any{"data": array(cliToken)}),
 		"CLITokenCreateRequest":    request(map[string]any{"name": str(), "tier": nullableString(), "expires_in_seconds": integer(), "scopes": array(str())}, "name"),
@@ -121,7 +135,15 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 		"POST /api/v1/auth/cli-token": {Request: ref("CLITokenCreateRequest"), Response: ref("CLIToken")}, "GET /api/v1/auth/cli-token/validate": {Response: ref("CLITokenValidateResponse")},
 		"GET /api/v1/auth/cli-tokens": {Response: ref("CLITokenList")}, "DELETE /api/v1/auth/cli-tokens/{tokenId}": {Response: ref("StatusResponse")},
 		"PATCH /api/v1/users/me": {Request: ref("ProfileUpdateRequest"), Response: ref("Profile")}, "POST /api/v1/users/me/password": {Request: ref("PasswordChangeRequest"), Response: ref("PasswordChangeResponse")},
-		"POST /api/v1/users/me/avatar": {Response: object(map[string]any{"avatar_url": nullableString()}), ResponseMedia: []string{"application/json"}}, "DELETE /api/v1/users/me/avatar": {Response: ref("StatusResponse")},
+		// Both avatar mutations end in writeProfile (internal/api/users_avatar.go:171,
+		// :198), so both answer with the full Profile — not {avatar_url}, and not
+		// StatusResponse.
+		//
+		// ResponseMedia is required on BOTH, not just the POST: responseContent()
+		// in main.go forces any path suffixed /avatar to image/svg+xml unless the
+		// entry names its media type. The POST set it and the DELETE did not, so
+		// the document described a JSON profile response as a binary SVG.
+		"POST /api/v1/users/me/avatar": {Response: ref("Profile"), ResponseMedia: []string{"application/json"}}, "DELETE /api/v1/users/me/avatar": {Response: ref("Profile"), ResponseMedia: []string{"application/json"}},
 		"GET /api/v1/users/{id}/avatar": {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"image/svg+xml", "image/png", "image/jpeg", "image/webp"}},
 	}
 	return map[string]map[string]DomainSchema{"credentials": credentialRoutes, "connectors-integrations": integrationRoutes, "auth-profile": authProfileRoutes}, components

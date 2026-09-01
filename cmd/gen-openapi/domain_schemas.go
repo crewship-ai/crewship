@@ -13,8 +13,16 @@ func executionSchemaComponents() map[string]any {
 	anyMap := map[string]any{"type": "object", "additionalProperties": true}
 	refOrString := func(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
 	arr := func(item map[string]any) map[string]any { return map[string]any{"type": "array", "items": item} }
-	obj := func(props map[string]any) map[string]any {
-		return map[string]any{"type": "object", "properties": props}
+	// Variadic `required`, matching schemas_core.go. Without it this file's
+	// schemas cannot say which properties a response always carries, so a body
+	// with every field renamed validates against them — see
+	// docs/prd/response-shape-contract.md.
+	obj := func(props map[string]any, required ...string) map[string]any {
+		s := map[string]any{"type": "object", "properties": props}
+		if len(required) > 0 {
+			s["required"] = required
+		}
+		return s
 	}
 	str := func() map[string]any { return map[string]any{"type": "string"} }
 	integer := func() map[string]any { return map[string]any{"type": "integer"} }

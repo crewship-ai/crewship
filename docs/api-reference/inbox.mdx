@@ -103,8 +103,9 @@ Paginated, newest-first list. The UI calls this on first load and after every WS
 | `state` | `unread` \| `read` \| `resolved` \| `active` \| `all` | `all` | Linear-Triage default — resolved items stay visible-but-dimmed. `active` returns everything not resolved (unread + read). `""` behaves like `all`. Invalid value → `400 invalid state`. |
 | `kind` | string | (unset) | Narrows by item type. |
 | `limit` | int | `100` | Capped at `500`. |
+| `offset` | int | `0` | Rows to skip. Pair with `has_more` to walk the feed; `crewship inbox list --all` does exactly that. Offset paging is not stable across a mutating feed — a row that leaves the filter between two requests shifts the window and is never returned, so a full walk is exact only on a quiet workspace. |
 
-The response inlines both row count and unread count so the bell badge renders from the same fetch (no second round-trip on every poll):
+The response inlines both row count and unread count so the bell badge renders from the same fetch (no second round-trip on every poll), plus `has_more` so a client can tell a full page from the final page:
 
 ```json
 {
@@ -129,7 +130,8 @@ The response inlines both row count and unread count so the bell badge renders f
     }
   ],
   "count": 1,
-  "unread_count": 7
+  "unread_count": 7,
+  "has_more": false
 }
 ```
 

@@ -90,7 +90,7 @@ describe("AppToolbar — the top bar never repeats the page name", () => {
 
   // Routes that were already correct — guard against a regression that
   // reintroduces a per-page title map.
-  it.each(["/inbox", "/issues", "/routines", "/integrations", "/admin", "/journal"])(
+  it.each(["/inbox-v2", "/issues", "/routines", "/integrations", "/admin", "/journal"])(
     "%s keeps showing Crewship",
     (route) => {
       expect(renderToolbarAt(route)).toHaveTextContent("Crewship")
@@ -142,7 +142,7 @@ describe("AppToolbar — the top bar never repeats the page name", () => {
 
   // Same guard, one level up: the index. Every route the toolbar can be
   // rendered at, and not one anchor pointing at the dead family.
-  it.each(["/", "/crews", DEAD, "/chat/riley", "/settings", "/inbox"])(
+  it.each(["/", "/crews", DEAD, "/chat/riley", "/settings", "/inbox-v2"])(
     "%s links nowhere into the dead agents family",
     (route) => {
       expect(deadHrefs(renderToolbarAt(route))).toEqual([])

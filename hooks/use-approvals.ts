@@ -11,10 +11,13 @@ import { apiFetch } from "@/lib/api-fetch"
 
 interface UseApprovalsOptions {
   status: ApprovalStatus
+  workspaceId?: string | null
   limit?: number
   /** Poll interval in ms. 0 disables polling. */
   pollMs?: number
   enabled?: boolean
+  /** Walk every server page. Used by the audit/history inbox. */
+  loadAll?: boolean
 }
 
 interface UseApprovalsResult {
@@ -32,7 +35,14 @@ interface UseApprovalsResult {
  * new requests surface without a reload; decided views don't bother.
  */
 export function useApprovals(opts: UseApprovalsOptions): UseApprovalsResult {
-  const { status, limit = 50, pollMs = 15000, enabled = true } = opts
+  const {
+    status,
+    workspaceId,
+    limit = 50,
+    pollMs = 15000,
+    enabled = true,
+    loadAll = false,
+  } = opts
   const [rows, setRows] = useState<ApprovalRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -51,53 +61,63 @@ export function useApprovals(opts: UseApprovalsOptions): UseApprovalsResult {
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/v1/approvals?status=${status}&limit=${limit}`)
-      if (reqIdRef.current !== reqId) return
-      if (res.status === 404) {
-        setRows([])
-        setNotConfigured(true)
-        return
-      }
-      setNotConfigured(false)
-      if (!res.ok) {
-        // Prefer the backend's `{error: "..."}` message over a bare
-        // HTTP code so operators see the real cause (e.g. "workspace
-        // required", "forbidden") instead of "HTTP 400".
-        let msg = `HTTP ${res.status}`
-        try {
-          const body = (await res.json()) as { error?: unknown }
-          if (body && typeof body.error === "string") msg = body.error
-        } catch {
-          // fall through with the HTTP-status fallback
+      const pageSize = loadAll ? 200 : limit
+      const allRows: ApprovalRow[] = []
+      let offset = 0
+      let configured = true
+      do {
+        const params = new URLSearchParams({ status, limit: String(pageSize) })
+        if (loadAll) params.set("offset", String(offset))
+        if (workspaceId) params.set("workspace_id", workspaceId)
+        const res = await apiFetch(`/api/v1/approvals?${params.toString()}`)
+        if (reqIdRef.current !== reqId) return
+        if (res.status === 404) {
+          configured = false
+          break
         }
-        setError(msg)
-        return
-      }
-      const json = await res.json()
-      const parsed = approvalListResponseSchema.safeParse(json)
-      if (reqIdRef.current !== reqId) return
-      if (!parsed.success) {
-        // Surface schema-validation failures instead of silently
-        // pretending the response was empty — otherwise a backend
-        // shape regression is invisible in the UI.
-        setRows([])
-        setError("Malformed response from /api/v1/approvals")
-        return
-      }
-      setRows(parsed.data.rows)
+        if (!res.ok) {
+          // Prefer the backend's `{error: "..."}` message over a bare
+          // HTTP code so operators see the real cause (e.g. "workspace
+          // required", "forbidden") instead of "HTTP 400".
+          let msg = `HTTP ${res.status}`
+          try {
+            const body = (await res.json()) as { error?: unknown }
+            if (body && typeof body.error === "string") msg = body.error
+          } catch {
+            // fall through with the HTTP-status fallback
+          }
+          setError(msg)
+          return
+        }
+        const parsed = approvalListResponseSchema.safeParse(await res.json())
+        if (reqIdRef.current !== reqId) return
+        if (!parsed.success) {
+          // Surface schema-validation failures instead of silently
+          // pretending the response was empty — otherwise a backend
+          // shape regression is invisible in the UI.
+          setRows([])
+          setError("Malformed response from /api/v1/approvals")
+          return
+        }
+        allRows.push(...parsed.data.rows)
+        if (!loadAll || !parsed.data.has_more) break
+        offset += parsed.data.rows.length
+      } while (true)
+      setNotConfigured(!configured)
+      setRows(configured ? allRows : [])
     } catch {
       if (reqIdRef.current === reqId) setError("Network error")
     } finally {
       if (reqIdRef.current === reqId) setLoading(false)
     }
-  }, [enabled, status, limit])
+  }, [enabled, status, workspaceId, limit, loadAll])
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
   useEffect(() => {
-    if (!enabled || !pollMs || status !== "pending") return
+    if (!enabled || !pollMs || (status !== "pending" && status !== "all")) return
     const id = setInterval(() => {
       refresh()
     }, pollMs)
@@ -119,8 +139,12 @@ export async function decideApproval(
   id: string,
   decision: "approved" | "denied",
   comment: string,
+  workspaceId?: string | null,
 ): Promise<{ status: string; decided_by?: string }> {
-  const res = await apiFetch(`/api/v1/approvals/${encodeURIComponent(id)}/decide`, {
+  const workspace = workspaceId
+    ? `?workspace_id=${encodeURIComponent(workspaceId)}`
+    : ""
+  const res = await apiFetch(`/api/v1/approvals/${encodeURIComponent(id)}/decide${workspace}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ status: decision, comment }),
