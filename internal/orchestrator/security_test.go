@@ -64,7 +64,7 @@ func TestSecuritySidecarVsDirectEnvIsolation(t *testing.T) {
 	}
 
 	// Direct env: MUST contain real keys
-	cred := &Credential{ID: "c1", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: anthKey}
+	cred := &Credential{ID: "c1", Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: anthKey}
 	directEnv := BuildEnvVars(req, cred)
 	found := false
 	for _, e := range directEnv {
@@ -112,9 +112,12 @@ func TestSidecarInjectsRealKeyOnlyForOwnAdapter(t *testing.T) {
 	cursorKey := "cur_real-" + strings.Repeat("X", 16)
 
 	creds := []Credential{
-		{ID: "c-oa", EnvVarName: "OPENAI_API_KEY", PlainValue: openaiKey, Priority: 1},
-		{ID: "c-go", EnvVarName: "GOOGLE_API_KEY", PlainValue: googleKey, Priority: 1},
-		{ID: "c-cu", EnvVarName: "CURSOR_API_KEY", PlainValue: cursorKey, Priority: 1},
+		// Classified (#2092/#2246): the adapter-allowlist env path now
+		// consults credpolicy, so these need a Type whose Delivery isn't
+		// DeliveryNone. API_KEY matches what these actually are.
+		{ID: "c-oa", Type: "API_KEY", EnvVarName: "OPENAI_API_KEY", PlainValue: openaiKey, Priority: 1},
+		{ID: "c-go", Type: "API_KEY", EnvVarName: "GOOGLE_API_KEY", PlainValue: googleKey, Priority: 1},
+		{ID: "c-cu", Type: "API_KEY", EnvVarName: "CURSOR_API_KEY", PlainValue: cursorKey, Priority: 1},
 	}
 
 	cases := []struct {
