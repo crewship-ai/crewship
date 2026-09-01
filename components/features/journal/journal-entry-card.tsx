@@ -176,9 +176,30 @@ function SummaryEntryCard({ entry }: { entry: JournalEntry }) {
   )
 }
 
-/** Render the `command` and `exit_code` fields for exec.command entries. */
+/**
+ * Render the command line and `exit_code` of an exec.command entry.
+ *
+ * Two payload shapes reach this type. The pipeline script audit writes a
+ * joined `command` string; the orchestrator writes `cmd` as the argv ARRAY
+ * (internal/orchestrator/journal_exec_command.go — the payload travels to the
+ * UI as a list, so a redaction applied to a join would never reach what is
+ * rendered here). Reading `command` alone left this line blank for every agent
+ * exec. Non-string elements are dropped rather than coerced so a malformed
+ * payload cannot print "[object Object]" as a command.
+ */
 function ExecCommandDetail({ entry }: { entry: JournalEntry }) {
-  const cmd = typeof entry.payload?.command === "string" ? (entry.payload.command as string) : ""
+  // `??` falls through on null/undefined only, so a `command` present but
+  // empty would suppress `cmd` and leave the line blank again — the exact
+  // symptom this fallback exists to fix. Take `command` only when it actually
+  // carries something.
+  const named = entry.payload?.command
+  const raw = typeof named === "string" && named.trim() !== "" ? named : entry.payload?.cmd
+  const cmd =
+    typeof raw === "string"
+      ? raw
+      : Array.isArray(raw)
+        ? raw.filter((e): e is string => typeof e === "string").join(" ")
+        : ""
   const exit = entry.payload?.exit_code
   const exitNum = typeof exit === "number" ? exit : null
   if (!cmd && exitNum === null) return null

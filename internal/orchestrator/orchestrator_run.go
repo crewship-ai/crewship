@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -123,10 +124,12 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// network.egress can't reconstruct WHY the agent was doing those
 	// things. Best-effort: a journal hiccup never aborts the run.
 	if req.UserMessage != "" {
-		userPreview := req.UserMessage
-		if len(userPreview) > 240 {
-			userPreview = userPreview[:240] + "…"
-		}
+		// The summary was already capped at 240 chars; the payload was the
+		// verbatim message, uncapped and unscrubbed, in the same append-only
+		// row (#2215). Both now come from the same bounded, scrubbed preview,
+		// so the payload can never carry more of a pasted secret than the
+		// summary rendered beside it.
+		userPreview, userTruncated := journalUserMessage(req)
 		_, _ = o.getJournal().Emit(ctx, JournalEntry{
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
@@ -138,10 +141,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			ActorID:     req.AgentID, // best available; agents-context call sites rarely carry user_id
 			Summary:     fmt.Sprintf("user → %s: %s", req.AgentSlug, userPreview),
 			Payload: map[string]any{
-				"chat_id":      req.ChatID,
-				"agent_slug":   req.AgentSlug,
-				"content":      req.UserMessage,
-				"length_chars": len(req.UserMessage),
+				"chat_id":    req.ChatID,
+				"agent_slug": req.AgentSlug,
+				"content":    userPreview,
+				// The full length is still recorded: the cap bounds what is
+				// stored, it does not hide that something was cut. Counted in
+				// runes, because the field is named chars and every other
+				// bound this entry carries is a rune count — len() reported
+				// two to three times the character count for a non-ASCII
+				// message.
+				"length_chars": utf8.RuneCountInString(req.UserMessage),
+				"truncated":    userTruncated,
 			},
 			Refs: map[string]any{"chat_id": req.ChatID},
 		})
@@ -365,7 +375,24 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	defer cancel()
 
 	cIDShort := shortID(req.ContainerID)
-	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", cmd)
+
+	// The run's credential values, collected once. They feed three sinks: the
+	// streamed-output scrubber (wrapScrubHandler below), the end-of-stream
+	// capture (streamOutput) and — from here on — every exec.command journal
+	// emit. Collected here rather than beside the handler wrap because the
+	// start emit fires first and needs them.
+	secretValues := collectSecretValues(req)
+	// journalCmd is the only argv form allowed to leave this function: the
+	// prompt-bearing elements are gone, what remains is scrubbed and capped.
+	// See journal_exec_command.go for why removal rather than scrubbing.
+	journalCmd := journalArgv(cmd, req, secretValues)
+
+	// The process log takes the same form. It is a softer sink than the
+	// journal — operator-only, rotated, not hash-chained — but it is still a
+	// place the whole prompt should not be copied to on every run (#2215),
+	// and the sanitised argv keeps the flags and the command shape an operator
+	// is actually reading it for.
+	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", journalCmd.argv)
 
 	// Crow's Nest: emit the command start so the live terminal UI can
 	// open a new block before any output streams. Payload carries the
@@ -382,15 +409,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		Severity:    "info",
 		ActorType:   "agent",
 		ActorID:     req.AgentID,
-		Summary:     fmt.Sprintf("%s runs %s", req.AgentSlug, truncateCmd(cmd, 120)),
-		Payload: map[string]any{
-			"cmd":          cmd,
-			"container_id": cIDShort,
-			"adapter":      req.CLIAdapter,
-			"model":        req.LLMModel,
-			"phase":        "start",
-		},
-		Refs: map[string]any{"chat_id": req.ChatID, "container_id": req.ContainerID},
+		Summary:     fmt.Sprintf("%s runs %s", req.AgentSlug, truncateCmd(journalCmd.argv, 120)),
+		Payload:     execCommandPayload(req, journalCmd, "start", nil),
+		Refs:        map[string]any{"chat_id": req.ChatID, "container_id": req.ContainerID},
 	})
 	// Flip agent to busy for the Watch Roster. The presence sweeper
 	// reverts to offline after idle timeout if the agent crashes before
@@ -426,68 +447,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			ActorType:   "agent",
 			ActorID:     req.AgentID,
 			Summary:     fmt.Sprintf("%s exec FAILED: %v", req.AgentSlug, err),
-			Payload: map[string]any{
-				"cmd":         cmd,
-				"phase":       "end",
+			Payload: execCommandPayload(req, journalCmd, "end", map[string]any{
 				"error":       err.Error(),
 				"duration_ms": time.Since(execStart).Milliseconds(),
-			},
+			}),
 		})
 		return fmt.Errorf("exec agent: %w", err)
 	}
 
-	// Wrap handler with credential scrubbing to prevent secret leakage
-	// in agent output (prompt injection defense). SC1: feed the stateful
-	// stream scrubber the run's loaded credential values so split/encoded
-	// secrets are caught across streamed deltas, and flush the buffered tail
-	// once the stream ends.
-	//
-	// HEADER values count as credential values. A bring-your-own endpoint can
-	// authenticate entirely through a custom header — `X-Api-Key: <secret>` —
-	// and those headers are written into OPENCODE_CONFIG_CONTENT, which an agent
-	// can simply print. Registering only PlainValue left an opaque header secret
-	// matching no built-in pattern and surviving Scrub into the chat UI and the
-	// journal. Same omission as the sidecar's registerCredentialLiterals had,
-	// one package away, which is how it was missed here.
-	var secretValues []string
-	addSecret := func(v string) {
-		if strings.TrimSpace(v) != "" {
-			secretValues = append(secretValues, v)
-		}
-	}
-	// A header value is registered only when it is long enough to plausibly BE
-	// a secret. Custom headers are not always secret — the field's own contract
-	// calls them "an org / route selector some gateways require" — and a global
-	// redaction literal is not free: registering "acme-production" turns every
-	// occurrence of that string in agent output, chat and the journal into
-	// REDACTED, which reads as a bug and hides the text an operator is trying
-	// to debug. The scrubber's own floor is 5 characters, calibrated for values
-	// that are secrets by construction; header values need a higher one because
-	// most of them are not.
-	//
-	// The trade-off is named rather than hidden: a genuine header secret shorter
-	// than this is NOT scrubbed. That is the losing case, and it is chosen
-	// because the scrubber is defence in depth here — a routed endpoint's headers
-	// live only in the sidecar and never enter agent output at all, so this path
-	// matters only for an UNROUTED run, where the headers are in the OpenCode
-	// config and already reported as an env exposure.
-	addHeaderSecret := func(v string) {
-		if len(strings.TrimSpace(v)) >= minHeaderSecretLen {
-			addSecret(v)
-		}
-	}
-	for _, c := range req.Credentials {
-		addSecret(c.PlainValue)
-		for _, k := range sortedKeys(c.Headers) {
-			addHeaderSecret(c.Headers[k])
-		}
-	}
-	// The resolved local-model endpoint travels outside req.Credentials. Its
-	// APIKey is a token by construction, so it is unconditional.
-	addSecret(req.LocalModelAPIKey)
-	for _, k := range sortedKeys(req.LocalModelHeaders) {
-		addHeaderSecret(req.LocalModelHeaders[k])
-	}
 	// Journal tap: accumulate the agent's reply for the end-of-run
 	// chat.agent_response journal entry. CRITICAL (CodeRabbit): this tap sits
 	// AFTER the scrubber (stream → scrub → journalTap → user) so the buffer
@@ -512,6 +479,11 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			handler(event)
 		}
 	})
+	// Wrap handler with credential scrubbing to prevent secret leakage
+	// in agent output (prompt injection defense). SC1: feed the stateful
+	// stream scrubber the run's credential values (collected above, before the
+	// first journal emit) so split/encoded secrets are caught across streamed
+	// deltas, and flush the buffered tail once the stream ends.
 	scrubHandler, flushScrub := o.wrapScrubHandler(journalTap, secretValues)
 	// loggedModel guards the one-shot resolved-model log so a multi-init
 	// stream (sub-agents, restarts) doesn't re-log on every system event.
@@ -679,7 +651,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		cleanCtx := context.Background()
 		o.failRun(cleanCtx, req, runState.ID, "error")
 		o.logger.Warn("run aborted by loop guard", "agent_id", req.AgentID, "exec_id", result.ExecID)
-		o.emitExecEnd(cleanCtx, req, result.ExecID, cmd, "warn",
+		o.emitExecEnd(cleanCtx, req, result.ExecID, journalCmd, "warn",
 			fmt.Sprintf("%s: ABORTED — stuck loop (same tool call ×%d)", req.AgentSlug, loopGuardThreshold),
 			execStart, map[string]any{"reason": "loop_detected"})
 		o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "loop_detected"})
@@ -698,7 +670,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// runs leave the live terminal hanging and presence stuck on
 		// "busy" until the 5-min idle sweeper corrects it. Uses
 		// cleanCtx so journal writes complete even after ctx expired.
-		o.emitExecEnd(cleanCtx, req, result.ExecID, cmd, "warn",
+		o.emitExecEnd(cleanCtx, req, result.ExecID, journalCmd, "warn",
 			fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
 			execStart, map[string]any{"cancelled": true})
 		o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "cancelled"})
@@ -738,7 +710,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Error("exec inspect failed; run outcome unknown, failing closed",
 			"agent_id", req.AgentID, "exec_id", result.ExecID, "error", inspErr)
 		o.failRun(ctx, req, runState.ID, "error")
-		o.emitExecEnd(ctx, req, result.ExecID, cmd, "warn",
+		o.emitExecEnd(ctx, req, result.ExecID, journalCmd, "warn",
 			fmt.Sprintf("%s: outcome UNKNOWN — exec inspect failed: %v", req.AgentSlug, inspErr),
 			execStart, map[string]any{"outcome": "unknown", "inspect_error": inspErr.Error()})
 		o.markAgentOnline(ctx, req, map[string]any{"reason": "exec_inspect_failed"})
@@ -761,7 +733,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// exec in Crow's Nest just because the process was polite about it.
 		endPayload["in_band_error"] = true
 	}
-	o.emitExecEnd(ctx, req, result.ExecID, cmd, endSeverity,
+	o.emitExecEnd(ctx, req, result.ExecID, journalCmd, endSeverity,
 		fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
 		execStart, endPayload)
 	// Flip agent back to online for the Watch Roster now that the run
@@ -1596,18 +1568,116 @@ func shortID(id string) string {
 	return id
 }
 
+// collectSecretValues gathers the run's credential plain values for the
+// scrubbers. Called once per run, before the first journal emit.
+//
+// HEADER values count as credential values. A bring-your-own endpoint can
+// authenticate entirely through a custom header — `X-Api-Key: <secret>` —
+// and those headers are written into OPENCODE_CONFIG_CONTENT, which an agent
+// can simply print. Registering only PlainValue left an opaque header secret
+// matching no built-in pattern and surviving Scrub into the chat UI and the
+// journal. Same omission as the sidecar's registerCredentialLiterals had,
+// one package away, which is how it was missed here.
+func collectSecretValues(req AgentRunRequest) []string {
+	var secretValues []string
+	addSecret := func(v string) {
+		if strings.TrimSpace(v) != "" {
+			secretValues = append(secretValues, v)
+		}
+	}
+	// A header value is registered only when it is long enough to plausibly BE
+	// a secret. Custom headers are not always secret — the field's own contract
+	// calls them "an org / route selector some gateways require" — and a global
+	// redaction literal is not free: registering "acme-production" turns every
+	// occurrence of that string in agent output, chat and the journal into
+	// REDACTED, which reads as a bug and hides the text an operator is trying
+	// to debug. The scrubber's own floor is 5 characters, calibrated for values
+	// that are secrets by construction; header values need a higher one because
+	// most of them are not.
+	//
+	// The trade-off is named rather than hidden: a genuine header secret shorter
+	// than this is NOT scrubbed. That is the losing case, and it is chosen
+	// because the scrubber is defence in depth here — a routed endpoint's headers
+	// live only in the sidecar and never enter agent output at all, so this path
+	// matters only for an UNROUTED run, where the headers are in the OpenCode
+	// config and already reported as an env exposure.
+	addHeaderSecret := func(v string) {
+		if len(strings.TrimSpace(v)) >= minHeaderSecretLen {
+			addSecret(v)
+		}
+	}
+	for _, c := range req.Credentials {
+		addSecret(c.PlainValue)
+		for _, k := range sortedKeys(c.Headers) {
+			addHeaderSecret(c.Headers[k])
+		}
+	}
+	// The resolved local-model endpoint travels outside req.Credentials. Its
+	// APIKey is a token by construction, so it is unconditional.
+	addSecret(req.LocalModelAPIKey)
+	for _, k := range sortedKeys(req.LocalModelHeaders) {
+		addHeaderSecret(req.LocalModelHeaders[k])
+	}
+	return secretValues
+}
+
+// scrubArgv returns a copy of the CLI argv with the run's credential values —
+// and the scrubber's built-in credential patterns — redacted from every
+// element. Its result is what the exec.command journal payloads carry; the raw
+// argv is what actually gets exec'd and never leaves this process.
+//
+// The journal is hash-chained and append-only: whatever lands in a payload here
+// can never be redacted later (GDPR erasure explicitly skips journal entries,
+// internal/api/admin_gdpr.go), so the argv must go through the same credential
+// scrubber the rest of the outbound path uses BEFORE it is written, not after.
+// That is the reasoning exec_stream.go already states over the sibling
+// exec.output_chunk emit, and the argv needs it at least as much: BuildCLICommand
+// puts the verbatim user message in argv, so a human who pastes a token into
+// agent chat has nothing else standing between it and permanent storage.
+//
+// Every element is scrubbed on its own rather than a joined form, because the
+// payload travels to the UI as a list — a redaction applied only to a join
+// would never reach what is rendered.
+//
+// The Scrubber is per-call, never a shared package-level instance:
+// AddSecretValues mutates the underlying Scrubber by adding patterns, so a
+// shared one would leak this run's credential patterns into every other run's
+// output (over-redaction + unbounded growth). Same reason wrapScrubHandler
+// gives for building its own base.
+func scrubArgv(argv []string, secretValues []string) []string {
+	if len(argv) == 0 {
+		return argv
+	}
+	s := scrubber.New()
+	if len(secretValues) > 0 {
+		s.AddSecretValues(secretValues...)
+	}
+	out := make([]string, len(argv))
+	for i, arg := range argv {
+		out[i] = s.Scrub(arg)
+	}
+	return out
+}
+
 // emitExecEnd emits the terminal exec.command journal entry that closes a
-// Crow's Nest command block. The payload always carries cmd, phase:"end" and
-// duration_ms; extra holds the per-outcome fields (exit_code, reason, …).
-func (o *Orchestrator) emitExecEnd(ctx context.Context, req AgentRunRequest, execID string, cmd []string, severity, summary string, execStart time.Time, extra map[string]any) {
-	payload := map[string]any{
-		"cmd":         cmd,
-		"phase":       "end",
-		"duration_ms": time.Since(execStart).Milliseconds(),
-	}
+// Crow's Nest command block. The payload carries the shared exec.command shape
+// plus duration_ms; extra holds the per-outcome fields (exit_code, reason, …).
+//
+// journalCmd is the journalArgv view, which is the only argv form that may be
+// persisted: this helper holds no credential values and cannot sanitise for
+// you. Passing the raw argv here is what the static guard in
+// exec_command_scrub_test.go exists to catch.
+func (o *Orchestrator) emitExecEnd(ctx context.Context, req AgentRunRequest, execID string, journalCmd journalCmdView, severity, summary string, execStart time.Time, extra map[string]any) {
+	// duration_ms first so a caller's extra can still override it, as it
+	// could before this helper shared a payload builder with the other two
+	// emit sites. Built into a fresh map rather than written into extra: the
+	// callers pass literals today, and a helper that mutates its argument is
+	// a trap for the one that does not.
+	fields := map[string]any{"duration_ms": time.Since(execStart).Milliseconds()}
 	for k, v := range extra {
-		payload[k] = v
+		fields[k] = v
 	}
+	payload := execCommandPayload(req, journalCmd, "end", fields)
 	_, _ = o.getJournal().Emit(ctx, JournalEntry{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
