@@ -1,0 +1,37 @@
+-- Pin existing workspaces to "keep forever" for approvals_retention_days.
+--
+-- Companion to 20260901134904_approvals_retention_days, which added the
+-- column. Same split as 20260810170000_audit_retention_windows /
+-- 20260811082000_audit_retention_pin_existing_workspaces: ADD COLUMN cannot
+-- be re-applied (SQLite has no ADD COLUMN IF NOT EXISTS) while a backfill
+-- both can and must be, so keeping them apart is what makes the backfill
+-- testable and safe for a restore whose ledger was rolled back.
+--
+-- Without this, upgrading is destructive: harbormaster.StartApprovalsRetentionSweeper
+-- performs one immediate sweep at boot, every workspace that predates this
+-- migration resolves its NULL override to the 90-day
+-- DefaultApprovalsRetentionDays, and every terminal approval older than 90
+-- days is DELETEd before the operator has any chance to set the override —
+-- the API that sets it only comes up after the sweeper has already run. No
+-- dry-run, no grace period, and nothing to recover from short of a
+-- pre-upgrade backup. (Raised in CodeRabbit review of #2254; the review's
+-- suggested fix of backfilling to 0 could not simply be applied on its own
+-- at that point in the PR's history because an earlier revision of this
+-- column collapsed 0 and NULL into the same 90-day meaning, which would have
+-- made the backfill a no-op. It works now because 0 is a real, distinct
+-- "keep forever" sentinel — see retention.go's package comment.)
+--
+-- A retention window is a decision about data somebody may be required to
+-- keep. Shipping a default is fine; applying it retroactively to history
+-- that accumulated under "we never delete this" is not.
+--
+-- So the asymmetry is deliberate: a workspace that existed before this
+-- migration keeps everything until its operator says otherwise, while a
+-- workspace created afterwards leaves the column NULL and gets the 90-day
+-- product default. New installs are bounded; existing installs are asked.
+--
+-- On a fresh database `workspaces` is empty, so this matches no rows and the
+-- default applies to everything created later — which is the intent.
+UPDATE workspaces
+   SET approvals_retention_days = 0
+ WHERE approvals_retention_days IS NULL;

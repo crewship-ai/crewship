@@ -29,6 +29,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/license"
@@ -1034,6 +1035,12 @@ var startCmd = &cobra.Command{
 				// operator's to declare and not ours to assume. See
 				// internal/api/audit_retention.go.
 				go api.StartAuditRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
+
+				// approvals_queue retention (#2233) — same daily shape, for
+				// terminal HITL approval rows that were kept forever before
+				// this. Defaults to 90 days; see
+				// internal/harbormaster/retention.go.
+				go harbormaster.StartApprovalsRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
 			}
 
 			// Pipeline schedules — cron triggers for saved pipelines.

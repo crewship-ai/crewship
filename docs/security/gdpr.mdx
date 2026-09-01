@@ -108,9 +108,23 @@ curl -X DELETE \
 | `inbox_items` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
 | `user_models` (DB) | row WHERE `user_id = $USER_ID` in this workspace | Hard delete — UNLESS the on-disk delete below failed for that model, in which case the row is left in place (see the disk-file row) |
 | `user_models` (disk file) | `/crew/shared/.memory/users/{user_slug}.md` **and its `.lock` sentinel**, in EVERY crew directory found under `outputBasePath` — not just the subject's current most-active crew. The index row only ever names the CURRENT crew, and an operator's most-active crew changes over time, so a delete keyed on that one row would leave every earlier copy an unreachable orphan. | `outputBasePath` must be configured. A directory that fails to delete is NOT masked: the cascade reports a partial failure (`207 Multi-Status`) instead of `202`, and the `user_models` row for that model is left in place — deleting it would make the surviving copy unfindable by any retry, since this cascade (and the self-service delete) locates a model by looking up that same row. |
+| `approvals_queue` (DB) | rows WHERE `requested_by = $USER_ID` OR `decided_by = $USER_ID` | Hard delete (#2233). No `data_subject_id` column exists on this table, so it is matched on the two columns that ARE user-attributable instead — `requested_by` (a user id for an interactively-triggered approval gate, an agent id for an autonomously-triggered one) and `decided_by` (always a user id; only a human decides). Its own accountability trail (who decided what, when) survives regardless in `journal_entries`, which is excluded below. |
 | `keeper_requests` | All rows | **Excluded** — these record sidecar decisions and don't carry user-attributable content beyond the agent_id |
 | `lessons.md` content scan | Per-crew lessons files | **Manual** — the handler logs a warning naming the subject when it finds the user_slug in any lessons.md; operator decides whether to edit the file by hand |
 | `chats` | All rows owned by subject | **NOT** auto-deleted — operator runs a separate query if the data subject was also a Crewship user; see [Chat sessions](/guides/chat-sessions#sessions) |
+
+<Note>
+`approvals_queue` is erased on Article 17 but is **not** part of the Article
+15 export bundle above — it lacks a `data_subject_id` column, so it doesn't
+fit the export's "every table keyed by data_subject_id" shape, and adding a
+requested-by/decided-by-keyed export is tracked separately rather than
+folded into this cascade. Its own retention sweep
+(`internal/harbormaster/retention.go`, `workspaces.approvals_retention_days`,
+default 90 days) bounds how long an undecided-to-erase row survives on its
+own — see [Migrations — 20260901134904](/guides/migrations) — but a live SAR
+ticket cannot wait out that window, which is why the cascade above erases it
+directly rather than relying on the sweep.
+</Note>
 
 <Note>
 **No per-subject marker survives the erasure.** Each peer card and operator
@@ -149,20 +163,23 @@ gated on the index file already existing, so a crew with no engine yet never
 gets one created just to record an absence.
 </Warning>
 
-The response confirms what landed:
+The response confirms what landed. `rows_deleted` is the single total across
+every table the cascade touched; the per-table breakdown — including
+`approvals_queue` (#2233) — is in `scope`:
 
 ```json
 {
   "action_id": "gdpr_act_…",
-  "rows_deleted": {
+  "data_subject": "usr_…",
+  "workspace_id": "ws_…",
+  "rows_deleted": 147,
+  "scope": {
     "peer_cards": 23,
     "memory_versions": 117,
     "inbox_items": 4,
-    "user_models": 1
-  },
-  "warnings": [
-    "lessons.md mentions user_slug=pavel_advine — manual review required"
-  ]
+    "user_models": 1,
+    "approvals_queue": 2
+  }
 }
 ```
 
@@ -193,7 +210,7 @@ A successful cascade returns:
 {
   "subject_user_id": "usr_…",
   "exported_at": "2026-05-21T18:45:30Z",
-  "scope": {"peer_cards": 0, "memory_versions": 0, "inbox_items": 0, "user_models": 0},
+  "scope": {"peer_cards": 0, "memory_versions": 0, "inbox_items": 0, "user_models": 0, "approvals_queue": 0},
   "peer_cards": [],
   "memory_versions": [],
   "inbox_items": [],

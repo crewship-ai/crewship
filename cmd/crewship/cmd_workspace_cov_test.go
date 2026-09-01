@@ -350,6 +350,56 @@ func TestWorkspaceUpdate_AllowPrivilegedCredentialsFlag(t *testing.T) {
 	}
 }
 
+// TestWorkspaceUpdate_ApprovalsRetentionDaysFlag is issue #2233's CLI
+// parity: --approvals-retention-days must map to the JSON body only when
+// explicitly set (cobra Changed()), same shape as the audit retention pair
+// (TestWorkspaceUpdate_AllowPrivilegedCredentialsFlag) — this drives the
+// real cmd_workspace.go flag, not a stand-in, so a rename or a dropped
+// `flags.Changed` guard on that flag fails this test.
+func TestWorkspaceUpdate_ApprovalsRetentionDaysFlag(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	stub.OnPatch("/api/v1/workspaces/"+covWS, clitest.JSONResponse(200, map[string]string{"id": covWS}))
+	setStubCLI(t, stub.URL())
+
+	c := &cobra.Command{Use: "t"}
+	c.Flags().String("name", "", "")
+	c.Flags().String("slug", "", "")
+	c.Flags().String("language", "", "")
+	c.Flags().Bool("allow-privileged-credentials", false, "")
+	c.Flags().Int("credential-audit-retention-days", 0, "")
+	c.Flags().Int("audit-log-retention-days", 0, "")
+	c.Flags().Int("approvals-retention-days", 0, "")
+	c.SetOut(new(bytes.Buffer))
+	if err := c.Flags().Set("approvals-retention-days", "45"); err != nil {
+		t.Fatal(err)
+	}
+
+	captureStdoutCovCli2(t, func() {
+		if err := workspaceUpdateCmd.RunE(c, nil); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+
+	calls := stub.CallsFor("PATCH", "/api/v1/workspaces/"+covWS)
+	if len(calls) != 1 {
+		t.Fatalf("PATCH calls = %d, want 1", len(calls))
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["approvals_retention_days"] != float64(45) {
+		t.Errorf("body = %v, want approvals_retention_days=45", body)
+	}
+	// The unset audit flags must NOT ride along — same guard the doc
+	// comment on cmd_workspace.go's flags.Changed calls describes.
+	if _, ok := body["credential_audit_retention_days"]; ok {
+		t.Errorf("credential_audit_retention_days not flagged as changed but sent: %v", body)
+	}
+	if _, ok := body["audit_log_retention_days"]; ok {
+		t.Errorf("audit_log_retention_days not flagged as changed but sent: %v", body)
+	}
+}
+
 func TestWorkspaceMemberList_RunE(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
