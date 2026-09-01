@@ -907,7 +907,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		// Gated on the target actually being post-rekey — an older target
 		// still keyed on crew_id needs no translation at all.
 		if table == issueCountersTable && allowed["workspace_id"] && allowed["prefix"] && !allowed["crew_id"] {
-			migratedRows, n, err := migrateIssueCounterRows(ctx, tx, rows, dump.Tables["crews"])
+			migratedRows, n, err := migrateIssueCounterRows(ctx, tx, rows, dump.Tables["crews"], dump.Tables["missions"], dump.Tables["workspaces"])
 			if err != nil {
 				return stats, fmt.Errorf("backup: migrate issue_counters rows: %w", err)
 			}

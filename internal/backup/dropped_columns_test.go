@@ -208,6 +208,213 @@ func TestRestoreDump_PreRekeyIssueCountersMergeTakesMax(t *testing.T) {
 	}
 }
 
+// TestRestoreDump_PreRekeyIssueCountersPreservesLowercasePrefix pins that an
+// explicit crews.issue_prefix restores VERBATIM, not upper-cased.
+//
+// validIssuePrefixRe permits lowercase (`^[A-Za-z0-9_-]{1,16}$`), and the
+// runtime allocator's lookup (nextIssueIdentifierTx, crewIssuePrefix in
+// internal/api/issue_create_core.go) returns an explicit issue_prefix
+// verbatim and does an exact `WHERE prefix = ?` match — it never
+// upper-cases. The pre-fix transform upper-cased the explicit-prefix branch
+// (but NOT its own SQL fallback three lines below it, nor the slug-fallback
+// branch here), so a crew with issue_prefix="eng" landed its migrated
+// counter under "ENG" — a key the allocator can never look up by this
+// crew's real prefix. That reproduces #2034's own stated worst case for
+// exactly the crew the fix exists to save: all its issues were deleted
+// before the backup, so on restore it reseeds from missions (none) and
+// restarts at 1, reissuing "eng-1".."eng-42" on top of identifiers that
+// already exist.
+func TestRestoreDump_PreRekeyIssueCountersPreservesLowercasePrefix(t *testing.T) {
+	db := newDroppedColumnTargetDB(t)
+
+	dump := &DBDump{
+		WorkspaceID: "ws_1",
+		Tables: map[string][]map[string]any{
+			"workspaces": {{"id": "ws_1", "name": "Acme", "slug": "acme"}},
+			"crews": {{
+				"id": "c_1", "workspace_id": "ws_1",
+				"name": "Engineering", "slug": "engineering", "issue_prefix": "eng",
+			}},
+			"issue_counters": {{"crew_id": "c_1", "next_number": int64(42)}},
+		},
+	}
+
+	stats, err := RestoreDumpTx(context.Background(), db, dump, func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	var prefix string
+	var next int64
+	if err := db.QueryRow(`SELECT prefix, next_number FROM issue_counters WHERE workspace_id = 'ws_1'`).
+		Scan(&prefix, &next); err != nil {
+		t.Fatalf("migrated counter: %v", err)
+	}
+	if prefix != "eng" {
+		t.Errorf("migrated prefix = %q, want %q (verbatim, not upper-cased) — "+
+			"the allocator's lookup is an exact match against crews.issue_prefix", prefix, "eng")
+	}
+	if next != 42 {
+		t.Errorf("migrated next_number = %d, want 42", next)
+	}
+	if stats.IssueCountersMigrated != 1 {
+		t.Errorf("IssueCountersMigrated = %d, want 1", stats.IssueCountersMigrated)
+	}
+}
+
+// TestRestoreDump_PreRekeyIssueCountersMissionsHighWaterMark pins the second
+// arm of the migration's collapse
+// (migrations/20260820125000_issue_counters_prefix_scope.sql takes MAX over a
+// UNION ALL of the per-crew counters AND the high-water mark already minted
+// under that prefix in missions): a bundled counter that is present but too
+// low must still be raised to at least what missions.identifier already
+// proves was handed out.
+//
+// The two failure modes are not symmetric. An ABSENT counter self-heals —
+// nextIssueIdentifierTx reseeds it from missions on first use (see
+// internal/api/issue_create_core.go:150). A PRESENT counter that is too low
+// never does: the allocator takes the `next_number + 1` UPDATE branch
+// forever. Crew A (prefix ENG) minted ENG-1..ENG-40 and was deleted — its
+// counter row is gone with it (issue_counters carries no ON DELETE CASCADE
+// post-#1797, but pre-#1797 it did), yet its missions remain. Crew B shares
+// the same effective prefix and is the pre-#1797 collision victim wedged at
+// next_number=1 — crew B is the only one left in the bundle's crews/
+// issue_counters tables, exactly like #2034's "crew whose issues were
+// deleted" case, except here ANOTHER crew's missions still occupy the
+// namespace. Folding only the bundled counter writes back 1: the very next
+// allocation is ENG-2, which already exists, so the allocator's UPDATE
+// increments, the INSERT is rejected by idx_mission_workspace_identifier,
+// and — because the counter upsert and the mission insert share one
+// transaction — the rejection rolls the increment back too. The crew can
+// never file an issue again; before this fix the row was simply dropped and
+// the allocator self-healed to ENG-41.
+func TestRestoreDump_PreRekeyIssueCountersMissionsHighWaterMark(t *testing.T) {
+	db := newDroppedColumnTargetDB(t)
+
+	dump := &DBDump{
+		WorkspaceID: "ws_1",
+		Tables: map[string][]map[string]any{
+			"workspaces": {{"id": "ws_1", "name": "Acme", "slug": "acme"}},
+			// Only crew B is in the bundle. Crew A, which actually minted
+			// the high identifiers, was deleted before the backup — its
+			// counter cascaded away with it, but the missions it created
+			// did not.
+			"crews": {{
+				"id": "c_b", "workspace_id": "ws_1",
+				"name": "Crew B", "slug": "crewb", "issue_prefix": "ENG",
+			}},
+			"issue_counters": {{"crew_id": "c_b", "next_number": int64(1)}},
+			"missions": {{
+				"id": "m_1", "workspace_id": "ws_1", "identifier": "ENG-40", "number": int64(40),
+			}},
+		},
+	}
+
+	stats, err := RestoreDumpTx(context.Background(), db, dump, func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	var next int64
+	if err := db.QueryRow(`SELECT next_number FROM issue_counters WHERE workspace_id = 'ws_1' AND prefix = 'ENG'`).
+		Scan(&next); err != nil {
+		t.Fatalf("migrated counter: %v", err)
+	}
+	if next != 40 {
+		t.Errorf("migrated next_number = %d, want 40 (the missions high-water mark, not the bundled counter's 1) — "+
+			"a counter written back too low can never self-heal", next)
+	}
+	if stats.IssueCountersMigrated != 1 {
+		t.Errorf("IssueCountersMigrated = %d, want 1", stats.IssueCountersMigrated)
+	}
+}
+
+// TestRestoreBackup_PreRekeyBundleForkedRestoreLandsInNewWorkspace pins the
+// --as-workspace / --as-crew case: RemapIDs regenerates crews.id BEFORE
+// migrateIssueCounterRows runs, but issue_counters.crew_id has no declared
+// FOREIGN KEY on a post-#1797 target (the column does not exist in that
+// schema at all), so without issue_counters registered in virtualForeignKeys
+// the bundle row's crew_id is left pointing at the crew's OLD id.
+//
+// crewIssueScopesFromDump then misses (it is keyed by the crews table's
+// NEW, already-remapped ids), migrateIssueCounterRows falls back to its tx
+// query, and on the realistic fork scenario — --as-workspace beside a
+// still-present source workspace on the SAME instance — that fallback finds
+// a crew that genuinely exists under the old id: the SOURCE crew. The
+// migrated counter then lands under the SOURCE's workspace_id instead of
+// the fork's, while RestoreStats.IssueCountersMigrated still reports
+// success.
+func TestRestoreBackup_PreRekeyBundleForkedRestoreLandsInNewWorkspace(t *testing.T) {
+	ctx := context.Background()
+
+	db := openMigratedDBCov(t)
+	// The source workspace/crew this bundle was taken from, still present
+	// on the SAME instance — the documented --as-workspace use case (fork
+	// beside the original, not replace it).
+	sourceWsID, sourceCrewID := seedCovWorkspace(t, db, "fork_src")
+	if _, err := db.ExecContext(ctx,
+		`UPDATE crews SET issue_prefix = 'ENG' WHERE id = ?`, sourceCrewID); err != nil {
+		t.Fatalf("set issue_prefix: %v", err)
+	}
+
+	dumpJSON := fmt.Sprintf(`{
+		"workspace_id": %[1]q,
+		"tables": {
+			"workspaces": [{"id": %[1]q, "name": "Source", "slug": "cov-fork_src"}],
+			"crews": [{"id": %[2]q, "workspace_id": %[1]q, "name": "Engineering", "slug": "crew-fork_src", "issue_prefix": "ENG"}],
+			"issue_counters": [{"crew_id": %[2]q, "next_number": 42}]
+		}
+	}`, sourceWsID, sourceCrewID)
+	bundle := writeRawBundle(t, t.TempDir(), &Manifest{
+		FormatVersion:     FormatVersion,
+		Scope:             ScopeWorkspace,
+		CompatibleTargets: []Target{TargetAnyInstance},
+		CreatedAt:         time.Now().UTC(),
+		CreatedBy:         Actor{UserID: "u_cov"},
+	}, buildPayloadTarZst(t, []payloadEntry{{name: "db/dump.json", body: []byte(dumpJSON)}}),
+		WriteBundleOptions{NoEncrypt: true}, "")
+
+	result, err := RestoreBackup(ctx, db, RestoreOptions{
+		Path:        bundle,
+		Actor:       covAdminActor(),
+		AsWorkspace: "cov-fork_dst",
+	})
+	if err != nil {
+		t.Fatalf("RestoreBackup --as-workspace: %v", err)
+	}
+	if result.RestoredWorkspaceID == "" {
+		t.Fatalf("restore reported no RestoredWorkspaceID; nothing to verify")
+	}
+	if result.RestoredWorkspaceID == sourceWsID {
+		t.Fatalf("--as-workspace did not remap the workspace id (still %s)", sourceWsID)
+	}
+	if result.IssueCountersMigrated != 1 {
+		t.Fatalf("IssueCountersMigrated = %d, want 1", result.IssueCountersMigrated)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM issue_counters WHERE workspace_id = ?`, sourceWsID).Scan(&count); err != nil {
+		t.Fatalf("count source counters: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("the migrated counter landed under the SOURCE workspace (%s): "+
+			"a forked restore must not write into the workspace it was forked FROM", sourceWsID)
+	}
+
+	var workspaceID, prefix string
+	var next int64
+	if err := db.QueryRowContext(ctx,
+		`SELECT workspace_id, prefix, next_number FROM issue_counters WHERE prefix = 'ENG'`).
+		Scan(&workspaceID, &prefix, &next); err != nil {
+		t.Fatalf("migrated counter: %v", err)
+	}
+	if workspaceID != result.RestoredWorkspaceID {
+		t.Errorf("migrated counter workspace_id = %q, want %q (the FORKED workspace)", workspaceID, result.RestoredWorkspaceID)
+	}
+	if next != 42 {
+		t.Errorf("migrated next_number = %d, want 42", next)
+	}
+}
+
 // TestRestoreDump_DroppedColumnsAggregateAcrossRowsAndTables checks the
 // accounting: one entry per (table, column) pair carrying its own row count,
 // a total that counts every discarded value, and a deterministic order —

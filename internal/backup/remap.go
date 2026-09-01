@@ -120,6 +120,29 @@ var virtualForeignKeys = map[string][]foreignKeyEdge{
 	// also be re-signed. rechainForkedJournal does that, and it runs
 	// immediately after RemapIDs for that reason.
 	"journal_chain_checkpoints": {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}},
+	// issue_counters.crew_id (#2034/#1797) is the same gap in the opposite
+	// direction: a PRE-#1797 bundle's issue_counters rows still carry
+	// crew_id, but on a post-#1797 TARGET that column does not exist in the
+	// schema at all — introspectForeignKeys queries the target, sees no
+	// issue_counters.crew_id column and so no edge, and pass 2 leaves the
+	// bundle row's crew_id pointing at the crew's OLD id while pass 1 just
+	// gave that crew a brand-new one.
+	//
+	// migrateIssueCounterRows (issue_counters_restore.go) then can't find
+	// the remapped crew by its NEW id in the bundle's own (already-remapped)
+	// crews table, falls back to querying crew_id against the TARGET
+	// database, and — on the realistic --as-workspace use case, forking
+	// beside the still-present source workspace — finds a crew that really
+	// does exist under that old id: the SOURCE crew. The migrated counter
+	// then lands under the source's workspace_id instead of the fork's,
+	// while RestoreStats.IssueCountersMigrated reports success.
+	//
+	// Declaring the edge here (used only when the target's real schema does
+	// not already declare crew_id, i.e. only for a post-#1797 target — see
+	// the "declared" skip in RemapIDs below) makes pass 2 rewrite crew_id
+	// alongside every other FK, so migrateIssueCounterRows resolves the row
+	// through the bundle's own remapped crews table like everything else.
+	"issue_counters": {{column: "crew_id", refTable: "crews", refColumn: "id"}},
 }
 
 // foreignKeyEdge captures one FK column's destination.

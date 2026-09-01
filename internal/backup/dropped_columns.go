@@ -173,7 +173,7 @@ func InspectDroppedColumns(ctx context.Context, db *sql.DB, dump *DBDump) (int, 
 			return 0, nil, 0, fmt.Errorf("backup: columns of %s: %w", table, err)
 		}
 		if table == issueCountersTable && allowed["workspace_id"] && allowed["prefix"] && !allowed["crew_id"] {
-			migratedRows, n, err := migrateIssueCounterRows(ctx, tx, rows, dump.Tables["crews"])
+			migratedRows, n, err := migrateIssueCounterRows(ctx, tx, rows, dump.Tables["crews"], dump.Tables["missions"], dump.Tables["workspaces"])
 			if err != nil {
 				return 0, nil, 0, fmt.Errorf("backup: migrate issue_counters rows: %w", err)
 			}
