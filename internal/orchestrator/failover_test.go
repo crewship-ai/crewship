@@ -317,6 +317,7 @@ func TestBuildEnvVars(t *testing.T) {
 
 	cred := &Credential{
 		ID:         "cred-1",
+		Type:       "API_KEY",
 		EnvVarName: "ANTHROPIC_API_KEY",
 		PlainValue: "sk-test",
 	}

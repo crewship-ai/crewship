@@ -10,7 +10,21 @@ import { test, expect } from "@playwright/test"
 // auth/CSRF chain, and exercises submit/reset through the same store
 // the assistant-turn.tsx UI uses. A bug in the store's chain() or
 // rollback logic would surface here even if the per-API test passes.
-
+//
+// The "submit() POSTs feedback" test below still uses a synthetic
+// turnId for the same reason its API-only sibling did before this
+// comment existed: there is no LLM credential here to produce a real
+// assistant turn to click on. As of #1617, POST /api/v1/feedback
+// correctly 404s a message_id that was never persisted to
+// conversation_messages (#1213, closing #1208's cross-tenant
+// message-existence oracle) — that is not a router bug (see
+// internal/api/feedback_route_test.go and
+// cmd/crewship/acceptance_feedback_test.go, both green against a real
+// message through the real router). This test stays red until this
+// harness has a way to seed a real conversation_messages row without
+// a live agent turn. The Origin-spoofing test right after it does not
+// depend on message existence (EnforceOrigin rejects before the
+// handler's DB lookup) and passes today.
 test.describe("Feedback store via real browser", () => {
   test.beforeEach(async ({ page, context, baseURL }) => {
     // Sign in via NextAuth credentials callback so the cookie lands

@@ -93,6 +93,18 @@ CREATE TABLE approvals_queue (
 );
 ```
 
+`payload` is `{"tool": "...", "args": {...}, "review": {...}}` — `review` is
+omitted when the caller passes none. `args` is both the rule-evaluator input
+and the reward-tuning fingerprint (see [Reward-adjusted
+gating](#reward-adjusted-gating) — `HashArgs` hashes it verbatim, key *and*
+value), so a caller must only put values there that are stable across
+repeated, unrelated calls of the same shape. `review` is extra, human-facing
+context — for `agent_run` this is a scrubbed, length-bounded preview of the
+prompt that triggered the call (`{"user_prompt": "...", "user_prompt_truncated": bool}`)
+— and is stored alongside `args` for the approvals UI/CLI to show, but is
+never hashed and never affects cohorting, so it may carry per-invocation
+text that `args` cannot.
+
 ## Endpoints
 
 - `GET /api/v1/approvals?status=pending&limit=50` -- inbox. Status defaults to `pending`; use `?status=all` for full history. **Requires OWNER or ADMIN** workspace role; 403 otherwise (#2233 -- before this it had no role floor).
@@ -316,6 +328,22 @@ biased the window (the next decisions will retrain naturally).
 never stored in `gate_reward_history`, only in the original
 `approvals_queue` row. Semantically-equal calls hash the same, so
 one cohort per operation shape.
+
+**A cohort is defined entirely by `args`, key and value.** Any
+per-invocation value in there — a prompt, a path, a timestamp — puts every
+call in a cohort of one, and the quorum this section describes can then
+never be reached. This is why `args` for `agent_run` is just `{agent_slug,
+agent_role}` (see [Payload shape](#queue-schema) above): before that, it
+also carried the user's message, so no two runs of the same agent ever
+hashed the same and reward-adjusted gating silently could not learn
+anything for `agent_run`. Any new gated tool should keep the same
+discipline — put per-invocation context in `review`, not `args`.
+
+Because the fingerprint shape changed, `agent_run` rows written before this
+fix carry an `args_hash` nothing will ever look up again — each was already
+a cohort of one, so nothing of value is orphaned. No migration was run;
+`gate_reward_history` accumulates fresh under the new shape, same as any
+`crewship approvals reset-auto-tuning` reset.
 
 Inspired by Self-Evolve's Q-value update loop, simplified: operator
 decision *is* the signal (no LLM judge needed).

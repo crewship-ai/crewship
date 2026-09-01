@@ -610,6 +610,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The feedback API docs still described the security hole #1213 had
+  already closed (#1617).** `docs/api-reference/feedback.mdx` and
+  `docs/guides/feedback.mdx` said `POST /api/v1/feedback` fell back to the
+  caller's most-recent workspace when `chat_id` was omitted, and one bullet
+  stated outright that "message_id ownership is not enforced" — the exact
+  cross-tenant message-existence oracle #1213 closed by requiring
+  `message_id` to resolve to a real, visible row in `conversation_messages`
+  (#1208). #1617 investigated the resulting 404 as a possible router bug —
+  POST/DELETE register through `authedSelfMut`, GET through the plain
+  `r.mux.Handle` beside it — but the route was never broken; the docs were
+  just stale. Corrected both pages, and added
+  `internal/api/feedback_route_test.go` (drives POST/GET/DELETE through the
+  real router) plus `cmd/crewship/acceptance_feedback_test.go` (drives
+  `crewship feedback create|list|delete` against a real server) so a real
+  registration regression on this route family fails loudly instead of
+  reading like this one did.
+
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
   conversation: a person opening a thread, a routine minting **one chat per
@@ -3935,6 +3952,45 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `int64`-nanosecond duration the sweep computes its cutoff from and wraps
   negative, which would otherwise delete every terminal row regardless of
   age.
+- **An escalation's raw text reached the permanent journal entry and the
+  workspace-wide broadcast, even though the inbox copy was scrubbed
+  (#2238).** `CreateEscalation` wrote the same agent-supplied
+  `reason`/`context`/`metadata` into three places — the inbox row, the
+  `peer.escalation` journal entry, and the `escalation_created` /
+  `escalation.created` WebSocket broadcasts — but secret-redaction and a
+  length bound were applied only to the inbox copy. An inbox row is exactly
+  what a GDPR erasure request deletes, while the journal entry is explicitly
+  excluded from that erasure and is never rewritten again, so the copy that
+  survived forever was the unredacted, unbounded one: a credential-shaped
+  value an agent pasted into an escalation sat there permanently, and
+  nothing capped how large `context` could be. The journal payload and its
+  summary line are now redacted and capped at 4096 characters, the same
+  treatment the inbox copy already got — and so is the `reason` sent in
+  `CreateEscalation`'s own workspace-wide broadcast, since that goes out
+  live to every connected member the moment the escalation is raised, not
+  just the person who ends up seeing the inbox row.
+
+  The same gap existed at three other points on the escalation path, closed
+  the same way: the expiry sweeper (`escalation_lifecycle.go`) re-reads
+  `reason` out of the `escalations` table and writes a SECOND permanent
+  `peer.escalation` entry when nobody answers in time — that summary line
+  now gets the identical redact-then-bound treatment, not just the create
+  path's. The auto-confidence escalation path
+  (`confidence_handler.go`) broadcasts its own `escalation.created`
+  workspace-wide with the agent-supplied `reason` — that call site now
+  redacts too. And `ResolveEscalation`'s journal entry redacted
+  `resolution` only when the escalation's type was `CREDENTIAL` and never
+  bounded it for any type, so an operator's free-text resolution on a
+  non-`CREDENTIAL` escalation could carry a secret an operator pasted in
+  ("used token ... to unblock it") into the same permanent entry, verbatim
+  and unbounded — `resolution` is now redacted and capped the same way for
+  every non-`CREDENTIAL` type.
+
+  Left out, deliberately: `CancelEscalation`'s journal entry and broadcasts
+  also carry a raw `reason`, but that text is operator-supplied (the human
+  cancelling, not the agent that raised the question), which is outside
+  this issue's scope of scrubbing agent-supplied text — tracked as a
+  follow-up rather than silently left unredacted.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
