@@ -88,11 +88,11 @@ curl -X DELETE 'https://<host>/api/v1/feedback?message_id=msg_abc&signal=not_hel
 # → 204 (idempotent: also 204 if the row didn't exist)
 ```
 
-## Workspace re-anchoring
+## Workspace resolution
 
-The `chat_id` parameter is optional on POST so eval widgets and CLI fallbacks without a chat context can still submit. Without it the server falls back to the caller's most-recent workspace (`ORDER BY workspace_members.created_at DESC LIMIT 1`).
+`message_id` is the only signal the server trusts for authorization (#1208, closed in #1213). On every POST the handler looks the id up in `conversation_messages` — the cross-session search mirror (migration v111) that `internal/conversation.Store.Append` writes on every real chat turn — reads that row's own `session_id`, and confirms the caller is a member of the workspace that chat belongs to. A `message_id` the mirror has never seen, or one whose chat the caller can't see, both collapse to the same `404` from the caller's point of view; the two aren't distinguishable from outside.
 
-A later POST against the same `(message_id, user_id, signal)` tuple that *does* carry `chat_id` re-anchors the row to the correct workspace via the UPSERT clause:
+`chat_id` is still accepted in the request body for older clients but is no longer trusted for authorization — a caller can no longer attach feedback to an unrelated message by pairing a real, visible `chat_id` with a forged `message_id`. There is also no more "fall back to the caller's most-recent workspace" path: every row's `workspace_id` comes from the message it's attached to, every time, including on a re-POST:
 
 ```sql
 ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
@@ -101,8 +101,6 @@ ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
     trace_id     = COALESCE(excluded.trace_id, message_feedback.trace_id),
     chat_id      = COALESCE(excluded.chat_id, message_feedback.chat_id)
 ```
-
-Without `workspace_id = excluded.workspace_id`, a user with multi-workspace membership who first POSTed from a widget (fallback to workspace A) and later POSTed from their real chat (workspace B) would have the row stuck in A; eval queries scoped to workspace B would miss it.
 
 ## Limits
 
@@ -116,7 +114,7 @@ Without `workspace_id = excluded.workspace_id`, a user with multi-workspace memb
 
 - **No server-side hydration of the UI state** on initial load — the frontend reads localStorage; a fresh browser starts with empty state. The server is the truth, and `GET /api/v1/feedback?message_id=...` exposes it for any UI that wants to rehydrate.
 - **No "retracted" signal value** — DELETE removes the row entirely. The eval pipeline distinguishes "row exists" from "row doesn't exist," so a once-thumbed-then-untoggled message reads as "no signal" rather than "explicitly retracted." Future iterations may add a `retracted` value if the distinction starts mattering.
-- **`message_id` ownership is not enforced** — messages live in JSONL files (`chats.jsonl_path`), not a SQL table, so a per-POST file read would slow the path too much. Workspace membership is the trust boundary; cross-tenant probes are still blocked.
+- **`message_id` must be in the search mirror** — the existence check (above) reads `conversation_messages`, which is "search-from-now-on": messages from before migration v111 were never backfilled into it. A very old `message_id` can 404 here even though the JSONL transcript (`chats.jsonl_path`) still has it. Rare in practice, and visible immediately to the caller as a 404 rather than silently misattributing the row.
 
 ## Related
 
