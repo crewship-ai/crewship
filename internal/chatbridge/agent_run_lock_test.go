@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// TestRunGate_ExcludesConcurrentClaims is the core exclusivity proof for
+// TestAgentRunLock_ExcludesConcurrentClaims is the core exclusivity proof for
 // F51: two callers racing to claim the SAME key must never both believe
-// they hold it. On main (before RunGate existed), the only exclusivity
+// they hold it. On main (before AgentRunLock existed), the only exclusivity
 // primitive was Bridge.tryMarkRunStart keyed by chat id — the assignment
 // path (api.AssignmentHandler.runAssignment) never called it at all, so
 // this guarantee did not exist for it. This test targets the extracted
@@ -17,11 +17,11 @@ import (
 // (internal/api) proves the same thing at the runAssignment call site.
 //
 // Run with -race: the shared `holders` counter is only safe because the
-// mutex inside RunGate really does serialise TryStart/End: a broken
+// mutex inside AgentRunLock really does serialise TryStart/End: a broken
 // implementation (e.g. a plain map with no lock) would race here.
-func TestRunGate_ExcludesConcurrentClaims(t *testing.T) {
+func TestAgentRunLock_ExcludesConcurrentClaims(t *testing.T) {
 	t.Parallel()
-	g := NewRunGate()
+	g := NewAgentRunLock()
 	const key = "agent-shared"
 	const workers = 16
 
@@ -67,12 +67,12 @@ func TestRunGate_ExcludesConcurrentClaims(t *testing.T) {
 	}
 }
 
-// TestRunGate_IndependentKeysDoNotBlockEachOther guards against an
+// TestAgentRunLock_IndependentKeysDoNotBlockEachOther guards against an
 // over-eager fix that serialises everything behind one lock: two
 // DIFFERENT agents must be able to run at the same time.
-func TestRunGate_IndependentKeysDoNotBlockEachOther(t *testing.T) {
+func TestAgentRunLock_IndependentKeysDoNotBlockEachOther(t *testing.T) {
 	t.Parallel()
-	g := NewRunGate()
+	g := NewAgentRunLock()
 	if !g.TryStart("agent-a") {
 		t.Fatal("expected first claim on agent-a to succeed")
 	}
@@ -83,12 +83,12 @@ func TestRunGate_IndependentKeysDoNotBlockEachOther(t *testing.T) {
 	g.End("agent-b")
 }
 
-// TestRunGate_ReentrantClaimFails documents the exclusivity contract on a
+// TestAgentRunLock_ReentrantClaimFails documents the exclusivity contract on a
 // single goroutine: TryStart must fail while its own prior claim on the
 // same key is still held, exactly like tryMarkRunStart.
-func TestRunGate_ReentrantClaimFails(t *testing.T) {
+func TestAgentRunLock_ReentrantClaimFails(t *testing.T) {
 	t.Parallel()
-	g := NewRunGate()
+	g := NewAgentRunLock()
 	if !g.TryStart("agent-x") {
 		t.Fatal("first claim should succeed")
 	}

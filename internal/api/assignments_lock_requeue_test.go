@@ -1,6 +1,6 @@
 package api
 
-// F51 follow-up: runAssignment losing chatbridge.RunGate's per-agent claim
+// F51 follow-up: runAssignment losing chatbridge.AgentRunLock's per-agent claim
 // used to mark the assignment FAILED ("already has a live run in
 // progress"). That is semantically wrong — nothing failed, the work merely
 // has to wait — and permanently pollutes run history with fake failures.
@@ -9,38 +9,38 @@ package api
 // primitives (claimCrewSlot / pumpCrewQueue / pumpAndDispatch) rather than
 // calling runAssignment in isolation:
 //
-//  1. TestGateLoss_RequeuedRow_DrainedOncePumped proves a row that lost the
-//     gate is QUEUED, not FAILED, and that it IS subsequently claimed and
-//     actually run once the gate frees — i.e. it does not silently rot in
+//  1. TestLockLoss_RequeuedRow_DrainedOncePumped proves a row that lost the
+//     lock is QUEUED, not FAILED, and that it IS subsequently claimed and
+//     actually run once the lock frees — i.e. it does not silently rot in
 //     QUEUED forever.
-//  2. TestPumpAndDispatch_DoesNotCollideWithHeldGate proves the completion
+//  2. TestPumpAndDispatch_DoesNotCollideWithHeldLock proves the completion
 //     pump — which claims purely on crew budget and has no visibility into
-//     the in-memory gate — cannot force a live collision: a row it claims
-//     for a busy agent bounces back to QUEUED via runAssignment's gate
+//     the in-memory lock — cannot force a live collision: a row it claims
+//     for a busy agent bounces back to QUEUED via runAssignment's lock
 //     check instead of reaching the orchestrator.
-//  3. TestRunAssignment_ReleasesGateBeforeOwnPump_SoOwnQueuedRowDrainsImmediately
+//  3. TestRunAssignment_ReleasesLockBeforeOwnPump_SoOwnQueuedRowDrainsImmediately
 //     covers a latent ordering hazard found while implementing this fix:
 //     finishAssignment calls pumpAndDispatch synchronously, and pumpAndDispatch
-//     dispatches each claimed row from a SPAWNED GOROUTINE. If the gate were
-//     released only via a bare `defer h.runGate.End(...)` (which fires after
+//     dispatches each claimed row from a SPAWNED GOROUTINE. If the lock were
+//     released only via a bare `defer h.agentRunLock.End(...)` (which fires after
 //     runAssignment itself returns, i.e. strictly after the in-body
 //     finishAssignment call that triggers the pump), there would be a real
 //     data race between that deferred release and the spawned goroutine's own
-//     gate.TryStart for a same-agent queued row: nothing orders one before
-//     the other, so the pumped row could observe the gate as still held and
+//     lock.TryStart for a same-agent queued row: nothing orders one before
+//     the other, so the pumped row could observe the lock as still held and
 //     bounce back to QUEUED instead of draining immediately.
 //
-//     runAssignment now calls a releaseGate() helper explicitly, right
+//     runAssignment now calls a releaseLock() helper explicitly, right
 //     before every finishAssignment call, instead of relying solely on the
 //     defer (which remains only as a panic/missed-path safety net). Because
 //     that explicit release happens strictly before pumpAndDispatch's `go
 //     dispatchByID(...)` statement in the SAME goroutine, Go's
 //     happens-before guarantee for goroutine creation (the spawning
 //     goroutine's prior actions happen-before the spawned goroutine's first
-//     action) means the pumped goroutine's gate.TryStart is deterministically
-//     guaranteed to observe the released gate — not just likely to.
+//     action) means the pumped goroutine's lock.TryStart is deterministically
+//     guaranteed to observe the released lock — not just likely to.
 //
-//     Honesty check: reverting just the explicit releaseGate() calls (back
+//     Honesty check: reverting just the explicit releaseLock() calls (back
 //     to defer-only) and running this test 15x in a row did NOT reproduce a
 //     failure — in practice the goroutine-scheduling latency to actually run
 //     the spawned dispatch reliably exceeds the handful of instructions
@@ -91,39 +91,39 @@ func pollFinalStatus(t *testing.T, db *sql.DB, id string, transient map[string]b
 	}
 }
 
-// TestGateLoss_RequeuedRow_DrainedOncePumped: a row that loses the gate
-// lands QUEUED (not FAILED), and once the gate frees, the normal
+// TestLockLoss_RequeuedRow_DrainedOncePumped: a row that loses the lock
+// lands QUEUED (not FAILED), and once the lock frees, the normal
 // completion-path pump claims and actually runs it (orch=nil so it ends
 // FAILED with "orchestrator not available" — proof it reached the
-// orchestrator-availability check this time, i.e. it got PAST the gate).
-func TestGateLoss_RequeuedRow_DrainedOncePumped(t *testing.T) {
+// orchestrator-availability check this time, i.e. it got PAST the lock).
+func TestLockLoss_RequeuedRow_DrainedOncePumped(t *testing.T) {
 	t.Parallel()
 	h, db, crewID, agentIDs, chatID := dispatchPumpRig(t)
 	setCrewBudget(t, db, crewID, 1)
-	gate := chatbridge.NewRunGate()
-	h.SetRunGate(gate)
+	lock := chatbridge.NewAgentRunLock()
+	h.SetAgentRunLock(lock)
 
-	const aid = "a_gateloss_1"
+	const aid = "a_lockloss_1"
 	seedAssignmentRow(t, db, aid, "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "RUNNING")
 
 	// Simulate: claimCrewSlot already flipped this row to RUNNING, but the
 	// agent has a different live run in flight (a chat send, or an earlier
 	// assignment) holding the exec slot.
-	if !gate.TryStart(agentIDs[0]) {
-		t.Fatal("setup: gate should be free")
+	if !lock.TryStart(agentIDs[0]) {
+		t.Fatal("setup: lock should be free")
 	}
 
 	if err := h.dispatchByID(context.Background(), aid); err != nil {
 		t.Fatalf("dispatchByID: %v", err)
 	}
 	// dispatchByID -> runAssignment is synchronous (no inner goroutine), so
-	// by return time the gate-loss branch has already run.
+	// by return time the lock-loss branch has already run.
 	if got := statusOf(t, db, aid); got != "QUEUED" {
-		t.Fatalf("status after gate loss = %q, want QUEUED", got)
+		t.Fatalf("status after lock loss = %q, want QUEUED", got)
 	}
 
-	// The agent's live run finishes and frees the gate.
-	gate.End(agentIDs[0])
+	// The agent's live run finishes and frees the lock.
+	lock.End(agentIDs[0])
 
 	// The natural drain trigger: some assignment in this crew completes,
 	// which calls pumpAndDispatch(crewID). We invoke it directly here
@@ -139,33 +139,33 @@ func TestGateLoss_RequeuedRow_DrainedOncePumped(t *testing.T) {
 	final := pollFinalStatus(t, db, aid, map[string]bool{"QUEUED": true, "RUNNING": true}, 2*time.Second)
 	if final != "FAILED" {
 		t.Fatalf("final status = %q, want FAILED (orch=nil path — proves the run actually reached the "+
-			"orchestrator-availability check once the gate freed, not stuck requeuing forever)", final)
+			"orchestrator-availability check once the lock freed, not stuck requeuing forever)", final)
 	}
 	var errMsg string
 	_ = db.QueryRow(`SELECT COALESCE(error_message,'') FROM assignments WHERE id = ?`, aid).Scan(&errMsg)
 	if errMsg != "orchestrator not available" {
-		t.Errorf("error_message = %q, want %q — a different reason means it didn't cleanly pass the gate",
+		t.Errorf("error_message = %q, want %q — a different reason means it didn't cleanly pass the lock",
 			errMsg, "orchestrator not available")
 	}
-	if gate.InFlight(agentIDs[0]) {
-		t.Error("gate still reports the agent in-flight after its run finished")
+	if lock.InFlight(agentIDs[0]) {
+		t.Error("lock still reports the agent in-flight after its run finished")
 	}
 }
 
-// TestPumpAndDispatch_DoesNotCollideWithHeldGate: the completion-path pump
+// TestPumpAndDispatch_DoesNotCollideWithHeldLock: the completion-path pump
 // (pumpCrewQueue) claims purely on crew budget — it has no visibility into
-// the in-memory RunGate, because the gate can't be evaluated inside the SQL
-// CAS. If it claims a QUEUED row for an agent that is ACTUALLY still busy
-// (gate held, e.g. by a concurrent chat send), that must not turn into a
-// live collision: runAssignment's gate check inside the dispatched goroutine
+// the in-memory AgentRunLock, because the lock can't be evaluated inside the
+// SQL CAS. If it claims a QUEUED row for an agent that is ACTUALLY still busy
+// (lock held, e.g. by a concurrent chat send), that must not turn into a
+// live collision: runAssignment's lock check inside the dispatched goroutine
 // must catch it and return the row to QUEUED instead of proceeding to the
 // orchestrator.
-func TestPumpAndDispatch_DoesNotCollideWithHeldGate(t *testing.T) {
+func TestPumpAndDispatch_DoesNotCollideWithHeldLock(t *testing.T) {
 	t.Parallel()
 	h, db, crewID, agentIDs, chatID := dispatchPumpRig(t)
 	setCrewBudget(t, db, crewID, 2) // headroom: budget alone would happily claim
-	gate := chatbridge.NewRunGate()
-	h.SetRunGate(gate)
+	lock := chatbridge.NewAgentRunLock()
+	h.SetAgentRunLock(lock)
 
 	const aid = "a_collide_1"
 	seedAssignmentRow(t, db, aid, "test-workspace-id", chatID, agentIDs[1], agentIDs[1], "QUEUED")
@@ -174,11 +174,11 @@ func TestPumpAndDispatch_DoesNotCollideWithHeldGate(t *testing.T) {
 	}
 
 	// The agent this row targets has a live run elsewhere (e.g. a chat
-	// send) holding the gate for the whole test.
-	if !gate.TryStart(agentIDs[1]) {
-		t.Fatal("setup: gate should be free")
+	// send) holding the lock for the whole test.
+	if !lock.TryStart(agentIDs[1]) {
+		t.Fatal("setup: lock should be free")
 	}
-	defer gate.End(agentIDs[1])
+	defer lock.End(agentIDs[1])
 
 	n, err := h.pumpAndDispatch(context.Background(), crewID)
 	if err != nil {
@@ -189,9 +189,9 @@ func TestPumpAndDispatch_DoesNotCollideWithHeldGate(t *testing.T) {
 	}
 
 	// The claim's CAS flips the row RUNNING; the dispatched goroutine's
-	// runAssignment must catch the still-held gate and requeue it. It must
+	// runAssignment must catch the still-held lock and requeue it. It must
 	// NOT settle on FAILED (which would mean it reached the
-	// orchestrator-availability check, i.e. got past the gate — the
+	// orchestrator-availability check, i.e. got past the lock — the
 	// collision this test exists to catch) or stay RUNNING (a live exec
 	// that never got requeued).
 	final := pollFinalStatus(t, db, aid, map[string]bool{"RUNNING": true}, 2*time.Second)
@@ -199,29 +199,29 @@ func TestPumpAndDispatch_DoesNotCollideWithHeldGate(t *testing.T) {
 		t.Fatalf("final status = %q, want QUEUED — the pump let a busy agent's row through instead of "+
 			"bouncing it back", final)
 	}
-	if !gate.InFlight(agentIDs[1]) {
-		t.Error("gate must still report the agent in-flight — the held claim must be untouched by the losing call")
+	if !lock.InFlight(agentIDs[1]) {
+		t.Error("lock must still report the agent in-flight — the held claim must be untouched by the losing call")
 	}
 }
 
-// TestRunAssignment_ReleasesGateBeforeOwnPump_SoOwnQueuedRowDrainsImmediately
+// TestRunAssignment_ReleasesLockBeforeOwnPump_SoOwnQueuedRowDrainsImmediately
 // is the regression test for the ordering window: finishAssignment calls
-// pumpAndDispatch SYNCHRONOUSLY as part of completing a run. If the gate is
+// pumpAndDispatch SYNCHRONOUSLY as part of completing a run. If the lock is
 // released only via a deferred call (which fires after runAssignment itself
 // returns — i.e. after the in-body finishAssignment call, and therefore
 // after its pump already ran), the very completion that frees an agent's
-// slot finds its OWN gate still held during that first pump attempt, and a
+// slot finds its OWN lock still held during that first pump attempt, and a
 // same-agent row queued behind it gets bounced straight back to QUEUED
-// instead of draining. This proves the fix (explicit releaseGate() right
+// instead of draining. This proves the fix (explicit releaseLock() right
 // before each finishAssignment call) closes that window: A1 finishes,
 // A2 (same agent, already QUEUED) is picked up by A1's OWN completion pump
 // and actually runs (orch=nil ends FAILED) rather than being requeued.
-func TestRunAssignment_ReleasesGateBeforeOwnPump_SoOwnQueuedRowDrainsImmediately(t *testing.T) {
+func TestRunAssignment_ReleasesLockBeforeOwnPump_SoOwnQueuedRowDrainsImmediately(t *testing.T) {
 	t.Parallel()
 	h, db, crewID, agentIDs, chatID := dispatchPumpRig(t)
 	setCrewBudget(t, db, crewID, 1)
-	gate := chatbridge.NewRunGate()
-	h.SetRunGate(gate)
+	lock := chatbridge.NewAgentRunLock()
+	h.SetAgentRunLock(lock)
 
 	const a1 = "a_order_1"
 	const a2 = "a_order_2"
@@ -236,7 +236,7 @@ func TestRunAssignment_ReleasesGateBeforeOwnPump_SoOwnQueuedRowDrainsImmediately
 	}
 	target := targetAgentInfo{ID: agentIDs[0], Slug: "agent-disp-a", Name: "Agent A", CrewSlug: "disp"}
 
-	// Run A1 synchronously — no pre-held gate, so it claims + runs (orch=nil
+	// Run A1 synchronously — no pre-held lock, so it claims + runs (orch=nil
 	// short-circuit) + finishes, all inline. finishAssignment's own pump
 	// call happens inside this call.
 	h.runAssignment(context.Background(), a1, body, target)
@@ -245,14 +245,14 @@ func TestRunAssignment_ReleasesGateBeforeOwnPump_SoOwnQueuedRowDrainsImmediately
 		t.Fatalf("a1 status = %q, want FAILED (orch=nil short-circuit)", got)
 	}
 	// a2 must not be stuck QUEUED: A1's own completion pump should have
-	// claimed and run it immediately, because the gate was released BEFORE
+	// claimed and run it immediately, because the lock was released BEFORE
 	// finishAssignment (and its pump) ran — not after.
 	final := pollFinalStatus(t, db, a2, map[string]bool{"QUEUED": true, "RUNNING": true}, 1*time.Second)
 	if final != "FAILED" {
 		t.Fatalf("a2 final status = %q, want FAILED — it should have been drained by a1's own completion "+
-			"pump (proves the gate was released before, not after, finishAssignment's pump call)", final)
+			"pump (proves the lock was released before, not after, finishAssignment's pump call)", final)
 	}
-	if gate.InFlight(agentIDs[0]) {
-		t.Error("gate still reports the agent in-flight after both runs finished")
+	if lock.InFlight(agentIDs[0]) {
+		t.Error("lock still reports the agent in-flight after both runs finished")
 	}
 }

@@ -248,14 +248,14 @@ type Bridge struct {
 	activeRunsMu sync.Mutex
 	activeRuns   map[string]int
 
-	// runGate is the cross-surface, per-AGENT exclusivity gate: at most one
-	// live RunAgent exec per agent, regardless of whether it was started by
-	// a chat send (this file) or an assignment/@mention dispatch
-	// (api.AssignmentHandler, wired to the SAME instance via SetRunGate so
-	// both doors share one claim). See RunGate's doc for why chat id alone
-	// (activeRuns above) doesn't cover the assignment case. Never nil —
-	// always constructed in New().
-	runGate *RunGate
+	// agentRunLock is the cross-surface, per-AGENT exclusivity lock: at most
+	// one live RunAgent exec per agent, regardless of whether it was started
+	// by a chat send (this file) or an assignment/@mention dispatch
+	// (api.AssignmentHandler, wired to the SAME instance via SetAgentRunLock
+	// so both doors share one claim). See AgentRunLock's doc for why chat id
+	// alone (activeRuns above) doesn't cover the assignment case. Never
+	// nil — always constructed in New().
+	agentRunLock *AgentRunLock
 
 	// steerBroadcaster announces steering_queued events on the chat's
 	// session channel. Optional: nil means the WS announcement is
@@ -319,16 +319,16 @@ func New(
 		logger:         logger,
 		containerCache: make(map[string]string),
 		activeRuns:     make(map[string]int),
-		runGate:        NewRunGate(),
+		agentRunLock:   NewAgentRunLock(),
 	}
 }
 
-// RunGate returns the Bridge's cross-surface per-agent exclusivity gate, so
-// it can be shared with api.AssignmentHandler (see AssignmentHandler.
-// SetRunGate) — one gate, claimed by whichever door starts a live agent
-// exec first, chat or assignment.
-func (b *Bridge) RunGate() *RunGate {
-	return b.runGate
+// AgentRunLock returns the Bridge's cross-surface per-agent exclusivity
+// lock, so it can be shared with api.AssignmentHandler (see
+// AssignmentHandler.SetAgentRunLock) — one lock, claimed by whichever door
+// starts a live agent exec first, chat or assignment.
+func (b *Bridge) AgentRunLock() *AgentRunLock {
+	return b.agentRunLock
 }
 
 func truncateID(id string, n int) string {
@@ -701,19 +701,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// not just per chat. The check above stops two sends racing in THIS
 	// chat, but the same agent can also be started by an assignment or an
 	// @mention dispatch (api.AssignmentHandler.runAssignment) under an
-	// entirely different chat/mission id — see RunGate's doc comment.
+	// entirely different chat/mission id — see AgentRunLock's doc comment.
 	// Claimed after the per-chat check (so a same-chat double-send still
 	// bounces off the cheaper, existing map first) and released immediately
 	// on loss so this call leaves no claim behind; the per-chat claim above
 	// is released too (via the defer already registered) so a bounce here
 	// leaves the SAME no-trace guarantee bridge.go documents for the
 	// per-chat case.
-	if !b.runGate.TryStart(info.AgentID) {
+	if !b.agentRunLock.TryStart(info.AgentID) {
 		b.logger.Info("rejecting send: agent already running (cross-surface)",
 			"chat_id", chatID, "agent_id", info.AgentID, "user_id", userID)
 		return fmt.Errorf("agent %s: %w", info.AgentID, ws.ErrAgentBusy)
 	}
-	defer b.runGate.End(info.AgentID)
+	defer b.agentRunLock.End(info.AgentID)
 
 	// Agent IS responding (private chat, or @mentioned in a group) and this
 	// send owns the run slot. Persist + broadcast the human turn now that

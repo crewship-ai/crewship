@@ -73,16 +73,17 @@ type AssignmentHandler struct {
 	// dispatches instead of leaving them racing the DB teardown.
 	dispatchWG sync.WaitGroup
 
-	// runGate is the cross-surface per-AGENT exclusivity gate shared with
-	// chatbridge.Bridge (SetRunGate wires it to Bridge.RunGate() at server
-	// boot, same setter-injection idiom as SetProvisioner/SetSteerBroadcaster
-	// — the Bridge is constructed after this handler in the boot sequence).
-	// nil is tolerated (mirrors provisioner/resolver: tests and any caller
-	// that doesn't wire it get the pre-existing, unguarded behaviour) rather
-	// than defaulting to a private instance, because a private instance
-	// would claim exclusively against itself and never see chat-side runs at
-	// all — silently defeating the guard while looking wired up.
-	runGate *chatbridge.RunGate
+	// agentRunLock is the cross-surface per-AGENT exclusivity lock shared
+	// with chatbridge.Bridge (SetAgentRunLock wires it to
+	// Bridge.AgentRunLock() at server boot, same setter-injection idiom as
+	// SetProvisioner/SetSteerBroadcaster — the Bridge is constructed after
+	// this handler in the boot sequence). nil is tolerated (mirrors
+	// provisioner/resolver: tests and any caller that doesn't wire it get
+	// the pre-existing, unguarded behaviour) rather than defaulting to a
+	// private instance, because a private instance would claim exclusively
+	// against itself and never see chat-side runs at all — silently
+	// defeating the guard while looking wired up.
+	agentRunLock *chatbridge.AgentRunLock
 }
 
 // WaitDispatches blocks until every async dispatch goroutine spawned so
@@ -127,11 +128,11 @@ func (h *AssignmentHandler) SetProvisioner(p crewProvisioner) {
 	h.provisioner = p
 }
 
-// SetRunGate wires the cross-surface per-agent exclusivity gate shared with
-// chatbridge.Bridge — see runGate's field doc for why nil is a tolerated,
-// unguarded fallback rather than a private default.
-func (h *AssignmentHandler) SetRunGate(g *chatbridge.RunGate) {
-	h.runGate = g
+// SetAgentRunLock wires the cross-surface per-agent exclusivity lock shared
+// with chatbridge.Bridge — see agentRunLock's field doc for why nil is a
+// tolerated, unguarded fallback rather than a private default.
+func (h *AssignmentHandler) SetAgentRunLock(l *chatbridge.AgentRunLock) {
+	h.agentRunLock = l
 }
 
 // SetJournal wires a journal emitter for run lifecycle events. nil maps

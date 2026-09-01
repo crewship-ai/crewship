@@ -173,13 +173,13 @@ func markAssignmentQueued(ctx context.Context, db *sql.DB, assignmentID string) 
 	return nil
 }
 
-// requeueForGateLoss returns an assignment to QUEUED when runAssignment
-// loses chatbridge.RunGate's per-agent claim — i.e. the agent already has a
-// different live run (another assignment, or a chat send) holding the exec
-// slot orchestrator.TmuxSessionName derives from the agent's slug alone.
-// That is not a failure: the work still needs doing, it just has to wait
-// its turn. See runAssignment's gate-loss branch (assignments_run.go) for
-// the caller.
+// requeueForLockLoss returns an assignment to QUEUED when runAssignment
+// loses chatbridge.AgentRunLock's per-agent claim — i.e. the agent already
+// has a different live run (another assignment, or a chat send) holding the
+// exec slot orchestrator.TmuxSessionName derives from the agent's slug
+// alone. That is not a failure: the work still needs doing, it just has to
+// wait its turn. See runAssignment's lock-loss branch (assignments_run.go)
+// for the caller.
 //
 // Unlike markAssignmentQueued (guarded on status='PENDING', used only by
 // the pre-dispatch admission check before any CAS has touched the row),
@@ -188,18 +188,18 @@ func markAssignmentQueued(ctx context.Context, db *sql.DB, assignmentID string) 
 //   - RUNNING is the common case. Both claim paths — claimCrewSlot (initial
 //     dispatch) and pumpCrewQueue (completion-path pump) — flip the row to
 //     RUNNING via their own SQL CAS *before* calling runAssignment, because
-//     the in-memory RunGate can't be evaluated inside that SQL statement
-//     (see claimCrewSlot/pumpCrewQueue docs — the gate and the CAS are two
-//     different kinds of lock that can't be taken atomically together).
-//     runAssignment's TryStart is therefore the second half of a two-phase
-//     claim, and losing it must undo the first half rather than leave the
-//     row RUNNING-but-never-executed.
+//     the in-memory AgentRunLock can't be evaluated inside that SQL
+//     statement (see claimCrewSlot/pumpCrewQueue docs — the lock and the
+//     CAS are two different kinds of lock that can't be taken atomically
+//     together). runAssignment's TryStart is therefore the second half of a
+//     two-phase claim, and losing it must undo the first half rather than
+//     leave the row RUNNING-but-never-executed.
 //   - PENDING covers the LeadPlanning bypass (DispatchAssignment skips the
 //     crew-budget CAS entirely for a mission lead, to avoid a lead
 //     deadlocking on its own sub-assignments' budget) and any direct
 //     runAssignment call that never went through claimCrewSlot.
 //
-// queued_at is re-stamped to now so a row that just lost the gate goes to
+// queued_at is re-stamped to now so a row that just lost the lock goes to
 // the BACK of this crew's FIFO instead of being retried first (and failing
 // again) on every subsequent completion in the crew until the agent that
 // beat it happens to finish — that would starve other crew members' queued
@@ -209,18 +209,18 @@ func markAssignmentQueued(ctx context.Context, db *sql.DB, assignmentID string) 
 // PENDING/RUNNING by the time this runs — a race with cancellation, the
 // stuck-RUNNING sweeper, or a terminal write elsewhere. The caller should
 // treat that as "someone else already owns this row's fate", not retry.
-func requeueForGateLoss(ctx context.Context, db *sql.DB, assignmentID string) (bool, error) {
+func requeueForLockLoss(ctx context.Context, db *sql.DB, assignmentID string) (bool, error) {
 	res, err := db.ExecContext(ctx, `
 		UPDATE assignments
 		   SET status = 'QUEUED',
 		       queued_at = datetime('now','subsec')
 		 WHERE id = ? AND status IN ('PENDING', 'RUNNING')`, assignmentID)
 	if err != nil {
-		return false, fmt.Errorf("requeue for gate loss: %w", err)
+		return false, fmt.Errorf("requeue for lock loss: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("requeue for gate loss rows affected: %w", err)
+		return false, fmt.Errorf("requeue for lock loss rows affected: %w", err)
 	}
 	return n == 1, nil
 }

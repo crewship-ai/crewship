@@ -2,7 +2,7 @@ package chatbridge
 
 import "sync"
 
-// RunGate implements the same per-key exclusivity CAS as
+// AgentRunLock implements the same per-key exclusivity CAS as
 // tryMarkRunStart/markRunEnd (see steer.go), generalised into its own type so
 // it can be shared across packages instead of being reinvented per caller.
 //
@@ -17,20 +17,27 @@ import "sync"
 // runAssignment for the SAME agent but under DIFFERENT, unrelated chat/
 // mission ids (ensureMissionChat mints one synthetic chat per MISSION, not
 // per agent), so keying exclusivity on chat id would not stop two such runs
-// from racing each other. RunGate is keyed on AgentID instead — the one
+// from racing each other. AgentRunLock is keyed on AgentID instead — the one
 // identifier every producer of a RunAgent exec (chat send, /assign, an
 // @mention dispatch) agrees on — and one instance is shared between
-// chatbridge.Bridge and api.AssignmentHandler (see Bridge.RunGate /
-// AssignmentHandler.SetRunGate) so both doors that can start a live exec for
-// an agent claim the same slot.
-type RunGate struct {
+// chatbridge.Bridge and api.AssignmentHandler (see Bridge.AgentRunLock /
+// AssignmentHandler.SetAgentRunLock) so both doors that can start a live
+// exec for an agent claim the same slot.
+//
+// Named a lock, not a gate: it is a lock ON AN AGENT (keyed by agent id),
+// held for the duration of one live RunAgent exec — "lock" says what it is
+// more precisely than "gate", and keeps it out of grep range of the
+// unrelated pipeline integrations gate (pipeline.ErrTestRunGateFailed and
+// its TestRunGate_* tests in internal/api/pipeline_integrations_gate_test.go),
+// which is a different, pre-existing concept.
+type AgentRunLock struct {
 	mu     sync.Mutex
 	active map[string]int
 }
 
-// NewRunGate returns an empty RunGate.
-func NewRunGate() *RunGate {
-	return &RunGate{active: make(map[string]int)}
+// NewAgentRunLock returns an empty AgentRunLock.
+func NewAgentRunLock() *AgentRunLock {
+	return &AgentRunLock{active: make(map[string]int)}
 }
 
 // TryStart atomically claims the run slot for key: it succeeds (and marks a
@@ -39,32 +46,32 @@ func NewRunGate() *RunGate {
 // caller that (legitimately, elsewhere) allows overlapping claims for the
 // same key doesn't have one finishing run clear the slot out from under
 // another still-live one — mirrors markRunStart/markRunEnd's rationale.
-func (g *RunGate) TryStart(key string) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.active[key] > 0 {
+func (l *AgentRunLock) TryStart(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.active[key] > 0 {
 		return false
 	}
-	g.active[key]++
+	l.active[key]++
 	return true
 }
 
 // End releases one claim on key, deleting the entry at zero so the map
 // doesn't grow unbounded. Guards against underflow so a stray extra call
 // can never wedge a key permanently "busy".
-func (g *RunGate) End(key string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.active[key] <= 1 {
-		delete(g.active, key)
+func (l *AgentRunLock) End(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.active[key] <= 1 {
+		delete(l.active, key)
 		return
 	}
-	g.active[key]--
+	l.active[key]--
 }
 
 // InFlight reports whether at least one run is currently claimed for key.
-func (g *RunGate) InFlight(key string) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.active[key] > 0
+func (l *AgentRunLock) InFlight(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.active[key] > 0
 }
