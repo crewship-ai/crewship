@@ -569,8 +569,8 @@ func TestBypass_UnclassifiedTypeNeverReachesEnv(t *testing.T) {
 }
 
 // TestBypass_UnclassifiedTypeNeverReachesEnvViaAdapterAllowlist covers the
-// SECOND of the three selectors CodeRabbit found still unguarded after the
-// #2092 legacy-fallback fix (#2246): BuildEnvVarsSidecar's BYO-API-key
+// SECOND of the three selectors an independent review found still unguarded
+// after the #2092 legacy-fallback fix (#2246): BuildEnvVarsSidecar's BYO-API-key
 // override loop matches a credential by EnvVarName alone (whatever
 // apiKeyEnvVarsForAdapter allows for req.CLIAdapter) and never consulted
 // credpolicy at all. An unclassified credential simply NAMED like a
@@ -606,7 +606,7 @@ func TestBypass_UnclassifiedTypeNeverReachesEnvViaAdapterAllowlist(t *testing.T)
 }
 
 // TestBypass_UnclassifiedTypeNeverReachesEnvViaOAuthShape covers the THIRD
-// (and, per CodeRabbit, worst) selector: BuildEnvVarsSidecar's hasOAuth loop
+// (and, per that review, worst) selector: BuildEnvVarsSidecar's hasOAuth loop
 // treats ANY credential whose plaintext starts with "sk-ant-oat" as an OAuth
 // token, regardless of its type, and — pre-fix — regardless of Keeper state
 // (that loop never looked at keeperEnabled at all). An unclassified
@@ -642,8 +642,8 @@ func TestBypass_UnclassifiedTypeNeverReachesEnvViaOAuthShape(t *testing.T) {
 	}
 }
 
-// TestBypass_UnclassifiedTypeNeverReachesEnvViaBuildEnvVars covers the FOURTH
-// selector CodeRabbit's review of #2246 found still unguarded: BuildEnvVars
+// TestBypass_UnclassifiedTypeNeverReachesEnvViaBuildEnvVars covers a selector
+// outside the "three" above, found by a further review of #2246: BuildEnvVars
 // (exec_env.go), the non-sidecar env builder. Unlike BuildEnvVarsSidecar it
 // never took a keeperEnabled parameter and never consulted credpolicy at
 // all — every credential's plaintext went straight into the env,

@@ -61,8 +61,8 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := baseAgentEnv(req)
 
 	if activeCred != nil {
-		// #2092/#2246: this is the fourth selector CodeRabbit's review found
-		// still unguarded — the non-sidecar path never consulted credpolicy at
+		// #2092/#2246: a further review found this selector still unguarded
+		// — the non-sidecar path never consulted credpolicy at
 		// all, so an unclassified credential (fallback Delivery: DeliveryNone)
 		// reached the agent env here even though every selector in
 		// BuildEnvVarsSidecar now withholds it. A worker sub-agent dispatched
