@@ -29,15 +29,29 @@ A security-hardened Docker image for Crewship crew containers, providing L3/L4 n
 
 ## Required capabilities
 
-The container MUST run with `NET_ADMIN` and `NET_RAW` Linux capabilities, or the firewall script will fail to configure iptables/ipset rules. Crewship's container provider adds these automatically; if running manually, pass `--cap-add=NET_ADMIN --cap-add=NET_RAW` to `docker run`.
+The container MUST run with `NET_ADMIN` and `NET_RAW` Linux capabilities, or the firewall script will fail to configure iptables/ipset rules.
+
+> [!WARNING]
+> **Crewship's container provider does not grant them.** Nothing in the tree
+> parses a devcontainer's `runArgs`, and `internal/devcontainer/config.go`
+> refuses any direct capability grant other than `NET_BIND_SERVICE`
+> (`ErrCapabilityNotAllowed`). So on a normal crew this firewall does not
+> configure itself — treat it as **not an active control** until that path
+> exists. It works when you run the image yourself with the flags below, and
+> on a `Privileged` crew, which is outside Crewship's threat model.
+
+If running manually, pass `--cap-add=NET_ADMIN --cap-add=NET_RAW` to `docker run`.
 
 ## Usage
 
 As a base image for a Crewship crew:
 
 1. Set `runtime_image` on the crew to `ghcr.io/crewship-ai/crewship-sandbox:latest`
-2. Ensure the crew container gets `NET_ADMIN` + `NET_RAW` capabilities (Crewship handles this)
-3. Firewall initializes automatically on container start
+2. The crew container needs `NET_ADMIN` + `NET_RAW`. **Crewship does not grant
+   these** (see the warning above), so on a non-privileged crew step 3 does not
+   happen and the image runs without its firewall.
+3. Where the capabilities *are* present, the firewall initializes on container
+   start via `postStartCommand`.
 
 Or bring your own devcontainer.json extending the sandbox:
 

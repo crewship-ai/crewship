@@ -9,8 +9,8 @@ package main
 // A reader who types that literally gets a clean exit and ZERO rows: --type is
 // an unvalidated passthrough client-side and server-side, and
 // internal/journal/queries.go compiles Types into `entry_type IN (...)` with no
-// LIKE, prefix or glob path anywhere. `-q` is no escape either — fts5Phrase
-// neutralises `*`.
+// LIKE, prefix or glob path anywhere. `-q` is no escape either: the FTS5 index
+// covers summary + payload, never entry_type.
 //
 // An empty journal and an unmatchable filter printing the same thing is the
 // same defect as the memory projection two files over: "nothing happened" and

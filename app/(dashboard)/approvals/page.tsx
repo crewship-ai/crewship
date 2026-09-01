@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { ApprovalCard } from "@/components/features/approvals/approval-card"
 import { ApprovalDetail } from "@/components/features/approvals/approval-detail"
 import { useApprovals } from "@/hooks/use-approvals"
+import { useWorkspace } from "@/hooks/use-workspace"
 import type { ApprovalRow, ApprovalStatus } from "@/lib/types/approvals"
 
 type FilterKey = "pending" | "decided" | "all"
@@ -24,6 +25,7 @@ const FILTERS: { key: FilterKey; label: string; apiStatus: ApprovalStatus }[] = 
  * approvals; clicking a card opens the right-side detail sheet.
  */
 export default function ApprovalsPage() {
+  const { workspaceId } = useWorkspace()
   const searchParams = useSearchParams()
   const agentFilter = searchParams.get("agent_id")
   const [filter, setFilter] = useState<FilterKey>("pending")
@@ -33,7 +35,9 @@ export default function ApprovalsPage() {
   const apiStatus = FILTERS.find((f) => f.key === filter)?.apiStatus ?? "pending"
   const { rows, loading, error, notConfigured, refresh, patchRow } = useApprovals({
     status: apiStatus,
+    workspaceId,
     pollMs: 15000,
+    enabled: Boolean(workspaceId),
   })
 
   // "Decided" is pending=no — filter client-side because the backend
@@ -62,7 +66,7 @@ export default function ApprovalsPage() {
   function handleDecided(id: string, status: "approved" | "denied", comment: string) {
     patchRow(id, {
       status,
-      comment,
+      decision_comment: comment,
       decided_at: new Date().toISOString(),
     })
   }
@@ -186,6 +190,7 @@ export default function ApprovalsPage() {
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         onDecided={handleDecided}
+        workspaceId={workspaceId}
       />
     </div>
   )

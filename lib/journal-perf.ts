@@ -1,5 +1,5 @@
 import type { JournalEntry } from "@/lib/types/journal"
-import { groupOf, severityOf, type EntryGroup } from "@/lib/journal-style"
+import { GROUP_ORDER, groupOf, severityOf, type EntryGroup } from "@/lib/journal-style"
 
 /**
  * Journal entry annotated with a parsed timestamp (ms since epoch).
@@ -42,10 +42,14 @@ export interface FilterOutcome {
   bucketed: AnnotatedEntry[]
 }
 
-const GROUP_KEYS: EntryGroup[] = [
-  "exec", "network", "file", "container", "run", "keeper", "peer",
-  "assignment", "approval", "mission", "cost", "skill", "memory", "system", "other",
-]
+/**
+ * Every group `groupOf()` can return, so `groupCounts` is seeded with all
+ * of them. Derived from GROUP_ORDER rather than re-listed: the hand-kept
+ * copy fell three groups behind (audit, provisioning, chat), and a group
+ * missing from the seed is `undefined++` → NaN at the increment below,
+ * which the chip row then hides because `NaN > 0` is false.
+ */
+const GROUP_KEYS: readonly EntryGroup[] = GROUP_ORDER
 
 /**
  * Single-pass filter — replaces the 4-stage useMemo chain with one

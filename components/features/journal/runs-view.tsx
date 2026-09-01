@@ -152,9 +152,38 @@ interface RunsViewProps {
   workspaceId: string | null
   /** Whether the parent has finished loading workspace context. */
   workspaceLoading: boolean
+  /**
+   * Filter state — controlled when the value AND its setter are supplied,
+   * the same idiom LogsPanel uses for severity/muted/live. /journal drives
+   * all four from the URL so a Runs view is shareable: "the four CRON runs
+   * that failed this week" was previously component state, reachable only by
+   * telling the reader which buttons to click.
+   *
+   * A controlled parent owns the page reset too — changing a filter while
+   * page 3 is showing lands on an empty table otherwise.
+   */
+  window?: RunWindow
+  onWindowChange?: (w: RunWindow) => void
+  statusFilter?: string
+  onStatusFilterChange?: (s: string) => void
+  triggerFilter?: string
+  onTriggerFilterChange?: (t: string) => void
+  page?: number
+  onPageChange?: (p: number) => void
 }
 
-export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
+export function RunsView({
+  workspaceId,
+  workspaceLoading,
+  window: windowProp,
+  onWindowChange,
+  statusFilter: statusFilterProp,
+  onStatusFilterChange,
+  triggerFilter: triggerFilterProp,
+  onTriggerFilterChange,
+  page: pageProp,
+  onPageChange,
+}: RunsViewProps) {
   const router = useRouter()
   const [data, setData] = useState<RunsResponse | null>(null)
   const [insights, setInsights] = useState<RunInsights | null>(null)
@@ -162,10 +191,43 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [triggerFilter, setTriggerFilter] = useState("all")
-  const [window, setWindow] = useState<RunWindow>("24h")
-  const [page, setPage] = useState(1)
+  const [internalStatusFilter, setInternalStatusFilter] = useState("all")
+  const [internalTriggerFilter, setInternalTriggerFilter] = useState("all")
+  const [internalWindow, setInternalWindow] = useState<RunWindow>("24h")
+  const [internalPage, setInternalPage] = useState(1)
+
+  const statusFilter = statusFilterProp ?? internalStatusFilter
+  const triggerFilter = triggerFilterProp ?? internalTriggerFilter
+  const window = windowProp ?? internalWindow
+  const page = pageProp ?? internalPage
+
+  const setWindow = useCallback((next: RunWindow) => {
+    if (onWindowChange) onWindowChange(next)
+    else setInternalWindow(next)
+  }, [onWindowChange])
+  const setPage = useCallback((next: number) => {
+    if (onPageChange) onPageChange(next)
+    else setInternalPage(next)
+  }, [onPageChange])
+  // Both filters reset pagination. Doing it here rather than in an effect on
+  // [statusFilter, triggerFilter] keeps it to ONE navigation for a controlled
+  // parent — an effect would write the filter and the page reset as two
+  // separate history entries, so Back would step through a state the user
+  // never saw.
+  const setStatusFilter = useCallback((next: string) => {
+    if (onStatusFilterChange) onStatusFilterChange(next)
+    else {
+      setInternalStatusFilter(next)
+      setInternalPage(1)
+    }
+  }, [onStatusFilterChange])
+  const setTriggerFilter = useCallback((next: string) => {
+    if (onTriggerFilterChange) onTriggerFilterChange(next)
+    else {
+      setInternalTriggerFilter(next)
+      setInternalPage(1)
+    }
+  }, [onTriggerFilterChange])
 
   const fetchRuns = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -246,11 +308,6 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
   useEffect(() => {
     fetchLive()
   }, [fetchLive])
-
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(1)
-  }, [statusFilter, triggerFilter])
 
   // Real-time refetch on run events. Backend collapses terminal statuses
   // into run.completed / run.failed; subscribing to these three covers the
@@ -607,7 +664,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                     variant="outline"
                     size="sm"
                     className="h-7 px-2 text-xs"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    onClick={() => setPage(Math.max(1, page - 1))}
                     disabled={page === 1 || isLoading}
                   >
                     <ChevronLeft className="h-3 w-3 mr-1" />
@@ -617,7 +674,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                     variant="outline"
                     size="sm"
                     className="h-7 px-2 text-xs"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    onClick={() => setPage(Math.min(totalPages, page + 1))}
                     disabled={page >= totalPages || isLoading}
                   >
                     Next

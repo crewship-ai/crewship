@@ -6,7 +6,7 @@ import { AlertCircle, ChevronLeft, ChevronRight } from "lucide-react"
 import type { JournalEntry } from "@/lib/types/journal"
 import { type EntryGroup } from "@/lib/journal-style"
 import { annotateEntries, filterEntries, type AnnotatedEntry } from "@/lib/journal-perf"
-import { buildMatcher } from "@/lib/log-search"
+import { buildMatcher, parseStructuredQuery } from "@/lib/log-search"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { LogsToolbar, type SeverityFilter, type ScopeControl } from "./logs-toolbar"
 import { LogsTypeChips } from "./logs-type-chips"
@@ -64,6 +64,17 @@ interface LogsPanelProps {
    * narrowing of the rendered list still runs on top of this.
    */
   onServerSearch?: (q: string) => void
+
+  /**
+   * Search box text — controlled when both are provided, same idiom as
+   * `severity` / `muted` / `live` above. /journal owns it so the query is
+   * part of the shareable URL: a bookmark that drops the search restores a
+   * view nobody was looking at. `onServerSearch` still fires debounced on
+   * top of this — the immediate value drives the input, the debounced one
+   * drives the fetch.
+   */
+  query?: string
+  onQueryChange?: (q: string) => void
 
   /** Refresh handler — shows a button + spinner state. */
   onRefresh?: () => void
@@ -145,6 +156,8 @@ export function LogsPanel({
   muted: mutedProp,
   onMutedChange,
   onServerSearch,
+  query: queryProp,
+  onQueryChange,
   onRefresh,
   loading,
   error,
@@ -162,7 +175,12 @@ export function LogsPanel({
   onSelectAgent,
   onSelectCrew,
 }: LogsPanelProps) {
-  const [query, setQuery] = useState("")
+  const [internalQuery, setInternalQuery] = useState("")
+  const query = queryProp ?? internalQuery
+  const setQuery = useCallback((next: string) => {
+    if (onQueryChange) onQueryChange(next)
+    else setInternalQuery(next)
+  }, [onQueryChange])
   // Severity + muted are controlled when the parent passes both the
   // value and the setter. Otherwise we keep local state for legacy
   // surfaces (older standalone uses of LogsPanel).
@@ -227,7 +245,18 @@ export function LogsPanel({
   // Pre-attach _tsMs once. Cheap to call repeatedly: the helper
   // short-circuits on entries that already carry the field.
   const annotated = useMemo<AnnotatedEntry[]>(() => annotateEntries(entries), [entries])
-  const matcher = useMemo(() => buildMatcher(query), [query])
+  // The local matcher narrows what is already loaded. When `onServerSearch`
+  // is wired the parent has forwarded the same string to the backend, which
+  // binds the structured tokens (agent:, crew:, severity:, …) as SQL
+  // filters — re-applying them here filters the server's own answer back
+  // out, because `agent:` reads e.agent_id and the user typed a name, not a
+  // UUID. Match on what the server could NOT bind instead (#2206). Without
+  // a server search nothing else applies those tokens, so the raw query
+  // stays the input.
+  const matcher = useMemo(
+    () => buildMatcher(onServerSearch ? parseStructuredQuery(query).clientQuery : query),
+    [query, onServerSearch],
+  )
 
   // One pass for severity counts, group counts, filtered, bucketed.
   const stage = useMemo(
@@ -267,7 +296,7 @@ export function LogsPanel({
     setSeverity("all")
     setMuted(new Set())
     setBucket(null)
-  }, [setSeverity, setMuted])
+  }, [setQuery, setSeverity, setMuted])
 
   const onExport = useCallback(() => {
     const blob = new Blob([JSON.stringify(ordered, null, 2)], { type: "application/json" })
@@ -331,7 +360,7 @@ export function LogsPanel({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [query, onClearAllFilters, onLiveToggle])
+  }, [query, setQuery, onClearAllFilters, onLiveToggle])
 
   const hasAnyEntries = entries.length > 0
   const hasFilters =

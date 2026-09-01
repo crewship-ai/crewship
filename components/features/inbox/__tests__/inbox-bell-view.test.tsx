@@ -86,6 +86,32 @@ describe("InboxBellView", () => {
     await waitFor(() => expect(onMarkAllRead).toHaveBeenCalledWith(["wp", "msg"]))
   })
 
+  // The bucket comment has always said an agent must be parked for a row to
+  // count as a decision, and named the tripped breaker as the counter-example.
+  // The filter used isActionableInboxItem, which answers a different and also
+  // correct question — "is there a source action behind this row?" — and a
+  // schedule advisory has one (re-enable the schedule). So both schedule kinds
+  // sat under "Needs a decision" with a countdown-free urgency treatment while
+  // nothing whatsoever was waiting on them.
+  it.each(["schedule_circuit_breaker_tripped", "schedule_missed"])(
+    "keeps %s in Recent — it wants action, but nothing is parked on it",
+    (kind) => {
+      const advisory = item({
+        id: "sched", kind, title: "Schedule needs attention",
+        sender_type: "system", sender_name: "Scheduler",
+        payload: { schedule_id: "sch-1" },
+      })
+      render(
+        <InboxBellView items={[advisory]} role="OWNER" onOpenItem={vi.fn()} onOpenInbox={vi.fn()} />,
+      )
+      fireEvent.click(screen.getByTestId("bell-trigger"))
+
+      expect(screen.queryByText("Needs a decision")).not.toBeInTheDocument()
+      expect(screen.getByText("Recent")).toBeInTheDocument()
+      expect(screen.getByText("Schedule needs attention")).toBeInTheDocument()
+    },
+  )
+
   it("hides the affordance when there is nothing unread", () => {
     const read = ITEMS.map((i) => ({ ...i, state: "read" as const }))
     render(

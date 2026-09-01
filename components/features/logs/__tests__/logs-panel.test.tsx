@@ -214,6 +214,44 @@ describe("LogsPanel", () => {
     expect(fetchSpy.mock.calls.map((c) => String(c[0]))).toEqual([])
   })
 
+  // #2206: when the parent forwards the query to the backend, the
+  // structured tokens in it are already bound as SQL filters. Re-applying
+  // them client-side filters the server's own answer back out — `agent:`
+  // resolves to e.agent_id, so every row carrying a real id fails a
+  // substring test against the name the user typed, and the panel reports
+  // "No entries match the current filters" over a non-empty result set.
+  it("does not re-apply server-bound tokens to the loaded rows", () => {
+    const entries = [
+      entry({ id: "a", agent_id: "cmtem1bak001028eba702", summary: "deploy production webhook" }),
+      entry({ id: "b", agent_id: "cmtem1bak001028eba702", summary: "unrelated line" }),
+    ]
+    const { getAllByTestId, getByPlaceholderText } = render(
+      <LogsPanel entries={entries} onServerSearch={vi.fn()} />,
+    )
+    fireEvent.change(getByPlaceholderText(/search/i), {
+      target: { value: "agent:morgan deploy" },
+    })
+    const rows = getAllByTestId("virtuoso-row")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].textContent).toMatch(/deploy production webhook/)
+  })
+
+  // The mirror image: with no server search wired, nothing else applies
+  // the token, so the panel must still narrow on it locally.
+  it("still applies structured tokens locally when no server search is wired", () => {
+    const entries = [
+      entry({ id: "a", agent_id: "agent-one", summary: "deploy production webhook" }),
+      entry({ id: "b", agent_id: "agent-two", summary: "deploy staging webhook" }),
+    ]
+    const { getAllByTestId, getByPlaceholderText } = render(<LogsPanel entries={entries} />)
+    fireEvent.change(getByPlaceholderText(/search/i), {
+      target: { value: "agent:agent-two deploy" },
+    })
+    const rows = getAllByTestId("virtuoso-row")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].textContent).toMatch(/staging/)
+  })
+
   it("collapses the stats rail when the chevron is clicked", () => {
     const entries = [entry({ id: "a", summary: "x" })]
     const { getByTitle, queryByText } = render(<LogsPanel entries={entries} />)

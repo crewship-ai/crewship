@@ -17,7 +17,17 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		out["nullable"] = true
 		return out
 	}
-	object := func(p map[string]any) map[string]any { return map[string]any{"type": "object", "properties": p} }
+	// Variadic `required`, matching schemas_core.go. Without it this file's
+	// schemas cannot say which properties a response always carries, so a body
+	// with every field renamed validates against them — see
+	// docs/prd/response-shape-contract.md.
+	object := func(p map[string]any, required ...string) map[string]any {
+		s := map[string]any{"type": "object", "properties": p}
+		if len(required) > 0 {
+			s["required"] = required
+		}
+		return s
+	}
 	array := func(i map[string]any) map[string]any { return map[string]any{"type": "array", "items": i} }
 	ref := func(n string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + n} }
 

@@ -181,6 +181,33 @@ export const JOURNAL_ENTRY_TYPES = [
   // an untrusted producer: the record has to exist regardless of who clicked.
   "page.action.dispatched",
   "page.spec.changed",
+
+  // ── Added 2026-08-31 (#2207). Every type below is emitted by the
+  // backend today but was declared OUTSIDE internal/journal/types.go — as
+  // a file-local `journal.EntryType` constant, or as a bare string literal
+  // at the emit site — so the backend-parity ratchet above, which reads
+  // only types.go, could not see any of them.
+  // lib/__tests__/journal-groups.test.ts now scans the whole Go tree.
+  // §7.3.2 public links, §8b webhooks, and the owner handoff.
+  "page.published",
+  "page.link_revoked",
+  "page.public_view",
+  "page.webhook_issued",
+  "page.webhook_revoked",
+  "page.owner_transferred",
+  // The setup agent's proposal being applied to a real workspace.
+  "onboarding.proposal_applied",
+  // Priority markers on existing entries. Emitted as a bare literal from
+  // internal/api/journal_handler.go until #2207 promoted it to
+  // journal.EntryMemoryPriorityChanged.
+  "memory.priority_changed",
+  // Keeper's rolling-reward auto-tuning: the rule that retuned itself, and
+  // an operator wiping the window it scores against.
+  "keeper.rule_auto_tuned",
+  "approval.auto_tuning_reset",
+  // Crew autonomy/behaviour policy edits, and the stuck-assignment sweeper.
+  "policy.changed",
+  "queue.sweeper_pumped",
 ] as const
 
 export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number]

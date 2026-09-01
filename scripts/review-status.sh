@@ -33,7 +33,9 @@
 #   scripts/review-status.sh                        # every open PR
 #   scripts/review-status.sh 1568 1571              # named PRs
 #   scripts/review-status.sh --checks               # + skipped-but-green CI checks
-#   scripts/review-status.sh --retrigger --dry-run  # the re-review queue
+#   scripts/review-status.sh --retrigger 2227       # re-review ONE pr
+#   scripts/review-status.sh --retrigger --all      # …or every unreviewed one
+#   scripts/review-status.sh --retrigger --dry-run  # the queue, posting nothing
 #   scripts/review-status.sh --json                 # one JSON object per PR
 #
 # Exit codes: 0 everything examined was reviewed  ·  2 usage or tooling error
@@ -61,10 +63,11 @@ BOT="coderabbitai[bot]"
 usage() {
   cat <<'EOF'
 Usage: scripts/review-status.sh [PR...] [--checks] [--json] [--window-min N]
-       scripts/review-status.sh --retrigger [--dry-run] [--max N] [--delay S]
+       scripts/review-status.sh --retrigger (PR... | --all) [--max N] [--delay S]
+       scripts/review-status.sh --retrigger --dry-run   # global preview, posts nothing
 
 EOF
-  sed -n '3,46p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,48p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 die() { printf 'review-status: %s\n' "$1" >&2; exit 2; }
@@ -371,8 +374,55 @@ CHECKS_JQ='
 # Every call is checked. A failed fetch becomes state `unknown` upstream. The
 # one thing this script must never do is turn "the API did not answer" into
 # "nothing was posted" — that is the exact substitution it exists to catch.
+# assemble_input <pr> <comments> <reviews> <revcomments> <status> <ciRun>
+#   — each of the first five is a FILE, not a value.
+#
+# They used to be `--argjson` values. Linux caps a single argv entry at
+# MAX_ARG_STRLEN (32 pages = 131072 bytes) independently of ARG_MAX, and this
+# repo's inline review comments crossed it: 24 comments serialise to ~188 KB
+# because each carries its diff hunk. jq then died with E2BIG, fetch_pr
+# returned 1, and the PR was reported `unknown  (GitHub API call failed)` —
+# every underlying call having in fact succeeded.
+#
+# Read that failure carefully, because it inverts the script's purpose: the
+# more review a PR accumulates, the more certainly this tool refuses to judge
+# it, and `unknown` on the busiest PR is where a reader is most likely to
+# shrug and merge. Files have no such limit.
+assemble_input() {
+  jq -n \
+    --slurpfile prIn "$1" \
+    --slurpfile commentsIn "$2" \
+    --slurpfile reviewsIn "$3" \
+    --slurpfile revcommentsIn "$4" \
+    --slurpfile statusIn "$5" \
+    --arg bot "$BOT" \
+    --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson window "$WINDOW_MIN" \
+    --argjson ciRun "$6" '
+    $prIn[0] as $pr
+    | $commentsIn[0] as $comments
+    | $reviewsIn[0] as $reviews
+    | $revcommentsIn[0] as $revcomments
+    | $statusIn[0] as $status
+    | ( [ $status.statuses[]? | select((.context // "") | test("coderabbit"; "i")) ] | last ) as $s
+    | { number: $pr.number, title: ($pr.title // ""), branch: ($pr.head.ref // ""),
+        headSha: ($pr.head.sha // ""), createdAt: ($pr.created_at // ""),
+        now: $now, windowMin: $window,
+        # Whether ANY run of the CI workflow exists for the head commit.
+        ciRunForHead: $ciRun,
+        statusState: (($s.state) // ""), statusDesc: (($s.description) // ""),
+        comments: [ $comments[] | select(.user.login == $bot)
+                    | {createdAt: .created_at, body: (.body // "")} ],
+        reviewComments: [ $revcomments[] | select(.user.login == $bot)
+                    | {createdAt: .created_at} ],
+        reviews:  [ $reviews[]  | select(.user.login == $bot)
+                    | select((.state // "") != "PENDING")
+                    | {submittedAt: .submitted_at, state: .state,
+                       body: (.body // ""), commitId: (.commit_id // "")} ] }'
+}
+
 fetch_pr() { # <number> -> classifier input on stdout, rc 1 if anything failed
-  local n="$1" pr comments reviews revcomments status sha
+  local n="$1" pr comments reviews revcomments status sha tmp rc
   pr="$(gh api "repos/$REPO/pulls/$n" 2>/dev/null)" || return 1
   [ -n "$pr" ] || return 1
   sha="$(printf '%s' "$pr" | jq -r '.head.sha // ""' 2>/dev/null)" || return 1
@@ -401,31 +451,18 @@ fetch_pr() { # <number> -> classifier input on stdout, rc 1 if anything failed
     ciRun=true
   fi
 
-  jq -n \
-    --argjson pr "$pr" \
-    --argjson comments "$comments" \
-    --argjson reviews "$reviews" \
-    --argjson revcomments "$revcomments" \
-    --argjson status "$status" \
-    --arg bot "$BOT" \
-    --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --argjson window "$WINDOW_MIN" \
-    --argjson ciRun "$ciRun" '
-    ( [ $status.statuses[]? | select((.context // "") | test("coderabbit"; "i")) ] | last ) as $s
-    | { number: $pr.number, title: ($pr.title // ""), branch: ($pr.head.ref // ""),
-        headSha: ($pr.head.sha // ""), createdAt: ($pr.created_at // ""),
-        now: $now, windowMin: $window,
-        # Whether ANY run of the CI workflow exists for the head commit.
-        ciRunForHead: $ciRun,
-        statusState: (($s.state) // ""), statusDesc: (($s.description) // ""),
-        comments: [ $comments[] | select(.user.login == $bot)
-                    | {createdAt: .created_at, body: (.body // "")} ],
-        reviewComments: [ $revcomments[] | select(.user.login == $bot)
-                    | {createdAt: .created_at} ],
-        reviews:  [ $reviews[]  | select(.user.login == $bot)
-                    | select((.state // "") != "PENDING")
-                    | {submittedAt: .submitted_at, state: .state,
-                       body: (.body // ""), commitId: (.commit_id // "")} ] }' 2>/dev/null
+  tmp="$(mktemp -d)" || return 1
+  printf '%s' "$pr"          > "$tmp/pr.json"          || { rm -rf "$tmp"; return 1; }
+  printf '%s' "$comments"    > "$tmp/comments.json"    || { rm -rf "$tmp"; return 1; }
+  printf '%s' "$reviews"     > "$tmp/reviews.json"     || { rm -rf "$tmp"; return 1; }
+  printf '%s' "$revcomments" > "$tmp/revcomments.json" || { rm -rf "$tmp"; return 1; }
+  printf '%s' "$status"      > "$tmp/status.json"      || { rm -rf "$tmp"; return 1; }
+
+  assemble_input "$tmp/pr.json" "$tmp/comments.json" "$tmp/reviews.json" \
+    "$tmp/revcomments.json" "$tmp/status.json" "$ciRun" 2>/dev/null
+  rc=$?
+  rm -rf "$tmp"
+  return "$rc"
 }
 
 # ── rendering ─────────────────────────────────────────────────────────────
@@ -581,12 +618,16 @@ retrigger() {
 }
 
 # ── argument parsing ──────────────────────────────────────────────────────
-SHOW_CHECKS=0; JSON=0; DRY_RUN=0; RETRIGGER=0; RETRIGGER_MAX=0; PRS=""
+SHOW_CHECKS=0; JSON=0; DRY_RUN=0; RETRIGGER=0; RETRIGGER_MAX=0; ALL=0; PRS=""
 
 case "${1:-}" in
   # Internal, for the tests: pure stdin→stdout, no network.
   --classify)        shift; classify; exit 0 ;;
   --classify-checks) shift; classify_checks; exit 0 ;;
+  # Internal, for the test that pins the MAX_ARG_STRLEN regression: takes the
+  # five blobs as FILES, exactly as fetch_pr does, so the test can hand it one
+  # larger than a single argv entry may be.
+  --assemble)        shift; assemble_input "$@"; exit $? ;;
   --parse-wait)      shift; jq -Rrs "$WAIT_JQ"' waitMinutes // "" '; exit 0 ;;
   -h|--help)         usage; exit 0 ;;
 esac
@@ -596,6 +637,7 @@ while [ $# -gt 0 ]; do
     --checks)     SHOW_CHECKS=1 ;;
     --json)       JSON=1 ;;
     --retrigger)  RETRIGGER=1 ;;
+    --all)        ALL=1 ;;
     --dry-run)    DRY_RUN=1 ;;
     --max)        RETRIGGER_MAX="${2:-0}"; shift ;;
     --delay)      RETRIGGER_DELAY="${2:-$RETRIGGER_DELAY}"; shift ;;
@@ -608,6 +650,21 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# --retrigger is the only MUTATING mode, and CodeRabbit replenishes ONE review
+# slot at a time — so every post spends the slot the next PR was waiting for.
+# Unscoped, that means spending other sessions' slots: on 2026-08-31 (#2231) one
+# such run queued four PRs, three of them another session's, and pushed the
+# requester's own PR to the back of the queue it had just filled.
+#
+# Reading unscoped is the whole point of this tool and is untouched. Mutating
+# unscoped now has to be said out loud. --dry-run posts nothing, so it stays a
+# safe global preview.
+if [ "$RETRIGGER" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && [ "$ALL" -eq 0 ] && [ -z "${PRS// /}" ]; then
+  die "--retrigger needs a target — it posts, and each post spends one review slot.
+  scripts/review-status.sh --retrigger 2227   # the PR you actually want
+  scripts/review-status.sh --retrigger --all  # every unreviewed PR, deliberately"
+fi
 
 command -v gh >/dev/null 2>&1 || die "gh CLI not found — https://cli.github.com/"
 command -v jq >/dev/null 2>&1 || die "jq not found"
@@ -641,7 +698,8 @@ At least one PR above is NOT reviewed, and its CodeRabbit check still says
 the review again, as a queue rather than a burst:
 
     scripts/review-status.sh --retrigger --dry-run   # see the schedule
-    scripts/review-status.sh --retrigger             # run it
+    scripts/review-status.sh --retrigger <PR>        # re-request that one
+    scripts/review-status.sh --retrigger --all       # …or every one above
 
 EOF
   fi

@@ -147,6 +147,36 @@ Bumping the toolchain also means **re-checking the analyser pins**.
 syntax it does not know — 1.26 → 1.27 needed both to move. Their pins carry
 comments saying so; the guard cannot check this one for you.
 
+### Version ceilings in `pnpm.overrides`
+
+Most entries under `pnpm.overrides` in `package.json` are security *floors*
+(`"ws": ">=8.21.0"`) — raise a transitive dependency past a known CVE. One is
+a **ceiling**, and it means the opposite:
+
+| Override | Why |
+|---|---|
+| `"@sentry/nextjs": "<10.72.0"` | 10.72.0 does not import under a DOM test environment |
+
+JSON has no comments, so the reason cannot live next to the pin. It is this:
+the SDK's `node` export condition reaches a vendored bundler plugin that picks
+its Node-vs-browser branch on `typeof document === 'undefined'`. Under
+`happy-dom` a `document` exists, so it takes the browser branch, builds an
+`http:` URL from `document.baseURI`, and hands it to `fileURLToPath` — which
+throws `TypeError: The URL must be of scheme file` at module scope. Anything
+that transitively imports `@sentry/nextjs` then fails to load at all.
+
+Production is unaffected: `next build` and the server runtime have no
+`document`, so they take the Node branch. This is a test-environment fault
+only, which is exactly why it reached us through a lockfile regeneration
+rather than through a bump anyone reviewed — no `package.json` spec changed.
+
+To lift it, drop the line, `pnpm install`, and run `pnpm test`. If
+`lib/__tests__/sentry-scrub.test.ts` still loads, upstream fixed it and the
+ceiling can go. Do not raise the ceiling to chase a version without running
+that; the failure mode is eleven unrelated suites failing to import, with
+every assertion in them still passing, which reads like anything but a
+dependency problem.
+
 ## Verify any change
 
 Run these locally before pushing — CI will run them too:
@@ -368,8 +398,8 @@ position rather than a verdict and stalls everything behind it. Review
 the PR yourself instead — a red-first test plus a mutation proving the
 test has teeth is the standard this repo applies anyway, and it is a
 real review where a queue position is not. Then say in the PR what was
-machine-reviewed and what was not, and queue a re-review
-(`scripts/review-status.sh --retrigger`) so it still lands.
+machine-reviewed and what was not, and queue a re-review for **your own
+PR** (`scripts/review-status.sh --retrigger <PR>`) so it still lands.
 
 Red CI is a separate gate and stays absolute: throttled or not, never
 merge on a failing check.
@@ -422,12 +452,16 @@ reviews serially, seeded from the "next review available in N minutes"
 the notice itself carries:
 
 ```bash
-scripts/review-status.sh --retrigger --dry-run   # see the schedule
-scripts/review-status.sh --retrigger             # run it (long-lived; background it)
+scripts/review-status.sh --retrigger --dry-run   # see the schedule, post nothing
+scripts/review-status.sh --retrigger 2227        # re-request that one
+scripts/review-status.sh --retrigger --all       # …or every PR above (long-lived; background it)
 ```
 
-Firing `@coderabbitai review` at every throttled PR at once just
-re-throttles all but the first. And read the answer carefully: a
+`--retrigger` refuses to run without a target, because it posts and each
+post spends the one slot the limit replenishes — an unscoped run spends
+other sessions' slots and pushes your own PR to the back of the queue it
+just filled (#2231). Firing `@coderabbitai review` at every throttled PR
+at once just re-throttles all but the first. And read the answer carefully: a
 re-trigger fired while the limit is still in force comes back with
 
 > ✅ **Action performed** — Review finished.
