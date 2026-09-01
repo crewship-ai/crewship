@@ -403,3 +403,36 @@ func TestCredStoreSelect_RoundRobinWithinTheActingAgentsTier(t *testing.T) {
 		t.Errorf("rotation stalled: a1=%d a2=%d, want both non-zero", seen["a1"], seen["a2"])
 	}
 }
+
+// Two members calling in turn must each still rotate over their OWN keys.
+//
+// This is the pathology a single per-provider counter has once eligibility
+// differs per agent: A holds two credentials and B one, so A's tickets all land
+// on the same parity and A's second key is never reached — one member silently
+// pinned to one key while its sibling is active, which is invisible until the
+// pinned key hits a rate limit. The counter is therefore keyed by (provider,
+// agent); the key space is the crew roster, not anything the request chooses.
+func TestCredStoreSelect_RotationSurvivesInterleavedAgents(t *testing.T) {
+	cs := NewCredStore()
+	cs.Load([]Credential{
+		{ID: "a1", Provider: ProviderAnthropic, Token: "sk-a1", AgentIDs: []string{"agt_a"}},
+		{ID: "a2", Provider: ProviderAnthropic, Token: "sk-a2", AgentIDs: []string{"agt_a"}},
+		{ID: "b1", Provider: ProviderAnthropic, Token: "sk-b1", AgentIDs: []string{"agt_b"}},
+	})
+
+	seen := map[string]int{}
+	for i := 0; i < 8; i++ {
+		a := cs.Select(ProviderAnthropic, "agt_a")
+		if a == nil {
+			t.Fatalf("call %d: agt_a holds two credentials and got none", i)
+		}
+		seen[a.ID]++
+		if b := cs.Select(ProviderAnthropic, "agt_b"); b == nil || b.ID != "b1" {
+			t.Fatalf("call %d: agt_b got %v, want b1", i, b)
+		}
+	}
+	if seen["a1"] == 0 || seen["a2"] == 0 {
+		t.Errorf("agt_a pinned to one key while agt_b interleaved: a1=%d a2=%d",
+			seen["a1"], seen["a2"])
+	}
+}

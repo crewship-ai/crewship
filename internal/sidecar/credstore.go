@@ -133,16 +133,25 @@ func (c *Credential) leaseLapsed(now time.Time) bool {
 // did", not "it never does".
 var leaseEpochSentinel = time.Unix(0, 0).UTC()
 
+// rrKey identifies one round-robin sequence: a provider, as seen by one acting
+// agent. The agent half exists because #2052 made eligibility per agent, and a
+// counter shared across members stops rotating for a member whose eligible tier
+// is a different size from its sibling's — see Select.
+type rrKey struct {
+	provider ProviderType
+	agentID  string
+}
+
 // CredStore holds credentials in memory. Never written to disk.
 // Safe for concurrent use.
 type CredStore struct {
 	mu    sync.RWMutex
 	creds []Credential
-	// rr holds the per-provider round-robin counter (ProviderType -> *uint64),
-	// bumped with atomic.AddUint64 so Select only needs a READ lock on the hot
-	// path — no write-lock serialization across concurrent outbound requests
-	// (#1081). A sync.Map lets the counter be created lazily for a provider
-	// without a map write under the read lock.
+	// rr holds the round-robin counter per (provider, acting agent)
+	// (rrKey -> *uint64), bumped with atomic.AddUint64 so Select only needs a
+	// READ lock on the hot path — no write-lock serialization across concurrent
+	// outbound requests (#1081). A sync.Map lets the counter be created lazily
+	// for a key on first use without a map write under the read lock.
 	rr sync.Map
 }
 
@@ -246,15 +255,21 @@ func (cs *CredStore) Select(provider ProviderType, actingAgentID string) *Creden
 	}
 
 	// Atomic round-robin within the top tier. LoadOrStore lazily creates the
-	// counter for a provider on first use; AddUint64-1 yields a 0-based ticket
-	// so the first Select maps to target 0 (unchanged from the old idx map).
+	// counter on first use; AddUint64-1 yields a 0-based ticket so the first
+	// Select maps to target 0 (unchanged from the old idx map).
 	//
-	// The counter stays keyed by PROVIDER, not by (provider, agent). Rotation is
-	// about spreading load across a provider's keys, and each member's eligible
-	// set is a subset of the same tier, so one ticket sequence still visits every
-	// credential a member holds; a per-agent counter would add an unbounded map
-	// keyed by a value from the request path for no distributional gain.
-	ctr, _ := cs.rr.LoadOrStore(provider, new(uint64))
+	// Keyed by (provider, acting agent), not by provider alone. Rotation is per
+	// provider in the sense that matters — it spreads a provider's own keys —
+	// but once eligibility differs per agent, ONE counter shared across members
+	// stops rotating for some of them: a member holding two credentials while a
+	// sibling holding one calls in turn draws only even tickets, `% 2` is always
+	// 0, and its second key is never reached. One member silently pinned to one
+	// key, invisible until that key hits a rate limit.
+	//
+	// The extra map dimension is bounded by the crew roster: the agent id comes
+	// from an HMAC-validated route token (llmRouteIdentity), so it is one of the
+	// members this sidecar was booted with and not a value the request chooses.
+	ctr, _ := cs.rr.LoadOrStore(rrKey{provider: provider, agentID: actingAgentID}, new(uint64))
 	target := int((atomic.AddUint64(ctr.(*uint64), 1) - 1) % uint64(topCount))
 
 	// Pass 2: iterate again and return the Nth match in the top tier. Scanning
