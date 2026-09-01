@@ -238,6 +238,18 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// #2258 — this route used to have no equivalent of the internal route's
+	// #1768 autonomy-gate check, so any MANAGER could start a mission whose
+	// gate an OWNER had explicitly denied: applyAutonomyGateDecisionTx
+	// deliberately writes no marker on the mission row when a gate is
+	// denied, so the approvals_queue row is the ONLY door, and that
+	// guarantee only holds if every start path reads it. Shares
+	// refuseUnlessAutonomyGateApproved with InternalMissionHandler.Start so
+	// the two routes refuse identically.
+	if !refuseUnlessAutonomyGateApproved(w, r, h.db, h.logger, wsID, missionID) {
+		return
+	}
+
 	// Validate DAG before starting (circular deps, nonexistent dep IDs)
 	if h.missionEngine != nil {
 		if dagErr := h.missionEngine.ValidateDAG(r.Context(), missionID); dagErr != nil {

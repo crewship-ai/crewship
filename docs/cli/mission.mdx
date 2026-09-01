@@ -139,6 +139,8 @@ crewship mission start <id> --wait --wait-timeout 1h
 
 The DAG engine evaluates task dependencies and dispatches ready tasks to agents.
 
+If the mission was created under an autonomy hold (see [Autonomy gate on agent-driven creation](/api-reference/internal#autonomy-gate-on-agent-driven-creation)) and its `autonomy_gate` approval is still pending, denied, cancelled, or timed out, `start` answers `403` regardless of who is calling — an OWNER/ADMIN must decide the hold with `crewship approvals approve <id>` first.
+
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--wait` | `false` | Block and poll `GET /api/v1/crews/{crewId}/missions/{missionId}` (the same route `mission get` uses) every 2s until the mission reaches `COMPLETED` or `FAILED`, instead of returning as soon as the start request is acknowledged. Exits non-zero on `FAILED`. |
