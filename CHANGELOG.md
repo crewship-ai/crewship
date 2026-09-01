@@ -3895,6 +3895,24 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   memory"), mapped from the real `admission.Reason*` tokens and falling back
   to the raw token for one this build doesn't recognize yet.
 
+- **An escalation's raw text reached the permanent journal entry and the
+  workspace-wide broadcast, even though the inbox copy was scrubbed
+  (#2238).** `CreateEscalation` wrote the same agent-supplied
+  `reason`/`context`/`metadata` into three places — the inbox row, the
+  `peer.escalation` journal entry, and the `escalation_created` /
+  `escalation.created` WebSocket broadcasts — but secret-redaction and a
+  length bound were applied only to the inbox copy. An inbox row is exactly
+  what a GDPR erasure request deletes, while the journal entry is explicitly
+  excluded from that erasure and is never rewritten again, so the copy that
+  survived forever was the unredacted, unbounded one: a credential-shaped
+  value an agent pasted into an escalation sat there permanently, and
+  nothing capped how large `context` could be. The journal payload and its
+  summary line are now redacted and capped at 4096 characters, the same
+  treatment the inbox copy already got — and so is the `reason` sent in the
+  workspace-wide broadcast, since that goes out live to every connected
+  member the moment the escalation is raised, not just the person who ends
+  up seeing the inbox row.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
