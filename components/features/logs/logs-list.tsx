@@ -1,20 +1,115 @@
 "use client"
 
-import { useMemo, useState, useCallback } from "react"
+import { memo, useState, useCallback } from "react"
+import Image from "next/image"
 import { Virtuoso } from "react-virtuoso"
-import { ChevronRight, ChevronDown } from "lucide-react"
+import {
+  Bot,
+  ChevronRight,
+  ChevronDown,
+  CircleDashed,
+  Container,
+  Server,
+  ShieldCheck,
+  User,
+  Workflow,
+  type LucideIcon,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { JournalEntry } from "@/lib/types/journal"
 import {
   GROUP_COLOR,
+  GROUP_LABEL,
   SEVERITY_BG_CLASS,
   SEVERITY_COLOR,
   groupOf,
-  pillLabelOf,
   severityOf,
 } from "@/lib/journal-style"
+import { iconForEntryType } from "@/lib/journal-icons"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import {
+  useJournalLookup,
+  type AgentLookup,
+  type CrewLookup,
+} from "@/hooks/use-journal-lookup"
 import { formatRelativeTime } from "@/lib/time"
 import { EgressAllowlistAction } from "./egress-allowlist-action"
+import { shortenId } from "./ids"
+
+/**
+ * Row grid, left to right:
+ *
+ *   3px   severity bar
+ *   84px  HH:MM:SS.mmm      (11px mono, 12 chars ≈ 79px)
+ *   38px  identity cluster  (18px avatar + 4px + 15px crew icon = 37px)
+ *   124px entry type        (12px icon + 4px + ~18 chars of 10px mono)
+ *   1fr   summary
+ *   62px  relative age      ("123d ago" ≈ 48px at 10px mono)
+ *   14px  chevron
+ *
+ * Fixed columns plus six 8px gaps come to 373px, against 333px for the
+ * pre-#2208 six-column row — the identity cluster and the wider type
+ * cell cost the summary 40px. Avatar and crew share one column rather
+ * than taking one each (the wireframe's 20px + 22px): both boxes are
+ * always painted, placeholder included, so they still line up down the
+ * list, and merging them saves a whole 8px grid gap.
+ *
+ * The full dotted `entry_type` does not always fit — the catalog's
+ * median is 18 characters but its tail runs to 41
+ * (`pipeline.schedule.circuit_breaker_tripped`). Long types ellipsize;
+ * the untruncated string is on the cell's `title` and in the expanded
+ * detail. Buying the tail would cost the summary another ~90px, which
+ * is not a trade this row can afford.
+ */
+// A static class, not an inline `gridTemplateColumns`: the template is
+// one fixed value, so Tailwind can see it at build time.
+const ROW_GRID = "grid-cols-[3px_84px_38px_124px_minmax(0,1fr)_62px_14px]"
+
+/**
+ * Glyph stand-ins for the actors that have no avatar because they are
+ * not agents. A blank cell here reads as missing data; a labelled glyph
+ * reads as "this was the system", which is the truth.
+ */
+// Module constants, not inline literals: Virtuoso compares these props
+// by identity, and a fresh object per render is the same mistake the
+// old inline `itemContent` made.
+const computeItemKey = (_: number, e: JournalEntry) => e.id
+const INCREASE_VIEWPORT_BY = { top: 0, bottom: 600 }
+
+const ACTOR_GLYPH: Record<string, LucideIcon> = {
+  agent: Bot,
+  user: User,
+  system: Server,
+  keeper: ShieldCheck,
+  sidecar: Container,
+  orchestrator: Workflow,
+}
+
+/**
+ * Strip a leading `"<agent>: "` from a summary when the prefix names the
+ * very agent whose avatar now sits on the same row. Emit sites write it
+ * inconsistently, so this only fires on an exact match against the
+ * resolved agent's name or slug — never on a generic `"word: "`, which
+ * would eat `"exec.command: ..."` and every message with a colon in it.
+ */
+function stripAgentPrefix(summary: string, agent: AgentLookup | undefined): string {
+  if (!summary || !agent) return summary
+  const idx = summary.indexOf(":")
+  if (idx <= 0) return summary
+  const head = summary.slice(0, idx).trim().toLowerCase()
+  // An agent with a blank name would otherwise match a blank head and
+  // eat the prefix of a summary like "  : something".
+  if (!head) return summary
+  if (head !== (agent.name ?? "").toLowerCase() && head !== (agent.slug ?? "").toLowerCase()) {
+    return summary
+  }
+  const rest = summary.slice(idx + 1).trimStart()
+  // Never blank the row: a summary that is nothing but the prefix keeps
+  // what it had.
+  return rest || summary
+}
 
 interface LogsListProps {
   entries: JournalEntry[]
@@ -38,7 +133,7 @@ interface LogsListProps {
 
 /**
  * Virtualized log stream rendered Grafana Explore-style:
- *   ┃ severity-bar │ HH:MM:SS.mmm │ type-pill │ summary │ age │ ▸
+ *   ┃ sev │ HH:MM:SS.mmm │ avatar+crew │ ◈ entry.type │ summary │ age │ ▸
  * Click a row to expand it inline and reveal payload + refs as
  * formatted JSON. Multiple rows can be open at once.
  */
@@ -54,10 +149,39 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached,
     })
   }, [])
 
-  // Stable derived list — newestFirst controlled by parent.
-  const list = useMemo(() => entries, [entries])
+  // Both subscribed once for the whole list, never per row. React.memo
+  // does not stop a context change from re-rendering a component, so a
+  // row that read the lookup itself would re-render on every provider
+  // update — and the provider flips `loading` on and off around each
+  // refetch, so a single `agent.updated` event would sweep the whole
+  // mounted list three times whether or not the data changed. Reading
+  // the maps here means only a real map swap reaches the rows.
+  const { agents, crews } = useJournalLookup()
+  const stylesVersion = useAvatarStylesVersion()
 
-  if (list.length === 0) {
+  // A fresh closure per item per render defeats React.memo on LogRow —
+  // every row would re-render on every keystroke in the search box.
+  // `expanded` is in the dep list (a new Set each toggle), but only the
+  // toggled row sees a changed prop, so the rest still bail out.
+  const itemContent = useCallback(
+    (_: number, e: JournalEntry) => (
+      <LogRow
+        entry={e}
+        wrap={wrap}
+        expanded={expanded.has(e.id)}
+        onToggle={toggleExpand}
+        agent={e.agent_id ? agents.get(e.agent_id) : undefined}
+        crew={e.crew_id ? crews.get(e.crew_id) : undefined}
+        stylesVersion={stylesVersion}
+        onSelectTrace={onSelectTrace}
+        onSelectAgent={onSelectAgent}
+        onSelectCrew={onSelectCrew}
+      />
+    ),
+    [wrap, expanded, toggleExpand, agents, crews, stylesVersion, onSelectTrace, onSelectAgent, onSelectCrew],
+  )
+
+  if (entries.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground/60 italic">
         No log entries match the current filter.
@@ -69,33 +193,111 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached,
 
   return (
     <Virtuoso
-      data={list}
+      data={entries}
       followOutput={followOutput as false | "auto"}
       defaultItemHeight={26}
-      computeItemKey={(_, e) => e.id}
+      computeItemKey={computeItemKey}
       endReached={onEndReached}
-      increaseViewportBy={{ top: 0, bottom: 600 }}
-      itemContent={(_, e) => (
-        <LogRow
-          entry={e}
-          wrap={wrap}
-          expanded={expanded.has(e.id)}
-          onToggle={() => toggleExpand(e.id)}
-          onSelectTrace={onSelectTrace}
-          onSelectAgent={onSelectAgent}
-          onSelectCrew={onSelectCrew}
-        />
-      )}
+      increaseViewportBy={INCREASE_VIEWPORT_BY}
+      itemContent={itemContent}
       className="h-full"
     />
   )
 }
 
-function LogRow({
+/**
+ * 18px agent avatar, or a labelled glyph for the actors that are not
+ * agents. Mirrors `ScopeBadge` in logs-toolbar.tsx — same seed rules,
+ * same fallback discipline — at row scale.
+ *
+ * An entry whose agent is not in the lookup (deleted agent, lookup
+ * still in flight) still gets a stable avatar: the id is a perfectly
+ * good DiceBear seed, so the row never flickers between a blank and a
+ * face.
+ */
+function ActorAvatar({
+  agent,
+  agentId,
+  actorType,
+}: {
+  agent: AgentLookup | undefined
+  agentId: string | undefined
+  actorType: string
+}) {
+  // Gated on the ACTOR, never on `agent_id` alone. A non-agent actor
+  // routinely names an agent — `chat.user_message` (actor `user`),
+  // `container.snapshot`, `conversation.compacted` and `sidecar.stale`
+  // (actor `system`) all emit with `AgentID` set, because the agent is
+  // what the event is *about*. Branching on the id would put the agent's
+  // face on a human's message and tell a screen reader the agent said it.
+  const name = agent?.name || (agentId ? shortenId(agentId) : undefined)
+  if (actorType === "agent" && agentId) {
+    // Seed precedence is `avatar_seed || name`, matching ScopeBadge in
+    // logs-toolbar.tsx. The two render the same agent on the same screen
+    // — the dropdown and the row — so a different rule here would draw
+    // two different faces for one agent. Keep them in lockstep.
+    const seed = agent?.avatar_seed || agent?.name || agentId
+    return (
+      <Image
+        src={getAgentAvatarUrl(seed, agent?.avatar_style ?? null)}
+        alt={name ?? agentId}
+        title={name ?? agentId}
+        width={18}
+        height={18}
+        className="h-[18px] w-[18px] rounded-[4px] shrink-0 bg-muted/40"
+        unoptimized
+      />
+    )
+  }
+  const Glyph = ACTOR_GLYPH[actorType] ?? CircleDashed
+  // The agent stays in the label when the entry carries one: a system
+  // row about Morgan's container should still say Morgan, just not
+  // claim Morgan acted.
+  const who = actorType || "unknown"
+  const label = name ? `${who} actor, agent ${name}` : `${who} actor`
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className="h-[18px] w-[18px] rounded-[4px] shrink-0 inline-flex items-center justify-center bg-muted/40 border border-border/50"
+    >
+      <Glyph className="h-2.5 w-2.5 text-muted-foreground" />
+    </span>
+  )
+}
+
+/**
+ * 15px crew gradient, via the same shared CrewIcon the crew dropdown
+ * uses. An entry with no crew still paints an empty box so the type
+ * column below it stays on one vertical line down the list.
+ */
+function CrewBadge({ crew }: { crew: CrewLookup | undefined }) {
+  if (!crew?.icon) {
+    return <span aria-hidden className="h-[15px] w-[15px] rounded-[3px] shrink-0 bg-muted/20" />
+  }
+  const label = `Crew ${crew.name}`
+  return (
+    // A div, not a span: CrewIcon renders a div, which is not phrasing
+    // content and cannot legally nest inside one.
+    <div role="img" aria-label={label} title={label} className="inline-flex shrink-0">
+      <CrewIcon
+        icon={crew.icon}
+        color={crew.color}
+        size="sm"
+        className="!h-[15px] !w-[15px] !rounded-[3px] [&>svg]:!h-2.5 [&>svg]:!w-2.5"
+      />
+    </div>
+  )
+}
+
+const LogRow = memo(function LogRow({
   entry,
   wrap,
   expanded,
   onToggle,
+  agent,
+  crew,
   onSelectTrace,
   onSelectAgent,
   onSelectCrew,
@@ -103,51 +305,76 @@ function LogRow({
   entry: JournalEntry
   wrap: boolean
   expanded: boolean
-  onToggle: () => void
+  onToggle: (id: string) => void
+  /** Resolved by the list, so the row never subscribes to the lookup. */
+  agent: AgentLookup | undefined
+  crew: CrewLookup | undefined
+  /**
+   * Bumped when a lazily-imported DiceBear collection finishes loading.
+   * Never read here — it exists so this memo boundary invalidates and
+   * getAgentAvatarUrl gets a second chance at a real avatar.
+   */
+  stylesVersion: number
   onSelectTrace?: (traceId: string) => void
   onSelectAgent?: (agentId: string) => void
   onSelectCrew?: (crewId: string) => void
 }) {
   const sev = severityOf(entry.severity)
   const grp = groupOf(entry.entry_type)
-  const pill = pillLabelOf(entry.entry_type)
+  const TypeIcon = iconForEntryType(entry.entry_type)
   const ts = entry.ts
   const tsLabel = formatTime(ts)
+  // The prefix is redundant only because the avatar is showing that
+  // agent — which it only does for an agent actor.
+  const summary =
+    entry.actor_type === "agent"
+      ? stripAgentPrefix(entry.summary ?? "", agent)
+      : entry.summary ?? ""
+  const detailId = `log-detail-${entry.id}`
+  const toggle = useCallback(() => onToggle(entry.id), [onToggle, entry.id])
 
   return (
     <div
-      onClick={onToggle}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault()
-          onToggle()
-        }
-      }}
+      onClick={toggle}
       className={cn(
         "group grid gap-2 px-2 py-[3px] items-start cursor-pointer text-[12px] leading-[18px] border-b border-border/30 hover:bg-accent/20",
+        ROW_GRID,
         expanded && "bg-primary/5",
       )}
-      style={{ gridTemplateColumns: "3px 96px 110px minmax(0,1fr) 70px 14px" }}
     >
-      <span
-        className={cn("self-stretch rounded-sm", SEVERITY_BG_CLASS[sev])}
-        aria-hidden
-      />
+      {/* The bar is the only severity signal on screen; the sr-only
+          child is the only one a screen reader gets. `sr-only` is
+          position:absolute, so it costs the 3px column no width. */}
+      <span className={cn("self-stretch rounded-sm", SEVERITY_BG_CLASS[sev])}>
+        <span className="sr-only">Severity: {sev}</span>
+      </span>
       <time
         dateTime={ts}
         className="font-mono text-[11px] tabular-nums text-muted-foreground/80 truncate"
       >
         {tsLabel}
       </time>
-      <span className="flex items-center">
-        <span
-          className="inline-flex items-center px-1.5 h-[16px] rounded-sm text-[10px] font-mono border border-border/50 bg-card"
-          style={{ color: GROUP_COLOR[grp] }}
-          title={entry.entry_type}
-        >
-          {pill}
+      {/* A div, not a span: CrewBadge renders a div once the crew has an
+          icon, and a div inside a span is invalid — the parser closes the
+          span and reparents the div out of this 38px column. */}
+      <div className="flex items-center gap-1">
+        <ActorAvatar agent={agent} agentId={entry.agent_id} actorType={entry.actor_type} />
+        <CrewBadge crew={crew} />
+      </div>
+      {/* The group colour stays an inline style on purpose. It is
+          category data, not theme (BRIEF-COLOR-TOKENS-2026 §2), so it has
+          no semantic token; the equivalent static classes would be raw
+          palette classes (`text-emerald-400`, …), which eslint.config.mjs
+          bans in components/**. GROUP_COLOR is also the single source for
+          the same 18 colours in the chips row, stats rail and histogram
+          legend, where they are consumed as a background value — a
+          parallel class map would be a second copy to keep in sync. */}
+      <span className="flex items-center gap-1 min-w-0" title={entry.entry_type}>
+        <TypeIcon className="h-3 w-3 shrink-0" style={{ color: GROUP_COLOR[grp] }} />
+        {/* Group membership is otherwise carried by colour alone. */}
+        <span className="sr-only">{GROUP_LABEL[grp]} group</span>
+        <span className="font-mono text-[10px] truncate" style={{ color: GROUP_COLOR[grp] }}>
+          {entry.entry_type}
         </span>
       </span>
       <span
@@ -156,18 +383,39 @@ function LogRow({
           wrap ? "whitespace-pre-wrap break-words" : "truncate whitespace-nowrap",
         )}
       >
-        {entry.summary || "—"}
+        {summary || "—"}
       </span>
       <span className="text-right font-mono text-[10px] tabular-nums text-muted-foreground/70">
         {formatRelativeTime(ts)}
       </span>
-      <span className="text-muted-foreground/60 text-[10px] leading-[18px]">
+      {/* The disclosure is this button, not the row container. The
+          container used to carry role="button" with the detail rendered
+          *inside* it, which made the detail's own buttons (the trace /
+          agent / crew jumps, the egress allowlist action) nested
+          interactive content, and grew the row's accessible name to
+          include the whole payload JSON once expanded. A real button
+          beside the region it controls is the shape aria-controls
+          expects. The row keeps its click handler for the mouse. */}
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={expanded ? detailId : undefined}
+        aria-label={`${expanded ? "Collapse" : "Expand"} detail for ${entry.entry_type} at ${tsLabel}`}
+        onClick={(e) => {
+          // The container handles the click for mouse users; without
+          // this the row would toggle twice and land back where it was.
+          e.stopPropagation()
+          toggle()
+        }}
+        className="text-muted-foreground/60 text-[10px] leading-[18px] cursor-pointer"
+      >
         {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-      </span>
+      </button>
 
       {expanded && (
         <div
-          className="col-start-2 col-end-7 mt-1 mb-1 rounded border border-border/60 bg-card/60"
+          id={detailId}
+          className="col-start-2 col-end-8 mt-1 mb-1 rounded border border-border/60 bg-card/60"
           // Stop click bubbling so interacting with the detail (selecting
           // text in the JSON, clicking trace/agent/crew jump buttons)
           // doesn't collapse the row.
@@ -187,7 +435,7 @@ function LogRow({
       )}
     </div>
   )
-}
+})
 
 function Detail({
   entry,

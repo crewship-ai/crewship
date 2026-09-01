@@ -33,7 +33,9 @@
 #   scripts/review-status.sh                        # every open PR
 #   scripts/review-status.sh 1568 1571              # named PRs
 #   scripts/review-status.sh --checks               # + skipped-but-green CI checks
-#   scripts/review-status.sh --retrigger --dry-run  # the re-review queue
+#   scripts/review-status.sh --retrigger 2227       # re-review ONE pr
+#   scripts/review-status.sh --retrigger --all      # …or every unreviewed one
+#   scripts/review-status.sh --retrigger --dry-run  # the queue, posting nothing
 #   scripts/review-status.sh --json                 # one JSON object per PR
 #
 # Exit codes: 0 everything examined was reviewed  ·  2 usage or tooling error
@@ -61,10 +63,11 @@ BOT="coderabbitai[bot]"
 usage() {
   cat <<'EOF'
 Usage: scripts/review-status.sh [PR...] [--checks] [--json] [--window-min N]
-       scripts/review-status.sh --retrigger [--dry-run] [--max N] [--delay S]
+       scripts/review-status.sh --retrigger (PR... | --all) [--max N] [--delay S]
+       scripts/review-status.sh --retrigger --dry-run   # global preview, posts nothing
 
 EOF
-  sed -n '3,46p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,48p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 die() { printf 'review-status: %s\n' "$1" >&2; exit 2; }
@@ -615,7 +618,7 @@ retrigger() {
 }
 
 # ── argument parsing ──────────────────────────────────────────────────────
-SHOW_CHECKS=0; JSON=0; DRY_RUN=0; RETRIGGER=0; RETRIGGER_MAX=0; PRS=""
+SHOW_CHECKS=0; JSON=0; DRY_RUN=0; RETRIGGER=0; RETRIGGER_MAX=0; ALL=0; PRS=""
 
 case "${1:-}" in
   # Internal, for the tests: pure stdin→stdout, no network.
@@ -634,6 +637,7 @@ while [ $# -gt 0 ]; do
     --checks)     SHOW_CHECKS=1 ;;
     --json)       JSON=1 ;;
     --retrigger)  RETRIGGER=1 ;;
+    --all)        ALL=1 ;;
     --dry-run)    DRY_RUN=1 ;;
     --max)        RETRIGGER_MAX="${2:-0}"; shift ;;
     --delay)      RETRIGGER_DELAY="${2:-$RETRIGGER_DELAY}"; shift ;;
@@ -646,6 +650,21 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# --retrigger is the only MUTATING mode, and CodeRabbit replenishes ONE review
+# slot at a time — so every post spends the slot the next PR was waiting for.
+# Unscoped, that means spending other sessions' slots: on 2026-08-31 (#2231) one
+# such run queued four PRs, three of them another session's, and pushed the
+# requester's own PR to the back of the queue it had just filled.
+#
+# Reading unscoped is the whole point of this tool and is untouched. Mutating
+# unscoped now has to be said out loud. --dry-run posts nothing, so it stays a
+# safe global preview.
+if [ "$RETRIGGER" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && [ "$ALL" -eq 0 ] && [ -z "${PRS// /}" ]; then
+  die "--retrigger needs a target — it posts, and each post spends one review slot.
+  scripts/review-status.sh --retrigger 2227   # the PR you actually want
+  scripts/review-status.sh --retrigger --all  # every unreviewed PR, deliberately"
+fi
 
 command -v gh >/dev/null 2>&1 || die "gh CLI not found — https://cli.github.com/"
 command -v jq >/dev/null 2>&1 || die "jq not found"
@@ -679,7 +698,8 @@ At least one PR above is NOT reviewed, and its CodeRabbit check still says
 the review again, as a queue rather than a burst:
 
     scripts/review-status.sh --retrigger --dry-run   # see the schedule
-    scripts/review-status.sh --retrigger             # run it
+    scripts/review-status.sh --retrigger <PR>        # re-request that one
+    scripts/review-status.sh --retrigger --all       # …or every one above
 
 EOF
   fi

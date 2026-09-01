@@ -164,7 +164,7 @@ jobs:
       # Goreleaser's `sboms:` block shells out to syft (CRE-122); the runner
       # image doesn't ship it. Same SHA-pinned install as release.yml.
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           syft-version: v1.38.0
 

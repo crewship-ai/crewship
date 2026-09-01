@@ -591,6 +591,42 @@ out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" 1234 2>&1)"; rc=$?
 expect_eq "gh missing exits 2" "2" "$rc"
 expect_contains "…and says gh is missing" "$out" "gh CLI not found"
 
+echo "== --retrigger needs a target (#2231) =="
+
+# --retrigger is the only MUTATING mode: it posts `@coderabbitai review`, and
+# CodeRabbit replenishes ONE review slot at a time. An unscoped run therefore
+# spends other sessions' slots — on 2026-08-31 one such run queued four PRs,
+# three of them another session's, and pushed the requester's own PR to the
+# back of the queue it had just filled. Reading unscoped is the whole point of
+# the tool; mutating unscoped has to be said out loud.
+#
+# EVERY case here runs on the empty PATH, including the ones expected to be
+# let through. A test for a mutating path must not be able to mutate: the
+# first draft of this block ran the unscoped case on the real PATH, which is
+# the very command the gate exists to stop. All four exit 2, so the exit code
+# proves nothing on its own — the MESSAGE is the assertion. "gh CLI not found"
+# means the gate let the call reach the tooling probes; the two usage lines
+# mean the gate fired first.
+
+out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" --retrigger 2>&1)"; rc=$?
+expect_eq "an unscoped --retrigger exits 2" "2" "$rc"
+expect_contains "…names the targeted form" "$out" "--retrigger 2227"
+expect_contains "…names the explicit global form" "$out" "--retrigger --all"
+expect_not_contains "…and never reaches the tooling probes" "$out" "gh CLI not found"
+
+out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" --retrigger --all 2>&1)"; rc=$?
+expect_eq "--retrigger --all exits 2 on tooling, not on usage" "2" "$rc"
+expect_contains "…having passed the target gate" "$out" "gh CLI not found"
+
+out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" --retrigger 2227 2>&1)"; rc=$?
+expect_eq "--retrigger with a PR exits 2 on tooling, not on usage" "2" "$rc"
+expect_contains "…having passed the target gate" "$out" "gh CLI not found"
+
+# --dry-run posts nothing, so it stays a safe global preview.
+out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" --retrigger --dry-run 2>&1)"; rc=$?
+expect_eq "--retrigger --dry-run stays unscoped" "2" "$rc"
+expect_contains "…having passed the target gate" "$out" "gh CLI not found"
+
 echo "== usage =="
 
 out="$("$RS" --nope 2>&1)"; rc=$?

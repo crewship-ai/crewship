@@ -362,6 +362,49 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   loaded — a comment on `facetCounts` says so, and says they must move to a
   server-side GROUP BY the day it is not.
 
+- **A `/journal` Timeline row says who acted (#2208).** The row carried a 3px
+  severity bar and a colour-coded text pill and nothing else — no avatar, no
+  crew icon, no entry-type glyph. The agent name appeared only where an emit
+  site happened to write it into the summary string. None of it needed
+  fetching: the avatar seed and style, the crew icon and colour, and an icon
+  for all 127 entry types were already in the browser and already refreshed on
+  realtime events, rendered only inside the two scope dropdowns.
+
+  The row is now seven columns — severity, time, an 18px agent avatar beside a
+  15px crew icon, the entry-type icon with the full dotted `entry_type`, the
+  summary, the age, the chevron. An agent the lookup cannot resolve is seeded
+  from its id rather than left blank. The summary drops a leading
+  `"<agent>: "` when the prefix names the agent now in the avatar, and takes
+  back some of the 40px the identity columns cost it. Long entry types
+  ellipsize — the catalog's median is 18 characters and its tail runs to 41 —
+  with the full string on the cell's `title` and in the expanded detail.
+
+  The avatar is gated on `actor_type`, not on whether `agent_id` is set. Four
+  common entry types — `chat.user_message`, `container.snapshot`,
+  `conversation.compacted`, `sidecar.stale` — emit a `user` or `system` actor
+  *with* the agent id populated, because the agent is what the event is about
+  rather than who caused it. Those rows get the labelled glyph, with the agent
+  named in the label, so a human's message is never captioned with an agent's
+  face.
+
+  Three signals that were colour-only are now also text: severity carries a
+  visually-hidden level (the bar was `aria-hidden`, and the word appeared only
+  after expanding), the entry-type group carries its name, and the disclosure
+  gets `aria-expanded` plus `aria-controls`. The disclosure is the chevron
+  button rather than the row container — with the detail rendered inside a
+  `role="button"`, the detail's own trace/agent/crew jumps were nested
+  interactive content and the button's accessible name grew to include the
+  entire payload JSON.
+
+  The stats rail's "Top agents" showed shortened uuids behind a flat slate
+  swatch, six agents reading as one series, with the avatar-carrying lookup
+  already mounted. It renders the avatar and the resolved name, and each bar
+  takes a seed-derived hue.
+
+  `LogRow` is memoized and the virtualized list's `itemContent` no longer
+  allocates a fresh closure per item per render, so a keystroke in the search
+  box stops re-rendering every mounted row.
+
 - **`/design` is gone; its audit is now a tracked document (#2165).** The
   create-surface unification proposal shipped as a page inside the product —
   no data, no API, no CLI command — and its own header said to delete it once
@@ -669,6 +712,42 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   browser reads: for each kind, `crewship inbox list --kind <k> --all` must
   agree with the facet, the kinds must sum to the unfiltered total, and the
   facet vocabulary must not have drifted from `inbox.AllKinds`.
+
+- **Three Logs filter chips could never appear, and 65 entry types had no
+  chip at all (#2207).** The Crow's Nest type-chip row seeded its per-group
+  counters from a hand-kept list that had fallen three groups behind the
+  eighteen the UI defines, so counting an `audit`, `provisioning` or `chat`
+  entry incremented a counter that did not exist — `NaN`, which fails the
+  `count > 0` test the row uses to decide what to render. Those three chips
+  were unreachable no matter how many such entries were loaded, and the
+  visible chips' totals under-reported. The list is now derived from the
+  render order, so it cannot drift again.
+
+  Scanning the backend for every entry type it can emit finds 139, of which
+  65 had no group: they rendered grey with a raw dotted-string pill, and
+  because muting a chip is pushed to the server as an `exclude_entry_type`
+  filter and the catch-all group has no type list, they could not be filtered
+  out of a busy workspace's 5,000-entry window at all. Two new chips take the
+  families that had nowhere to go — **routine** (the fourteen `pipeline.*`
+  types plus the two `automation.*` refusals that explain why a routine did
+  not run) and **page** (all fifteen `page.*` types, including publishing,
+  public views and webhook credentials). The rest join the existing chips:
+  memory, credentials, approvals-and-trust, notifications, provisioning and
+  runtime freshness, missions, runs, chat, skills, system. The twelve the
+  frontend's entry-type list had never carried — among them
+  `page.owner_transferred`, `page.published` and
+  `onboarding.proposal_applied` — gained an icon and a place in the activity
+  sidebar's facets. `memory.priority_changed`, emitted as a bare string
+  literal since it shipped, is now a named constant on the Go side, so the
+  entry that records who changed a compaction-surviving marker is visible to
+  anything that reads the backend's declarations.
+
+  `hook.dispatch_error` was in the server-side `system` exclusion list but
+  not in the client's type→group map, so muting System dropped it on the
+  server while the client still called it ungrouped. The two maps now agree,
+  and a test asserts it in both directions. `docs/guides/crew-journal.mdx`
+  billed roughly ninety types as the "full entry-type catalog"; it now lists
+  all 139 with the chip each one filters under.
 
 - **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
   server refused it (#2195).** The standalone `kind: Agent` validator kept
