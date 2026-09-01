@@ -54,6 +54,12 @@ const bypassCanary = "kp-bypass-canary-9f13a7"
 // credential (PRD-CREDENTIALS-V2 §2.2) — the second door into the same room.
 const bypassPartCanary = "kp-bypass-part-canary-4c02"
 
+// bypassOAuthShapeCanary carries the sk-ant-oat prefix BuildEnvVarsSidecar's
+// OAuth selector matches on VALUE shape alone (exec_env.go's hasOAuth loop),
+// so an unclassified credential whose plaintext merely looks like an
+// Anthropic OAuth token can be driven down that path regardless of type.
+const bypassOAuthShapeCanary = "sk-ant-oat-kp-bypass-9f13a7"
+
 // caseVariantSecretTypes are the spellings of "SECRET" that miss the
 // credpolicy map key. Every one of them is reachable today: the credentials
 // table was plain TEXT with no enum validation for most of the product's life
@@ -557,6 +563,80 @@ func TestBypass_UnclassifiedTypeNeverReachesEnv(t *testing.T) {
 			t.Errorf("keeper=%v: an unclassified type reached /secrets (%d file(s)) — the "+
 				"file path reads credpolicy Delivery and must never deliver DeliveryNone",
 				keeper, written)
+		}
+	}
+}
+
+// TestBypass_UnclassifiedTypeNeverReachesEnvViaAdapterAllowlist covers the
+// SECOND of the three selectors CodeRabbit found still unguarded after the
+// #2092 legacy-fallback fix (#2246): BuildEnvVarsSidecar's BYO-API-key
+// override loop matches a credential by EnvVarName alone (whatever
+// apiKeyEnvVarsForAdapter allows for req.CLIAdapter) and never consulted
+// credpolicy at all. An unclassified credential simply NAMED like a
+// recognized provider key (e.g. OPENROUTER_API_KEY for an OPENCODE adapter)
+// must not reach the env by that name collision, in either Keeper state —
+// and AgentEnvCredentialExposures must not report it either.
+func TestBypass_UnclassifiedTypeNeverReachesEnvViaAdapterAllowlist(t *testing.T) {
+	t.Parallel()
+	req := AgentRunRequest{
+		AgentSlug:  "riley",
+		CLIAdapter: "OPENCODE", // apiKeyEnvVarsForAdapter("OPENCODE") includes OPENROUTER_API_KEY
+		Credentials: []Credential{{
+			ID:         "cred-adapter-bypass",
+			Type:       "VAULT_HANDLE", // unclassified: no credpolicy row
+			EnvVarName: "OPENROUTER_API_KEY",
+			PlainValue: bypassCanary,
+		}},
+	}
+
+	for _, keeper := range []bool{true, false} {
+		if _, inEnv := envCarries(BuildEnvVarsSidecar(req, keeper), bypassCanary); inEnv {
+			t.Errorf("keeper=%v: an unclassified credential named after an adapter-recognized "+
+				"env var reached the agent env — the allowlist override loop must consult "+
+				"credpolicy before it overrides, not just the env-var name", keeper)
+		}
+		for _, exp := range AgentEnvCredentialExposures(req, keeper) {
+			if exp.EnvVarName == "OPENROUTER_API_KEY" {
+				t.Errorf("keeper=%v: AgentEnvCredentialExposures reported an exposure for the "+
+					"withheld unclassified credential (%+v)", keeper, exp)
+			}
+		}
+	}
+}
+
+// TestBypass_UnclassifiedTypeNeverReachesEnvViaOAuthShape covers the THIRD
+// (and, per CodeRabbit, worst) selector: BuildEnvVarsSidecar's hasOAuth loop
+// treats ANY credential whose plaintext starts with "sk-ant-oat" as an OAuth
+// token, regardless of its type, and — pre-fix — regardless of Keeper state
+// (that loop never looked at keeperEnabled at all). An unclassified
+// credential whose value merely collides with that shape must not reach the
+// env as CLAUDE_CODE_OAUTH_TOKEN in EITHER Keeper state, including Keeper ON
+// — the one state every other channel always withholds in.
+func TestBypass_UnclassifiedTypeNeverReachesEnvViaOAuthShape(t *testing.T) {
+	t.Parallel()
+	req := AgentRunRequest{
+		AgentSlug:  "riley",
+		CLIAdapter: "CLAUDE_CODE",
+		Credentials: []Credential{{
+			ID:         "cred-oauth-shape-bypass",
+			Type:       "VAULT_HANDLE", // unclassified: no credpolicy row
+			EnvVarName: "IRRELEVANT_NAME",
+			PlainValue: bypassOAuthShapeCanary,
+		}},
+	}
+
+	for _, keeper := range []bool{true, false} {
+		env := BuildEnvVarsSidecar(req, keeper)
+		if _, inEnv := envCarries(env, bypassOAuthShapeCanary); inEnv {
+			t.Errorf("keeper=%v: an unclassified credential whose value merely looks like an "+
+				"OAuth token reached the agent env — the OAuth selector matches on value shape "+
+				"and must still consult credpolicy before treating it as deliverable", keeper)
+		}
+		for _, exp := range AgentEnvCredentialExposures(req, keeper) {
+			if exp.EnvVarName == "CLAUDE_CODE_OAUTH_TOKEN" {
+				t.Errorf("keeper=%v: AgentEnvCredentialExposures reported an exposure for the "+
+					"withheld unclassified OAuth-shaped credential (%+v)", keeper, exp)
+			}
 		}
 	}
 }
