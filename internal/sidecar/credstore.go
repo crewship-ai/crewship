@@ -291,6 +291,36 @@ func (cs *CredStore) Select(provider ProviderType, actingAgentID string) *Creden
 	return nil // unreachable: topCount > 0 guarantees a hit above.
 }
 
+// HeldForAnotherAgent reports whether the store holds a credential for provider
+// that agentID would have been served in every respect EXCEPT that it was not
+// granted it (#2052).
+//
+// It exists to keep "the store has nothing for this provider" and "the store
+// has one, but not yours" apart at the two call sites where they used to be the
+// same nil. reverseProxyToProvider forwards a request with NO credential for a
+// spec that does not RequireCredential — the three fixed-host vendors — so the
+// agent's disposable dummy key travels to the real vendor and comes back a 401
+// that blames the key. That is the correct behaviour for an empty store (it is
+// what happens today, and the pass-through predates credentials entirely); it
+// is the wrong one for a refusal, which the operator needs to see as a refusal.
+//
+// The lease filter is applied here too, so a lapsed credential does not turn
+// "nothing for this provider" into a 503. Same predicate as Select, minus the
+// ownership test that is the question being asked.
+func (cs *CredStore) HeldForAnotherAgent(provider ProviderType, agentID string) bool {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	now := time.Now()
+	for i := range cs.creds {
+		c := &cs.creds[i]
+		if c.Provider == provider && !c.leaseLapsed(now) && !c.grantedTo(agentID) {
+			return true
+		}
+	}
+	return false
+}
+
 // Remove removes a credential by ID (e.g. when revoked).
 func (cs *CredStore) Remove(id string) {
 	cs.mu.Lock()

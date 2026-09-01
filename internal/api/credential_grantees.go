@@ -55,7 +55,9 @@ import (
 //   - a crew-linked credential whose explicit grant to that member has a lapsed
 //     lease — the explicit grant is authoritative and removes the credential
 //     outright for them (see loadDeliveredCredentials' notes), while the crew
-//     link still reaches everyone else.
+//     link still reaches everyone else. (A lapsed grant no longer makes the
+//     member a GRANTEE — the query below gates on the lease — but a crew route
+//     that reaches everybody is crew-wide regardless of anyone's grant.)
 //
 // In both, that member could select through the sidecar a credential its own
 // delivery did not include. That is exactly today's behaviour, so neither is a
@@ -147,8 +149,23 @@ const crewMembersSQL = `
 // grant, AGENT binding, CREW/WORKSPACE binding, crew link — because a source
 // that exists there and not here would classify a credential as narrower than
 // it is delivered, and the CredStore would refuse a member the credential it
-// was actually given.
-const crewCredentialGranteesSQL = `
+// was actually given. The FILTERS have to mirror it too, and the lease gate is
+// the one that bites: a peer whose grant has lapsed is not a grantee, and
+// counting it as one is worse than cosmetic. It inflates the set, and a set that
+// reaches every member of the crew collapses to crew-wide — so one expired row
+// can erase the scoping of a credential entirely and hand it to the very member
+// whose lease ran out. This is #1373's recurring shape: the gate written at one
+// resolver and missing at the next. Built with Sprintf against
+// credentialLeaseGateSQL rather than re-spelled, so weakening the predicate
+// there weakens it here too instead of leaving the two to drift.
+//
+// Bind order is (agentID /* CTE */, leaseComparisonNow() /* explicit arm */) —
+// the WITH clause is first in the text, so its parameter is first in sequence.
+//
+// The binding arms need no lease gate: neither credential_bindings nor
+// credential_crews has an expires_at column, exactly as the delivery query's
+// own notes record.
+var crewCredentialGranteesSQL = fmt.Sprintf(`
 	WITH agent_scope AS (
 		SELECT a.id AS agent_id, a.workspace_id AS workspace_id, a.crew_id AS crew_id
 		FROM agents a
@@ -159,6 +176,7 @@ const crewCredentialGranteesSQL = `
 	FROM agent_credentials ac
 	JOIN agents peer ON peer.id = ac.agent_id AND peer.deleted_at IS NULL
 	JOIN agent_scope s ON peer.crew_id = s.crew_id
+	WHERE %s
 
 	UNION ALL
 
@@ -181,7 +199,7 @@ const crewCredentialGranteesSQL = `
 	JOIN agent_scope s ON b2.workspace_id = s.workspace_id
 	WHERE b2.scope = 'WORKSPACE'
 	   OR (b2.scope = 'CREW' AND b2.crew_id = s.crew_id)
-`
+`, credentialLeaseGateSQL)
 
 // loadCrewCredentialGrantees reads both halves in two small queries. It is
 // called once per delivery, alongside the delivery query itself.
@@ -223,7 +241,7 @@ func loadCrewCredentialGrantees(ctx context.Context, db *sql.DB, agentID string)
 		return g, nil // crew-less agent; grantedTo answers nil for everything
 	}
 
-	rows, err := db.QueryContext(ctx, crewCredentialGranteesSQL, agentID)
+	rows, err := db.QueryContext(ctx, crewCredentialGranteesSQL, agentID, leaseComparisonNow())
 	if err != nil {
 		return nil, fmt.Errorf("query credential grantees: %w", err)
 	}

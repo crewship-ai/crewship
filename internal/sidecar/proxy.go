@@ -701,7 +701,16 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	// another member's gateway with that member's key — allowlisted (the #2051
 	// union covers it) and therefore silent.
 	cred := p.credStore.Select(ProviderType(s.ID), actorID)
-	if cred == nil && s.RequireCredential {
+	// A nil credential means two different things now, and only one of them may
+	// fall through. An EMPTY store for a spec that does not RequireCredential is
+	// the pass-through this route has always had: the request goes upstream
+	// unauthenticated (in practice carrying the agent's disposable dummy key)
+	// and the vendor answers. A REFUSAL — the store holds one for this provider
+	// and the acting agent was not granted it — must not take that path, or
+	// #2052's silent crossover is replaced by a vendor 401 that blames the key,
+	// which is no more diagnosable. Fail closed with the same 503 the
+	// RequireCredential specs already give.
+	if cred == nil && (s.RequireCredential || p.credStore.HeldForAnotherAgent(ProviderType(s.ID), actorID)) {
 		p.logger.Error("no credential available for reverse proxy",
 			"provider", s.ID, "path", r.URL.Path, "agent_id", actorID)
 		http.Error(w, "no credential available for "+s.ID, http.StatusServiceUnavailable)

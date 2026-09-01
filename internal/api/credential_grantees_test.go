@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // #2052 — the agent dimension the crew-wide sidecar CredStore needs, computed at
@@ -165,4 +166,54 @@ func TestCredentialGrantees_AgentScopedBindingIsNarrow(t *testing.T) {
 		return
 	}
 	t.Fatal("the AGENT-scoped binding delivered nothing")
+}
+
+// A peer whose grant has LAPSED is not a grantee.
+//
+// The delivery query gates agent_credentials on credentialLeaseGateSQL and this
+// derivation has to gate the same table the same way, or one expired row
+// inflates the grantee set — and a set that reaches every member of the crew
+// collapses to crew-wide, which erases the scoping of the credential entirely
+// and hands it to the member whose lease ran out. #1373's recurring shape: the
+// gate written at one resolver and missing at the next.
+func TestCredentialGrantees_LapsedPeerGrantIsNotAGrantee(t *testing.T) {
+	db := setupTestDB(t)
+	ensureEncryptionKey(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	const (
+		crewID = "grl-crew"
+		agentA = "grl-agent-a"
+		agentB = "grl-agent-b"
+	)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'C', 'grl-c')`, crewID, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, 'A', 'grl-a')`, agentA, crewID, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, 'B', 'grl-b')`, agentB, crewID, wsID)
+
+	seedCredentialEnc(t, db, wsID, userID, "grl-cred", "grl-cred", `{"baseURL":"https://a.example/v1","apiKey":"sk-a"}`)
+	execOrFatal(t, db, `UPDATE credentials SET provider = 'OPENAI_COMPAT', type = 'API_KEY' WHERE id = 'grl-cred'`)
+	// A holds it standing; B held it under a lease that ran out yesterday.
+	execOrFatal(t, db, `INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
+		VALUES ('grl-ac-a', ?, 'grl-cred', 'COMPAT_URL', 0, datetime('now'))`, agentA)
+	execOrFatal(t, db, `INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, expires_at, created_at)
+		VALUES ('grl-ac-b', ?, 'grl-cred', 'COMPAT_URL', 0, ?, datetime('now'))`,
+		agentB, time.Now().UTC().Add(-24*time.Hour).Format(time.RFC3339))
+
+	delivered, _, err := loadDeliveredCredentials(context.Background(), db, agentA)
+	if err != nil {
+		t.Fatalf("loadDeliveredCredentials: %v", err)
+	}
+	for _, d := range delivered {
+		if d.ID != "grl-cred" {
+			continue
+		}
+		if strings.Join(d.GrantedAgentIDs, ",") != agentA {
+			t.Fatalf("granted_agent_ids = %v, want [%s]: a lapsed grant made the set look "+
+				"like the whole crew, so the credential ships unscoped to the member "+
+				"whose lease ran out", d.GrantedAgentIDs, agentA)
+		}
+		return
+	}
+	t.Fatal("agent A was not delivered its own credential")
 }

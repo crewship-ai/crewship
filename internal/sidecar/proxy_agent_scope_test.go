@@ -172,3 +172,56 @@ func TestLLMRoute_CrewScopedCredentialServesEveryMember(t *testing.T) {
 		}
 	}
 }
+
+// The refusal must not be silent for a provider that does NOT require a
+// credential.
+//
+// Anthropic, OpenAI and Google are RequireCredential:false — the reverse-proxy
+// route forwards a request with no credential rather than 503ing, which is the
+// pass-through it has always had for an EMPTY store. Once Select refuses on
+// ownership, that same nil starts meaning "the store has one, but not yours",
+// and falling through sends the agent's disposable dummy provider key to the
+// real vendor. The vendor answers 401 and the operator reads it as a bad key —
+// #2052's silent crossover swapped for a silent misattribution, which is no
+// better. The two nils are told apart, and only the refusal fails closed.
+func TestLLMRoute_PeerOnlyCredentialRefusesRatherThanForwardingTheDummy(t *testing.T) {
+	var upstream *http.Request
+	p := scopedProxy(t, []Credential{
+		{ID: "ant-b", Provider: ProviderAnthropic, Token: "sk-ant-bravo", AgentIDs: []string{scopeAgentB}},
+	}, &upstream)
+
+	req := scopeRouteRequest(scopeAgentA)
+	req.URL.Path = "/v1/messages"
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body %s", w.Code, w.Body.String())
+	}
+	if upstream != nil {
+		t.Errorf("forwarded to %q with the agent's dummy key: the peer's credential was "+
+			"refused and the request went upstream unauthenticated anyway", upstream.URL.Host)
+	}
+}
+
+// …and the pass-through it replaced is untouched. An EMPTY store for a
+// non-RequireCredential provider still forwards, exactly as it did before
+// ownership existed — that path predates credentials entirely and turning it
+// into a 503 would break every crew running one of these providers on a key the
+// agent carries itself.
+func TestLLMRoute_EmptyStoreStillPassesThroughForOptionalCredentialProviders(t *testing.T) {
+	var upstream *http.Request
+	p := scopedProxy(t, nil, &upstream)
+
+	req := scopeRouteRequest(scopeAgentA)
+	req.URL.Path = "/v1/messages"
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", w.Code, w.Body.String())
+	}
+	if upstream == nil {
+		t.Fatal("an empty store stopped forwarding: the pre-#2052 pass-through is gone")
+	}
+}

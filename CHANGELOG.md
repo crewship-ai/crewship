@@ -681,8 +681,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   sidecar on every alternation between agents, which is the thrash #1160
   removed. A grant covering every member of the crew is crew-wide in effect and
   is delivered as such, which is the shape `autoAssignCredentials` leaves every
-  template-created crew in — so no existing crew's fingerprint moves and no
-  running sidecar restarts on upgrade.
+  template-created crew in — so for a crew with no per-agent grant the payload
+  is byte-identical, the fingerprint does not move, and no running sidecar
+  restarts on upgrade. A crew that DOES hold a credential granted to a strict
+  subset of its members — the crews this fixes — gains agent ids in its payload,
+  and its sidecar restarts once; an in-flight run there sees the existing
+  fingerprint-mismatch `503` and retries.
 
 - **Restoring a bundle taken before the `issue_counters` re-key silently
   dropped every counter row (#2034).** `#1797` re-keyed `issue_counters`
