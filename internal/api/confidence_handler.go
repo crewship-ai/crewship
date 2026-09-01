@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -148,5 +149,10 @@ func (h *QueryHandler) autoEscalateForConfidence(r *http.Request, agentID, crewI
 		return
 	}
 
-	broadcastWorkspaceEvent(h.hub, workspaceID, "escalation.created", map[string]string{"id": escalationID, "task_id": taskID, "reason": reason})
+	// reason is agent-supplied (ReportConfidence's body.Reason) and this is a
+	// workspace-wide broadcast reaching every connected member, so it gets the
+	// same redaction CreateEscalation applies to its own escalation.created
+	// broadcast (#2238) — this is the same event name, and until now it was
+	// the one call site the changelog's claim about that broadcast forgot.
+	broadcastWorkspaceEvent(h.hub, workspaceID, "escalation.created", map[string]string{"id": escalationID, "task_id": taskID, "reason": inbox.RedactSecrets(reason)})
 }
