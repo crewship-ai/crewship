@@ -919,6 +919,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `crewship feedback create|list|delete` against a real server) so a real
   registration regression on this route family fails loudly instead of
   reading like this one did.
+- **A second run for a busy agent no longer kills the first (#2269).** The
+  per-agent exclusivity that already guarded chat sends is now shared with
+  `/assign` and `@mention` dispatch as `AgentRunLock`. Before, a second
+  concurrent run for one agent reused the tmux session `agent-<slug>` and the
+  exec wrapper's opening `kill-session` terminated the first run and deleted
+  its fifo and exit file. A dispatch that loses the lock is queued behind the
+  live run (back of the crew FIFO) and drained by the existing completion
+  pump — it is not failed. A chat message to an agent that is busy on an
+  issue now bounces with `agent_busy` instead of colliding with it.
+
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
   conversation: a person opening a thread, a routine minting **one chat per
