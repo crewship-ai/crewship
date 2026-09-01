@@ -407,3 +407,55 @@ func TestMissionAssignmentRowsCarryDepthZero(t *testing.T) {
 		t.Fatalf("assignment rows = %d, want 2 (one task + one planning)", n)
 	}
 }
+
+// TestMissionAssignmentRowsCarryMissionID (#2256) — the two direct
+// `INSERT INTO assignments` sites in this package (scheduleTask's task run,
+// dispatchLeadPlanning's planning run) both know their mission id already
+// (it IS ms.ID), so neither has an excuse to leave the row unattributed.
+// Same fixture as TestMissionAssignmentRowsCarryDepthZero, above.
+func TestMissionAssignmentRowsCarryMissionID(t *testing.T) {
+	db := covMissionDB(t)
+	_, _, _, workerID := covSeed(t, db)
+	ms := covMission(t, db, "m-missionid", "IN_PROGRESS")
+	e := newLifecycleEngine(t, db)
+	disp := newHoldDispatcher(nil)
+	e.SetDispatcher(disp)
+	holdActivate(e, ms)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	mustExec(t, db, `INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-missionid', ?, ?, 'MissionID', 'PENDING', 1, '[]', ?, ?)`, ms.ID, workerID, now, now)
+
+	task := TaskInfo{ID: "t-missionid", MissionID: ms.ID, AssignedAgentID: &workerID, Title: "MissionID", Status: "PENDING"}
+	if err := e.scheduleTask(context.Background(), ms, task, nil); err != nil {
+		t.Fatalf("scheduleTask: %v", err)
+	}
+	if err := e.dispatchLeadPlanning(context.Background(), ms); err != nil {
+		t.Fatalf("dispatchLeadPlanning: %v", err)
+	}
+	disp.waitForDispatch(t, 2)
+
+	rows, err := db.Query(`SELECT id, COALESCE(mission_id,'') FROM assignments`)
+	if err != nil {
+		t.Fatalf("query assignments: %v", err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var id, missionID string
+		if err := rows.Scan(&id, &missionID); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if missionID != ms.ID {
+			t.Errorf("mission assignment %s has mission_id %q, want %q — issue_handler_runs.go's "+
+				"ListRuns can only find this run from its issue via this column", id, missionID, ms.ID)
+		}
+		n++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate assignments: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("assignment rows = %d, want 2 (one task + one planning)", n)
+	}
+}

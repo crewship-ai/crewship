@@ -292,6 +292,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			Task:        body.Task,
 			GroupID:     body.ChatID,
 			CreatedAt:   now,
+			MissionID:   body.MissionID,
 		})
 	if err != nil {
 		var refusal *delegationRefusal

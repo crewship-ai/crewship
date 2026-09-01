@@ -46,7 +46,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 			assigned_by_id TEXT, assigned_to_id TEXT, task TEXT, status TEXT DEFAULT 'PENDING',
 			started_at TEXT, finished_at TEXT, result_summary TEXT, error_message TEXT,
 			group_id TEXT, created_at TEXT,
-			depth INTEGER NOT NULL DEFAULT 0, parent_assignment_id TEXT);
+			depth INTEGER NOT NULL DEFAULT 0, parent_assignment_id TEXT, mission_id TEXT);
 		CREATE TABLE chats (id TEXT PRIMARY KEY, agent_id TEXT, workspace_id TEXT,
 			title TEXT, mode TEXT, status TEXT, started_at TEXT, created_at TEXT, updated_at TEXT);
 	`

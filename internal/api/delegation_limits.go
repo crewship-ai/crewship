@@ -514,6 +514,10 @@ type cappedAssignment struct {
 	Task        string
 	GroupID     string
 	CreatedAt   string
+	// MissionID is the issue this run is attributable to (#2256). Empty for a
+	// bare /assign with no issue context — the column stores NULL rather than
+	// "", matching every other optional FK this function writes.
+	MissionID string
 }
 
 // insertCappedAssignment writes the PENDING assignment row with the fan-out
@@ -560,14 +564,20 @@ func insertCappedAssignment(
 	if scope.ParentRunID != "" {
 		parentRunVal = scope.ParentRunID
 	}
+	// Same NULL-not-empty-string reasoning as originVal above — and the same
+	// FK an empty string would otherwise have to fail against.
+	var missionVal any
+	if a.MissionID != "" {
+		missionVal = a.MissionID
+	}
 	guardSQL, guardArgs := fanoutGuard(scope, caller, a.ChatID, lim.MaxFanout)
 	insertArgs := append([]any{
 		assignmentID, a.WorkspaceID, a.ChatID, caller.FanoutSubjectID, a.TargetID,
-		a.Task, a.GroupID, scope.Depth, parentVal, originVal, parentRunVal, a.CreatedAt,
+		a.Task, a.GroupID, scope.Depth, parentVal, originVal, parentRunVal, missionVal, a.CreatedAt,
 	}, guardArgs...)
 	res, err := db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at)
-		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, mission_id, created_at)
+		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?
 		 WHERE `+guardSQL, insertArgs...)
 	if err != nil {
 		return "", err
