@@ -7184,6 +7184,9 @@
           "crew_slug": {
             "type": "string"
           },
+          "delegate": {
+            "$ref": "#/components/schemas/IssueDelegate"
+          },
           "description": {
             "nullable": true,
             "type": "string"
@@ -7222,6 +7225,9 @@
           "number": {
             "nullable": true,
             "type": "integer"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/IssueOwner"
           },
           "parent_issue_id": {
             "nullable": true,
@@ -7432,11 +7438,39 @@
         ],
         "type": "object"
       },
+      "IssueDelegate": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
       "IssueList": {
         "items": {
           "$ref": "#/components/schemas/Issue"
         },
         "type": "array"
+      },
+      "IssueOwner": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
       },
       "IssueUpdateRequest": {
         "properties": {

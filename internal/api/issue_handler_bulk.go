@@ -118,6 +118,9 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 			}
 			ub.Set("assignee_type", assigneeType)
 			assigneeTypeSet = true
+			// A10 (I5): route the write to the typed owner or delegate
+			// column alongside the legacy pair above.
+			setOwnerOrDelegate(ub, assigneeType, *req.Updates.AssigneeID)
 		}
 		if req.Updates.AssigneeType != nil && !assigneeTypeSet {
 			ub.Set("assignee_type", *req.Updates.AssigneeType)

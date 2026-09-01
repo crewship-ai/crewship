@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+// Named so Start's 400 body is grep-able and a test can assert exactly
+// which one fired, without parsing writeProblem's rendered text (F62,
+// PRD-ISSUES-AND-ROUTINES-2026 work package A10). Kept distinct from each
+// other on purpose: "nobody was ever delegated" and "something was
+// delegated but it can't run work" are different operator actions.
+var (
+	errIssueStartNoDelegate       = errors.New("Issue must have an agent delegate before starting")
+	errIssueStartDelegateNotAgent = errors.New("Issue delegate is not an executable agent")
+)
+
 // ── Review — POST /api/v1/crews/{crewId}/issues/{identifier}/review ────────
 
 func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +118,9 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				ub.Set("assignee_type", "agent")
 				ub.Set("assignee_id", agentID)
+				// Delegation (A10, I5): reassigning to an agent sets the
+				// typed delegate column, never owner_user_id.
+				ub.Set("delegate_agent_id", agentID)
 			}
 		}
 
@@ -192,11 +205,11 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Load issue
 	var missionID, status, title, leadAgentID string
-	var description, assigneeID sql.NullString
+	var description, delegateAgentID sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT id, status, title, description, assignee_id, lead_agent_id
+		SELECT id, status, title, description, delegate_agent_id, lead_agent_id
 		FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
-		ident, crewID, wsID).Scan(&missionID, &status, &title, &description, &assigneeID, &leadAgentID)
+		ident, crewID, wsID).Scan(&missionID, &status, &title, &description, &delegateAgentID, &leadAgentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -212,9 +225,38 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Validate assignee
-	if !assigneeID.Valid || assigneeID.String == "" {
-		writeProblem(w, r, http.StatusBadRequest, "Issue must have an assignee before starting")
+	// 3. Validate delegate (F62): pre-A10 this checked only that
+	// assignee_id EXISTED, which passed for a user-owner with no agent
+	// delegate at all, or for an assignee_id whose row had since been
+	// hard-deleted or soft-deleted — the mission_task insert below then
+	// carried a dangling assigned_agent_id, or the LEAD-planning branch
+	// silently ran nothing. delegate_agent_id is a typed FK to agents(id)
+	// (ON DELETE SET NULL), so "it exists" is now a real question about an
+	// agent specifically, not about either half of the old polymorphic
+	// assignee — and existence still isn't executability, so the row is
+	// re-checked against deleted_at and PENDING_REVIEW below.
+	if !delegateAgentID.Valid || delegateAgentID.String == "" {
+		writeProblem(w, r, http.StatusBadRequest, errIssueStartNoDelegate.Error())
+		return
+	}
+	var delegateSlug, delegateStatus, assigneeRole string
+	err = h.db.QueryRowContext(r.Context(),
+		`SELECT slug, COALESCE(status, ''), COALESCE(agent_role, '') FROM agents WHERE id = ? AND deleted_at IS NULL`,
+		delegateAgentID.String).Scan(&delegateSlug, &delegateStatus, &assigneeRole)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusBadRequest, errIssueStartDelegateNotAgent.Error())
+			return
+		}
+		internalError(w, r, h.logger, "start issue: validate delegate", err)
+		return
+	}
+	// A HELD agent (PENDING_REVIEW — created or hired by another agent,
+	// awaiting operator approval) is not executable either; refuseHeldAgent
+	// is the same predicate DispatchMention uses to keep a held agent from
+	// being woken by a mention (assignments.go).
+	if hErr := refuseHeldAgent(delegateSlug, delegateStatus); hErr != nil {
+		writeProblem(w, r, http.StatusBadRequest, hErr.Error())
 		return
 	}
 
@@ -246,16 +288,13 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 			iteration = COALESCE(iteration, 0) + 1, updated_at = ?
 			WHERE mission_id = ?`, resetNow, missionID)
 	} else {
-		// If assignee is a LEAD agent, skip creating a default task so the mission engine
-		// triggers lead planning (with sidecar and crew context for delegation).
-		var assigneeRole string
-		_ = h.db.QueryRowContext(r.Context(),
-			`SELECT agent_role FROM agents WHERE id = ? AND deleted_at IS NULL`,
-			assigneeID.String).Scan(&assigneeRole)
-
+		// If the delegate is a LEAD agent, skip creating a default task so
+		// the mission engine triggers lead planning (with sidecar and crew
+		// context for delegation). assigneeRole was already resolved by
+		// the delegate validation above (step 3) — no second query needed.
 		if assigneeRole == "LEAD" {
-			h.logger.Info("start issue: LEAD assignee — skipping default task for lead planning",
-				"issue", ident, "assignee", assigneeID.String)
+			h.logger.Info("start issue: LEAD delegate — skipping default task for lead planning",
+				"issue", ident, "delegate", delegateAgentID.String)
 		} else {
 			taskID := generateCUID()
 			now := time.Now().UTC().Format(time.RFC3339)
@@ -266,7 +305,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 			_, err = h.db.ExecContext(r.Context(), `
 				INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, description, status, task_order, depends_on, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, 'PENDING', 1, '[]', ?, ?)`,
-				taskID, missionID, assigneeID.String, title, desc, now, now)
+				taskID, missionID, delegateAgentID.String, title, desc, now, now)
 			if err != nil {
 				h.logger.Error("start issue: create task", "error", err)
 				writeProblem(w, r, http.StatusInternalServerError, "Failed to create task")
@@ -304,7 +343,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	// 7. Broadcast
 	h.broadcastIssueEvent(wsID, "issue.started", map[string]string{"id": missionID, "identifier": ident, "status": "IN_PROGRESS"})
 
-	h.logger.Info("issue started", "identifier", ident, "agent", assigneeID.String)
+	h.logger.Info("issue started", "identifier", ident, "agent", delegateAgentID.String)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "IN_PROGRESS", "identifier": ident})
 }
 

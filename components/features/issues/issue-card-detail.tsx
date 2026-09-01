@@ -60,6 +60,7 @@ import { formatDate, formatDurationDecimal, relTime, timeAgo } from "@/lib/time"
 import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
 import { TintedCard, TintedFacts, type TintTone } from "./tinted-card"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { MentionChip } from "@/components/features/issues/mention-chip"
 import { CommentComposer } from "./comment-composer"
@@ -273,7 +274,35 @@ export function IssueCardDetail({
                         <span>{issue.crew_name}</span>
                       </>
                     )}
-                    {issue.assignee_name && (
+                    {/* Owner and delegate render as two separate chips — an
+                        agent delegate is never shown in the owner's place
+                        (I5: delegating to an agent never changes the human
+                        owner). Legacy assignee_name is the fallback only
+                        when NEITHER typed field is present, for a row this
+                        client fetched before the A10 backfill reached it. */}
+                    {issue.owner && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2">
+                          <UserAvatar name={issue.owner.name} email="" className="h-4 w-4" />
+                          <span className="font-medium">{issue.owner.name ?? "Owner"}</span>
+                        </span>
+                      </>
+                    )}
+                    {issue.delegate && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2">
+                          <AgentAvatar
+                            seed={issue.delegate.id}
+                            className="h-4 w-4"
+                            alt=""
+                          />
+                          <span className="font-medium">{issue.delegate.name ?? "Delegate"}</span>
+                        </span>
+                      </>
+                    )}
+                    {!issue.owner && !issue.delegate && issue.assignee_name && (
                       <>
                         <span aria-hidden>·</span>
                         <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2">
@@ -523,20 +552,47 @@ export function IssueCardDetail({
                         {priorityLabel[issue.priority ?? "none"]}
                       </span>
                     </Row>
-                    <Row icon={UserCircle2} label="Assignee">
-                      {issue.assignee_name ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <AgentAvatar
-                            seed={issue.assignee_id ?? issue.assignee_name}
-                            className="h-4 w-4"
-                            alt=""
-                          />
-                          {issue.assignee_name}
-                        </span>
-                      ) : (
-                        <Muted>Unassigned</Muted>
-                      )}
-                    </Row>
+                    {issue.owner || issue.delegate ? (
+                      <>
+                        <Row icon={UserCircle2} label="Owner">
+                          {issue.owner ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <UserAvatar name={issue.owner.name} email="" className="h-4 w-4" />
+                              {issue.owner.name ?? "Owner"}
+                            </span>
+                          ) : (
+                            <Muted>No human owner</Muted>
+                          )}
+                        </Row>
+                        <Row icon={UserCircle2} label="Delegate">
+                          {issue.delegate ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <AgentAvatar seed={issue.delegate.id} className="h-4 w-4" alt="" />
+                              {issue.delegate.name ?? "Delegate"}
+                            </span>
+                          ) : (
+                            <Muted>Not delegated</Muted>
+                          )}
+                        </Row>
+                      </>
+                    ) : (
+                      // Fallback for a row this client fetched before the A10
+                      // backfill reached it — neither typed field is present.
+                      <Row icon={UserCircle2} label="Assignee">
+                        {issue.assignee_name ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <AgentAvatar
+                              seed={issue.assignee_id ?? issue.assignee_name}
+                              className="h-4 w-4"
+                              alt=""
+                            />
+                            {issue.assignee_name}
+                          </span>
+                        ) : (
+                          <Muted>Unassigned</Muted>
+                        )}
+                      </Row>
+                    )}
                     <Row icon={Users} label="Crew">
                       {issue.crew_name ?? <Muted>Unassigned</Muted>}
                     </Row>
@@ -581,7 +637,7 @@ export function IssueCardDetail({
                 ) : (
                   <p className="text-[12px] text-muted-foreground">
                     No routine bound. Starting this issue hands it to{" "}
-                    {issue.assignee_name ?? "whoever is assigned"} directly.
+                    {issue.delegate?.name ?? issue.assignee_name ?? "whoever is delegated"} directly.
                   </p>
                 )}
                 {/* …and who else starts it. "Starting this issue runs that

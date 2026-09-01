@@ -121,6 +121,67 @@ func resolveAssigneeType(ctx context.Context, q rowQuerier, assigneeID, wsID str
 	return "", false, nil
 }
 
+// setOwnerOrDelegate queues the SET clause for whichever typed column
+// corresponds to assigneeType (missions.owner_user_id for "user",
+// missions.delegate_agent_id for "agent"), alongside a caller's own
+// assignee_type/assignee_id SET clauses (kept as the compatibility
+// projection for the migration window — PRD-ISSUES-AND-ROUTINES-2026 §9.10,
+// work package A10).
+//
+// It touches exactly one of the two typed columns and never the other:
+// invariant I5 says delegating to an agent must never change the human
+// owner, and the symmetric case (assigning a human owner) must equally
+// never clear an in-flight delegate. Every write site that sets the legacy
+// pair dynamically (Create, Update, BulkUpdate, the internal agent-facing
+// Update) calls this right after resolving assigneeType so the two column
+// families can never drift from each other on the same request.
+func setOwnerOrDelegate(ub *updateBuilder, assigneeType, assigneeID string) {
+	switch assigneeType {
+	case "user":
+		ub.Set("owner_user_id", assigneeID)
+	case "agent":
+		ub.Set("delegate_agent_id", assigneeID)
+	}
+}
+
+// ownerDelegateInsertValues derives the owner_user_id / delegate_agent_id
+// values to INSERT alongside a freshly created issue's legacy
+// assignee_type/assignee_id pair — the create-time equivalent of
+// setOwnerOrDelegate (A10, I5). At most one of the two typed columns is
+// populated; nil/nil for an issue created with no assignee at all.
+func ownerDelegateInsertValues(assigneeType, assigneeID *string) (ownerUserID, delegateAgentID *string) {
+	if assigneeType == nil || assigneeID == nil || *assigneeID == "" {
+		return nil, nil
+	}
+	switch *assigneeType {
+	case "user":
+		return assigneeID, nil
+	case "agent":
+		return nil, assigneeID
+	default:
+		return nil, nil
+	}
+}
+
+// issueOwnerFromID / issueDelegateFromID build the response objects for a
+// freshly created issue, where the id is already known but the display name
+// isn't worth a second round-trip — the client's next fetch (issueSelectQuery)
+// resolves it, same tradeoff this file already makes for AssigneeName on the
+// create response.
+func issueOwnerFromID(id *string) *issueOwnerResponse {
+	if id == nil || *id == "" {
+		return nil
+	}
+	return &issueOwnerResponse{ID: *id}
+}
+
+func issueDelegateFromID(id *string) *issueDelegateResponse {
+	if id == nil || *id == "" {
+		return nil
+	}
+	return &issueDelegateResponse{ID: *id}
+}
+
 // SetStoragePath wires the host storage root for the F4.5
 // mission-outcomes-to-crew-memory hook. See MissionHandler.SetStoragePath
 // for the same contract — handlers share the storage path because both
@@ -186,35 +247,44 @@ func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[s
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
-	ID             string          `json:"id"`
-	WorkspaceID    string          `json:"workspace_id"`
-	CrewID         string          `json:"crew_id"`
-	CrewName       string          `json:"crew_name,omitempty"`
-	CrewSlug       string          `json:"crew_slug,omitempty"`
-	Number         *int            `json:"number"`
-	Identifier     *string         `json:"identifier"`
-	Title          string          `json:"title"`
-	Description    *string         `json:"description"`
-	Status         string          `json:"status"`
-	Priority       string          `json:"priority"`
-	AssigneeType   *string         `json:"assignee_type"`
-	AssigneeID     *string         `json:"assignee_id"`
-	AssigneeName   *string         `json:"assignee_name,omitempty"`
-	DueDate        *string         `json:"due_date"`
-	SortOrder      float64         `json:"sort_order"`
-	MissionType    string          `json:"mission_type"`
-	LeadAgentID    string          `json:"lead_agent_id"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-	CompletedAt    *string         `json:"completed_at"`
-	Labels         []labelResponse `json:"labels"`
-	ProjectID      *string         `json:"project_id"`
-	ProjectName    *string         `json:"project_name,omitempty"`
-	Estimate       *int            `json:"estimate"`
-	ParentIssueID  *string         `json:"parent_issue_id"`
-	MilestoneID    *string         `json:"milestone_id"`
-	SubIssuesCount int             `json:"sub_issues_count"`
-	CommentCount   int             `json:"comment_count"`
+	ID           string  `json:"id"`
+	WorkspaceID  string  `json:"workspace_id"`
+	CrewID       string  `json:"crew_id"`
+	CrewName     string  `json:"crew_name,omitempty"`
+	CrewSlug     string  `json:"crew_slug,omitempty"`
+	Number       *int    `json:"number"`
+	Identifier   *string `json:"identifier"`
+	Title        string  `json:"title"`
+	Description  *string `json:"description"`
+	Status       string  `json:"status"`
+	Priority     string  `json:"priority"`
+	AssigneeType *string `json:"assignee_type"`
+	AssigneeID   *string `json:"assignee_id"`
+	AssigneeName *string `json:"assignee_name,omitempty"`
+	// Owner and Delegate (A10, invariant I5 — "delegating to an agent never
+	// changes the human owner") are the typed projection of missions'
+	// owner_user_id / delegate_agent_id columns, independent of each other
+	// and of the legacy AssigneeType/AssigneeID pair above, which stays for
+	// old clients during the migration window. Nil when nobody occupies
+	// that slot. A UI must render these as two separate things and must
+	// never fall back to putting an agent in Owner's place.
+	Owner          *issueOwnerResponse    `json:"owner,omitempty"`
+	Delegate       *issueDelegateResponse `json:"delegate,omitempty"`
+	DueDate        *string                `json:"due_date"`
+	SortOrder      float64                `json:"sort_order"`
+	MissionType    string                 `json:"mission_type"`
+	LeadAgentID    string                 `json:"lead_agent_id"`
+	CreatedAt      string                 `json:"created_at"`
+	UpdatedAt      string                 `json:"updated_at"`
+	CompletedAt    *string                `json:"completed_at"`
+	Labels         []labelResponse        `json:"labels"`
+	ProjectID      *string                `json:"project_id"`
+	ProjectName    *string                `json:"project_name,omitempty"`
+	Estimate       *int                   `json:"estimate"`
+	ParentIssueID  *string                `json:"parent_issue_id"`
+	MilestoneID    *string                `json:"milestone_id"`
+	SubIssuesCount int                    `json:"sub_issues_count"`
+	CommentCount   int                    `json:"comment_count"`
 	// Routine binding — when set, /run-routine on this issue invokes
 	// the bound pipeline. RoutineSlug is denormalized in the response
 	// so the UI doesn't have to round-trip the pipelines list to
@@ -235,6 +305,19 @@ type issueResponse struct {
 	// from GET …/issues/{identifier}/code-links instead; agents get this
 	// summary, whose free text is run through the untrusted fence.
 	CodeLinks []agentCodeLink `json:"code_links,omitempty"`
+}
+
+// issueOwnerResponse is the human owner of an issue (missions.owner_user_id).
+type issueOwnerResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
+// issueDelegateResponse is the agent an issue's work has been delegated to
+// (missions.delegate_agent_id).
+type issueDelegateResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
 }
 
 // issueCreatorResponse is the creator object on issue responses.
@@ -412,7 +495,11 @@ func issueSelectQuery() string {
 		CASE
 			WHEN m.author_agent_id IS NOT NULL THEN (SELECT name FROM agents WHERE id = m.author_agent_id)
 			WHEN m.created_by_user_id IS NOT NULL THEN (SELECT full_name FROM users WHERE id = m.created_by_user_id)
-		END AS creator_name
+		END AS creator_name,
+		m.owner_user_id,
+		(SELECT full_name FROM users WHERE id = m.owner_user_id) AS owner_name,
+		m.delegate_agent_id,
+		(SELECT name FROM agents WHERE id = m.delegate_agent_id AND workspace_id = m.workspace_id) AS delegate_name
 	FROM missions m
 	LEFT JOIN crews c ON m.crew_id = c.id
 	LEFT JOIN pipelines p ON m.routine_id = p.id AND p.workspace_id = m.workspace_id`
@@ -422,6 +509,7 @@ func issueSelectQuery() string {
 func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, error) {
 	var issue issueResponse
 	var authorAgentID, createdByUserID, authoredVia, creatorName sql.NullString
+	var ownerUserID, ownerName, delegateAgentID, delegateName sql.NullString
 	err := row.Scan(
 		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
 		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
@@ -432,12 +520,19 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 		&issue.SubIssuesCount,
 		&issue.RoutineID, &issue.RoutineSlug, &issue.RoutineName,
 		&authorAgentID, &createdByUserID, &authoredVia, &creatorName,
+		&ownerUserID, &ownerName, &delegateAgentID, &delegateName,
 	)
 	if err == nil {
 		issue.Labels = []labelResponse{}
 		issue.CreatedBy = buildIssueCreator(authorAgentID, createdByUserID, creatorName)
 		if authoredVia.Valid && authoredVia.String != "" {
 			issue.AuthoredVia = &authoredVia.String
+		}
+		if ownerUserID.Valid && ownerUserID.String != "" {
+			issue.Owner = &issueOwnerResponse{ID: ownerUserID.String, Name: ownerName.String}
+		}
+		if delegateAgentID.Valid && delegateAgentID.String != "" {
+			issue.Delegate = &issueDelegateResponse{ID: delegateAgentID.String, Name: delegateName.String}
 		}
 	}
 	return issue, err

@@ -107,6 +107,11 @@ Returns issues across the workspace with filtering, sorting, and pagination.
     "assignee_type": "agent",
     "assignee_id": "agent_789",
     "assignee_name": "Backend Dev",
+    "owner": null,
+    "delegate": {
+      "id": "agent_789",
+      "name": "Backend Dev"
+    },
     "created_by": {
       "type": "agent",
       "id": "agent_789",
@@ -149,9 +154,11 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `description` | string? | Issue description |
 | `status` | string | Current status |
 | `priority` | string | Priority level |
-| `assignee_type` | string? | `"user"` or `"agent"` |
-| `assignee_id` | string? | Assignee ID |
+| `assignee_type` | string? | `"user"` or `"agent"` — legacy compatibility projection, kept for existing clients during the migration to `owner`/`delegate` below. Still written on every assignment path |
+| `assignee_id` | string? | Assignee ID — same compatibility projection as `assignee_type` |
 | `assignee_name` | string? | Resolved assignee name |
+| `owner` | object? | The issue's human owner: `{id, name}`. Independent of `delegate` — delegating an issue to an agent never changes this field (invariant: human owner, agent delegate). Omitted when nobody owns the issue |
+| `delegate` | object? | The agent an issue's work has been delegated to: `{id, name}`. Independent of `owner`. Omitted when no agent has been delegated |
 | `created_by` | object? | Who created the issue: `{type, id, name}` where `type` is `"user"` (created via the API/UI) or `"agent"` (created by an agent tool call). `name` is resolved at read time like `assignee_name`. Omitted on issues that predate creator attribution |
 | `authored_via` | string? | Creation channel: `"user_api"` (human via API/UI/slash command) or `"agent_tool_call"` (agent via sidecar). Omitted on legacy issues |
 | `due_date` | string? | Due date |
@@ -340,7 +347,12 @@ Drive an issue through agent execution: start, stop, and review.
 POST /api/v1/crews/{crewId}/issues/{identifier}/start?workspace_id={workspaceId}
 ```
 
-Starts execution of a `BACKLOG` or `TODO` issue. The issue must have an assignee. This:
+Starts execution of a `BACKLOG` or `TODO` issue. The issue must have an agent
+**delegate** — `delegate_agent_id` (or an assignee resolved from the legacy
+`assignee_type='agent'` pair), naming a live, non-held agent. A human
+**owner** with no delegate is not enough (F62: existence of *any* assignee
+used to be sufficient; it is not anymore — the delegate must specifically be
+an executable agent). This:
 
 1. Creates a synthetic chat session for the mission
 2. Creates or resets tasks (resets existing tasks to PENDING for re-runs)
@@ -360,7 +372,7 @@ Starts execution of a `BACKLOG` or `TODO` issue. The issue must have an assignee
 
 | Status | Condition |
 |---|---|
-| `400` | Issue not in BACKLOG/TODO, or no assignee |
+| `400` | Issue not in BACKLOG/TODO; or no agent delegate (`"Issue must have an agent delegate before starting"`); or the delegate is not an executable agent — soft-deleted or `PENDING_REVIEW` (`"Issue delegate is not an executable agent"`) |
 | `404` | Issue not found |
 | `409` | Issue was already started by another request |
 

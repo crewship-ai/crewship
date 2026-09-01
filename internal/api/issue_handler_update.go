@@ -131,6 +131,9 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ub.Set("assignee_type", assigneeType)
 		assigneeTypeSet = true
+		// A10 (I5): route the write to the typed owner or delegate column
+		// alongside the legacy pair above — never both, never the other one.
+		setOwnerOrDelegate(ub, assigneeType, *req.AssigneeID)
 	}
 	if req.AssigneeType != nil && !assigneeTypeSet {
 		ub.Set("assignee_type", *req.AssigneeType)
