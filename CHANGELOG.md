@@ -610,6 +610,38 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **A forked restore left the journal hash chain unverifiable (#2226).**
+  `crewship backup restore --as-workspace <slug>` returned success and produced
+  a workspace whose `VerifyChain` reported *every* restored row as tampered —
+  the exact false positive the chain work was built to avoid, fired by the
+  admin integrity endpoint on the very next check. `RemapIDs` regenerates the
+  identity columns the entry's keyed HMAC commits to (its own `id`, and every
+  FK column SQLite reports — `workspace_id`), while `seq`, `prev_hash` and
+  `entry_hash` rode through the bundle verbatim, so each stored hash still
+  attested to values the row no longer held. A second, independent break sat
+  beside it: `journal_chain_checkpoints.workspace_id` carries no `REFERENCES`
+  clause, so the remap's FK pass never rewrote it while pass 1 still
+  regenerated the row's primary key — every forked restore wrote a duplicate
+  checkpoint into the **source** workspace's audit state and left the fork with
+  none, turning a legitimately compacted gap into what reads as a malicious
+  mid-chain delete.
+
+  A forked restore now re-signs the chain under this installation's key, the
+  way the v152 migration's `backfillJournalChain` already does for a chain it
+  legitimately rewrote, and re-points *and* re-MACs the compaction checkpoints
+  under the new workspace id (`journal.CheckpointMAC` frames the workspace id,
+  so moving the row without re-signing it would have covered nothing). The fork
+  therefore starts at a **new genesis** — it verifies clean, but it attests to
+  this instance from the restore onward and no longer links back to the
+  source's history, so it does not get one silently: a `backup.chain_resigned`
+  entry is written at the tail of the new chain, inside the chain it describes,
+  naming the source workspace, the bundle digest and the counts. The CLI, the
+  restore API response and the `backup.restore` audit row report the same two
+  numbers. A restore that cannot re-sign the chain now fails before writing
+  anything rather than landing an unverifiable fork; there is no branch that
+  skips the re-sign. A plain or `--replace` restore remaps nothing, re-signs
+  nothing, and is unchanged.
+
 - **The journal stored the prompt text of every run, verbatim and forever
   (#2215).** `exec.command` recorded the CLI argv, and the argv carries the
   run's whole system prompt plus the verbatim user message; `chat.user_message`

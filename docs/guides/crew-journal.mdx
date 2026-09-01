@@ -77,6 +77,7 @@ below loses its group or its place in either of the two maps that encode it.
 | Pages | `page` | `page.produce_denied`, `page.spec.changed`, `page.panel.updated`, `page.panel.stale`, `page.panel.recovered`, `page.wake.fired`, `page.action.dispatched`, `page.grant_added/grant_removed`, `page.owner_transferred` (`internal/api/pages_transfer_owner.go`), `page.published`/`page.link_revoked`/`page.public_view` (`internal/api/pages_public_tokens.go`), `page.webhook_issued`/`page.webhook_revoked` (`internal/api/pages_webhooks.go`) |
 | Audit | `audit` | `audit.entity_created/updated/deleted/restored` (mirrors `audit_logs`) |
 | Checkpointing | `system` | `checkpoint.created`, `checkpoint.restored`, `fork.created` |
+| Backup | `system` | `backup.chain_resigned` — a forked restore re-signed this workspace's hash chain at a new genesis. See [Backup & restore](/guides/backup#forked-restores-re-sign-the-journal-chain). |
 | Eval | `system` | `eval.run_started`, `eval.metric`, `eval.regression_detected` |
 | Hooks | `system` | `hook.fired`, `hook.blocked`, `hook.dispatch_error` |
 | Agent error | `system` | `agent.error` (panic recoveries + stream-handling failures) |
