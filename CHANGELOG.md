@@ -658,7 +658,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   guide say plainly that no key validation is possible, because no
   payload-schema registry exists.
 - **A webhook or automation that fails to start a run is now visible, not
-  just logged (#TBD).** Schedules already raised a journal entry and an inbox
+  just logged (#2282).** Schedules already raised a journal entry and an inbox
   card when they failed; a webhook fire failure wrote a database row only,
   and an automation whose enqueue failed left nothing but a log line. Both
   now emit a journal entry on every failure and one inbox card — kinds
