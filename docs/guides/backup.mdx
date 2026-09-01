@@ -236,6 +236,8 @@ Step 3 is what earlier versions described as "re-run restore without the rewrite
 
 Restoring under the ORIGINAL identity (same workspace, or a genuinely empty instance) is unaffected: the docker phase runs in the same call and there is no step 3.
 
+A fork regenerates **identity**, not merely primary keys: alongside every row's id it also mints a fresh value for the columns that have to be unique across the whole instance rather than within a workspace — a mission's `trace_id` is the one that exists today. Without that the fork's row would collide with the source row still holding the value and be dropped in silence, taking its children down with it (#2260). Columns that are unique only *within* a workspace are left alone on purpose: an issue identifier like `ENG-14` is scoped by the workspace id the fork already remapped, so the fork keeps the identifiers your team knows.
+
 ### Forked restores re-sign the journal chain
 
 The crew journal is tamper-evident: every entry carries a keyed HMAC over its own content *and* the hash of the entry before it, so an after-the-fact edit or a mid-chain delete is detectable (see [Audit & tamper-evidence](/security/audit)).
