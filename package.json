@@ -169,7 +169,9 @@
       "uuid": ">=11.1.1",
       "valibot": ">=1.4.2",
       "sharp": ">=0.35.0",
-      "@sentry/nextjs": "<10.72.0"
+      "@sentry/nextjs": "<10.72.0",
+      "postcss>nanoid": "^3.3.18",
+      "@prisma/config>deepmerge-ts": "^8.0.0"
     }
   },
   "devDependencies": {
