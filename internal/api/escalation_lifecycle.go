@@ -346,6 +346,12 @@ func (h *QueryHandler) expireEscalationRow(ctx context.Context, row expirableEsc
 	// question needs attention, and an agent that proceeded without its answer
 	// needs it just as much. This is the entry an operator reads to find out
 	// that a decision they meant to make was made for them by a clock.
+	//
+	// row.reason is the same agent-supplied text CreateEscalation redacted and
+	// bounded before it went into the journal the first time (#2238) — the
+	// sweep reads it back out of the escalations table and writes a SECOND
+	// peer.escalation entry, so it needs the identical redact-before-truncate
+	// treatment or a credential-shaped reason leaks here instead.
 	_, _ = h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: row.workspaceID,
 		CrewID:      row.crewID,
@@ -354,7 +360,7 @@ func (h *QueryHandler) expireEscalationRow(ctx context.Context, row expirableEsc
 		Severity:    journal.SeverityWarn,
 		ActorType:   journal.ActorSystem,
 		ActorID:     "escalation_deadline",
-		Summary:     fmt.Sprintf("escalation expired unanswered: %s", truncate(row.reason, 140)),
+		Summary:     fmt.Sprintf("escalation expired unanswered: %s", truncate(inbox.RedactSecrets(row.reason), 140)),
 		Payload: map[string]any{
 			"state":         "expired",
 			"resolution":    resolution,

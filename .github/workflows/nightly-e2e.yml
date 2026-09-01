@@ -137,9 +137,18 @@ env:
   # selects them (`playwright.pr.config.ts` matches `pr-contract.spec.ts`
   # only) — so parking them in DRIFT would ship a feature with a test suite
   # that is never allowed to fail.
+  #
+  # shell-overflow.spec.ts arrived with #2156 (the SidebarInset `min-w-0` fix
+  # for a wide descendant clipping the account menu off-screen). It is a
+  # regression guard for that fix, not new UI coverage, so it belongs in GATE
+  # rather than DRIFT: a guard nobody enforces is not a guard. Verified green
+  # (all 5 tests) against a freshly seeded instance under
+  # `playwright.nightly.config.ts`, standalone and again alongside
+  # create-crew-wizard at the nightly's own `CI=1 --workers=2`.
   GATE_SPECS: >-
     e2e/create-crew-wizard.spec.ts
     e2e/routine-run-inputs.spec.ts
+    e2e/shell-overflow.spec.ts
     e2e/slash-run-routine-chat.spec.ts
   #
   # DRIFT: run, reported, never fatal. Measured locally against a seeded

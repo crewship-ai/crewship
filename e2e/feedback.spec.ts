@@ -12,7 +12,24 @@ import { test, expect } from "@playwright/test"
 // or the locally-spawned Next.js dev server otherwise. The frontend
 // proxies /api/v1/* to the backend so we don't need a separate
 // CREWSHIP_BACKEND_URL env.
-
+//
+// #1617 investigated the two "POST creates a row" / "UPSERT
+// idempotency" failures below as a possible router bug (POST/DELETE
+// register via authedSelfMut, GET via the plain r.mux.Handle beside
+// it). That theory does not hold: internal/api/feedback_route_test.go
+// and cmd/crewship/acceptance_feedback_test.go both drive the real
+// router end to end with a real message and get a clean 201 — the
+// registration is fine. The 404 these two tests see is
+// MessageFeedbackHandler.Create's own, correct "message not found"
+// response: message_id must resolve to a real row in
+// conversation_messages (added in #1213, closing #1208 — a
+// cross-tenant message-existence oracle), and these two tests POST a
+// synthetic id that was never persisted there. Creating a real one
+// needs an actual chat turn, which needs a provisioned agent and an
+// LLM credential — neither is available in this harness (nightly-e2e
+// runs the daemon with CREWSHIP_SKIP_SIDECAR=1 and no provider key).
+// Left failing pending a follow-up that gives this harness a way to
+// seed a real conversation_messages row without a live agent turn.
 test.describe("Feedback API", () => {
   test.beforeEach(async ({ context, baseURL }) => {
     // Hand off through NextAuth's credentials callback to land a
