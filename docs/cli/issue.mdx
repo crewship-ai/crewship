@@ -279,7 +279,7 @@ crewship issue activity BE-42 --format json | jq '.[] | select(.action=="status_
 
 ## `crewship issue runs`
 
-List the runs triggered by an issue — the data the dashboard's issue "Runs" tab shows. Hits `GET /api/v1/crews/{crewId}/issues/{ident}/runs` after resolving `<identifier>` to its crew via `fetchIssue`.
+List every run attributed to an issue — mission tasks, mention-dispatched runs, and delegation-hop runs alike — the data the dashboard's issue "Runs" tab shows. Hits `GET /api/v1/crews/{crewId}/issues/{ident}/runs` after resolving `<identifier>` to its crew via `fetchIssue`.
 
 ```bash
 crewship issue runs BE-42
