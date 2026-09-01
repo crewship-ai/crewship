@@ -288,6 +288,7 @@ var backupRestoreCmd = &cobra.Command{
 			SecurityLevelClamps    []restoreClamp `json:"security_level_clamps"`
 			ColumnsDropped         int            `json:"columns_dropped"`
 			DroppedColumns         []droppedCol   `json:"dropped_columns"`
+			IssueCountersMigrated  int            `json:"issue_counters_migrated"`
 			// #2226: a forked restore regenerates the ids the journal
 			// hash chain commits to, so the chain is re-signed at a new
 			// genesis. Zero on a plain restore.
@@ -427,6 +428,19 @@ var backupRestoreCmd = &cobra.Command{
 					"  The bundle was written against a different schema. Rows that needed one of those columns to satisfy a NOT NULL or a primary key did NOT land, and the restore could not report them individually.\n"+
 					"  Check the tables named above before treating this restore as complete.",
 				out.ColumnsDropped, verb, strings.Join(details, ", "), more))
+		}
+		// Informational, not a warning: a migrated counter is the restore
+		// doing exactly what it should with a pre-#1797 bundle (#2034).
+		// Surfaced because "your counter came from a different key than the
+		// one on disk" is worth an admin seeing once.
+		if out.IssueCountersMigrated > 0 {
+			verb := "migrated"
+			if dryRun {
+				verb = "would be migrated"
+			}
+			cli.PrintSuccess(fmt.Sprintf(
+				"%d issue_counters row(s) from a pre-#1797 bundle %s from crew_id to (workspace_id, prefix).",
+				out.IssueCountersMigrated, verb))
 		}
 		return nil
 	},

@@ -771,6 +771,14 @@ type RestoreStats struct {
 	// DroppedColumns is the bounded per-(table, column) breakdown of the
 	// above, in the order the insert loop met them.
 	DroppedColumns []DroppedColumn
+	// IssueCountersMigrated counts issue_counters bundle rows this restore
+	// translated from the pre-#1797 {crew_id, next_number} shape into the
+	// post-#1797 {workspace_id, prefix, next_number} shape by resolving
+	// each row's crew (#2034). Two rows whose crews share an effective
+	// prefix count as one migrated pair even though only one row lands —
+	// see migrateIssueCounterRows. Zero on an ordinary restore, where
+	// every issue_counters row already carries the current key.
+	IssueCountersMigrated int
 }
 
 // RestoreDumpTx is RestoreDump with a caller-supplied preflight hook
@@ -890,6 +898,21 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		// #2034: a pre-#1797 bundle's issue_counters rows are keyed on
+		// crew_id, which a post-#1797 target does not have a column for.
+		// Rewrite them into the target's actual key BEFORE the generic
+		// column whitelist below ever sees crew_id, so the row lands
+		// instead of degenerating into a swallowed NOT NULL violation.
+		// Gated on the target actually being post-rekey — an older target
+		// still keyed on crew_id needs no translation at all.
+		if table == issueCountersTable && allowed["workspace_id"] && allowed["prefix"] && !allowed["crew_id"] {
+			migratedRows, n, err := migrateIssueCounterRows(ctx, tx, rows, dump.Tables["crews"])
+			if err != nil {
+				return stats, fmt.Errorf("backup: migrate issue_counters rows: %w", err)
+			}
+			rows = migratedRows
+			stats.IssueCountersMigrated += n
 		}
 		// Purge tombstones whose primary key collides with a bundle row.
 		// Without this, a row that was soft-deleted on the target (the

@@ -133,9 +133,16 @@ func tallyDroppedColumns(t *droppedColumnTally, table string, keys []string, all
 // answer PRAGMA table_info then the restore this dry run is predicting cannot
 // work either, and reporting "no skew found" because the question could not be
 // asked is the exact failure mode this file exists to remove.
-func InspectDroppedColumns(ctx context.Context, db *sql.DB, dump *DBDump) (int, []DroppedColumn, error) {
+//
+// The fourth return is how many issue_counters rows the same pre-#1797
+// transform the committed restore runs (migrateIssueCounterRows, #2034) would
+// migrate. It is computed here, not read off ColumnsDropped, because a row
+// that migrates successfully must NOT show up as a dropped crew_id — the dry
+// run's whole value is that it predicts the real thing, and the real thing
+// does not drop that row.
+func InspectDroppedColumns(ctx context.Context, db *sql.DB, dump *DBDump) (int, []DroppedColumn, int, error) {
 	if db == nil || dump == nil {
-		return 0, nil, nil
+		return 0, nil, 0, nil
 	}
 	// A transaction, not the bare *sql.DB, because tableColumns and
 	// tableExistsTx are tx-bound — the same helpers the committed path uses,
@@ -143,11 +150,12 @@ func InspectDroppedColumns(ctx context.Context, db *sql.DB, dump *DBDump) (int, 
 	// exist". Rolled back unconditionally: nothing here writes.
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, nil, fmt.Errorf("backup: inspect dropped columns: %w", err)
+		return 0, nil, 0, fmt.Errorf("backup: inspect dropped columns: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var tally droppedColumnTally
+	issueCountersMigrated := 0
 	for _, table := range BackupTables {
 		rows, ok := dump.Tables[table]
 		if !ok || len(rows) == 0 {
@@ -155,14 +163,22 @@ func InspectDroppedColumns(ctx context.Context, db *sql.DB, dump *DBDump) (int, 
 		}
 		exists, err := tableExistsTx(ctx, tx, table)
 		if err != nil {
-			return 0, nil, fmt.Errorf("backup: probe %s: %w", table, err)
+			return 0, nil, 0, fmt.Errorf("backup: probe %s: %w", table, err)
 		}
 		if !exists {
 			continue
 		}
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
-			return 0, nil, fmt.Errorf("backup: columns of %s: %w", table, err)
+			return 0, nil, 0, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		if table == issueCountersTable && allowed["workspace_id"] && allowed["prefix"] && !allowed["crew_id"] {
+			migratedRows, n, err := migrateIssueCounterRows(ctx, tx, rows, dump.Tables["crews"])
+			if err != nil {
+				return 0, nil, 0, fmt.Errorf("backup: migrate issue_counters rows: %w", err)
+			}
+			rows = migratedRows
+			issueCountersMigrated += n
 		}
 		for _, row := range rows {
 			keys := make([]string, 0, len(row))
@@ -174,7 +190,7 @@ func InspectDroppedColumns(ctx context.Context, db *sql.DB, dump *DBDump) (int, 
 		}
 	}
 	total, dropped := tally.result()
-	return total, dropped, nil
+	return total, dropped, issueCountersMigrated, nil
 }
 
 // warnDroppedColumns emits the operator-facing warning. Shared by the dry-run
