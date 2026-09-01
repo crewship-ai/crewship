@@ -442,6 +442,94 @@ func TestRestoreBackup_RowsInsertedShortfallIsReported(t *testing.T) {
 	}
 }
 
+// TestVerify_ScopingBugUnderSelection_KnownResidual pins #2009's documented
+// scope limit rather than letting it be rediscovered from scratch later.
+//
+// Contents.TableRowCounts is len(dump.Tables[table]), read from the exact
+// same in-memory dump that DumpWorkspace/DumpCrew then writes into the
+// payload (runner_create.go: `contents.TableRowCounts =
+// tableRowCounts(dump)`, called on the SAME dump WriteDBSection just
+// serialised). If the query that built dump.Tables under-selected — a
+// scoping bug picking a nullable FK column that happened to be NULL
+// everywhere, the exact shape of #1973 — the recorded count and the payload
+// agree with each other perfectly, because they were never independent
+// measurements. Verify's completeness check (this PR, #2009) compares
+// exactly those two numbers, so it reports VALID on a bundle that is
+// already short relative to its SOURCE DATABASE.
+//
+// This is not a bug in this PR; it is the documented boundary of "the
+// bundle is intact" versus the stronger "the bundle is everything" (see
+// TableRowCounts's doc comment in manifest.go). This test proves the
+// boundary is real: seed a database with 3 missions, take a normal
+// DumpWorkspace snapshot of it, then simulate a scoping bug's effect
+// directly on the dump (dropping 2 of the 3 rows) BEFORE deriving the
+// manifest's recorded counts from it — exactly the order runner_create.go
+// uses. Verify still reports VALID, because nothing this PR ships is
+// independent of the query that built the dump.
+//
+// If this test starts failing — Verify begins reporting a mismatch for a
+// dump that under-selected relative to its source — an independent
+// recount (or another mechanism) has landed and closed the residual.
+// Invert the assertions below (expect Valid=false and a "missions"
+// mismatch) and drop the _KnownResidual suffix.
+func TestVerify_ScopingBugUnderSelection_KnownResidual(t *testing.T) {
+	ctx := context.Background()
+	source := openMigratedDBCov(t)
+	wsID, crewID := seedCovWorkspace(t, source, "residual")
+
+	for i := 0; i < 3; i++ {
+		if _, err := source.ExecContext(ctx,
+			`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at)
+			 VALUES (?, ?, ?, ?, ?, 'Residual mission', 'IN_PROGRESS', datetime('now'))`,
+			fmt.Sprintf("m_residual_%d", i), wsID, crewID, "a_cov_residual", fmt.Sprintf("tr_residual_%d", i)); err != nil {
+			t.Fatalf("seed mission %d: %v", i, err)
+		}
+	}
+
+	// A genuine, correctly-scoped snapshot: all 3 missions are present.
+	dump, err := DumpWorkspace(ctx, source, wsID)
+	if err != nil {
+		t.Fatalf("DumpWorkspace: %v", err)
+	}
+	if got := len(dump.Tables["missions"]); got != 3 {
+		t.Fatalf("test setup: expected 3 missions in the real dump, got %d", got)
+	}
+
+	// Simulate a create-time scoping bug's effect: the dump this restore
+	// path actually has to work with is already short. Nothing in THIS PR
+	// touches how dump.Tables gets built — only what happens after.
+	dump.Tables["missions"] = dump.Tables["missions"][:1]
+
+	// runner_create.go's order: Contents.TableRowCounts is derived from
+	// this SAME (already-short) dump, after the fact.
+	recordedCounts := tableRowCounts(dump)
+	if recordedCounts["missions"] != 1 {
+		t.Fatalf("test setup: expected the simulated under-selection to read back as 1, got %d", recordedCounts["missions"])
+	}
+
+	m := newValidManifest()
+	m.Encryption = Encryption{}
+	m.Contents.TableRowCounts = recordedCounts
+	dumpJSON, err := json.Marshal(dump)
+	if err != nil {
+		t.Fatalf("marshal dump: %v", err)
+	}
+	payload := buildPayloadTarZst(t, []payloadEntry{{name: "db/dump.json", body: dumpJSON}})
+	path := writeRawBundle(t, t.TempDir(), m, payload, WriteBundleOptions{NoEncrypt: true}, "")
+
+	res, err := Verify(ctx, path)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !res.Valid || !res.CompletenessChecked || len(res.TableRowCountMismatches) != 0 {
+		t.Fatalf("#2009 appears to be FIXED beyond its documented scope: Verify caught an "+
+			"under-selected dump whose manifest was recorded from that same short dump. Good — "+
+			"figure out what changed, invert this test to assert the catch, and drop the "+
+			"_KnownResidual suffix. Got valid=%v checked=%v mismatches=%+v",
+			res.Valid, res.CompletenessChecked, res.TableRowCountMismatches)
+	}
+}
+
 func sameTableRowCountMismatches(got, want []TableRowCountMismatch) bool {
 	if len(got) != len(want) {
 		return false
