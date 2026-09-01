@@ -20,7 +20,7 @@ than being described as if it did.
 | Limit | Value | Enforced in | At the boundary | Are you told? |
 |---|---|---|---|---|
 | Agents given a thread lookup for the conversations column | 12 | `components/features/chat/chat-tree-data.ts` (`AGENT_FANOUT_CAP`) | Agents past the cap keep every other affordance, but their conversations are never fetched and so never appear in the column | **No** — see below |
-| Threads fetched per agent for that lookup | 10 | same file (`PER_AGENT_CHAT_LIMIT`) | Older threads are not in the merged list | **No** |
+| Threads fetched per agent for that lookup | 10 | same file (`PER_AGENT_CHAT_LIMIT`) | Older threads **of the scope you are looking at** are not in the merged list | **No** — see [Kinds](#kinds-are-what-keeps-this-page-limit-honest) |
 | Agents spanned by a workspace-wide conversation search | 400 | `internal/api/conversation_search.go` (`maxWorkspaceSearchAgents`) | The 400 most recently created agents are searched; the rest are not | Documented, but nothing in the response or the log says the scope was cut |
 | Chat attachment size | 25 MB | `internal/api/proxy_attachments.go`, and again in the browser | `400` from the API; the composer refuses the file with a toast naming it | **Yes** |
 | Chat attachment, crew stopped | — | `internal/server/routes_files.go` | `409` with the remedy in the message | **Yes** |
@@ -38,6 +38,77 @@ than being described as if it did.
 
 All character counts are **characters, not bytes** — a Czech or Japanese
 value gets the same length as an English one.
+
+## Kinds are what keeps this page limit honest
+
+The ten-threads-per-agent bound above used to be the worst limit on this
+page, and it was not obvious why: ten looks generous for a sidebar.
+
+It was not a sidebar bound. Four different things write rows into `chats` —
+a person opening a conversation, a **routine minting one chat per step**, an
+issue starting work, an agent delegating to another agent — and
+`GET /api/v1/agents/{id}/chats` returned all four in one list ordered by last
+activity. A five-step routine on a nightly schedule writes five rows a night.
+Two nights and a person's newest conversation is row eleven; six weeks and it
+is row three hundred.
+
+So the limit did not bury conversations below the fold. It **evicted them
+from the query**, before any client-side filter could see them — which is why
+narrowing on the client was never a fix.
+
+The endpoint now takes a `kind` parameter, and the conversations column sends
+it as part of the fetch rather than filtering the response:
+
+| Kind | Rows it selects | Decided by |
+| --- | --- | --- |
+| `direct` | conversations a person opened | everything the other three don't match |
+| `routine` | routine steps, cron and webhook dispatches | `origin IN ('ROUTINE','CRON','WEBHOOK')` |
+| `issue` | the chat an issue runs its work in | `mode = 'MISSION'` |
+| `agent` | agent-to-agent delegation | `origin = 'AGENT'` |
+
+Two properties are load-bearing, and both are tested
+(`internal/api/chat_kinds_test.go`):
+
+- **The partition is total and disjoint.** Every row matches exactly one kind.
+  `direct` is written as the negation of the other three rather than as an
+  allowlist, so a row with an origin nobody has thought of yet — a future
+  value, a restore from an older schema — classifies as `direct` and stays
+  **visible**. A row that belongs to no bucket would be unfindable with
+  nothing on screen to say so, which is the failure this whole mechanism
+  exists to prevent.
+- **It never reads the title.** A title is user-editable
+  (`PATCH .../chats/{id}`), so a rule over it would reclassify a row the
+  moment somebody tidied its name, and misfile a human conversation the
+  moment somebody called one "Pipeline notes". Classification reads only
+  `mode` and `origin`, which are written by the code path that created the
+  row.
+
+What the limit still costs, with kinds in place: the eleventh-oldest
+conversation **of the scope you are viewing** is not fetched. That is the
+bound behaving as a page size, which is what it was always meant to be.
+
+The console's own separation follows from this — the conversations column's
+**Show** section (Direct / Routines / Issues) is the `kind` parameter, and
+switching bucket re-runs the fan-out. `crewship chat list --kind` is the same
+parameter from the terminal.
+
+Because the fetch is scoped, the buckets you are *not* looking at cannot be
+counted from the response. `?counts=1` adds one `GROUP BY (mode, origin)` over
+the agent's chats and returns the totals in an `X-Chat-Kind-Counts` response
+header (`direct=3,routine=182,issue=0,agent=1`). It is opt-in because the count
+spans every chat the agent has, not the page — `crewship chat list` has no tab
+strip to fill and should not pay for it. The groups are folded through the same
+`ChatKindOf` the filter uses, so the number on a bucket cannot drift from the
+list behind it. A client that does not see the header shows a count only on the
+bucket it actually fetched.
+
+<Note>
+Upgrading instances get a one-time backfill
+(`migrate_consts_chat_origin_routine.go`) that stamps `origin = 'ROUTINE'` on
+routine-step chats written before the runner started stamping one. It is
+guarded on `created_by IS NULL` as well as on the runner's exact title shape,
+so a person's conversation cannot be caught by it.
+</Note>
 
 ## The thirteenth agent
 

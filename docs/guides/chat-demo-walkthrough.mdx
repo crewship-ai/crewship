@@ -27,7 +27,7 @@ of them.
 | # | Step | Where | Roughly |
 |---|---|---|---|
 | 0 | Check what the seed gave you | CLI | 1 min |
-| 1 | `/chat` — the conversations column, the facets, a thread that names itself | Browser | 2 min |
+| 1 | `/chat` — the conversations column, its scopes, a thread that names itself | Browser | 2 min |
 | 2 | The two kinds of chip | Browser | 1 min |
 | 3 | The questionnaire, end to end | Browser | 2 min |
 | 4 | An attachment, and what the agent is told about it | Browser | 2 min |
@@ -151,25 +151,63 @@ The column lists **conversations**, not agents. The agent is an attribute of a
 row — its avatar, and its name on the row's second line — the way a sender is an
 attribute of an email, not a folder you have to open first.
 
-Top to bottom: a search box that filters titles the page already has, a
-**New conversation** button, then one segmented strip of three facets — **All**,
-**Unread**, **Live** — each carrying its own count. Under that, **Conversations**,
-newest activity first.
+Top to bottom it is the same chrome as [/issues](/guides/issue-detail) and
+[/routines](/guides/automations), and deliberately: a **Search + Filter**
+toolbar, one bucket section — here **Show**, with **Direct**, **Routines** and
+**Issues**, each carrying its count — then the list. `Conversations`, newest
+activity first, grouped by day once there are enough of them to need headings.
+The `+` beside that heading starts one.
 
 </Step>
 
-<Step title="The facets">
+<Step title="The scopes">
 
-**Click Unread, then open the row it shows.** The count drops immediately and
+**Click Routines.** The list you were reading is replaced by routine steps,
+stacked under the routine that ran them.
+
+This is the one control on the column that is not a filter. It is a **fetch
+parameter** — `?kind=` on `GET /api/v1/agents/{id}/chats`, which narrows inside
+the statement, before its `LIMIT`. That distinction is the whole reason the
+control exists: a routine mints one chat per step, so on a workspace that runs
+routines the page was already full of them before any client-side filter could
+look at it, and a person's newest conversation was not below the fold, it was
+outside the query. [Chat Surface Limits](/guides/chat-surface-limits) works
+through the arithmetic. Switching scope therefore re-runs the fan-out, and the
+count sits on the active tab only — the other scopes' totals are genuinely not
+known, and a number we would have to invent is worse than none.
+
+</Step>
+
+<Step title="Unread, Live, and one agent">
+
+**Open Filter.** Read state, activity and a per-agent list — the same panel,
+the same facets-AND-together behaviour, the same "Clear all" that every other
+sidebar on this app has.
+
+Unread and Live used to be two thirds of a segmented strip beside **All**,
+which was wrong twice over: they are predicates sitting in a control whose
+third option is a scope, and they read "Unread 0 · Live 0" on most visits,
+which is how a filter teaches its reader that filters here do nothing. In the
+panel they **compose** with the bucket — "unread routines" is a real question,
+and the exclusive strip could not express it, because choosing Unread threw the
+scope away — and the count badge on the Filter button is what keeps them from
+being hidden by the extra click.
+
+**Click Unread only, then open the row it shows.** The count drops immediately and
 the row **stays where it is**. Reading something must not delete it from the
 list you are reading it from, so the open conversation is pinned into the list
-whatever the facet says — and the counts are computed *without* that pin, so
+whatever the toggles say — and the counts are computed *without* that pin, so
 "Unread 0" can never sit above a list with a row in it.
 
 **Live** means the agent is working right now. It is driven by the
 `agent.status` workspace event rather than by a roster fetched once at mount, so
 it flips at the moment a run does: send a message and watch it go to 1, then
-back to 0 when the reply lands.
+back to 0 when the reply lands. The dot rides the agent's portrait on the row
+it belongs to.
+
+**Collapse** (the panel icon at the end of the toolbar) folds the column to a
+9px rail with the expand button in it — same control, same place, same
+behaviour as the other two explorers.
 
 Say what did *not* happen on any of that: no navigation, no refetch, no page
 transition — picking a conversation is a `useState` plus a `replaceState`.
@@ -182,7 +220,9 @@ transition.
 <Step title="A thread that names itself">
 
 At the foot of the column, **Not started yet** collects the agents nobody has
-talked to. Expand it and click `casey`. That mints a conversation id locally and
+talked to. Click it — or the `+` beside the **Conversations** heading, which
+opens the same picker over every agent rather than choosing one for you — and
+pick `casey`. That mints a conversation id locally and
 posts nothing — arriving is not sending, and a conversation you never write in
 must not leave a row behind.
 

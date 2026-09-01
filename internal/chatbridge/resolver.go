@@ -243,6 +243,11 @@ type CreateChatRequest struct {
 	WorkspaceID string `json:"workspace_id"`
 	UserID      string `json:"user_id,omitempty"`
 	Title       string `json:"title,omitempty"`
+	// Origin is how the chat came to exist ("ROUTINE" for a routine step,
+	// "AGENT" for a delegation). It is what lets the conversations column
+	// keep machine work out of a person's list — omitted, the row is
+	// indistinguishable from a conversation somebody opened by hand.
+	Origin string `json:"origin,omitempty"`
 }
 
 // CreateChat creates a new chat session via the internal API.

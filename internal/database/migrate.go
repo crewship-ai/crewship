@@ -2058,6 +2058,12 @@ END;
 	// construction rather than by a watcher.
 	// See migrate_consts_trust_grants.go.
 	{version: 20260809120000, name: "waitpoint_trust_grants", sql: migrationWaitpointTrustGrants},
+
+	// Teach the existing routine-step chats what they are, so the
+	// conversations column's new mode+origin partition does not file every
+	// one of them as a person's conversation on upgrade.
+	// See migrate_consts_chat_origin_routine.go.
+	{version: 20260831072918, name: "chat_origin_routine", sql: migrationChatOriginRoutine},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

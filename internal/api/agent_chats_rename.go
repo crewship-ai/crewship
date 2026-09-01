@@ -64,6 +64,11 @@ type chatResponse struct {
 	Origin         *string `json:"origin"`
 	LastActivityAt string  `json:"last_activity_at"`
 	UnreadCount    int     `json:"unread_count"`
+	// Kind is mode+origin already decided, so a client never has to
+	// re-derive the partition and can never disagree with the `kind`
+	// filter it just used. Always one of ChatKind — never null, never
+	// empty: `direct` is the catch-all (see chat_kinds.go).
+	Kind ChatKind `json:"kind"`
 }
 
 // errChatTitleEmpty and errChatTitleTooLong are the two ways a title is
@@ -259,10 +264,21 @@ func (h *AgentHandler) chatRowByID(r *http.Request, chatID, userID string) (*cha
 		&c.LastActivityAt); err != nil {
 		return nil, err
 	}
+	c.Kind = ChatKindOf(c.Mode, derefOr(c.Origin, ""))
 	unread, err := h.chatUnreadCounts(r.Context(), []string{chatID}, userID)
 	if err != nil {
 		return nil, err
 	}
 	c.UnreadCount = unread[c.ID]
 	return &c, nil
+}
+
+// derefOr reads a nullable string column's Go form. `origin` is a *string
+// because "never set" is meaningful on the wire; the classifier only cares
+// about the value, and NULL classifies the same as an unrecognised one.
+func derefOr(p *string, fallback string) string {
+	if p == nil {
+		return fallback
+	}
+	return *p
 }

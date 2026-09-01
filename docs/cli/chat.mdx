@@ -23,7 +23,7 @@ Auth: every subcommand requires an authenticated session (`crewship login`). All
 | --- | --- |
 | `chat <chat-id>` | Print the full message history of one chat as a rendered transcript. |
 | `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
-| `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes an `UNREAD` column (replies you haven't seen). |
+| `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes `KIND` (what wrote the chat) and `UNREAD` (replies you haven't seen). `--kind` narrows to one. |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
 | `chat rename <chat-id> <title>` | Give the session a name — what `chat list`, the sidebar and reply notifications call it. Alias: `title`. |
 | `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/<attachment-id>/` in the container). |
@@ -255,12 +255,35 @@ crewship chat c_abc123 --since 24h
 
 ```bash
 crewship chat list daniel
-# ID            TITLE                                 STATUS    MSGS  UNREAD  LAST ACTIVITY      ORIGIN
-# c_abc123      Refactor the queue worker             active    14    2       2026-05-19 14:02   CLI
-# c_xyz789      Audit pass on auth middleware         done      6     -       2026-05-19 09:18   web
+# ID            TITLE                                 KIND      STATUS    MSGS  UNREAD  LAST ACTIVITY
+# c_abc123      Refactor the queue worker             direct    active    14    2       2026-05-19 14:02
+# run_9f2a1c    Daily digest · summarize              routine   active    2     -       2026-05-19 09:18
 ```
 
-Rows are ordered by `LAST ACTIVITY` (newest message, not creation time). `UNREAD` counts messages you haven't seen — your own don't count; `-` means fully read. The `ORIGIN` column distinguishes chats spawned by `crewship run` / `crewship ask` (`CLI`) from the web UI — handy when grep-ing for terminal sessions to attach a file to.
+Rows are ordered by `LAST ACTIVITY` (newest message, not creation time). `UNREAD` counts messages you haven't seen — your own don't count; `-` means fully read.
+
+`KIND` is the one to read first, because an agent's chats are not all the same thing. Four writers land in this list:
+
+| Kind | Written by | Where it lives in the console |
+| --- | --- | --- |
+| `direct` | you, from the console or `crewship run` / `crewship ask` | the Direct scope of the conversations column |
+| `routine` | a routine — **one chat per step** — plus cron and webhook dispatches | the Routines scope, and [/routines](/guides/automations) |
+| `issue` | an issue starting work (a `MISSION`-mode chat) | the Issues scope, and /issues |
+| `agent` | one agent delegating to another | the Routines scope, badged as a delegation |
+
+On a busy agent the `routine` rows outnumber the rest by an order of magnitude — a five-step nightly routine writes 150 a month — so `--kind` is usually what you want:
+
+```bash
+crewship chat list daniel --kind direct           # the ones you opened
+crewship chat list daniel --kind routine          # what ran on its own
+crewship chat list daniel --kind direct,issue     # comma-separates
+```
+
+The filter runs **in the query, before the server's page limit**, which is the point of it: narrowing after the fact narrows a page routine rows have already filled. Omitted, every kind is listed — `--kind` narrows, it never reorders.
+
+Casing and stray separators are forgiven (`--kind ALL`, `--kind "direct,"`), but a value with no kind in it at all — `--kind ,` — is an **error** rather than silently meaning "everything". A filter that fails open hands back the mixed list you were trying to escape while you believe you narrowed it. Naming `all` alongside a kind is refused for the same reason.
+
+The raw provenance token is still on the wire as `origin` (`UI`, `CLI`, `WEBHOOK`, `CRON`, `ROUTINE`, `AGENT`); `--output json` carries both it and `kind`. Use `origin` when you specifically want to tell a `crewship run` session from a browser one — handy when grep-ing for terminal sessions to attach a file to.
 
 ### Catch up on a reply you missed
 

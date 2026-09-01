@@ -1864,6 +1864,20 @@ func (e *Executor) dispatchHookStep(ctx context.Context, hook *Step, in RunInput
 // its zero dependency on lookout — adding the typed import would
 // create a cycle the moment lookout takes a pipeline.GuardrailsConfig
 // in any future enrichment.
+// routineDisplayName is what a person calls this routine: the DSL's
+// display_name when the author set one, else its name. Empty when the DSL is
+// unavailable (a direct RunStep outside the executor), and the caller falls
+// back to the pipeline id — the pre-change behaviour, never a blank title.
+func routineDisplayName(dsl *DSL) string {
+	if dsl == nil {
+		return ""
+	}
+	if dsl.DisplayName != "" {
+		return dsl.DisplayName
+	}
+	return dsl.Name
+}
+
 func resolveInputGuardAction(dsl *DSL) string {
 	if dsl == nil || dsl.Guardrails == nil || dsl.Guardrails.Input == nil {
 		return ""
@@ -1948,6 +1962,7 @@ func (e *Executor) runAgentStep(
 			Prompt:           attemptPrompt,
 			TimeoutSec:       step.TimeoutSec,
 			PipelineID:       pipelineID,
+			PipelineName:     routineDisplayName(in.dsl),
 			PipelineRunID:    runID,
 			StepID:           step.ID,
 			InvokingCrewID:   in.InvokingCrewID,

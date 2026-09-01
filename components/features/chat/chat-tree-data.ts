@@ -7,6 +7,30 @@ import { useWorkspace } from "@/hooks/use-workspace"
 
 import { httpError, scopeErrorMessage, useRetry } from "./scope-fetch"
 
+/** Mirrors `api.ChatKindCountsHeader`. */
+export const CHAT_KIND_COUNTS_HEADER = "X-Chat-Kind-Counts"
+
+/**
+ * Read `direct=3,routine=182,issue=0,agent=1`.
+ *
+ * Tolerant on purpose: an unparseable pair is skipped rather than failing the
+ * whole header, and a header that yields nothing answers `null` — the same
+ * "the server did not say" the absent header means. A count strip is
+ * decoration over a list that is otherwise fine, so nothing here may take the
+ * list down with it.
+ */
+export function parseKindCounts(raw: string | null): Record<string, number> | null {
+  if (!raw) return null
+  const out: Record<string, number> = {}
+  for (const pair of raw.split(",")) {
+    const [k, v] = pair.split("=")
+    const n = Number(v)
+    if (!k?.trim() || !Number.isFinite(n)) continue
+    out[k.trim()] = n
+  }
+  return Object.keys(out).length ? out : null
+}
+
 /**
  * The chat surface's data layer: the roster, the per-agent thread fan-out, and
  * the one breakpoint below which a left column is not a column.
@@ -43,8 +67,17 @@ export interface ChatTreeThread {
   ended_at?: string | null
   last_activity_at?: string | null
   unread_count?: number
-  /** UI · CLI · WEBHOOK · CRON · AGENT (migration v59); NULL on older rows. */
+  /** CHAT · MISSION. An issue runs its work in a MISSION-mode chat. */
+  mode?: string | null
+  /** UI · CLI · WEBHOOK · CRON · ROUTINE · AGENT (migration v59); NULL on older rows. */
   origin?: string | null
+  /**
+   * `direct` · `routine` · `issue` · `agent` — mode+origin already decided,
+   * server-side (internal/api/chat_kinds.go). Absent from a server older
+   * than that change and from a locally minted draft, which is why
+   * `classifyThread` still knows how to derive it.
+   */
+  kind?: string | null
 }
 
 
@@ -117,6 +150,19 @@ export interface ChatTreeData<A extends ChatTreeAgent = ChatTreeAgent> {
    * list, not an empty one, and the tree says so.
    */
   threadErrors: Record<string, string>
+  /**
+   * Workspace-wide totals per kind, summed across the fan-out.
+   *
+   * They cannot come from `threadsByAgent`: the fetch is scoped, so the
+   * response holds exactly one kind and the other three are absent by
+   * construction. The server totals them per agent
+   * (`X-Chat-Kind-Counts`) and this sums the scope's own agents.
+   *
+   * `null` means the server did not say — an older build, or a proxy that
+   * dropped the header. The column then shows a count only on the scope it
+   * actually fetched, which is what it knows.
+   */
+  kindCounts: Record<string, number> | null
   threadsLoaded: boolean
   /** Re-run the fan-out. Wired to the Retry beside a failed agent. */
   retryThreads: () => void
@@ -153,12 +199,14 @@ export interface ChatTreeData<A extends ChatTreeAgent = ChatTreeAgent> {
  */
 export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   ensureSlug,
-}: { ensureSlug?: string | null } = {}): ChatTreeData<A> {
+  kind,
+}: { ensureSlug?: string | null; kind?: string | null } = {}): ChatTreeData<A> {
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   const [roster, setRoster] = useState<A[] | null>(null)
   const [threadsByAgent, setThreadsByAgent] = useState<Record<string, ChatTreeThread[]>>({})
   const [threadErrors, setThreadErrors] = useState<Record<string, string>>({})
+  const [kindCounts, setKindCounts] = useState<Record<string, number> | null>(null)
   const [threadsLoaded, setThreadsLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { nonce: threadsNonce, retry: retryThreads } = useRetry()
@@ -216,43 +264,79 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
       scope.map((a) =>
         apiFetch(
           `/api/v1/agents/${encodeURIComponent(a.id)}/chats` +
-            `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${PER_AGENT_CHAT_LIMIT}`,
+            `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${PER_AGENT_CHAT_LIMIT}` +
+            (kind ? `&kind=${encodeURIComponent(kind)}` : "") +
+            // The tab strip needs totals for the kinds this request is
+            // filtering OUT, so they travel beside the page rather than in
+            // it. `?counts=1` because the count is over every chat the agent
+            // has, and nothing else asking this endpoint wants to pay for it.
+            "&counts=1",
         )
           .then((r) => {
             if (!r.ok) throw httpError(r.status)
-            return r.json()
+            // Optional-chained, and not to appease a stub: the counts
+            // decorate a list that is otherwise fine, and the ONE rule this
+            // whole path has is that nothing about a number on a tab may take
+            // the list down with it. A response object without readable
+            // headers — a proxy, a service worker, a test double — is the
+            // same "the server did not say" as an absent header, and the
+            // column already knows how to draw that.
+            const counts = parseKindCounts(r.headers?.get(CHAT_KIND_COUNTS_HEADER) ?? null)
+            return r.json().then((rows: unknown) => [rows, counts] as const)
           })
           .then(
-            (rows: unknown) =>
-              [a.id, Array.isArray(rows) ? (rows as ChatTreeThread[]) : [], null] as const,
+            ([rows, counts]) =>
+              [
+                a.id,
+                Array.isArray(rows) ? (rows as ChatTreeThread[]) : [],
+                null,
+                counts,
+              ] as const,
           )
           // One agent's list failing must not blank the column — the other
           // eleven are still worth showing. It must not pass for an EMPTY
           // list either, which is what returning [] here used to do.
-          .catch((e: unknown) => [a.id, null, scopeErrorMessage(e)] as const),
+          .catch((e: unknown) => [a.id, null, scopeErrorMessage(e), null] as const),
       ),
     ).then((results) => {
       if (cancelled) return
       const lists: Record<string, ChatTreeThread[]> = {}
       const errors: Record<string, string> = {}
-      for (const [id, rows, err] of results) {
+      // Summed only over agents that ANSWERED. An agent whose request failed
+      // contributes nothing rather than a zero — a total that quietly drops a
+      // failed agent's chats is a number that disagrees with the list for a
+      // reason nothing on screen explains, which is the same defect
+      // `threadErrors` exists to prevent one layer down.
+      let totals: Record<string, number> | null = null
+      for (const [id, rows, err, counts] of results) {
         if (rows) lists[id] = rows
         else if (err) errors[id] = err
+        if (!counts) continue
+        totals ??= {}
+        for (const [k, n] of Object.entries(counts)) totals[k] = (totals[k] ?? 0) + n
       }
       setThreadsByAgent(lists)
       setThreadErrors(errors)
+      setKindCounts(totals)
       setThreadsLoaded(true)
     })
     return () => {
       cancelled = true
     }
-  }, [workspaceId, agents, ensureSlug, threadsNonce])
+    // `kind` is a dependency and not a post-filter, and that is the whole
+    // point of it. The page is cut by `LIMIT` on the server, so narrowing
+    // after the response arrives narrows a page that routine rows have
+    // already filled — the reader asks for their conversations and is told
+    // there are none, which is the exact failure this parameter exists to
+    // stop. Changing scope therefore re-runs the fan-out.
+  }, [workspaceId, agents, ensureSlug, kind, threadsNonce])
 
   return {
     agents,
     roster,
     threadsByAgent,
     threadErrors,
+    kindCounts,
     threadsLoaded,
     retryThreads,
     retryRoster,

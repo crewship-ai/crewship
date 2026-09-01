@@ -610,6 +610,39 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **A routine no longer evicts your conversations from the chat column
+  (#2244).** Four code paths insert into `chats` and only one of them is a
+  conversation: a person opening a thread, a routine minting **one chat per
+  step**, an issue running its work, and an agent delegating to another agent.
+  `GET /agents/{id}/chats` returned all four in one activity-ordered list with
+  no way to narrow — and because the endpoint pages, that was not clutter but
+  eviction: five rows per routine run meant a person's newest conversation was
+  outside the result set within two nights, before any client-side filter could
+  see it. The endpoint now takes `?kind=direct|routine|issue|agent`, applied
+  inside the statement *before* `LIMIT`, and answers `?counts=1` with per-kind
+  totals in `X-Chat-Kind-Counts` so a column can label the buckets it is not
+  fetching. Every row carries its `kind`. The partition lives in one place
+  (`internal/chatkind`) as both Go and SQL, with `direct` written as the
+  negation of the other three — an origin nobody has thought of yet stays
+  visible rather than vanishing from every list at once. The pipeline runner
+  now stamps `ROUTINE` (it stamped nothing) and titles a step chat with the
+  routine's name instead of its id; a migration backfills existing rows,
+  guarded on `created_by IS NULL` as well as the runner's own title shape.
+  Every surface that needed to tell these apart had been asking
+  `created_by IS NULL`, which answers "does this row have an owner" and not
+  "did a person open this" — two questions that stopped being the same in both
+  directions, since `POST /agents/{id}/chats` stamps a creator *and* accepts an
+  origin, and deleting a user nulls the creator on every chat they opened.
+  `crewship chat list --kind` narrows the same way, with a `KIND` column in
+  place of the raw `ORIGIN` token.
+
+- **The chat column's "New conversation" asked nobody who (#2141).** It called
+  `onStartConversation(roster[0])` — whichever agent `/agents` happened to
+  return first — so the one button on the column silently made the only
+  decision it exists to take, and a *second* conversation with a chosen agent
+  could not be started from the UI at all. It now opens a picker over every
+  agent, not only the ones with no history.
+
 - **A forked restore left the journal hash chain unverifiable (#2226).**
   `crewship backup restore --as-workspace <slug>` returned success and produced
   a workspace whose `VerifyChain` reported *every* restored row as tampered —
