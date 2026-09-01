@@ -122,6 +122,10 @@ var BackupTables = []string{
 	"issue_counters",
 	"subscriptions",
 	"inbox_items",
+	// inbox_item_reads (A7): per-user read marker, FK inbox_item_id →
+	// inbox_items(id), so it must restore after its parent. No workspace_id
+	// column — see the workspaceFilterSQL case below.
+	"inbox_item_reads",
 	// Outbound notifications (#1412). Both carry a direct workspace_id
 	// column (dumped via the generic workspaceFilterSQL default), NOT a
 	// workspaces FK — so the FK-walk discovery never surfaced them and
@@ -412,6 +416,11 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "chat_participants", "chat_read_cursors":
 		// No workspace_id column — scoped via the chat.
 		return "chat_id IN (SELECT id FROM chats WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "inbox_item_reads":
+		// No workspace_id column — scoped via the inbox item. inbox_item_id
+		// is NOT NULL (composite PK, not a nullable hop), same shape as
+		// chat_read_cursors above.
+		return "inbox_item_id IN (SELECT id FROM inbox_items WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "pipeline_routine_state":
 		// No workspace_id column — scoped via its routine (pipeline).
 		return "pipeline_id IN (SELECT id FROM pipelines WHERE workspace_id = ?)", []any{workspaceID}, true

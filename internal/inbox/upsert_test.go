@@ -93,6 +93,59 @@ func TestUpsertMessage_SecondCallRefreshesInsteadOfDuplicating(t *testing.T) {
 	}
 }
 
+// TestUpsertMessage_SecondCallClearsPerUserReadMarkers is the A7 half of
+// TestUpsertMessage_SecondCallRefreshesInsteadOfDuplicating: a resurrected
+// item carries new content, so a per-user inbox_item_reads row left over
+// from the FIRST occurrence must not make the refreshed row look already
+// read to the user who read the old one.
+func TestUpsertMessage_SecondCallClearsPerUserReadMarkers(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+
+	// newInboxTestDB already seeds workspace 'ws1'.
+	if _, err := db.Exec(`INSERT INTO users (id, email) VALUES ('u1','u1@example.com')`); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	item := Item{
+		WorkspaceID:  "ws1",
+		Kind:         KindMessage,
+		SourceID:     "chat_reply_c3_u1",
+		TargetUserID: "u1",
+		Title:        "Atlas replied",
+		BodyMD:       "first reply",
+		SenderType:   "agent",
+		SenderID:     "a1",
+		SenderName:   "Atlas",
+	}
+	if err := UpsertMessage(ctx, db, quietLogger(), item); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+
+	var itemID string
+	if err := db.QueryRow(`SELECT id FROM inbox_items WHERE source_id='chat_reply_c3_u1'`).Scan(&itemID); err != nil {
+		t.Fatalf("read id: %v", err)
+	}
+	// u1 reads the first occurrence.
+	if _, err := db.Exec(`INSERT INTO inbox_item_reads (inbox_item_id, user_id) VALUES (?, 'u1')`, itemID); err != nil {
+		t.Fatalf("seed per-user read marker: %v", err)
+	}
+
+	item.BodyMD = "second reply"
+	if err := UpsertMessage(ctx, db, quietLogger(), item); err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_item_reads WHERE inbox_item_id = ?`, itemID).Scan(&n); err != nil {
+		t.Fatalf("count read markers: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("per-user read markers survived a resurrect = %d, want 0 (the new occurrence must read as unread again)", n)
+	}
+}
+
 func TestUpsertMessage_ValidationNoop(t *testing.T) {
 	t.Parallel()
 	db := newInboxTestDB(t)

@@ -59,6 +59,12 @@ import (
 //   - inbox_items (by data_subject_id) — hard delete. Soft-delete
 //     would leave the proposal title visible in the inbox feed,
 //     which the SAR forbids.
+//   - inbox_item_reads (A7, by user_id, scoped to this workspace via
+//     the inbox_items join) — the subject's own record of which
+//     inbox items they opened. Independent of the item's
+//     data_subject_id: this is the subject's activity, not content
+//     about them, and it must go even when the item itself (someone
+//     else's) is untouched.
 //   - approvals_queue (by requested_by OR decided_by) — hard delete
 //     (#2233). The table predates v107 and was never considered for
 //     either list — grep for "approvals" in this file returned zero
@@ -199,6 +205,7 @@ type gdprActionScope struct {
 	PeerCards       int `json:"peer_cards"`
 	MemoryVersions  int `json:"memory_versions"`
 	InboxItems      int `json:"inbox_items"`
+	InboxItemReads  int `json:"inbox_item_reads"`
 	UserModels      int `json:"user_models"`
 	PeerCardsOnDisk int `json:"peer_cards_on_disk,omitempty"`
 	// ApprovalsQueue (#2233) counts rows deleted because the subject was
@@ -484,6 +491,29 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 		scope.InboxItems = int(n)
 	}
 
+	// 3b) inbox_item_reads (A7): the subject's OWN per-item read markers.
+	// Distinct from step 3 above — that deletes items ABOUT the subject
+	// (data_subject_id); this deletes the subject's activity record of
+	// having READ items, which may belong to anyone (a role-targeted
+	// escalation the subject happened to open). Rows for items step 3 just
+	// deleted are already gone via inbox_item_reads.inbox_item_id's
+	// ON DELETE CASCADE; this catches the rest. Scoped to this workspace
+	// via the inbox_items join — the subject's read markers in a DIFFERENT
+	// workspace are a separate SAR ticket.
+	res, err = h.db.ExecContext(r.Context(), `
+		DELETE FROM inbox_item_reads
+		WHERE user_id = ? AND inbox_item_id IN (SELECT id FROM inbox_items WHERE workspace_id = ?)`,
+		targetID, wsID)
+	if err != nil {
+		h.logger.Warn("gdpr delete: inbox_item_reads delete failed",
+			"action_id", actionID, "err", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		scope.InboxItemReads = int(n)
+	}
+
 	// 4) approvals_queue: hard delete every row the subject touched, either
 	// as requester or as decider (#2233) — a single statement, so a row
 	// where the subject happens to be both (a self-approved gate) is still
@@ -605,7 +635,7 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 
 	h.finalizeGDPRAction(r.Context(), actionID, scope, firstErr)
 
-	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.UserModels + scope.ApprovalsQueue
+	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.InboxItemReads + scope.UserModels + scope.ApprovalsQueue
 	status := http.StatusAccepted
 	resp := map[string]any{
 		"action_id":    actionID,
@@ -626,14 +656,27 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 // breakage when new tables are added — new top-level keys are
 // additive.
 type gdprExportBundle struct {
-	DataSubjectID string                `json:"data_subject_id"`
-	WorkspaceID   string                `json:"workspace_id"`
-	ExportedAt    string                `json:"exported_at"`
-	ActionID      string                `json:"action_id"`
-	PeerCards     []exportPeerCard      `json:"peer_cards"`
-	MemoryVersion []exportMemoryVersion `json:"memory_versions"`
-	InboxItems    []exportInboxItem     `json:"inbox_items"`
-	UserModels    []exportUserModel     `json:"user_models"`
+	DataSubjectID  string                `json:"data_subject_id"`
+	WorkspaceID    string                `json:"workspace_id"`
+	ExportedAt     string                `json:"exported_at"`
+	ActionID       string                `json:"action_id"`
+	PeerCards      []exportPeerCard      `json:"peer_cards"`
+	MemoryVersion  []exportMemoryVersion `json:"memory_versions"`
+	InboxItems     []exportInboxItem     `json:"inbox_items"`
+	InboxItemReads []exportInboxItemRead `json:"inbox_item_reads"`
+	UserModels     []exportUserModel     `json:"user_models"`
+}
+
+// exportInboxItemRead is the subject's own per-item read marker (A7):
+// "I read inbox item X at time Y". title/kind are carried alongside the id
+// so the SAR answer is legible without a second lookup against inbox_items
+// (which may itself be a different subject's item the requester merely
+// opened).
+type exportInboxItemRead struct {
+	InboxItemID string `json:"inbox_item_id"`
+	Title       string `json:"title"`
+	Kind        string `json:"kind"`
+	ReadAt      string `json:"read_at"`
 }
 
 // exportUserModel carries the operator model INCLUDING its body. The
@@ -705,14 +748,15 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 	}
 
 	bundle := gdprExportBundle{
-		DataSubjectID: targetID,
-		WorkspaceID:   wsID,
-		ExportedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-		ActionID:      actionID,
-		PeerCards:     []exportPeerCard{},
-		MemoryVersion: []exportMemoryVersion{},
-		InboxItems:    []exportInboxItem{},
-		UserModels:    []exportUserModel{},
+		DataSubjectID:  targetID,
+		WorkspaceID:    wsID,
+		ExportedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+		ActionID:       actionID,
+		PeerCards:      []exportPeerCard{},
+		MemoryVersion:  []exportMemoryVersion{},
+		InboxItems:     []exportInboxItem{},
+		InboxItemReads: []exportInboxItemRead{},
+		UserModels:     []exportUserModel{},
 	}
 
 	scope := gdprActionScope{}
@@ -822,6 +866,46 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 		}
 		_ = ibRows.Close()
 		scope.InboxItems = len(bundle.InboxItems)
+	}
+
+	// inbox_item_reads (A7): the subject's own per-item read activity,
+	// scoped to this workspace via the inbox_items join — mirrors the
+	// DELETE cascade's step 3b.
+	irRows, err := h.db.QueryContext(r.Context(), `
+		SELECT ir.inbox_item_id, ii.title, ii.kind, ir.read_at
+		FROM inbox_item_reads ir
+		JOIN inbox_items ii ON ii.id = ir.inbox_item_id
+		WHERE ii.workspace_id = ? AND ir.user_id = ?
+		ORDER BY ir.read_at DESC
+	`, wsID, targetID)
+	if err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		h.logger.Warn("gdpr export: inbox_item_reads query failed",
+			"action_id", actionID, "err", err)
+	} else {
+		for irRows.Next() {
+			var e exportInboxItemRead
+			if scanErr := irRows.Scan(&e.InboxItemID, &e.Title, &e.Kind, &e.ReadAt); scanErr != nil {
+				h.logger.Error("gdpr export: inbox_item_reads scan failed",
+					"action_id", actionID, "err", scanErr)
+				if firstErr == nil {
+					firstErr = scanErr
+				}
+				continue
+			}
+			bundle.InboxItemReads = append(bundle.InboxItemReads, e)
+		}
+		if iterErr := irRows.Err(); iterErr != nil {
+			h.logger.Warn("gdpr export: inbox_item_reads iteration error",
+				"action_id", actionID, "err", iterErr)
+			if firstErr == nil {
+				firstErr = iterErr
+			}
+		}
+		_ = irRows.Close()
+		scope.InboxItemReads = len(bundle.InboxItemReads)
 	}
 
 	// user_models — the operator model (#1669). Body included, not just
