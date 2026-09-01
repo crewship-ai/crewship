@@ -362,6 +362,19 @@ were delivered and resumed, and calling again claims the rest.
 
 ### Pipeline budgets
 
+<Warning>
+**`monthly_budget_usd` is reporting-only — it never stops a run.** Setting it
+does not enforce anything; the executor has no code path that reads it. It
+only drives `over_budget`/`pct_used` on this response and the workspace
+budget-summary roll-up, so you can *see* that a routine ran over its planned
+monthly spend after the fact. The value that actually blocks execution is the
+DSL's own `max_cost_usd` (a per-run hard cap authored into the routine
+definition and enforced mid-run by the executor) — see the
+[Monthly budget meter](/guides/routines#monthly-budget-meter) section of the
+routines guide for the full comparison. If you need runs to be refused or
+aborted for cost, set `max_cost_usd`, not this field.
+</Warning>
+
 #### `GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget`
 
 **Auth:** `member`. A missing/soft-deleted pipeline is `404`; an unavailable

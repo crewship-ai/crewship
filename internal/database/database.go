@@ -140,7 +140,7 @@ func Open(databaseURL string, opts ...Option) (*DB, error) {
 	// what WAL is designed for. Going higher buys no extra writer
 	// throughput (writers still serialize via busy_timeout) and just
 	// pads memory; lower than 5 reintroduces the dashboard-tab stall.
-	// busy_timeout(5000ms) applies per-connection via the DSN pragma
+	// busy_timeout(30000ms) applies per-connection via the DSN pragma
 	// above, so it stays in effect at any pool size.
 	db.SetMaxOpenConns(5)
 

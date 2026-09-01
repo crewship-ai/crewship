@@ -2044,7 +2044,9 @@ Use `concurrency_key` with a template referencing the tenant-identifying input:
 }
 ```
 
-Two requests for the same `account_id` queue rather than fan out; requests for different `account_id`s run in parallel. Pair with the `Idempotency-Key` header for webhook handlers (see the [Concurrency + idempotency recipe](/guides/routines-cookbook#recipe-5-—-idempotent-routine-with-concurrency-key)).
+A second request for the same `account_id` while the first is still running is rejected immediately with `429` and a `Retry-After` header — it does not queue or wait; requests for different `account_id`s run in parallel. If you want a burst of same-key triggers to collapse into one run instead of erroring, that's a different mechanism — [deferred dispatch's debounce](#deferred-dispatch-delay-ttl-debounce-priority) — not `concurrency_key`. Pair `concurrency_key` with the `Idempotency-Key` header for webhook handlers (see the [Concurrency + idempotency recipe](/guides/routines-cookbook#recipe-5-—-idempotent-routine-with-concurrency-key)).
+
+Also note: the concurrency gate is enforced per-process, not cluster-wide — a multi-replica deployment has no cross-replica coordination, so the effective cap is `max_concurrent` × replica count (see [`runs/active` is single-replica scope](/api-reference/workspaces#list-active-runs-in-memory-registry) for the same limitation on the adjacent endpoint).
 
 The platform **fails fast** if the rendered key is empty (missing input + no literal prefix in the template) — see [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value) for why and how to fix.
 

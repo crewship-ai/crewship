@@ -914,6 +914,23 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusBadRequest, "token required")
 		return
 	}
+	// Approved uses the Go zero value (false) as its default: an omitted
+	// or body-less request DENIES the waitpoint, even though the route
+	// is named ".../approve". This is intentional and asymmetric with
+	// the PUBLIC callback (CompleteWaitpointToken in
+	// pipeline_waitpoint_callback.go), which defaults an omitted
+	// `approved` to true. Rationale: this endpoint is JWT-authed
+	// (requireRole MANAGER+) — a human or system with a real session is
+	// expected to state the decision, and failing closed means a
+	// malformed/truncated request leaves the gated run parked instead of
+	// silently releasing it. The public endpoint has no JWT (the token
+	// in the path is the sole credential) and exists for external
+	// systems whose only completion signal is often a bare POST
+	// ("task finished, continue") — trigger.dev wait.forToken parity —
+	// so it fails open instead. Both defaults are deliberate for their
+	// own caller population; do not assume they match. See
+	// docs/api-reference/workspaces.mdx "Defaults differ from the
+	// public callback".
 	var body struct {
 		Approved bool   `json:"approved"`
 		Comment  string `json:"comment"`
