@@ -148,6 +148,30 @@ type Contents struct {
 	// Bundle creation does not fail on this; it's surfaced so an
 	// operator can investigate via `crewship memory versions`.
 	MemoryBlobsMissing int `json:"memory_blobs_missing,omitempty" yaml:"memory_blobs_missing,omitempty"`
+
+	// TableRowCounts records, per table, how many rows the DB dump
+	// (DumpWorkspace / DumpCrew) wrote into this bundle's payload at
+	// create time — len(dump.Tables[table]) for every table the dump
+	// touched, including tables with zero rows (#2009). Additive field:
+	// nil/empty on any bundle written before this existed, or on a bundle
+	// with no DB section at all (files-only resume, instance-scope
+	// backups that carry no workspace dump). Verify and restore both
+	// treat an empty map as "completeness unverifiable" — never as "zero
+	// rows recorded, so anything goes" and never as a failure.
+	//
+	// What this catches, and what it deliberately does not: it is
+	// len(dump.Tables[table]), read from the SAME in-memory dump that is
+	// then written into the payload — not an independently re-derived
+	// count. A create-time scoping bug that produces too few rows (#1973's
+	// shape) affects this number and the payload identically, so a bundle
+	// with that bug still has TableRowCounts that agree with itself. What
+	// this DOES catch is the payload diverging from what its own manifest
+	// claims — a corrupted or hand-edited bundle, or a future refactor
+	// that lets the two numbers drift apart. "The bundle is intact" is
+	// the guarantee; "the bundle is everything" (independent
+	// re-derivation, e.g. reconciling against the source instance) is a
+	// stronger, separate guarantee and out of scope here — see #2009.
+	TableRowCounts map[string]int `json:"table_row_counts,omitempty" yaml:"table_row_counts,omitempty"`
 }
 
 // WorkspaceSummary carries workspace-level identity fields.

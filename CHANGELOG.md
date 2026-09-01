@@ -610,6 +610,26 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **`backup verify` no longer calls a short bundle VALID (#2009).** Verify
+  only ever checked the payload's SHA-256 against the manifest — integrity,
+  not completeness — so a bundle that dumped zero rows for a table (a
+  scoping bug, corruption, or a hand-edited manifest) still reported
+  `✓ VALID`. Bundle creation now records each table's row count in the
+  manifest (`contents.table_row_counts`), and for an **unencrypted** bundle
+  `verify` compares the payload's actual counts against it, reporting
+  `INVALID` on a divergence instead of passing silently. An **encrypted**
+  bundle's completeness still cannot be checked here — `verify` deliberately
+  never asks for a passphrase, which is what lets it run unattended against
+  a whole directory of nightly bundles — but the CLI and API now say so
+  explicitly (`completeness_checked: false`, with a reason) instead of
+  implying the check happened. `crewship backup restore --dry-run`, which
+  already decrypts, makes the same comparison and reports it as
+  `payload_row_count_mismatches`, plus a second, separate comparison —
+  `rows_inserted_shortfalls` — for what actually landed on the target. A
+  bundle written before this change carries no recorded counts and is
+  reported the same honest "not verified" way, never as a false pass or a
+  new failure.
+
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
   conversation: a person opening a thread, a routine minting **one chat per

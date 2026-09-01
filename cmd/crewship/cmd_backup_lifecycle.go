@@ -199,6 +199,16 @@ type droppedCol struct {
 	Rows   int    `json:"rows"`
 }
 
+// rowCountMismatch mirrors backup.TableRowCountMismatch on the wire (#2009):
+// one table whose row count did not match what the manifest recorded, at
+// either the payload level (bundle vs. its own manifest) or the insert
+// level (what landed on the target vs. the manifest).
+type rowCountMismatch struct {
+	Table    string `json:"table"`
+	Recorded int    `json:"recorded"`
+	Actual   int    `json:"actual"`
+}
+
 var backupRestoreCmd = &cobra.Command{
 	Use:   "restore <file>",
 	Short: "Restore a workspace or crew from a backup bundle",
@@ -288,6 +298,10 @@ var backupRestoreCmd = &cobra.Command{
 			SecurityLevelClamps    []restoreClamp `json:"security_level_clamps"`
 			ColumnsDropped         int            `json:"columns_dropped"`
 			DroppedColumns         []droppedCol   `json:"dropped_columns"`
+			// #2009: does the decrypted payload match what the manifest
+			// recorded, and did the insert land what the payload carries.
+			PayloadRowCountMismatches []rowCountMismatch `json:"payload_row_count_mismatches"`
+			RowsInsertedShortfalls    []rowCountMismatch `json:"rows_inserted_shortfalls"`
 			// #2226: a forked restore regenerates the ids the journal
 			// hash chain commits to, so the chain is re-signed at a new
 			// genesis. Zero on a plain restore.
@@ -427,6 +441,35 @@ var backupRestoreCmd = &cobra.Command{
 					"  The bundle was written against a different schema. Rows that needed one of those columns to satisfy a NOT NULL or a primary key did NOT land, and the restore could not report them individually.\n"+
 					"  Check the tables named above before treating this restore as complete.",
 				out.ColumnsDropped, verb, strings.Join(details, ", "), more))
+		}
+		// #2009: does the decrypted payload actually carry what the
+		// manifest claimed at create time. Distinct from columns_dropped —
+		// this is the bundle disagreeing with its OWN manifest, not with
+		// the target schema.
+		if len(out.PayloadRowCountMismatches) > 0 {
+			details := make([]string, 0, len(out.PayloadRowCountMismatches))
+			for _, m := range out.PayloadRowCountMismatches {
+				details = append(details, fmt.Sprintf("%s (recorded %d, actual %d)", m.Table, m.Recorded, m.Actual))
+			}
+			cli.PrintWarning(fmt.Sprintf(
+				"This bundle's payload does not match its own manifest for %d table(s): %s.\n"+
+					"  The manifest was written against a different dump than the payload carries — treat this bundle as suspect before relying on it for disaster recovery.",
+				len(out.PayloadRowCountMismatches), strings.Join(details, "; ")))
+		}
+		// #2009: did the insert pass actually land what the payload
+		// carries, table by table — the summary that catches a shortfall
+		// none of the more specific reports above (columns_dropped, a PK
+		// collision) named. Never printed on a dry run — nothing was
+		// inserted to compare.
+		if len(out.RowsInsertedShortfalls) > 0 {
+			details := make([]string, 0, len(out.RowsInsertedShortfalls))
+			for _, m := range out.RowsInsertedShortfalls {
+				details = append(details, fmt.Sprintf("%s (recorded %d, landed %d)", m.Table, m.Recorded, m.Actual))
+			}
+			cli.PrintWarning(fmt.Sprintf(
+				"Fewer rows landed than the manifest recorded for %d table(s): %s.\n"+
+					"  Check ColumnsDropped and the tables above for a specific cause; if none apply, a primary-key collision on the target likely swallowed them.",
+				len(out.RowsInsertedShortfalls), strings.Join(details, "; ")))
 		}
 		return nil
 	},

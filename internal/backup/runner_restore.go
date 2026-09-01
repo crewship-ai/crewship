@@ -162,6 +162,29 @@ type RestoreResult struct {
 	// at the moment it happens.
 	JournalEntriesResigned     int
 	JournalCheckpointsResigned int
+	// PayloadRowCountMismatches lists every table whose decrypted payload
+	// row count does not match Manifest.Contents.TableRowCounts (#2009) —
+	// the same comparison Verify makes, run here because restore already
+	// has the decrypted dump for other reasons and an encrypted bundle
+	// never reaches Verify's version of this check at all. Empty when the
+	// manifest carries no recorded counts (bundle predates #2009) or when
+	// every table agrees. Reported, not refused: a divergence here means
+	// the bundle is not what its own manifest claims, which the operator
+	// needs to know about but which restoring anyway (with that caveat)
+	// may still be the right call in a DR scenario.
+	PayloadRowCountMismatches []TableRowCountMismatch
+	// RowsInsertedShortfalls lists every table where fewer rows landed on
+	// the committed path (RestoreStats.RowsInsertedByTable) than the
+	// manifest recorded at create time (#2009). Unlike
+	// PayloadRowCountMismatches this is about the TARGET, not the bundle:
+	// the payload can be complete and a table still come up short here —
+	// a schema-skew column drop (#2034), a PK collision INSERT OR IGNORE
+	// swallowed, a table the target schema lacks entirely. Those each have
+	// their own more specific report (ColumnsDropped, the no-op-restore
+	// error); this is the summary that catches whatever they don't. Empty
+	// on a dry run (nothing was inserted to compare) and on a bundle with
+	// no recorded counts.
+	RowsInsertedShortfalls []TableRowCountMismatch
 }
 
 // warnSecurityLevelClamps emits the operator-facing warning for a restore
@@ -778,6 +801,23 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		return nil
 	}
+	// #2009: compare what the decrypted payload actually carries against
+	// what the manifest recorded at create time — the same comparison
+	// Verify makes for an unencrypted bundle, run here unconditionally
+	// because restore already holds the decrypted dump regardless of
+	// encryption. Computed once and shared by both the dry-run and
+	// committed results below; extracted.DBDump has already been through
+	// any --as-workspace/--as-crew id/slug rewrites at this point, but
+	// those never add or remove rows, so the counts are unaffected by
+	// them.
+	payloadMismatches := compareRowCounts(manifest.Contents.TableRowCounts, tableRowCounts(extracted.DBDump))
+	if !opts.FilesOnly {
+		// A --files-only resume applies no DB dump by design (see below) —
+		// warning about the payload's DB section here would read as a
+		// problem with a run that never touched the database at all.
+		warnRowCountMismatches(opts.Logger, "payload row counts", payloadMismatches)
+	}
+
 	// Dry-run short-circuit: all validation already ran (manifest
 	// parse, checksum verify, payload extract, schema-skew). Nothing
 	// left mutates state, so return early with a synthetic success
@@ -811,17 +851,18 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		warnDroppedColumns(opts.Logger, droppedColumns, columnsDropped, true)
 		return &RestoreResult{
-			Manifest:               manifest,
-			RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
-			RestoredWorkspaceID:    firstWorkspaceID(extracted.DBDump),
-			CrewsCount:             len(manifest.Contents.Crews),
-			RowsInserted:           rowsSeen, // dry-run reports potential inserts
-			DockerPhaseSkipped:     skipDocker,
-			DroppedCrewFilesystems: droppedCrewFilesystems,
-			SecurityLevelClamped:   clamped,
-			SecurityLevelClamps:    clamps,
-			ColumnsDropped:         columnsDropped,
-			DroppedColumns:         droppedColumns,
+			Manifest:                  manifest,
+			RestoredWs:                firstWorkspaceSlug(extracted.DBDump),
+			RestoredWorkspaceID:       firstWorkspaceID(extracted.DBDump),
+			CrewsCount:                len(manifest.Contents.Crews),
+			RowsInserted:              rowsSeen, // dry-run reports potential inserts
+			DockerPhaseSkipped:        skipDocker,
+			DroppedCrewFilesystems:    droppedCrewFilesystems,
+			SecurityLevelClamped:      clamped,
+			SecurityLevelClamps:       clamps,
+			ColumnsDropped:            columnsDropped,
+			DroppedColumns:            droppedColumns,
+			PayloadRowCountMismatches: payloadMismatches,
 
 			// A dry run of a FORKED restore already performed the
 			// re-sign, in memory, on its way here — reporting 0 would
@@ -997,6 +1038,18 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 	}
 
+	// #2009: did what landed on the TARGET match what the manifest
+	// recorded, table by table? Distinct from payloadMismatches above —
+	// that one asks whether the bundle is what it claims to be; this one
+	// asks whether the insert pass actually landed it. A table can come up
+	// short here for reasons that already have their own, more specific
+	// report (a dropped key column — #2034 — or a PK collision INSERT OR
+	// IGNORE swallowed); this is the summary that catches whatever those
+	// don't. Empty on a dry run — stats.RowsInsertedByTable is nil there,
+	// since nothing was inserted to compare.
+	rowsInsertedShortfalls := compareRowCounts(manifest.Contents.TableRowCounts, stats.RowsInsertedByTable)
+	warnRowCountMismatches(opts.Logger, "rows inserted", rowsInsertedShortfalls)
+
 	// No-op restore detection: the bundle carried rows but every one
 	// of them collided with an existing primary key and INSERT OR
 	// IGNORE silently dropped it. The classic cause is "restore into
@@ -1024,8 +1077,10 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			// "every PK collided" message is wrong if what actually
 			// happened is that the key columns were dropped. Carrying the
 			// skew out here is what lets the operator tell them apart.
-			ColumnsDropped: stats.ColumnsDropped,
-			DroppedColumns: stats.DroppedColumns,
+			ColumnsDropped:            stats.ColumnsDropped,
+			DroppedColumns:            stats.DroppedColumns,
+			PayloadRowCountMismatches: payloadMismatches,
+			RowsInsertedShortfalls:    rowsInsertedShortfalls,
 		}, fmt.Errorf("%w: 0 of %d rows inserted — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", ErrNoOpRestore, stats.RowsSeen)
 	}
 
@@ -1037,14 +1092,16 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// Set on the ordinary path too, not just the resume: reporting 0
 		// here while crews_count says 4 would be a fresh way of lying
 		// about what landed, in a field added to stop exactly that.
-		CrewsRestored:          crewsRestored,
-		RowsInserted:           stats.RowsInserted,
-		DockerPhaseSkipped:     skipDocker,
-		DroppedCrewFilesystems: droppedCrewFilesystems,
-		SecurityLevelClamped:   stats.SecurityLevelClamped,
-		SecurityLevelClamps:    stats.SecurityLevelClamps,
-		ColumnsDropped:         stats.ColumnsDropped,
-		DroppedColumns:         stats.DroppedColumns,
+		CrewsRestored:             crewsRestored,
+		RowsInserted:              stats.RowsInserted,
+		DockerPhaseSkipped:        skipDocker,
+		DroppedCrewFilesystems:    droppedCrewFilesystems,
+		SecurityLevelClamped:      stats.SecurityLevelClamped,
+		SecurityLevelClamps:       stats.SecurityLevelClamps,
+		ColumnsDropped:            stats.ColumnsDropped,
+		DroppedColumns:            stats.DroppedColumns,
+		PayloadRowCountMismatches: payloadMismatches,
+		RowsInsertedShortfalls:    rowsInsertedShortfalls,
 
 		JournalEntriesResigned:     journalChainResigned.Entries,
 		JournalCheckpointsResigned: journalChainResigned.Checkpoints,

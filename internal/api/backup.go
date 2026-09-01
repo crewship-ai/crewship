@@ -465,6 +465,13 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// after its key column was dropped is not counted anywhere else.
 		"columns_dropped": result.ColumnsDropped,
 		"dropped_columns": result.DroppedColumns,
+		// #2009: does the decrypted payload actually carry what the
+		// manifest claimed at create time, and did the insert pass land
+		// what the payload carries. Both belong on the audit row for the
+		// same reason columns_dropped does — completeness the moment it
+		// happened is not reconstructable later from rows_inserted alone.
+		"payload_row_count_mismatches": result.PayloadRowCountMismatches,
+		"rows_inserted_shortfalls":     result.RowsInsertedShortfalls,
 		// A forked restore re-signs the journal chain at a new genesis;
 		// the audit row is where that fact has to be findable later.
 		"journal_entries_resigned":     result.JournalEntriesResigned,
@@ -473,6 +480,18 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	if result.ColumnsDropped > 0 {
 		h.logger.Warn("backup restore dropped columns the target schema does not have",
 			"count", result.ColumnsDropped, "columns", result.DroppedColumns,
+			"path", req.Path, "workspace_id", workspaceID, "user", user.ID,
+			"dry_run", req.DryRun)
+	}
+	if len(result.PayloadRowCountMismatches) > 0 {
+		h.logger.Warn("backup restore: payload row counts do not match the manifest",
+			"mismatches", result.PayloadRowCountMismatches,
+			"path", req.Path, "workspace_id", workspaceID, "user", user.ID,
+			"dry_run", req.DryRun)
+	}
+	if len(result.RowsInsertedShortfalls) > 0 {
+		h.logger.Warn("backup restore: fewer rows landed than the manifest recorded",
+			"shortfalls", result.RowsInsertedShortfalls,
 			"path", req.Path, "workspace_id", workspaceID, "user", user.ID,
 			"dry_run", req.DryRun)
 	}
@@ -525,6 +544,11 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// reported nothing.
 		"columns_dropped": result.ColumnsDropped,
 		"dropped_columns": result.DroppedColumns,
+		// #2009: the two completeness comparisons — does the payload match
+		// the manifest, and did the insert land what the payload carries.
+		// See RestoreResult's doc comments for what distinguishes them.
+		"payload_row_count_mismatches": result.PayloadRowCountMismatches,
+		"rows_inserted_shortfalls":     result.RowsInsertedShortfalls,
 		// A FORKED restore regenerates the ids the journal hash chain
 		// commits to, so it has to re-sign the chain under a new genesis
 		// (#2226). Reported because the fork's journal no longer links

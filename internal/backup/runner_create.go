@@ -442,6 +442,14 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		contents.MemoryBlobsIncluded = memoryBlobsResult.Included
 		contents.MemoryBlobsMissing = len(memoryBlobsResult.Missing)
 	}
+	// #2009: record what the dump actually carries so verify and restore
+	// have something to compare the payload against later. Read from dump
+	// itself (the exact object WriteDBSection just serialised into the
+	// payload), not re-derived — see TableRowCounts's doc comment for what
+	// that does and does not guarantee.
+	if dump != nil {
+		contents.TableRowCounts = tableRowCounts(dump)
+	}
 	manifest := &Manifest{
 		FormatVersion:           FormatVersion,
 		CrewshipVersionAtBackup: DetectCrewshipVersion(opts.CrewshipVersion),

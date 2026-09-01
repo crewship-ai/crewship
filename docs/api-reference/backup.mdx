@@ -253,7 +253,9 @@ Returns the manifest JSON as produced by `backup.Inspect` (`internal/backup/mani
 
 ### GET /api/v1/admin/backups/verify
 
-Recompute the sealed-payload SHA-256 and compare against the MANIFEST. Does not decrypt. Streams the payload from a temp file so peak heap is bounded by the zstd decoder window.
+Recompute the sealed-payload SHA-256 and compare against the MANIFEST — integrity. Never decrypts an ENCRYPTED bundle, so this needs no passphrase and is safe to run unattended against a whole directory of nightly bundles.
+
+For an UNENCRYPTED bundle, also compares the payload's actual per-table row counts against `manifest.contents.table_row_counts` (#2009) — completeness. This is what closes the gap that let a bundle which dumped zero rows for a table (a create-side scoping bug, or corruption) still report `valid: true`: that divergence now sets `valid: false` too, not only a checksum mismatch.
 
 ### Query
 
@@ -270,11 +272,16 @@ The request has no body. **Response:** `200 OK` with the verification object.
   "valid": true,
   "size_bytes": 13421772,
   "manifest": { "format_version": 3, "scope": "workspace", "…": "…" },
-  "error": ""
+  "error": "",
+  "completeness_checked": true,
+  "completeness_skip_reason": "",
+  "table_row_count_mismatches": null
 }
 ```
 
-`valid: false` sets `error` to a human-readable reason (`checksum mismatch`, `truncated payload`, `unreadable bundle`, …).
+`valid: false` sets `error` to a human-readable reason (`checksum mismatch`, `truncated payload`, `unreadable bundle`, a payload/manifest row-count divergence, …).
+
+`completeness_checked` reports whether the row-count comparison ran at all — `false` means **not evaluated**, never "confirmed complete" and never "confirmed incomplete". It is `false` for an encrypted bundle (`completeness_skip_reason` explains and points at `restore --dry-run`, which decrypts and makes the same comparison — see below) and for a bundle written before #2009, which carries no recorded counts to compare against. `table_row_count_mismatches` is non-empty only when `completeness_checked` is `true` and a divergence was found; each entry is `{table, recorded, actual}`.
 
 ## Retention, transfer, and restore
 
@@ -371,7 +378,9 @@ Restore a bundle into the current workspace.
     { "credential_id": "cred_abc123", "name": "deploy-key", "from": "0", "to": 4 }
   ],
   "columns_dropped": 0,
-  "dropped_columns": []
+  "dropped_columns": [],
+  "payload_row_count_mismatches": [],
+  "rows_inserted_shortfalls": []
 }
 ```
 
@@ -386,6 +395,13 @@ Re-calling WITHOUT `files_only` after a rename does not work and is not the reco
 `columns_dropped` counts the values this restore discarded because the bundle named a column this instance's schema does not have; `dropped_columns` names them as `{table, column, rows}`, bounded to 20 pairs while the count stays exact. On a `dry_run` both report what *would* be discarded, which is the point at which you can still do something about it.
 
 Dropping unknown columns is deliberate — it is what lets a bundle from a newer Crewship restore into an older instance — but it is not always harmless, and `rows_inserted` cannot show the difference. A row whose remaining columns satisfy the table lands **without** those values. A row that needed a dropped column to satisfy a `NOT NULL` or a primary key does not land **at all**, and `INSERT OR IGNORE` reports neither the violation nor the loss. That is what a non-zero `columns_dropped` is warning about: the bundle was written against a different schema, and this restore is incomplete in a way nothing else in the response records. Check each table named before treating the restore as done. Restoring a bundle taken before a **non-additive** migration (one that re-keys or renames rather than adds) is the case that produces it.
+
+`payload_row_count_mismatches` and `rows_inserted_shortfalls` (#2009) are two distinct completeness comparisons, both `[{table, recorded, actual}]`:
+
+- `payload_row_count_mismatches` is the same comparison `GET /api/v1/admin/backups/verify` makes for an unencrypted bundle, run here regardless of encryption — restore already has the decrypted payload for other reasons. A non-empty result means the bundle's decrypted contents disagree with what its own manifest recorded; the bundle is not what it claims to be, independent of whatever the target does with it.
+- `rows_inserted_shortfalls` compares what actually landed (`RowsInsertedByTable`) against the manifest's recorded counts, per table. A table can come up short here even when `payload_row_count_mismatches` is empty — a dropped key column (`columns_dropped`, above) or a primary-key collision `INSERT OR IGNORE` swallowed are the usual causes, and each of those already has its own more specific report; this is the summary that catches whatever isn't covered by a more specific one. Empty on a `dry_run` — nothing was inserted to compare.
+
+Neither field causes the restore to fail or roll back; both are reported so the operator can decide, the same way `columns_dropped` is.
 
 ### Errors
 

@@ -400,6 +400,82 @@ func TestBackupRestoreRunE_NoDroppedColumnsNoWarning(t *testing.T) {
 	}
 }
 
+// TestBackupRestoreRunE_PayloadRowCountMismatchWarning is #2009 at the CLI:
+// the bundle's decrypted payload disagrees with what its own manifest
+// recorded, and that has to be loud regardless of what rows_inserted says.
+func TestBackupRestoreRunE_PayloadRowCountMismatchWarning(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetBackupRestoreFlags(t)
+	stub.OnPost("/api/v1/admin/backups/restore", clitest.JSONResponse(200, map[string]any{
+		"restored_ws": "acme", "crews_count": 1, "rows_inserted": 10,
+		"payload_row_count_mismatches": []map[string]any{
+			{"table": "missions", "recorded": 30, "actual": 0},
+		},
+	}))
+
+	var err error
+	out := covCaptureAll(t, func() {
+		err = backupRestoreCmd.RunE(backupRestoreCmd, []string{"/b.tar"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "does not match its own manifest") {
+		t.Errorf("missing payload-mismatch warning; got:\n%s", out)
+	}
+	if !strings.Contains(out, "missions (recorded 30, actual 0)") {
+		t.Errorf("warning must name the table and both counts; got:\n%s", out)
+	}
+}
+
+// TestBackupRestoreRunE_RowsInsertedShortfallWarning covers the OTHER
+// completeness comparison: the payload is fine, but fewer rows landed on
+// the target than the manifest recorded.
+func TestBackupRestoreRunE_RowsInsertedShortfallWarning(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetBackupRestoreFlags(t)
+	stub.OnPost("/api/v1/admin/backups/restore", clitest.JSONResponse(200, map[string]any{
+		"restored_ws": "acme", "crews_count": 1, "rows_inserted": 10,
+		"rows_inserted_shortfalls": []map[string]any{
+			{"table": "workspaces", "recorded": 1, "actual": 0},
+		},
+	}))
+
+	var err error
+	out := covCaptureAll(t, func() {
+		err = backupRestoreCmd.RunE(backupRestoreCmd, []string{"/b.tar"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "Fewer rows landed than the manifest recorded") {
+		t.Errorf("missing rows-inserted-shortfall warning; got:\n%s", out)
+	}
+	if !strings.Contains(out, "workspaces (recorded 1, landed 0)") {
+		t.Errorf("warning must name the table and both counts; got:\n%s", out)
+	}
+}
+
+// The counterpart to both: a clean restore prints neither.
+func TestBackupRestoreRunE_NoRowCountWarningsWhenClean(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetBackupRestoreFlags(t)
+	stub.OnPost("/api/v1/admin/backups/restore", clitest.JSONResponse(200, map[string]any{
+		"restored_ws": "acme", "crews_count": 1, "rows_inserted": 10,
+	}))
+
+	var err error
+	out := covCaptureAll(t, func() {
+		err = backupRestoreCmd.RunE(backupRestoreCmd, []string{"/b.tar"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(out, "does not match its own manifest") || strings.Contains(out, "Fewer rows landed") {
+		t.Errorf("clean restore printed a row-count warning; got:\n%s", out)
+	}
+}
+
 func TestBackupRestoreRunE_DryRun(t *testing.T) {
 	stub := covSetupCli5(t)
 	covResetBackupRestoreFlags(t)

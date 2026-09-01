@@ -553,6 +553,22 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 	return dump, nil
 }
 
+// tableRowCounts reduces a DBDump to how many rows each table carries —
+// len(dump.Tables[table]) per key. Used both to populate
+// Manifest.Contents.TableRowCounts at create time and to re-derive the same
+// shape from a bundle's payload at verify/restore time so the two are
+// directly comparable (#2009).
+func tableRowCounts(dump *DBDump) map[string]int {
+	if dump == nil {
+		return nil
+	}
+	out := make(map[string]int, len(dump.Tables))
+	for table, rows := range dump.Tables {
+		out[table] = len(rows)
+	}
+	return out
+}
+
 // DumpCrew exports rows for a single crew within its workspace. Useful
 // for `--scope=crew` backups which produce same-instance bundles (per
 // PRD section 2.3).
@@ -771,6 +787,14 @@ type RestoreStats struct {
 	// DroppedColumns is the bounded per-(table, column) breakdown of the
 	// above, in the order the insert loop met them.
 	DroppedColumns []DroppedColumn
+	// RowsInsertedByTable is RowsInserted broken out per table (#2009) —
+	// every table the bundle touched gets an entry, including 0 when
+	// every row for that table collided or was dropped. This is what lets
+	// a caller compare what actually landed against
+	// Manifest.Contents.TableRowCounts table by table, rather than only
+	// noticing a shortfall in aggregate the way the RowsSeen/RowsInserted
+	// no-op check already does.
+	RowsInsertedByTable map[string]int
 }
 
 // RestoreDumpTx is RestoreDump with a caller-supplied preflight hook
@@ -904,6 +928,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 		}
+		tableInserted := 0
 		for _, row := range rows {
 			// pendingClamp is only reported if the row actually lands:
 			// INSERT OR IGNORE silently drops a PK collision, and telling an
@@ -967,12 +992,17 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			landed := true
 			if n, err := res.RowsAffected(); err == nil {
 				stats.RowsInserted += int(n)
+				tableInserted += int(n)
 				landed = n > 0
 			}
 			if pendingClamp != nil && landed {
 				appendSecurityLevelClamp(&stats, *pendingClamp)
 			}
 		}
+		if stats.RowsInsertedByTable == nil {
+			stats.RowsInsertedByTable = map[string]int{}
+		}
+		stats.RowsInsertedByTable[table] += tableInserted
 	}
 	// Settled once the insert pass is done, so the caller sees one number
 	// for the whole restore. On an early error return above, the tx rolls
