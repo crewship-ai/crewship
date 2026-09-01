@@ -1333,7 +1333,14 @@ func (h *AssignmentHandler) finishAssignment(
 				_ = h.db.QueryRowContext(ctx, `SELECT name FROM agents WHERE id = ?`, agentID).Scan(&agentName)
 
 				var commentBody string
-				if errMsg != "" {
+				if status == "CANCELLED" {
+					// cancel_requested_at wins even when the run itself
+					// reported a late failure (errMsg may be non-empty here)
+					// — this must be checked before errMsg != "" or a stopped
+					// run announces itself as failed. Never the failure
+					// framing/text, mirroring the broadcast switch below.
+					commentBody = fmt.Sprintf("**%s's work was cancelled.**", agentName)
+				} else if errMsg != "" {
 					// Durable, user-facing surface — never the raw error (may
 					// carry container/exec internals). The full errMsg already
 					// landed in assignments.error_message + the run journal
@@ -1361,7 +1368,10 @@ func (h *AssignmentHandler) finishAssignment(
 						cid, groupID.String, agentID, commentBody, now, now)
 					aid := generateCUID()
 					action := "task_completed"
-					if errMsg != "" {
+					switch {
+					case status == "CANCELLED":
+						action = "task_cancelled"
+					case errMsg != "":
 						action = "task_failed"
 					}
 					_, _ = h.db.ExecContext(ctx,
@@ -1377,6 +1387,21 @@ func (h *AssignmentHandler) finishAssignment(
 	}
 
 	switch {
+	case status == "CANCELLED":
+		// cancel_requested_at wins over whatever the run itself reported —
+		// a clean completion (no error text either way) AND a late failure
+		// (errMsg may be non-empty here; see the error_message decision in
+		// this function's own comment above the CAS UPDATE). Checked before
+		// errMsg != "" specifically so a late failure that arrived after
+		// Stop still reads as cancelled, not failed — "assignment_completed"
+		// would be a lie here too (Stop was called and the row is not
+		// COMPLETED), so this case must come first, not merely before
+		// "default".
+		broadcastChannelEvent(h.hub, "session", chatID, "assignment_cancelled",
+			map[string]string{
+				"id":     assignmentID,
+				"target": targetSlug,
+			})
 	case errMsg != "":
 		// Chat bubble — user-facing, same sanitization as the mission
 		// comment above. The raw errMsg already reached the DB run
@@ -1386,15 +1411,6 @@ func (h *AssignmentHandler) finishAssignment(
 				"id":     assignmentID,
 				"target": targetSlug,
 				"error":  userFacingAssignmentError(errMsg),
-			})
-	case status == "CANCELLED":
-		// No error text either way — cancel_requested_at won even over a
-		// clean completion. "assignment_completed" would be a plain lie
-		// here (Stop was called and the row is not COMPLETED).
-		broadcastChannelEvent(h.hub, "session", chatID, "assignment_cancelled",
-			map[string]string{
-				"id":     assignmentID,
-				"target": targetSlug,
 			})
 	default:
 		broadcastChannelEvent(h.hub, "session", chatID, "assignment_completed",

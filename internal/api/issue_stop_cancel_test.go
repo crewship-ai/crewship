@@ -313,24 +313,27 @@ func TestFinishAssignment_CancelRequested_OverridesLateCompletion(t *testing.T) 
 					"reported outcome (%s)", status, tc.name)
 			}
 			if tc.lateErrMsg != "" {
-				// FINDING (not asserted as a failure below — this is current,
-				// observed behavior, not a forced expectation): a late FAILED
-				// report is not fully suppressed. Only the status column is
-				// protected by finishAssignment's cancel_requested_at check
-				// (assignments_run.go:1049) — errVal is built from errMsg
-				// unconditionally a few lines later (:1057-1059) and lands in
-				// error_message on the CANCELLED row anyway. The same
-				// asymmetry reaches two other observable surfaces beyond this
-				// column: the switch at :1283-1310 tests `errMsg != ""` BEFORE
-				// `status == "CANCELLED"`, so the websocket broadcast for a
-				// late failure is "assignment_failed", not
-				// "assignment_cancelled" — contradicting that switch's own
-				// comment ("cancel_requested_at won even over a clean
-				// completion"); and the mission-comment block at :1239-1245
-				// posts "encountered an issue" with the failure text rather
-				// than a cancellation notice. A late FAILED callback does NOT
-				// "change nothing" on this branch — only a late COMPLETED one
-				// does. See the report for this audit for detail.
+				// DELIBERATE (not a leftover finding): error_message is kept
+				// unconditional. It is operator/diagnostic-facing — the run
+				// journal entry carries the same raw text unconditionally too
+				// (assignments_run.go, the entry built from acc/errMsg above
+				// the CAS UPDATE) — and every user-facing surface that
+				// renders a *failure* from this row is entry-type/status
+				// gated, not error_message-presence gated: the websocket
+				// broadcast switch checks `status == "CANCELLED"` BEFORE
+				// `errMsg != ""` (assignments_run.go, the switch above the
+				// workspace broadcast) so a late failure now emits
+				// "assignment_cancelled", and the mission-comment block
+				// checks `status == "CANCELLED"` first too, posting a
+				// cancellation notice instead of "encountered an issue".
+				// TestFinishAssignment_CancelRequested_LateFailure_* in
+				// assignments_run_cancel_leak_test.go covers those two
+				// surfaces directly. Losing the raw text from this column
+				// entirely would remove the only durable, queryable record of
+				// "what actually broke" for a run that both failed and was
+				// stopped, which is worse for debugging than a column that
+				// disagrees with the (correct) status field — see the report
+				// for this change for the readers checked before deciding.
 				if errMsg != tc.lateErrMsg {
 					t.Errorf("error_message = %q, want it to still carry the late report's raw text (%q) — "+
 						"this assertion documents current behavior, not the ideal", errMsg, tc.lateErrMsg)
