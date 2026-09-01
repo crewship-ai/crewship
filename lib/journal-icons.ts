@@ -190,6 +190,10 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "pipeline.schedule.circuit_breaker_tripped": ShieldAlert,
   "pipeline.schedule.missed_occurrences": Clock,
   "pipeline.runs_swept": Trash2,
+  // The fire never became a run at all — a genuine failure, not a policy
+  // refusal, so it takes the same XCircle glyph as pipeline.run.failed
+  // rather than the ShieldAlert used for throttle/depth-cap refusals.
+  "pipeline.webhook.fire_failed": XCircle,
 
   // ── Automation ────────────────────────────────────────────────────
   // Both are a rule being REFUSED, and the distinction matters: one is
@@ -197,6 +201,10 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // (you have built a cycle). One glyph for both would hide which.
   "automation.throttled": Gauge,
   "automation.depth_exceeded": ShieldAlert,
+  // A matched rule that could not park its deferred run — an infra
+  // failure, not a refusal, so it shares XCircle with the other .failed
+  // outcomes rather than the ShieldAlert refusals above.
+  "automation.enqueue_failed": XCircle,
 
   // ── Chat ──────────────────────────────────────────────────────────
   "chat.user_message": MessageSquare,

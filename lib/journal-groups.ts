@@ -52,9 +52,11 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "pipeline.dry_run",
     "pipeline.schedule.circuit_breaker_tripped",
     "pipeline.schedule.missed_occurrences",
+    "pipeline.webhook.fire_failed",
     "pipeline.runs_swept",
     "automation.throttled",
     "automation.depth_exceeded",
+    "automation.enqueue_failed",
   ],
   keeper: [
     "keeper.request",
