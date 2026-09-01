@@ -230,6 +230,12 @@ var categoryByKind = map[string]string{
 	"memory_consolidation":             CategoryMemory,
 	"schedule_missed":                  CategoryRoutinesMissed,
 	"schedule_circuit_breaker_tripped": CategoryRoutinesMissed,
+	// A webhook fire or an automation match that never became a run is the
+	// same operator concern as a missed occurrence: work that should have
+	// happened and did not. Routed with the schedule kinds above so it reaches
+	// the same channels (A4 — trigger failure visible for all three kinds).
+	"webhook_fire_failed":       CategoryRoutinesMissed,
+	"automation_enqueue_failed": CategoryRoutinesMissed,
 }
 
 // SubkindRoutineUpdate is the payload discriminator a notify step writes so its
