@@ -82,8 +82,8 @@ type Matcher struct {
 	// and not in production because one side round-tripped through SQLite.
 	//
 	// A key NO emitter writes is not an error here and cannot be: this type
-	// knows nothing about the 117 journal entry types or their payloads. The
-	// rule is simply saved and matches nothing.
+	// knows nothing about the journal's registered entry types or their
+	// payloads. The rule is simply saved and matches nothing.
 	//
 	// That silence shipped once: `--payload-equals to=DONE` was the documented
 	// first example for months against an emitter that wrote only `action` and
@@ -215,8 +215,28 @@ const (
 )
 
 // Validate checks the fields a caller controls, defaulting the burst controls
-// when unset. It is the single gate both the HTTP handler and the store use,
-// so an automation created through any door has the same guarantees.
+// when unset. It is the single gate every writer uses — the HTTP handler
+// (internal/api/automations.go, via Store.Create/Update), Store.Create and
+// Store.Update themselves, and internal/api/pages_wake.go's page-wake-gate
+// reconciler, which inserts with raw SQL inside the page's own transaction
+// and relies on this func, not the store, to keep its rows honest — so an
+// automation created through any door has the same guarantees.
+//
+// The event_type registry check and the payload_equals key check both live
+// here (moved from internal/api/automations.go in the same change that made
+// journal.AllEntryTypes actually complete — PRD-ISSUES-AND-ROUTINES-2026
+// §A3) precisely so pages_wake.go's raw-SQL path is covered without having
+// to duplicate them: before, that path called Validate() and believed its
+// own doc comment that doing so "gates every row", which was false for
+// exactly these two checks.
+//
+// What is NOT here, deliberately: whether a.Action.RoutineSlug names a
+// routine that actually exists. That is a database read, and Validate is a
+// pure function — a stored rule's routine_slug is allowed to dangle (see
+// Store.ListActive's comment on why: "the row stays in the table and starts
+// working the moment the routine exists"), so a caller with database access
+// checks it itself, and only when routine_slug is part of what changed
+// (internal/api/automations.go's Patch).
 func (a *Automation) Validate() error {
 	if a.WorkspaceID == "" {
 		return errors.New("automation: workspace_id required")
@@ -226,6 +246,14 @@ func (a *Automation) Validate() error {
 	}
 	if a.EventType == "" {
 		return errors.New("automation: event_type required")
+	}
+	et := journal.EntryType(a.EventType)
+	if !journal.Registered(et) {
+		return fmt.Errorf("automation: event_type %q is not a registered journal entry type; %s",
+			a.EventType, eventTypeHint(a.EventType))
+	}
+	if err := validatePayloadEqualsKeys(et, a.Matcher.PayloadEquals); err != nil {
+		return err
 	}
 	if a.ActionKind == "" {
 		a.ActionKind = ActionKindRoutine

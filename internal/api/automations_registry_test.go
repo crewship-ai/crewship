@@ -160,6 +160,146 @@ func TestAutomationHandlerAcceptsRegisteredEventTypeAndKnownPayloadKey(t *testin
 	}
 }
 
+// TestAutomationHandlerAcceptsAdHocRegisteredEventType is the regression this
+// fix closes: journal.AllEntryTypes's first cut only scanned
+// internal/journal/types.go, so at least eleven real, genuinely-emitted
+// entry types declared ad hoc elsewhere (internal/api/pages_public_tokens.go
+// and internal/harbormaster/reward.go among them) were rejected as
+// "unregistered" even though the events fired in production. `automation
+// create --event page.public_view`, which worked before A3's first cut
+// landed, must work again.
+func TestAutomationHandlerAcceptsAdHocRegisteredEventType(t *testing.T) {
+	db := setupTestDB(t)
+	seedAutomationFixtures(t, db)
+	h := NewAutomationHandler(db, newTestLogger())
+
+	w := httptest.NewRecorder()
+	h.Create(w, automationRequest(t, "POST", "/api/v1/automations", "ws_A", `{
+		"name": "notify on public view", "event_type": "page.public_view",
+		"action": {"routine_slug": "triage"}
+	}`))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body %s — page.public_view is declared and emitted "+
+			"(internal/api/pages_public_tokens.go) even though it is not in internal/journal/types.go", w.Code, w.Body.String())
+	}
+}
+
+// TestAutomationHandlerAcceptsDepthExceededWithPipelineSlugKey pins the
+// automation.depth_exceeded payload-key union: internal/pipeline/journal.go's
+// emitDepthExceeded is a THIRD emitter of this type (besides
+// internal/automation/registry.go's two), and it writes pipeline_id,
+// pipeline_slug, run_id, chain_origin and edge — none of which the other two
+// emitters write. A rule matching on pipeline_slug must not be rejected as
+// an unknown key.
+func TestAutomationHandlerAcceptsDepthExceededWithPipelineSlugKey(t *testing.T) {
+	db := setupTestDB(t)
+	seedAutomationFixtures(t, db)
+	h := NewAutomationHandler(db, newTestLogger())
+
+	w := httptest.NewRecorder()
+	h.Create(w, automationRequest(t, "POST", "/api/v1/automations", "ws_A", `{
+		"name": "chain depth alert", "event_type": "automation.depth_exceeded",
+		"matcher": {"payload_equals": {"pipeline_slug": "triage"}},
+		"action": {"routine_slug": "triage"}
+	}`))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body %s — pipeline_slug is written by "+
+			"internal/pipeline/journal.go's emitDepthExceeded", w.Code, w.Body.String())
+	}
+}
+
+// TestAutomationHandlerPatchSparseSurvivesSoftDeletedRoutine is the second
+// regression this fix closes. Before it, Patch always loaded the current row
+// and re-validated the EFFECTIVE (merged) event_type and routine_slug even
+// when the request body carried neither — so a sparse `PATCH {"enabled":
+// false}` on a rule whose routine had since been soft-deleted returned 400,
+// and the rule could never be disabled, renamed, or have its debounce
+// tuned; the only way out was DELETE and recreate. Store.Update and
+// Store.ListActive both deliberately tolerate a dangling routine reference
+// ("the row stays in the table and starts working the moment the routine
+// exists" — Store.ListActive's own comment); Patch must too, for whatever
+// it did not touch.
+func TestAutomationHandlerPatchSparseSurvivesSoftDeletedRoutine(t *testing.T) {
+	db := setupTestDB(t)
+	seedAutomationFixtures(t, db)
+	h := NewAutomationHandler(db, newTestLogger())
+
+	w := httptest.NewRecorder()
+	h.Create(w, automationRequest(t, "POST", "/api/v1/automations", "ws_A", `{
+		"name": "triage on close", "event_type": "mission.status_change",
+		"action": {"routine_slug": "triage"}
+	}`))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Soft-delete the routine the rule points at, exactly as `routine
+	// delete` would leave it — the automation row is untouched, only the
+	// pipeline it names is gone.
+	if _, err := db.Exec(`UPDATE pipelines SET deleted_at = datetime('now') WHERE workspace_id = ? AND slug = ?`,
+		"ws_A", "triage"); err != nil {
+		t.Fatalf("soft-delete routine: %v", err)
+	}
+
+	req := automationRequest(t, "PATCH", "/api/v1/automations/"+created.ID, "ws_A", `{"enabled": false}`)
+	req.SetPathValue("id", created.ID)
+	w = httptest.NewRecorder()
+	h.Patch(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want 200; body %s — a sparse PATCH that does not touch "+
+			"action.routine_slug must not be blocked by a routine it never mentioned", w.Code, w.Body.String())
+	}
+	var updated struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if updated.Enabled {
+		t.Error("enabled = true, want false")
+	}
+}
+
+// TestAutomationHandlerPatchStillChecksRoutineWhenBodyChangesIt is the
+// counterpart to the sparse-patch test above: when a PATCH DOES set
+// action.routine_slug, that slug must still be checked, soft-deleted-routine
+// tolerance is specifically about fields the body did not touch.
+func TestAutomationHandlerPatchStillChecksRoutineWhenBodyChangesIt(t *testing.T) {
+	db := setupTestDB(t)
+	seedAutomationFixtures(t, db)
+	h := NewAutomationHandler(db, newTestLogger())
+
+	w := httptest.NewRecorder()
+	h.Create(w, automationRequest(t, "POST", "/api/v1/automations", "ws_A", `{
+		"name": "triage on close", "event_type": "mission.status_change",
+		"action": {"routine_slug": "triage"}
+	}`))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	req := automationRequest(t, "PATCH", "/api/v1/automations/"+created.ID, "ws_A",
+		`{"action": {"routine_slug": "does-not-exist"}}`)
+	req.SetPathValue("id", created.ID)
+	w = httptest.NewRecorder()
+	h.Patch(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("patch status = %d, want 400; body %s", w.Code, w.Body.String())
+	}
+}
+
 // TestAutomationHandlerUnmappedEventTypeSkipsPayloadKeyValidation pins the
 // documented limitation: KnownPayloadKeys is a curated subset, not every
 // registered type. A registered type absent from that map must still save —
