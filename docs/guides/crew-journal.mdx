@@ -42,31 +42,46 @@ Entries are immutable -- corrections are new entries with `refs.parent_entry_id`
 
 ### Entry type catalog
 
-Defined in `internal/journal/types.go`. Every type is a stable string -- renames require a backfill migration.
+Most types are declared in `internal/journal/types.go`. `journal.EntryType` is a
+plain string type with no central registry, though, so a call site is free to
+mint its own file-local constant, and a handful do -- the last column of the
+table below names the file when it is not `types.go`. Every type is a stable
+string; renames require a backfill migration.
+
+The **group** column is the chip the type gets in the Crow's Nest Logs filter
+row (`lib/journal-style.ts`). It is not decoration: muting a chip is pushed to
+the server as an `exclude_entry_type` filter, so a type with no group is one
+you cannot filter out of a busy workspace's 5,000-entry window.
+`lib/__tests__/journal-groups.test.ts` scans the Go tree and fails if any type
+below loses its group or its place in either of the two maps that encode it.
 
 <Accordion title="Full entry-type catalog by bucket">
 
-| Bucket | Entry types |
-|---|---|
-| Communication | `peer.conversation`, `peer.escalation` (one type per escalation lifecycle transition — `payload.state` is `pending`, `resolved`, `expired` or `cancelled`), `message.broadcast`, `agent.mentioned` |
-| Mission | `mission.status_change`, `mission.comment`, `assignment.created/running/completed/failed`, `crew.action`, `task.delegated` |
-| **Runs** (since PR #234) | `run.started`, `run.completed`, `run.failed`, `run.cancelled`, `run.timeout` |
-| Security | `keeper.request`, `keeper.decision`, `keeper.rule_auto_tuned`, `guardrail.input_blocked`, `guardrail.output_blocked`, `approval.requested/granted/denied/timeout/cancelled`, `approval.trust_granted/trust_revoked` |
-| Cost | `llm.call`, `llm.cache_hit`, `cost.incurred`, `budget.exceeded`, `budget.warning` |
-| Memory | `memory.updated`, `memory.consolidated`, `memory.priority_changed`, `summary.generated` |
-| Observability | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics`, `container.snapshot` |
-| Presence | `agent.status_change` |
-| Checkpointing | `checkpoint.created`, `checkpoint.restored`, `fork.created` |
-| Eval | `eval.run_started`, `eval.metric`, `eval.regression_detected` |
-| Hooks | `hook.fired`, `hook.blocked` |
-| Pipeline | `pipeline.run.started/completed/failed`, `pipeline.step.started/completed/failed/validation_failed`, `pipeline.dry_run` |
-| Credentials | `credential.auto_assign_failed`, `credential.auto_assign_empty` |
-| Skills | `skill.imported`, `skill.deleted`, `skill.assigned`, `skill.unassigned`, `skill.invoked` |
-| Audit | `audit.entity_created/updated/deleted/restored` (mirrors `audit_logs`) |
-| Provisioning | `provisioning.queued/building/complete/failed` (crew runtime container build) |
-| Chat | `chat.user_message`, `chat.agent_response` (user↔agent turns) |
-| Agent error | `agent.error` (panic recoveries + stream-handling failures) |
-| System | `system.compaction`, `system.migration`, `system.hook_toggled`, `system.consolidation_triggered/completed` |
+| Bucket | Group | Entry types |
+|---|---|---|
+| Communication | `peer` | `peer.conversation`, `peer.escalation` (one type per escalation lifecycle transition — `payload.state` is `pending`, `resolved`, `expired` or `cancelled`), `message.broadcast`, `agent.mentioned`, `notification.delivered/failed/dropped` |
+| Chat | `chat` | `chat.user_message`, `chat.agent_response` (user↔agent turns), `conversation.compacted` |
+| Mission | `mission` | `mission.created`, `mission.assigned`, `mission.status_change`, `mission.comment`, `crew.action` |
+| Assignment | `assignment` | `assignment.created/running/completed/failed`, `task.delegated` |
+| **Runs** (since PR #234) | `run` | `run.started`, `run.completed`, `run.failed`, `run.cancelled`, `run.timeout`, `run.session_init`, `run.agent_span` |
+| Routines | `routine` | `pipeline.run.started/completed/failed`, `pipeline.step.started/completed/failed/validation_failed/skipped/retrying/container_ready`, `pipeline.dry_run`, `pipeline.runs_swept`, `pipeline.schedule.circuit_breaker_tripped`, `pipeline.schedule.missed_occurrences`, `automation.throttled`, `automation.depth_exceeded` |
+| Security | `keeper` | `keeper.request`, `keeper.decision`, `keeper.rule_auto_tuned` (`internal/harbormaster/reward.go`), `guardrail.input_blocked`, `guardrail.output_blocked` |
+| Approvals | `approval` | `approval.requested/granted/denied/timeout/cancelled`, `approval.trust_granted/trust_revoked`, `approval.auto_tuning_reset` (`internal/api/approvals_handler.go`) |
+| Credentials | `keeper` | `credential.revealed`, `credential.reveal_policy_changed`, `credential.sensitivity_lowered`, `credential.lease_issued`, `credential.auto_assign_failed`, `credential.auto_assign_empty` |
+| Cost | `cost` | `llm.call`, `llm.cache_hit`, `cost.incurred`, `budget.exceeded`, `budget.warning` |
+| Memory | `memory` | `memory.updated`, `memory.consolidated`, `memory.consolidation_proposed`, `memory.priority_changed`, `memory.searched`, `memory.config_updated`, `memory.versions_swept`, `memory.write_rejected`, `memory.write_verifier_blocked`, `memory.skill_proposed/skill_approved/skill_rejected`, `summary.generated` |
+| Skills | `skill` | `skill.imported`, `skill.deleted`, `skill.assigned`, `skill.unassigned`, `skill.invoked` |
+| Observability | `exec` / `network` / `file` / `container` | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics`, `container.snapshot` |
+| Presence | `container` | `agent.status_change` |
+| Provisioning | `provisioning` | `provisioning.queued/building/step/complete/failed/build_failed` (crew runtime container build), `sidecar.stale`, `image.stale` |
+| Pages | `page` | `page.produce_denied`, `page.spec.changed`, `page.panel.updated`, `page.panel.stale`, `page.panel.recovered`, `page.wake.fired`, `page.action.dispatched`, `page.grant_added/grant_removed`, `page.owner_transferred` (`internal/api/pages_transfer_owner.go`), `page.published`/`page.link_revoked`/`page.public_view` (`internal/api/pages_public_tokens.go`), `page.webhook_issued`/`page.webhook_revoked` (`internal/api/pages_webhooks.go`) |
+| Audit | `audit` | `audit.entity_created/updated/deleted/restored` (mirrors `audit_logs`) |
+| Checkpointing | `system` | `checkpoint.created`, `checkpoint.restored`, `fork.created` |
+| Backup | `system` | `backup.chain_resigned` — a forked restore re-signed this workspace's hash chain at a new genesis. See [Backup & restore](/guides/backup#forked-restores-re-sign-the-journal-chain). |
+| Eval | `system` | `eval.run_started`, `eval.metric`, `eval.regression_detected` |
+| Hooks | `system` | `hook.fired`, `hook.blocked`, `hook.dispatch_error` |
+| Agent error | `system` | `agent.error` (panic recoveries + stream-handling failures) |
+| System | `system` | `system.compaction`, `system.migration`, `system.hook_toggled`, `system.consolidation_triggered/completed`, `policy.changed` (`internal/api/crew_policy.go`), `queue.sweeper_pumped` (`internal/api/assignments_stuck_sweeper.go`), `onboarding.proposal_applied` (`internal/api/onboarding_proposal.go`) |
 
 </Accordion>
 
@@ -129,6 +144,82 @@ The row carries the run's `trace_id`, so `--trace-id <run-id>` narrows it to one
 ```bash
 crewship journal --type provisioning.step --trace-id <run-id>
 ```
+
+#### `exec.command` — what ran, without the prompt {#exec-command-payload}
+
+Every agent exec emits a `start` entry and a terminal `end` entry. The payload
+is bounded and typed, and it deliberately does **not** contain the prompt:
+
+```json
+{
+  "cmd": [
+    "claude", "--print", "--model", "claude-sonnet-4-6",
+    "--system-prompt", "[PROMPT:system-prompt omitted, 13561 chars]",
+    "--", "[PROMPT:user-message omitted, 48 chars]"
+  ],
+  "truncated": false,
+  "phase": "start",
+  "adapter": "CLAUDE_CODE",
+  "model": "claude-sonnet-4-6",
+  "tool_profile": "CODING",
+  "container_id": "container-ab",
+  "prompt": {
+    "system_sha256": "04ee573f92c5…",
+    "system_chars": 13561,
+    "user_turn_chars": 1284,
+    "chat_id": "chat_…"
+  }
+}
+```
+
+- **`cmd` keeps the argv shape, not its contents.** Same elements, same order,
+  same flags — the terminal block in Crow's Nest still shows exactly what the
+  CLI was asked to do. The elements that carried prompt text are replaced by a
+  placeholder naming the element and its length.
+- **`prompt.system_sha256` is a version identifier.** Two entries quoting the
+  same digest ran the same system prompt, and a prompt change shows as a digest
+  change — without the prompt being stored. There is no digest of the user
+  message: for a short message a digest is a verifier for the text itself.
+  `prompt.chat_id` is the reference to where the message actually lives, and a
+  chat is erasable.
+- **`prompt.user_turn_chars` is the composed turn, not the typed message.** By
+  the time the CLI is invoked, the user message carries the conversation
+  history, episodic recall and any nudge block in front of what the human
+  typed. The human's own message length is `length_chars` on the
+  `chat.user_message` entry.
+- **`truncated` says whether the cap cut anything.** The argv is capped at 512
+  characters per element and 4096 in total, and the markers that say something
+  was cut are charged against the same budget.
+- The terminal entry adds `exit_code` (or `error`) and `duration_ms`.
+
+Why not simply scrub the argv? Because the [credential
+scrubber](/security/threat-model) is defence in depth and not a boundary: it
+cannot match a value nobody registered and whose shape it does not know, and a
+journal entry is hash-chained and append-only, so nothing can redact it after
+the write. The scrub still runs — on what is left, for a credential that
+reaches a non-prompt element.
+
+The `chat.user_message` entry beside it is bounded rather than emptied:
+`payload.content` is scrubbed and capped to the same 240 characters as the
+entry summary, with `length_chars` recording the message's full length in
+characters and `truncated` saying whether the cap applied. It keeps the text
+because the message **is** the entry — it is the "why was the agent doing
+this?" anchor for a Timeline of `exec.command` and `network.egress` rows — so
+within those 240 characters the scrubber is the only control, and a secret it
+does not recognise survives. The full message lives in the chat the entry
+references, which unlike this row can be erased. One consequence worth knowing:
+`crewship journal --query` is a full-text search over summary and payload, so
+free-text search now reaches the first 240 characters of a user message and no
+part of a prompt.
+
+Two neighbours are bounded but not prompt-free, and are a different decision:
+`chat.agent_response` keeps up to 8 KB of the agent's scrubbed reply, and
+`exec.output_chunk` keeps its scrubbed stdout. An agent that quotes its prompt
+back writes that text through those entries, and the scrubber is what stands
+behind them.
+
+A pipeline script step also emits `exec.command`, with a joined `command`
+string instead of a `cmd` array — readers accept either.
 
 Severity is one of `info`, `notice`, `warn`, `error`. Actor types: `agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`.
 
@@ -213,7 +304,7 @@ Emit is asynchronous: entries are queued (buffer 1024), a background goroutine b
 ### HTTP
 
 - `GET /api/v1/journal` -- paginated list, newest first. See the [API reference](/api-reference/journal).
-- `GET /api/v1/journal/stream` -- SSE live tail; seeds with the most recent 50 entries, polls every 1s, emits `event: entry` frames, and heartbeats every 15s. Reconnect with `Last-Event-ID` to skip already-seen rows.
+- `GET /api/v1/journal/stream` -- SSE live tail; seeds with the most recent 50 entries, then wakes on the writer's flush notification (with a 20s fallback ticker, not the 1s poll this line used to claim), emits `event: entry` frames, and heartbeats every 15s. Reconnect with `Last-Event-ID` to skip already-seen rows -- that is how `crewship journal --follow` resumes (`internal/cli/sse.go` sets the header, `followJournal` threads it across reconnects). A **browser** `EventSource` cannot set request headers, so it sends `Last-Event-ID` only on its own built-in retry; a web client that closes and reopens the stream to control its backoff starts clean and must backfill via `?since=`.
 - `GET /api/v1/journal/count` -- total matching count for a filter set; ignores cursor/limit so the badge stays honest.
 - `GET /api/v1/journal/{id}` -- single entry (scoped to workspace; cross-tenant IDs return 404).
 - `POST /api/v1/journal/{id}/priority` -- annotate an entry with `normal`/`high`/`pin`/`permanent`. OWNER or ADMIN only; emits a `memory.priority_changed` audit row.
@@ -240,10 +331,11 @@ Every filter is AND-combined and indexed at the DB level:
 
 | Query param | CLI flag | SQL predicate |
 |---|---|---|
-| `crew_id` | `--crew` | `crew_id = ?` |
-| `agent_id` | `--agent` | `agent_id = ?` |
+| `crew_id` | `--crew` | `crew_id = ?` (name/slug resolved to an id first — see below) |
+| `agent_id` | `--agent` | `agent_id = ?` (name/slug resolved to an id first — see below) |
 | `mission_id` | `--mission` | `mission_id = ?` |
 | `trace_id` | `--trace-id` | `trace_id = ?` (one run's spans) |
+| `run_id` | `--run-id` | `(trace_id = ? OR actor_id = ? OR run_id = ?)` — a run id reaches the journal by three doors depending on the engine |
 | `crew_ids` | -- | CSV `crew_id IN (?,?,...)` (takes precedence over `crew_id`) |
 | `agent_ids` | -- | CSV `agent_id IN (?,?,...)` (takes precedence over `agent_id`) |
 | `entry_type` | `--type` | CSV `entry_type IN (?,?,...)` |
@@ -257,9 +349,27 @@ Every filter is AND-combined and indexed at the DB level:
 
 Pagination is keyset (compound `ts, id`), not offset, so deep paging stays O(log n). `limit` is 1-500, default 100 for list, 50 for the SSE seed.
 
+<Note>
+"Indexed at the DB level" is a claim worth re-checking with `EXPLAIN QUERY
+PLAN` whenever a filter or an index changes — a partial index silently stops
+matching when the query's predicate no longer *implies* the index's, and
+nothing errors. `severity IN ('error')` does not imply
+`WHERE severity IN ('warn','error')`, and `priority IN ('high')` does not imply
+`WHERE priority != 'normal'`, so both single-value filters fell back to a
+workspace scan for as long as those partial indexes were the only ones
+(fixed by `20260831093500_journal_filter_indexes.sql`, which adds unconditional
+`(workspace_id, severity, ts)` and `(workspace_id, priority, ts)` twins).
+
+`run_id` has the same shape of trap for a different reason: SQLite turns an OR
+into an index union only when **every** leg is indexable, so the unindexed
+`actor_id` leg cost the whole three-door predicate its indexes — and `count`
+emits no `LIMIT`, so `/journal/count?run_id=` scanned the entire workspace. The
+same migration indexes `actor_id`.
+</Note>
+
 ### Full-text search
 
-Migration 55 adds a contentless FTS5 virtual table `journal_entries_fts` mirroring `summary` and `payload`, with insert / update / delete triggers that keep it in sync with the base table. The `?q=` query parameter (CLI: `--query` / `-q`) compiles to a phrase-wrapped `MATCH` against this index:
+Migration 55 adds a contentless FTS5 virtual table `journal_entries_fts` mirroring `summary` and `payload`, with insert / update / delete triggers that keep it in sync with the base table. The `?q=` query parameter (CLI: `--query` / `-q`) compiles to a `MATCH` against this index:
 
 ```bash
 crewship journal --query "OOM" --since 24h
@@ -271,7 +381,34 @@ GET /api/v1/journal?q=ratelimit&since=2026-04-29T00:00:00Z
 GET /api/v1/journal/stream?q=approval         # live tail filtered by FTS
 ```
 
-The same parameter works on the SSE stream — the seed slice and every subsequent poll apply the FTS filter, so a "watch for `OOM`" tab stays cheap. `q` is bounded in length (rejected if absurd) and merges with structural filters (`crew_id`, `severity`, ...) via AND.
+The same parameter works on the SSE stream — the seed slice and every subsequent wake apply the FTS filter, so a "watch for `OOM`" tab stays cheap. `q` is bounded in length (rejected if absurd) and merges with structural filters (`crew_id`, `severity`, ...) via AND.
+
+**How the query is compiled.** The input is split on whitespace, each term is
+wrapped in its own FTS5 phrase literal, and the phrases are `AND`-joined with a
+trailing `*` on the last one. Three consequences:
+
+- Word order is irrelevant — `session morgan` and `morgan session` are the same
+  query. (Before #2206 the whole input was one phrase, so reversing two words
+  returned zero rows.)
+- The last term prefix-matches, so `morg` finds `morgan` while the user is
+  still typing. Earlier terms match whole words.
+- Operators typed by the user stay literal. `alpha OR beta` requires all three
+  of `alpha`, `or` and `beta`; `NEAR(...)`, `NOT`, `summary:x`, `*` and stray
+  quotes cannot restructure the query or error it out. Terms with no letter or
+  digit are dropped; an input made entirely of them matches nothing rather than
+  everything.
+
+The tokenizer is `porter ascii`, so terms are stemmed — which is why a prefix
+on a stemmed word (`runn`) may miss a row whose indexed form is `run`.
+
+**Crew and agent references.** `crew_id` / `agent_id` (and their `_ids` CSV
+forms) accept an id, a slug, or a display name, resolved case-insensitively
+inside the caller's workspace before the SQL is built. A reference that resolves
+to nothing is used as-is against the id column, so entries belonging to a
+deleted agent stay reachable by id and a typo returns zero rows instead of
+silently widening the filter. An ambiguous display name expands to every
+matching id. This is server-side on purpose: the UI search box (`agent:viktor`),
+the CLI (`--agent morgan`) and any direct API caller all get it from one place.
 
 ### Lookup table (card enrichment)
 
@@ -302,6 +439,35 @@ Since PR #234 the standalone `/runs` page is folded into `/journal` as a preset 
 - **Spend** — cost rollup: total spend, spend-over-time by agent, and the top-N most expensive routines/runs in the window. See [below](#spend-cost-rollup).
 
 All three share the same SSE stream and FTS index — selecting a tab does not retrigger a fetch, only a client-side filter shift. Audit-tab navigation is dropped (it was always a redirect placeholder); the `/audit` page remains in the sidebar for security review.
+
+### Timeline — row anatomy
+
+Seven columns, left to right (`components/features/logs/logs-list.tsx`):
+
+| col | width | content |
+|---|---|---|
+| severity | 3px | Colour bar. Carries a visually-hidden `Severity: <level>` for screen readers — the colour is not the only signal. |
+| time | 84px | `HH:MM:SS.mmm`, local. |
+| identity | 38px | 18px agent avatar + 15px crew icon. |
+| type | 124px | Entry-type icon (`lib/journal-icons.ts`, all 127 types) + the full dotted `entry_type`, tinted by group. The group name is repeated visually-hidden, so group membership is not colour-only either. |
+| summary | rest | `entry.summary`, minus a leading `"<agent>: "` when that prefix names the agent already shown in the identity column. |
+| age | 62px | Relative time. |
+| chevron | 14px | The disclosure button — `aria-expanded` plus `aria-controls` onto the detail region, which is a *sibling* grid item, not a descendant. The row container keeps a click handler for the mouse but is not itself a button: with the detail inside a `role="button"`, the detail's own jump controls were nested interactive content and the button's accessible name grew to include the whole payload JSON. |
+
+Avatar, crew icon and names come from the cached [lookup table](#lookup-table-card-enrichment) — the row never joins on the streaming path, and never blocks on it either:
+
+The avatar is gated on `actor_type`, **not** on whether `agent_id` is set. A non-agent actor routinely names an agent, because the agent is what the event is *about* rather than who caused it — `chat.user_message` (actor `user`), `container.snapshot`, `conversation.compacted` and `sidecar.stale` (actor `system`) all emit with `AgentID` populated. Branching on the id would put an agent's face on a human's message and tell a screen reader the agent said it.
+
+- `actor_type: "agent"` and resolved → DiceBear avatar from `avatar_seed` + `avatar_style`. Seed precedence is `avatar_seed || name`, matching `ScopeBadge` in `logs-toolbar.tsx` — the dropdown and the row draw the same agent on the same screen, so the rule has to be identical in both or one agent gets two faces.
+- `agent_id` present but unresolved (deleted agent, lookup still in flight) → an avatar seeded from the id, and a shortened id for a name. Stable across renders, so the row does not flicker.
+- Any other `actor_type` (`user`, `system`, `keeper`, `sidecar`, `orchestrator`) → a labelled glyph, never a blank seat. When the entry also carries an `agent_id`, the agent stays in the glyph's label (`"system actor, agent Morgan"`) — the row still says which agent the event concerns, without claiming the agent acted.
+- No crew → an empty box, so the type column stays on one vertical line down the list.
+
+Long entry types ellipsize: the catalog's median is 18 characters and its tail runs to 41. The untruncated string is on the cell's `title` and in the expanded detail.
+
+Rows are memoized and the list's `itemContent` is stable, so a keystroke in the search box does not re-render every mounted row. The lookup is read **once in `LogsList`** and the resolved agent and crew are passed down as props: `React.memo` does not stop a context change from re-rendering a component, and the provider flips `loading` around every refetch, so a row that read the lookup itself would be swept three times by each `agent.updated` event whether or not the data changed. Anything added to the row must keep all three properties or virtualization regresses under load.
+
+The right-hand stats rail reads the same lookup: **Top agents** shows each agent's avatar and name rather than a shortened uuid, and the bar takes a seed-derived hue so six agents no longer read as one series.
 
 ### Runs — fleet operations overview
 
@@ -364,6 +530,70 @@ crewship spend --format json | jq '.top_routines'
 <Note>
 This is a **separate, journal-native rollup** from [Paymaster](/guides/paymaster)'s `/api/v1/paymaster/spend/*` endpoints (`crewship cost`, `crewship paymaster ...`) — an intentional duplication, not an oversight. Paymaster's ledger-backed rollup and this journal-native one read overlapping but not identical data; if you're deciding which to extend, ask before assuming one supersedes the other.
 </Note>
+
+## Shareable views
+
+A dashboard is returned to, not explored. `/journal` keeps everything that
+answers *what am I looking at* in the URL, so a view is a link.
+
+### The URL contract
+
+| Param | Values | Applies to |
+|---|---|---|
+| `tab` | `timeline` \| `runs` \| `spend` (omitted = `timeline`) | all |
+| `time` | `5m` \| `15m` \| `1h` \| `24h` \| `7d` \| `30d` \| `all` \| `custom` (omitted = `24h`) | Timeline |
+| `from`, `to` | epoch-ms bounds; only read when `time=custom` and `to > from` | Timeline |
+| `crew_id`, `agent_id`, `trace_id` | ids | Timeline |
+| `severity` | `info` \| `notice` \| `warn` \| `error` (omitted = all) | Timeline |
+| `mute` | CSV of entry groups to hide | Timeline |
+| `q` | the search box, structured tokens included (`agent:viktor severity:error`) | Timeline |
+| `run_window` | `24h` \| `7d` \| `30d` (omitted = `24h`) | Runs |
+| `run_status` | `RUNNING` \| `COMPLETED` \| `FAILED` \| `CANCELLED` \| `TIMEOUT` (omitted = all) | Runs |
+| `run_trigger` | `USER` \| `WEBHOOK` \| `CRON` \| `AGENT` \| `SYSTEM` (omitted = all) | Runs |
+| `run_page` | 1-based page of the recent-runs table (omitted = 1) | Runs |
+
+Unknown or malformed values fall back to the default rather than being bound
+as a filter, so a stale bookmark cannot surface a 403 or a rejected query.
+
+**Not in the URL, on purpose.** Wrap, sort direction, dedup, refresh cadence,
+the stats-rail collapse and the metrics-visibility chip answer *how do I like
+to read*, not *what am I looking at*. They are per-user preferences
+(`/api/v1/me/preferences`), so a link never re-styles the recipient's journal
+and a URL value never fights the stored preference on load. Histogram bucket
+selection stays component-local: it is a transient drill-down over the loaded
+buffer, keyed to a time range the recipient may not be in. The live-tail pause
+is a session control — "stop moving while I read this" means nothing to
+whoever opens the link.
+
+Filter changes are `push`ed, so Back steps back through them instead of
+leaving the page. The search box is the one exception: it `replace`s, because
+one history entry per typing pause would bury the view you came from.
+
+### Saved views
+
+The chip row above the tabs reads and writes the same server-stored bookmarks
+as [`crewship saved-view`](/api-reference/saved-views) — `filters_json` carries the URL
+params above, so a view made in the UI is editable from the CLI and back.
+
+```
+crewship saved-view create --name "Failed CRON runs" --shared \
+  --filters '{"surface":"journal","params":{"tab":"runs","run_status":"FAILED","run_trigger":"CRON","run_window":"7d"}}'
+crewship saved-view list
+```
+
+`--shared` hands the view to the whole workspace; only its owner can update or
+delete it.
+
+<Note>
+The `surface` key inside `filters_json` is what separates journal views from
+the issue tracker's — **not** `view_type`. `saved_views.view_type` carries a
+`CHECK (view_type IN ('board','list'))` constraint, so a third value is a 500
+from the insert, not a new category. Both surfaces read the same
+`GET /api/v1/saved-views` list and filter it by this key.
+</Note>
+
+Applying a view replaces the entire journal param set, so a view that does not
+name `severity` clears it rather than inheriting whatever was on screen.
 
 ## Outcome verdict — `summary.generated`
 

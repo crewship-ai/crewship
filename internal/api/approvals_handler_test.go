@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -158,6 +160,45 @@ func TestApprovals_List_GarbageLimitFallsBackToDefault(t *testing.T) {
 		if rr.Code != http.StatusOK {
 			t.Errorf("limit=%q: status = %d, want 200", raw, rr.Code)
 		}
+	}
+}
+
+func TestApprovals_List_PaginatesWithoutDroppingHistory(t *testing.T) {
+	h, userID, wsID := approvalsHandlerRig(t)
+	for i := 0; i < 3; i++ {
+		_ = enqueueApproval(t, h, wsID, userID, fmt.Sprintf("page-row-%d", i))
+	}
+
+	request := func(offset int) struct {
+		Rows    []json.RawMessage `json:"rows"`
+		HasMore bool              `json:"has_more"`
+	} {
+		req := withWorkspaceUser(
+			httptest.NewRequest("GET", fmt.Sprintf("/api/v1/approvals?status=all&limit=2&offset=%d", offset), nil),
+			userID, wsID, "OWNER",
+		)
+		rr := httptest.NewRecorder()
+		h.List(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("offset=%d status=%d body=%s", offset, rr.Code, rr.Body.String())
+		}
+		var response struct {
+			Rows    []json.RawMessage `json:"rows"`
+			HasMore bool              `json:"has_more"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+			t.Fatalf("offset=%d decode: %v", offset, err)
+		}
+		return response
+	}
+
+	first := request(0)
+	second := request(2)
+	if len(first.Rows) != 2 || !first.HasMore {
+		t.Errorf("first page rows=%d has_more=%v, want 2/true", len(first.Rows), first.HasMore)
+	}
+	if len(second.Rows) != 1 || second.HasMore {
+		t.Errorf("second page rows=%d has_more=%v, want 1/false", len(second.Rows), second.HasMore)
 	}
 }
 
@@ -559,4 +600,67 @@ func TestApprovals_ResetAutoTuning_HappyPath_Returns200(t *testing.T) {
 	if resp.WorkspaceID != wsID {
 		t.Errorf("workspace_id echo = %q, want %q", resp.WorkspaceID, wsID)
 	}
+}
+
+// TestApprovals_WireShape_IsSnakeCase pins the JSON key names the HTTP
+// clients actually parse. It decodes into a map on purpose: every other
+// test in this file decodes into a Go struct, and encoding/json matches
+// field names case-insensitively, so a struct-based assertion passes
+// against "ID"/"CreatedAt" just as happily as against "id"/"created_at".
+// That blind spot let harbormaster.Request ship with no JSON tags at all
+// — the web client's zod schema and cmd/gen-openapi both document
+// snake_case, the server emitted PascalCase, and the only consumer that
+// worked was the Go CLI, for the same case-insensitivity reason.
+//
+// Assert on the wire bytes, not on what a Go decoder can recover from them.
+func TestApprovals_WireShape_IsSnakeCase(t *testing.T) {
+	h, userID, wsID := approvalsHandlerRig(t)
+	enqueueApproval(t, h, wsID, userID, "wire shape")
+
+	for _, path := range []string{"/api/v1/approvals?status=all", "/api/v1/approvals"} {
+		req := withWorkspaceUser(httptest.NewRequest("GET", path, nil), userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.List(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200; body=%s", path, rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Rows []map[string]any `json:"rows"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("%s: unmarshal: %v", path, err)
+		}
+		if len(resp.Rows) != 1 {
+			t.Fatalf("%s: rows = %d, want 1", path, len(resp.Rows))
+		}
+		row := resp.Rows[0]
+
+		// The keys lib/types/approvals.ts declares required, plus the
+		// optional ones cmd/gen-openapi documents.
+		for _, key := range []string{
+			"id", "workspace_id", "crew_id", "agent_id", "mission_id",
+			"requested_by", "kind", "reason", "payload", "status",
+			"decided_by", "decided_at", "decision_comment", "timeout_at", "created_at",
+		} {
+			if _, ok := row[key]; !ok {
+				t.Errorf("%s: row is missing %q; keys on the wire: %v", path, key, wireKeys(row))
+			}
+		}
+		// TimeoutSecs is documented in types.go as living only on the
+		// in-memory struct. It must not reach a client at all.
+		for _, key := range []string{"ID", "Kind", "Status", "CreatedAt", "Payload", "TimeoutSecs", "timeout_secs"} {
+			if _, ok := row[key]; ok {
+				t.Errorf("%s: row leaks %q; keys on the wire: %v", path, key, wireKeys(row))
+			}
+		}
+	}
+}
+
+func wireKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

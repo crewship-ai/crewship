@@ -13,8 +13,16 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 	anyObject := func() map[string]any {
 		return map[string]any{"type": "object", "additionalProperties": true}
 	}
-	object := func(properties map[string]any) map[string]any {
-		return map[string]any{"type": "object", "properties": properties}
+	// Variadic `required`, matching schemas_core.go. A response schema that
+	// names its properties but not its required ones certifies a body that
+	// shares no field name with what the server sends — which is how an
+	// all-PascalCase approvals response passed every check we own.
+	object := func(properties map[string]any, required ...string) map[string]any {
+		s := map[string]any{"type": "object", "properties": properties}
+		if len(required) > 0 {
+			s["required"] = required
+		}
+		return s
 	}
 	array := func(items map[string]any) map[string]any {
 		return map[string]any{"type": "array", "items": items}
@@ -58,7 +66,13 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"requested_by": str(), "kind": str(), "reason": str(), "payload": anyObject(), "status": str(),
 		"decided_by": nullable(str()), "decided_at": nullable(str()), "decision_comment": str(),
 		"timeout_at": nullable(str()), "created_at": str(),
-	})
+	},
+		// harbormaster.Request has no omitempty on any of these, so the server
+		// emits all fifteen on every row. Naming them is what lets the contract
+		// gate see a renamed field at all.
+		"id", "workspace_id", "crew_id", "agent_id", "mission_id", "requested_by",
+		"kind", "reason", "payload", "status", "decided_by", "decided_at",
+		"decision_comment", "timeout_at", "created_at")
 	checkpointState := object(map[string]any{
 		"agent_memory":  stringMap(),
 		"pending_tasks": stringArray(), "open_assignments": stringArray(),
@@ -82,14 +96,14 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"totals":       object(map[string]any{"versions": integer(), "bytes": integer(), "blobs": integer(), "oldest_at": str(), "newest_at": str()}),
 		"by_tier":      array(object(map[string]any{"tier": str(), "versions": integer(), "bytes": integer()})),
 		"by_agent":     array(object(map[string]any{"agent_slug": str(), "versions": integer(), "bytes": integer(), "newest_at": str()})),
-	})
+	}, "workspace_id", "totals", "by_tier", "by_agent")
 	memoryVersionList := object(map[string]any{
 		"workspace_id": str(), "rows": array(memoryVersion), "next_cursor": nullable(str()),
 		"limit": integer(), "filters_applied": stringMap(),
-	})
+	}, "workspace_id", "rows", "next_cursor", "limit", "filters_applied")
 	memoryConfig := object(map[string]any{
 		"workspace_id": str(), "versions_retention_days": integer(), "is_default": boolean(), "raw_config": nullable(str()),
-	})
+	}, "workspace_id", "versions_retention_days", "is_default", "raw_config")
 	memoryHealth := object(map[string]any{
 		"workspace_id": str(), "crew_id": nullable(str()), "computed_at": str(), "overall": number(),
 		"metrics": object(map[string]any{"freshness": number(), "coverage": number(), "coherence": number(), "efficiency": number(), "reachability": number()}),
@@ -152,16 +166,26 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 	_ = skillDetail
 
 	return map[string]DomainSchema{
-		"GET /api/v1/admin/stats":                                  {Response: stats},
-		"GET /api/v1/admin/users":                                  {Response: array(adminUser)},
-		"GET /api/v1/admin/workspaces":                             {Response: array(adminWorkspace)},
-		"GET /api/v1/admin/health":                                 {Response: object(map[string]any{"uptime_seconds": integer(), "log_level": anyObject(), "encryption_key_source": str(), "db": anyObject(), "disk": anyObject()})},
-		"GET /api/v1/admin/security-posture":                       {Response: object(map[string]any{"environment": str(), "encryption_key_configured": boolean(), "plaintext_secrets_allowed": boolean(), "private_endpoints_ceiling": boolean(), "signup_open": boolean(), "oauth_configured": boolean(), "email_configured": boolean(), "rate_limit_disabled": boolean(), "rate_limit_effectively_disabled": boolean(), "warnings": array(object(map[string]any{"key": str(), "severity": str(), "message": str()}))})},
-		"GET /api/v1/admin/log-level":                              {Response: object(map[string]any{"level": str(), "baseline": str(), "expires_at": nullable(str())})},
-		"PUT /api/v1/admin/log-level":                              {Request: object(map[string]any{"level": str(), "ttl_seconds": integer()})},
-		"GET /api/v1/admin/rate-limits":                            {Response: object(map[string]any{"limiters": array(anyObject())})},
-		"PUT /api/v1/admin/rate-limits/{key}":                      {Request: object(map[string]any{"value": integer()})},
-		"GET /api/v1/approvals":                                    {Response: object(map[string]any{"rows": array(approval), "status": str(), "count": integer()})},
+		"GET /api/v1/admin/stats":      {Response: stats},
+		"GET /api/v1/admin/users":      {Response: array(adminUser)},
+		"GET /api/v1/admin/workspaces": {Response: array(adminWorkspace)},
+		"GET /api/v1/admin/health":     {Response: object(map[string]any{"uptime_seconds": integer(), "log_level": anyObject(), "encryption_key_source": str(), "db": anyObject(), "disk": anyObject()})},
+		"GET /api/v1/admin/security-posture": {Response: object(map[string]any{"environment": str(), "encryption_key_configured": boolean(), "plaintext_secrets_allowed": boolean(), "private_endpoints_ceiling": boolean(), "signup_open": boolean(), "oauth_configured": boolean(), "email_configured": boolean(), "rate_limit_disabled": boolean(), "rate_limit_effectively_disabled": boolean(), "warnings": array(object(map[string]any{"key": str(), "severity": str(), "message": str()}, "key", "severity", "message"))},
+			"environment", "encryption_key_configured", "plaintext_secrets_allowed", "private_endpoints_ceiling", "signup_open",
+			"oauth_configured", "email_configured", "rate_limit_disabled", "rate_limit_effectively_disabled", "warnings")},
+		"GET /api/v1/admin/log-level":         {Response: object(map[string]any{"level": str(), "baseline": str(), "expires_at": nullable(str())})},
+		"PUT /api/v1/admin/log-level":         {Request: object(map[string]any{"level": str(), "ttl_seconds": integer()})},
+		"GET /api/v1/admin/rate-limits":       {Response: object(map[string]any{"limiters": array(anyObject())})},
+		"PUT /api/v1/admin/rate-limits/{key}": {Request: object(map[string]any{"value": integer()})},
+		"GET /api/v1/approvals": {Response: object(map[string]any{"rows": array(approval), "status": str(), "count": integer(), "has_more": map[string]any{"type": "boolean"}},
+			// The ENVELOPE needs its own required list, not just the row. Without
+			// it `{}` validates: an empty object is a valid instance of a schema
+			// whose every property is optional, so a handler that returned
+			// nothing at all would satisfy the contract. ApprovalsHandler.List
+			// writes this envelope as a map literal, so there is no struct to
+			// derive it from — see the DTO note in
+			// docs/prd/response-shape-contract.md.
+			"rows", "status", "count", "has_more")},
 		"GET /api/v1/approvals/{id}":                               {Response: approval},
 		"POST /api/v1/approvals/{id}/decide":                       {Request: object(map[string]any{"status": str(), "comment": str()}), Response: object(map[string]any{"status": str(), "decided_by": str()})},
 		"POST /api/v1/approvals/{id}/cancel":                       {Request: object(map[string]any{"reason": str()}), Response: object(map[string]any{"status": str(), "cancelled_by": str()})},

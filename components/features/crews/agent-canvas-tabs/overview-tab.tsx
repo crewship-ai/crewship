@@ -382,7 +382,7 @@ export function OverviewTab({
               tag: "all",
             }))}
             footerLabel="Open inbox"
-            footerHref={`/inbox?agent=${encodeURIComponent(agent.slug)}`}
+            footerHref={`/inbox-v2?agent=${encodeURIComponent(agent.slug)}`}
           />
         )}
       </div>

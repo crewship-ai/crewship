@@ -4,6 +4,7 @@ export interface AgentSummary {
   slug: string
   status: string
   role_title: string | null
+  /** Straight from the API, stored rows included — normalised at render. */
   agent_role: string
   avatar_seed?: string | null
   avatar_style?: string | null

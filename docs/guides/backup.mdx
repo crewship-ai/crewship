@@ -216,6 +216,34 @@ Step 3 is what earlier versions described as "re-run restore without the rewrite
 
 Restoring under the ORIGINAL identity (same workspace, or a genuinely empty instance) is unaffected: the docker phase runs in the same call and there is no step 3.
 
+### Forked restores re-sign the journal chain
+
+The crew journal is tamper-evident: every entry carries a keyed HMAC over its own content *and* the hash of the entry before it, so an after-the-fact edit or a mid-chain delete is detectable (see [Audit & tamper-evidence](/security/audit)).
+
+Identity columns are inside that HMAC — the entry's own id and its workspace id among them — and `--as-workspace` / `--as-crew` regenerate exactly those. A fork therefore **cannot** keep the bundle's signatures: they attest to ids that no longer exist. So the restore recomputes them, and the forked workspace gets a **new genesis** under this installation's chain key.
+
+What that means in practice:
+
+- The fork's journal verifies clean. `crewship journal verify -w <fork>` (and the admin integrity endpoint) report `ok` immediately after the restore, instead of calling every restored row tampered.
+- The fork's chain attests to **this instance, from this restore onward**. It carries no cryptographic link back to the source workspace. If you need to prove the source's history, verify it on the source (or on a `--replace` / same-identity restore, which remaps nothing and keeps the original signatures intact).
+- A `backup.chain_resigned` journal entry is written at the tail of the new chain, recording how many entries and compaction checkpoints were re-signed, the source workspace id, and the bundle digest. It is inside the chain it describes, so it cannot be removed without breaking verification. Do not treat its absence in a forked workspace as normal.
+- Signed compaction checkpoints follow the fork and are re-signed under the new workspace id, so a journal that was legitimately compacted before the backup does not read as a malicious mid-chain delete afterwards. They are no longer duplicated into the source workspace's checkpoint set.
+
+A restore that cannot re-sign the chain **fails** rather than landing a fork whose journal would report as tampered. The failure happens before any row is written, so nothing is half-applied.
+
+Rows that predate the hash chain (schema v152) were never signed; a fork carries them across exactly as they are, no better and no worse than the source.
+
+`crewship backup restore` reports the counts:
+
+```
+✓ Restore complete — workspace=acme-dr crews=2 rows=8412 id=ws_new123
+✓ Journal chain re-signed: 1284 entries, 3 compaction checkpoints.
+  The fork starts a NEW chain under this instance's key — it no longer links back to the source workspace.
+  Recorded in the fork's own journal as a `backup.chain_resigned` entry.
+```
+
+The same two counts come back on the API as `journal_entries_resigned` / `journal_checkpoints_resigned`, and land on the `backup.restore` audit row.
+
 ### The target crew must be running
 
 Every section is written through `tar` inside the container now (see

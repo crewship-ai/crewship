@@ -4,11 +4,13 @@ import { useState } from "react"
 import { Bot, ChevronDown } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { agentRoleLabel, isLeadRole } from "@/lib/agent-role"
 
 interface PreviewAgent {
   name: string
   slug: string
   role_title: string
+  /** Unvalidated: a template row or an LLM suggestion, normalised at render. */
   agent_role: string
   system_prompt: string
 }
@@ -28,8 +30,13 @@ function AgentRow({ agent }: { agent: PreviewAgent }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium text-sm">{agent.name}</span>
-            <Badge variant={agent.agent_role === "LEAD" ? "default" : "secondary"} className="text-xs">
-              {agent.agent_role === "LEAD" ? "Lead" : agent.agent_role}
+            {/* Never the raw token: this list previews a lineup the wizard is
+              * about to create, and the LLM behind /crew-ai-suggest can name a
+              * role the create endpoint refuses. An unrecognised role presents
+              * as an ordinary agent — the one thing the form can deliver for
+              * that row (#2197). */}
+            <Badge variant={isLeadRole(agent.agent_role) ? "default" : "secondary"} className="text-xs">
+              {agentRoleLabel(agent.agent_role)}
             </Badge>
             <span className="text-xs text-muted-foreground">{agent.role_title}</span>
           </div>

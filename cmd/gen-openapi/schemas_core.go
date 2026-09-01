@@ -58,7 +58,7 @@ func coreResourceSchemas() map[string]any {
 	agentCrew := object(map[string]any{
 		"name": stringSchema(), "slug": stringSchema(),
 		"color": nullableString(), "avatar_style": nullableString(),
-	}, "name", "slug")
+	}, "name", "slug", "color", "avatar_style")
 
 	workspace := object(map[string]any{
 		"id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
@@ -74,7 +74,8 @@ func coreResourceSchemas() map[string]any {
 		"audit_log_retention_days":        nullableInt(),
 		"_count":                          ref("WorkspaceCounts"),
 		"_count_crews":                    intSchema(), "_count_agents": intSchema(), "_count_members": intSchema(),
-	}, "id", "name", "slug", "created_at", "updated_at", "allow_privileged_credentials")
+	}, "id", "name", "slug", "created_at", "updated_at", "allow_privileged_credentials",
+		"logo_url", "preferred_language", "run_retention_days", "credential_audit_retention_days", "audit_log_retention_days")
 
 	crew := object(map[string]any{
 		"id": stringSchema(), "workspace_id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
@@ -88,7 +89,8 @@ func coreResourceSchemas() map[string]any {
 		"max_ephemeral_agents": intSchema(), "created_at": stringSchema(), "updated_at": stringSchema(),
 		"_count": ref("CrewCounts"),
 	}, "id", "workspace_id", "name", "slug", "container_memory_mb", "container_cpus", "network_mode",
-		"network_mode_enforced", "allowed_domains", "allow_private_endpoints", "max_ephemeral_agents", "created_at", "updated_at", "_count")
+		"network_mode_enforced", "allowed_domains", "allow_private_endpoints", "max_ephemeral_agents", "created_at", "updated_at", "_count",
+		"description", "color", "icon", "avatar_style", "container_ttl_hours", "issue_prefix")
 
 	agent := object(map[string]any{
 		"id": stringSchema(), "crew_id": nullableString(), "workspace_id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
@@ -102,7 +104,10 @@ func coreResourceSchemas() map[string]any {
 		"created_by_user_id": stringSchema(), "ephemeral": boolSchema(), "expires_at": nullableString(), "expired_at": nullableString(),
 		"parent_lead_id": nullableString(), "hire_reason": nullableString(),
 	}, "id", "workspace_id", "name", "slug", "agent_role", "status", "cli_adapter", "timeout_seconds", "tool_profile",
-		"memory_enabled", "schedule_enabled", "webhook_require_timestamp", "created_at", "updated_at", "crew", "_count", "ephemeral")
+		"memory_enabled", "schedule_enabled", "webhook_require_timestamp", "created_at", "updated_at", "crew", "_count", "ephemeral",
+		"crew_id", "description", "role_title", "lead_mode", "llm_provider", "llm_model", "system_prompt",
+		"avatar_seed", "avatar_style", "avatar_url", "cli_tools", "schedule_cron", "schedule_prompt",
+		"schedule_last_run", "schedule_next_run", "expires_at", "expired_at", "parent_lead_id", "hire_reason")
 
 	project := object(map[string]any{
 		"id": stringSchema(), "workspace_id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
@@ -110,7 +115,8 @@ func coreResourceSchemas() map[string]any {
 		"priority": stringSchema(), "health": stringSchema(), "lead_type": nullableString(), "lead_id": nullableString(),
 		"lead_name": nullableString(), "start_date": nullableString(), "target_date": nullableString(),
 		"created_at": stringSchema(), "updated_at": stringSchema(), "issue_count": intSchema(), "done_count": intSchema(), "progress": intSchema(),
-	}, "id", "workspace_id", "name", "slug", "color", "status", "priority", "health", "created_at", "updated_at", "issue_count", "done_count", "progress")
+	}, "id", "workspace_id", "name", "slug", "color", "status", "priority", "health", "created_at", "updated_at", "issue_count", "done_count", "progress",
+		"description", "icon", "lead_type", "lead_id", "start_date", "target_date")
 
 	return map[string]any{
 		"Workspace": workspace, "WorkspaceList": arrayOf(ref("Workspace")), "WorkspaceCounts": workspaceCounts,

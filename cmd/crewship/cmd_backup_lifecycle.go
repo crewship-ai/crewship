@@ -288,6 +288,11 @@ var backupRestoreCmd = &cobra.Command{
 			SecurityLevelClamps    []restoreClamp `json:"security_level_clamps"`
 			ColumnsDropped         int            `json:"columns_dropped"`
 			DroppedColumns         []droppedCol   `json:"dropped_columns"`
+			// #2226: a forked restore regenerates the ids the journal
+			// hash chain commits to, so the chain is re-signed at a new
+			// genesis. Zero on a plain restore.
+			JournalEntriesResigned     int `json:"journal_entries_resigned"`
+			JournalCheckpointsResigned int `json:"journal_checkpoints_resigned"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -338,6 +343,30 @@ var backupRestoreCmd = &cobra.Command{
 			steps := backup.ForkedRestoreSteps("<crew>", target, args[0])
 			warning += fmt.Sprintf("\n  Finish the restore with:\n    %s\n    %s", steps[0], steps[1])
 			cli.PrintWarning(warning)
+		}
+		// A re-signed chain is not a warning — the restore did the right
+		// thing — but it IS a change of meaning the operator has to be
+		// handed at the moment it happens: the fork's journal verifies
+		// clean while attesting to THIS instance only, with no
+		// cryptographic link back to the source's history. Saying nothing
+		// would let a later clean `journal verify` be read as provenance
+		// the fork does not have.
+		//
+		// Printed on a dry run too, and unlike the docker warning it
+		// belongs there: "this fork would start a new chain" is exactly
+		// what an operator wants to hear BEFORE cutover, not after.
+		if out.JournalEntriesResigned > 0 {
+			verb, tense := "re-signed", "starts"
+			if dryRun {
+				verb, tense = "would be re-signed", "would start"
+			}
+			note := fmt.Sprintf("Journal chain %s: %d entries", verb, out.JournalEntriesResigned)
+			if out.JournalCheckpointsResigned > 0 {
+				note += fmt.Sprintf(", %d compaction checkpoints", out.JournalCheckpointsResigned)
+			}
+			note += fmt.Sprintf(".\n  The fork %s a NEW chain under this instance's key — it no longer links back to the source workspace.", tense)
+			note += "\n  Recorded in the fork's own journal as a `backup.chain_resigned` entry."
+			cli.PrintSuccess(note)
 		}
 		// CrewsRestored, not CrewsCount: the first is what landed, the
 		// second is what the bundle describes. Printing the bundle's

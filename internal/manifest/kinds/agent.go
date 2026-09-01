@@ -76,14 +76,28 @@ const defaultAgentTimeoutSeconds = 1800
 // values for the user.
 
 var validAgentRoles = map[string]struct{}{
-	"AGENT":       {},
-	"LEAD":        {},
-	"COORDINATOR": {}, // accepted in the manifest schema per task spec;
-	// the API may itself reject it (the server enum was trimmed to
-	// AGENT/LEAD in v0.1), in which case Apply surfaces the 400. We
-	// keep COORDINATOR in the front-end validator so a future server
-	// rollback is a one-line change here.
+	"AGENT": {},
+	"LEAD":  {},
 }
+
+// retiredAgentRole is the one role value that is refused with its own
+// message rather than the generic enum error.
+//
+// #2195: it used to sit in validAgentRoles, on the reasoning that keeping
+// it made a future server rollback a one-line change here. The server enum
+// was trimmed to AGENT/LEAD in v0.1 (internal/api/agents.go, pinned by
+// agents_test.go as "retired in v0.1") and no rollback is in flight, so the
+// price of that option was paid on every run: `crewship apply --dry-run`
+// printed a green "1 to create" plan for a document the real apply then
+// failed on with 400 "agent_role must be AGENT or LEAD". A dry-run plan is
+// the artifact CI checks, so the plan has to be honest about what the
+// server will accept.
+//
+// Matched case-insensitively so a hand-written `coordinator` gets the
+// message that names the retirement and the replacement, instead of the
+// generic "invalid agent_role" bucket. Same refusal as the CLI's
+// refuseRetiredRole (cmd/crewship/cmd_agent.go), one layer over.
+const retiredAgentRole = "COORDINATOR"
 
 var validAgentCLIAdapters = map[string]struct{}{
 	"CLAUDE_CODE":   {},
@@ -144,16 +158,19 @@ type LLMSpec struct {
 // prompt back out into a sibling file.
 type AgentSpec struct {
 	// CrewSlug is the parent crew this agent belongs to. REQUIRED for
-	// LEAD; optional for AGENT/COORDINATOR (a crewless AGENT is a
-	// workspace-scoped utility — uncommon but supported).
+	// every agent in a manifest, AGENT included: the server allows
+	// crewless agents, but Validate refuses an empty crew_slug before
+	// it even looks at the role, so cross-document references stay
+	// unambiguous.
 	CrewSlug string `yaml:"crew_slug,omitempty" json:"crew_slug,omitempty"`
 
 	// RoleTitle is the human-facing title shown in the UI (e.g.
 	// "Technical Architect"). Optional.
 	RoleTitle string `yaml:"role_title,omitempty" json:"role_title,omitempty"`
 
-	// AgentRole is the orchestrator role. One of LEAD | AGENT |
-	// COORDINATOR. Empty means "let the server default (AGENT)".
+	// AgentRole is the orchestrator role. One of LEAD | AGENT. Empty
+	// means "let the server default (AGENT)". The retired COORDINATOR
+	// role is refused by Validate — see retiredAgentRole.
 	AgentRole string `yaml:"agent_role,omitempty" json:"agent_role,omitempty"`
 
 	// CLIAdapter selects the runtime adapter (which binary the
@@ -298,8 +315,12 @@ func (d *AgentDocument) Validate(wsCtx internalapi.WorkspaceContext) error {
 	}
 
 	if d.Spec.AgentRole != "" {
+		if strings.EqualFold(d.Spec.AgentRole, retiredAgentRole) {
+			return fmt.Errorf("agent %q: agent_role %s was retired in v0.1 and the server rejects it; use LEAD",
+				d.Metadata.Slug, retiredAgentRole)
+		}
 		if _, ok := validAgentRoles[d.Spec.AgentRole]; !ok {
-			return fmt.Errorf("agent %q: invalid agent_role %q (want one of LEAD, AGENT, COORDINATOR)",
+			return fmt.Errorf("agent %q: invalid agent_role %q (want one of LEAD, AGENT)",
 				d.Metadata.Slug, d.Spec.AgentRole)
 		}
 	}

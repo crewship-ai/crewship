@@ -37,13 +37,16 @@ crewship approvals <subcommand> [flags]
 ```bash
 crewship approvals list                                    # pending only (default)
 crewship approvals list --status approved --limit 100
-crewship approvals list --status all                        # full history
+crewship approvals list --status all --all      # the whole queue, every page
+crewship approvals list --status all            # first page of history only
 ```
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--status` | `string` | `pending` | One of `pending`, `approved`, `denied`, `timeout`, `cancelled`, `all`. |
 | `--limit` | `int` | `50` | Max rows (server caps at 200). |
+| `--offset` | `int` | `0` | Skip this many rows (server-side offset pagination). |
+| `--all` | `bool` | `false` | Keep requesting pages until the server reports `has_more: false`. Exact only on a quiet queue: a row decided mid-walk shifts the window and is never returned. |
 
 Sample output:
 

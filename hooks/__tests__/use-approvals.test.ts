@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { renderHook, waitFor, act } from "@testing-library/react"
+import { renderHook, act } from "@testing-library/react"
 
 import { useApprovals, decideApproval } from "@/hooks/use-approvals"
 
 function okJSON(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as unknown as Response
+}
+
+// The envelope ApprovalsHandler.List actually writes. Fixtures went through
+// this rather than hand-listing keys, because hand-written bodies are how the
+// schema drifted from the server in the first place.
+function listBody(rows: unknown[], extra: Record<string, unknown> = {}) {
+  return { rows, status: "pending", count: rows.length, has_more: false, ...extra }
 }
 
 function errJSON(status: number, body: unknown): Response {
@@ -32,7 +39,7 @@ afterEach(() => {
 describe("useApprovals", () => {
   it("loads pending rows on mount", async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      okJSON({ rows: [sampleRow], status: "pending", count: 1 }),
+      okJSON(listBody([sampleRow])),
     )
 
     const { result } = renderHook(() => useApprovals({ status: "pending", pollMs: 0 }))
@@ -41,6 +48,22 @@ describe("useApprovals", () => {
     expect(result.current.rows).toHaveLength(1)
     expect(result.current.rows[0].id).toBe("appr_1")
     expect(result.current.error).toBeNull()
+  })
+
+  it("scopes approval reads to the active workspace", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockResolvedValueOnce(okJSON(listBody([])))
+
+    const { result } = renderHook(() => useApprovals({
+      status: "pending",
+      workspaceId: "ws with space",
+      pollMs: 0,
+    }))
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/approvals?status=pending&limit=50&workspace_id=ws+with+space",
+    )
   })
 
   it("reports notConfigured on 404 (Harbormaster not enabled)", async () => {
@@ -89,9 +112,31 @@ describe("useApprovals", () => {
     expect(result.current.rows).toEqual([])
   })
 
+  // ApprovalsHandler.List writes its envelope as a map literal with all four
+  // keys unconditionally, and cmd/gen-openapi lists all four as required. The
+  // zod schema had only `rows` required, so a response missing `has_more`
+  // parsed clean and `loadAll` stopped after page one — the client half of the
+  // shape drift this branch exists to close. Both directions are pinned here:
+  // the envelope must be rejected when a required key is gone, and a walk over
+  // a well-formed envelope must still reach page two.
+  it("rejects a list envelope missing a field the server always sends", async () => {
+    for (const missing of ["status", "count", "has_more"] as const) {
+      const body: Record<string, unknown> = listBody([sampleRow])
+      delete body[missing]
+      ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON(body))
+
+      const { result, unmount } = renderHook(() => useApprovals({ status: "pending", pollMs: 0 }))
+      await vi.waitFor(() => expect(result.current.loading).toBe(false))
+
+      expect([missing, result.current.error]).toEqual([missing, "Malformed response from /api/v1/approvals"])
+      expect(result.current.rows).toEqual([])
+      unmount()
+    }
+  })
+
   it("does not poll when status != pending", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
-    fetchMock.mockResolvedValue(okJSON({ rows: [] }))
+    fetchMock.mockResolvedValue(okJSON(listBody([])))
 
     renderHook(() => useApprovals({ status: "approved", pollMs: 1000 }))
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
@@ -106,7 +151,7 @@ describe("useApprovals", () => {
 
   it("polls every pollMs when status=pending", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
-    fetchMock.mockResolvedValue(okJSON({ rows: [] }))
+    fetchMock.mockResolvedValue(okJSON(listBody([])))
 
     renderHook(() => useApprovals({ status: "pending", pollMs: 1000 }))
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
@@ -118,6 +163,22 @@ describe("useApprovals", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
+  it("walks all approval history pages when loadAll is enabled", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock
+      .mockResolvedValueOnce(okJSON(listBody([sampleRow], { status: "all", has_more: true })))
+      .mockResolvedValueOnce(okJSON(listBody([{ ...sampleRow, id: "appr_2", status: "approved" }], { status: "all" })))
+
+    const { result } = renderHook(() => useApprovals({ status: "all", pollMs: 0, loadAll: true }))
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.rows.map((row) => row.id)).toEqual(["appr_1", "appr_2"])
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/v1/approvals?status=all&limit=200&offset=0",
+      "/api/v1/approvals?status=all&limit=200&offset=1",
+    ])
+  })
+
   it("does not fetch when enabled=false but still drops loading", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
     const { result } = renderHook(() => useApprovals({ status: "pending", pollMs: 0, enabled: false }))
@@ -127,7 +188,7 @@ describe("useApprovals", () => {
   })
 
   it("patchRow optimistically updates a row by id", async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON({ rows: [sampleRow] }))
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON(listBody([sampleRow])))
 
     const { result } = renderHook(() => useApprovals({ status: "pending", pollMs: 0 }))
     await vi.waitFor(() => expect(result.current.loading).toBe(false))
@@ -140,7 +201,7 @@ describe("useApprovals", () => {
   })
 
   it("patchRow with non-matching id is a no-op", async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON({ rows: [sampleRow] }))
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON(listBody([sampleRow])))
 
     const { result } = renderHook(() => useApprovals({ status: "pending", pollMs: 0 }))
     await vi.waitFor(() => expect(result.current.loading).toBe(false))
@@ -154,7 +215,7 @@ describe("useApprovals", () => {
 
   it("refresh forces a new fetch even with the same status", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
-    fetchMock.mockResolvedValue(okJSON({ rows: [] }))
+    fetchMock.mockResolvedValue(okJSON(listBody([])))
 
     const { result } = renderHook(() => useApprovals({ status: "pending", pollMs: 0 }))
     await vi.waitFor(() => expect(result.current.loading).toBe(false))
@@ -195,6 +256,15 @@ describe("decideApproval", () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
     const url = fetchMock.mock.calls[0][0] as string
     expect(url).toContain("appr%2Fwith%20slash")
+  })
+
+  it("scopes a decision to the active workspace", async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON({ status: "approved" }))
+
+    await decideApproval("appr_1", "approved", "", "ws/1")
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+      "/api/v1/approvals/appr_1/decide?workspace_id=ws%2F1",
+    )
   })
 
   it("throws backend error message on non-OK", async () => {

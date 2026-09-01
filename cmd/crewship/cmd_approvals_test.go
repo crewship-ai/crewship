@@ -233,3 +233,101 @@ func TestApprovalsDenyRunE_HappyPath(t *testing.T) {
 		t.Errorf("decide body missing denied status: %s", body)
 	}
 }
+
+// pagingMock answers a two-page feed and records the query string of every
+// request, so a test can assert the CLI actually walked the pages instead of
+// asserting on its own fixture. The row shape is the one the server really
+// emits (snake_case, has_more) — see TestApprovals_WireShape_IsSnakeCase in
+// internal/api, which pins that shape at the other end.
+type pagingMock struct {
+	t     *testing.T
+	path  string
+	mu    sync.Mutex
+	seen  []string
+	pages []string
+}
+
+func (m *pagingMock) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, m.path) {
+			m.t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		m.mu.Lock()
+		n := len(m.seen)
+		m.seen = append(m.seen, r.URL.RawQuery)
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if n < len(m.pages) {
+			_, _ = w.Write([]byte(m.pages[n]))
+			return
+		}
+		m.t.Errorf("CLI asked for page %d but the mock only has %d", n+1, len(m.pages))
+	})
+}
+
+// A CLI that stops at the first page cannot be the contract agents script
+// against — the web inbox walks every page, so `--all` has to as well.
+func TestApprovalsList_All_WalksEveryPage(t *testing.T) {
+	saveCLIState(t)
+
+	m := &pagingMock{t: t, path: "/api/v1/approvals", pages: []string{
+		`{"rows":[{"id":"apr-1","status":"pending","kind":"tool_call","created_at":"2026-04-17T00:00:00Z"},{"id":"apr-2","status":"pending","kind":"tool_call","created_at":"2026-04-17T00:00:00Z"}],"count":2,"has_more":true}`,
+		`{"rows":[{"id":"apr-3","status":"pending","kind":"tool_call","created_at":"2026-04-17T00:00:00Z"}],"count":1,"has_more":false}`,
+	}}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: srv.URL}
+
+	if err := approvalsListCmd.Flags().Set("all", "true"); err != nil {
+		t.Fatalf("set --all: %v", err)
+	}
+	t.Cleanup(func() { _ = approvalsListCmd.Flags().Set("all", "false") })
+
+	out, err := captureStdoutCov(t, func() error { return approvalsListCmd.RunE(approvalsListCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	m.mu.Lock()
+	seen := append([]string(nil), m.seen...)
+	m.mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("requests = %d (%v), want 2 — --all stopped before has_more went false", len(seen), seen)
+	}
+	if strings.Contains(seen[0], "offset=") {
+		t.Errorf("first page sent an offset: %q", seen[0])
+	}
+	if !strings.Contains(seen[1], "offset=2") {
+		t.Errorf("second page offset = %q, want offset=2 (rows returned by page 1)", seen[1])
+	}
+	for _, id := range []string{"apr-1", "apr-2", "apr-3"} {
+		if !strings.Contains(out, id) {
+			t.Errorf("output is missing %s — a walked page was dropped:\n%s", id, out)
+		}
+	}
+}
+
+// Without --all the walk must not happen: one request, no offset. A flag that
+// silently paginates would change the cost of every existing script.
+func TestApprovalsList_WithoutAll_StopsAtFirstPage(t *testing.T) {
+	saveCLIState(t)
+
+	m := &pagingMock{t: t, path: "/api/v1/approvals", pages: []string{
+		`{"rows":[{"id":"apr-1","status":"pending","kind":"tool_call","created_at":"2026-04-17T00:00:00Z"}],"count":1,"has_more":true}`,
+	}}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: "cabcdefghijklmnopqrs", Server: srv.URL}
+
+	if _, err := captureStdoutCov(t, func() error { return approvalsListCmd.RunE(approvalsListCmd, nil) }); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	m.mu.Lock()
+	n := len(m.seen)
+	m.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("requests = %d, want 1 — has_more must be ignored without --all", n)
+	}
+}

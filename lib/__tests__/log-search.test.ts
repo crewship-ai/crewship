@@ -71,6 +71,26 @@ describe("buildMatcher", () => {
     expect(buildMatcher("severity:warn")!(entry({ severity: "warn" }))).toBe(true)
   })
 
+  // #2206: the server's FTS5 index covers summary AND payload, so a
+  // matcher that only reads the summary hides rows the server just
+  // found and the panel renders "No entries match" over a non-empty
+  // result set.
+  it("matches free text against payload text, like the server's FTS does", () => {
+    const e = entry({
+      summary: "container died",
+      payload: { error: "OOMKilled exit 137" },
+    })
+    expect(buildMatcher("OOMKilled")!(e)).toBe(true)
+    expect(buildMatcher("oomkilled")!(e)).toBe(true)
+    // Still ANDs: one token from the summary, one from the payload.
+    expect(buildMatcher("container OOMKilled")!(e)).toBe(true)
+    expect(buildMatcher("container SIGTERM")!(e)).toBe(false)
+  })
+
+  it("does not match payload text for entries without a payload", () => {
+    expect(buildMatcher("oomkilled")!(entry({ summary: "container died", payload: undefined }))).toBe(false)
+  })
+
   it("matches key:value against payload fields too", () => {
     const m = buildMatcher("path:/etc/passwd")
     expect(m!(entry({ payload: { path: "/etc/passwd" } }))).toBe(true)

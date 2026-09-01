@@ -33,8 +33,8 @@ export function InboxBell() {
     <InboxBellView
       items={items}
       role={(role as WorkspaceRole | null) ?? null}
-      onOpenItem={(id) => router.push(`/inbox?item=${encodeURIComponent(id)}`)}
-      onOpenInbox={() => router.push("/inbox")}
+      onOpenItem={(id) => router.push(`/inbox-v2?item=${encodeURIComponent(id)}`)}
+      onOpenInbox={() => router.push("/inbox-v2")}
       onMarkAllRead={async (ids) => {
         if (!workspaceId || ids.length === 0) return
         // Chunked to the backend's 500-id cap, same as the list's bulk bar.

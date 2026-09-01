@@ -28,8 +28,15 @@ interface UseJournalListResult {
   refresh: () => Promise<void>
   /** Append next page. */
   loadMore: () => Promise<void>
-  /** Prepend a live entry (dedupes by id). */
-  prependLive: (entry: JournalEntry) => void
+  /**
+   * Prepend live entries (dedupes by id). Pass an array for a batch: one
+   * pass over the buffer and one state update for the whole flush, instead
+   * of an O(n) scan plus a full array copy per event.
+   *
+   * Array order is chronological (oldest first), matching the order events
+   * arrive in — the last element ends up at the head.
+   */
+  prependLive: (entries: JournalEntry | JournalEntry[]) => void
 }
 
 /**
@@ -156,10 +163,29 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
     return Math.floor(maxEntries)
   })()
 
-  const prependLive = useCallback((entry: JournalEntry) => {
+  const prependLive = useCallback((incoming: JournalEntry | JournalEntry[]) => {
+    const batch = Array.isArray(incoming) ? incoming : [incoming]
+    if (batch.length === 0) return
     setEntries((prev) => {
-      if (prev.some((e) => e.id === entry.id)) return prev
-      const next = [entry, ...prev]
+      // One Set over the buffer for the whole batch. The per-entry version
+      // ran prev.some() — an O(n) scan over up to 5,000 rows — plus a full
+      // array copy for every single SSE event; a 50-event flush was ~250k
+      // comparisons and 50 copies before React rendered once.
+      const seen = new Set<string>()
+      for (const e of prev) seen.add(e.id)
+      // Walk newest-first so the head ends up as it would have after N
+      // separate prepends, and so a duplicate id inside the batch keeps the
+      // newest occurrence.
+      const fresh: JournalEntry[] = []
+      for (let i = batch.length - 1; i >= 0; i--) {
+        const e = batch[i]
+        if (seen.has(e.id)) continue
+        seen.add(e.id)
+        fresh.push(e)
+      }
+      // Nothing new — return the same reference so no render is scheduled.
+      if (fresh.length === 0) return prev
+      const next = [...fresh, ...prev]
       if (cap !== undefined && next.length > cap) next.length = cap
       return next
     })

@@ -129,6 +129,20 @@ const (
 	EntryMemoryUpdated      EntryType = "memory.updated"
 	EntryMemoryConsolidated EntryType = "memory.consolidated"
 	EntrySummaryGenerated   EntryType = "summary.generated"
+	// EntryMemoryPriorityChanged records a priority marker being raised or
+	// lowered on an existing entry (PATCH /api/v1/journal/{id}/priority).
+	// Priority is load-bearing — permanent entries are never compacted and
+	// pins land in curated pins.md — so the change is journaled rather than
+	// applied as a silent UPDATE, and the entry double-checks the
+	// journal_entry_priorities ledger: a fabricated row with no matching
+	// entry in the keyed chain is detectable by comparing the two.
+	//
+	// It had been emitted as a bare string literal from
+	// internal/api/journal_handler.go since it shipped, which made it the
+	// one type in the corpus with no constant anywhere — invisible to any
+	// check that reads the Go declarations. Promoted, not dropped: the
+	// entry is real, durable and already on disk in every workspace.
+	EntryMemoryPriorityChanged EntryType = "memory.priority_changed"
 	// EntryMemoryWriteRejected fires when a sidecar /memory/write call
 	// is rejected by the scrubber (credential pattern matched in block
 	// mode) or by a cap check (file would exceed AGENT.md/CREW.md/pins.md
@@ -236,6 +250,26 @@ const (
 	EntryCheckpointCreated  EntryType = "checkpoint.created"
 	EntryCheckpointRestored EntryType = "checkpoint.restored"
 	EntryForkCreated        EntryType = "fork.created"
+
+	// EntryBackupChainResigned records that a restore re-signed this
+	// workspace's journal hash chain and started it over at a new genesis
+	// (#2226).
+	//
+	// It is emitted by exactly one operation: a FORKED restore
+	// (`--as-workspace` / `--as-crew`), which regenerates every id the
+	// chain's HMAC commits to and therefore has to recompute every
+	// prev_hash/entry_hash under this installation's key. The chain that
+	// results attests to THIS instance from this moment on — it carries no
+	// cryptographic link back to the source workspace, whose signatures
+	// covered ids that no longer exist.
+	//
+	// The entry is not a formality. Without it the fork's journal would
+	// verify clean and read as unbroken provenance all the way back to the
+	// source's genesis, which is a stronger claim than the data supports.
+	// A fork deserves a new genesis; this is the row that says it got one,
+	// and its payload names the bundle and the source workspace it was
+	// forked from.
+	EntryBackupChainResigned EntryType = "backup.chain_resigned"
 
 	// Eval
 	EntryEvalRunStarted EntryType = "eval.run_started"

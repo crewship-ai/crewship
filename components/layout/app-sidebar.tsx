@@ -43,7 +43,7 @@ export const navSections = [
     label: "Plan",
     items: [
       { title: "Dashboard", href: "/", icon: CONCEPT_ICON.dashboard },
-      { title: "Inbox", href: "/inbox", icon: CONCEPT_ICON.inbox },
+      { title: "Inbox", href: "/inbox-v2", icon: CONCEPT_ICON.inbox },
       // Chat is under Plan, next to Inbox: both are "someone is waiting on a
       // reply". It points at the index, never at /chat/<slug> — a nav row
       // cannot know which agent, and the index is what answers that.
@@ -138,7 +138,7 @@ export function AppSidebar() {
                       )
                     }
 
-                    const showInboxBadge = item.href === "/inbox" && inboxUnread > 0
+                    const showInboxBadge = item.href === "/inbox-v2" && inboxUnread > 0
 
                     return (
                       <SidebarMenuItem key={item.href}>

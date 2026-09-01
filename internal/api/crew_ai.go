@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -84,25 +85,54 @@ JSON schema (return exactly this structure):
   ]
 }`
 
+// CrewAISuggestRequest is the body POST /api/v1/crew-ai-suggest decodes.
+//
+// It is exported, and named, so a client's test can bind against the field
+// this handler actually reads instead of restating it as a JSON string
+// literal. The CLI posted {"goal": …} at this {"description": …} for as long
+// as `crewship crew suggest` existed, so every invocation died on the length
+// check below without ever reaching a model — and the stub-server test stayed
+// green because it asserted the CLI's own spelling rather than this struct
+// (#2201).
+type CrewAISuggestRequest struct {
+	Description string `json:"description"`
+}
+
+// Bounds on CrewAISuggestRequest.Description, in BYTES of UTF-8 — the unit
+// len(string) counts, and the unit the error messages name. It is not
+// characters: 501 four-byte emoji are 501 characters and blow the maximum,
+// and a four-character CJK goal is 12 bytes and clears the minimum. Saying
+// "characters" while measuring bytes is what CodeRabbit caught on #2202, and
+// the maximum is the half that actually bites — a CJK description is refused
+// at roughly a third of the length the message promises.
+//
+// Exported so a client-side pre-flight check cannot silently drift from what
+// the handler enforces. Any client mirroring these MUST count bytes too, or
+// it refuses what this handler would accept; cmd/crewship pins both the
+// numbers and the unit (see TestCrewSuggestLocalBounds_MatchTheHandler and
+// TestAcceptance_CrewSuggest_LocalBoundIsBytesLikeTheServer).
+const (
+	CrewAISuggestMinDescription = 10
+	CrewAISuggestMaxDescription = 2000
+)
+
 // Suggest handles POST /api/v1/crew-ai-suggest
 // Calls Anthropic API with workspace's API key to generate a crew definition.
 func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var body struct {
-		Description string `json:"description"`
-	}
+	var body CrewAISuggestRequest
 	if err := readJSON(r, &body); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	body.Description = strings.TrimSpace(body.Description)
-	if len(body.Description) < 10 {
-		writeProblem(w, r, http.StatusBadRequest, "description must be at least 10 characters")
+	if len(body.Description) < CrewAISuggestMinDescription {
+		writeProblem(w, r, http.StatusBadRequest, "description must be at least 10 bytes of UTF-8")
 		return
 	}
-	if len(body.Description) > 2000 {
-		writeProblem(w, r, http.StatusBadRequest, "description must be at most 2000 characters")
+	if len(body.Description) > CrewAISuggestMaxDescription {
+		writeProblem(w, r, http.StatusBadRequest, "description must be at most 2000 bytes of UTF-8")
 		return
 	}
 
@@ -197,6 +227,19 @@ func stripMarkdownFences(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// acceptedAgentRoles renders validAgentRoles for an error message, sorted so
+// the text is stable. Derived rather than written out: a role added to or
+// removed from the accepted set must not leave this refusal naming the old
+// one.
+func acceptedAgentRoles() []string {
+	roles := make([]string, 0, len(validAgentRoles))
+	for role := range validAgentRoles {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	return roles
+}
+
 func validateSuggestion(s *AISuggestResponse) error {
 	if s.CrewName == "" {
 		return fmt.Errorf("missing crew_name")
@@ -206,11 +249,37 @@ func validateSuggestion(s *AISuggestResponse) error {
 	}
 	leads := 0
 	for i := range s.Agents {
-		if s.Agents[i].AgentRole == "LEAD" {
-			leads++
-		}
 		if s.Agents[i].Name == "" || s.Agents[i].SystemPrompt == "" {
 			return fmt.Errorf("agent missing required fields")
+		}
+		// The system prompt asks for AGENT/LEAD, and a prompt is not a
+		// validator. Until #2197 this loop only counted LEADs, so a model
+		// answering the retired COORDINATOR for a non-lead agent — a plausible
+		// completion, "coordinates" sits in the instruction for the sibling
+		// role — produced a suggestion the wizard rendered as a lineup and
+		// POST /api/v1/agents then refused with 400 "agent_role must be AGENT
+		// or LEAD". A role this API cannot create is an unparseable
+		// suggestion, and fails like any other.
+		//
+		// Casing and padding are normalised rather than refused: they are the
+		// same role written the way a model writes JSON, and the create
+		// endpoint compares the token exactly. An omitted role becomes AGENT,
+		// the default agents_create.go applies to the same field.
+		raw := s.Agents[i].AgentRole
+		role := strings.ToUpper(strings.TrimSpace(raw))
+		if role == "" {
+			role = "AGENT"
+		}
+		if !validAgentRoles[role] {
+			// The refusal quotes what the model actually wrote, not the
+			// normalised form: this is read while working out what the model
+			// is doing, and %q keeps a hostile string printable.
+			return fmt.Errorf("agent %q has unsupported agent_role %q (want %s)",
+				s.Agents[i].Name, raw, strings.Join(acceptedAgentRoles(), " or "))
+		}
+		s.Agents[i].AgentRole = role
+		if role == "LEAD" {
+			leads++
 		}
 		// Normalize slug; fall back to name-derived slug if empty or invalid
 		s.Agents[i].Slug = slugify(s.Agents[i].Slug)

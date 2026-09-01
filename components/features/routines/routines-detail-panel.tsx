@@ -512,8 +512,8 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
               onClick={() =>
                 router.push(
                   routine?.inbox_item_id
-                    ? `/inbox?item=${encodeURIComponent(routine.inbox_item_id)}`
-                    : "/inbox",
+                    ? `/inbox-v2?item=${encodeURIComponent(routine.inbox_item_id)}`
+                    : "/inbox-v2",
                 )
               }
               className="h-8 gap-1.5 px-3 text-sm"

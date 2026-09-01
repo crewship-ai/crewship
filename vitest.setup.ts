@@ -79,3 +79,31 @@ afterEach(() => {
     )
   }
 })
+
+// happy-dom rejects `Animation.finished` on cancel, and creates it eagerly.
+//
+// Per WAAPI, `cancel()` rejects the animation's finished promise with an
+// AbortError — happy-dom 20.12.0 does exactly that. A browser gets away with
+// it because the spec builds `finished` lazily, on first access of the getter:
+// an animation nobody awaited has no promise to reject, so nothing is ever
+// unhandled. happy-dom instead assigns `finished` as an instance field in the
+// constructor (and again in `play()`), so every animation carries a live,
+// unwatched promise.
+//
+// motion drives its exit transitions through WAAPI and cancels them on
+// unmount — which every `cleanup()` triggers. Its own `cancel()` wraps the
+// call in try/catch, but the rejection lands asynchronously on `finished`, so
+// the catch never sees it. The result was 1493 unhandled rejections across 11
+// test files with 7012 tests passing and zero assertions failing.
+//
+// Attaching a no-op handler restores the browser's observable behaviour: the
+// promise is marked handled, so an animation nobody awaited stays silent. A
+// test that does await `finished` is unaffected — `.catch()` derives a new
+// promise and leaves the original's rejection visible to every other consumer.
+if (typeof globalThis.Animation === 'function') {
+  const cancel = globalThis.Animation.prototype.cancel
+  globalThis.Animation.prototype.cancel = function (this: Animation) {
+    this.finished?.catch(() => {})
+    return cancel.call(this)
+  }
+}

@@ -31,6 +31,59 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **`crewship admin seed-inbox` fills the inbox with one row of every kind.**
+  The inbox has no create endpoint — every row is written by a producer, so a
+  fresh workspace shows an empty inbox and there is no way to see how the
+  views, facets and reading pane behave against real variety. Reviewing the
+  surface against two rows is guesswork. Rows go in through `inbox.Insert` and
+  `harbormaster.Enqueue`, the same writers the real producers use, so what
+  lands is shaped like production data rather than hand-built SQL that agrees
+  with whatever the UI expects. Host-side like the rest of `admin`, behind the
+  same `--local` gate, and everything it writes carries a `seed_` source id so
+  `--clear` removes exactly what it added and nothing else.
+  `TestSeedInboxRows_CoverEveryInboxKind` fails when a kind is added to
+  `inbox.AllKinds` without a seed row — otherwise the next person reviewing
+  the inbox never sees that kind and concludes it works.
+
+- **Saved views and a real URL contract on `/journal` (#2209).** A dashboard
+  is returned to, not explored, and the journal was the one surface a query
+  could not be kept on: `crewship saved-view create|list|update|delete` had
+  shipped for months and `/journal` could not read or write one, so the only
+  way to hold `routine:nightly-digest outcome:failed` was a browser bookmark
+  — which lost the search box, because the URL mirror wrote `time`, `crew_id`,
+  `agent_id`, `trace_id`, `severity`, `mute` and `tab` but never `q`. A shared
+  "here is the failure I found" link arrived without the query that found it.
+  The Runs tab mirrored nothing at all, so its window, status, trigger and
+  page number could only be handed over as a list of buttons to press.
+
+  `q` and the four Runs filters (`run_window`, `run_status`, `run_trigger`,
+  `run_page`) are part of the URL now, filter changes `push` so Back steps
+  back through them instead of leaving the page, and a saved-view chip row
+  above the tabs reads and writes the same server-stored bookmarks the CLI
+  does — `--shared` included, no backend change. Wrap, sort, dedup, refresh
+  cadence and the stats-rail collapse deliberately stay per-user preferences:
+  a link should not re-style the recipient's journal. Documented in
+  [the journal guide](docs/guides/crew-journal.mdx#shareable-views).
+
+- **The dashboard leads with what needs a human (#2185).** The landing page
+  was a wall of tiles that answered "what exists" before "what is stuck". It
+  now opens with a "Needs your attention" strip — approvals waiting, failed
+  runs, crews held for capacity, credential gaps — each linking to the surface
+  that can act on it, above a Running-now / Up-next pair, the run KPIs
+  (completed, success rate, ledger spend, p95), a run-volume chart grouped by
+  crew, and fleet health per crew.
+
+  `hooks/use-dashboard-data.ts` gains the queries behind it (run insights,
+  crew spend, crew service inventory, capacity holds) with the workspace gate
+  and non-ok-to-empty mapping the existing hooks use, so a failed panel is an
+  empty tile rather than an error state. The 24h / 7d / 30d selector drives
+  every windowed query from one place.
+
+  Windowed KPIs read agent runs (`/api/v1/runs`, journal-backed) while
+  Running-now reads routine runs, so on a workspace with only one kind the
+  other reads zero. That is faithful to the API rather than a bug in the page,
+  and it is called out here because the two sit side by side.
+
 - **The lifecycle-hook registry has a screen (#2162).** `/api/v1/hooks` has
   had full CRUD and a CLI since the engine landed and no web UI at any role —
   while a `shell` handler runs `sh -c` on the crewshipd host with a 30s
@@ -297,6 +350,81 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **The inbox column is the shared explorer now, and its filters are
+  answerable.** `/inbox-v2` had a 190 px rail holding three nav rows and a
+  permanent "all sources connected" block, plus three raw `<select>`s. Two of
+  those three could not be honoured: "type" filtered on which of the three
+  fetches a row arrived in — a client-only field, with an invented "grouped
+  incidents" member — and "subject" was harvested from whatever rows happened
+  to be loaded, meaning three different things at once (sender for inbox rows,
+  a raw user id for approvals, agent name for missions). "Priority" is a real
+  column for inbox rows only; `approvalEntry` and `missionEntries` synthesise
+  it for the other two. None of the three reached the server, so a filter
+  could never find a row that had not already been downloaded.
+
+  The column is rebuilt on `components/layout/sidebar-kit` — the same
+  explorer Routines, Issues, Crews and Pages use, and the same one the OLD
+  `/inbox` was already built on before v2 hand-rolled its own chrome. The
+  three views are a `SidebarSection` of `SidebarRow`s with counts, the way
+  Routines carries its status buckets; the filter is the kit's
+  `SidebarFilterPopover`, which — unlike the dropdown Routines hand-rolls —
+  stays open when a facet is picked, so two facets can be combined in one
+  visit. Active facets come back as removable `SidebarActiveChip`s. The
+  column collapses to `w-9` like the others, and is full-width on a phone,
+  where a fixed column left a dead strip beside it.
+
+  The facets are type (the seven values of `inbox.AllKinds`, plus "approval
+  gate" and "mission signal" named for what they are rather than for the
+  endpoint that answered), deadline (from the real `timeout_at`, and a
+  deadline further out than today answers to neither bucket rather than being
+  folded into "today"), and unread. Subject and priority are not offered:
+  a filter has to be answerable. Counts are exact because the feed is fully
+  loaded — a comment on `facetCounts` says so, and says they must move to a
+  server-side GROUP BY the day it is not.
+
+- **A `/journal` Timeline row says who acted (#2208).** The row carried a 3px
+  severity bar and a colour-coded text pill and nothing else — no avatar, no
+  crew icon, no entry-type glyph. The agent name appeared only where an emit
+  site happened to write it into the summary string. None of it needed
+  fetching: the avatar seed and style, the crew icon and colour, and an icon
+  for all 127 entry types were already in the browser and already refreshed on
+  realtime events, rendered only inside the two scope dropdowns.
+
+  The row is now seven columns — severity, time, an 18px agent avatar beside a
+  15px crew icon, the entry-type icon with the full dotted `entry_type`, the
+  summary, the age, the chevron. An agent the lookup cannot resolve is seeded
+  from its id rather than left blank. The summary drops a leading
+  `"<agent>: "` when the prefix names the agent now in the avatar, and takes
+  back some of the 40px the identity columns cost it. Long entry types
+  ellipsize — the catalog's median is 18 characters and its tail runs to 41 —
+  with the full string on the cell's `title` and in the expanded detail.
+
+  The avatar is gated on `actor_type`, not on whether `agent_id` is set. Four
+  common entry types — `chat.user_message`, `container.snapshot`,
+  `conversation.compacted`, `sidecar.stale` — emit a `user` or `system` actor
+  *with* the agent id populated, because the agent is what the event is about
+  rather than who caused it. Those rows get the labelled glyph, with the agent
+  named in the label, so a human's message is never captioned with an agent's
+  face.
+
+  Three signals that were colour-only are now also text: severity carries a
+  visually-hidden level (the bar was `aria-hidden`, and the word appeared only
+  after expanding), the entry-type group carries its name, and the disclosure
+  gets `aria-expanded` plus `aria-controls`. The disclosure is the chevron
+  button rather than the row container — with the detail rendered inside a
+  `role="button"`, the detail's own trace/agent/crew jumps were nested
+  interactive content and the button's accessible name grew to include the
+  entire payload JSON.
+
+  The stats rail's "Top agents" showed shortened uuids behind a flat slate
+  swatch, six agents reading as one series, with the avatar-carrying lookup
+  already mounted. It renders the avatar and the resolved name, and each bar
+  takes a seed-derived hue.
+
+  `LogRow` is memoized and the virtualized list's `itemContent` no longer
+  allocates a fresh closure per item per render, so a keystroke in the search
+  box stops re-rendering every mounted row.
+
 - **`/design` is gone; its audit is now a tracked document (#2165).** The
   create-surface unification proposal shipped as a page inside the product —
   no data, no API, no CLI command — and its own header said to delete it once
@@ -515,6 +643,455 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   could not be started from the UI at all. It now opens a picker over every
   agent, not only the ones with no history.
 
+- **A forked restore left the journal hash chain unverifiable (#2226).**
+  `crewship backup restore --as-workspace <slug>` returned success and produced
+  a workspace whose `VerifyChain` reported *every* restored row as tampered —
+  the exact false positive the chain work was built to avoid, fired by the
+  admin integrity endpoint on the very next check. `RemapIDs` regenerates the
+  identity columns the entry's keyed HMAC commits to (its own `id`, and every
+  FK column SQLite reports — `workspace_id`), while `seq`, `prev_hash` and
+  `entry_hash` rode through the bundle verbatim, so each stored hash still
+  attested to values the row no longer held. A second, independent break sat
+  beside it: `journal_chain_checkpoints.workspace_id` carries no `REFERENCES`
+  clause, so the remap's FK pass never rewrote it while pass 1 still
+  regenerated the row's primary key — every forked restore wrote a duplicate
+  checkpoint into the **source** workspace's audit state and left the fork with
+  none, turning a legitimately compacted gap into what reads as a malicious
+  mid-chain delete.
+
+  A forked restore now re-signs the chain under this installation's key, the
+  way the v152 migration's `backfillJournalChain` already does for a chain it
+  legitimately rewrote, and re-points *and* re-MACs the compaction checkpoints
+  under the new workspace id (`journal.CheckpointMAC` frames the workspace id,
+  so moving the row without re-signing it would have covered nothing). The fork
+  therefore starts at a **new genesis** — it verifies clean, but it attests to
+  this instance from the restore onward and no longer links back to the
+  source's history, so it does not get one silently: a `backup.chain_resigned`
+  entry is written at the tail of the new chain, inside the chain it describes,
+  naming the source workspace, the bundle digest and the counts. The CLI, the
+  restore API response and the `backup.restore` audit row report the same two
+  numbers. A restore that cannot re-sign the chain now fails before writing
+  anything rather than landing an unverifiable fork; there is no branch that
+  skips the re-sign. A plain or `--replace` restore remaps nothing, re-signs
+  nothing, and is unchanged.
+
+- **The journal stored the prompt text of every run, verbatim and forever
+  (#2215).** `exec.command` recorded the CLI argv, and the argv carries the
+  run's whole system prompt plus the verbatim user message; `chat.user_message`
+  stored the message body uncapped, while its own summary was capped at 240
+  characters. Both land in a hash-chained, append-only table that erasure
+  requests deliberately skip, and the Timeline tab that renders them is not
+  admin-gated.
+
+  Scrubbing could not close this, and #2205's scrub was never going to: the
+  credential scrubber is defence in depth, not a boundary — it cannot match a
+  value nobody registered and whose shape it does not know, so a token pasted
+  into agent chat survived it. The prompt-bearing values are therefore no
+  longer written. `exec.command` now carries a bounded, typed payload — the
+  argv *shape* with the prompt elements replaced by a placeholder naming the
+  element and its length, plus the adapter, model, tool profile, container,
+  exit code, duration, and a digest and length of the prompt — which answers
+  "what ran, and with which prompt" without storing the prompt. A measured
+  entry drops from about 43 KB to under 1 KB. What remains is capped, with an
+  explicit `truncated` flag. `chat.user_message` is scrubbed and capped to the
+  same 240 characters its summary always was, and the run's process log line
+  takes the same sanitised argv. The #2205 scrub is kept and still runs on
+  what is left.
+
+  Two UI readers were fixed with it: the Journal card's terminal line and the
+  run rail's detail line both read a key the orchestrator never wrote, so they
+  were blank for every agent exec. Both now accept either payload shape.
+
+  Three behaviour notes. `crewship journal --query` searches summary and
+  payload, so free-text search now reaches the first 240 characters of a user
+  message and no part of a prompt. `chat.user_message` is bounded rather than
+  emptied — the message is what that entry is for — so within those 240
+  characters the scrubber is still the only control. And `chat.agent_response`
+  still keeps up to 8 KB of the agent's scrubbed reply and `exec.output_chunk`
+  its scrubbed stdout, so an agent that quotes its prompt back still writes
+  that text to the journal.
+
+- **The `exec.command` journal entry wrote the CLI argv unscrubbed (#2205).**
+  All three emit sites recorded the agent CLI's argv verbatim. That argv
+  carries the run's whole system prompt and the verbatim user message, so
+  every entry was a large payload of prompt text that no member-facing
+  surface was filtering: the Timeline tab is not admin-gated, and Export
+  writes every loaded payload to a file in one click.
+
+  The sibling `exec.output_chunk` emit already scrubbed, under a comment
+  stating the reason: the journal is hash-chained and append-only, so whatever
+  lands in a payload can never be redacted afterwards, and the GDPR erasure
+  cascade deliberately skips `journal_entries`. The argv needed it at least as
+  much, because it carries text a *human* typed — a credential pasted into
+  agent chat had nothing between it and permanent storage. Every argv element
+  now goes through the run's own credential scrubber before the entry is
+  written, and two guard tests (one behavioural over all three emit paths, one
+  static over the emit sites themselves) fail if a future site writes the raw
+  argv.
+
+- **The client half of the approvals contract accepted a shape the server
+  never sends.** `ApprovalsHandler.List` writes `{rows, status, count,
+  has_more}` as a map literal — all four keys on every response — and the
+  generated spec requires all four. `approvalListResponseSchema` required only
+  `rows`. `useApprovals({loadAll: true})` pages until `has_more` is false, so
+  an envelope missing that key read as `undefined`, the walk stopped after one
+  page, and the UI presented the first 200 rows of approval history as the
+  whole history with no error anywhere. All four are required now. Every list
+  fixture in the hook's tests was hand-written and none was a real envelope,
+  which is why nothing caught it; they go through one helper that builds what
+  the handler actually writes.
+
+- **Decided approvals were filed under Archived instead of Decisions.**
+  `isArchivedNotDecided` looked for the decider on `entry.inboxItem`, but the
+  two entry constructors are disjoint — `inboxEntry` sets `inboxItem`,
+  `approvalEntry` sets `approval`. Every decided approval therefore had no
+  decider to find and was classified as archived noise, which is precisely the
+  mislabelling the function exists to prevent. It reads either field now, and
+  `timeout` — the approvals queue's spelling of its own sweep, distinct from
+  the waitpoint `timed_out` already listed — counts as not-a-decision.
+
+- **Schedule advisories outranked real gates in the inbox bell.** The bell's
+  "Needs a decision" bucket filtered on `isActionableInboxItem`, which answers
+  "is there a source action behind this row?" and rightly says yes to a missed
+  occurrence or a tripped circuit breaker. The bell asks the narrower question
+  its heading promises — is an agent parked until a human answers? — and
+  nothing is parked on either. They move to Recent, where the bucket's own
+  comment always said they belonged.
+
+- **Inbox deep links stopped working after the first render.** `?item=` and
+  `?agent=` were read into `useState` initializers, and the route stays mounted
+  across a same-route navigation. Leaving `/inbox-v2?item=x` for the bare route
+  kept row x in the reading pane — a link naming no row is a request to show no
+  row, and answering it with the previous one is how the wrong request gets
+  decided — and `?agent=riley` after `?agent=casey` kept filtering on casey.
+  Both now track the URL for the life of the route, and neither overwrites a
+  search the user typed or a row they clicked.
+
+- **`source_missing` could not say "checked, and the source is live".** The
+  detail read computes whether a waitpoint or escalation still has a row that
+  can decide it, and the pane offers a way out of an orphaned row on the
+  strength of it. As `bool` with `omitempty` the false arm was unsendable: a
+  live gate and a list row that never ran the probe were the same empty space
+  on the wire. It is a pointer now, so the detail read states both answers and
+  the list still states neither.
+
+- **`limit` and `offset` were published as strings on `/inbox` and
+  `/approvals`.** Both handlers `strconv.Atoi` them and reject anything that is
+  not a non-negative integer, so the document promised generated clients a
+  contract the server does not honour.
+
+- **`crewship admin seed-inbox` collided with itself.** Both identifier
+  families derived from `time.Now().Unix()`, so a second run within the same
+  second re-minted the same run id and failed on the primary key — or, with no
+  pipeline to hang the run on, re-used every source id, where `inbox.Insert`
+  dedupes silently while the success line still claimed sixteen rows written.
+  One nanosecond-derived suffix per invocation, carried by both families, with
+  the `run_seed_` and `seed_` prefixes `--clear` matches on left intact. Its
+  `--clear` flag is also documented now, which is what the strict docs gate was
+  failing on.
+
+- **The approvals API answered in a shape no browser could read.**
+  `harbormaster.Request` carried no JSON tags and was serialized straight onto
+  the wire, so `GET /api/v1/approvals` returned `"ID"`, `"Kind"`, `"Status"`,
+  `"CreatedAt"` — while `lib/types/approvals.ts` and the generated OpenAPI spec
+  both declared snake_case. Every non-empty response failed `safeParse`, so
+  `/approvals` and the inbox's approval feed rendered zero rows behind
+  "Malformed response from /api/v1/approvals". Only the Go CLI worked, because
+  `encoding/json` matches field names case-insensitively on decode — which is
+  also why every Go test passed: they all decoded into structs. The struct now
+  carries snake_case tags, `DecisionComment` serializes as `decision_comment`
+  (the column name, and what the OpenAPI schema already documented), and
+  `TimeoutSecs` — documented as in-memory-only, but leaking to clients as a
+  constant `0` — is `json:"-"`. `TestApprovals_WireShape_IsSnakeCase` asserts
+  the emitted keys rather than what a Go decoder can recover from them.
+  `docs/api-reference/approvals.mdx`, which had documented the PascalCase
+  shape as a known quirk, is updated with it.
+
+- **Four inbox rows advertised a decision they could not take.** Each was a
+  button that called an endpoint the row could never satisfy:
+
+  *Autonomy-gate holds.* `writeAutonomyHold` writes a `kind=waitpoint` row
+  whose `source_id` is a crew, agent or mission id — never a
+  `pipeline_waitpoints` token — so the generic Approve/Deny resolved to
+  `/pipelines/waitpoints/{crew_id}/approve` and 404'd every time. The decision
+  lives in the approvals queue and the row already carries `approval_id` in
+  its payload; it is decided there now. (The inbox's cross-source dedupe
+  suppresses the approvals row this one projects, so until this fix the only
+  working surface was hidden and the broken one was what remained.)
+
+  *A decision whose source is gone.* A waitpoint whose run was pruned, a hire
+  already swept, an escalation whose `escalations` row was deleted: the source
+  endpoint 404s and the inbox PATCH answered 409 "use the source endpoint", so
+  the row could never leave Needs action and never reached History. The PATCH
+  guard now makes the same exception for waitpoints it already made for
+  source-less escalations, and `BulkPatchState` uses the same predicate rather
+  than the escalation-only one it had drifted to.
+
+  *The Archive button that knew nothing.* The client guessed whether a source
+  still existed by looking at the payload — wrong in both directions. The
+  detail read now answers it (`source_missing`), using the same probe the
+  PATCH guard uses, so a live decision still offers no Archive and an orphaned
+  one does.
+
+  *Retry on a failed run.* It read `payload.pipeline_slug`, which the producer
+  never writes, and fell back to `sender_name` — the SCHEDULE's name — posting
+  `/pipelines/{schedule name}/run`. The `!slug` guard never fired because
+  `sender_name` is always set, so the user got a red toast and the row stayed.
+  Retry now needs a real slug, and a Retry that cannot run no longer resolves
+  the row as "cancelled" behind the user's back.
+
+- **History stopped calling archived noise a decision record.** One click on
+  the grouped advisory card's "Archive 6 updates" put six curator advisories
+  into History under a heading that read "Decision records" — telling the
+  reader six decisions had been made when none had. History now splits into
+  Decisions and Archived. Archiving is not deciding; the PRD says History
+  holds both, not that they are the same thing.
+
+  `scripts`-free cross-check, driving the CLI against the same server the
+  browser reads: for each kind, `crewship inbox list --kind <k> --all` must
+  agree with the facet, the kinds must sum to the unfiltered total, and the
+  facet vocabulary must not have drifted from `inbox.AllKinds`.
+
+- **Journal search said "no entries match" over a result set that was not
+  empty (#2206).** Three defects in the same search box, each producing a
+  false empty answer. Free-text search wrapped the whole input in one FTS5
+  phrase literal, so it was an ordered phrase rather than a set of terms:
+  on a live instance `morgan session` found 56 rows, `session morgan` found
+  0, and `morg` found 0 against a corpus where `morgan` occurs 1,140 times.
+  Terms are now quoted individually and `AND`-ed, with a prefix `*` on the
+  last one — word order stops mattering (`session morgan` → 119, same as
+  `morgan session`) and a half-typed word still matches (`morg` → 1,140).
+  Quoting every term preserves the operator neutralisation the phrase form
+  bought: `AND`, `OR`, `NOT`, `NEAR(...)`, `*`, `summary:x` and stray quotes
+  stay literal search text and can neither restructure the query nor error
+  it out.
+
+  `agent:` and `crew:` in the search box — and `crewship journal --agent` —
+  bound their value straight into a SQL equality on the id column, so the
+  box's own placeholder example (`agent:viktor`) and `--agent morgan`
+  returned zero. Both parameters now accept an id, a slug or a display name,
+  resolved inside the caller's workspace by the API, so the UI, the CLI and
+  direct API callers all get it. A reference that resolves to nothing is
+  still matched against the id column, so a deleted agent's id keeps
+  reaching its history and a typo stays unmatchable rather than widening to
+  the whole workspace; an ambiguous display name matches every hit.
+
+  The timeline's client-side matcher also re-applied the tokens the server
+  had already bound, filtering the server's own rows back out (`agent:`
+  reads the entry's `agent_id`, which is a UUID, against the name the user
+  typed). It now narrows only on what the backend could not bind, and its
+  free-text matching reaches the payload, which the server's index has
+  always covered.
+- **Three Logs filter chips could never appear, and 65 entry types had no
+  chip at all (#2207).** The Crow's Nest type-chip row seeded its per-group
+  counters from a hand-kept list that had fallen three groups behind the
+  eighteen the UI defines, so counting an `audit`, `provisioning` or `chat`
+  entry incremented a counter that did not exist — `NaN`, which fails the
+  `count > 0` test the row uses to decide what to render. Those three chips
+  were unreachable no matter how many such entries were loaded, and the
+  visible chips' totals under-reported. The list is now derived from the
+  render order, so it cannot drift again.
+
+  Scanning the backend for every entry type it can emit finds 139, of which
+  65 had no group: they rendered grey with a raw dotted-string pill, and
+  because muting a chip is pushed to the server as an `exclude_entry_type`
+  filter and the catch-all group has no type list, they could not be filtered
+  out of a busy workspace's 5,000-entry window at all. Two new chips take the
+  families that had nowhere to go — **routine** (the fourteen `pipeline.*`
+  types plus the two `automation.*` refusals that explain why a routine did
+  not run) and **page** (all fifteen `page.*` types, including publishing,
+  public views and webhook credentials). The rest join the existing chips:
+  memory, credentials, approvals-and-trust, notifications, provisioning and
+  runtime freshness, missions, runs, chat, skills, system. The twelve the
+  frontend's entry-type list had never carried — among them
+  `page.owner_transferred`, `page.published` and
+  `onboarding.proposal_applied` — gained an icon and a place in the activity
+  sidebar's facets. `memory.priority_changed`, emitted as a bare string
+  literal since it shipped, is now a named constant on the Go side, so the
+  entry that records who changed a compaction-surviving marker is visible to
+  anything that reads the backend's declarations.
+
+  `hook.dispatch_error` was in the server-side `system` exclusion list but
+  not in the client's type→group map, so muting System dropped it on the
+  server while the client still called it ungrouped. The two maps now agree,
+  and a test asserts it in both directions. `docs/guides/crew-journal.mdx`
+  billed roughly ninety types as the "full entry-type catalog"; it now lists
+  all 139 with the chip each one filters under.
+
+- **Clicking a run in `/journal?tab=runs` moved the address bar and nothing
+  else (#2209).** The row handler pushes `/journal?tab=timeline&trace_id=<id>`
+  — the same pathname, so the App Router re-renders the page without
+  unmounting it. Every URL-derived value was read once at mount
+  (`useMemo(…, [])` or a lazy `useState` initialiser) and nothing re-read
+  `searchParams`, so the tab stayed on Runs, the trace focus stayed empty, and
+  the user was left staring at the runs table while the URL claimed Timeline.
+  Every in-app link into `/journal?…` from an already-mounted journal was
+  equally inert, as was the "click a row → open trace" hint promising it.
+  The URL is derived state now rather than a mount-time copy, so the page
+  follows it. Verified in a browser: `tab=runs` → row click → Timeline with
+  the trace pill, no full page load.
+
+- **The journal Timeline degraded permanently on a real workspace (#2210).**
+  Four faults on one data path, each invisible on a quiet instance.
+
+  *A dropped SSE stream never came back.* On the first `onerror` the hook
+  closed the EventSource, fell back to 5 s polling and never reached for the
+  stream again — only a filter change or a page reload restored the live tail,
+  and the badge read "Polling" for the rest of the session with no explanation
+  and nothing to click. It now reconnects on jittered exponential backoff
+  (1 s doubling to a 30 s ceiling, equal jitter so tabs knocked offline by one
+  server restart do not retry in lockstep), stops polling the moment the
+  stream is back, and the badge is a button that retries immediately and
+  re-reads the head.
+
+  *The polling backfill silently lost the gap it existed to cover.* The
+  watermark was set when the effect mounted and only ever advanced from
+  *polled* entries, never from ones the stream had already delivered — so a
+  stream that dropped after a busy hour re-requested from page-load time and
+  got back one 50-row page, discarding everything in between with nothing
+  saying so. The watermark now advances from stream entries too, each poll
+  walks up to 4 cursor pages to close a deeper backlog, and a backlog deeper
+  still surfaces as "Entries missing" rather than vanishing. `lastError`,
+  which the hook had always computed and the page had always thrown away, is
+  now on the badge.
+
+  *Prepending a live entry was O(n), per event.* Each `prependLive` scanned up
+  to 5,000 buffered entries for a duplicate id and copied the whole array; the
+  page's 250 ms batch then called it once per event, so a 50-event flush was
+  ~250k comparisons and 50 array copies before React rendered once.
+  `prependLive` takes an array: one pass, one update. `ResourcesStrip` was not
+  batching at all — for `container.metrics`, the highest-volume entry type in
+  the product — and now shares the batching hook.
+
+  *Two filters missed the partial indexes built for them, and a third had no
+  index at all.* SQLite uses a partial index only when the query's predicate
+  *implies* the index's, and a single-value `IN` does not: the Timeline sends
+  exactly one severity, so `severity IN ('error')` never matched
+  `idx_journal_ws_sev_ts … WHERE severity IN ('warn','error')` and scanned the
+  workspace partition instead. `priority IN ('high')` missed
+  `idx_journal_entries_priority … WHERE priority != 'normal'` the same way.
+  And `run_id` — `(trace_id = ? OR actor_id = ? OR run_id = ?)` — could not be
+  index-unioned at all, because `actor_id` had no index (`idx_journal_actor_ts`
+  is on actor_*type*), which made every `/journal/count?run_id=` scan the
+  whole workspace partition since `Count()` emits no `LIMIT`. Migration
+  `20260831093500_journal_filter_indexes.sql` adds unconditional
+  `(workspace_id, severity, ts)` and `(workspace_id, priority, ts)` indexes plus
+  a partial `(workspace_id, actor_id, ts)`, drops the now-redundant
+  `idx_journal_entries_priority`, and keeps v146's tiny partial severity index,
+  which still wins the two-value errors-and-warnings shape. Every plan change
+  is pinned by `EXPLAIN QUERY PLAN` assertions against a seeded, `ANALYZE`d
+  database — an index whose plan nobody checked is worse than none, because it
+  looks like the problem is solved.
+
+- **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
+  server refused it (#2195).** The standalone `kind: Agent` validator kept
+  `COORDINATOR` in `validAgentRoles`, so a manifest carrying that role passed
+  `--dry-run` with a green `Plan: 1 to create` and the real apply failed with
+  `400 agent_role must be AGENT or LEAD`. The role was retired in v0.1
+  (`internal/api/agents.go`, pinned by `agents_test.go`); the comment in the
+  validator acknowledged the server rejects it and kept the value anyway, so
+  that a future server rollback would stay a one-line change. That option was
+  never exercised and its price was paid on every run — and a dry-run plan is
+  the artifact CI checks. The validator's own enum error made it worse by
+  advertising `COORDINATOR` among the values to use, so a user who mistyped
+  the role was handed a fix that fails at apply.
+
+  Validation now refuses the retired role before any request, in any casing,
+  with `agent_role COORDINATOR was retired in v0.1 and the server rejects it;
+  use LEAD` — the message #2191 gave `crewship agent create --role`, one layer
+  over. The enum error for other bad values lists only `LEAD, AGENT`. Third
+  surface of the same retired role, after #2166 (create-agent dialog) and
+  #2189 (`crewship agent create --role`); #2197 covers the crew wizard.
+
+- **Agent avatars never actually got stored, and `/crews` re-tried the failed
+  writes on every load (#2196).** The backfill that hands the server a
+  rendered avatar for an agent that has none has never stored a single one
+  since it shipped. Its `PUT /api/v1/agents/{id}/avatar` carried no
+  `workspace_id`: the route resolves its workspace from the query string, a
+  path segment, or the `X-Workspace-ID` header, and the client had none of the
+  three, so every write was refused with `400 workspace_id is required` before
+  the handler ran — eight of eight agents, on every view of `/crews`, with
+  `avatar_url` still `null` a day after a seed. The workspace id is now
+  threaded from the component into `queueAvatarBackfill`, and a missing one
+  skips the write entirely instead of sending a request that cannot succeed —
+  the rule the read path (`agentAvatarURL`) has always applied. `/onboarding`
+  supplies its own workspace id, because that route never loads the workspace
+  store and its Crewship Guide avatar would otherwise be skipped.
+
+  The same function also refunded its per-page-load budget for any non-403
+  failure, so a permanently failing endpoint consumed no budget and the page
+  re-attempted the full allowance every load, forever. A run of failures that
+  are not permission refusals now stops the backfill for the session, the way
+  a run of 403s already did, and a failed write spends its budget. Avatars
+  still render from their seed throughout; nothing on screen changes when a
+  backfill fails.
+
+- **The create-crew wizard could offer a crew it was then unable to create
+  (#2197).** `POST /api/v1/crew-ai-suggest` asks a model for each agent's
+  `agent_role` and constrained it in the prompt only. `validateSuggestion`
+  checked the crew name, the agent count, the required fields, the slugs and
+  that exactly one agent was `LEAD` — never what the other agents claimed to
+  be. A model answering with a role the platform retired in v0.1, a plausible
+  completion given the word "coordinates" sits in the instruction for the
+  sibling role, produced a suggestion that passed validation, rendered as a
+  lineup preview with that role on a badge, and failed at creation:
+  `POST /api/v1/agents` answers `400 agent_role must be AGENT or LEAD`.
+
+  Suggestions are now validated against the same set the create endpoint
+  accepts. A role outside it fails the suggestion the way a missing field
+  does, so the wizard can no longer show a lineup carrying a role it cannot
+  build. (Roles only — `validateSuggestion` still checks names and slugs for
+  presence rather than length, so a suggestion remains a draft to review.)
+  Casing and surrounding whitespace are normalised rather than refused — the
+  same role written the way a model writes JSON — and an omitted role becomes
+  `AGENT`, the default the create endpoint already applies.
+
+  Three renderers printed whatever token arrived, and no longer do: the
+  wizard's lineup preview, the agent roster and the crew canvas roster all
+  present an unrecognised role as an ordinary agent, which is the one thing
+  the form behind them can deliver. Stored agent rows predating the retirement
+  stop carrying a badge for a role that no longer exists. The crew-template
+  and AI-suggest response types narrowed to `"AGENT" | "LEAD"`, so a third
+  value has to be added deliberately — a test catches that, not the compiler,
+  because each renderer takes the field as a plain string on purpose.
+
+  Fourth surface of the same retired role, after the create-agent dialog copy
+  (#2166), `crewship agent create --role` (#2189) and the standalone `Agent`
+  manifest validator (#2195).
+
+- **`crewship crew suggest --goal "…"` could never succeed on any server
+  (#2201).** The command posted `{"goal": …}` and
+  `POST /api/v1/crew-ai-suggest` decodes `{"description": …}`, so the handler
+  always saw an empty string and answered `400 description must be at least 10
+  characters` — a message naming a field the CLI has no flag for, on a request
+  that never reached a model. It now posts `description`; the flag stays
+  `--goal`, which is what `docs/cli/crew.mdx`, the OpenAPI request schema and
+  the web crew wizard already agreed on.
+
+  A goal outside the endpoint's 10–2000 bytes of UTF-8 is now refused locally,
+  naming `--goal` and exiting `2` — the same code the server's `400` maps to,
+  so moving the check between tiers does not change what a script sees (the
+  #2189 precedent). `--goal is required` moves to that exit code too; it
+  previously exited `1`.
+
+  Both layers now say **bytes of UTF-8** where they used to say "characters".
+  The bound has always been `len(string)`, so the old wording was a promise the
+  check did not keep — harmless at the minimum, where a non-ASCII goal only
+  ever passes more easily, but wrong at the maximum, where a CJK or emoji
+  description is refused at roughly a third of the 2000 the message named. The
+  limits themselves are unchanged; only `POST /api/v1/crew-ai-suggest`'s two
+  `400` message strings and the docs are.
+
+  The bug survived CI because the only test of the payload asserted the CLI's
+  own spelling — `strings.Contains(body, "\"goal\":\"grow the userbase\"")` —
+  against a stub server that answered `200` to any body, so it passed
+  *because* the key was wrong. That assertion now decodes the posted body with
+  `api.CrewAISuggestRequest`, the struct the handler itself decodes into, and
+  a new acceptance test drives the built binary against a real `api.NewRouter`
+  to the endpoint's `422` for a workspace with no Anthropic key — the furthest
+  point reachable without spending tokens, and one step past where the bug
+  died.
+
 - **`go test ./internal/api/...` was red on every dev clone, and green in CI
   (#2188).** `TestEveryCredentialLoader_SplitsTheEndpointObject` walks the
   repository from its root and skipped `.git`, `node_modules`, `web`, `vendor`
@@ -556,6 +1133,69 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   which owns what is valid — this is a removal of one false promise, not a new
   client-side role validator. Companion to #2166, which removed the same dead
   promise from the create-agent dialog.
+
+- **A missing field on one response took down the whole dashboard (#2185).**
+  `series_labels` is typed as required on the timeseries response, but the
+  type is a claim about the wire and `fetchOr` validates nothing, so a 200
+  with an unexpected body reached `Object.entries(undefined)` inside a
+  `useMemo` — a render-time throw that unmounts the page rather than the one
+  chart it belongs to. The line above it already tolerated a missing
+  `bucket.series` for the same reason.
+
+- **The run-volume chart never refreshed (#2185).** `useInvalidateDashboard`
+  invalidated two fixed-param timeseries keys that nothing mounts, and never
+  the key the page actually uses — `invalidateQueries` compares the params
+  object by deep equality, so the window-dependent key could not match. The
+  KPIs and Running-now updated from the realtime path while the chart beside
+  them stayed frozen until a remount or a window switch.
+
+- **The attention strip dropped items past the third (#2185).** The badge
+  reported the true count, but the order is fixed, so on a workspace with
+  approvals, failures and capacity holds a credential gap could never render
+  — and neither it nor a capacity hold is reachable through the strip's
+  "Open Inbox" link. The remainder is now named, with its links, rather than
+  only counted.
+
+- **The dashboard reported green over failures it could not see (#2185).**
+  Three states were rendered as one. The attention strip said "All clear ·
+  There is nothing blocking your crews right now" whenever `attentionItems`
+  was empty — including while the inbox was still loading, and permanently
+  when the inbox fetch failed, which for an RBAC-gated workspace is a 403 the
+  hook does not retry. The Runtime capacity signal read a green "Available"
+  when its fetch failed, because `capacity?.enabled === false` is also false
+  for a null response, so a dead admission-control endpoint looked like
+  healthy capacity. And the Services row painted "6/6 running" in success
+  green while two of five crews had never been reached.
+
+  Each now has the third state it needed: unknown is not clear. And the strip
+  says so even when it does have something to show: `capacity` and
+  `credentials` come from their own endpoints, so the list can be non-empty
+  while the inbox — which carries approvals and failed runs — was never read,
+  and a confident count over that is the same defect one layer up.
+
+- **The dashboard rendered another workspace's crews (#2185).**
+  `GET /api/v1/runtime/capacity` is deliberately instance-scoped — the host is
+  a property of the instance — and the attention strip rendered
+  `held[0].detail` verbatim. On an instance with more than one tenant that put
+  one workspace's crew detail on another's dashboard, and counted their held
+  starts in its badge. Holds are now filtered to this workspace's crews.
+
+  The same filter fixes the count: `admission.Hold` is appended per held
+  *start*, so five queued starts on one crew read as "5 crews waiting for
+  capacity". It is deduped per crew now.
+
+- **The dashboard showed money that is not money (#2185, #2193).**
+  The "Actual cost" tile is removed. On a flat-rate subscription the marginal
+  cost of a call is structurally not a number — paymaster's own type says so,
+  forcing `CostUSD` to 0 and confidence to Unknown for `BillingFlatRate` — and
+  the tile rendered a ledger figure with no confidence badge, which the same
+  file explicitly forbids. On the workspace it was built against, 25 routine
+  runs carrying $0.83 of adapter-reported usage produced zero ledger rows,
+  because routine runs on the subscription adapter never reach the metered
+  path; the tile showed $0.00 and, with a budget set, a progress bar that
+  filled far slower than reality. The reasoning is left at the call site so
+  it is not re-added without it. #2193 tracks the four other places the same
+  figure is still printed with a `$`.
 
 - **An approval could outlive the run it belonged to, and approving it did
   nothing (#2163).** A routine run parked on a `wait` step and then marked

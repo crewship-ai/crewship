@@ -16,7 +16,10 @@ const waitpointDecide = vi.fn()
 const escalationResolve = vi.fn()
 const inboxBulk = vi.fn()
 
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test", role: "OWNER" }) }))
+vi.mock("@/hooks/use-workspace", () => ({
+  useWorkspace: () => ({ workspaceId: "ws-test", role: "OWNER" }),
+  useCurrentWorkspaceId: () => "ws-test",
+}))
 vi.mock("@/hooks/use-dashboard-data", () => ({ useAgentSummaries: () => ({ data: [] }) }))
 vi.mock("@/hooks/use-pipelines", () => ({ usePipelines: () => ({ pipelines: [], refresh: vi.fn() }) }))
 // Partial: use-websocket imports broadcastSessionExpired from the same module,
@@ -171,8 +174,10 @@ describe("dismiss and archive", () => {
     render(<InboxList />)
     open("Approve promote")
 
-    // A waitpoint is source-managed: the inbox PATCH 409s on anything but
-    // "read", so an Archive button here could only ever fail.
+    // A waitpoint whose source is still live is source-managed: the inbox
+    // PATCH 409s on anything but "read", so an Archive button could only ever
+    // fail. The server says so on the detail read via source_missing, which is
+    // absent here.
     expect(screen.queryByRole("button", { name: /^Archive$/ })).not.toBeInTheDocument()
   })
 })

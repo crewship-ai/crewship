@@ -130,8 +130,8 @@ every crew; per-crew entries add to (and can override) them.
 - **agents** — see [Agent](/manifest/agent) for the field reference (the
   nested form omits `crew_slug` since the parent crew is implicit). At
   most one agent per crew may be `agent_role: LEAD`. Only `AGENT` and
-  `LEAD` are valid here — `COORDINATOR` is rejected in the nested form
-  (see the validation rules below).
+  `LEAD` are valid — the retired `COORDINATOR` value is rejected (see
+  the validation rules below).
 - **mcp_servers** — the inline form of [Integration](/manifest/integration),
   crew-scoped. Each entry's `transport` is one of `stdio`,
   `streamable-http`, `http`, or `sse`.
@@ -256,12 +256,12 @@ every failure into one message so you fix them in a single pass:
   one LEAD per crew; `skills` and `env_refs` resolve against the
   crew-scope then workspace-scope declarations.
 
-  > **`COORDINATOR` is not valid in nested bundles.** Inside a
+  > **`COORDINATOR` is retired and rejected everywhere.** Inside a
   > `kind: Crew` or `kind: Workspace` document the agent-role validator
   > (`validAgentRole`, `internal/manifest/validate.go`) admits only
-  > `AGENT` and `LEAD`. The standalone [`kind: Agent`](/manifest/agent) form
-  > accepts `COORDINATOR` in its own front-end validator, but the
-  > nested form rejects it outright — prefer `AGENT`/`LEAD` everywhere.
+  > `AGENT` and `LEAD`; since #2195 the standalone
+  > [`kind: Agent`](/manifest/agent) form refuses the retired value too,
+  > rather than planning a create the server answers with a `400`.
 - MCP servers and services validate their own shapes (env-mapping
   values resolve to known credentials; service names are DNS labels;
   named volumes only). MCP `transport` must be one of `stdio`,

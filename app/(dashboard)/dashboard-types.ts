@@ -70,3 +70,93 @@ export interface TimeseriesResponse {
   buckets: TimeseriesBucket[]
   series_labels: Record<string, string>
 }
+
+export type DashboardWindow = "24h" | "7d" | "30d"
+
+export interface RunInsightCategory {
+  key: string
+  total: number
+  failed: number
+}
+
+export interface RunInsightsResponse {
+  window: DashboardWindow
+  totals: {
+    total: number
+    succeeded: number
+    failed: number
+    running: number
+  }
+  duration: {
+    p50_ms: number
+    p95_ms: number
+  }
+  by_trigger: RunInsightCategory[]
+  by_model: RunInsightCategory[]
+  by_crew: Array<{ id: string; name: string; total: number; failed: number }>
+  top_agents: Array<{ id: string; name: string; crew_name: string; total: number; failed: number }>
+  truncated: boolean
+}
+
+export interface RuntimeCapacityResponse {
+  enabled: boolean
+  limits?: {
+    MaxConcurrentStarts?: number
+    MinStartInterval?: number
+    RequiredFreeMB?: number
+    MaxPressurePct?: number
+  }
+  in_flight_starts?: number
+  held: Array<{
+    crew_id: string
+    crew_slug?: string
+    reason: string
+    detail?: string
+    since: string
+    waited_ms: number
+  }>
+  held_total?: number
+  host_signal_available?: boolean
+  host_signal_error?: string
+  host?: {
+    AvailableMB?: number
+    TotalMB?: number
+    SomeStallPct?: number
+  }
+}
+
+export interface MemoryHealthResponse {
+  workspace_id: string
+  crew_id: string
+  computed_at: string
+  overall: number
+  metrics: {
+    freshness: number
+    coverage: number
+    coherence: number
+    efficiency: number
+    reachability: number
+  }
+  details: Record<string, unknown>
+}
+
+export interface CrewSpendRow {
+  crew_id: string
+  cost_usd: number
+  call_count: number
+  input_tokens: number
+  output_tokens: number
+}
+
+export interface CrewSpendResponse {
+  rows: CrewSpendRow[]
+  since: string
+  until: string
+}
+
+export interface CrewServiceSummary {
+  total: number
+  running: number
+  degraded: number
+  checked: boolean
+}

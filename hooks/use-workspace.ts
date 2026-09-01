@@ -115,6 +115,31 @@ function getServerSnapshot() {
   return ssrSnapshot
 }
 
+/**
+ * The selected workspace id, or null while nothing is selected yet.
+ *
+ * Read-only and, unlike {@link useWorkspace}, it does **not** trigger the
+ * workspace load — it only subscribes, so it re-renders when whoever does own
+ * the load finishes. That distinction matters for leaf presentational
+ * components: `AgentAvatar` renders in ~30 places and needs the id purely to
+ * scope a background write (#2196), and calling `useWorkspace()` there would
+ * turn every avatar on the page into something that can fire
+ * `GET /api/v1/workspaces`.
+ *
+ * Because it does not load, it reports null on any route that never mounts
+ * the store. Every dashboard route does — `app/(dashboard)/layout.tsx` calls
+ * `useWorkspace()` — but `/onboarding` does not, and it renders a real
+ * agent's avatar. A caller in that position passes its own id through
+ * `AgentAvatar`'s `workspaceId` prop rather than relying on this.
+ */
+export function useCurrentWorkspaceId(): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => snapshot.currentId,
+    () => ssrSnapshot.currentId,
+  )
+}
+
 export function useWorkspace(): UseWorkspaceReturn {
   const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 

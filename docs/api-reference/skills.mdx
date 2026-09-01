@@ -645,7 +645,7 @@ Uses AI to suggest a crew configuration based on a natural language description.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `description` | string | Yes | Natural-language description (10–2000 characters) |
+| `description` | string | Yes | Natural-language description (10–2000 bytes of UTF-8, not characters — the check is `len(string)`) |
 
 ```json
 { "description": "A crew that triages GitHub issues and drafts release notes." }
@@ -653,11 +653,45 @@ Uses AI to suggest a crew configuration based on a natural language description.
 
 **Response:** `200 OK` -- suggested crew configuration.
 
+```json
+{
+  "crew_name": "Release Crew",
+  "crew_slug": "release-crew",
+  "description": "Triages issues and drafts release notes.",
+  "agents": [
+    {
+      "name": "Rita",
+      "slug": "rita",
+      "role_title": "Release lead",
+      "agent_role": "LEAD",
+      "system_prompt": "You coordinate the release."
+    }
+  ]
+}
+```
+
+The model's answer is validated before it is returned. What that validation
+guarantees is the roles and the shape: 2–6 agents, exactly one with
+`agent_role` `LEAD` and the rest `AGENT` — the same two values
+[`POST /api/v1/agents`](/api-reference/agents) accepts, so every role in a
+returned suggestion is one you can go on to create. Any other role makes the
+whole suggestion a `502`, rather than a crew you are offered and then cannot
+create. Roles are matched case-insensitively and returned in upper case; an
+omitted `agent_role` is `AGENT`. Slugs are normalised, and derived from the
+agent's name when missing or unusable.
+
+It does **not** guarantee that every other field will pass the create
+endpoint. Names and slugs are checked for presence, not length, so a
+suggestion can carry a one-character agent name that `POST /api/v1/agents`
+then refuses with `400 name must be 2-100 characters` (and likewise its
+2–50 rule for slugs). Treat a suggestion as a draft to review, not as a
+validated payload.
+
 | Status | Condition |
 |---|---|
-| `400` | Invalid JSON, or `description` shorter than 10 / longer than 2000 characters |
+| `400` | Invalid JSON, or `description` shorter than 10 / longer than 2000 bytes of UTF-8 |
 | `422` | No active Anthropic `API_KEY` credential in the workspace |
-| `502` | AI suggestion call failed |
+| `502` | AI suggestion call failed, or the model's answer failed validation |
 
 ---
 

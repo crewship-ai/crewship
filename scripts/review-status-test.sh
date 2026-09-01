@@ -519,7 +519,13 @@ echo "== the API failing is its own state, never a benign one =="
 # pure-stdin test can reach that branch. So drive the real script with a `gh`
 # that fails. Still network-free — the stub is the only `gh` on PATH.
 STUB_DIR="$(mktemp -d)"
-trap 'rm -rf "$STUB_DIR"' EXIT
+# ONE cleanup for every temp dir this file makes. Bash keeps a single action
+# per signal, so a second `trap ... EXIT` further down does not add to this one
+# — it replaces it, and whatever the first was guarding is leaked silently. A
+# later block did exactly that and left one directory behind per run.
+assemble_tmp=""
+cleanup() { rm -rf "$STUB_DIR" ${assemble_tmp:+"$assemble_tmp"}; }
+trap cleanup EXIT
 stub_gh() { printf '%s\n' '#!/bin/sh' "$@" > "$STUB_DIR/gh"; chmod +x "$STUB_DIR/gh"; }
 with_stub() { PATH="$STUB_DIR:$PATH" "$RS" "$@" 2>&1; }
 
@@ -585,6 +591,42 @@ out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" 1234 2>&1)"; rc=$?
 expect_eq "gh missing exits 2" "2" "$rc"
 expect_contains "…and says gh is missing" "$out" "gh CLI not found"
 
+echo "== --retrigger needs a target (#2231) =="
+
+# --retrigger is the only MUTATING mode: it posts `@coderabbitai review`, and
+# CodeRabbit replenishes ONE review slot at a time. An unscoped run therefore
+# spends other sessions' slots — on 2026-08-31 one such run queued four PRs,
+# three of them another session's, and pushed the requester's own PR to the
+# back of the queue it had just filled. Reading unscoped is the whole point of
+# the tool; mutating unscoped has to be said out loud.
+#
+# EVERY case here runs on the empty PATH, including the ones expected to be
+# let through. A test for a mutating path must not be able to mutate: the
+# first draft of this block ran the unscoped case on the real PATH, which is
+# the very command the gate exists to stop. All four exit 2, so the exit code
+# proves nothing on its own — the MESSAGE is the assertion. "gh CLI not found"
+# means the gate let the call reach the tooling probes; the two usage lines
+# mean the gate fired first.
+
+out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" --retrigger 2>&1)"; rc=$?
+expect_eq "an unscoped --retrigger exits 2" "2" "$rc"
+expect_contains "…names the targeted form" "$out" "--retrigger 2227"
+expect_contains "…names the explicit global form" "$out" "--retrigger --all"
+expect_not_contains "…and never reaches the tooling probes" "$out" "gh CLI not found"
+
+out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" --retrigger --all 2>&1)"; rc=$?
+expect_eq "--retrigger --all exits 2 on tooling, not on usage" "2" "$rc"
+expect_contains "…having passed the target gate" "$out" "gh CLI not found"
+
+out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" --retrigger 2227 2>&1)"; rc=$?
+expect_eq "--retrigger with a PR exits 2 on tooling, not on usage" "2" "$rc"
+expect_contains "…having passed the target gate" "$out" "gh CLI not found"
+
+# --dry-run posts nothing, so it stays a safe global preview.
+out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" --retrigger --dry-run 2>&1)"; rc=$?
+expect_eq "--retrigger --dry-run stays unscoped" "2" "$rc"
+expect_contains "…having passed the target gate" "$out" "gh CLI not found"
+
 echo "== usage =="
 
 out="$("$RS" --nope 2>&1)"; rc=$?
@@ -606,6 +648,54 @@ done
 # that header silently truncates the tail. Pin the last line of it.
 expect_contains "--help prints the whole header, not a truncated slice" \
   "$out" "Requires: gh CLI logged in"
+
+# ── the input assembler survives a PR with a lot of review on it ───────────
+#
+# The blobs went to jq as `--argjson` values. Linux caps ONE argv entry at
+# MAX_ARG_STRLEN (32 pages = 131072 bytes) regardless of ARG_MAX, and #2225's
+# inline review comments passed it — 24 comments, ~188 KB, because each carries
+# its diff hunk. jq died with E2BIG and the PR came back
+# `unknown  (GitHub API call failed)` while every API call had in fact
+# succeeded.
+#
+# That failure runs backwards: the more review a PR collects, the more surely
+# this tool refuses to judge it — and `unknown` on the busiest PR is exactly
+# where a reader shrugs and merges. Worse, it is indistinguishable from a
+# genuine network blip, and was in fact misread as one.
+assemble_tmp="$(mktemp -d)"   # removed by the cleanup trap above
+
+printf '{"number":1,"title":"t","head":{"ref":"b","sha":"deadbeef"},"created_at":"2026-01-01T00:00:00Z"}' \
+  > "$assemble_tmp/pr.json"
+printf '[]' > "$assemble_tmp/comments.json"
+printf '[]' > "$assemble_tmp/reviews.json"
+printf '{"statuses":[]}' > "$assemble_tmp/status.json"
+
+# One inline comment whose diff_hunk alone is 200 KB — past the per-argument
+# limit on its own, so this fails on the old code and cannot pass by accident.
+python3 - "$assemble_tmp/revcomments.json" <<'PYEOF'
+import json, sys
+json.dump([{ "user": {"login": "coderabbitai[bot]"},
+             "created_at": "2026-01-01T00:00:00Z",
+             "diff_hunk": "x" * 200_000 }], open(sys.argv[1], "w"))
+PYEOF
+
+bytes_in="$(wc -c < "$assemble_tmp/revcomments.json")"
+if [ "$bytes_in" -le 131072 ]; then
+  fail "the oversized fixture is actually oversized" "only $bytes_in bytes; MAX_ARG_STRLEN is 131072"
+else
+  pass "the oversized fixture is actually oversized ($bytes_in bytes > 131072)"
+fi
+
+if out="$("$RS" --assemble "$assemble_tmp/pr.json" "$assemble_tmp/comments.json" \
+      "$assemble_tmp/reviews.json" "$assemble_tmp/revcomments.json" \
+      "$assemble_tmp/status.json" false 2>&1)"; then
+  expect_eq "a 200 KB review-comment blob still assembles" \
+    "1" "$(printf '%s' "$out" | jq -r '.number')"
+  expect_eq "and the bot's inline comment is counted, not dropped" \
+    "1" "$(printf '%s' "$out" | jq -r '.reviewComments | length')"
+else
+  fail "a 200 KB review-comment blob still assembles" "$out"
+fi
 
 echo
 if [ "$FAILURES" -gt 0 ]; then

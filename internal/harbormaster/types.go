@@ -85,25 +85,37 @@ func (m Mode) String() string {
 // Request is the in-memory shape of an approvals_queue row. Callers fill
 // it in before calling Store.Enqueue; the store assigns ID/CreatedAt/
 // TimeoutAt and writes the row.
+//
+// The JSON tags are load-bearing, not decoration: ApprovalsHandler.List
+// and .Get serialize this struct straight onto the wire. Without tags the
+// API answered "ID"/"Kind"/"CreatedAt" while lib/types/approvals.ts and
+// cmd/gen-openapi both declared snake_case, so every browser client
+// rejected the body in zod and rendered an empty approvals queue. The Go
+// CLI was the only consumer that worked, because encoding/json matches
+// field names case-insensitively on the way IN — which is also why no Go
+// test caught it. TestApprovals_WireShape_IsSnakeCase asserts the emitted
+// keys, and is the guard that must fail if these tags are ever dropped.
 type Request struct {
-	ID              string
-	WorkspaceID     string
-	CrewID          string
-	AgentID         string
-	MissionID       string
-	RequestedBy     string
-	Kind            Kind
-	Reason          string
-	Payload         map[string]any
-	Status          Status
-	DecidedBy       string
-	DecidedAt       *time.Time
-	DecisionComment string
-	TimeoutAt       *time.Time
-	CreatedAt       time.Time
+	ID              string         `json:"id"`
+	WorkspaceID     string         `json:"workspace_id"`
+	CrewID          string         `json:"crew_id"`
+	AgentID         string         `json:"agent_id"`
+	MissionID       string         `json:"mission_id"`
+	RequestedBy     string         `json:"requested_by"`
+	Kind            Kind           `json:"kind"`
+	Reason          string         `json:"reason"`
+	Payload         map[string]any `json:"payload"`
+	Status          Status         `json:"status"`
+	DecidedBy       string         `json:"decided_by"`
+	DecidedAt       *time.Time     `json:"decided_at"`
+	DecisionComment string         `json:"decision_comment"`
+	TimeoutAt       *time.Time     `json:"timeout_at"`
+	CreatedAt       time.Time      `json:"created_at"`
 	// TimeoutSecs is consulted by Enqueue when TimeoutAt is zero. Default
-	// 3600 (one hour). Stored only on the in-memory struct, not persisted.
-	TimeoutSecs int
+	// 3600 (one hour). Stored only on the in-memory struct, not persisted
+	// — and therefore never serialized: a client that read it would be
+	// reading a value the database does not have.
+	TimeoutSecs int `json:"-"`
 }
 
 // Decision is what Gate returns to the caller. Pending=true means the
