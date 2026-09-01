@@ -262,6 +262,42 @@ A scrub hit replaces the matched substring with a `[REDACTED:<type>]`
 marker. The operator can search journal entries for the marker to
 investigate which agent tried to echo what.
 
+Text a **human** typed is scrubbed on the same path, not just agent
+output. The `exec.command` journal entry records the CLI argv of a run,
+and the argv carries the verbatim user message — so a token pasted into
+agent chat would otherwise be written to a hash-chained, append-only
+table that the [GDPR erasure cascade](/security/gdpr) deliberately
+skips. Every argv element is scrubbed *before* the entry is written,
+against the built-in patterns **and** the run's own credential values;
+there is no after-the-fact redaction for a journal entry.
+
+**And where the prompt itself is concerned, the scrub is not what
+protects it.** Being defence in depth cuts both ways: the scrubber
+cannot match a value nobody registered and whose shape we do not know,
+so an opaque token pasted into a prompt would survive it. So on the two
+entries whose whole content was the prompt, the prompt-bearing values
+are not written at all. In `exec.command`, the argv elements holding the
+system prompt and the user message are replaced before the entry is
+built, with a placeholder naming the element and its length; what the
+entry keeps is a digest of the system prompt, the lengths, and a
+reference to the chat the message lives in — enough to answer *which
+prompt ran* without storing it. The process log line for a run takes the
+same sanitised argv.
+
+`chat.user_message` is bounded rather than emptied: scrubbed and capped
+to 240 characters, because there the message *is* the entry. Within
+those characters the scrubber is the only control, so an unrecognised
+secret survives — the full text lives in the chat the entry references,
+which can be erased. Payload shape:
+[Crew Journal](/guides/crew-journal#exec-command-payload).
+
+This is scoped, not a claim about the whole table. `chat.agent_response`
+still stores up to 8 KB of the agent's reply and `exec.output_chunk`
+stores its stdout — both scrubbed, neither prompt-free, so an agent that
+quotes its own prompt back writes that text into the journal through
+them. Those are Layer-3 surfaces in the ordinary sense: the scrubber is
+what stands behind them.
+
 For the keeper credential-use path (`/execute`), the scrubber additionally
 masks the **injected secret's own value** and its common encodings — literal,
 base64 (std/URL, padded and raw), base32, URL-escape, hex (lower/upper), and
@@ -400,7 +436,7 @@ flowchart TD
 
 **All-adapter sweep (PR-F4 "scan path 2")** — the remaining adapters (`CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`, `FACTORY_DROID`, `CURSOR_CLI`) emit `tool_result` events directly from their parsers. Those events all flow through a single chokepoint — the stream handler in `streamOutput` (`internal/orchestrator/exec_stream.go`) — which runs the same `scanToolResultEvent` on every `tool_result` before it reaches the journal, chat-bridge, or re-injected context. `CLAUDE_CODE` is skipped there (already scanned on path 1), so nothing is double-scanned. One caveat: the `CURSOR_CLI` adapter's `tool_result` content carries only the lifecycle subtype — the tool payload rides in UI-only metadata and is not re-injected into model context. The `TestToolResultScan_AllAdapters` matrix locks the coverage per adapter.
 
-**BYO model-endpoint SSRF fence (#961)** — a workspace-configured `ENDPOINT_URL` credential is a tenant-supplied destination the sandbox dials, so it is guarded against reaching internal infrastructure. `internal/httpsafe` splits the blocked ranges into a *hard* tier (link-local incl. cloud metadata `169.254.169.254`, multicast, reserved, unspecified — and their IPv4-mapped-IPv6 forms) and a *private* tier (RFC1918, loopback, ULA). `validateEndpointURL` rejects a hard-tier literal at credential-create; `localModelExtraDomains` gates a literal private host at run-setup; and the sidecar proxy's `ssrfDialContext` does the authoritative **resolve-then-pin** — it re-resolves the host at dial and connects to the exact validated IP, so a name that resolves internal (or DNS-rebinds after the allowlist string-match) is refused. The hard tier is blocked unconditionally; the private tier opens only for a crew that set `allow_private_endpoints` **and** an operator who set the instance-level ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS` (ANDed in `effectiveAllowPrivateEndpoints`, #974 S5) — so a workspace admin cannot self-grant private egress on a shared/cloud host. The container's L3 firewall also filters private/link-local/metadata IPs before ipset-allowing a resolved domain (#974 S6), defense-in-depth behind the sidecar's resolve-then-pin. `free` network mode retains its explicit no-limits semantics. Covered by `TestEndpointTiers`, `TestValidateEndpointURL_SSRF`, `TestLocalModelExtraDomains_SSRF`, `TestSSRFDialContext`.
+**BYO model-endpoint SSRF fence (#961)** — a workspace-configured `ENDPOINT_URL` credential is a tenant-supplied destination the sandbox dials, so it is guarded against reaching internal infrastructure. `internal/httpsafe` splits the blocked ranges into a *hard* tier (link-local incl. cloud metadata `169.254.169.254`, multicast, reserved, unspecified — and their IPv4-mapped-IPv6 forms) and a *private* tier (RFC1918, loopback, ULA). `validateEndpointURL` rejects a hard-tier literal at credential-create; `localModelExtraDomains` gates a literal private host at run-setup; and the sidecar proxy's `ssrfDialContext` does the authoritative **resolve-then-pin** — it re-resolves the host at dial and connects to the exact validated IP, so a name that resolves internal (or DNS-rebinds after the allowlist string-match) is refused. The hard tier is blocked unconditionally; the private tier opens only for a crew that set `allow_private_endpoints` **and** an operator who set the instance-level ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS` (ANDed in `effectiveAllowPrivateEndpoints`, #974 S5) — so a workspace admin cannot self-grant private egress on a shared/cloud host. The sandbox image's L3 firewall was *designed* as defense-in-depth behind that resolve-then-pin — it filters private/link-local/metadata IPs before ipset-allowing a resolved domain (#974 S6) — but it does not run on a non-privileged crew today, so **the resolve-then-pin is the whole control here, not the outer of two layers**. See [Egress: what is enforced, and what only looks enforced](#egress-what-is-enforced-and-what-only-looks-enforced). `free` network mode retains its explicit no-limits semantics. Covered by `TestEndpointTiers`, `TestValidateEndpointURL_SSRF`, `TestLocalModelExtraDomains_SSRF`, `TestSSRFDialContext`.
 
 </Accordion>
 

@@ -242,6 +242,17 @@ describe("the detail's own edges", () => {
     expect(screen.getByRole("button", { name: /Restore/ })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^Archive$/ })).not.toBeInTheDocument()
   })
+
+  it("does not offer an invalid Restore for source-managed history", () => {
+    render(
+      <InboxDetail
+        item={item({ kind: "escalation", state: "resolved", resolved_action: "archived", resolved_at: new Date().toISOString() })}
+        role="OWNER"
+        onResolve={noop} onArchive={noop} onMarkUnread={noop} onRefresh={noop}
+      />,
+    )
+    expect(screen.queryByRole("button", { name: /Restore/ })).not.toBeInTheDocument()
+  })
 })
 
 describe("the subject picker at scale", () => {

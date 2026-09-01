@@ -163,7 +163,12 @@ NON_JSON_PATH_PATTERNS=(
   'agents/[^/]+/files/download'          # application/octet-stream
   'chats/[^/]+/stream'                  # application/x-ndjson, never-ending
   'crews/[^/]+/files/download'          # application/octet-stream
-  'users/[^/]+/avatar'                  # image/{svg+xml,png,jpeg,webp}
+  # Only the id-addressed GET is binary. /users/me/avatar's POST and DELETE
+  # both answer application/json — they end in writeProfile — so they are
+  # ordinary JSON routes and belong in the probe. The old `[^/]+` swallowed
+  # them, and the gate's own exclusion audit caught it the moment the document
+  # stopped mislabelling them as image/svg+xml.
+  'users/(?!me/)[^/]+/avatar'           # image/{svg+xml,png,jpeg,webp}
   'memory/export'                       # application/zip
   'memory/versions/[^/]+'               # application/octet-stream
   'journal/stream'                      # text/event-stream, never-ending

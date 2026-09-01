@@ -87,8 +87,9 @@ Examples:
 		// LIKE, prefix or glob path — so `--type approval.*` matches nothing
 		// and exits 0. The operator asking "who disarmed this gate" then reads
 		// an empty page as "nobody ever did", which is the worst possible
-		// wrong answer from an audit surface. `-q` is no escape either;
-		// fts5Phrase strips `*` before it reaches FTS5.
+		// wrong answer from an audit surface. `-q` is no escape either: the
+		// FTS5 index covers summary + payload, never entry_type, so no
+		// amount of prefix matching there reaches this filter.
 		if err := rejectTypeWildcard("type", typeFilter); err != nil {
 			return err
 		}
@@ -268,8 +269,8 @@ Examples:
 
 func init() {
 	journalCmd.Flags().Int("lines", 50, "Max entries to fetch (1-500)")
-	journalCmd.Flags().String("crew", "", "Filter by crew slug or ID")
-	journalCmd.Flags().String("agent", "", "Filter by agent ID")
+	journalCmd.Flags().String("crew", "", "Filter by crew name, slug or ID")
+	journalCmd.Flags().String("agent", "", "Filter by agent name, slug or ID")
 	journalCmd.Flags().String("mission", "", "Filter by mission ID")
 	journalCmd.Flags().String("trace-id", "", "Filter by run/trace ID — narrows to one run's spans")
 	// --trace-id only reaches ad-hoc AGENT runs: routine runs never set
@@ -282,7 +283,7 @@ func init() {
 	journalCmd.Flags().String("severity", "", "Comma-separated severities (info,notice,warn,error)")
 	journalCmd.Flags().String("actor-type", "", "Comma-separated actors (agent,user,system,keeper,sidecar,orchestrator)")
 	journalCmd.Flags().String("priority", "", "Comma-separated priorities (normal,high,pin,permanent)")
-	journalCmd.Flags().StringP("query", "q", "", "FTS5 free-text search across summary + payload")
+	journalCmd.Flags().StringP("query", "q", "", "Free-text search across summary + payload; terms AND, last one prefix-matches")
 	journalCmd.Flags().String("since", "", "Time window (1h, 24h, 7d, or RFC3339)")
 	journalCmd.Flags().Bool("follow", false, "Live tail via SSE — Ctrl-C to exit")
 
@@ -290,8 +291,8 @@ func init() {
 	// Defining them on the count subcommand directly (rather than
 	// inheriting via PersistentFlags on `journal`) keeps the list
 	// view's --lines/--follow from polluting `journal count --help`.
-	journalCountCmd.Flags().String("crew", "", "Filter by crew slug or ID")
-	journalCountCmd.Flags().String("agent", "", "Filter by agent ID")
+	journalCountCmd.Flags().String("crew", "", "Filter by crew name, slug or ID")
+	journalCountCmd.Flags().String("agent", "", "Filter by agent name, slug or ID")
 	journalCountCmd.Flags().String("mission", "", "Filter by mission ID")
 	journalCountCmd.Flags().String("trace-id", "", "Filter by run/trace ID")
 	journalCountCmd.Flags().String("run-id", "", "Filter to one run, whichever engine ran it (agent or routine)")
@@ -300,7 +301,7 @@ func init() {
 	journalCountCmd.Flags().String("severity", "", "Comma-separated severities")
 	journalCountCmd.Flags().String("actor-type", "", "Comma-separated actors")
 	journalCountCmd.Flags().String("priority", "", "Comma-separated priorities")
-	journalCountCmd.Flags().StringP("query", "q", "", "FTS5 free-text search")
+	journalCountCmd.Flags().StringP("query", "q", "", "Free-text search across summary + payload; terms AND, last one prefix-matches")
 	journalCountCmd.Flags().String("since", "", "Time window (1h, 24h, 7d, or RFC3339)")
 	journalCountCmd.Flags().String("until", "", "Upper bound (1h, 24h, 7d, or RFC3339)")
 

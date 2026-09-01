@@ -11,6 +11,8 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 // the item supports (approve waitpoint, retry run, resolve escalation,
 // etc.). Payload is kind-specific structured data.
 export interface InboxItem {
+  /** Detail read only: the source that owns this decision no longer exists. */
+  source_missing?: boolean
   id: string
   workspace_id: string
   /**
@@ -98,6 +100,7 @@ interface InboxListResponse {
   rows: InboxItem[]
   count: number
   unread_count: number
+  has_more?: boolean
 }
 
 // "active" = everything not archived (unread + read), resolved excluded
@@ -113,6 +116,8 @@ type StateFilter = "unread" | "read" | "resolved" | "all" | "active"
 export const inboxKeys = {
   all: (ws: string) => ["inbox", ws] as const,
   list: (ws: string, state: StateFilter) => ["inbox", ws, "list", { state }] as const,
+  completeList: (ws: string, state: StateFilter) => ["inbox", ws, "complete-list", { state }] as const,
+  detail: (ws: string, id: string) => ["inbox", ws, "detail", id] as const,
   count: (ws: string) => ["inbox", ws, "count"] as const,
 }
 
@@ -136,27 +141,47 @@ function useInboxRealtimeInvalidation(workspaceId: string | null | undefined) {
 // the unread badge count, and provides patch helpers that flip an item
 // between unread / read / resolved. Backed by React Query — realtime
 // events invalidate the cache, mutations reconcile it in place.
-export function useInbox(workspaceId: string | null | undefined, stateFilter?: StateFilter) {
+export function useInbox(
+  workspaceId: string | null | undefined,
+  stateFilter?: StateFilter,
+  options?: { loadAll?: boolean },
+) {
   const qc = useQueryClient()
   // workspace_id is required by RequireWorkspace middleware; the
   // backend route is /api/v1/inbox (no path param) so the value has to
   // land on the URL. 'all' and "no filter" hit the same URL — normalise
   // so they share a cache entry.
   const stateParam: StateFilter = stateFilter && stateFilter !== "all" ? stateFilter : "all"
-  const listKey = inboxKeys.list(workspaceId ?? "", stateParam)
+  const loadAll = options?.loadAll ?? false
+  const listKey = loadAll
+    ? inboxKeys.completeList(workspaceId ?? "", stateParam)
+    : inboxKeys.list(workspaceId ?? "", stateParam)
 
   const query = useQuery<InboxListResponse>({
     queryKey: listKey,
     queryFn: async ({ signal }) => {
-      const params = new URLSearchParams({ workspace_id: workspaceId! })
-      if (stateParam !== "all") {
-        params.set("state", stateParam)
-      }
-      const res = await apiFetch(`/api/v1/inbox?${params.toString()}`, { signal })
-      if (!res.ok) {
-        throw new Error(`inbox: ${res.status}`)
-      }
-      return (await res.json()) as InboxListResponse
+      const pageSize = loadAll ? 500 : 100
+      const rows: InboxItem[] = []
+      let offset = 0
+      let unreadCount = 0
+      do {
+        const params = new URLSearchParams({
+          workspace_id: workspaceId!,
+        })
+        if (loadAll) {
+          params.set("limit", String(pageSize))
+          params.set("offset", String(offset))
+        }
+        if (stateParam !== "all") params.set("state", stateParam)
+        const res = await apiFetch(`/api/v1/inbox?${params.toString()}`, { signal })
+        if (!res.ok) throw new Error(`inbox: ${res.status}`)
+        const page = (await res.json()) as InboxListResponse
+        rows.push(...(page.rows ?? []))
+        unreadCount = page.unread_count ?? unreadCount
+        if (!loadAll || !page.has_more) break
+        offset += page.rows.length
+      } while (true)
+      return { rows, count: rows.length, unread_count: unreadCount, has_more: false }
     },
     enabled: Boolean(workspaceId),
     // Single-shot like the previous hand-rolled fetch — the error
@@ -275,6 +300,36 @@ export function useInbox(workspaceId: string | null | undefined, stateFilter?: S
     refresh,
     patch,
   }
+}
+
+/**
+ * Fetch the server-enriched representation for the selected row.
+ *
+ * List responses deliberately skip expensive, decision-specific evidence.
+ * Rendering a list row as the reading pane therefore hid the credential facts
+ * the server already exposed from GET /inbox/{id}. Inbox v2 selects cheaply
+ * from the list, then upgrades only the open row through this hook.
+ */
+export function useInboxItem(
+  workspaceId: string | null | undefined,
+  id: string | null | undefined,
+) {
+  const query = useQuery<InboxItem>({
+    queryKey: inboxKeys.detail(workspaceId ?? "", id ?? ""),
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch(
+        `/api/v1/inbox/${encodeURIComponent(id!)}?workspace_id=${encodeURIComponent(workspaceId!)}`,
+        { signal },
+      )
+      if (!res.ok) throw new Error(`inbox detail: ${res.status}`)
+      return (await res.json()) as InboxItem
+    },
+    enabled: Boolean(workspaceId && id),
+    retry: false,
+  })
+
+  useInboxRealtimeInvalidation(workspaceId)
+  return query
 }
 
 // useInboxUnreadCount is the lighter cousin used by the top-bar bell

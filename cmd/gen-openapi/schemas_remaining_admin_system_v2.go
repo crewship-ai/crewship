@@ -11,8 +11,16 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 	boolean := func() map[string]any { return map[string]any{"type": "boolean"} }
 	nullableStr := func() map[string]any { return map[string]any{"type": "string", "nullable": true} }
 	dateTime := func() map[string]any { return map[string]any{"type": "string", "format": "date-time"} }
-	obj := func(properties map[string]any) map[string]any {
-		return map[string]any{"type": "object", "properties": properties}
+	// Variadic `required`, matching schemas_core.go. Without it this file's
+	// schemas cannot say which properties a response always carries, so a body
+	// with every field renamed validates against them — see
+	// docs/prd/response-shape-contract.md.
+	obj := func(properties map[string]any, required ...string) map[string]any {
+		s := map[string]any{"type": "object", "properties": properties}
+		if len(required) > 0 {
+			s["required"] = required
+		}
+		return s
 	}
 	free := func() map[string]any {
 		return map[string]any{"type": "object", "additionalProperties": true}
@@ -48,7 +56,8 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 		"judge_wire": keeperField(str()), "judge_model": keeperField(str()), "judge_timeout_ms": keeperField(integer()),
 		"judge_profile": keeperProfile, "overridden": boolean(), "updated_at": nullableStr(), "updated_by": nullableStr(),
 		"judge_configured": boolean(),
-	})
+	}, "enabled", "judge_provider", "judge_endpoint_url", "judge_wire", "judge_model",
+		"judge_timeout_ms", "judge_profile", "overridden", "judge_configured")
 	keeperSlot := obj(map[string]any{
 		"slot": str(), "label": str(), "provider": keeperField(str()), "model": keeperField(str()),
 		"timeout_ms": keeperField(integer()), "credential_id": keeperField(str()), "overridden": boolean(),
@@ -56,20 +65,22 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 	})
 	keeperAux := obj(map[string]any{
 		"slots": array(keeperSlot), "providers": array(str()), "judge_provider": str(), "judge_model": str(), "any_overridden": boolean(),
-	})
+	}, "slots", "providers", "judge_provider", "judge_model", "any_overridden")
 	keeperStage := obj(map[string]any{"name": str(), "label": str(), "ok": boolean(), "skipped": boolean(), "detail": str(), "latency_ms": integer()})
 	keeperTest := obj(map[string]any{
 		"ok": boolean(), "endpoint": str(), "model": str(), "stages": array(keeperStage), "models": array(str()), "decision": str(),
 	})
 	keeperModels := obj(map[string]any{
 		"endpoint": str(), "models": array(str()), "suggestions": array(obj(map[string]any{"url": str(), "label": str()})), "error": str(),
-	})
+	}, "endpoint", "models")
 	keeperHealth := obj(map[string]any{
 		"workspace_id": str(), "samples": integer(), "allow": integer(), "deny": integer(), "escalate": integer(), "judge_failures": integer(),
 		"allow_rate": number(), "deny_rate": number(), "escalate_rate": number(), "progressed_rate": number(), "judge_failure_rate": number(),
 		"p95_latency_ms": integer(), "min_samples": integer(), "alarm_progressed_rate": number(), "alarm_judge_failure_rate": number(),
 		"alarm": obj(map[string]any{"kind": str(), "summary": str(), "at": str()}), "oldest": str(), "newest": str(),
-	})
+	}, "workspace_id", "samples", "allow", "deny", "escalate", "judge_failures",
+		"allow_rate", "deny_rate", "escalate_rate", "progressed_rate", "judge_failure_rate",
+		"p95_latency_ms", "min_samples", "alarm_progressed_rate", "alarm_judge_failure_rate")
 	policy := obj(map[string]any{
 		"crew_id": str(), "autonomy_level": str(), "behavior_mode": str(), "set_by_user_id": str(), "set_at": dateTime(), "reason": str(),
 	})

@@ -243,9 +243,13 @@ describe("failed runs", () => {
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }))
 
     // The scheduler writes pipeline_id, not pipeline_slug. Posting to whatever
-    // is left over would fire the wrong routine, or none.
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/slug missing/i)))
-    expect(onResolve).toHaveBeenCalledWith("cancelled")
+    // is left over would fire the wrong routine, or none — the old fallback
+    // read sender_name, which is the SCHEDULE's name, and 404'd.
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/cannot be retried/i)))
+    // …and a failed Retry must not quietly resolve the row as cancelled. The
+    // user asked to re-run it; Cancel is a separate button, right there.
+    expect(onResolve).not.toHaveBeenCalled()
+    expect(apiFetch).not.toHaveBeenCalled()
   })
 
   it("cancels without touching the routine", async () => {

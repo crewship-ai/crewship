@@ -69,6 +69,18 @@ function str(p: Record<string, unknown> | undefined, ...keys: string[]): string 
   return undefined
 }
 
+/**
+ * Join an argv array payload field into one display line. Non-string elements
+ * are dropped rather than coerced, so a malformed payload cannot render
+ * "[object Object]" into a command line.
+ */
+function argvString(p: Record<string, unknown> | undefined, key: string): string | undefined {
+  const v = p?.[key]
+  if (!Array.isArray(v)) return undefined
+  const parts = v.filter((e): e is string => typeof e === "string")
+  return parts.length > 0 ? parts.join(" ") : undefined
+}
+
 function num(p: Record<string, unknown> | undefined, ...keys: string[]): number | undefined {
   if (!p) return undefined
   for (const k of keys) {
@@ -195,7 +207,13 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
     }
 
     case "exec.command": {
-      const cmd = str(p, "command", "cmd")
+      // Two shapes reach this entry type: the pipeline script audit writes a
+      // joined `command` string, the orchestrator writes `cmd` as the argv
+      // array (internal/orchestrator/journal_exec_command.go — the payload
+      // travels as a list so a redaction applied to a join would never reach
+      // what is rendered). str() ignores a non-string, so the array form used
+      // to leave the rail's detail line empty.
+      const cmd = str(p, "command", "cmd") ?? argvString(p, "cmd")
       const exit = num(p, "exit_code")
       const failed = exit !== undefined && exit !== 0
       return {

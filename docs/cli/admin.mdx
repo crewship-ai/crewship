@@ -97,6 +97,7 @@ crewship admin list-users --local
 | `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
 | `memory-stats` | `memory_versions` counts and byte totals for the workspace, by tier and by agent. **HTTP-backed — needs a running server + login.** |
 | `ratelimits list/set/reset` | Inspect and tune the instance's rate limiters at runtime (per-IP HTTP buckets, login lockout, notifications, provisioning, agent webhooks). **HTTP-backed — needs a running server + login.** |
+| `seed-inbox` | Fill a scratch workspace's inbox with one row of every kind so the surface can be exercised. Development data, local-only; needs `--local` when a server is named. |
 
 ## `crewship admin reencrypt`
 
@@ -739,3 +740,31 @@ Writes are **manage-tier** (OWNER/ADMIN) and logged at WARN with the actor. A va
 <Note>
 Raising `http.auth_per_min` is the fix for an instance whose users get logged out under heavy refresh behind a shared NAT. On current builds the read-only session polls that caused that no longer touch this bucket, so most instances never need to.
 </Note>
+
+## `crewship admin seed-inbox`
+
+Fill a workspace's inbox with one row of every kind — waitpoints, escalations, a failed run, messages, a memory proposal, schedule alerts — plus approval-queue rows both pending and decided. It exists because the inbox has no create endpoint: every row is written by a producer (a pipeline reaching a waitpoint, an agent escalating, the keeper sweeping), so a fresh workspace shows an empty inbox and there is no way to see how the views, facets and the reading pane behave against real variety.
+
+Rows go in through the same writers the real producers use, so what lands is shaped exactly like production data rather than hand-built SQL that agrees with whatever the UI happens to expect.
+
+```bash
+# Seed a scratch workspace
+crewship admin seed-inbox --local --workspace ws_abc123
+
+# Remove only what this command wrote
+crewship admin seed-inbox --local --workspace ws_abc123 --clear
+```
+
+| Flag | Purpose |
+|---|---|
+| `--workspace <id>` | **Required.** The workspace to seed. Give it a scratch workspace, not a real one. |
+| `--clear` | Delete the rows this command wrote, and nothing else. Everything it writes carries a `seed_` source id (`[seed]` on approvals), which is what `--clear` matches; it never touches a row it did not create. |
+| `--local` | Confirms you mean the database file on this host. Required when the CLI is pointed at a server — see [Which database am I talking to?](#which-database-am-i-talking-to) above. |
+
+<Warning>
+**Fixture, not a runtime test.** The run behind a seeded approval gate is a row, not an execution: no executor is parked on the waitpoint, so approving a seeded gate flips the token and cascades the inbox row and then *nothing resumes*.
+
+Use it to remove "is it seeded?" preconditions from a test, and to prove a button reaches its endpoint — never as evidence that a decision took effect. That is the `approval-gate-demo` routine's job — `crewship routine run approval-gate-demo` parks a real run on a real gate, and approving it resumes the run.
+
+Seed while the server is running, too: a restart sweeps gates whose pipeline run is missing or terminal (`CancelOrphanedWaitpoints`), which settles the seeded ones out from under you.
+</Warning>

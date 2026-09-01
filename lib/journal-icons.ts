@@ -274,6 +274,25 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // The page's arrangement changed — the event a `refresh: on:panels-changed`
   // panel runs its producer on.
   "page.spec.changed": LayoutTemplate,
+  // Reach beyond the workspace: a public link, someone using it, and a
+  // webhook credential that writes a panel from outside the product.
+  // Publishing and revoking are opposites, so they do not share a glyph.
+  "page.published": Globe,
+  "page.link_revoked": Ban,
+  "page.public_view": Eye,
+  "page.webhook_issued": Webhook,
+  "page.webhook_revoked": Ban,
+  "page.owner_transferred": UserCheck,
+
+  // ── Workspace plumbing ────────────────────────────────────────────
+  "onboarding.proposal_applied": Wand2,
+  "policy.changed": ShieldCheck,
+  "queue.sweeper_pumped": Zap,
+  "memory.priority_changed": BookmarkCheck,
+  // Keeper's rolling-reward window retuning itself, and an operator
+  // wiping the evidence it tuned against.
+  "keeper.rule_auto_tuned": Wand2,
+  "approval.auto_tuning_reset": Trash2,
 }
 
 /**

@@ -139,6 +139,30 @@ describe("humanizeEntry", () => {
     expect(row!.detail).toContain("ls -la")
   })
 
+  // The orchestrator writes payload.cmd as the argv ARRAY, not a joined
+  // string (internal/orchestrator/journal_exec_command.go): the payload
+  // travels to the UI as a list so a redaction applied to a join would never
+  // reach what is rendered. Read as a string it came back undefined, so every
+  // agent exec.command row in the rail had no detail line at all.
+  it("exec.command renders an argv array, the shape the orchestrator emits", () => {
+    const row = humanizeEntry(entry({
+      entry_type: "exec.command",
+      payload: {
+        cmd: ["claude", "--print", "--system-prompt", "[PROMPT:system-prompt omitted, 13561 chars]"],
+        exit_code: 0,
+      },
+    }))
+    expect(row!.detail).toBe("claude --print --system-prompt [PROMPT:system-prompt omitted, 13561 chars]")
+  })
+
+  it("exec.command ignores a non-string argv element rather than printing [object Object]", () => {
+    const row = humanizeEntry(entry({
+      entry_type: "exec.command",
+      payload: { cmd: ["ls", 7, null, "-la"], exit_code: 0 },
+    }))
+    expect(row!.detail).toBe("ls -la")
+  })
+
   it("file.written → path detail + size meta, delete uses op", () => {
     const wrote = humanizeEntry(entry({ entry_type: "file.written", payload: { path: "/tmp/x.txt", size: 412, op: "created" } }))
     expect(wrote!.title).toBe("Wrote file")

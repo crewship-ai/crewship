@@ -40,12 +40,35 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
+/**
+ * Wait for the card to have actually answered.
+ *
+ * The verdict pill is rendered from the first paint carrying "Checking…"
+ * (verdictOf returns "loading" while `status` is null), so
+ * `findByTestId("crew-image-freshness-verdict")` resolves on that first
+ * render — before the mocked fetch has settled. Every assertion chained
+ * onto it was therefore racing the promise, and winning only because an
+ * idle machine happens to flush the microtask in the same batch. Under a
+ * coverage-instrumented run or a busy CI runner it loses, and reports
+ * `Received: Checking…` against whatever the test expected.
+ *
+ * Waiting on the CONTENT is what "the card has answered" means, so that
+ * is what this waits on.
+ */
+async function settledVerdict(): Promise<HTMLElement> {
+  return await waitFor(() => {
+    const el = screen.getByTestId("crew-image-freshness-verdict")
+    expect(el).not.toHaveTextContent(/checking/i)
+    return el
+  })
+}
+
 describe("CrewImageFreshness", () => {
   it("says the crew is behind and offers the refresh", async () => {
     apiFetch.mockResolvedValue(status())
     render(<CrewImageFreshness crewId="crew_1" workspaceId="ws_1" canEdit />)
 
-    expect(await screen.findByTestId("crew-image-freshness-verdict")).toHaveTextContent(/behind/i)
+    expect(await settledVerdict()).toHaveTextContent(/behind/i)
     expect(screen.getByTestId("crew-image-refresh")).toBeInTheDocument()
   })
 
@@ -56,7 +79,7 @@ describe("CrewImageFreshness", () => {
     apiFetch.mockResolvedValue(status())
     render(<CrewImageFreshness crewId="crew_1" workspaceId="ws_1" canEdit />)
 
-    await screen.findByTestId("crew-image-freshness-verdict")
+    await settledVerdict()
     expect(screen.getByText(new RegExp(RUNNING.slice(7, 19)))).toBeInTheDocument()
     expect(screen.getByText(new RegExp(RESOLVED.slice(7, 19)))).toBeInTheDocument()
   })
@@ -67,7 +90,7 @@ describe("CrewImageFreshness", () => {
     apiFetch.mockResolvedValue(status({ behind: false, reason: "registry unreachable", running_digest: "", resolved_digest: "" }))
     render(<CrewImageFreshness crewId="crew_1" workspaceId="ws_1" canEdit />)
 
-    const verdict = await screen.findByTestId("crew-image-freshness-verdict")
+    const verdict = await settledVerdict()
     expect(verdict).toHaveTextContent(/unknown/i)
     expect(verdict).not.toHaveTextContent(/^current$/i)
     expect(screen.getByTestId("crew-image-freshness-reason")).toHaveTextContent(/registry unreachable/i)
@@ -77,7 +100,7 @@ describe("CrewImageFreshness", () => {
     apiFetch.mockResolvedValue(status({ behind: false, reason: "", running_digest: RESOLVED }))
     render(<CrewImageFreshness crewId="crew_1" workspaceId="ws_1" canEdit />)
 
-    expect(await screen.findByTestId("crew-image-freshness-verdict")).toHaveTextContent(/current/i)
+    expect(await settledVerdict()).toHaveTextContent(/current/i)
     expect(screen.queryByTestId("crew-image-refresh")).not.toBeInTheDocument()
   })
 
@@ -126,7 +149,7 @@ describe("CrewImageFreshness", () => {
     apiFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: "not available" }) } as unknown as Response)
     render(<CrewImageFreshness crewId="crew_1" workspaceId="ws_1" canEdit />)
 
-    const verdict = await screen.findByTestId("crew-image-freshness-verdict")
+    const verdict = await settledVerdict()
     expect(verdict).toHaveTextContent(/unavailable/i)
     expect(verdict).not.toHaveTextContent(/current/i)
   })
@@ -137,7 +160,7 @@ describe("CrewImageFreshness", () => {
     apiFetch.mockResolvedValue(status())
     render(<CrewImageFreshness crewId="crew_1" workspaceId="ws_1" canEdit={false} />)
 
-    await screen.findByTestId("crew-image-freshness-verdict")
+    await settledVerdict()
     expect(screen.queryByTestId("crew-image-refresh")).not.toBeInTheDocument()
   })
 })

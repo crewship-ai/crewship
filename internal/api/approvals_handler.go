@@ -66,13 +66,25 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	rows, err := harbormaster.List(r.Context(), h.db, workspaceID, status, limit)
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	rows, err := harbormaster.List(r.Context(), h.db, workspaceID, status, limit+1, offset)
 	if err != nil {
 		h.logger.Error("approvals list", "err", err)
 		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "status": status, "count": len(rows)})
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"rows": rows, "status": status, "count": len(rows), "has_more": hasMore,
+	})
 }
 
 // Get serves GET /api/v1/approvals/{id}. Returns full request detail

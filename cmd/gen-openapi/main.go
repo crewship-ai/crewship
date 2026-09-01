@@ -695,8 +695,22 @@ func array(items map[string]any) map[string]any {
 	return map[string]any{"type": "array", "items": items}
 }
 
-func object(properties map[string]any) map[string]any {
-	return map[string]any{"type": "object", "properties": properties}
+// object builds an object schema. The variadic `required` is not decoration:
+// a response schema that names its properties but not its required ones
+// accepts a body that shares no field name with what the server sends, so the
+// contract gate certifies the drift instead of catching it (see
+// docs/prd/response-shape-contract.md).
+//
+// The list is not written from memory. TestOpenAPIRequired_MatchesTheStructsOwnJSONTags
+// in internal/api derives it from the response struct's json tags — a field
+// without `,omitempty` is emitted on every response and belongs here — and
+// fails naming the exact fields when the two disagree.
+func object(properties map[string]any, required ...string) map[string]any {
+	s := map[string]any{"type": "object", "properties": properties}
+	if len(required) > 0 {
+		s["required"] = required
+	}
+	return s
 }
 
 func responseComponents() map[string]any {

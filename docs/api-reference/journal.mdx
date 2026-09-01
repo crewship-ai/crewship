@@ -42,12 +42,12 @@ All filters are AND-combined; CSV-valued ones expand to `IN (?, ?, ...)` predica
 
 | Param | Type | Description |
 |---|---|---|
-| `crew_id` | string | Filter by single crew ID. |
-| `agent_id` | string | Filter by single agent ID. |
+| `crew_id` | string | Filter by a single crew — id, slug or display name (see [References](#references)). |
+| `agent_id` | string | Filter by a single agent — id, slug or display name (see [References](#references)). |
 | `mission_id` | string | Filter by mission ID. |
 | `trace_id` | string | Narrow to one run's spans (`trace_id` == run id). |
-| `crew_ids` | string | CSV multi-crew filter — takes precedence over `crew_id` when non-empty. |
-| `agent_ids` | string | CSV multi-agent filter — takes precedence over `agent_id` when non-empty. |
+| `crew_ids` | string | CSV multi-crew filter — takes precedence over `crew_id` when non-empty. Each value is resolved the same way. |
+| `agent_ids` | string | CSV multi-agent filter — takes precedence over `agent_id` when non-empty. Each value is resolved the same way. |
 | `entry_type` | string | CSV of entry types (e.g. `peer.escalation,keeper.decision`). |
 | `exclude_entry_type` | string | CSV of entry types to exclude (`NOT IN`). Useful for hiding `container.metrics` noise. AND-combines with `entry_type`. |
 | `severity` | string | CSV of `info`, `notice`, `warn`, `error`. |
@@ -55,7 +55,7 @@ All filters are AND-combined; CSV-valued ones expand to `IN (?, ?, ...)` predica
 | `priority` | string | CSV of `normal`, `high`, `pin`, `permanent`. Invalid values → 400. |
 | `since` | string | RFC3339 lower bound on `ts`. |
 | `until` | string | RFC3339 upper bound on `ts`. |
-| `q` | string | FTS5 search across `summary` + `payload` (migration 55). Bounded to 200 chars; phrase-wrapped before MATCH; AND-combined with structural filters. |
+| `q` | string | FTS5 search across `summary` + `payload` (migration 55). Bounded to 200 chars; tokenised before MATCH (see [Free-text search](#free-text-search)); AND-combined with structural filters. |
 | `cursor` | string | Opaque pagination token from a prior response. |
 | `limit` | integer | 1-500, default 100. |
 
@@ -110,11 +110,35 @@ All filters are AND-combined; CSV-valued ones expand to `IN (?, ?, ...)` predica
 | 401 | No workspace context. |
 | 500 | DB error. |
 
+### Free-text search
+
+`q` is split on whitespace and the terms are AND-combined, so word order does
+not change the result set: `q=session%20morgan` returns exactly what
+`q=morgan%20session` returns. The **last** term is a prefix match — `q=morg`
+reaches `morgan` — while earlier terms match whole words.
+
+Each term is wrapped in an FTS5 phrase literal before it reaches SQLite, so
+operators inside the input (`AND`, `OR`, `NOT`, `NEAR(...)`, `*`, `column:`, a
+bare `"`) are literal search text. They can neither restructure the query nor
+produce a 500. Terms containing no letter or digit are dropped; input made up
+entirely of such terms matches nothing rather than everything.
+
+The index covers `summary` and `payload` only — never `entry_type`.
+
+### References
+
+`crew_id`, `agent_id`, `crew_ids` and `agent_ids` accept an id, a slug, or a
+display name (case-insensitive), resolved within the caller's workspace. A
+value that resolves to nothing is used as-is against the id column, so an id
+whose row has since been deleted still reaches that entity's history and a typo
+returns zero rows instead of silently widening the filter. A display name shared
+by several agents matches all of them.
+
 ---
 
 ## Stream entries (SSE)
 
-Live tail of the journal over Server-Sent Events, seeded with a recent batch then switched to polling.
+Live tail of the journal over Server-Sent Events, seeded with a recent batch then driven by the emitter's flush notifications.
 
 ```
 GET /api/v1/journal/stream
@@ -145,11 +169,30 @@ event: entry
 data: {...}
 ```
 
-- **Seed:** sends the most recent 50 entries matching filters, then switches to live polling.
-- **Poll interval:** 1 second.
+- **Seed:** sends the most recent 50 entries matching filters, then goes live.
+- **Wake-up:** notification-driven. The writer signals the stream as soon as a
+  batch commits, so a new entry is on the wire within milliseconds of the
+  flush rather than on a fixed clock. A **20 s** fallback ticker re-polls
+  regardless, covering the case where a notification is missed or the wired
+  emitter does not support them. (This used to be a flat 1 s poll per
+  connected client, which is what older revisions of this page described.)
 - **Heartbeat:** `: heartbeat` comment every 15s to keep proxies from closing idle connections. Event handlers ignore comments.
 - **Watermark:** compound (ts, id) so bursts sharing a ms timestamp aren't partially dropped.
-- **Reconnect:** clients send the SSE `Last-Event-ID` header; the server looks the entry up, treats its `ts` as the lower bound, and pages through the gap (up to **500 entries**, 10 × 50-row pages) before switching to live polling. A disconnect that produced more than 500 matching entries truncates the older end of the gap and the server logs a `warn` — clients should reconcile by re-fetching `/api/v1/journal?since=<last-known-ts>` if they need a longer window.
+- **Reconnect:** clients send the SSE `Last-Event-ID` header; the server looks the entry up, treats its `ts` as the lower bound, and pages through the gap (up to **500 entries**, 10 × 50-row pages) before going live. A disconnect that produced more than 500 matching entries truncates the older end of the gap and the server logs a `warn` — clients should reconcile by re-fetching `/api/v1/journal?since=<last-known-ts>` if they need a longer window.
+
+  Any client that can set request headers should resume this way, and
+  `crewship journal --follow` does: `internal/cli/sse.go` sets `Last-Event-ID`
+  and `followJournal` threads it across its own bounded-backoff reconnects.
+
+  A **browser** `EventSource` cannot set request headers. It sends
+  `Last-Event-ID` only on its built-in automatic retry — a web client that
+  closes the connection and constructs a new `EventSource` (which is what the
+  web UI does, so it can control the backoff and stop polling on success)
+  starts a fresh stream with no `Last-Event-ID` and must close its own gap
+  with `/api/v1/journal?since=<last-known-ts>`. The UI's journal hook does
+  exactly that: while the stream is down it polls `since` on a rolling
+  watermark, walking the cursor up to 4 pages per tick, and reports
+  "Entries missing" if the backlog was deeper than that.
 
 **Errors:**
 

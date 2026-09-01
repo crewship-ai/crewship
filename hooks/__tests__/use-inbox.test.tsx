@@ -138,6 +138,23 @@ describe("useInbox", () => {
     expect(mockFetch.mock.calls[0][0]).toBe("/api/v1/inbox?workspace_id=ws-1")
   })
 
+  it("walks every page when the audit inbox requests a complete list", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okJSON({ rows: [item({ id: "i1" })], count: 1, unread_count: 2, has_more: true }))
+      .mockResolvedValueOnce(okJSON({ rows: [item({ id: "i2" })], count: 1, unread_count: 2, has_more: false }))
+
+    const { result } = renderHook(() => useInbox("ws-1", "resolved", { loadAll: true }), {
+      wrapper: makeWrapper(qc),
+    })
+    await waitFor(() => expect(result.current.items.map((row) => row.id)).toEqual(["i1", "i2"]))
+
+    expect(mockFetch.mock.calls.map((call) => call[0])).toEqual([
+      "/api/v1/inbox?workspace_id=ws-1&limit=500&offset=0&state=resolved",
+      "/api/v1/inbox?workspace_id=ws-1&limit=500&offset=1&state=resolved",
+    ])
+    expect(qc.getQueryData(inboxKeys.completeList("ws-1", "resolved"))).toBeTruthy()
+  })
+
   it("surfaces a non-ok list response as the same `inbox: <status>` error string", async () => {
     mockFetch.mockResolvedValueOnce(errJSON(500, {}))
 
