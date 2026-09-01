@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Activity,
   BookOpen,
@@ -22,12 +21,20 @@ import { useJournalStream } from "@/hooks/use-journal-stream"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { RunsView } from "@/components/features/journal/runs-view"
 import { JournalSpendView } from "@/components/features/journal/journal-spend-view"
+import { JournalSavedViews } from "@/components/features/journal/journal-saved-views"
 import { LogsPanel } from "@/components/features/logs/logs-panel"
 import { ResourcesStrip } from "@/components/features/logs/resources-strip"
 import { sinceFromTimeRange, type CustomRange, type TimeRange } from "@/components/features/logs/time-range-picker"
 import { refreshRateMs, type RefreshRate } from "@/components/features/logs/refresh-rate-picker"
 import type { ScopeOption, SeverityFilter } from "@/components/features/logs/logs-toolbar"
-import { GROUP_ORDER, type EntryGroup } from "@/lib/journal-style"
+import {
+  journalFiltersFromSearch,
+  useJournalUrlState,
+  type JournalTab,
+  type JournalUrlKey,
+} from "@/hooks/use-journal-url-state"
+import { type EntryGroup } from "@/lib/journal-style"
+import type { RunWindow } from "@/lib/runs-insights"
 import { entryTypesForGroups } from "@/lib/journal-groups"
 import { parseStructuredQuery } from "@/lib/log-search"
 import { apiFetch } from "@/lib/api-fetch"
@@ -55,8 +62,6 @@ interface AgentSummary {
   avatar_style?: string | null
   crew?: { avatar_style?: string | null } | null
 }
-
-type JournalTab = "timeline" | "runs" | "spend"
 
 interface TabDef {
   id: JournalTab
@@ -94,12 +99,22 @@ const ALL_TABS: TabDef[] = [
  * never see a "click here for 403" affordance.
  */
 export default function JournalPage() {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const pathname = usePathname()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { role, loading: rolesLoading } = useAbilities()
   const isAdmin = role === "OWNER" || role === "ADMIN"
+
+  // ── The URL IS the filter state ─────────────────────────────────────────
+  //
+  // Not a copy of it. Every value below is a pure read of `searchParams`, so
+  // a same-pathname `router.push` — a run row opening its trace, an in-app
+  // link into /journal?… while the page is already mounted — moves the whole
+  // page instead of only the address bar. It also means there is no mirror
+  // effect writing the URL back, and therefore no way for a render to
+  // schedule a navigation: the state→URL→state loop that made the original
+  // author freeze these values at mount cannot form. Writes happen in event
+  // handlers only. See hooks/use-journal-url-state.ts.
+  const { state: url, search: urlSearch, setParams, applyParams } = useJournalUrlState()
+  const { timeRange, customRange, crewId, agentId, traceId, severity, muted } = url
 
   // Visible tabs depends on role. Admin-only tabs are filtered out for
   // non-admins. The deeplink defaults to timeline if the user lacks
@@ -109,53 +124,51 @@ export default function JournalPage() {
     [isAdmin],
   )
 
-  // Filter state — lifted from the page so URL/deeplink hydration is
-  // trivial and so the LogsPanel toolbar can drive the backend query.
-  const initialTimeRange = useMemo<TimeRange>(() => {
-    const t = searchParams.get("time")
-    return (t === "5m" || t === "15m" || t === "1h" || t === "24h" || t === "7d" || t === "30d" || t === "all" || t === "custom")
-      ? (t as TimeRange)
-      : "24h"
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const setTimeRange = useCallback(
+    (next: TimeRange) => {
+      // Leaving "custom" drops the bounds with it — a stale from/to left in
+      // the URL would come back the next time the picker reached "custom".
+      setParams(
+        next === "custom"
+          ? { time: "custom" }
+          : { time: next === "24h" ? null : next, from: null, to: null },
+      )
+    },
+    [setParams],
+  )
 
-  const initialCustomRange = useMemo<CustomRange | null>(() => {
-    const f = Number(searchParams.get("from"))
-    const t = Number(searchParams.get("to"))
-    if (Number.isFinite(f) && Number.isFinite(t) && t > f) return { fromMs: f, toMs: t }
-    return null
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const setCustomRange = useCallback(
+    (next: CustomRange | null) => {
+      if (!next) setParams({ from: null, to: null })
+      else setParams({ time: "custom", from: String(next.fromMs), to: String(next.toMs) })
+    },
+    [setParams],
+  )
 
-  const [timeRange, setTimeRange] = useState<TimeRange>(initialTimeRange)
-  const [customRange, setCustomRange] = useState<CustomRange | null>(initialCustomRange)
-  const [crewId, setCrewId] = useState<string>(() => searchParams.get("crew_id") ?? "")
-  const [agentId, setAgentId] = useState<string>(() => searchParams.get("agent_id") ?? "")
-  const [traceId, setTraceId] = useState<string>(() => searchParams.get("trace_id") ?? "")
-  const [serverQuery, setServerQuery] = useState<string>("")
+  const setAgentId = useCallback(
+    (id: string) => setParams({ agent_id: id || null }),
+    [setParams],
+  )
+  const setTraceId = useCallback(
+    (id: string) => setParams({ trace_id: id || null }),
+    [setParams],
+  )
   // Severity + muted-groups are LIFTED out of LogsPanel so we can mirror
   // them as server-side filters. The previous client-only filtering
   // silently dropped matches when the 5,000-entry buffer cap kicked in
   // — muting "container" might leave zero events visible because the
   // server already returned the most recent 5k container.metrics rows.
-  const initialSeverity = useMemo<SeverityFilter>(() => {
-    const s = searchParams.get("severity")
-    return (s === "info" || s === "notice" || s === "warn" || s === "error" ? s : "all") as SeverityFilter
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const initialMuted = useMemo<Set<EntryGroup>>(() => {
-    const raw = searchParams.get("mute")
-    if (!raw) return new Set<EntryGroup>()
-    const set = new Set<EntryGroup>()
-    for (const g of raw.split(",")) {
-      const trimmed = g.trim() as EntryGroup
-      if ((GROUP_ORDER as readonly string[]).includes(trimmed)) set.add(trimmed)
-    }
-    return set
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const [severity, setSeverity] = useState<SeverityFilter>(initialSeverity)
-  const [muted, setMuted] = useState<Set<EntryGroup>>(initialMuted)
+  const setSeverity = useCallback(
+    (next: SeverityFilter) => setParams({ severity: next === "all" ? null : next }),
+    [setParams],
+  )
+  const setMuted = useCallback(
+    (next: Set<EntryGroup>) =>
+      setParams({ mute: next.size > 0 ? Array.from(next).join(",") : null }),
+    [setParams],
+  )
+  // Live-tail pause is a session control, not a view: it says "stop moving
+  // while I read this", which is meaningless to whoever opens the link.
   const [live, setLive] = useState(true)
   // Auto-refresh cadence — defaults to "live" (SSE-driven, no polling)
   // so we don't load the backend with redundant requests when a
@@ -177,28 +190,32 @@ export default function JournalPage() {
     ["container.metrics"],
   )
 
-  // Initial tab from `?tab=`. Unknown / unauthorized values fall back
-  // to timeline so a stale bookmark can never surface a 403.
-  const initialTab = useMemo<JournalTab>(() => {
-    const t = searchParams.get("tab")
-    const valid = ALL_TABS.some((tab) => tab.id === t)
-    if (!valid) return "timeline"
-    return t as JournalTab
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const [activeTab, setActiveTab] = useState<JournalTab>(initialTab)
+  // Tab from `?tab=`. Unknown / locked / unauthorized values render as
+  // timeline so a stale bookmark can never surface a 403 — the clamp is a
+  // derivation, so it holds on every render, not just the first.
+  // `isAdmin` is false while the role is still loading, which is the safe
+  // direction: an admin-only surface never paints before we know.
+  const activeTab = useMemo<JournalTab>(() => {
+    const tabDef = ALL_TABS.find((t) => t.id === url.tab)
+    if (!tabDef || tabDef.locked || (tabDef.adminOnly && !isAdmin)) return "timeline"
+    return url.tab
+  }, [url.tab, isAdmin])
 
-  // If admin permissions resolve to non-admin OR a deeplink lands on a
-  // locked tab, demote back to timeline. Locked check fires regardless
-  // of role so even admins can't snap into an unimplemented surface via
-  // a stale bookmark.
+  const setActiveTab = useCallback(
+    (next: JournalTab) => setParams({ tab: next === "timeline" ? null : next }),
+    [setParams],
+  )
+
+  // Keep the URL honest once the role is known: a link that says `tab=spend`
+  // while showing the timeline is a link nobody can share. `replace`, because
+  // the user did not navigate here — and the write makes its own condition
+  // false (url.tab becomes "timeline", which is what activeTab already is),
+  // so it runs at most once per demotion rather than looping.
   useEffect(() => {
     if (rolesLoading) return
-    const tabDef = ALL_TABS.find((t) => t.id === activeTab)
-    if (!tabDef || tabDef.locked || (tabDef.adminOnly && !isAdmin)) {
-      setActiveTab("timeline")
-    }
-  }, [activeTab, isAdmin, rolesLoading])
+    if (url.tab === activeTab) return
+    setParams({ tab: null }, { replace: true })
+  }, [rolesLoading, url.tab, activeTab, setParams])
 
   // Crew + agent options for the toolbar selects.
   const [crews, setCrews] = useState<ScopeOption[]>([])
@@ -263,11 +280,13 @@ export default function JournalPage() {
     return () => { cancelled = true }
   }, [workspaceId, crewId])
 
-  // Crew change clears any agent selection that's no longer in scope.
-  const onCrewChange = useCallback((id: string) => {
-    setCrewId(id)
-    setAgentId("")
-  }, [])
+  // Crew change clears any agent selection that's no longer in scope — one
+  // navigation, so Back does not step through a crew/agent pair that was
+  // never on screen.
+  const onCrewChange = useCallback(
+    (id: string) => setParams({ crew_id: id || null, agent_id: null }),
+    [setParams],
+  )
 
   // id → name lookup so the LogsPanel stats rail can render "viktor"
   // instead of a UUID.
@@ -277,26 +296,36 @@ export default function JournalPage() {
     return out
   }, [agents])
 
-  // Deeplink — mirror filter state into URL search params on change so
-  // the user can share / bookmark a specific view. Severity + muted
-  // groups are part of the filter contract: a saved bookmark must
-  // restore the exact view, not just the time range.
+  // ── Search box ──────────────────────────────────────────────────────────
+  //
+  // The one filter that cannot be read straight off the URL: the input needs
+  // the character the user just typed, and the URL should only carry the
+  // query they stopped typing. So the draft is local, the committed value
+  // lives in `?q=` (LogsPanel debounces the commit for us), and `committedRef`
+  // records who wrote the URL last.
+  //
+  // That ref is what keeps the two-way sync from oscillating. A commit sets
+  // it before writing, so the adopt-from-URL effect sees its own value and
+  // stands down; an external change (Back, a saved view, a deeplink) does not
+  // match, so the draft adopts it exactly once. Each direction terminates the
+  // other.
+  const [searchDraft, setSearchDraft] = useState(url.q)
+  const committedRef = useRef(url.q)
   useEffect(() => {
-    const sp = new URLSearchParams()
-    if (timeRange !== "24h") sp.set("time", timeRange)
-    if (timeRange === "custom" && customRange) {
-      sp.set("from", String(customRange.fromMs))
-      sp.set("to", String(customRange.toMs))
-    }
-    if (crewId) sp.set("crew_id", crewId)
-    if (agentId) sp.set("agent_id", agentId)
-    if (traceId) sp.set("trace_id", traceId)
-    if (severity !== "all") sp.set("severity", severity)
-    if (muted.size > 0) sp.set("mute", Array.from(muted).join(","))
-    if (activeTab !== "timeline") sp.set("tab", activeTab)
-    const qs = sp.toString()
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-  }, [timeRange, customRange, crewId, agentId, traceId, severity, muted, activeTab, router, pathname])
+    if (url.q === committedRef.current) return
+    committedRef.current = url.q
+    setSearchDraft(url.q)
+  }, [url.q])
+  const commitSearch = useCallback(
+    (next: string) => {
+      committedRef.current = next
+      // `replace`, not `push`: typing is continuous input, and one history
+      // entry per 300 ms pause would bury the view the user came from.
+      setParams({ q: next || null }, { replace: true })
+    },
+    [setParams],
+  )
+  const serverQuery = url.q
 
   // Structured-query split: tokens like `agent:viktor severity:error
   // type:exec.command` get peeled off the search box and routed to
@@ -424,6 +453,46 @@ export default function JournalPage() {
   // crew is in scope (metrics are per-container).
   const showNetworkCard = isAdmin && Boolean(crewId)
 
+  // ── Runs tab ────────────────────────────────────────────────────────────
+  // Window / status / trigger / page were component state, so "the CRON runs
+  // that failed this week" could only be handed over as instructions. Each
+  // filter change drops the page number in the SAME navigation — a page 3
+  // carried across a filter change lands on an empty table, and resetting it
+  // in a second write would make Back step through a view nobody saw.
+  const setRunWindow = useCallback(
+    // Clear the page for the same reason status and trigger do: a narrower
+    // window can leave the reader on a page that no longer exists, and an
+    // empty page 3 reads as "no runs" rather than as "you are past the end".
+    (next: RunWindow) =>
+      setParams({ run_window: next === "24h" ? null : next, run_page: null }),
+    [setParams],
+  )
+  const setRunStatus = useCallback(
+    (next: string) => setParams({ run_status: next === "all" ? null : next, run_page: null }),
+    [setParams],
+  )
+  const setRunTrigger = useCallback(
+    (next: string) => setParams({ run_trigger: next === "all" ? null : next, run_page: null }),
+    [setParams],
+  )
+  const setRunPage = useCallback(
+    (next: number) => setParams({ run_page: next <= 1 ? null : String(next) }),
+    [setParams],
+  )
+
+  // ── Saved views ─────────────────────────────────────────────────────────
+  // A saved view is exactly this page's URL params, so it stores them
+  // verbatim and applying one replaces the whole set — a view that does not
+  // name `severity` has to CLEAR it, not inherit whatever is on screen.
+  const savedViewFilters = useMemo(
+    () => journalFiltersFromSearch(urlSearch),
+    [urlSearch],
+  )
+  const applySavedView = useCallback(
+    (params: Record<string, string>) => applyParams(params as Partial<Record<JournalUrlKey, string>>),
+    [applyParams],
+  )
+
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Sub-bar: identity + status + tabs ---- */}
@@ -438,10 +507,9 @@ export default function JournalPage() {
               <StreamStatusBadge status={streamStatus} />
               <AnomalyBadge
                 entries={entries}
-                onClick={() => {
-                  setSeverity("error")
-                  setTimeRange("5m")
-                }}
+                // One navigation, not two — a pair of writes would leave a
+                // half-applied view sitting in the history for Back to land on.
+                onClick={() => setParams({ severity: "error", time: "5m", from: null, to: null })}
               />
               <MetricsVisibilityChip
                 excludedTypes={excludedTypes}
@@ -462,6 +530,15 @@ export default function JournalPage() {
         // them); the demote-to-timeline useEffect still owns stale-deeplink
         // and role-loss fallbacks.
         onTabChange={setActiveTab}
+      />
+
+      {/* ---- Saved views ---- */}
+      {/* Above the tab content, not inside it: a saved view can name the tab,
+          so the control that applies one cannot live in a single tab. */}
+      <JournalSavedViews
+        workspaceId={workspaceId}
+        filters={savedViewFilters}
+        onApply={applySavedView}
       />
 
       {/* ---- Tab content (animated swap) ---- */}
@@ -508,7 +585,9 @@ export default function JournalPage() {
                 onSelectTrace={setTraceId}
                 onSelectAgent={setAgentId}
                 onSelectCrew={onCrewChange}
-                onServerSearch={setServerQuery}
+                query={searchDraft}
+                onQueryChange={setSearchDraft}
+                onServerSearch={commitSearch}
                 onRefresh={handleRefresh}
                 loading={loading}
                 error={error}
@@ -533,7 +612,18 @@ export default function JournalPage() {
             transition={{ duration: 0.18, ease: "easeOut" }}
             className="flex-1 min-h-0 overflow-hidden flex flex-col"
           >
-            <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
+            <RunsView
+              workspaceId={workspaceId}
+              workspaceLoading={wsLoading}
+              window={url.runWindow}
+              onWindowChange={setRunWindow}
+              statusFilter={url.runStatus}
+              onStatusFilterChange={setRunStatus}
+              triggerFilter={url.runTrigger}
+              onTriggerFilterChange={setRunTrigger}
+              page={url.runPage}
+              onPageChange={setRunPage}
+            />
           </motion.div>
         )}
 

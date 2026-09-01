@@ -21,6 +21,46 @@ function isSavedView(value: unknown): value is SavedView {
   return typeof v.id === "string" && typeof v.name === "string"
 }
 
+/**
+ * Which surface a saved view belongs to.
+ *
+ * `GET /api/v1/saved-views` returns every view in the workspace, so the two
+ * consumers have to tell theirs apart: a journal view applied to the issue
+ * board sets no issue filter at all and reads as a broken menu entry.
+ *
+ * The discriminator is a key inside `filters_json`, NOT `view_type`, and that
+ * is not a style choice: `saved_views.view_type` carries a
+ * `CHECK (view_type IN ('board','list'))` constraint, so a third value is a
+ * 500 from the insert — which is what a browser run of this feature produced
+ * before the marker moved. `filters_json` is a free-form TEXT column and
+ * already the place both surfaces keep their own vocabulary, so the journal
+ * needs no schema change to store one.
+ */
+export const JOURNAL_SURFACE = "journal"
+
+export function isJournalView(view: SavedView): boolean {
+  if (!view.filters_json) return false
+  try {
+    const parsed: unknown = JSON.parse(view.filters_json)
+    if (!parsed || typeof parsed !== "object") return false
+    return (parsed as Record<string, unknown>).surface === JOURNAL_SURFACE
+  } catch {
+    // Unparseable filters belong to whoever wrote them; the journal only
+    // claims what it can prove is its own.
+    return false
+  }
+}
+
+/** Views the issues surface can apply — everything that is not a journal view. */
+export function issueViews(views: SavedView[]): SavedView[] {
+  return views.filter((v) => !isJournalView(v))
+}
+
+/** Views the journal surface can apply. */
+export function journalViews(views: SavedView[]): SavedView[] {
+  return views.filter(isJournalView)
+}
+
 export function parseSavedViews(raw: unknown): SavedView[] {
   if (Array.isArray(raw)) return raw.filter(isSavedView)
   if (raw && typeof raw === "object" && "views" in raw) {

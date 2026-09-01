@@ -435,6 +435,70 @@ crewship spend --format json | jq '.top_routines'
 This is a **separate, journal-native rollup** from [Paymaster](/guides/paymaster)'s `/api/v1/paymaster/spend/*` endpoints (`crewship cost`, `crewship paymaster ...`) — an intentional duplication, not an oversight. Paymaster's ledger-backed rollup and this journal-native one read overlapping but not identical data; if you're deciding which to extend, ask before assuming one supersedes the other.
 </Note>
 
+## Shareable views
+
+A dashboard is returned to, not explored. `/journal` keeps everything that
+answers *what am I looking at* in the URL, so a view is a link.
+
+### The URL contract
+
+| Param | Values | Applies to |
+|---|---|---|
+| `tab` | `timeline` \| `runs` \| `spend` (omitted = `timeline`) | all |
+| `time` | `5m` \| `15m` \| `1h` \| `24h` \| `7d` \| `30d` \| `all` \| `custom` (omitted = `24h`) | Timeline |
+| `from`, `to` | epoch-ms bounds; only read when `time=custom` and `to > from` | Timeline |
+| `crew_id`, `agent_id`, `trace_id` | ids | Timeline |
+| `severity` | `info` \| `notice` \| `warn` \| `error` (omitted = all) | Timeline |
+| `mute` | CSV of entry groups to hide | Timeline |
+| `q` | the search box, structured tokens included (`agent:viktor severity:error`) | Timeline |
+| `run_window` | `24h` \| `7d` \| `30d` (omitted = `24h`) | Runs |
+| `run_status` | `RUNNING` \| `COMPLETED` \| `FAILED` \| `CANCELLED` \| `TIMEOUT` (omitted = all) | Runs |
+| `run_trigger` | `USER` \| `WEBHOOK` \| `CRON` \| `AGENT` \| `SYSTEM` (omitted = all) | Runs |
+| `run_page` | 1-based page of the recent-runs table (omitted = 1) | Runs |
+
+Unknown or malformed values fall back to the default rather than being bound
+as a filter, so a stale bookmark cannot surface a 403 or a rejected query.
+
+**Not in the URL, on purpose.** Wrap, sort direction, dedup, refresh cadence,
+the stats-rail collapse and the metrics-visibility chip answer *how do I like
+to read*, not *what am I looking at*. They are per-user preferences
+(`/api/v1/me/preferences`), so a link never re-styles the recipient's journal
+and a URL value never fights the stored preference on load. Histogram bucket
+selection stays component-local: it is a transient drill-down over the loaded
+buffer, keyed to a time range the recipient may not be in. The live-tail pause
+is a session control — "stop moving while I read this" means nothing to
+whoever opens the link.
+
+Filter changes are `push`ed, so Back steps back through them instead of
+leaving the page. The search box is the one exception: it `replace`s, because
+one history entry per typing pause would bury the view you came from.
+
+### Saved views
+
+The chip row above the tabs reads and writes the same server-stored bookmarks
+as [`crewship saved-view`](/api-reference/saved-views) — `filters_json` carries the URL
+params above, so a view made in the UI is editable from the CLI and back.
+
+```
+crewship saved-view create --name "Failed CRON runs" --shared \
+  --filters '{"surface":"journal","params":{"tab":"runs","run_status":"FAILED","run_trigger":"CRON","run_window":"7d"}}'
+crewship saved-view list
+```
+
+`--shared` hands the view to the whole workspace; only its owner can update or
+delete it.
+
+<Note>
+The `surface` key inside `filters_json` is what separates journal views from
+the issue tracker's — **not** `view_type`. `saved_views.view_type` carries a
+`CHECK (view_type IN ('board','list'))` constraint, so a third value is a 500
+from the insert, not a new category. Both surfaces read the same
+`GET /api/v1/saved-views` list and filter it by this key.
+</Note>
+
+Applying a view replaces the entire journal param set, so a view that does not
+name `severity` clears it rather than inheriting whatever was on screen.
+
 ## Outcome verdict — `summary.generated`
 
 After a run reaches a terminal state (completed/failed/timeout), one cheap Haiku-class LLM call over the run's journal entries produces a one-line outcome verdict — "did the agent accomplish the goal?" — answering the question raw event humanization can't ("Wrote file", "Ran command" tell you *what* happened, not whether it *worked*). The verdict is emitted as a `summary.generated` entry (declared in `internal/journal/types.go` since early on, but only wired to an emit site by this feature) and rendered as the run's first, expandable row:

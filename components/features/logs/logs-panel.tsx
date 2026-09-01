@@ -65,6 +65,17 @@ interface LogsPanelProps {
    */
   onServerSearch?: (q: string) => void
 
+  /**
+   * Search box text — controlled when both are provided, same idiom as
+   * `severity` / `muted` / `live` above. /journal owns it so the query is
+   * part of the shareable URL: a bookmark that drops the search restores a
+   * view nobody was looking at. `onServerSearch` still fires debounced on
+   * top of this — the immediate value drives the input, the debounced one
+   * drives the fetch.
+   */
+  query?: string
+  onQueryChange?: (q: string) => void
+
   /** Refresh handler — shows a button + spinner state. */
   onRefresh?: () => void
   /** Mark the panel as loading (spinner on the refresh button). */
@@ -145,6 +156,8 @@ export function LogsPanel({
   muted: mutedProp,
   onMutedChange,
   onServerSearch,
+  query: queryProp,
+  onQueryChange,
   onRefresh,
   loading,
   error,
@@ -162,7 +175,12 @@ export function LogsPanel({
   onSelectAgent,
   onSelectCrew,
 }: LogsPanelProps) {
-  const [query, setQuery] = useState("")
+  const [internalQuery, setInternalQuery] = useState("")
+  const query = queryProp ?? internalQuery
+  const setQuery = useCallback((next: string) => {
+    if (onQueryChange) onQueryChange(next)
+    else setInternalQuery(next)
+  }, [onQueryChange])
   // Severity + muted are controlled when the parent passes both the
   // value and the setter. Otherwise we keep local state for legacy
   // surfaces (older standalone uses of LogsPanel).
@@ -278,7 +296,7 @@ export function LogsPanel({
     setSeverity("all")
     setMuted(new Set())
     setBucket(null)
-  }, [setSeverity, setMuted])
+  }, [setQuery, setSeverity, setMuted])
 
   const onExport = useCallback(() => {
     const blob = new Blob([JSON.stringify(ordered, null, 2)], { type: "application/json" })
@@ -342,7 +360,7 @@ export function LogsPanel({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [query, onClearAllFilters, onLiveToggle])
+  }, [query, setQuery, onClearAllFilters, onLiveToggle])
 
   const hasAnyEntries = entries.length > 0
   const hasFilters =

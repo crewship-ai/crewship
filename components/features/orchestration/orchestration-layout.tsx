@@ -50,7 +50,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
 import { useIssueDetail } from "@/hooks/use-issue-detail"
 import { useProjectDetail } from "@/hooks/use-project-detail"
-import { parseSavedViews, applySavedView } from "@/lib/saved-views"
+import { parseSavedViews, applySavedView, issueViews } from "@/lib/saved-views"
 import { IssuesBoardInline, IssuesListInline } from "@/components/features/orchestration/issues-inline"
 import { IssueDetailSurface } from "@/components/features/issues/issue-detail-surface"
 import { ProjectDetailSurface } from "@/components/features/issues/project-detail-surface"
@@ -360,7 +360,11 @@ export function OrchestrationLayout({
     if (!workspaceId) return
     try {
       const res = await apiFetch(`/api/v1/saved-views?workspace_id=${encodeURIComponent(workspaceId)}`)
-      if (res.ok) setSavedViews(parseSavedViews(await res.json()))
+      // The endpoint returns every saved view in the workspace, /journal's
+      // included. Applying one of those here sets no issue filter at all, so
+      // the dropdown entry reads as broken — drop them by their surface
+      // marker (lib/saved-views.ts).
+      if (res.ok) setSavedViews(issueViews(parseSavedViews(await res.json())))
     } catch { /* ignore */ }
   }, [workspaceId])
 

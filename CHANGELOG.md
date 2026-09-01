@@ -45,6 +45,26 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `inbox.AllKinds` without a seed row — otherwise the next person reviewing
   the inbox never sees that kind and concludes it works.
 
+- **Saved views and a real URL contract on `/journal` (#2209).** A dashboard
+  is returned to, not explored, and the journal was the one surface a query
+  could not be kept on: `crewship saved-view create|list|update|delete` had
+  shipped for months and `/journal` could not read or write one, so the only
+  way to hold `routine:nightly-digest outcome:failed` was a browser bookmark
+  — which lost the search box, because the URL mirror wrote `time`, `crew_id`,
+  `agent_id`, `trace_id`, `severity`, `mute` and `tab` but never `q`. A shared
+  "here is the failure I found" link arrived without the query that found it.
+  The Runs tab mirrored nothing at all, so its window, status, trigger and
+  page number could only be handed over as a list of buttons to press.
+
+  `q` and the four Runs filters (`run_window`, `run_status`, `run_trigger`,
+  `run_page`) are part of the URL now, filter changes `push` so Back steps
+  back through them instead of leaving the page, and a saved-view chip row
+  above the tabs reads and writes the same server-stored bookmarks the CLI
+  does — `--shared` included, no backend change. Wrap, sort, dedup, refresh
+  cadence and the stats-rail collapse deliberately stay per-user preferences:
+  a link should not re-style the recipient's journal. Documented in
+  [the journal guide](docs/guides/crew-journal.mdx#shareable-views).
+
 - **The dashboard leads with what needs a human (#2185).** The landing page
   was a wall of tiles that answered "what exists" before "what is stuck". It
   now opens with a "Needs your attention" strip — approvals waiting, failed
@@ -778,6 +798,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   and a test asserts it in both directions. `docs/guides/crew-journal.mdx`
   billed roughly ninety types as the "full entry-type catalog"; it now lists
   all 139 with the chip each one filters under.
+
+- **Clicking a run in `/journal?tab=runs` moved the address bar and nothing
+  else (#2209).** The row handler pushes `/journal?tab=timeline&trace_id=<id>`
+  — the same pathname, so the App Router re-renders the page without
+  unmounting it. Every URL-derived value was read once at mount
+  (`useMemo(…, [])` or a lazy `useState` initialiser) and nothing re-read
+  `searchParams`, so the tab stayed on Runs, the trace focus stayed empty, and
+  the user was left staring at the runs table while the URL claimed Timeline.
+  Every in-app link into `/journal?…` from an already-mounted journal was
+  equally inert, as was the "click a row → open trace" hint promising it.
+  The URL is derived state now rather than a mount-time copy, so the page
+  follows it. Verified in a browser: `tab=runs` → row click → Timeline with
+  the trace pill, no full page load.
 
 - **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
   server refused it (#2195).** The standalone `kind: Agent` validator kept
