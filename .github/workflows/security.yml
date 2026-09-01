@@ -370,12 +370,29 @@ jobs:
       - name: Install osv-scanner
         run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.2.4
 
-      # Phase 1: warn-only. Mirrors grype's `fail-build: false` posture
-      # above — we want the table in the run log + a `::warning::` annotation
-      # on the PR, but not a red CI gate while Dependabot is still draining
-      # the baseline backlog (~14 fixable findings as of this PR). Once the
-      # baseline is clean, drop the `|| true` and promote to a hard gate.
-      - name: Run osv-scanner against lockfiles (warn-only)
+      # Phase 2: blocking on Critical/High, promoted from Phase 1 warn-only
+      # once the High baseline (deepmerge-ts GHSA-ggr8-5vv4-36mx, nanoid
+      # GHSA-2v37-7h3g-55p8 — see #2236) hit zero. Gate on Critical/High only,
+      # mirroring grype's `severity-cutoff: high` above — osv-scanner exits
+      # non-zero for ANY known vulnerability regardless of severity, and two
+      # Medium/Unknown-severity findings remain that a High-only baseline
+      # doesn't cover:
+      #   - GHSA-rgwj-5xj2-c3m3 (mysql2, via prisma's own devDependency
+      #     graph) is Medium (CVSS 3.1 ~5.8, DoS needs AC:H) and outside this
+      #     issue's stated scope.
+      #   - GO-2026-5932 (golang.org/x/crypto/openpgp) has no upstream fix at
+      #     all — every published version ships it — and is already accepted
+      #     as a known, non-reachable risk for govulncheck (see the allowlist
+      #     job above + THIRD-PARTY-NOTICES.md). It always reports "Unknown"
+      #     severity here because osv-scanner can't score it, and it is not
+      #     in this agent's remit (go.mod/go.sum belongs to the tracking
+      #     issue's Go half, #1510).
+      # Failing the build on either would turn a real, unrelated backlog item
+      # into a permanent red gate — the exact "skim past it" failure mode
+      # this promotion is meant to fix, just moved from warn-only to
+      # everyone-ignores-a-perma-red-check. A NEW Critical/High still fails
+      # the build immediately, which is the point.
+      - name: Run osv-scanner against lockfiles
         run: |
           set +e
           osv-scanner \
@@ -384,10 +401,30 @@ jobs:
             > /tmp/osv.log 2>&1
           exit_code=$?
           cat /tmp/osv.log
-          if [ "$exit_code" -ne 0 ]; then
-            count=$(grep -oE 'Total [0-9]+ packages affected by [0-9]+ known vulnerabilities' /tmp/osv.log | head -1)
-            echo "::warning::osv-scanner: ${count:-non-zero exit}. See run log for the table. Phase 1 = warn-only; baseline still being drained by Dependabot."
+
+          if [ "$exit_code" -eq 0 ]; then
+            exit 0
           fi
+
+          # Fail SAFE, not fail green: if the summary line's shape ever
+          # changes (osv-scanner upgrade, output format drift), we cannot
+          # tell Critical/High apart from Medium/Low/Unknown, so treat a
+          # non-zero exit with an unparsed summary as a hard failure rather
+          # than silently passing it through.
+          summary=$(grep -oE 'Total [0-9]+ packages? affected by [0-9]+ known vulnerabilit(y|ies) \([0-9]+ Critical, [0-9]+ High, [0-9]+ Medium, [0-9]+ Low, [0-9]+ Unknown\)' /tmp/osv.log | head -1)
+          if [ -z "$summary" ]; then
+            echo "::error::osv-scanner exited $exit_code but its summary line could not be parsed — failing safe rather than silently passing. See run log."
+            exit 1
+          fi
+
+          critical=$(echo "$summary" | grep -oE '[0-9]+ Critical' | grep -oE '[0-9]+')
+          high=$(echo "$summary" | grep -oE '[0-9]+ High' | grep -oE '[0-9]+')
+          if [ "$critical" -gt 0 ] || [ "$high" -gt 0 ]; then
+            echo "::error::osv-scanner: ${summary}. Critical/High findings block the build — see run log for the table."
+            exit 1
+          fi
+
+          echo "::warning::osv-scanner: ${summary}. No Critical/High findings, so not blocking — see run log for the table."
           exit 0
 
   # ── Scheduled-run alerting: file an issue instead of reddening PRs ──
