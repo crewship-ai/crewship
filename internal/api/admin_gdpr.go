@@ -750,7 +750,7 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 	bundle := gdprExportBundle{
 		DataSubjectID:  targetID,
 		WorkspaceID:    wsID,
-		ExportedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+		ExportedAt:     time.Now().UTC().Format(time.RFC3339Nano), // tsformat:allow: export payload field, never compared or ordered in SQL
 		ActionID:       actionID,
 		PeerCards:      []exportPeerCard{},
 		MemoryVersion:  []exportMemoryVersion{},
