@@ -33,6 +33,24 @@ export interface PipelineSchedule {
   // doesn't need a second lookup.
   wake_pipeline_id?: string
   wake_pipeline_slug?: string
+  wake_fail_closed?: boolean
+  wake_check_count?: number
+  wake_fire_count?: number
+  last_wake_at?: string
+  last_wake_status?: string
+  // Missed-run catch-up (#1422). catchup_policy is always populated
+  // (defaults to "once" server-side); last_missed_count is telemetry from
+  // the most recent tick, 0 meaning current or a fully-drained backlog.
+  catchup_policy?: string
+  last_missed_count?: number
+  // Circuit breaker (#1405, F18/A6). consecutive_failures and
+  // max_consecutive_failures are always present; disabled_reason is ""
+  // for an operator-initiated disable and "circuit_breaker" once the
+  // breaker has tripped it — see lib/schedule-health.ts, which turns
+  // these four into the read-only status the schedules tab renders.
+  consecutive_failures: number
+  max_consecutive_failures: number
+  disabled_reason?: string
 }
 
 export interface ScheduleSaveBody {

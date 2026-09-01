@@ -120,6 +120,13 @@ export default function DashboardPage() {
   useRealtimeEvent("agent.status", debouncedRefresh)
   useRealtimeEvent("mission.updated", debouncedRefresh)
   useRealtimeEvent("issue.updated", debouncedRefresh)
+  // A6 (#2125): these were emitted server-side and dropped by the realtime
+  // allowlist, so a new/deleted/started issue never moved the dashboard's
+  // mission counts without a manual reload. Now registered — wire the same
+  // debounced refresh issue.updated already uses.
+  useRealtimeEvent("issue.created", debouncedRefresh)
+  useRealtimeEvent("issue.deleted", debouncedRefresh)
+  useRealtimeEvent("issue.started", debouncedRefresh)
   useRealtimeEvent("pipeline.run.started", debouncedRefresh)
   useRealtimeEvent("pipeline.run.completed", debouncedRefresh)
   useRealtimeEvent("pipeline.run.failed", debouncedRefresh)
