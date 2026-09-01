@@ -55,8 +55,13 @@ So "fire when an issue moves to DONE" is one predicate:
       --event mission.status_change --payload-equals to=DONE \
       --routine post-close
 
-A key the emitter never writes is accepted and matches nothing, which
-is silent. Check a rule against real history before trusting it:
+--event and --payload-equals are checked at save time: --event must be a
+registered journal entry type, and for a curated set of event types
+(mission.status_change among them — see the guide) --payload-equals keys
+are checked against the ones that type's emitter actually writes. Other
+event types have no key check yet, so a key the emitter never writes is
+still accepted there and matches nothing, silently. Either way, check a
+rule against real history before trusting it:
 
   crewship automation preview --event mission.status_change \
       --payload-equals to=DONE`,
@@ -136,18 +141,21 @@ var automationCreateCmd = &cobra.Command{
 	Long: `Create an automation.
 
 --event takes ONE journal entry type. A rule that fires on "anything" is not
-supported: confirm the type exists first with
+supported. The server checks it against the journal's closed registry and
+refuses anything unregistered, naming real alternatives — but a value can be
+well-formed AND registered and still be the wrong type for what you meant,
+so confirm it first:
 
     crewship journal --type mission.status_change
-
-because a typo produces a rule that is saved, listed, and never fires.
 
 Predicate flags narrow which entries of that type match; every one you pass
 must be satisfied, and passing none matches all of them.
 
---payload-equals has the same silent-failure mode as a typo'd --event, and a
-worse one: a key that no emitter writes is accepted and matches nothing. Read
-one real entry before you write the predicate —
+--payload-equals keys are checked at save time for a curated set of event
+types (mission.status_change among them). For any event type NOT on that
+list, a key that no emitter writes is still accepted and matches nothing,
+silently — same as an unchecked --event used to be. Read one real entry
+before you write the predicate —
 
     crewship journal --type mission.status_change --lines 1 --format json
 

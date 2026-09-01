@@ -22,6 +22,14 @@ import (
 // typed helpers further below. New types are free to add as long as the
 // string is stable — callers MUST NOT rename existing ones without a
 // migration that rewrites historical rows.
+//
+// After adding, removing or renaming a constant in the block below, run
+// `go generate ./internal/journal/...` and commit registry_generated.go —
+// AllEntryTypes and Registered() are generated from this exact block (see
+// cmd/gen-journal-registry), and registry_generated_test.go fails the build
+// if the generated file falls behind this one.
+//
+//go:generate go run ../../cmd/gen-journal-registry
 type EntryType string
 
 const (

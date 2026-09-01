@@ -70,9 +70,16 @@ before you save:
 crewship journal --type mission.status_change --lines 5
 ```
 
-A typo is accepted by the API — the journal has 117 entry types and no
-closed registry to check against — so it produces a rule that is saved,
-listed, and never fires. Checking first costs one command.
+`event_type` is checked against the journal's own closed registry
+(`journal.AllEntryTypes`, generated from the entry-type declarations in
+`internal/journal/types.go` — currently ~129 types) at save time, on both
+`automation create` and `automation update`. A value that is not one of them
+is rejected with a 400 naming real alternatives — types sharing the same
+namespace as the typo when there are any, otherwise a handful of examples —
+so a typo can no longer produce a rule that is saved, listed, and never
+fires. This closed the gap: previously the API accepted anything merely
+SHAPED like an entry type (`word.word`), which a typo like
+`mission.staus_change` satisfies just as well as the real thing.
 
 ### The matcher
 
@@ -92,10 +99,12 @@ the number `3` and `action=status_changed` matches the string
 `"status_changed"`.
 
 <Warning>
-  `--payload-equals` has the same silent-failure mode as a typo'd `--event`,
-  and a nastier one: a key **no emitter writes** is accepted, and the rule then
-  matches nothing, forever, with no error anywhere. Read one real entry before
-  writing the predicate:
+  `--payload-equals` used to have the same silent-failure mode as a typo'd
+  `--event`, and a nastier one: a key **no emitter writes** was accepted, and
+  the rule then matched nothing, forever, with no error anywhere. That is now
+  checked at save time **for the event types listed below** — read the
+  "Payload key validation" section before relying on it for a type that isn't
+  one of them. Either way, read one real entry before writing the predicate:
 
   ```bash
   crewship journal --type mission.status_change --lines 1 --format json
@@ -103,6 +112,40 @@ the number `3` and `action=status_changed` matches the string
 
   and match on a key you can see in its `payload`.
 </Warning>
+
+### Payload key validation
+
+`matcher.payload_equals` keys are checked against a **curated, incomplete**
+map of event type → known payload keys
+(`automation.KnownPayloadKeys` in `internal/automation/payload_schema.go`),
+built by reading each listed type's real emitter — not generated, and not
+exhaustive. A key for one of the mapped types below that its emitter does not
+write is rejected at save time, naming the keys that are actually valid.
+
+| Event type | Known keys |
+|---|---|
+| `mission.status_change` | `action`, `details`, `from`, `to` |
+| `mission.created` | `action`, `details` |
+| `mission.assigned` | `action`, `details` |
+| `mission.comment` | `action`, `details` |
+| `automation.throttled` | `automation_id`, `automation_name`, `event_type`, `max_per_hour`, `window_started_at` |
+| `automation.depth_exceeded` | `automation_id`, `automation_name`, `routine_slug`, `origin_run_id`, `reason`, `error`, `chain_depth`, `max_chain_depth` |
+| `pipeline.schedule.circuit_breaker_tripped` | `schedule_id`, `pipeline_slug`, `consecutive_failures`, `max_consecutive_failures` |
+| `pipeline.schedule.missed_occurrences` | `schedule_id`, `missed_count`, `window_start`, `window_end` |
+| `page.wake.fired` | `page`, `page_id`, `panel`, `gate`, `crew`, `writes`, `issue_id`, `issue_identifier`, `automation_id`, `coalesced_events` |
+
+**An event type not on this list gets no payload-key check at all** — a key
+against, say, `run.completed` or `pipeline.run.failed` is accepted
+unconditionally, exactly as before this change. This is a stated limitation,
+not an oversight: no declared payload-schema registry exists anywhere in the
+codebase (payloads are assembled at ~130 call sites, many through helper
+functions several frames from the journal write, which a static scan cannot
+reliably see through without either missing real keys or — worse — rejecting
+a valid one). Extending this table means reading the real emitter for the
+type you need and adding it to `KnownPayloadKeys`; `automation preview`
+remains the general answer for any event type, mapped or not — it replays
+real history against your matcher and tells you whether it would ever have
+matched.
 
 ### What `mission.status_change` actually carries
 
@@ -176,6 +219,12 @@ emits, and it carries:
 | `seq` | The payload's sequence number within the panel's ring. |
 | `state` | The producer's own verdict, `ok` or `failed`. Not the freshness state: `fresh` and `stale` are functions of the clock and are never stored. |
 | `wake_<n>` | Present, and `true`, ONLY when the panel's nth wake gate is armed by this push — its threshold is met and its `for` window has elapsed. This is what a gate's rule matches on, and it is why the threshold itself never has to be evaluated on the write path. |
+
+`page.panel.updated` is **not** in the payload-key validation table above —
+`wake_<n>` is a family of keys, not a fixed name, and the curated schema only
+covers fixed key sets. A `--payload-equals` against this type is accepted
+without a key check; `automation preview` is the way to confirm it actually
+matches.
 
 ### Inputs and the `event` namespace
 

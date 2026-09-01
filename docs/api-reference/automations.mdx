@@ -70,8 +70,8 @@ GET /api/v1/automations
 
 | Field | Type | Description |
 |---|---|---|
-| `event_type` | string | A journal entry type. Exactly one per rule; there is no wildcard. |
-| `matcher` | object | `crew_ids`, `agent_ids`, `mission_ids`, `severities`, `payload_equals`. Every populated field must be satisfied; `{}` matches every entry of the type. A `payload_equals` key that no emitter writes is accepted and matches nothing — `mission.status_change` carries only `action` and `details` (see [Automations](/guides/automations)). |
+| `event_type` | string | A journal entry type. Exactly one per rule; there is no wildcard. Checked at save time against the journal's closed registry (`journal.AllEntryTypes`) — an unregistered value is rejected with `400`, naming real alternatives. |
+| `matcher` | object | `crew_ids`, `agent_ids`, `mission_ids`, `severities`, `payload_equals`. Every populated field must be satisfied; `{}` matches every entry of the type. `payload_equals` keys are checked against a curated (not exhaustive) list of known payload keys per event type — e.g. `mission.status_change` carries `action`, `details`, `from`, `to` — and a key that is not on that list for a covered event type is rejected with `400`. An event type NOT on the curated list gets no key check at all: a typo'd key is still accepted and matches nothing. See [Automations → Payload key validation](/guides/automations#payload-key-validation) for the full covered list and why it isn't every type. |
 | `action_kind` | string | `routine` in this release. |
 | `action` | object | `routine_slug` plus `inputs`. Input values may reference the triggering entry with `{{ event.mission_id }}`, `{{ event.agent_id }}`, `{{ event.crew_id }}`, `{{ event.run_id }}` and `{{ event.payload.<key> }}`. |
 | `debounce_seconds` | integer | How long the parked run stays open for further matching events to coalesce into. |
@@ -116,9 +116,11 @@ POST /api/v1/automations
 **Response:** `201 Created` — the stored automation, in the shape shown above.
 
 **Status codes:** `201` created · `400` malformed body, an `event_type` that is
-not shaped like a journal entry type, or a `routine_slug` that does not exist
-in this workspace · `401` no workspace · `403` below `ADMIN` · `500` write
-failed.
+not a registered journal entry type, a `matcher.payload_equals` key that is
+not a known payload field of `event_type` (for the covered event types — see
+[Payload key validation](/guides/automations#payload-key-validation)), or a
+`routine_slug` that does not exist in this workspace · `401` no workspace ·
+`403` below `ADMIN` · `500` write failed.
 
 ---
 
