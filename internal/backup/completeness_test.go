@@ -606,11 +606,12 @@ func TestWarnRowCountMismatches_DirectionalWordingAndPerCallerVerdict(t *testing
 // in the backup_test package for that).
 func TestExpectedInsertCounts_ExcludesSkillsAndDiscountsReconciledUsers(t *testing.T) {
 	recorded := map[string]int{
-		"skills":     3,
-		"users":      2,
-		"workspaces": 1,
+		"skills":         3,
+		"users":          2,
+		"workspaces":     1,
+		"issue_counters": 2,
 	}
-	got := expectedInsertCounts(recorded, 1 /* one reconciled user */)
+	got := expectedInsertCounts(recorded, 1 /* one reconciled user */, 1 /* one collapsed issue_counters row */)
 	if _, present := got["skills"]; present {
 		t.Errorf("expectedInsertCounts kept skills in the comparison: %+v", got)
 	}
@@ -620,12 +621,18 @@ func TestExpectedInsertCounts_ExcludesSkillsAndDiscountsReconciledUsers(t *testi
 	if got["workspaces"] != 1 {
 		t.Errorf("expectedInsertCounts[workspaces] = %d, want unchanged 1", got["workspaces"])
 	}
+	if got["issue_counters"] != 1 {
+		t.Errorf("expectedInsertCounts[issue_counters] = %d, want 1 (2 recorded - 1 collapsed)", got["issue_counters"])
+	}
 
-	// A reconciled count exceeding recorded must floor at 0, not go
-	// negative — compareRowCounts would otherwise read a negative
+	// A reconciled/collapsed count exceeding recorded must floor at 0, not
+	// go negative — compareRowCounts would otherwise read a negative
 	// "recorded" as a real, very large mismatch against Actual.
-	got = expectedInsertCounts(map[string]int{"users": 1}, 5)
+	got = expectedInsertCounts(map[string]int{"users": 1, "issue_counters": 1}, 5, 5)
 	if got["users"] != 0 {
 		t.Errorf("expectedInsertCounts[users] = %d, want floored to 0", got["users"])
+	}
+	if got["issue_counters"] != 0 {
+		t.Errorf("expectedInsertCounts[issue_counters] = %d, want floored to 0", got["issue_counters"])
 	}
 }

@@ -340,7 +340,7 @@ A restore applies only the columns that exist on this instance. That is what let
 crewship backup restore old-bundle.tar.zst
 # ✓ Restore complete — workspace=acme crews=4 rows=311 id=ws_abc123
 # ⚠ 1 value(s) in this bundle were dropped because this instance's schema has no
-#   such column: issue_counters.crew_id (1 row(s)).
+#   such column: some_table.some_column (1 row(s)).
 #   The bundle was written against a different schema. Rows that needed one of
 #   those columns to satisfy a NOT NULL or a primary key did NOT land, and the
 #   restore could not report them individually.
@@ -348,9 +348,28 @@ crewship backup restore old-bundle.tar.zst
 
 Why it is worth a warning rather than a shrug: dropping a column is harmless when the row still makes sense without it, and it is *silent data loss* when it does not. If the dropped column was part of the row's primary key or a `NOT NULL`, the insert violates a constraint, `INSERT OR IGNORE` discards the whole row, and nothing errors — the bundle verifies, the restore reports success, and the rows are simply not there. `rows_inserted` cannot show you the difference, because a row that never landed is not counted anywhere.
 
-The case that produces it is a bundle taken before a **non-additive** migration — one that re-keys or renames a table rather than adding to it. Restoring across one is not something the restore path can repair on its own: it does not know what the old column meant. What it can do is refuse to be quiet about it, so you check the tables it names instead of finding out months later.
+The case that produces it is a bundle taken before a **non-additive** migration — one that re-keys or renames a table rather than adding to it. Restoring across one is not something the restore path can repair on its own in general: it does not know what the old column meant. What it can do is refuse to be quiet about it, so you check the tables it names instead of finding out months later. `issue_counters` (below) is the one table this restore *does* know how to repair, because #2034 taught it that table's specific rename.
 
 `--dry-run` reports the same skew (as *would be dropped*) before anything is written.
+
+### A pre-#1797 `issue_counters` row is migrated, not dropped
+
+`issue_counters` used to be keyed on `crew_id`; migration `20260820125000_issue_counters_prefix_scope` (#1797, documented in the [migrations guide](/guides/migrations)) re-keyed it to `(workspace_id, prefix)`. Without special handling that is exactly the shape of loss the previous section describes: `crew_id` is a column the new table does not have, the row degenerates into a constraint violation on the two new `NOT NULL` key columns, and `INSERT OR IGNORE` swallows it — every counter gone, silently (#2034).
+
+Restoring a bundle taken before that migration resolves each row's crew — from the bundle's own `crews` table, or from the target if the crew already exists there — to that crew's workspace and effective prefix (`issue_prefix`, or the first three letters of the slug, upper-cased — the same rule the migration's backfill and the runtime allocator both use), and writes the counter under its current key instead:
+
+```bash
+crewship backup restore pre-1797-bundle.tar.zst
+# ✓ Restore complete — workspace=acme crews=4 rows=312 id=ws_abc123
+# ✓ 1 issue_counters row(s) from a pre-#1797 bundle migrated from crew_id to
+#   (workspace_id, prefix).
+```
+
+Two crews that share an effective prefix collapse onto one migrated row, keeping the **higher** `next_number` — writing back the lower one would let the allocator hand out an identifier that already exists, which is worse than the counter being absent (an absent counter is reseeded above whatever identifiers restored alongside it).
+
+A row whose crew cannot be resolved at all — the crew, like its issues, is also gone, and is not in this bundle or on the target — is not guessed at. It falls through to the ordinary column-drop report above, `issue_counters.crew_id`, so you still hear about it; the counter itself is the one thing that scenario cannot recover, because it was the crew's only remaining record of how far it had counted.
+
+`issue_counters_migrated` in the API response (and `--dry-run`, as *would be migrated*) carries the count. Because that collapse happens **before** insert, `rows_inserted_shortfalls` (below) discounts `issue_counters` by the number of rows the collapse actually removed — the manifest's pre-collapse count minus that discount is what a healthy restore is compared against, the same discount pattern `rows_inserted_shortfalls` already applies to `users`. A genuine `issue_counters` shortfall — a row whose crew could not be resolved, or an ordinary PK collision — still shows up.
 
 ### Restore checks the payload against the manifest, and the target against both (#2009)
 

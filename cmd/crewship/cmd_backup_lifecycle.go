@@ -298,6 +298,7 @@ var backupRestoreCmd = &cobra.Command{
 			SecurityLevelClamps    []restoreClamp `json:"security_level_clamps"`
 			ColumnsDropped         int            `json:"columns_dropped"`
 			DroppedColumns         []droppedCol   `json:"dropped_columns"`
+			IssueCountersMigrated  int            `json:"issue_counters_migrated"`
 			// #2009: does the decrypted payload match what the manifest
 			// recorded, and did the insert land what the payload carries.
 			PayloadRowCountMismatches []rowCountMismatch `json:"payload_row_count_mismatches"`
@@ -441,6 +442,19 @@ var backupRestoreCmd = &cobra.Command{
 					"  The bundle was written against a different schema. Rows that needed one of those columns to satisfy a NOT NULL or a primary key did NOT land, and the restore could not report them individually.\n"+
 					"  Check the tables named above before treating this restore as complete.",
 				out.ColumnsDropped, verb, strings.Join(details, ", "), more))
+		}
+		// Informational, not a warning: a migrated counter is the restore
+		// doing exactly what it should with a pre-#1797 bundle (#2034).
+		// Surfaced because "your counter came from a different key than the
+		// one on disk" is worth an admin seeing once.
+		if out.IssueCountersMigrated > 0 {
+			verb := "migrated"
+			if dryRun {
+				verb = "would be migrated"
+			}
+			cli.PrintSuccess(fmt.Sprintf(
+				"%d issue_counters row(s) from a pre-#1797 bundle %s from crew_id to (workspace_id, prefix).",
+				out.IssueCountersMigrated, verb))
 		}
 		// #2009: does the decrypted payload actually carry what the
 		// manifest claimed at create time. Distinct from columns_dropped —

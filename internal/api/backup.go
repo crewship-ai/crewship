@@ -465,6 +465,9 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// after its key column was dropped is not counted anywhere else.
 		"columns_dropped": result.ColumnsDropped,
 		"dropped_columns": result.DroppedColumns,
+		// Pre-#1797 issue_counters rows this restore translated instead of
+		// losing to columns_dropped (#2034).
+		"issue_counters_migrated": result.IssueCountersMigrated,
 		// #2009: does the decrypted payload actually carry what the
 		// manifest claimed at create time, and did the insert pass land
 		// what the payload carries. Both belong on the audit row for the
@@ -544,6 +547,9 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// reported nothing.
 		"columns_dropped": result.ColumnsDropped,
 		"dropped_columns": result.DroppedColumns,
+		// Pre-#1797 issue_counters rows this restore translated instead of
+		// losing to columns_dropped (#2034).
+		"issue_counters_migrated": result.IssueCountersMigrated,
 		// #2009: the two completeness comparisons — does the payload match
 		// the manifest, and did the insert land what the payload carries.
 		// See RestoreResult's doc comments for what distinguishes them.

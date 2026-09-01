@@ -379,6 +379,7 @@ Restore a bundle into the current workspace.
   ],
   "columns_dropped": 0,
   "dropped_columns": [],
+  "issue_counters_migrated": 0,
   "payload_row_count_mismatches": [],
   "rows_inserted_shortfalls": []
 }
@@ -396,10 +397,12 @@ Re-calling WITHOUT `files_only` after a rename does not work and is not the reco
 
 Dropping unknown columns is deliberate — it is what lets a bundle from a newer Crewship restore into an older instance — but it is not always harmless, and `rows_inserted` cannot show the difference. A row whose remaining columns satisfy the table lands **without** those values. A row that needed a dropped column to satisfy a `NOT NULL` or a primary key does not land **at all**, and `INSERT OR IGNORE` reports neither the violation nor the loss. That is what a non-zero `columns_dropped` is warning about: the bundle was written against a different schema, and this restore is incomplete in a way nothing else in the response records. Check each table named before treating the restore as done. Restoring a bundle taken before a **non-additive** migration (one that re-keys or renames rather than adds) is the case that produces it.
 
+`issue_counters_migrated` (#2034) is the one exception the restore repairs instead of merely reporting: a bundle taken before migration `20260820125000_issue_counters_prefix_scope` (#1797) carries `issue_counters` rows keyed on `crew_id`, which the current table does not have a column for — without this, the row would land in `columns_dropped` and, because `crew_id` was part of the old primary key, never actually restore. Each row is resolved instead, by crew, to its workspace and effective prefix (from the bundle's own `crews` table, or the target's if the crew already exists there) and written under the current `(workspace_id, prefix)` key; two crews sharing an effective prefix collapse onto one row, keeping the higher `next_number`. A row whose crew cannot be resolved anywhere still falls through to `columns_dropped` — it is not guessed at. On a `dry_run`, `issue_counters_migrated` reports what *would* be migrated.
+
 `payload_row_count_mismatches` and `rows_inserted_shortfalls` (#2009) are two distinct completeness comparisons, both `[{table, recorded, actual}]`:
 
 - `payload_row_count_mismatches` is the same comparison `GET /api/v1/admin/backups/verify` makes for an unencrypted bundle, run here regardless of encryption — restore already has the decrypted payload for other reasons. A non-empty result means the bundle's decrypted contents disagree with what its own manifest recorded; the bundle is not what it claims to be, independent of whatever the target does with it.
-- `rows_inserted_shortfalls` compares what actually landed (`RowsInsertedByTable`) against the manifest's recorded counts, per table. A table can come up short here even when `payload_row_count_mismatches` is empty — a dropped key column (`columns_dropped`, above) or a primary-key collision `INSERT OR IGNORE` swallowed are the usual causes, and each of those already has its own more specific report; this is the summary that catches whatever isn't covered by a more specific one. Empty on a `dry_run` — nothing was inserted to compare.
+- `rows_inserted_shortfalls` compares what actually landed (`RowsInsertedByTable`) against the manifest's recorded counts, per table. A table can come up short here even when `payload_row_count_mismatches` is empty — a dropped key column (`columns_dropped`, above) or a primary-key collision `INSERT OR IGNORE` swallowed are the usual causes, and each of those already has its own more specific report; this is the summary that catches whatever isn't covered by a more specific one. `issue_counters` is discounted for the rows a pre-#1797 migration legitimately collapsed (`issue_counters_migrated`, above) before this comparison runs, so a genuine shortfall on that table still surfaces. Empty on a `dry_run` — nothing was inserted to compare.
 
 Neither field causes the restore to fail or roll back; both are reported so the operator can decide, the same way `columns_dropped` is.
 

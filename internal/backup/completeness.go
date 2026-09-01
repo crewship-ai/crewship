@@ -91,7 +91,15 @@ func compareRowCounts(recorded, actual map[string]int) []TableRowCountMismatch {
 //     collision. Subtracted from the recorded count (floored at 0) so
 //     any OTHER users shortfall — one reconciliation didn't already
 //     explain — still surfaces.
-func expectedInsertCounts(recorded map[string]int, reconciledUsers int) map[string]int {
+//   - issue_counters: issueCountersCollapsed (RestoreStats.
+//     IssueCountersRowsCollapsed) is exactly how many pre-#1797 bundle
+//     rows migrateIssueCounterRows folded into another row rather than
+//     inserting standalone, because their crews shared an effective
+//     (workspace, prefix) — a merge, not a loss (#2255). Subtracted from
+//     the recorded count the same way reconciledUsers is: floored at 0,
+//     not excluded outright, so a genuine issue_counters shortfall (an
+//     unresolvable crew, a real PK collision) still surfaces.
+func expectedInsertCounts(recorded map[string]int, reconciledUsers, issueCountersCollapsed int) map[string]int {
 	if len(recorded) == 0 {
 		return recorded
 	}
@@ -102,6 +110,11 @@ func expectedInsertCounts(recorded map[string]int, reconciledUsers int) map[stri
 			continue
 		case "users":
 			n -= reconciledUsers
+			if n < 0 {
+				n = 0
+			}
+		case "issue_counters":
+			n -= issueCountersCollapsed
 			if n < 0 {
 				n = 0
 			}
