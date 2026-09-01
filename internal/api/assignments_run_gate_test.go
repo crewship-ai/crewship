@@ -9,24 +9,37 @@ package api
 // the identical tmux session name + /tmp scratch files
 // (orchestrator.TmuxSessionName is keyed by agent slug alone). These tests
 // prove runAssignment now shares chatbridge.RunGate — keyed by target
-// AgentID — with the chat-send path, and that a losing call is refused (not
-// silently dropped, not silently run anyway) with a recorded reason.
+// AgentID — with the chat-send path.
 //
-// These tests fail to compile against the pre-fix tree: h.SetRunGate and
+// F51 follow-up: losing the gate is NOT a failure — the work still needs
+// doing, it just has to wait its turn behind the agent's own live run. A
+// losing call is requeued (status QUEUED, queued_at stamped) rather than
+// marked FAILED, so it is picked up again once the gate frees (see
+// assignments_gate_requeue_test.go for the drain-path tests) instead of
+// permanently polluting run history with a fake failure.
+//
+// These tests fail to compile against the pre-F51 tree: h.SetRunGate and
 // chatbridge.RunGate did not exist, and runAssignment had no exclusivity
-// check to prove — see the PR description for the captured failure with
-// the guard clause in runAssignment temporarily removed instead (same
-// scenario, "agent busy" never fires and the row fails for a DIFFERENT,
-// orchestrator-unavailable reason instead).
+// check to prove.
 
 import (
 	"context"
-	"strings"
+	"database/sql"
 	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 )
+
+func gateQueuedAt(t *testing.T, db *sql.DB, id string) (status string, queuedAt sql.NullString) {
+	t.Helper()
+	if err := db.QueryRow(
+		`SELECT status, queued_at FROM assignments WHERE id = ?`, id,
+	).Scan(&status, &queuedAt); err != nil {
+		t.Fatalf("query %s: %v", id, err)
+	}
+	return status, queuedAt
+}
 
 // TestRunAssignment_ConcurrentSameAgent_SecondIsRefused simulates the real
 // production race deterministically: goroutine A's TryStart on the shared
@@ -36,9 +49,9 @@ import (
 // without depending on goroutine-scheduling luck (which would make the test
 // flaky in either direction). h.orch is left nil, so if the guard did NOT
 // fire first, the row would fail with "orchestrator not available" instead
-// — a different, distinguishable reason — proving the busy check runs
-// before any orchestrator work is attempted, not after it fails for some
-// unrelated cause.
+// of landing QUEUED — a different, distinguishable outcome — proving the
+// busy check runs before any orchestrator work is attempted, not after it
+// fails for some unrelated cause.
 func TestRunAssignment_ConcurrentSameAgent_SecondIsRefused(t *testing.T) {
 	t.Parallel()
 	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
@@ -61,18 +74,12 @@ func TestRunAssignment_ConcurrentSameAgent_SecondIsRefused(t *testing.T) {
 
 	h.runAssignment(context.Background(), "asg-gate-1", body, target)
 
-	var status, errMsg string
-	if err := h.db.QueryRow(
-		`SELECT status, COALESCE(error_message,'') FROM assignments WHERE id = 'asg-gate-1'`,
-	).Scan(&status, &errMsg); err != nil {
-		t.Fatalf("query: %v", err)
+	status, queuedAt := gateQueuedAt(t, h.db, "asg-gate-1")
+	if status != "QUEUED" {
+		t.Fatalf("status = %q, want QUEUED (losing the gate is not a failure — it waits its turn)", status)
 	}
-	if status != "FAILED" {
-		t.Fatalf("status = %q, want FAILED (assignment must be refused, not silently dropped or run anyway)", status)
-	}
-	if !strings.Contains(errMsg, "already has a live run") {
-		t.Errorf("error_message = %q, want the agent-busy reason (got a different failure — the exclusivity"+
-			" check did not run first)", errMsg)
+	if !queuedAt.Valid || queuedAt.String == "" {
+		t.Errorf("queued_at not stamped — the FIFO pump order will be broken")
 	}
 	if gate.InFlight("asg-run-should-not-have-claimed") {
 		t.Error("runAssignment must not have claimed any OTHER key")
@@ -116,11 +123,11 @@ func TestRunAssignment_GateFreedAfterRun_NextCallProceeds(t *testing.T) {
 
 // TestRunAssignment_TwoRealGoroutines_MutualExclusion launches two genuine
 // concurrent runAssignment calls for the SAME agent (two different
-// assignment rows, as two independent dispatch doors would produce) and
-// asserts the outcomes are mutually exclusive: exactly one reaches the
-// orchestrator-availability failure and exactly one is refused as busy —
-// never both succeeding past the gate, never both refused. Run under
-// -race to catch any unsynchronized access the wiring might introduce.
+// assignment rows, as two independent dispatch doors would produce) while
+// the gate is held for the whole window, so both must lose it: neither may
+// reach the orchestrator, and both must land QUEUED rather than FAILED or
+// silently dropped. Run under -race to catch any unsynchronized access the
+// wiring might introduce.
 func TestRunAssignment_TwoRealGoroutines_MutualExclusion(t *testing.T) {
 	t.Parallel()
 	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
@@ -149,15 +156,13 @@ func TestRunAssignment_TwoRealGoroutines_MutualExclusion(t *testing.T) {
 	gate.End(workerID)
 
 	for _, id := range []string{"asg-gate-3a", "asg-gate-3b"} {
-		var status, errMsg string
-		if err := h.db.QueryRow(
-			`SELECT status, COALESCE(error_message,'') FROM assignments WHERE id = ?`, id,
-		).Scan(&status, &errMsg); err != nil {
-			t.Fatalf("query %s: %v", id, err)
+		status, queuedAt := gateQueuedAt(t, h.db, id)
+		if status != "QUEUED" {
+			t.Errorf("%s: status = %q, want QUEUED — both calls raced a held claim and neither should have "+
+				"reached the orchestrator, but losing the gate is not a failure", id, status)
 		}
-		if status != "FAILED" || !strings.Contains(errMsg, "already has a live run") {
-			t.Errorf("%s: status=%q err=%q, want FAILED with the busy reason — both calls raced a held claim "+
-				"and neither should have reached the orchestrator", id, status, errMsg)
+		if !queuedAt.Valid || queuedAt.String == "" {
+			t.Errorf("%s: queued_at not stamped", id)
 		}
 	}
 	if gate.InFlight(workerID) {
