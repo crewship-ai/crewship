@@ -209,6 +209,85 @@ func TestBackupVerifyRunE_NoWorkspace(t *testing.T) {
 	}
 }
 
+// TestBackupVerifyRunE_CompletenessChecked is #2009 at the CLI: a bundle
+// whose row counts were confirmed against the manifest prints that fact,
+// not just the bare "VALID" a checksum-only result would.
+func TestBackupVerifyRunE_CompletenessChecked(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+
+	stub.OnGet("/api/v1/admin/backups/verify", clitest.JSONResponse(200, map[string]any{
+		"valid":                    true,
+		"size_bytes":               2048,
+		"completeness_checked":     true,
+		"completeness_skip_reason": "",
+	}))
+
+	out, err := covCaptureStderrCli6(t, func() error {
+		return backupVerifyCmd.RunE(backupVerifyCmd, []string{"/srv/backups/x.tar.zst"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "row counts match") {
+		t.Errorf("expected output to say row counts matched, got:\n%s", out)
+	}
+}
+
+// TestBackupVerifyRunE_CompletenessSkipped is the honest-degrade path: an
+// encrypted or pre-#2009 bundle reports VALID (checksum) but must also
+// surface, loudly, that completeness was not checked — never silence.
+func TestBackupVerifyRunE_CompletenessSkipped(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+
+	stub.OnGet("/api/v1/admin/backups/verify", clitest.JSONResponse(200, map[string]any{
+		"valid":                    true,
+		"size_bytes":               2048,
+		"completeness_checked":     false,
+		"completeness_skip_reason": "bundle is encrypted; verify does not decrypt the payload, so row counts cannot be inspected",
+	}))
+
+	outErr, err := covCaptureStderrCli6(t, func() error {
+		return backupVerifyCmd.RunE(backupVerifyCmd, []string{"/srv/backups/x.tar.zst"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(outErr, "Completeness NOT verified") || !strings.Contains(outErr, "encrypted") {
+		t.Errorf("expected a completeness-skip warning naming the reason, got:\n%s", outErr)
+	}
+}
+
+// TestBackupVerifyRunE_IncompleteBundlePrintsMismatches is the fail case:
+// row counts diverged, so `valid` is false and the CLI should name which
+// table(s) and by how much, not just repeat the generic error string.
+func TestBackupVerifyRunE_IncompleteBundlePrintsMismatches(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+
+	stub.OnGet("/api/v1/admin/backups/verify", clitest.JSONResponse(200, map[string]any{
+		"valid": false,
+		"error": "backup: payload row counts do not match the manifest: 1 table(s)",
+		"table_row_count_mismatches": []map[string]any{
+			{"table": "missions", "recorded": 30, "actual": 0},
+		},
+	}))
+
+	outErr, err := covCaptureStderrCli6(t, func() error {
+		return backupVerifyCmd.RunE(backupVerifyCmd, []string{"/srv/backups/x.tar.zst"})
+	})
+	if err == nil || !strings.Contains(err.Error(), "bundle verification failed") {
+		t.Errorf("expected verification failure, got %v", err)
+	}
+	if !strings.Contains(outErr, "missions") || !strings.Contains(outErr, "30") {
+		t.Errorf("expected the mismatch detail printed, got:\n%s", outErr)
+	}
+}
+
 // ─── backup unlock ───────────────────────────────────────────────────────
 
 func TestBackupUnlockRunE_NonInteractiveRequiresForce(t *testing.T) {

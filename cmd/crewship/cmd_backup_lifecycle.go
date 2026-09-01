@@ -199,6 +199,16 @@ type droppedCol struct {
 	Rows   int    `json:"rows"`
 }
 
+// rowCountMismatch mirrors backup.TableRowCountMismatch on the wire (#2009):
+// one table whose row count did not match what the manifest recorded, at
+// either the payload level (bundle vs. its own manifest) or the insert
+// level (what landed on the target vs. the manifest).
+type rowCountMismatch struct {
+	Table    string `json:"table"`
+	Recorded int    `json:"recorded"`
+	Actual   int    `json:"actual"`
+}
+
 var backupRestoreCmd = &cobra.Command{
 	Use:   "restore <file>",
 	Short: "Restore a workspace or crew from a backup bundle",
@@ -289,6 +299,10 @@ var backupRestoreCmd = &cobra.Command{
 			ColumnsDropped         int            `json:"columns_dropped"`
 			DroppedColumns         []droppedCol   `json:"dropped_columns"`
 			IssueCountersMigrated  int            `json:"issue_counters_migrated"`
+			// #2009: does the decrypted payload match what the manifest
+			// recorded, and did the insert land what the payload carries.
+			PayloadRowCountMismatches []rowCountMismatch `json:"payload_row_count_mismatches"`
+			RowsInsertedShortfalls    []rowCountMismatch `json:"rows_inserted_shortfalls"`
 			// #2226: a forked restore regenerates the ids the journal
 			// hash chain commits to, so the chain is re-signed at a new
 			// genesis. Zero on a plain restore.
@@ -441,6 +455,56 @@ var backupRestoreCmd = &cobra.Command{
 			cli.PrintSuccess(fmt.Sprintf(
 				"%d issue_counters row(s) from a pre-#1797 bundle %s from crew_id to (workspace_id, prefix).",
 				out.IssueCountersMigrated, verb))
+		}
+		// #2009: does the decrypted payload actually carry what the
+		// manifest claimed at create time. Distinct from columns_dropped —
+		// this is the bundle disagreeing with its OWN manifest, not with
+		// the target schema.
+		if len(out.PayloadRowCountMismatches) > 0 {
+			details := make([]string, 0, len(out.PayloadRowCountMismatches))
+			for _, m := range out.PayloadRowCountMismatches {
+				details = append(details, fmt.Sprintf("%s (recorded %d, actual %d)", m.Table, m.Recorded, m.Actual))
+			}
+			cli.PrintWarning(fmt.Sprintf(
+				"This bundle's payload does not match its own manifest for %d table(s): %s.\n"+
+					"  The manifest was written against a different dump than the payload carries — treat this bundle as suspect before relying on it for disaster recovery.",
+				len(out.PayloadRowCountMismatches), strings.Join(details, "; ")))
+		}
+		// #2009: did the insert pass actually land what the payload
+		// carries, table by table — the summary that catches a shortfall
+		// none of the more specific reports above (columns_dropped, a PK
+		// collision) named. Never printed on a dry run — nothing was
+		// inserted to compare.
+		//
+		// A table can land FEWER rows than recorded (a collision, a
+		// dropped column) or MORE (a --as-workspace/--as-crew restore adds
+		// a row of its own — a re-signed journal chain entry, a
+		// restoring-admin membership row — that the bundle never carried).
+		// Split by direction so neither case is reported with the other's
+		// wording: "fewer" text pointing at a "more" row would send the
+		// operator after a collision that never happened.
+		if len(out.RowsInsertedShortfalls) > 0 {
+			var fewer, more []string
+			for _, m := range out.RowsInsertedShortfalls {
+				detail := fmt.Sprintf("%s (recorded %d, landed %d)", m.Table, m.Recorded, m.Actual)
+				if m.Actual < m.Recorded {
+					fewer = append(fewer, detail)
+				} else {
+					more = append(more, detail)
+				}
+			}
+			if len(fewer) > 0 {
+				cli.PrintWarning(fmt.Sprintf(
+					"Fewer rows landed than the manifest recorded for %d table(s): %s.\n"+
+						"  Check ColumnsDropped and the tables above for a specific cause; if none apply, a primary-key collision on the target likely swallowed them.",
+					len(fewer), strings.Join(fewer, "; ")))
+			}
+			if len(more) > 0 {
+				cli.PrintWarning(fmt.Sprintf(
+					"More rows landed than the manifest recorded for %d table(s): %s.\n"+
+						"  Expected on a --as-workspace/--as-crew restore, which adds rows of its own (a re-signed journal chain entry, a restoring-admin membership row) that the original bundle did not carry — not a sign of a problem.",
+					len(more), strings.Join(more, "; ")))
+			}
 		}
 		return nil
 	},

@@ -196,9 +196,20 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 // Verify handles GET /api/v1/admin/backups/verify?path=…. Opens the
 // bundle, verifies the sealed payload SHA-256 against the manifest,
-// and returns a VerifyResult JSON. Does NOT decrypt — checksum
-// covers sealed bytes so no key is needed. Handy for periodic
-// bundle-rot checks ("is my 3-month-old backup still restorable?").
+// and returns a VerifyResult JSON. Does NOT decrypt an ENCRYPTED bundle —
+// checksum covers sealed bytes so no key is needed for that half. Handy
+// for periodic bundle-rot checks ("is my 3-month-old backup still
+// restorable?") that should never need to hold a passphrase.
+//
+// For an UNENCRYPTED bundle (#2009), it also compares the payload's actual
+// per-table row counts against Manifest.Contents.TableRowCounts — see
+// `valid` below, which is now false on that divergence too, not only on a
+// checksum mismatch. `completeness_checked` says whether that comparison
+// ran at all; when it did not (encrypted bundle, or one written before
+// #2009), `valid` reflects the checksum alone and `completeness_skip_reason`
+// says why. An encrypted bundle's completeness can still be checked, just
+// not here — `crewship backup restore <file> --dry-run` decrypts and makes
+// the same comparison.
 
 func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -236,6 +247,13 @@ func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		"size_bytes": res.Size,
 		"manifest":   res.Manifest,
 		"error":      errStr,
+		// #2009: whether the payload's row counts were compared against
+		// the manifest, and what came of it. See this handler's doc
+		// comment — completeness_checked=false is "not evaluated", never
+		// "confirmed complete".
+		"completeness_checked":       res.CompletenessChecked,
+		"completeness_skip_reason":   res.CompletenessSkipReason,
+		"table_row_count_mismatches": res.TableRowCountMismatches,
 	})
 }
 

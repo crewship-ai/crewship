@@ -610,6 +610,46 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **`backup verify` no longer calls a short bundle VALID (#2009).** Verify
+  only ever checked the payload's SHA-256 against the manifest — integrity,
+  not completeness — so a bundle that dumped zero rows for a table (a
+  scoping bug, corruption, or a hand-edited manifest) still reported
+  `✓ VALID`. Bundle creation now records each table's row count in the
+  manifest (`contents.table_row_counts`), and for an **unencrypted** bundle
+  `verify` compares the payload's actual counts against it, reporting
+  `INVALID` on a divergence instead of passing silently. An **encrypted**
+  bundle's completeness still cannot be checked here — `verify` deliberately
+  never asks for a passphrase, which is what lets it run unattended against
+  a whole directory of nightly bundles — but the CLI and API now say so
+  explicitly (`completeness_checked: false`, with a reason) instead of
+  implying the check happened. `crewship backup restore --dry-run`, which
+  already decrypts, makes the same comparison and reports it as
+  `payload_row_count_mismatches`, plus a second, separate comparison —
+  `rows_inserted_shortfalls` — for what actually landed on the target. A
+  bundle written before this change carries no recorded counts and is
+  reported the same honest "not verified" way, never as a false pass or a
+  new failure.
+
+  `payload_row_count_mismatches` is now taken BEFORE a `--as-workspace` /
+  `--as-crew` fork does its own bookkeeping (re-signing the journal chain,
+  adding the restoring admin to `workspace_members`) — those rows are the
+  restore's own doing, not the bundle disagreeing with its manifest, and
+  counting them the same way made every ordinary forked restore report the
+  bundle as suspect. `rows_inserted_shortfalls` no longer names a table
+  whose "shortfall" is INSERT OR IGNORE working as designed: bundled skills
+  reseed with the same IDs on every boot, a user `crewship backup restore`
+  reconciles onto a matching target account by email intentionally no-ops
+  on insert, and (once `issue_counters` re-keying, #2034, lands alongside
+  this) two crews sharing an effective prefix collapse a pre-#1797 bundle's
+  counters onto one row before insert — discounted by exactly how many rows
+  that merge folded away, not excluded outright, so a genuine
+  `issue_counters` shortfall (an unresolvable crew, a real collision) still
+  surfaces. And the warning text for both now follows which one fired —
+  `rows_inserted_shortfalls` is about the *target*, not the bundle, so it
+  no longer tells the operator to treat the bundle as suspect — and says
+  "more" rather than always "fewer" when a table landed extra rows rather
+  than too few.
+
 - **Restoring a bundle taken before the `issue_counters` re-key silently
   dropped every counter row (#2034).** `#1797` re-keyed `issue_counters`
   from `crew_id` to `(workspace_id, prefix)` — the first non-additive
@@ -635,6 +675,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   counted, reported column-drop warning (`columns_dropped` /
   `dropped_columns`) restore already surfaces for schema skew in general
   (#2108).
+
 - **The feedback API docs still described the security hole #1213 had
   already closed (#1617).** `docs/api-reference/feedback.mdx` and
   `docs/guides/feedback.mdx` said `POST /api/v1/feedback` fell back to the

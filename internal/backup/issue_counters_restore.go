@@ -181,11 +181,19 @@ func missionIssueHighWaterMarks(missions []map[string]any) map[issueCounterPrefi
 // UNION ALL ... GROUP BY ... MAX(...) exactly — see that function's doc
 // comment for why the arm cannot be skipped.
 //
-// Returns the (possibly rewritten) row set and how many bundle rows were
+// Returns the (possibly rewritten) row set, how many bundle rows were
 // folded into a migrated counter — the number for RestoreStats.
 // IssueCountersMigrated, not the number of rows in the returned slice (a
-// merge can turn several rows into one).
-func migrateIssueCounterRows(ctx context.Context, tx *sql.Tx, rows []map[string]any, crews []map[string]any, missions []map[string]any, workspaces []map[string]any) ([]map[string]any, int, error) {
+// merge can turn several rows into one) — and how many of those migrated
+// rows were then collapsed away by that merge (migrated minus the number
+// of distinct (workspace, prefix) groups actually written). The manifest
+// records the bundle's pre-migration row count, so that collapsed count is
+// exactly what completeness.go's expectedInsertCounts needs to discount
+// issue_counters by: a bundle that collapses two crews' counters onto one
+// row inserts fewer rows than the manifest recorded even on a completely
+// successful restore, and without this the honest count reads as a false
+// rows_inserted_shortfalls (#2255).
+func migrateIssueCounterRows(ctx context.Context, tx *sql.Tx, rows []map[string]any, crews []map[string]any, missions []map[string]any, workspaces []map[string]any) ([]map[string]any, int, int, error) {
 	byCrew := crewIssueScopesFromDump(crews)
 	highWater := missionIssueHighWaterMarks(missions)
 
@@ -258,7 +266,7 @@ func migrateIssueCounterRows(ctx context.Context, tx *sql.Tx, rows []map[string]
 				continue
 			}
 			if err != nil {
-				return nil, 0, fmt.Errorf("backup: resolve crew %q for issue_counters: %w", crewID, err)
+				return nil, 0, 0, fmt.Errorf("backup: resolve crew %q for issue_counters: %w", crewID, err)
 			}
 			scope = crewIssueScope{workspaceID: workspaceID, prefix: prefix}
 		}
@@ -271,7 +279,7 @@ func migrateIssueCounterRows(ctx context.Context, tx *sql.Tx, rows []map[string]
 		}
 		exists, err := workspaceExists(scope.workspaceID)
 		if err != nil {
-			return nil, 0, fmt.Errorf("backup: resolve workspace %q for issue_counters: %w", scope.workspaceID, err)
+			return nil, 0, 0, fmt.Errorf("backup: resolve workspace %q for issue_counters: %w", scope.workspaceID, err)
 		}
 		if !exists {
 			// The crew's workspace is gone (bundle and target both lack
@@ -293,7 +301,7 @@ func migrateIssueCounterRows(ctx context.Context, tx *sql.Tx, rows []map[string]
 	}
 
 	if migrated == 0 {
-		return passthrough, 0, nil
+		return passthrough, 0, 0, nil
 	}
 	out := passthrough
 	for _, k := range order {
@@ -307,7 +315,13 @@ func migrateIssueCounterRows(ctx context.Context, tx *sql.Tx, rows []map[string]
 			"next_number":  next,
 		})
 	}
-	return out, migrated, nil
+	// migrated counts every bundle row this transform consumed; len(order)
+	// is the number of distinct (workspace, prefix) groups those rows
+	// collapsed onto — one output row each. The difference is how many
+	// fewer rows land than the manifest recorded for reasons that have
+	// nothing to do with a problem on this restore.
+	collapsed := migrated - len(order)
+	return out, migrated, collapsed, nil
 }
 
 // warnIssueCountersMigrated emits the operator-facing note for a restore

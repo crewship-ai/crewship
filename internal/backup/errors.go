@@ -91,4 +91,13 @@ var (
 	// inconsistent state. The caller must re-run with --replace
 	// (wipe-and-restore) or --as-workspace <new-slug> (fork beside).
 	ErrTargetConflict = errors.New("backup: restore target already holds a conflicting workspace")
+
+	// ErrIncompleteBundle is returned by Verify when the payload's actual
+	// per-table row counts do not match manifest.Contents.TableRowCounts
+	// (#2009) — the bundle is not what its own manifest says it is. Unlike
+	// ErrInvalidChecksum this is not necessarily corruption: it is at
+	// minimum a divergence between how the manifest and the payload were
+	// built, and it means the bundle cannot be trusted to restore what an
+	// operator expects.
+	ErrIncompleteBundle = errors.New("backup: payload row counts do not match the manifest")
 )

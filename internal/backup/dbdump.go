@@ -553,6 +553,22 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 	return dump, nil
 }
 
+// tableRowCounts reduces a DBDump to how many rows each table carries —
+// len(dump.Tables[table]) per key. Used both to populate
+// Manifest.Contents.TableRowCounts at create time and to re-derive the same
+// shape from a bundle's payload at verify/restore time so the two are
+// directly comparable (#2009).
+func tableRowCounts(dump *DBDump) map[string]int {
+	if dump == nil {
+		return nil
+	}
+	out := make(map[string]int, len(dump.Tables))
+	for table, rows := range dump.Tables {
+		out[table] = len(rows)
+	}
+	return out
+}
+
 // DumpCrew exports rows for a single crew within its workspace. Useful
 // for `--scope=crew` backups which produce same-instance bundles (per
 // PRD section 2.3).
@@ -779,6 +795,23 @@ type RestoreStats struct {
 	// see migrateIssueCounterRows. Zero on an ordinary restore, where
 	// every issue_counters row already carries the current key.
 	IssueCountersMigrated int
+	// IssueCountersRowsCollapsed is how many of IssueCountersMigrated's
+	// rows were then folded away by that same migration merging two
+	// crews' counters onto one (workspace, prefix) row (#2255) —
+	// IssueCountersMigrated minus the number of distinct groups actually
+	// written. Manifest.Contents.TableRowCounts["issue_counters"] records
+	// the bundle's pre-migration row count, so this is exactly how much
+	// lower RowsInsertedByTable["issue_counters"] legitimately comes in
+	// even on a fully successful restore — see expectedInsertCounts.
+	IssueCountersRowsCollapsed int
+	// RowsInsertedByTable is RowsInserted broken out per table (#2009) —
+	// every table the bundle touched gets an entry, including 0 when
+	// every row for that table collided or was dropped. This is what lets
+	// a caller compare what actually landed against
+	// Manifest.Contents.TableRowCounts table by table, rather than only
+	// noticing a shortfall in aggregate the way the RowsSeen/RowsInserted
+	// no-op check already does.
+	RowsInsertedByTable map[string]int
 }
 
 // RestoreDumpTx is RestoreDump with a caller-supplied preflight hook
@@ -907,12 +940,13 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		// Gated on the target actually being post-rekey — an older target
 		// still keyed on crew_id needs no translation at all.
 		if table == issueCountersTable && allowed["workspace_id"] && allowed["prefix"] && !allowed["crew_id"] {
-			migratedRows, n, err := migrateIssueCounterRows(ctx, tx, rows, dump.Tables["crews"], dump.Tables["missions"], dump.Tables["workspaces"])
+			migratedRows, n, collapsed, err := migrateIssueCounterRows(ctx, tx, rows, dump.Tables["crews"], dump.Tables["missions"], dump.Tables["workspaces"])
 			if err != nil {
 				return stats, fmt.Errorf("backup: migrate issue_counters rows: %w", err)
 			}
 			rows = migratedRows
 			stats.IssueCountersMigrated += n
+			stats.IssueCountersRowsCollapsed += collapsed
 		}
 		// Purge tombstones whose primary key collides with a bundle row.
 		// Without this, a row that was soft-deleted on the target (the
@@ -927,6 +961,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 		}
+		tableInserted := 0
 		for _, row := range rows {
 			// pendingClamp is only reported if the row actually lands:
 			// INSERT OR IGNORE silently drops a PK collision, and telling an
@@ -990,12 +1025,17 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			landed := true
 			if n, err := res.RowsAffected(); err == nil {
 				stats.RowsInserted += int(n)
+				tableInserted += int(n)
 				landed = n > 0
 			}
 			if pendingClamp != nil && landed {
 				appendSecurityLevelClamp(&stats, *pendingClamp)
 			}
 		}
+		if stats.RowsInsertedByTable == nil {
+			stats.RowsInsertedByTable = map[string]int{}
+		}
+		stats.RowsInsertedByTable[table] += tableInserted
 	}
 	// Settled once the insert pass is done, so the caller sees one number
 	// for the whole restore. On an early error return above, the tx rolls
