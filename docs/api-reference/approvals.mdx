@@ -92,7 +92,7 @@ For `?status=all`, the `status` envelope key echoes back as an empty string (`""
 |---|---|---|
 | `rows[].kind` | string | `tool_call`, `cost_threshold`, `destructive_op`, `target_environment`, `ephemeral_hire`, `autonomy_gate`, `custom`. |
 | `rows[].status` | string | See Status values above. |
-| `rows[].payload` | object | Tool call context (`tool`, `args`, plus any rule-specific fields). For `ephemeral_hire` it carries `inbox_item_id`, the inbox waitpoint projecting the same decision. |
+| `rows[].payload` | object | Tool call context (`tool`, `args`, plus any rule-specific fields). `args` doubles as the gate's reward-tuning fingerprint (see [Harbor Master → Reward-adjusted gating](/guides/harbormaster#reward-adjusted-gating)), so callers keep it to values stable across repeated calls; per-invocation human context (e.g. `agent_run`'s scrubbed prompt preview) rides in a sibling `review` key instead, omitted when the caller passes none. For `ephemeral_hire` it carries `inbox_item_id`, the inbox waitpoint projecting the same decision. |
 | `rows[].timeout_at` | string? | RFC3339 deadline; the sweeper flips past-due rows to `timeout`. |
 
 ---

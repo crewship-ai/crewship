@@ -128,6 +128,7 @@ func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.Approva
 		RequestedBy: in.UserID,
 		Tool:        in.Tool,
 		Args:        in.Args,
+		Review:      in.Review,
 		Mode:        mode,
 	})
 	if err != nil {
