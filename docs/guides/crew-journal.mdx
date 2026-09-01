@@ -303,6 +303,35 @@ Since PR #234 the standalone `/runs` page is folded into `/journal` as a preset 
 
 All three share the same SSE stream and FTS index — selecting a tab does not retrigger a fetch, only a client-side filter shift. Audit-tab navigation is dropped (it was always a redirect placeholder); the `/audit` page remains in the sidebar for security review.
 
+### Timeline — row anatomy
+
+Seven columns, left to right (`components/features/logs/logs-list.tsx`):
+
+| col | width | content |
+|---|---|---|
+| severity | 3px | Colour bar. Carries a visually-hidden `Severity: <level>` for screen readers — the colour is not the only signal. |
+| time | 84px | `HH:MM:SS.mmm`, local. |
+| identity | 38px | 18px agent avatar + 15px crew icon. |
+| type | 124px | Entry-type icon (`lib/journal-icons.ts`, all 127 types) + the full dotted `entry_type`, tinted by group. The group name is repeated visually-hidden, so group membership is not colour-only either. |
+| summary | rest | `entry.summary`, minus a leading `"<agent>: "` when that prefix names the agent already shown in the identity column. |
+| age | 62px | Relative time. |
+| chevron | 14px | The disclosure button — `aria-expanded` plus `aria-controls` onto the detail region, which is a *sibling* grid item, not a descendant. The row container keeps a click handler for the mouse but is not itself a button: with the detail inside a `role="button"`, the detail's own jump controls were nested interactive content and the button's accessible name grew to include the whole payload JSON. |
+
+Avatar, crew icon and names come from the cached [lookup table](#lookup-table-card-enrichment) — the row never joins on the streaming path, and never blocks on it either:
+
+The avatar is gated on `actor_type`, **not** on whether `agent_id` is set. A non-agent actor routinely names an agent, because the agent is what the event is *about* rather than who caused it — `chat.user_message` (actor `user`), `container.snapshot`, `conversation.compacted` and `sidecar.stale` (actor `system`) all emit with `AgentID` populated. Branching on the id would put an agent's face on a human's message and tell a screen reader the agent said it.
+
+- `actor_type: "agent"` and resolved → DiceBear avatar from `avatar_seed` + `avatar_style`. Seed precedence is `avatar_seed || name`, matching `ScopeBadge` in `logs-toolbar.tsx` — the dropdown and the row draw the same agent on the same screen, so the rule has to be identical in both or one agent gets two faces.
+- `agent_id` present but unresolved (deleted agent, lookup still in flight) → an avatar seeded from the id, and a shortened id for a name. Stable across renders, so the row does not flicker.
+- Any other `actor_type` (`user`, `system`, `keeper`, `sidecar`, `orchestrator`) → a labelled glyph, never a blank seat. When the entry also carries an `agent_id`, the agent stays in the glyph's label (`"system actor, agent Morgan"`) — the row still says which agent the event concerns, without claiming the agent acted.
+- No crew → an empty box, so the type column stays on one vertical line down the list.
+
+Long entry types ellipsize: the catalog's median is 18 characters and its tail runs to 41. The untruncated string is on the cell's `title` and in the expanded detail.
+
+Rows are memoized and the list's `itemContent` is stable, so a keystroke in the search box does not re-render every mounted row. The lookup is read **once in `LogsList`** and the resolved agent and crew are passed down as props: `React.memo` does not stop a context change from re-rendering a component, and the provider flips `loading` around every refetch, so a row that read the lookup itself would be swept three times by each `agent.updated` event whether or not the data changed. Anything added to the row must keep all three properties or virtualization regresses under load.
+
+The right-hand stats rail reads the same lookup: **Top agents** shows each agent's avatar and name rather than a shortened uuid, and the bar takes a seed-derived hue so six agents no longer read as one series.
+
 ### Runs — fleet operations overview
 
 The Runs tab has four sections. The KPI row and breakdowns (2-3) are scoped by a
