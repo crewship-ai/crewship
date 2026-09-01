@@ -9,14 +9,15 @@
 //
 // A3 (PRD-ISSUES-AND-ROUTINES-2026 §17) closed the registry on the
 // assumption that every entry type is declared in
-// internal/journal/types.go's `Name EntryType = "value"` const block. That
-// assumption was false: at least a dozen entry types are declared ad hoc in
-// the packages that emit them — internal/api/pages_public_tokens.go,
-// internal/harbormaster/reward.go, internal/api/pages_transfer_owner.go and
-// others — using shapes types.go never uses: a call-conversion
-// `journal.EntryType("value")`, or a package-level const explicitly typed
-// `journal.EntryType`. A scanner that only reads types.go cannot see them,
-// so the "closed" registry rejected event types that genuinely fired.
+// internal/journal/types.go's `Name EntryType = <string literal>` const
+// block. That assumption was false: at least a dozen entry types are
+// declared ad hoc in the packages that emit them —
+// internal/api/pages_public_tokens.go, internal/harbormaster/reward.go,
+// internal/api/pages_transfer_owner.go and others — using shapes types.go
+// never uses: a call-conversion `journal.EntryType(<string literal>)`, or a
+// package-level const explicitly typed `journal.EntryType`. A scanner that
+// only reads types.go cannot see them, so the "closed" registry rejected
+// event types that genuinely fired.
 //
 // ScanTree recognises both of those shapes, anywhere under the given root
 // directories, in addition to types.go's own shape (which is exactly the
@@ -285,7 +286,7 @@ func scanFile(fset *token.FileSet, file *ast.File) ([]EntryConst, error) {
 			if !isEntryTypeType(specType, inJournal) {
 				// Not explicitly typed EntryType — but the value may still
 				// be an EntryType(...) conversion inferring the type, as in
-				// `journalPageWebhookIssued = journal.EntryType("...")`
+				// `journalPageWebhookIssued = journal.EntryType(<its string literal>)`
 				// (internal/api/pages_webhooks.go). The generic CallExpr
 				// walk above already records the *value* for that shape;
 				// this only adds the *name*, for a nicer generated comment
