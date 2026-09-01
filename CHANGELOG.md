@@ -972,6 +972,48 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   The restore now skips such a marker instead of aborting on the deferred
   foreign-key check, and reports the skip in `rows_inserted_shortfalls`.
 
+- **Stop now actually stops the next step, and a late failure report still
+  reads as cancelled (#TBD).** `POST /issues/{identifier}/stop` cancelled the
+  issue's row and its pending tasks, but a run already `RUNNING` when Stop
+  was called kept executing to completion and, if it finished with an error
+  after the stop, the websocket broadcast and the mission comment both
+  reported it as a failure (`assignment_failed`, "encountered an issue") —
+  the opposite of what the operator who clicked Stop asked for. Stop is Tier
+  1 (cooperative): there is no kill primitive for a shared crew container, so
+  a run mid-exec is not interrupted. What changed is that the contract is now
+  actually enforced end to end. In one transaction, Stop stamps
+  `assignments.cancel_requested_at` on every live assignment for the issue.
+  `runAssignment` checks the stamp before spending anything on the row —
+  before the container exec, before the LLM call — so a run that has not yet
+  started never starts. `finishAssignment` checks the same stamp again when
+  an already-`RUNNING` run eventually completes, and now the check runs
+  *before* the websocket broadcast switch and the mission-comment block are
+  reached, not only before the `status` column write: a late `COMPLETED` or
+  `FAILED` report is recorded and announced as `CANCELLED` either way, and
+  `mission_activity` gets a dedicated `task_cancelled` action instead of
+  reusing `task_failed`. No further step is scheduled for the issue. A hard
+  kill that interrupts a run mid-exec remains a separate, not-yet-built
+  capability.
+
+- **A run is now attributable to the issue that caused it, including
+  delegation hops and mention dispatches (#TBD).** `assignments.mission_id`
+  is the direct link between a run and the issue it belongs to, but neither
+  of `AssignmentHandler.Create`'s two real callers — the sidecar's
+  `handleAssign` and the routine dispatcher's `crewshipBody` — ever set it,
+  so every delegation hop made from inside a mission task, lead-planning, or
+  mention-dispatched run created an assignment with `mission_id = NULL`,
+  invisible to `issue runs` and to Stop's live-run match alike. `Create` now
+  derives `mission_id` server-side when the body omits it: every synthetic
+  mission chat is created with the mission's own id as the chat's primary
+  key, so an existence check against `missions(id)` for the assignment's
+  `chat_id` is the exact FK precondition `mission_id` needs, not a
+  heuristic. Stop's own match now prefers `mission_id` directly over the old
+  `chat_id`/`group_id` heuristic, keeping that heuristic only as a fallback
+  for rows created before this change. `GET /issues/{identifier}/runs` and
+  `crewship issue runs` now return every run attributed to the issue —
+  mission tasks, mention-dispatched runs, and delegation-hop runs alike —
+  instead of only the mission-task rows a join could already reach.
+
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
   conversation: a person opening a thread, a routine minting **one chat per
