@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed. Track A is 1.0-eligible; Track B is 1.1. Implementation-ready after A0. |
+| Status | **Track A implemented on local branches** `a1` (with `a2` merged), `a3`, `a4`, `a5`, `a6`, `a7`, `a9`, `t1` — nothing merged, nothing pushed, no issues claimed. Track A is 1.0-eligible; Track B is 1.1 and must not start before A merges (§17). |
 | Created | 2026-09-01 |
 | Baseline | `main` @ `3fa36df5`, live dev1 clone `/srv/crewship/crewship_1/crewship.db` |
 | Supersedes | `docs/prd/PRD-AGENT-FIRST-ISSUE-COORDINATION-2026.md` (issues-only, and wrong in five places — see §3) |
@@ -274,6 +274,44 @@ The `internal/api` race job computes `-timeout` as 2× `RACE_API_BASELINE_SECOND
 **F59 — The database configuration is genuinely good, and it makes this design viable.**
 `internal/database/database.go:113-119`: `busy_timeout(30000)`, `journal_mode(WAL)`, `foreign_keys(ON)`, and **`_txlock=immediate`** (write lock taken at BEGIN, so no late upgrade deadlock), with `SetMaxOpenConns(5)`/`SetMaxIdleConns(5)`. Concurrent writers **wait, they do not fail** — which is why the CAS-and-unique-index approach works here. Two caveats: writers still serialize, so a long write transaction directly delays the sub-500ms acknowledgement target; and the comment at `:144` claims `busy_timeout(5000ms)` while the DSN sets 30000 (stale comment, worth fixing).
 
+### 2.9 Findings ported from the rev-1 dev1 audit
+
+The superseded draft recorded twelve observations from a live dev1 session (two routine runs, two clone missions, sixteen delegations, a factory reset). Nine map onto findings above; three were not in this document until rev 3 and get their own numbers. All twelve stay as regression cases.
+
+| Rev-1 observation | Maps to | Status |
+|---|---|---|
+| An issue reached `REVIEW` with four child issues open | F10 | OPEN — B11 |
+| Four linked assignments; the Runs endpoint returned one | F1, F33 | FIXED-IN `a1` — `ListRuns` now matches on `mission_id` |
+| Seven linked assignments; Runs returned zero | F1, F33 | FIXED-IN `a1` |
+| Comments without a mention never reached active work; an analyst repeated a finished screenshot capture | F3, F13, F15 | OPEN — B2, B5 |
+| Issue rows carried too little provenance to reconstruct cause | F1 | FIXED-IN `a1` |
+| **A temporary agent-token `403` made the issue board unavailable from a live crew, while unauthenticated reads stayed healthy** | **F60** (new) | OPEN — no package; needs its own issue |
+| Board and detail did not repaint from every server-emitted lifecycle event | F32 | PARTIAL — `a6` registers the three issue events; ~39 remain for B11 |
+| **The Issues board fetched at most 100 rows, exposed no total or pagination, and rendered some fetch failures as an empty board** | **F61** (new) | OPEN — no package; a truth defect in a shipped surface, 1.0-eligible, needs its own issue |
+| `DONE` and `COMPLETED` mixed in one column | F11 | OPEN — B13 |
+| Stop changed status without proving execution stopped | F6, F7 | FIXED-IN `a1` (Tier 1); hard kill B7 |
+| Delegation replaced the polymorphic assignee with the agent, hiding the human owner | I5, scenario 9 | OPEN — **A10** (§9.10, added rev 3) |
+| **Start validated that an assignee exists, not that it is an executable agent** | **F62** (new) | OPEN — folds into A10 (`delegate_agent_id` is typed, so the check becomes a FK) |
+
+### 2.10 Finding status at rev 3
+
+**A branch is a claim, not a fix.** `FIXED-IN` means a red-then-green test exists on a local branch that has not been merged, reviewed by CodeRabbit, or pushed. Nothing below is `MERGED`.
+
+| Status | Findings |
+|---|---|
+| FIXED-IN `a1` (Stop, terminal guards, `mission_id`, derivation, late-failure leak) | F1, F6 (Tier 1), F7, F9 |
+| FIXED-IN `a3` | F19 |
+| FIXED-IN `a4` | F20 |
+| FIXED-IN `a5` (docs, labels, stale comment) | F25, F26, F23 (docs half) |
+| FIXED-IN `a7` (with F37/F38 integration steps applied) | F27 |
+| FIXED-IN `a9` | F2 (the kill; deferral semantics stay B2), F51 |
+| PARTIAL `a6` | F18 (read-only display; editor B9), F32 (3 of ~42), F33 (header now honest; read-side SQL unassigned) |
+| PARTIAL `t1` | F34 (scenarios 11–13 proven; the RunStore blind spot is OPEN and needs its own issue) |
+| OPEN — Track B | F3, F4, F8, F10, F11, F13, F14, F15, F17, F21, F22, F28, F29, F30 |
+| OPEN — no package yet | F5 (sub-agent streaming), F33 read-side, F60, F61, the RunStore test blind spot |
+| ACCEPTED as constraints (design must respect, not fix) | F12 (N5), F16, F24, F31, F35, F36, F39, F40, F41, F42, F43, F44, F45, F46, F47, F48, F49, F50, F52–F59 |
+| Applied as integration steps in `a7` | F37, F38 |
+
 ---
 
 ## 3. Corrections — where earlier assessments were wrong
@@ -303,6 +341,7 @@ Found by an adversarial review of rev 1 against the code. Listed with the same s
 | "≥60% fewer input tokens on a repeat wake" (§11, WP-6) | **Measuring something that is not there** | `SkipConvHistory` is unconditionally true on exactly this path (F13), and `mentionTaskBrief` (`internal/api/issue_mentions.go:911-948`) sends only the agent name, issue identifier, title, author and the one triggering comment inside an untrusted fence, plus "read the issue yourself". There is no history to remove. The proposed pack's own budget (2900 tokens before memory) would likely be *larger*. The real defect is not bloat — it is that the agent must rediscover state by tool calls every time and has no record of what it already did. §11.4 rev 2 replaces the target. |
 | "Pick DONE, migrate rows, delete six defensive clauses" (WP-1) | **Dangerously undersold** | `ValidMissionTransitions` (`internal/statuses/transitions.go:26-36`) legitimately runs `PLANNING→IN_PROGRESS→REVIEW→COMPLETED` for the mission engine *in the same column* as the issue tracker's `BACKLOG→…→DONE`. `COMPLETED` is a live, correct value written by a guarded CAS (`internal/orchestrator/mission.go:497`). The clause count is 8 files not 6; the literal appears in 201 Go files, 60 TS/TSX and 26 docs — most about `assignments.status`/`pipeline_runs.status`, which must not be touched. This is a decision about two lifecycles sharing one column, not a find-and-replace. |
 | "The partial unique index enforces one active turn per session" (§9.4) | **True mechanism, missing wiring** | Partial unique indexes are a supported, precedented pattern here (`migrate_consts_v152_journal_hash_chain.go:80`, `v33_v41.go:103`). But `insertCappedAssignment` (`internal/api/delegation_limits.go:537-577`) has no `session_id` in its struct or its `INSERT`, so the index would guard a column nothing sets. Resolving-or-creating the session must happen in the same statement or transaction as the fan-out guard, or the TOCTOU it exists to close is reintroduced. |
+| "Delete the rev-1 draft; git history keeps it" (rev-3 analysis, in conversation) | **Wrong on both counts** | The draft was never tracked, so `rm` would have lost it outright — and it still held four sections this document had not absorbed (owner/delegate schema, input routing, twelve dev1 regression cases, the provider matrix). Caught by a second session's review; ported in rev 3 (§2.9, §9.10, §10.5, A0 step 10). |
 | Golden scenarios graded by WP-13, which ships last | **Internal contradiction** | §25 requires the scenarios to exist and fail on the pre-WP baseline; §17 rev 1 built them in the final phase. Rev 2 moves the harness to Track A. |
 
 ---
@@ -323,7 +362,7 @@ Seven objects. The whole design is making these real in the schema and honest in
 
 And two triggers of work: a **Routine** (recurring, defined) and a **Mention/Assignment** (ad hoc, human-initiated). Both must produce the same Run → Outcome → routing behaviour. Today they do not share a single line of that path.
 
-**Non-negotiable framing:** the issue is the control plane for judged work; the comment table is not a message queue. Delivery gets its own table precisely so that a comment stays a comment.
+**Non-negotiable framing:** the issue is the control plane for judged work; the comment table is not a message queue. Delivery gets its own row (the generalised mentions table, §9.3) precisely so that a comment stays a comment.
 
 ---
 
@@ -374,13 +413,14 @@ Do not skip. Output is a PR that changes only this document plus a report file. 
 
 1. **Re-verify §2 against current `main`.** Every `file:line` in §2. Mark each CONFIRMED / MOVED / FIXED. If more than three are stale, stop and re-plan.
 2. **Re-run the live-data query** on your clone and paste the table. If schedules/webhooks/automations are still all zero, note that the baseline is unchanged; if not, find out who exercised them and how.
-3. **Decide the event-log question** (§3, D6): extend `mission_activity` with a monotonic per-issue sequence, or create a new table. Default is *extend*, following the `issue_counters` precedent for per-scope counters. Write the decision and the reason in §22.
+3. **Re-verify the event-log decision** (D6, resolved: widen `mission_activity`, §9.1). The decision stands; what A0 checks is that its three costs still hold — no `workspace_id`, no CHECK on `action`, two writers bypassing the emitter — and that no new writer has appeared since `3fa36df5`.
 4. **Confirm name availability** for every proposed table and column: `checkpoints`, `sessions`, `deliveries`, `outbox` are all taken or ambiguous. Grep before you name.
 5. **Enumerate the realtime allowlist debt.** List which of the events this PRD adds would be dropped by `hooks/use-realtime.tsx`, and confirm whether #2125 has landed. A6 and B11 both depend on the answer.
 6. **Confirm the RBAC pattern** for new mutating routes by reading `internal/api/router_orchestration.go:96-97` and naming the role each new route will use. No route ships without one.
 7. **Measure the current context payload and the cost of not having one.** Instrument one assignment run: assembled prompt size, and — more importantly — how many context-gathering tool calls the agent makes before its first productive action, and how often it repeats work a previous run finished. Per §3.1 there is no conversation history on this path to remove, so the baseline being established is for the §11.4 metrics, not for a token-reduction target.
 8. **Reconcile scope** with open issues #2256, #2257, #2125, #2233, #2234 and with `docs/prd/inbox-maximum-wireframe.md`, `docs/prd/response-shape-contract.md`, `docs/prd/agent-memory-on-wake.md`. Say which WP absorbs each, and which stay independent. If `gh` is unavailable in your sandbox, say so and use the local docs only.
 9. **Check the response-shape trap.** `docs/prd/response-shape-contract.md` documents a live PascalCase/snake_case JSON-tag bug on `/api/v1/approvals`. Every new response type here inherits that risk class; state the convention you will follow and the test that enforces it.
+10. **Fill the provider capability matrix** (ported from rev 1 §7.5). For Claude, Codex, Gemini, Cursor, Droid and OpenCode record: native continuation/session handle; compaction support; streaming input or interrupt support; cancellation support and observed termination; whether a fresh process can restore from a Crewship checkpoint; which event fields carry resolved model/session ids; behaviour on container or server restart. F45 has the first column; the rest is empty. The product contract works on the lowest common denominator — faster live steering is an enhancement, not a correctness requirement.
 
 ---
 
@@ -400,7 +440,7 @@ One substrate, two entry points.
         v
    +----------------------------------------------------+
    |  DELIVERY  (event -> target, exactly-once claim)    |
-   |  unique(event_id, target_kind, target_id)           |
+   |  unique(event_id, agent_id)  (§9.3)                 |
    +----------------------------------------------------+
         |
         +--- session idle -----> wake: start a RUN
@@ -436,7 +476,7 @@ One substrate, two entry points.
 
 Why this shape:
 
-- **Delivery is a separate table** so the comment table stays a comment table (F4), so redelivery is provable, and so "the agent never saw it" stops being indistinguishable from "the agent ignored it".
+- **Delivery is a separate record from the comment** — a row in the generalised mentions table, never a column on `mission_comments` — so the comment table stays a comment table (F4), so redelivery is provable, and so "the agent never saw it" stops being indistinguishable from "the agent ignored it".
 - **Session sits between issue and run** so a run may fail without losing the relationship, and so I2 has something to be unique on (F1, F13).
 - **Outcome is separate from status** because status answers "did the process end" and outcome answers "should a human care" (F22). Routing off status is why success and infrastructure noise land in the same list today.
 - **Both entry points converge before Outcome**, so the Inbox has one contract to honour rather than three producers with three conventions (F20, F30).
@@ -513,7 +553,7 @@ CREATE UNIQUE INDEX idx_assignments_one_active_per_session
 
 That index is invariant I2. **It guards nothing until `insertCappedAssignment` sets the column** — `cappedAssignment` (`internal/api/delegation_limits.go:509-516`) has no `SessionID` field and its INSERT (`:566-568`) does not list one. Resolve-or-create the session inside the same transaction as the fan-out guard, or the TOCTOU this index exists to close comes straight back.
 
-Prior art worth copying rather than inventing: `chatbridge.tryMarkRunStart` (`steer.go:60-77`) is this same exclusivity guarantee, already working, in memory, keyed on `chat_id`. This work moves it into the database and re-keys it on the session — and closes the door it currently leaves open (F51).
+Prior art: `chatbridge.tryMarkRunStart` (`steer.go:60-77`) was this same guarantee, in memory, keyed on `chat_id`, and it left the assignment door open (F51). A9 has since extracted it as `AgentRunLock`, re-keyed it on the agent, and closed that door. B3 is the next step: the same guarantee in the database, keyed on the session, so it survives a restart and a second replica.
 
 ### 9.5 `agent_session_checkpoints` — new, one JSON column
 
@@ -567,6 +607,24 @@ What is lost: a single cross-kind query target — four call sites instead of on
 - The `mission_comment_mentions` triggers must be dropped and recreated, not altered (§9.3).
 - **Net: 3 new tables, 4 widened tables, ~7 migrations.** The migration count barely moves; what halves is the number of tables and joins anyone has to hold in their head.
 
+### 9.10 Ownership fields on `missions` (ported from rev 1 — Track A10)
+
+Invariant I5 says the human owner stays the owner when an agent is delegated to, and scenario 9 tests it. Until rev 3 this document had no schema that could enforce either: `missions` carries a polymorphic `assignee_type`/`assignee_id`, and delegation overwrites it with the agent (rev-1 dev1 observation 11, §2.9). A UI that renders the agent in the owner slot is a truth defect in a shipped surface.
+
+```sql
+ALTER TABLE missions ADD COLUMN owner_user_id    TEXT REFERENCES users(id)  ON DELETE SET NULL;
+ALTER TABLE missions ADD COLUMN delegate_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL;
+```
+
+Rules:
+- backfill `owner_user_id` from rows where `assignee_type='user'`, `delegate_agent_id` from `assignee_type='agent'`;
+- `assignee_type`/`assignee_id` stay as a compatibility projection for the migration window; their removal is a separate versioned change;
+- delegation writes `delegate_agent_id`, never `owner_user_id`;
+- Start uses `delegate_agent_id` or an explicitly chosen executable agent — the typed FK is what closes F62 (Start validated existence, not executability);
+- public DTOs expose `owner` and `delegate` independently.
+
+**Why Track A and not B:** it is additive, nullable, backfilled — the same shape as A2's `mission_id` — and it is the schema behind an invariant Track A already claims and a scenario Track A already lists. It is the largest A item and should ship last in A. `ON DELETE SET NULL` for the same reason A2 chose it (F55): deleting a user or agent must not delete the issue.
+
 ## 10. State machines
 
 ### 10.1 Session
@@ -609,7 +667,7 @@ Rev 1 claimed a hard kill. The code has no kill primitive and the container is s
 **Tier 1 — Cooperative stop (achievable now, no new container capability).**
 
 ```
-RUNNING ──human Stop──> cancel_requested_at set + decision_receipt
+RUNNING ──human Stop──> cancel_requested_at set + journal entry (§9.8)
                           │
                           ├─ in-process: the run's context is cancelled, so no
                           │  further model call, tool call or step is started
@@ -635,7 +693,21 @@ Golden scenario 5 is split accordingly (§18).
 
 ### 10.4 Issue status and children (fixes F10)
 
-Add one rule: an issue with non-terminal sub-issues (`parent_issue_id`) or non-terminal `mission_tasks` may not transition to `DONE` or `REVIEW` without `?force=true`, which records a `decision_receipt`. Everything else in `ValidIssueTransitions` stays.
+Add one rule: an issue with non-terminal sub-issues (`parent_issue_id`) or non-terminal `mission_tasks` may not transition to `DONE` or `REVIEW` without `?force=true`, which emits a hash-chained journal entry naming who forced it (§9.8). Everything else in `ValidIssueTransitions` stays.
+
+### 10.5 Input routing (ported from rev 1 — the Track B contract)
+
+Sessions do not exist yet (§9.2 is B1), so this table is the contract B2 implements, not current behaviour. It is here so that "which session does this input wake" is decided once, in writing, rather than per call site.
+
+| Input | Recipient | While a session is active |
+|---|---|---|
+| Explicit `@agent` mention | The mentioned agent's session(s), within the existing mention fan-out cap | Queue into each existing session; create the missing ones. |
+| Reply to an agent's activity | That activity's agent session | Queue for the next safe boundary (N1); live steer only if the adapter supports it — none does today (F45). |
+| Plain comment, one delegate | The delegate's session | Queue and acknowledge. |
+| Plain comment, several participants | The primary delegate only; others get a human notification per subscription | Ask for an explicit target when it matters. **Never wake everyone by default.** |
+| Agent result or hand-off | The parent session waiting on that assignment | Resume only the causally waiting session. |
+| Human approval | The exact waitpoint or session that asked | Resume that waitpoint; never mint a generic assignment. |
+| `STOP`, `HOLD`, `RESUME`, `VETO` | The server control path (§14.1) | Enforce policy and the state transition; **text alone is never authoritative** (I6). |
 
 ---
 
@@ -650,7 +722,7 @@ Ordered, and budgeted:
 1. **Stable system prompt** — agent persona and permissions. Unchanged; must stay byte-stable for cache reuse (F16).
 2. **Issue snapshot** (≤ 800 tokens): identifier, title, goal, acceptance criteria, status, human owner, labels, dependencies, links.
 3. **Latest checkpoint** (≤ 600 tokens): `done`, `plan`, `facts`, `blockers`, `next_step`, `confidence` (§9.5).
-4. **Unread delta only** (≤ 1200 tokens): `issue_events` where `seq > last_consumed_seq`, oldest first, each rendered as `#seq · actor · kind · text`. Over budget → oldest are summarised into one line each, never dropped silently.
+4. **Unread delta only** (≤ 1200 tokens): `mission_activity` rows where `seq > last_consumed_seq` (§9.1), oldest first, each rendered as `#seq · actor · kind · text`. Over budget → oldest are summarised into one line each, never dropped silently.
 5. **Relevant memory** — existing tiered memory and episodic recall, unchanged (`internal/orchestrator/memory.go:111-163`, `internal/episodic/hybrid.go:98-247`).
 6. **Artifact manifest** (≤ 300 tokens): files touched, PRs, prior runs, with ids to fetch.
 
@@ -718,7 +790,7 @@ The Inbox is a queue of things a *named person* can act on. Three lanes, server-
 
 **Updates.** Agent finished, routine created an issue, a rule auto-disabled, non-blocking warnings, and the **digest** of successful and no-change runs — the `'digest'` state that already exists in the schema and has no scheduler (F30). B10 gives it one.
 
-**History.** Resolved items plus `decision_receipts` (§9.8), searchable.
+**History.** Resolved items plus the decision records of §9.8 — `decided_by`/`decided_at`/`routine_version` on the subject rows and their hash-chained journal entries — searchable.
 
 Two hard rules:
 - `NO_CHANGE` and `SUCCEEDED` never create an item (I10 means they are still *recorded*, in the digest).
@@ -743,7 +815,7 @@ Extend `save_routine` (`internal/sidecar/routine_mcp.go:22-53`) with an optional
 }
 ```
 
-Server-side, routine + version + trigger are created **in one transaction**; either all exist or none do. `activation: "draft"` creates the trigger disabled and raises a `NEEDS_HUMAN` inbox item — "Routine X is ready. First run would be tomorrow 09:00. Activate?" — which on approval writes a `decision_receipt` pinning the version approved (§9.8). The authoring skill (`internal/skills/bundled/crewship/routine-author/SKILL.md`) must be updated in the same PR to require the trigger and to state, in its final message: what was created, when it first runs, and whether it is active or awaiting approval.
+Server-side, routine + version + trigger are created **in one transaction**; either all exist or none do. `activation: "draft"` creates the trigger disabled and raises a `NEEDS_HUMAN` inbox item — "Routine X is ready. First run would be tomorrow 09:00. Activate?" — which on approval stamps `routine_version` on the approval row and emits the hash-chained journal entry that is the decision record (§9.8). The authoring skill (`internal/skills/bundled/crewship/routine-author/SKILL.md`) must be updated in the same PR to require the trigger and to state, in its final message: what was created, when it first runs, and whether it is active or awaiting approval.
 
 A routine with no trigger and no explicit `"trigger": "manual"` is a warning on the routine page, not a silent success.
 
@@ -817,7 +889,7 @@ New: `issue.session.created`, `issue.session.state`, `issue.delivery.acked`, `is
 
 **Routine page.** One page answering: what it does, when it next runs, what it did last time (with outcome, not just status), how healthy it is, who it bothers, and what it costs.
 
-**Runs.** `/journal?tab=runs` must subscribe to `pipeline.run.*` as well as `run.*` (F33) or it is not the workspace-wide run view its own header claims to be.
+**Runs.** `/journal?tab=runs` cannot show routine runs at all today — the read-side SQL excludes them (F33 rev 3). A6 makes the header say so. Until the read side is fixed in its own package, the honest label is the deliverable; a subscription to `pipeline.run.*` alone changes nothing the user can see.
 
 **Owner vs delegate.** The human owner stays the owner. Agent engagement renders as delegation (I5). Never render an agent in the owner slot.
 
@@ -829,8 +901,8 @@ New: `issue.session.created`, `issue.session.state`, `issue.delivery.acked`, `is
 - **RBAC named per route** (§14.1). No mutating route ships without a role; A0 step 6 confirms the pattern.
 - **Peer ≠ human** (I6): the control endpoint and every waitpoint resume must reject an agent-sourced actor for approval semantics.
 - **Scrub before persist.** `mission_activity.payload_json` (§9.1) and checkpoint bodies pass through `internal/scrubber` — issues #2215, #2228, #2229 are all "raw prompt text reached an append-only sink". Do not add a fourth.
-- **Erasure.** New tables carry `data_subject_id` where they can hold user text, and are added to the GDPR erasure cascade alongside `inbox_items`. Note open issue #2233: `approvals_queue` currently has no retention sweep — do not copy that omission.
-- **Retention.** Checkpoints, deliveries and receipts are excluded from the 30-day journal compaction sweep (I8, F36) and get their own retention policy, stated explicitly.
+- **Erasure.** There is no cascade to join (F38): each new table that can hold user text gets `data_subject_id` and the four hand-edits of §16.1. Note open issue #2233: `approvals_queue` currently has no retention sweep — do not copy that omission.
+- **Retention.** Checkpoints and deliveries are excluded from the 30-day journal compaction sweep (I8, F36) and get their own retention policy, stated explicitly.
 
 
 ### 16.1 The integration checklist every new table must pass
@@ -873,53 +945,66 @@ If 1.0 is genuinely meant to include Track B, that is a decision to *redefine 1.
 **A0 · Truth audit** (§7). Docs only. Now also re-measures the release-readiness numbers, since `RELEASE-1-0-READINESS-2026-08-10.md` is 283 commits stale and disclaims its own currency.
 
 **A1 · Stop actually stops (Tier 1), and terminal states hold.**
-Cooperative cancellation per §10.3 Tier 1: `cancel_requested_at`, the run's context cancelled so no further step starts, a step-boundary poll for the cross-process case, and terminal-state guards on `mission_tasks` and `assignments`. `assignments` becomes reachable in `CANCELLED` (F9). The old stop route keeps its path and gains real behaviour. UI label becomes "Stopping — will finish the current step".
+Cooperative cancellation per §10.3 Tier 1: `cancel_requested_at`, checked before any exec starts and again when the run reports back, and terminal-state guards on `mission_tasks` and `assignments`. **As built there is no mid-execution poll** — a run already inside its exec finishes that exec and is then recorded `CANCELLED`, and the mission engine schedules nothing further (proven for a live RUNNING run, `mission_tasks_stop_midflight_test.go`). That matches the promise exactly; do not describe it as more. `assignments` becomes reachable in `CANCELLED` (F9). The old stop route keeps its path and gains real behaviour. A late *failure* report on a stopped run now also reads as cancelled on every user-facing surface (broadcast, mission comment, activity), not only in `status`. UI label: "Stopping — will finish the current step".
+*Status:* on branch `a1-stop-actually-stops`, which also carries A2 (merged), the 5a proof tests and the late-failure fix.
 *Why 1.0:* a control that is documented and does nothing is the definition of the bar's condition #2. Fixes F6 (worst half) and F7 entirely.
 *Accept:* a stopped run starts no further step; a late callback changes nothing (regression test must fail on current `main`); the UI label matches the guarantee; no `docker kill` on a shared crew container anywhere in the diff.
 
-> **Merge reconciliation, A1 ↔ A2.** These two packages overlap and were built in separate worktrees. A1's Stop matches live runs with `WHERE (chat_id = ? OR group_id = ?)` — sound today, because mission dispatches stamp both with the mission id and `ensureMissionChat` (`internal/api/issue_mentions.go:1001-1019`) uses the **mission id itself as the chat's primary key**, so mention-driven runs are caught too (verified). Once A2's `assignments.mission_id` lands, that heuristic should become a direct match on the column. Whichever branch merges second owns the reconciliation, and it needs a test proving Stop still reaches mention-driven runs.
+> **Merge reconciliation, A1 ↔ A2 — done.** A2 is merged into `a1`. Stop now matches `mission_id` directly **and keeps the `chat_id OR group_id` fallback**, because one path still produces a live run with a NULL `mission_id`: a sub-agent delegating further via `/assign` from inside a mission (the sidecar and the routine dispatcher never send it). The server now derives `mission_id` from `chat_id` on that path (`EXISTS (SELECT 1 FROM missions WHERE id = chat_id)` — `ensureMissionChat` uses the mission id as the chat's primary key, and existence rather than `chats.mode` is the predicate because a hard-deleted mission leaves an orphaned MISSION-mode chat behind). Tests: `TestIssue_Stop_ReachesMentionDispatchedRun`, `TestIssue_Stop_FallsBackForDelegatedRunWithNoMissionID`, `TestAssignmentCreate_DerivesMissionIDFromChatID`.
 
 **A2 · Every run is attributable to its issue.**
 `assignments.mission_id` + backfill + index. Nothing else from §9.4.
 *Why 1.0:* this is issue #2256 ("nothing records what caused what") and it is a data-model defect, not a feature. Small.
 *Accept:* one query returns every run for an issue; migration test covers a populated DB; `scripts/lint-migrations` clean; `internal/backup/intent.go` unchanged (no new table).
+*Status:* built on `a2-runs-attributable-to-issues`, merged into `a1`. Found while building it: the existing `GET .../issues/{identifier}/runs` only joined through `mission_tasks`, so every mention-dispatched run was missing from its own issue — now fixed there.
 
 **A3 · Triggers cannot be saved in a state where they can never fire.**
 Closed event registry generated from `internal/journal/types.go`, membership validation replacing the shape regex (`internal/api/automations.go:71`), payload-key validation, and the 7-day "matched nothing" acknowledgement promoted from the opt-in preview endpoint into the create flow.
 *Why 1.0:* condition #2 again — the API accepts input it cannot honour, and the code comment admits it.
 *Accept:* an unregistered `event_type` is rejected naming the valid ones; a nonexistent payload key is rejected; a rule matching nothing in 7 days requires acknowledgement.
+*Status:* on `a3-closed-event-registry`. The registry is generated from `types.go` by an AST scan with a drift test (130 entry types, not the 117 the old comment claimed). **Limit, stated honestly in the error and the docs:** no payload-schema registry exists anywhere; nine event types are hand-verified, and a type outside that map gets no payload-key validation. The 7-day acknowledgement is not yet in the create flow.
 
 **A4 · Trigger failure is visible for all three trigger kinds.**
 Webhook fire failures and automation enqueue failures emit a journal entry and, on repetition, an inbox item — matching schedules (`internal/pipeline/schedules.go:1058-1069`). Fixes the bare `logger.Error` at `internal/automation/registry.go:734-736`.
 *Why 1.0:* condition #5, orchestration paths with behaviour-level evidence.
 *Accept:* each of the three kinds produces a durable, queryable record of "should have run, didn't".
+*Status:* on `a4-trigger-failure-visible`. Journal entry on every failure; one inbox card at three consecutive failures (lower than schedules' five, because here no run exists at all); a run that started and then failed is deliberately not counted — it already has `EntryPipelineRunFailed`.
 
 **A5 · The docs stop contradicting the code.**
 Rollback (`docs/cli/routine.mdx:1097` says a new version is created; `internal/pipeline/versions.go:230-249` only repoints head); concurrency ("queue" vs the actual 429, `docs/guides/routines.mdx:2047`); the waitpoint empty-body asymmetry (`pipeline_waitpoint_callback.go:44-47` defaults true, the authed route false — pick one and document it); and the monthly-budget naming (F25 — either rename it to something that does not read as enforcement, or state on the page that it is reporting-only).
 *Why 1.0:* conditions #2, #4 and #7, verbatim.
 *Accept:* each of the four has a doc change, a test, or both; `docs-inventory -strict` clean.
+*Status:* on `a5-docs-match-code`. No behaviour changed: the waitpoint asymmetry is documented on both handlers with its security reasoning (authed fails closed; the public token callback fails open for `trigger.dev wait.forToken` parity) rather than unified; the budget field keeps its name and gains reporting-only statements in the API reference, the CLI help and every budget command's output.
 
 **A6 · Shipped surfaces tell the truth about what they show.**
 `RunsView` subscribes to `pipeline.run.*` as well as `run.*` (F33); the three server-emitted issue events dropped by the allowlist are registered (#2125), with a test that fails when an emitted type is unregistered; schedule health — `disabled_reason`, `consecutive_failures`, `last_missed_count`, wake stats — is *displayed* read-only (the editor is Track B).
 *Why 1.0:* a view whose header claims workspace-wide coverage and silently omits a trigger class fails condition #2; a schedule disabled with no visible reason fails #7.
 *Accept:* the allowlist test catches a deliberately omitted registration; an auto-disabled schedule shows its reason; and the runs view's header states what it can and cannot show. **Not** "every trigger kind appears in the runs list" — F33 rev 3 shows that is read-side work in a separate package, and an accept criterion the package cannot satisfy is how a truth defect gets re-labelled as done.
+*Status:* on `a6-surfaces-tell-truth`. Frontend only; full Vitest (573 files) and a static-export build pass — the build needs `pnpm db:generate` first in any fresh clone or worktree, or it fails on a `TS2307` that looks like a code defect and is not.
 
 **A7 · Inbox read state is per user.**
 `inbox_item_reads` (§9.7) with read state computed as a LEFT JOIN; existing columns retained.
 *Why 1.0:* on a multi-user workspace the current behaviour is a correctness bug (F27), not a missing feature — one person reading clears it for everyone.
 *Accept:* two users have independent read state; the existing columns still answer "someone dealt with it"; the table passes §16.1 in full.
+*Status:* on `a7-per-user-inbox-read`. `IntentInclude` for backup, deliberately unlike `notification_deliveries`. Found while building it: `inbox.Upsert` resurrecting an item to unread did not clear per-user markers — fixed, since it is the same class of bug.
 
-**A9 · Close the exclusivity gap the codebase already knows about** (rev 3, gated on investigation).
-`tryMarkRunStart` (`internal/chatbridge/steer.go:60-77`) guards the chat door against two execs racing into one agent container because the result is interleaved stdout and corrupted tmux state. `runAssignment` — `/assign` and every @mention — does not consult it (F51).
-*Why 1.0 if confirmed:* this is a known-corruption path, not a missing feature; condition #5 covers it. *Why gated:* the finding rests on the guard's own comment, not a measurement. **Phase 1 is an investigation that may kill the premise** — whether the exec identity is per-agent or per-run, and whether the tmux wrapper is even used on the assignment path. A correct "F51 is wrong" closes this package.
-*Accept (if confirmed):* two concurrent runs for the same agent cannot both be live; the loser is deferred or refused with a recorded reason, never silently dropped; test runs under `-race` with `t.Parallel` and fails on current `main`.
+**A9 · Close the exclusivity gap the codebase already knows about** (rev 3 — confirmed from the exec wrapper, F51; implemented on `a9-exclusivity-guard`).
+`tryMarkRunStart` (`internal/chatbridge/steer.go:60-77`) guards the chat door against two execs racing into one agent container. `runAssignment` — `/assign` and every @mention — did not consult it. Reading the exec wrapper settled the premise: the session name is `agent-<slug>` and the wrapper opens with `tmux kill-session`, so the second run kills the first (§2.2, F51 rev-3 addendum). Not a suspicion any more.
+*Why 1.0:* a known-corruption path with one unguarded door; condition #5 covers it.
+*As built:* the primitive is extracted into `chatbridge` (renamed `AgentRunLock` to avoid a grep collision with the pipeline integrations gate's `TestRunGate_*`/`ErrTestRunGateFailed`), keyed by agent id, shared by `HandleChatMessage` and `runAssignment`. A run that loses the lock is **requeued** (`QUEUED`, back of the crew FIFO), not failed — the completion pump already drains it. The chat door now also bounces when the agent is busy on an issue; that is correct (they collide) and is a visible behaviour change to call out in the changelog.
+*Accept:* two concurrent runs for the same agent cannot both be live; the loser lands `QUEUED` and is drained once the lock frees; the pump cannot force a live collision; tests run under `-race` with deterministic pre-held locks. Full `go test ./...` green on `c874b5463`.
+
+**A10 · Owner and delegate are separate columns** (§9.10; ported from rev 1; added rev 3).
+Two nullable FK columns on `missions`, backfilled from the polymorphic assignee; delegation never touches the owner; Start requires a typed executable delegate; DTOs expose both.
+*Why 1.0:* rev-1 dev1 observation 11 — the UI showed the agent as owner — is a truth defect in a shipped surface (condition #2), and F62 (Start does not check executability) is a correctness gap the typed FK closes for free.
+*Accept:* scenario 9 green (owner unchanged after delegation); Start refuses a non-agent delegate with a named error; the legacy assignee projection still reads correctly for old clients; §16.1 applied (the columns hold ids, not user text — no `data_subject_id`, but confirm with the GDPR export path).
 
 **A8 · The golden-scenario harness exists from the start.**
 The runner, plus the scenarios Track A can actually prove: **5a** (cooperative stop), **11** (a schedule fires on time; a wake gate returning false suppresses and says so), **12** (catch-up honoured across three missed fire times, all three policies), **13** (duplicate webhook with the same idempotency key → one run), and a new **A-scoped** one: an automation rule that can never fire is rejected at save time.
 Note what this buys: 11, 12 and 13 exercise engine behaviour that is well built and, per §2.1, **has never once run on a real clone**. Proving them is exactly what 1.0 asks for. Moved here from rev 1's final phase, which contradicted §25.
 *Accept:* the harness runs in CI; each included scenario fails on the pre-A baseline (for 11–13, "fails" means the behaviour is unproven, so the first green run is itself the deliverable).
 
-**Explicitly deferred out of Track A, and labelled in the 1.0 docs as known limits:** a mention while an agent is busy starts a second run (F2); a comment does not reach a running turn (F3); there is no cross-run continuity (F13, F15); Stop is cooperative, not immediate (§10.3 Tier 2); `DONE`/`COMPLETED` remain two lifecycles in one column (F11, §3.1). Writing these down is condition #7 of the 1.0 bar. Hiding them is what fails it.
+**Explicitly deferred out of Track A, and labelled in the 1.0 docs as known limits:** a mention while an agent is busy is queued behind the live run and only delivered when it ends — it never reaches the running turn (F3; A9 turned the old second-run collision into a queue, and a chat message to an agent busy on an issue now bounces `agent_busy`); routine runs do not appear in the Runs view (F33 rev 3); the 7-day "matched nothing" acknowledgement is not yet in the automation create flow (A3); there is no cross-run continuity (F13, F15); Stop is cooperative, not immediate (§10.3 Tier 2); `DONE`/`COMPLETED` remain two lifecycles in one column (F11, §3.1). Writing these down is condition #7 of the 1.0 bar. Hiding them is what fails it.
 
 ### Track B — the 1.1 architecture
 
@@ -968,7 +1053,7 @@ Ordered; each is one claimed issue and one PR.
 
 ## 18. Golden end-to-end scenarios
 
-These are the acceptance suite. Each must fail on current `main` before it passes.
+These are the acceptance suite. Each must fail on current `main` before it passes — **except 11, 12 and 13**, which test engine behaviour that was correct all along and simply never exercised; there, the first green run is the proof (A8), and they pass on `main`.
 
 1. Mention an idle agent → visible acknowledgement < 1s, exactly one session, exactly one run.
 2. Ten duplicate deliveries of the same event → one run.
@@ -996,6 +1081,7 @@ These are the acceptance suite. Each must fail on current `main` before it passe
 | Layer | What it must cover | Where |
 |---|---|---|
 | Go unit | Delivery CAS, session state machine, outcome routing, event-registry validation, terminal-state guards, catch-up arithmetic, DST fire-time computation | table-driven `*_test.go`, `testutil.MigratedSQLDB` |
+| **Persistence, not mocks** | Any test of a scheduled or webhook-triggered run must wire a `RunStore` (`Executor.WithRunStore`, `PipelineHandler.SetRunStore`) and assert a `pipeline_runs` row exists. **Every pre-existing schedule and webhook test omits this**, so none could catch a persistence regression — found by `t1`, whose tests failed with zero rows until the store was wired. Needs its own issue. | `internal/pipeline`, `internal/api` |
 | Go concurrency | I1 and I2 under `t.Parallel` + `-race`; ten concurrent claims; two concurrent finishers | `internal/api`, `internal/pipeline` |
 | Restart | Kill between event and consumption; between claim and consume; mid-step; lease expiry recovery | pattern from `internal/server/running_recovery_boot_test.go` |
 | Migration | Upgrade from a populated old DB; backfill correctness; immutability | `scripts/lint-migrations`, `migrate_upgrade_path_oldest_test.go` |
@@ -1020,7 +1106,7 @@ pnpm test:e2e
 
 Two traps worth stating: "Go Lint" is five gates and the annotation names none of them; and a green `gh pr checks` on a short list means CI did not run, not that it passed.
 
-### 19.3 Service levels
+### 19.3 Service levels — targets, not measured
 
 | Metric | Target | Measured |
 |---|---|---|
@@ -1065,11 +1151,11 @@ Backwards compatibility: old `assignments` rows keep NULL `mission_id`/`session_
 
 | Risk | Mitigation |
 |---|---|
-| The scope is large enough to become one unreviewable PR | Fourteen WPs, each its own claimed issue and PR. A PR touching more than one WP is rejected in review. |
+| The scope is large enough to become one unreviewable PR | One work package per claimed issue and PR. A PR touching more than one is rejected in review. The one exception is `a1`, which deliberately carries A2 because they touch the same rows. |
 | Journal instability undermines run truth (F36) | A0 gates on journal health; nothing durable lives only in `journal_entries` (I8). |
 | The realtime allowlist silently swallows the new board (F32) | A6 fixes the existing three and adds a test that fails on unregistered emissions; B11 adds the rest plus client gap-detection, because the hub also drops frames silently under load (F43). |
 | Static export limits the live UI (F31) | Everything realtime rides the existing WS provider; no server components are introduced. |
-| "One turn per session" makes agents feel slower | It is correct, not slower: today's alternative is two agents editing the same tree (F2). Surface the queued follow-up in the UI so waiting is visible. |
+| "One turn per session" makes agents feel slower | It is correct, not slower: the alternative was the second run killing the first (F51). Surface the queued follow-up in the UI so waiting is visible. |
 | Outcome becomes a third confusing status field | One PR documents `status` vs `outcome` vs `runverdict` in `docs/guides/routines.mdx`, or B6 is not done. |
 | Cost truth stays broken (F12, F25) | Explicitly out of scope (N5), named here so nobody claims budgets work. |
 | Estimates drift because nothing was measured first | Rev 2 replaced the −60% token target with the bounded-context metrics of §11.4; A0 still gates on measuring the baseline. |
@@ -1090,7 +1176,7 @@ Backwards compatibility: old `assignments` rows keep NULL `mission_id`/`session_
 | #2233 `approvals_queue` retention/erasure | Adjacent; §16 must not repeat the omission. |
 | #2234 gate auto-tuning fingerprints the prompt | Adjacent; unaffected. |
 | #2144 read-scope invariant vs authedMut | Affects every new GET route; check before adding. |
-| `docs/prd/PRD-AGENT-FIRST-ISSUE-COORDINATION-2026.md` | **Superseded by this document.** Its §1.2 corrections, delegation-limits and notifyroute findings are carried forward; its five wrong claims are corrected in §3. |
+| `docs/prd/PRD-AGENT-FIRST-ISSUE-COORDINATION-2026.md` | **Superseded and, after rev 3, deleted.** Committed once alongside this document so it is in history (`633af3125`); its four unabsorbed sections were ported first (§2.9, §9.10, §10.5, A0 step 10) and its five wrong claims are corrected in §3. |
 | `docs/prd/inbox-maximum-wireframe.md` | B10 implements its unbuilt "no-loss technical contract" section; A7 takes only the per-user read-state correctness fix. |
 | `docs/prd/response-shape-contract.md` | Binding on every new response type (§7 step 9). |
 | `docs/prd/agent-memory-on-wake.md`, `memory-retrieval-layer.md` | Reconcile, do not absorb: §11 consumes memory, it does not redesign it. |
@@ -1104,14 +1190,12 @@ Backwards compatibility: old `assignments` rows keep NULL `mission_id`/`session_
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | Delivery is its own table, not a column on comments | Comments are content; delivery is transport. Conflating them is why "did the agent see it" is unanswerable today (F4). |
+| D1 | Delivery is its own record, not a column on comments | Comments are content; delivery is transport. Conflating them is why "did the agent see it" is unanswerable today (F4). Rev 3 keeps the separation and puts the record in the generalised mentions table (D16). |
 | D2 | One active turn per session, enforced by a partial unique index | Application-level politeness has already failed here (F2). The database is the only reliable place for I2. |
 | D3 | Outcome is separate from status and from `runverdict` | Status is technical, verdict is an LLM's opinion, outcome is a routing decision that must be deterministic (F22). |
 | D4 | Checkpoints are a table, not journal entries | The journal is compacted at 30 days and has been unstable this month (F36). |
 | D5 | `agent_session_checkpoints`, not `checkpoints` | The name is taken twice already (§3). |
 | D6 | **Resolved in rev 3: widen `mission_activity`.** | Two activity logs is worse than one imperfect one. The merge is not free — the table has no `workspace_id`, no CHECK on `action`, records no comment events today, and two writers bypass its emitter (§9.1) — but a parallel table costs all of that plus a second truth. |
-| D16 | Deliveries generalise `mission_comment_mentions`; receipts become two columns | Six new tables became three (§9). The guarantees are identical; the surface to reason about is halved. The one hard cost is dropping and recreating a consistency trigger, which SQLite forces (§9.3). |
-| D17 | A9 is gated on investigation, not assumed | F51 rests on a code comment. Implementing a guard against a collision that does not happen would be its own truth-vs-label failure. |
 | D7 | Reuse `internal/featureflags` | A second gate system is how a rollout becomes unrollbackable (F35). |
 | D8 | Mid-turn interruption stays a non-goal | The runtime queues to the next turn (F3); promising live insertion would be a truth-vs-label failure (I4). |
 | D9 | Readiness is stated per verified loop, not as a single percentage | §24. |
@@ -1121,6 +1205,10 @@ Backwards compatibility: old `assignments` rows keep NULL `mission_id`/`session_
 | D13 | Sessions pin the agent version | `agent_config_history` already exists and nothing reads it (§11.6); without this, "why did it behave differently" is unanswerable. |
 | D14 | Provider-native session resume stays unused | All six adapters are stateless today (F45); a second continuity channel would diverge from checkpoints invisibly. |
 | D15 | Track A ships for 1.0; Track B is 1.1 | The project's own 1.0 bar is about proof, not surface (§17). Redefining that is an owner decision. |
+| D16 | Deliveries generalise `mission_comment_mentions`; receipts become two columns | Six new tables became three (§9). The guarantees are identical; the surface to reason about is halved. The one hard cost is dropping and recreating a consistency trigger, which SQLite forces (§9.3). |
+| D17 | A9 was gated on investigation until F51 was confirmed from code | It rested on a code comment until the exec wrapper was read: `TmuxSessionName` is per-slug and the wrapper opens with `kill-session`. Confirmed. The §27 experiment is now recommended for *observation* of the failure from the user's side, not required for the decision. |
+| D18 | Owner/delegate schema is Track A, not B | Additive, nullable, backfilled — A2's shape — and it is the only thing that can enforce I5 and make scenario 9 testable (§9.10). |
+| D19 | The A9 loser is requeued, not failed | `FAILED` would be a lie in run history; `QUEUED` plus the existing completion pump is the machinery the codebase already has. Deferral *into the live turn* stays B2. |
 
 ## 24. Readiness — stated honestly, and split by release
 
@@ -1128,21 +1216,21 @@ Percentages over surface area were the wrong unit and rev 1 used them anyway. St
 
 | Loop | Ready when | Today | Track |
 |---|---|---|---|
-| Execution is attributable | every run carries `mission_id` | **Not implemented** (F1) | A2 |
-| Stop does what its label says | scenario 5a green | **Not implemented** (F6, F7) | A1 |
-| A trigger cannot be saved unable to fire | the A-scoped scenario in A8 | **Not implemented** (F19) | A3 |
-| A trigger that fails is visible | A4 accept | Schedules only (F20) | A4 |
-| Docs match code | A5 accept | Four known contradictions (F25, F26) | A5 |
-| Shipped surfaces show what they claim | A6 accept | **No** (F27, F32, F33) | A6, A7 |
+| Execution is attributable | every run carries `mission_id` | On `a1`, unmerged (F1) | A2 |
+| Stop does what its label says | scenario 5a green | On `a1`, unmerged; 5a proven for PENDING and RUNNING | A1 |
+| A trigger cannot be saved unable to fire | the A-scoped scenario in A8 | On `a3`, unmerged (F19) | A3 |
+| A trigger that fails is visible | A4 accept | On `a4`, unmerged (F20) | A4 |
+| Docs match code | A5 accept | On `a5`, unmerged (F25, F26) | A5 |
+| Shipped surfaces show what they claim | A6 accept | On `a6`/`a7`, unmerged; F33 read-side still open | A6, A7 |
 | Mention → wake → visible reply | scenarios 1–4 green | **Not implemented** (F2, F3, F4) | B1–B3 |
 | Continuity across days | scenario 7 green | **Not implemented** (F13, F15) | B5 |
 | Stop is immediate | scenario 5b green | **Not implemented** (§3.1) | B7 |
-| Recurring work fires and reports | scenarios 11–13 green (A8), then 14 | Engine strong, **never operated** (§2.1) | A3/A4/A8, then B8/B9 |
+| Recurring work fires and reports | scenarios 11–13 green (A8), then 14 | **11–13 proven on `t1`** — first evidence ever; 14 is B8 | A3/A4/A8, then B8/B9 |
 | Human attention is scarce and provable | scenario 15 green | Partial (F28, F29, F30) | B10 |
 
 ### 24.1 Scenario proof status — measured, not assumed (rev 3)
 
-A coverage audit of the eight Track A branches against the 15 scenarios of §18 found: **none of the fifteen is fully proven.** Scenario 5a is roughly 60% — its "late callback changes nothing" and "a pre-cancelled run never dispatches" clauses are behaviourally proven; "a live RUNNING run starts no further step" is not.
+A coverage audit of the eight Track A branches against the 15 scenarios of §18 found, at the time of the audit: **none of the fifteen fully proven.** Since then: **5a** is proven for both a pending and a live RUNNING run (`a1`); **11, 12, 13** and the circuit breaker are proven on `t1` — the first time the scheduler, catch-up and webhook idempotency have been shown to work at all. Four and a half of fifteen. The remainder need Track B (1–4, 6, 7, 15), a rule that does not exist yet (8, B11), or A10 (9).
 
 That is not a failure of the branches. Each built real behavioural coverage **for its own work package** — registry validation, trigger-failure visibility, per-user read state, the per-agent run gate. But a work package is not a scenario: the packages are bounded fixes, the scenarios are cross-cutting behaviour, and §24's table has always listed them separately. The error would be to let package coverage be *read* as scenario coverage.
 
@@ -1166,7 +1254,7 @@ There is no "100%". For a system like this the measurable properties are deliver
 - The Track A deferred-limits list is written into user-facing documentation as known limits (1.0 condition #7).
 - Every §2 finding is fixed, assigned to a track, or explicitly accepted with a reason in §22.
 - `docs/guides/routines.mdx`, `docs/cli/routine.mdx` and the API reference match the code (F26).
-- The golden-scenario harness exists (A8) and every scenario it covers fails on the pre-A baseline.
+- The golden-scenario harness exists (A8) and every scenario it covers either fails on the pre-A baseline or — for 11–13 — is a first-ever proof of engine behaviour, stated as such.
 - Track B is recorded as 1.1 scope, or an owner decision to redefine 1.0 is written into the quality-audit PRD.
 
 ---
@@ -1197,13 +1285,13 @@ What this confirms here: Crewship's waitpoints already implement this correctly,
 
 Durable-execution runtimes converged during 2025–2026: automatic state persistence plus exactly-once semantics. Restate journals each step before execution and replays on recovery, skipping already-executed steps, which gives exactly-once *without* idempotency keys in application code; Temporal runs activities exactly once with configurable retries and reached GA integration with the OpenAI Agents SDK on 23 March 2026; DBOS persists execution state in the same Postgres or SQLite as the application data, in-process, with no new infrastructure.
 
-What this confirms here: §9.3's claim/consume CAS plus `UNIQUE(event_id, target_kind, target_id)` is the conventional shape, and DBOS's design is the closest analogue to Crewship's — SQLite in-process, no new infrastructure — which is the right precedent to cite when someone proposes adding a queue broker. Crewship's per-step durable outputs and boot resume (`internal/pipeline/resume.go`) already sit in this family.
+What this confirms here: §9.3's claim/consume CAS plus `UNIQUE(event_id, agent_id)` is the conventional shape, and DBOS's design is the closest analogue to Crewship's — SQLite in-process, no new infrastructure — which is the right precedent to cite when someone proposes adding a queue broker. Crewship's per-step durable outputs and boot resume (`internal/pipeline/resume.go`) already sit in this family.
 
 ### 26.5 The agent-facing contract has published numbers
 
 Linear's agent contract requires a first activity **within 10 seconds** of the `created` event or the agent is shown as unresponsive; follow-up activities may continue for **up to 30 minutes** before the session is considered stale, and staleness is recoverable by sending another activity. Activities are typed — `thought` on start, then `response`, `elicitation` or `error` — and agents are told to reconstruct conversation from **Agent Activities (frozen records)** rather than comments, because comments are editable and may have changed since the agent last ran.
 
-What this changes here: §19.3 gains a real precedent for the acknowledgement targets and a model for the `active → idle` timeout §10.1 left unspecified. The typed-activity idea maps onto `issue_events.kind` and is worth adopting for the session strip in §15 — "thinking", "acting", "asking", "answered" is a better human signal than a spinner.
+What this changes here: §19.3 gains a real precedent for the acknowledgement targets and a model for the `active → idle` timeout §10.1 left unspecified. The typed-activity idea maps onto `mission_activity.action` (§9.1) and is worth adopting for the session strip in §15 — "thinking", "acting", "asking", "answered" is a better human signal than a spinner.
 
 **One thing deliberately not adopted:** the "don't read history from comments" rule. In Crewship comments are append-only — `GET` and `POST` only (`internal/api/router_orchestration.go:106-107`), no `UPDATE mission_comments` anywhere (F50) — so the premise does not hold here today. The event log is still the right source of truth, for ordering and delivery reasons, but this document should not borrow a justification that is not true of our code.
 
@@ -1235,9 +1323,9 @@ Twelve audits and this document's entire evidence base are **static reading plus
 
 Four things only a running system can answer, ranked by what they would change:
 
-1. **Does F51 actually collide?** Post a mention, then a second mention of the same agent while the first is live, and watch whether two execs enter the same container and whether tmux state degrades. This decides whether A9 is a 1.0 defect or a phantom. *Cost: starts real agent runs — tokens and a container.*
+1. **What does F51 look like from the outside?** It is decided (§2.2 rev-3 addendum; A9 is built). What no audit shows is the *user's* view of the old failure and of the new queue: post a mention, then a second one for the same agent while the first is live, on a build without A9 and on one with it. One pair of runs, on dev1, never stage. *Cost: real agent runs — tokens and a container.* Result goes into the A9 PR body and here.
 2. **Does the mention path work end to end?** `mission_comment_mentions` has 0 rows and `mission_activity` has no `mentioned` entry, but both dispatcher doors are wired in production (`router_orchestration.go:796`, `router_internal.go:224`). So the path is almost certainly unused rather than broken — but "almost certainly" is what this document is trying to eliminate.
 3. **Do the CAS state machines hold under real concurrency?** `_txlock=immediate` and a 30s busy timeout say writers wait rather than fail (F59), and `MarkFired` shows the correct error handling (F57). Ten concurrent claimants against a five-connection pool has not been measured.
 4. **Does a long write transaction blow the sub-500ms acknowledgement target?** Writers serialize. Nobody has measured the tail.
 
-Item 1 and 2 are one experiment and should be run before A9 is implemented. Items 3 and 4 belong with B12's instrumentation.
+Items 1 and 2 are one experiment, now for observation rather than decision, best run once the A9 PR is open. Items 3 and 4 belong with B12's instrumentation.
