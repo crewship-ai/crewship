@@ -22,8 +22,13 @@ package api
 //     migration window) gets a coherent answer after delegation: the
 //     legacy pair names the SAME agent as the new delegate field, not a
 //     stale or empty value.
+//  4. unassign coherence — the public PATCH's explicit unassign
+//     (assignee_id: "") must clear owner_user_id and delegate_agent_id
+//     exactly like the internal agent-facing Update already does, not just
+//     the legacy assignee_type/assignee_id pair.
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -193,5 +198,46 @@ func TestIssueDelegate_LegacyAssigneeProjectionStaysCoherent(t *testing.T) {
 	}
 	if assigneeID != delegateAgentID {
 		t.Errorf("legacy assignee_id (%q) and new delegate_agent_id (%q) disagree — not a coherent answer", assigneeID, delegateAgentID)
+	}
+}
+
+// TestIssueUpdate_Unassign_ClearsTypedColumns_A10 is the public-PATCH
+// counterpart of the internal handler's unassign fix
+// (issues_internal.go): an explicit unassign (assignee_id: "") must clear
+// owner_user_id and delegate_agent_id, not just the legacy
+// assignee_type/assignee_id pair — otherwise the compatibility projection
+// and the typed columns disagree the moment anyone unassigns through the
+// public API.
+func TestIssueUpdate_Unassign_ClearsTypedColumns_A10(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
+	if _, err := h.db.Exec(
+		`UPDATE missions SET owner_user_id = ?, delegate_agent_id = ?, assignee_type = 'agent', assignee_id = ? WHERE id = ?`,
+		userID, workerID, workerID, id); err != nil {
+		t.Fatalf("seed both typed columns: %v", err)
+	}
+
+	rr := covIHUPatch(h, userID, wsID, crewID, "ENG-1", map[string]any{"assignee_id": ""})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var ownerUserID, delegateAgentID, assigneeType, assigneeID sql.NullString
+	if err := h.db.QueryRow(
+		`SELECT owner_user_id, delegate_agent_id, assignee_type, assignee_id FROM missions WHERE id = ?`, id,
+	).Scan(&ownerUserID, &delegateAgentID, &assigneeType, &assigneeID); err != nil {
+		t.Fatalf("query mission: %v", err)
+	}
+	if ownerUserID.Valid {
+		t.Errorf("owner_user_id = %q after unassign, want NULL", ownerUserID.String)
+	}
+	if delegateAgentID.Valid {
+		t.Errorf("delegate_agent_id = %q after unassign, want NULL", delegateAgentID.String)
+	}
+	if assigneeType.Valid && assigneeType.String != "" {
+		t.Errorf("legacy assignee_type = %q after unassign, want empty", assigneeType.String)
+	}
+	if assigneeID.Valid && assigneeID.String != "" {
+		t.Errorf("legacy assignee_id = %q after unassign, want empty", assigneeID.String)
 	}
 }

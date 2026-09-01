@@ -134,6 +134,17 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// A10 (I5): route the write to the typed owner or delegate column
 		// alongside the legacy pair above — never both, never the other one.
 		setOwnerOrDelegate(ub, assigneeType, *req.AssigneeID)
+	} else if req.AssigneeID != nil {
+		// Explicit unassign (assignee_id: ""): clear whichever typed slot
+		// was occupied, identical to the internal agent-facing Update
+		// (issues_internal.go) — the caller doesn't say which type was
+		// assigned, and "assigned to nobody" must not leave a stale owner
+		// or delegate behind (A10, I5). Without this the legacy pair below
+		// goes empty while owner_user_id/delegate_agent_id stay stale, and
+		// the compatibility projection and the typed columns disagree.
+		ub.SetNull("assignee_type")
+		assigneeTypeSet = true
+		clearOwnerAndDelegate(ub)
 	}
 	if req.AssigneeType != nil && !assigneeTypeSet {
 		ub.Set("assignee_type", *req.AssigneeType)

@@ -659,8 +659,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			// A10: an explicit unassign clears whichever typed slot was
 			// occupied — the caller doesn't say which, and "assigned to
 			// nobody" must not leave a stale owner or delegate behind.
-			ub.SetNull("owner_user_id")
-			ub.SetNull("delegate_agent_id")
+			clearOwnerAndDelegate(ub)
 			assigneeChanged = true
 		} else {
 			assigneeType := ""

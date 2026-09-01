@@ -144,6 +144,19 @@ func setOwnerOrDelegate(ub *updateBuilder, assigneeType, assigneeID string) {
 	}
 }
 
+// clearOwnerAndDelegate is setOwnerOrDelegate's counterpart for an explicit
+// unassign: it NULLs BOTH typed columns rather than routing to one of them.
+// An unassign request (assignee_id: "") doesn't say which type was
+// occupied, and "assigned to nobody" must not leave a stale owner or
+// delegate behind (A10, I5). Every write site that can unassign — the
+// internal agent-facing Update (issues_internal.go) and the public PATCH
+// (issue_handler_update.go) — calls this so the two are never allowed to
+// drift on what "unassigned" means.
+func clearOwnerAndDelegate(ub *updateBuilder) {
+	ub.SetNull("owner_user_id")
+	ub.SetNull("delegate_agent_id")
+}
+
 // ownerDelegateInsertValues derives the owner_user_id / delegate_agent_id
 // values to INSERT alongside a freshly created issue's legacy
 // assignee_type/assignee_id pair — the create-time equivalent of
