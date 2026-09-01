@@ -187,6 +187,58 @@ describe("useApprovals", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  // CWE-200 (#2254 CodeRabbit review): a viewer's authorization can be
+  // revoked mid-session (role resolved away from admin tier, workspace
+  // switched, etc.), which flips `enabled` from true to false. Data fetched
+  // while they WERE authorized must not keep rendering afterward.
+  it("clears rows/error/notConfigured when enabled flips from true to false", async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      okJSON(listBody([sampleRow])),
+    )
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useApprovals({ status: "pending", pollMs: 0, enabled }),
+      { initialProps: { enabled: true } },
+    )
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows).toHaveLength(1)
+
+    rerender({ enabled: false })
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.rows).toEqual([])
+    expect(result.current.error).toBeNull()
+    expect(result.current.notConfigured).toBe(false)
+  })
+
+  // Same scenario, but the authorization flip happens WHILE a request is
+  // still in flight. Without bumping reqIdRef on the disabled path, the
+  // late response would win the race and repopulate rows/error/
+  // notConfigured after the caller has already been told to stop reading.
+  it("ignores an in-flight response that resolves after enabled flips to false", async () => {
+    let resolveFetch!: (res: Response) => void
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => { resolveFetch = resolve }))
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useApprovals({ status: "pending", pollMs: 0, enabled }),
+      { initialProps: { enabled: true } },
+    )
+    // The request is in flight (loading=true); flip enabled before it
+    // resolves.
+    rerender({ enabled: false })
+    await vi.waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows).toEqual([])
+
+    await act(async () => {
+      resolveFetch(okJSON(listBody([sampleRow])))
+      await Promise.resolve()
+    })
+
+    expect(result.current.rows).toEqual([])
+    expect(result.current.loading).toBe(false)
+  })
+
   it("patchRow optimistically updates a row by id", async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON(listBody([sampleRow])))
 

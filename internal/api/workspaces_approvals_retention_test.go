@@ -51,6 +51,25 @@ func TestWorkspaceUpdate_ApprovalsRetentionWindow(t *testing.T) {
 			body:       `{"approvals_retention_days":-1}`,
 			wantStatus: http.StatusBadRequest,
 		},
+		{
+			// harbormaster.MaxApprovalsRetentionDays itself must still be
+			// accepted — only values PAST the int64-nanosecond overflow
+			// boundary are refused.
+			name:       "the maximum window is accepted",
+			body:       `{"approvals_retention_days":106751}`,
+			wantStatus: http.StatusOK,
+			want:       intPtr(106751),
+		},
+		{
+			// time.Duration is int64 nanoseconds: retentionDays*24h
+			// overflows past 106751 days and wraps NEGATIVE, which would
+			// move the sweep's cutoff into the future and delete every
+			// terminal row regardless of age. Refuse it here rather than
+			// let it reach the sweeper.
+			name:       "a window past the int64-nanosecond overflow boundary is refused",
+			body:       `{"approvals_retention_days":106752}`,
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tc := range tests {

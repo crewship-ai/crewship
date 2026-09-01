@@ -197,7 +197,7 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `run_retention_days` | integer | Positive retention override in days. |
 | `credential_audit_retention_days` | integer | Days to keep `credential_audit`. `0` is legal and means keep forever. Negative is rejected. |
 | `audit_log_retention_days` | integer | Days to keep `audit_logs`. `0` is legal and means keep forever. Negative is rejected. |
-| `approvals_retention_days` | integer | Days of decided `approvals_queue` history to keep. `0` is legal and means keep forever. Negative is rejected. |
+| `approvals_retention_days` | integer | Days of decided `approvals_queue` history to keep. `0` is legal and means keep forever. Negative is rejected, and so is anything above `106751` (~292 years) — that is where `days * 24h` overflows an `int64`-nanosecond `time.Duration` and wraps negative, which would move the sweep's cutoff into the future and delete every terminal row regardless of age. |
 
 <Note>
 `0` behaves differently on `run_retention_days` than on the other three:

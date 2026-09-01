@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { Gavel, RefreshCw, ShieldCheck, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { ApprovalCard } from "@/components/features/approvals/approval-card"
 import { ApprovalDetail } from "@/components/features/approvals/approval-detail"
@@ -26,7 +27,7 @@ const FILTERS: { key: FilterKey; label: string; apiStatus: ApprovalStatus }[] = 
  * approvals; clicking a card opens the right-side detail sheet.
  */
 export default function ApprovalsPage() {
-  const { workspaceId, role } = useWorkspace()
+  const { workspaceId, role, loading: workspaceLoading } = useWorkspace()
   const searchParams = useSearchParams()
   const agentFilter = searchParams.get("agent_id")
   const [filter, setFilter] = useState<FilterKey>("pending")
@@ -53,12 +54,12 @@ export default function ApprovalsPage() {
   // the Crews inbox deep-link so clicking a row count lands on the right
   // filter rather than the unfiltered queue.
   //
-  // Both useMemo calls stay ABOVE the `!canRead` early return below: React's
-  // Rules of Hooks require every hook to run, in the same order, on every
-  // render, and a role that resolves from "still loading" (null) to a real
-  // value between renders would otherwise change how many hooks this
-  // component calls. rows is always [] while canRead is false (useApprovals
-  // is enabled:false), so this costs nothing for a non-admin viewer.
+  // Both useMemo calls stay ABOVE the early returns below: React's Rules of
+  // Hooks require every hook to run, in the same order, on every render, and
+  // a role that resolves from "still loading" (null) to a real value
+  // between renders would otherwise change how many hooks this component
+  // calls. rows is always [] while canRead is false (useApprovals is
+  // enabled:false), so this costs nothing for a non-admin viewer.
   const visibleRows = useMemo(() => {
     let out = rows
     if (filter === "decided") out = out.filter((r) => r.status !== "pending")
@@ -70,6 +71,26 @@ export default function ApprovalsPage() {
     () => visibleRows.find((r) => r.id === selectedId) ?? null,
     [visibleRows, selectedId],
   )
+
+  // useWorkspace().role is null while the workspace snapshot loads, and
+  // isAdminTier(null) is false — so without this check, an OWNER/ADMIN
+  // would flash "Approvals is an admin surface" on every load before role
+  // resolves. Wait for the workspace fetch to finish before trusting a
+  // "not admin" reading of a still-unknown role.
+  if (workspaceLoading) {
+    return (
+      <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 min-h-[calc(100vh-48px)]">
+        <aside className="w-full lg:w-56 shrink-0 space-y-3">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-28 w-full" />
+        </aside>
+        <div className="flex-1 min-w-0 space-y-3">
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      </div>
+    )
+  }
 
   if (!canRead) {
     return (

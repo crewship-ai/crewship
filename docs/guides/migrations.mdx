@@ -702,6 +702,16 @@ review, resolves the column like the audit pair too, **not** like
 | `run_retention_days` | use the 90-day default | rejected (not a legal value) | `pipeline_runs` has no compliance story, so there is no "keep forever" to express. |
 | `credential_audit_retention_days` / `audit_log_retention_days` / `approvals_retention_days` | use the product default | keep forever | All three sit on the same `workspace update` command. Giving `approvals_retention_days` different `0` semantics from its two neighbours would be a footgun: an operator typing `0` out of habit with the audit flags would silently get 90-day deletion instead of "never delete". `approvals_queue` also has a real keep-forever use case of its own — `AfterDecide`'s journal entry carries only `approval_id`/`kind`/comment, not `reason` or the full `payload`, so `approvals_queue` is the only place those survive at all. |
 
+<Warning>
+`20260901140000` pins every workspace that **predates** the migration to an
+explicit `0` (keep forever), leaving `NULL` — and so the 90-day default —
+only for workspaces created afterwards. Same reasoning and same split as
+`20260811082000` above: without the backfill, the sweeper's immediate first
+sweep at boot resolves every existing workspace's `NULL` to 90 days and
+deletes decided approval history before the operator has any chance to set
+the override. New installs are bounded, existing installs are asked.
+</Warning>
+
 Only terminal rows (`status IN ('approved','denied','timeout','cancelled')`)
 with a non-`NULL` `decided_at` older than the window are ever deleted. A
 `pending` row is never touched regardless of age — that is the timeout
@@ -711,6 +721,11 @@ deterministically.
 
 `crewship workspace update --approvals-retention-days N` sets the override
 (`PATCH /api/v1/workspaces/{id}` — see [Workspaces](/api-reference/workspaces)).
+`N` above `harbormaster.MaxApprovalsRetentionDays` (106751 days, ~292 years —
+the point at which `days * 24h` overflows an `int64` nanosecond
+`time.Duration` and wraps negative) is rejected with `400 Bad Request`
+rather than silently accepted and later turned into a cutoff in the future,
+which would delete every terminal row regardless of age.
 
 ## How to read this in operation
 

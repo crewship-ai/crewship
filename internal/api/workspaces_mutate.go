@@ -6,8 +6,11 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 )
 
 type createWorkspaceRequest struct {
@@ -185,6 +188,16 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ApprovalsRetentionDays != nil && *req.ApprovalsRetentionDays < 0 {
 		replyError(w, http.StatusBadRequest, "approvals_retention_days must be 0 (keep forever) or a positive number of days")
+		return
+	}
+	// Reject before persisting rather than let it reach the sweeper:
+	// time.Duration is int64 nanoseconds, so *days*24h overflows past
+	// harbormaster.MaxApprovalsRetentionDays (~106751 days, ~292 years)
+	// and wraps NEGATIVE — a cutoff in the future that would match every
+	// terminal row regardless of age. See retention.go.
+	if req.ApprovalsRetentionDays != nil && *req.ApprovalsRetentionDays > harbormaster.MaxApprovalsRetentionDays {
+		replyError(w, http.StatusBadRequest, fmt.Sprintf(
+			"approvals_retention_days is %d; the maximum is %d", *req.ApprovalsRetentionDays, harbormaster.MaxApprovalsRetentionDays))
 		return
 	}
 

@@ -3916,7 +3916,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   cancel routes next to them. The shipped Inbox (`/inbox-v2` and
   `/approvals`) fetched this endpoint for every member regardless of role,
   so both surfaces now gate the fetch on role client-side instead of
-  showing a 403 error banner to a MEMBER/MANAGER viewer.
+  showing a 403 error banner to a MEMBER/MANAGER viewer; when that gate
+  flips off mid-session (role resolved away from admin tier), rows already
+  fetched while the viewer was authorized are now cleared rather than left
+  rendered. A companion migration
+  (`20260901140000_approvals_retention_pin_existing_workspaces`) pins every
+  workspace that predates this change to an explicit `0` (keep forever):
+  without it the sweeper's immediate first sweep at boot would have
+  resolved every existing workspace's unset override to the 90-day default
+  and deleted decided approval history on the first restart after
+  upgrading. `--approvals-retention-days` now also rejects a value above
+  106751 days (~292 years) — past that point the day count overflows the
+  `int64`-nanosecond duration the sweep computes its cutoff from and wraps
+  negative, which would otherwise delete every terminal row regardless of
+  age.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

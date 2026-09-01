@@ -85,6 +85,20 @@ const (
 	// means the default; an explicit 0 means keep forever".
 	DefaultApprovalsRetentionDays = 90
 
+	// MaxApprovalsRetentionDays is the largest value safe to convert to a
+	// time.Duration in days: time.Duration is int64 nanoseconds, and
+	// days*24h overflows past math.MaxInt64/(24*time.Hour) = 106751.99…,
+	// wrapping NEGATIVE. A negative duration subtracted from now.UTC()
+	// below would move `cutoff` into the FUTURE, and every terminal row —
+	// however recent — would match `decided_at < cutoff`. Same arithmetic
+	// pagePublicExpiry guards against in
+	// internal/api/pages_public_tokens.go. The API write path
+	// (internal/api/workspaces_mutate.go) rejects a larger value before it
+	// is ever persisted; SweepApprovalsRetention enforces it again
+	// defensively below in case a bad value reaches the column some other
+	// way.
+	MaxApprovalsRetentionDays = 106751
+
 	// approvalsRetentionBatchRows bounds how many rows a single DELETE may
 	// touch, same rationale as auditRetentionBatchRows in
 	// internal/api/audit_retention.go: SQLite holds the one database-wide
@@ -111,6 +125,12 @@ const (
 // this is the caller's job (see SweepAllWorkspacesApprovalsRetention), which
 // is what makes this function safe to call directly with a raw column value
 // in tests.
+//
+// retentionDays > MaxApprovalsRetentionDays is refused rather than clamped
+// or silently treated as "delete nothing": the write path
+// (internal/api/workspaces_mutate.go) is supposed to have already rejected
+// it, so a value this large reaching here means something bypassed that
+// check, and that is worth surfacing as an error rather than papering over.
 func SweepApprovalsRetention(
 	ctx context.Context,
 	db *sql.DB,
@@ -125,6 +145,16 @@ func SweepApprovalsRetention(
 	}
 	if retentionDays <= 0 {
 		return 0, false, nil
+	}
+	if retentionDays > MaxApprovalsRetentionDays {
+		// Refuse rather than compute a cutoff: retentionDays*24h overflows
+		// int64 nanoseconds past this point and wraps NEGATIVE, which would
+		// move `cutoff` into the future and match every terminal row
+		// regardless of age — turning "keep for N days" into "delete
+		// everything". See MaxApprovalsRetentionDays.
+		return 0, false, fmt.Errorf(
+			"harbormaster: sweep approvals retention: retention_days %d exceeds the maximum of %d days",
+			retentionDays, MaxApprovalsRetentionDays)
 	}
 
 	// Same fixed-width format the column itself is written in (timeFmt,

@@ -18,6 +18,12 @@
 -- entry does not carry `reason` or the full `payload`, only approval_id/
 -- kind/comment, so approvals_queue is the only place those survive at all.
 -- See the retention.go package comment for the full rationale.
+--
+-- Existing workspaces are pinned to "keep forever" by the companion
+-- migration 20260901140000_approvals_retention_pin_existing_workspaces —
+-- without it, the sweeper's immediate first sweep at boot would resolve
+-- every pre-existing workspace's NULL to the 90-day default and delete
+-- terminal approval history nobody asked to prune. See that file.
 
 ALTER TABLE workspaces
     ADD COLUMN approvals_retention_days INTEGER;

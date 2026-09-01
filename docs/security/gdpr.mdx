@@ -163,21 +163,23 @@ gated on the index file already existing, so a crew with no engine yet never
 gets one created just to record an absence.
 </Warning>
 
-The response confirms what landed:
+The response confirms what landed. `rows_deleted` is the single total across
+every table the cascade touched; the per-table breakdown — including
+`approvals_queue` (#2233) — is in `scope`:
 
 ```json
 {
   "action_id": "gdpr_act_…",
-  "rows_deleted": {
+  "data_subject": "usr_…",
+  "workspace_id": "ws_…",
+  "rows_deleted": 147,
+  "scope": {
     "peer_cards": 23,
     "memory_versions": 117,
     "inbox_items": 4,
     "user_models": 1,
     "approvals_queue": 2
-  },
-  "warnings": [
-    "lessons.md mentions user_slug=pavel_advine — manual review required"
-  ]
+  }
 }
 ```
 

@@ -208,3 +208,50 @@ func TestSweepApprovalsRetention_WorkspaceScoped(t *testing.T) {
 		t.Errorf("ws_other's row was deleted by a sweep scoped to ws_test")
 	}
 }
+
+// TestSweepApprovalsRetention_RejectsOverflowingRetentionDays pins the
+// boundary CodeRabbit flagged on #2254: time.Duration is int64 nanoseconds,
+// so retentionDays*24h overflows past MaxApprovalsRetentionDays and wraps
+// NEGATIVE. now.Add(-negative) then moves `cutoff` into the FUTURE, and
+// every terminal row — however recent — matches `decided_at < cutoff`,
+// turning "keep for N days" into "delete everything". The API write path
+// (internal/api/workspaces_mutate.go) is supposed to reject this before it
+// is ever persisted; this pins the function's own defense in case a bad
+// value reaches it some other way (a raw call, a value set before the API
+// guard existed, direct DB manipulation).
+func TestSweepApprovalsRetention_RejectsOverflowingRetentionDays(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	seedApprovalRows(t, db, []seedRow{
+		{id: "fresh", workspaceID: "ws_test", status: "approved", decidedAgeDays: 1},
+	})
+
+	deleted, capped, err := SweepApprovalsRetention(context.Background(), db, "ws_test", MaxApprovalsRetentionDays+1)
+	if err == nil {
+		t.Fatal("sweep with retentionDays = MaxApprovalsRetentionDays+1 succeeded, want an error refusing the overflow-prone value")
+	}
+	if deleted != 0 || capped {
+		t.Errorf("deleted=%d capped=%v on a refused sweep, want 0/false", deleted, capped)
+	}
+	if !approvalRowIDs(t, db, "ws_test")["fresh"] {
+		t.Error("a one-day-old row was deleted by a retentionDays value that should have been refused before computing any cutoff")
+	}
+}
+
+// TestSweepApprovalsRetention_AcceptsMaxRetentionDays pins the other edge of
+// the same boundary: the maximum itself must still work normally rather
+// than being refused by an off-by-one in the guard.
+func TestSweepApprovalsRetention_AcceptsMaxRetentionDays(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	seedApprovalRows(t, db, []seedRow{
+		{id: "fresh", workspaceID: "ws_test", status: "approved", decidedAgeDays: 1},
+	})
+
+	if _, _, err := SweepApprovalsRetention(context.Background(), db, "ws_test", MaxApprovalsRetentionDays); err != nil {
+		t.Fatalf("sweep at MaxApprovalsRetentionDays: %v", err)
+	}
+	if !approvalRowIDs(t, db, "ws_test")["fresh"] {
+		t.Error("a one-day-old row was deleted by a ~292-year retention window")
+	}
+}
