@@ -54,6 +54,7 @@ const (
 	EntryAssignmentRun    EntryType = "assignment.running"
 	EntryAssignmentDone   EntryType = "assignment.completed"
 	EntryAssignmentFail   EntryType = "assignment.failed"
+	EntryAssignmentCancel EntryType = "assignment.cancelled"
 	EntryCrewAction       EntryType = "crew.action"
 	EntryTaskDelegated    EntryType = "task.delegated"
 

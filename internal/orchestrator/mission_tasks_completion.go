@@ -36,6 +36,17 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 	if status == "FAILED" || status == "TIMEOUT" {
 		taskStatus = "FAILED"
 	}
+	if status == "CANCELLED" {
+		// Tier 1 cooperative stop: the assignment's own terminal write
+		// already deferred to cancel_requested_at (assignments_run.go's
+		// finishAssignment) — mirror that here rather than mapping an
+		// operator-requested stop to COMPLETED. In the common case Stop
+		// already moved this task to CANCELLED directly, and the guard
+		// added to the UPDATE below makes this branch a no-op; it matters
+		// for the rarer path where this callback is the first terminal
+		// writer to see the cancellation.
+		taskStatus = "CANCELLED"
+	}
 
 	// Circuit breaker: track consecutive failures per agent
 	if assignedAgentID.Valid {
@@ -176,9 +187,26 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 	}
 	args = append(args, taskID)
 
-	if _, err = e.db.ExecContext(ctx,
-		`UPDATE mission_tasks SET `+updates+` WHERE id = ?`, args...); err != nil {
+	// Terminal-state guard (mirrors the one finalizeMission already has on
+	// missions, mission.go:497's `AND status = 'IN_PROGRESS'`): without it,
+	// a late completion for a task Stop already moved to CANCELLED — the
+	// run kept going because there is no kill primitive for a shared crew
+	// container — silently resurrected it to COMPLETED. AWAITING_APPROVAL
+	// is deliberately NOT in this list: it is not terminal, and ApproveTask
+	// above transitions out of it through its own guarded UPDATE.
+	res, err := e.db.ExecContext(ctx,
+		`UPDATE mission_tasks SET `+updates+` WHERE id = ? AND status NOT IN ('CANCELLED', 'COMPLETED', 'FAILED')`, args...)
+	if err != nil {
 		return fmt.Errorf("update task %s: %w", taskID, err)
+	}
+	if n, raErr := res.RowsAffected(); raErr == nil && n == 0 {
+		// Lost the terminal race — a Stop (or an earlier completion) already
+		// finished this task. Nothing after this point may run: no retry, no
+		// dependent-unblocking, no mission-completion check driven by a
+		// status this write did not actually apply.
+		e.logger.Info("task already terminal — dropping late completion",
+			"task_id", taskID, "mission_id", missionID, "late_status", taskStatus)
+		return nil
 	}
 
 	// If the task failed, attempt retry via LoopController before proceeding

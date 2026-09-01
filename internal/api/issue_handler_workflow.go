@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // Named so Start's 400 body is grep-able and a test can assert exactly
@@ -378,15 +380,45 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Cancel running/pending tasks
-	_, _ = h.db.ExecContext(r.Context(), `
-		UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,
-		now, missionID)
+	// One transaction: the DB-visible half of "stop" — mission_tasks,
+	// assignments, and missions — moves atomically, so no reader ever
+	// observes the issue as CANCELLED while a task or assignment it owns
+	// still looks live (or vice versa).
+	//
+	// This is Tier 1 (cooperative) only: there is no kill primitive for a
+	// shared crew container (internal/provider/container.go has
+	// Exec/ExecInspect, no Kill), so a running exec is not interrupted here.
+	// cancel_requested_at is the cooperative signal the runner checks before
+	// starting any further work (assignments_run.go's runAssignment) and
+	// consults when an already-in-flight run finishes late (finishAssignment)
+	// so it records CANCELLED instead of resurrecting the row as COMPLETED.
+	err = database.WithTx(r.Context(), h.db, func(tx *sql.Tx) error {
+		// Cancel running/pending tasks
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,
+			now, missionID); err != nil {
+			return err
+		}
 
-	// Update issue status → CANCELLED
-	_, err = h.db.ExecContext(r.Context(), `
-		UPDATE missions SET status = 'CANCELLED', completed_at = ?, updated_at = ? WHERE id = ?`,
-		now, now, missionID)
+		// Signal the live assignment(s) for this issue. Mission dispatches
+		// stamp both chat_id and group_id with the mission id (see
+		// scheduleTask in internal/orchestrator/mission_tasks.go), so either
+		// column finds them; PENDING/RUNNING is "not yet terminal".
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
+			 WHERE (chat_id = ? OR group_id = ?) AND status IN ('PENDING', 'RUNNING')`,
+			now, missionID, missionID); err != nil {
+			return err
+		}
+
+		// Update issue status → CANCELLED
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE missions SET status = 'CANCELLED', completed_at = ?, updated_at = ? WHERE id = ?`,
+			now, now, missionID); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		internalError(w, r, h.logger, "stop issue: update", err)
 		return
