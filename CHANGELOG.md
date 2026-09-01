@@ -3937,6 +3937,46 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   memory"), mapped from the real `admission.Reason*` tokens and falling back
   to the raw token for one this build doesn't recognize yet.
 
+- **`approvals_queue` was kept forever, had no GDPR erasure path, and its
+  read endpoints answered any workspace member (#2233).** Every terminal
+  approval decision (approve/deny, cancel, both timeout paths) only ever
+  updated `status`/`decided_*` in place — nothing deleted a row, so the
+  table grew without bound and every row rode into every backup bundle.
+  Decided rows now age out on a per-workspace retention schedule
+  (`workspaces.approvals_retention_days`, defaulting to 90 days, swept
+  daily by `harbormaster.StartApprovalsRetentionSweeper`; set it with
+  `crewship workspace update --approvals-retention-days`, where `0` means
+  keep forever — the same as its `--credential-audit-retention-days` and
+  `--audit-log-retention-days` neighbours on that command), a pending row is
+  never touched regardless of age, a `kind=autonomy_gate` row is never swept
+  regardless of age or status either — for a mission target that row is the
+  hold itself (`autonomyGateApproved` treats "no row" as "proceed"), not
+  history, so sweeping a denied or timed-out one would eventually let a
+  mission that was never approved start running unattended — and the
+  Article 17 cascade
+  (`DELETE /api/v1/admin/users/{userId}/data`) now erases a subject's rows
+  by `requested_by`/`decided_by` since the table has no `data_subject_id`
+  column. Separately, and this is a behaviour change an integrator will
+  notice: `GET /api/v1/approvals` and `GET /api/v1/approvals/{id}` used to
+  require only workspace membership and returned the full request payload
+  to any member; they now require `OWNER`/`ADMIN`, matching the decide/
+  cancel routes next to them. The shipped Inbox (`/inbox-v2` and
+  `/approvals`) fetched this endpoint for every member regardless of role,
+  so both surfaces now gate the fetch on role client-side instead of
+  showing a 403 error banner to a MEMBER/MANAGER viewer; when that gate
+  flips off mid-session (role resolved away from admin tier), rows already
+  fetched while the viewer was authorized are now cleared rather than left
+  rendered. A companion migration
+  (`20260901140000_approvals_retention_pin_existing_workspaces`) pins every
+  workspace that predates this change to an explicit `0` (keep forever):
+  without it the sweeper's immediate first sweep at boot would have
+  resolved every existing workspace's unset override to the 90-day default
+  and deleted decided approval history on the first restart after
+  upgrading. `--approvals-retention-days` now also rejects a value above
+  106751 days (~292 years) — past that point the day count overflows the
+  `int64`-nanosecond duration the sweep computes its cutoff from and wraps
+  negative, which would otherwise delete every terminal row regardless of
+  age.
 - **An escalation's raw text reached the permanent journal entry and the
   workspace-wide broadcast, even though the inbox copy was scrubbed
   (#2238).** `CreateEscalation` wrote the same agent-supplied

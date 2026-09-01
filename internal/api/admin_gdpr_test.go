@@ -93,6 +93,18 @@ func (r *gdprTestRig) seedAll(t *testing.T) {
 		VALUES ('ib1','ws1','message','msg-subj1','persona suggestion about subj1','subj1')`); err != nil {
 		t.Fatalf("seed inbox_items: %v", err)
 	}
+	// approvals_queue: one row where the subject is the REQUESTER, one
+	// where the subject is the DECIDER, and one belonging to neither (must
+	// survive) — approvals_queue has no data_subject_id column, so the
+	// cascade matches on these two columns instead (#2233).
+	if _, err := r.db.Exec(`INSERT INTO approvals_queue
+		(id, workspace_id, requested_by, kind, reason, status, decided_by, decided_at)
+		VALUES
+		('ap-requested-by-subj','ws1','subj1','tool_call','because','approved','admin1','2026-01-01T00:00:00.000Z'),
+		('ap-decided-by-subj','ws1','admin1','tool_call','because','denied','subj1','2026-01-01T00:00:00.000Z'),
+		('ap-other','ws1','member1','tool_call','because','approved','admin1','2026-01-01T00:00:00.000Z')`); err != nil {
+		t.Fatalf("seed approvals_queue: %v", err)
+	}
 }
 
 // adminReq crafts a request with workspace + admin role context
@@ -156,6 +168,59 @@ func TestGDPRCascade_DeletesMemoryVersions(t *testing.T) {
 	}
 	if cnt != 1 {
 		t.Errorf("other subject memory_versions = %d, want 1 (cascade leaked)", cnt)
+	}
+}
+
+// TestGDPRCascade_DeletesApprovalsQueue pins the #2233 decision: erase
+// rather than exclude. It must delete a row where the subject is the
+// requester, a row where the subject is the decider, and leave a row
+// belonging to neither participant untouched (tenant/subject isolation).
+func TestGDPRCascade_DeletesApprovalsQueue(t *testing.T) {
+	r := gdprTestSetup(t)
+	r.seedAll(t)
+
+	rec := httptest.NewRecorder()
+	r.h.DeleteUserData(rec, r.adminReq(t, http.MethodDelete,
+		`{"reason":"sar"}`, r.targetID, "ADMIN"))
+	if rec.Code >= 400 {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
+	}
+
+	var cnt int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM approvals_queue
+		WHERE workspace_id=? AND (requested_by=? OR decided_by=?)`,
+		r.wsID, r.targetID, r.targetID).Scan(&cnt); err != nil {
+		t.Fatalf("count approvals_queue for subject: %v", err)
+	}
+	if cnt != 0 {
+		t.Errorf("approvals_queue rows remaining for subject = %d, want 0", cnt)
+	}
+
+	// The row naming neither the subject as requester nor as decider must
+	// survive — this is the cascade's subject-isolation invariant, same as
+	// memory_versions above.
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM approvals_queue
+		WHERE id='ap-other'`).Scan(&cnt); err != nil {
+		t.Fatalf("count ap-other: %v", err)
+	}
+	if cnt != 1 {
+		t.Errorf("ap-other (unrelated to the subject) = %d, want 1 (cascade over-matched)", cnt)
+	}
+
+	var scope struct {
+		ApprovalsQueue int `json:"approvals_queue"`
+	}
+	var resp struct {
+		Scope json.RawMessage `json:"scope"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+	}
+	if err := json.Unmarshal(resp.Scope, &scope); err != nil {
+		t.Fatalf("decode scope: %v", err)
+	}
+	if scope.ApprovalsQueue != 2 {
+		t.Errorf("scope.approvals_queue = %d, want 2 (one as requester, one as decider)", scope.ApprovalsQueue)
 	}
 }
 

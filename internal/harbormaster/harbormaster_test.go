@@ -17,7 +17,7 @@ import (
 // the whole migrate package would be slower and would couple this
 // package's tests to migration ordering.
 const schemaSQL = `
-CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+CREATE TABLE workspaces (id TEXT PRIMARY KEY, approvals_retention_days INTEGER);
 INSERT INTO workspaces (id) VALUES ('ws_test');
 
 CREATE TABLE approvals_queue (

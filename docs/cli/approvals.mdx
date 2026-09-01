@@ -15,8 +15,11 @@ crewship approvals <subcommand> [flags]
 ```
 
 <Note>
-  `list` is safe for any workspace member; `approve`, `deny`, and `cancel`
-  require `OWNER` or `ADMIN` role server-side (403 otherwise).
+  Every subcommand requires `OWNER` or `ADMIN` role server-side (403
+  otherwise) — including `list` and `get`, as of #2233. Before then the
+  read endpoints had no role floor and any workspace member could read the
+  full queue, including request payloads; the API reference's
+  [Approvals](/api-reference/approvals) page has the endpoint-level detail.
 </Note>
 
 ## Subcommands

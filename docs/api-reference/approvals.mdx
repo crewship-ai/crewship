@@ -9,7 +9,12 @@ tag: Stable
 The Harbormaster approval queue is the human-in-the-loop gate for agent actions that match a policy rule. Enqueue is internal-only -- it fires from `harbormaster.Gate` when an agent hits a rule-matching action -- so the public surface is the read + decide flow operators use to triage, approve, or deny pending requests. See the [Harbormaster guide](/guides/harbormaster).
 
 <Note>
-  All endpoints require authentication and are workspace-scoped. Decision endpoints additionally require `OWNER` or `ADMIN` role.
+  All endpoints require authentication and are workspace-scoped, and every
+  endpoint on this page — reads included — additionally requires `OWNER` or
+  `ADMIN` role (#2233). Before this, the two read endpoints were reachable by
+  any workspace member; a request's full payload is shown verbatim in the
+  approval detail UI, so the read floor now matches the decide/cancel floor
+  it always should have.
 </Note>
 
 ## Endpoints
@@ -32,6 +37,8 @@ Read the approval queue and inspect individual requests.
 ```
 GET /api/v1/approvals?status=pending&limit=50
 ```
+
+**Auth:** `OWNER` or `ADMIN` only (#2233). 403 for any other role.
 
 **Query parameters:**
 
@@ -103,7 +110,7 @@ For `?status=all`, the `status` envelope key echoes back as an empty string (`""
 GET /api/v1/approvals/{id}
 ```
 
-**Auth:** Requires an authenticated request with workspace context. The optional
+**Auth:** `OWNER` or `ADMIN` only (#2233). 403 for any other role. The optional
 `X-Workspace-ID` header selects the workspace when it is not already present in
 the request context.
 
@@ -117,6 +124,7 @@ Returns the full request object (same schema as list rows).
 | Status | Condition |
 |---|---|
 | 401 | No workspace. |
+| 403 | Not OWNER/ADMIN. |
 | 404 | ID not found or belongs to another workspace. |
 | 500 | Database error while loading the request. |
 

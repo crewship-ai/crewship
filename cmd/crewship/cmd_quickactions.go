@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -52,32 +54,43 @@ Equivalent to running 'mission list --assignee=me' + 'approvals list
 			errs = append(errs, label+": "+err.Error())
 			mu.Unlock()
 		}
-		fetch := func(path string, into *[]map[string]any, label string) {
+		fetch := func(path string, into *[]map[string]any, label string, optional bool) {
 			defer wg.Done()
 			var body struct {
 				Data []map[string]any `json:"data"`
 			}
-			if err := getJSON(client, path, &body); err != nil {
-				// Fallback: endpoint may return a bare array.
-				var alt []map[string]any
-				if err2 := getJSON(client, path, &alt); err2 != nil {
-					recordErr(label, err)
-					return
-				}
+			err := getJSON(client, path, &body)
+			if err == nil {
 				mu.Lock()
-				*into = alt
+				*into = body.Data
 				mu.Unlock()
 				return
 			}
+			// GET /api/v1/approvals now requires roleManage (OWNER/ADMIN,
+			// #2233) — a MEMBER/MANAGER gets 403 here, same as they would on
+			// the web Inbox, which gates the fetch on role client-side
+			// rather than showing an error for it. `optional` mirrors that:
+			// no approvals visible to you is absence, not a fetch failure,
+			// so it must not land in errs and render as a [partial] error
+			// line on every `crewship me`/`now` a non-admin runs.
+			if optional && isForbidden(err) {
+				return
+			}
+			// Fallback: endpoint may return a bare array.
+			var alt []map[string]any
+			if err2 := getJSON(client, path, &alt); err2 != nil {
+				recordErr(label, err)
+				return
+			}
 			mu.Lock()
-			*into = body.Data
+			*into = alt
 			mu.Unlock()
 		}
 		const fanout = 3
 		wg.Add(fanout)
-		go fetch("/api/v1/missions?assignee=me", &missions, "missions")
-		go fetch("/api/v1/approvals?status=pending&assignee=me", &approvals, "approvals")
-		go fetch("/api/v1/runs?actor=me&limit=10", &runs, "runs")
+		go fetch("/api/v1/missions?assignee=me", &missions, "missions", false)
+		go fetch("/api/v1/approvals?status=pending&assignee=me", &approvals, "approvals", true)
+		go fetch("/api/v1/runs?actor=me&limit=10", &runs, "runs", false)
 		wg.Wait()
 		// Bail with a real error (and non-zero exit) when every fetch
 		// failed the same way with session_invalid — otherwise the
@@ -169,26 +182,33 @@ var nowCmd = &cobra.Command{
 			wg          sync.WaitGroup
 			errs        []string
 		)
-		fetchData := func(path string, into *[]map[string]any, label string) {
+		fetchData := func(path string, into *[]map[string]any, label string, optional bool) {
 			defer wg.Done()
 			var body struct {
 				Data []map[string]any `json:"data"`
 			}
-			if err := getJSON(client, path, &body); err != nil {
-				var alt []map[string]any
-				if err2 := getJSON(client, path, &alt); err2 != nil {
-					mu.Lock()
-					errs = append(errs, label+": "+err.Error())
-					mu.Unlock()
-					return
-				}
+			err := getJSON(client, path, &body)
+			if err == nil {
 				mu.Lock()
-				*into = alt
+				*into = body.Data
+				mu.Unlock()
+				return
+			}
+			// See the matching comment in meCmd's fetch: GET /api/v1/approvals
+			// is roleManage-gated (#2233), and a MEMBER/MANAGER's 403 there is
+			// absence — nothing visible to you — not a fetch failure.
+			if optional && isForbidden(err) {
+				return
+			}
+			var alt []map[string]any
+			if err2 := getJSON(client, path, &alt); err2 != nil {
+				mu.Lock()
+				errs = append(errs, label+": "+err.Error())
 				mu.Unlock()
 				return
 			}
 			mu.Lock()
-			*into = body.Data
+			*into = alt
 			mu.Unlock()
 		}
 		// Host admission control (#1668). Without this, a run held because
@@ -209,9 +229,9 @@ var nowCmd = &cobra.Command{
 		)
 		const fanout = 3
 		wg.Add(fanout + 1)
-		go fetchData("/api/v1/runs?status=RUNNING&limit=20", &runningRuns, "runs")
-		go fetchData("/api/v1/agents", &agents, "agents")
-		go fetchData("/api/v1/approvals?status=pending", &approvals, "approvals")
+		go fetchData("/api/v1/runs?status=RUNNING&limit=20", &runningRuns, "runs", false)
+		go fetchData("/api/v1/agents", &agents, "agents", false)
+		go fetchData("/api/v1/approvals?status=pending", &approvals, "approvals", true)
 		go func() {
 			defer wg.Done()
 			rc, err := fetchCapacity(client)
@@ -339,6 +359,16 @@ func renderNow(runs, agents, approvals []map[string]any, capacity runtimeCapacit
 		fmt.Fprintf(os.Stderr, "%s[partial]%s %s\n", cli.Dim, cli.Reset, e)
 	}
 	return nil
+}
+
+// isForbidden reports whether err is a 403 from the API — used by the
+// quick-action fanout fetchers to tell "you're not allowed to see this"
+// (e.g. a MEMBER/MANAGER against roleManage-gated GET /api/v1/approvals,
+// #2233) apart from a real fetch failure. The former should render as
+// absence; only the latter belongs in the `[partial]` error list.
+func isForbidden(err error) bool {
+	var apiErr *cli.APIError
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden
 }
 
 // str safely coerces an interface{} → string (for map[string]any reads).

@@ -59,6 +59,37 @@ import (
 //   - inbox_items (by data_subject_id) — hard delete. Soft-delete
 //     would leave the proposal title visible in the inbox feed,
 //     which the SAR forbids.
+//   - approvals_queue (by requested_by OR decided_by) — hard delete
+//     (#2233). The table predates v107 and was never considered for
+//     either list — grep for "approvals" in this file returned zero
+//     hits before this. It has no data_subject_id column, so unlike
+//     the two rows above it is matched on the two columns that ARE
+//     user-attributable: requested_by (a user id for an
+//     interactively-triggered gate, an agent id for an
+//     autonomously-triggered one — matching is still correct because
+//     ids never collide across the two) and decided_by (always a
+//     user id — only a human decides). docs/security/gdpr.mdx already
+//     frames "agent decisions" as operator-owned content erasure may
+//     reach, distinct from the audit trail that must survive it — see
+//     "Why erase rather than exclude" below for the full argument. The
+//     row's own accountability trail (who decided what, when) survives
+//     in journal_entries regardless, which is on the excluded list.
+//
+// # Why erase approvals_queue rather than add it to the excluded list
+//
+// The three excluded tables below share one property: no user-attributable
+// content, or content that is itself the SAR's own accountability record.
+// approvals_queue is neither. Its payload is (pre-#2250) a raw tool-call
+// prompt the requester wrote, and requested_by / decided_by / reason name
+// the two participants directly — exactly the "content the operator owns"
+// gdpr.mdx's Article 17 section calls out ("agent decisions") as distinct
+// from "audit records that have to survive operator's own retention
+// obligations". Leaving it erased-nowhere was not a considered position,
+// it was the absence of one — the issue that opened this (#2233) exists
+// precisely because nobody had decided. A retention sweep (see
+// internal/harbormaster/retention.go) bounds how long an UNDECIDED-to-erase
+// row survives, but a live SAR ticket cannot wait out a 90-day default, so
+// the cascade needs its own deliberate answer: erase.
 //
 // Tables intentionally excluded:
 //
@@ -170,6 +201,10 @@ type gdprActionScope struct {
 	InboxItems      int `json:"inbox_items"`
 	UserModels      int `json:"user_models"`
 	PeerCardsOnDisk int `json:"peer_cards_on_disk,omitempty"`
+	// ApprovalsQueue (#2233) counts rows deleted because the subject was
+	// either the requester or the decider — see the file header "Why erase
+	// approvals_queue rather than add it to the excluded list".
+	ApprovalsQueue int `json:"approvals_queue,omitempty"`
 	// PagesTransferred counts pages handed to a crew because the subject
 	// owned them (§7.1 rule 1b). Never a delete count — a page is never
 	// deleted by this cascade, only reassigned.
@@ -258,6 +293,8 @@ func (h *AdminGDPRHandler) transferOrRefuseUserPages(ctx context.Context, action
 //     effort on-disk).
 //   - memory_versions rows tagged data_subject_id = user are gone.
 //   - inbox_items rows tagged data_subject_id = user are gone.
+//   - approvals_queue rows where the user was requester or decider are
+//     gone (#2233).
 //   - gdpr_actions has a 'delete' row with scope_json + status=
 //     'completed' (or 'failed' with error populated).
 //
@@ -447,7 +484,26 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 		scope.InboxItems = int(n)
 	}
 
-	// 4) user_models: the operator model — the one surface holding the
+	// 4) approvals_queue: hard delete every row the subject touched, either
+	// as requester or as decider (#2233) — a single statement, so a row
+	// where the subject happens to be both (a self-approved gate) is still
+	// counted once in RowsAffected, not twice. See the file header "Why
+	// erase approvals_queue rather than add it to the excluded list" for
+	// why this table is erased at all.
+	res, err = h.db.ExecContext(r.Context(),
+		`DELETE FROM approvals_queue WHERE workspace_id = ? AND (requested_by = ? OR decided_by = ?)`,
+		wsID, targetID, targetID)
+	if err != nil {
+		h.logger.Warn("gdpr delete: approvals_queue delete failed",
+			"action_id", actionID, "err", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		scope.ApprovalsQueue = int(n)
+	}
+
+	// 5) user_models: the operator model — the one surface holding the
 	// subject's OWN stated facts (#1669). UNIQUE on (workspace_id,
 	// user_slug), so at most one row.
 	//
@@ -549,7 +605,7 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 
 	h.finalizeGDPRAction(r.Context(), actionID, scope, firstErr)
 
-	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.UserModels
+	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.UserModels + scope.ApprovalsQueue
 	status := http.StatusAccepted
 	resp := map[string]any{
 		"action_id":    actionID,

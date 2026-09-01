@@ -14,6 +14,7 @@ import { useInbox, useInboxItem } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import { inboxBulk } from "@/lib/api/inbox"
+import { isAdminTier } from "@/lib/permissions/tiers"
 import type { Mission } from "@/lib/types/mission"
 import { cn } from "@/lib/utils"
 
@@ -47,12 +48,19 @@ export function InboxV2() {
 
   const active = useInbox(workspaceId, "active", { loadAll: true })
   const resolved = useInbox(workspaceId, "resolved", { loadAll: true })
+  // GET /api/v1/approvals is now roleManage (#2233) — a MEMBER/MANAGER
+  // fetch would 403. Rather than surface that as a permanent error banner
+  // in `sourceHealth` below, skip the fetch for a role that could never
+  // read it and simply show no approval entries in the merged feed. Those
+  // roles never had a Decide button here either (see the `role` prop
+  // passed to InboxV2Detail), so this changes what shows up, not what a
+  // MEMBER/MANAGER could previously act on.
   const approvals = useApprovals({
     status: "all",
     workspaceId,
     limit: 200,
     pollMs: 15_000,
-    enabled: Boolean(workspaceId),
+    enabled: Boolean(workspaceId) && isAdminTier(role),
     loadAll: true,
   })
   const missions = useQuery<Mission[]>({
