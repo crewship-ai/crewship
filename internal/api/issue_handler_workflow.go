@@ -400,14 +400,39 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		// Signal the live assignment(s) for this issue. Mission dispatches
-		// stamp both chat_id and group_id with the mission id (see
-		// scheduleTask in internal/orchestrator/mission_tasks.go), so either
-		// column finds them; PENDING/RUNNING is "not yet terminal".
+		// Signal the live assignment(s) for this issue.
+		//
+		// mission_id (#2256) is the direct answer and the one preferred: every
+		// mission-task run (mission_tasks.go's scheduleTask), the lead-planning
+		// run (mission_tasks_planning.go's dispatchLeadPlanning), and a mention
+		// dispatch (issue_mentions.go's DispatchMention) stamp it explicitly.
+		//
+		// chat_id/group_id stay as a FALLBACK, not a redundant belt-and-braces
+		// check: a sub-agent that delegates further via /assign while running
+		// inside a mission (or a mention-dispatched run doing the same) creates
+		// its new assignment row through AssignmentHandler.Create
+		// (assignments_run.go), and neither caller of that door threads
+		// mission_id through —
+		//
+		//   - the sidecar's handleAssign (internal/sidecar/assignment.go) never
+		//     sets "mission_id" in the body it forwards, only actor_agent_id;
+		//   - the routine dispatcher's crewshipBody (crewship_actions.go)
+		//     injects workspace_id/crew_id/agent identity but not mission_id
+		//     either.
+		//
+		// That delegated row DOES inherit chat_id = the mission id, though:
+		// s.ipc.ChatID for a mission-task or mention-dispatched container is set
+		// to the mission id (mission_tasks.go:585, issue_mentions.go's ChatID:
+		// req.MissionID), and handleAssign carries that IPC chat_id straight
+		// through as the new assignment's chat_id. So a delegated sub-task has
+		// mission_id = NULL but chat_id = the mission id, and only the
+		// heuristic finds it. Dropping the fallback would make Stop silently
+		// stop reaching every delegation hop under a mission or a mention —
+		// worse than the heuristic it would replace.
 		if _, err := tx.ExecContext(r.Context(), `
 			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
-			 WHERE (chat_id = ? OR group_id = ?) AND status IN ('PENDING', 'RUNNING')`,
-			now, missionID, missionID); err != nil {
+			 WHERE (mission_id = ? OR chat_id = ? OR group_id = ?) AND status IN ('PENDING', 'RUNNING')`,
+			now, missionID, missionID, missionID); err != nil {
 			return err
 		}
 

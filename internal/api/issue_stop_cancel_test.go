@@ -92,6 +92,108 @@ func TestIssue_Stop_StampsCancelRequestedOnLiveAssignments(t *testing.T) {
 	}
 }
 
+// TestIssue_Stop_ReachesMentionDispatchedRun is the reconciliation this merge
+// exists for: a2-runs-attributable-to-issues (#2256) added
+// assignments.mission_id, and DispatchMention (internal/api/issue_mentions.go)
+// now stamps it on every mention-dispatched run. Stop's WHERE clause was
+// widened to match on mission_id directly instead of relying solely on the
+// chat_id/group_id heuristic — this proves that widening actually reaches a
+// mention-dispatched row (mission_id = the issue's mission id) rather than
+// silently stopping short of it.
+func TestIssue_Stop_ReachesMentionDispatchedRun(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-2", "IN_PROGRESS")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.Exec(`
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, 'Mission: ENG-2', 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		id, leadID, wsID, now, now, now); err != nil {
+		t.Fatalf("seed mission chat: %v", err)
+	}
+	// Shaped exactly like DispatchMention's insert (issue_mentions.go): chat_id
+	// and group_id are the mission id (a mention has no mission_tasks row, so
+	// group_id can't come from anywhere else), and mission_id is now stamped
+	// too.
+	if _, err := h.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, mission_id, created_at, started_at)
+		VALUES ('a-mentioned', ?, ?, ?, ?, 'reply to mention', 'RUNNING', ?, ?, ?, ?)`,
+		wsID, id, leadID, workerID, id, id, now, now); err != nil {
+		t.Fatalf("seed mention-dispatched assignment: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-2")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var cancelAt string
+	if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,'') FROM assignments WHERE id='a-mentioned'`).Scan(&cancelAt); err != nil {
+		t.Fatalf("query a-mentioned: %v", err)
+	}
+	if cancelAt == "" {
+		t.Errorf("a-mentioned.cancel_requested_at not stamped by Stop — mention-dispatched runs must still be reachable")
+	}
+}
+
+// TestIssue_Stop_FallsBackForDelegatedRunWithNoMissionID proves the other
+// half of the same reconciliation: mission_id is NOT threaded through every
+// door that can produce a live run for an issue. A sub-agent that delegates
+// further via /assign while executing inside a mission (or a
+// mention-dispatched run doing the same) creates its new row through
+// AssignmentHandler.Create — neither the sidecar's handleAssign
+// (internal/sidecar/assignment.go) nor the routine dispatcher's crewshipBody
+// (internal/api/crewship_actions.go) put mission_id in that request, so the
+// new row's mission_id is NULL. It DOES inherit chat_id = the mission id,
+// though (the delegating agent's own IPC chat_id, carried straight through by
+// insertCappedAssignment's ChatID/GroupID). If Stop's match were narrowed to
+// mission_id alone, this row would never be reached.
+func TestIssue_Stop_FallsBackForDelegatedRunWithNoMissionID(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-3", "IN_PROGRESS")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.Exec(`
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, 'Mission: ENG-3', 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		id, leadID, wsID, now, now, now); err != nil {
+		t.Fatalf("seed mission chat: %v", err)
+	}
+	// Shaped like a delegation hop (AssignmentHandler.Create /
+	// insertCappedAssignment): chat_id/group_id inherited from the delegating
+	// agent's IPC chat (the mission id), mission_id left NULL because neither
+	// caller of that door threads it through.
+	if _, err := h.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at, started_at)
+		VALUES ('a-delegated', ?, ?, ?, ?, 'sub-task', 'RUNNING', ?, ?, ?)`,
+		wsID, id, workerID, workerID, id, now, now); err != nil {
+		t.Fatalf("seed delegated assignment: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-3")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var cancelAt string
+	if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,'') FROM assignments WHERE id='a-delegated'`).Scan(&cancelAt); err != nil {
+		t.Fatalf("query a-delegated: %v", err)
+	}
+	if cancelAt == "" {
+		t.Errorf("a-delegated.cancel_requested_at not stamped by Stop — the chat_id/group_id fallback must still catch a NULL-mission_id delegation hop")
+	}
+}
+
 // TestRunAssignment_CancelRequested_StartsNoFurtherStep is the "a stopped
 // run starts no further step" test: an assignment whose cancel_requested_at
 // was already stamped (by Stop, before this dispatch goroutine got to run —
