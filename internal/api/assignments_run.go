@@ -512,6 +512,36 @@ func (h *AssignmentHandler) runAssignment(
 	body createAssignmentBody,
 	target targetAgentInfo,
 ) {
+	// Cross-surface exclusivity: at most one live RunAgent exec per AGENT,
+	// matching chatbridge.Bridge's per-chat guard on the chat-send door (see
+	// chatbridge.RunGate's doc). Two runAssignment calls for the SAME agent
+	// — from /assign, an @mention, or a chat send racing an assignment —
+	// would otherwise both reach setupTmuxExec and race the identical tmux
+	// session name + /tmp scratch files (orchestrator.TmuxSessionName is
+	// keyed by agent slug alone, with no chat/run/mission component), so the
+	// second exec's `tmux kill-session` tears down the first run's live
+	// session mid-turn. Claimed FIRST, before the pre_task_delegation hook
+	// or any DB write, so a losing call spends nothing beyond this check —
+	// same "cheapest check first" placement as the hook comment below.
+	//
+	// h.runGate is nil only when a caller hasn't wired SetRunGate (tests,
+	// or a build that predates it); nil is fail-open (pre-existing
+	// unguarded behaviour) rather than fail-closed, matching h.provisioner
+	// and h.resolver's nil handling elsewhere in this file.
+	if h.runGate != nil {
+		if !h.runGate.TryStart(target.ID) {
+			reason := fmt.Sprintf(
+				"agent %s already has a live run in progress; refusing to start a second "+
+					"concurrent exec into the same agent container/tmux session — retry once "+
+					"the current run finishes", body.TargetSlug)
+			h.logger.Info("assignment refused: agent busy",
+				"assignment_id", assignmentID, "target", body.TargetSlug, "agent_id", target.ID)
+			h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "", reason, nil)
+			return
+		}
+		defer h.runGate.End(target.ID)
+	}
+
 	// pre_task_delegation: the one point every delegation door (sidecar
 	// /assign's Create, its dispatch-pump retry, the mission engine's
 	// DispatchAssignment, and the @mention DispatchMention) converges on

@@ -364,6 +364,13 @@ var startCmd = &cobra.Command{
 		// announces steering_queued on the chat's WS session channel.
 		if apiRouter := srv.APIRouter(); apiRouter != nil {
 			apiRouter.SetSteerer(bridge)
+			// Share the per-agent exclusivity gate with AssignmentHandler
+			// (F51): a chat send and an /assign or @mention dispatch for
+			// the same agent must not both reach the tmux exec path at
+			// once. See chatbridge.RunGate's doc comment.
+			if assign := apiRouter.Assignments(); assign != nil {
+				assign.SetRunGate(bridge.RunGate())
+			}
 		}
 		bridge.SetSteerBroadcaster(srv.WSHub())
 

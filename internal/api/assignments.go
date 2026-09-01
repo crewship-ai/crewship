@@ -72,6 +72,17 @@ type AssignmentHandler struct {
 	// waits on it; it exists so shutdown (and tests) can drain in-flight
 	// dispatches instead of leaving them racing the DB teardown.
 	dispatchWG sync.WaitGroup
+
+	// runGate is the cross-surface per-AGENT exclusivity gate shared with
+	// chatbridge.Bridge (SetRunGate wires it to Bridge.RunGate() at server
+	// boot, same setter-injection idiom as SetProvisioner/SetSteerBroadcaster
+	// — the Bridge is constructed after this handler in the boot sequence).
+	// nil is tolerated (mirrors provisioner/resolver: tests and any caller
+	// that doesn't wire it get the pre-existing, unguarded behaviour) rather
+	// than defaulting to a private instance, because a private instance
+	// would claim exclusively against itself and never see chat-side runs at
+	// all — silently defeating the guard while looking wired up.
+	runGate *chatbridge.RunGate
 }
 
 // WaitDispatches blocks until every async dispatch goroutine spawned so
@@ -114,6 +125,13 @@ func (h *AssignmentHandler) SetResolver(rz agentConfigResolver) {
 // image is available. Wired at server boot to the ProvisioningHandler.
 func (h *AssignmentHandler) SetProvisioner(p crewProvisioner) {
 	h.provisioner = p
+}
+
+// SetRunGate wires the cross-surface per-agent exclusivity gate shared with
+// chatbridge.Bridge — see runGate's field doc for why nil is a tolerated,
+// unguarded fallback rather than a private default.
+func (h *AssignmentHandler) SetRunGate(g *chatbridge.RunGate) {
+	h.runGate = g
 }
 
 // SetJournal wires a journal emitter for run lifecycle events. nil maps
