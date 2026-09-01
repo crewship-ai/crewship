@@ -64,7 +64,7 @@ func TestSecuritySidecarVsDirectEnvIsolation(t *testing.T) {
 	}
 
 	// Direct env: MUST contain real keys
-	cred := &Credential{ID: "c1", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: anthKey}
+	cred := &Credential{ID: "c1", Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: anthKey}
 	directEnv := BuildEnvVars(req, cred)
 	found := false
 	for _, e := range directEnv {

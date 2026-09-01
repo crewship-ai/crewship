@@ -23,6 +23,7 @@ package orchestrator
 //	exec_env.go:210      injectMCPCredentialEnvVars  — MCP ${VAR} env injection
 //	exec_env.go:487      BuildEnvVarsSidecar         — the agent's env block
 //	exec_env.go:1207     AgentEnvCredentialExposures — the operator's posture view
+//	exec_env.go:~41      BuildEnvVars                — the non-sidecar agent env block
 //	exec_sidecar.go:354  buildCredFileScript         — /secrets file delivery
 //	secrets_cleanup.go:77 hasFileMountedCreds        — post-run scrub accounting
 //
@@ -638,5 +639,78 @@ func TestBypass_UnclassifiedTypeNeverReachesEnvViaOAuthShape(t *testing.T) {
 					"withheld unclassified OAuth-shaped credential (%+v)", keeper, exp)
 			}
 		}
+	}
+}
+
+// TestBypass_UnclassifiedTypeNeverReachesEnvViaBuildEnvVars covers the FOURTH
+// selector CodeRabbit's review of #2246 found still unguarded: BuildEnvVars
+// (exec_env.go), the non-sidecar env builder. Unlike BuildEnvVarsSidecar it
+// never took a keeperEnabled parameter and never consulted credpolicy at
+// all — every credential's plaintext went straight into the env,
+// unconditionally, for both the "activeCred" slot and every other credential
+// on the request.
+//
+// Why this path matters as much as the sidecar one: a worker sub-agent
+// dispatched with SkipSidecar=true (internal/api/query_handler.go) takes
+// exactly this path even though the crew's sidecar is already running in the
+// shared container — orchestrator_run.go's ensureSidecar computes
+// sidecarEnabled=false and calls BuildEnvVars instead of
+// BuildEnvVarsSidecar. Pre-fix, the SAME credential in the SAME Keeper state
+// was withheld from the parent agent (via BuildEnvVarsSidecar's
+// credEnvDeliverable gate) and handed to its sub-agent anyway (via this
+// function's total absence of any gate) — a credential with no explicit
+// credpolicy row leaked to whichever agent happened to run without starting
+// its own sidecar.
+func TestBypass_UnclassifiedTypeNeverReachesEnvViaBuildEnvVars(t *testing.T) {
+	t.Parallel()
+
+	types := append([]string{}, caseVariantSecretTypes...)
+	types = append(types, novelSecretTypes...)
+
+	for _, ty := range types {
+		name := ty
+		if name == "" {
+			name = "(empty type column)"
+		}
+		name = strings.ReplaceAll(strings.ReplaceAll(name, "\n", "\\n"), "\t", "\\t")
+
+		t.Run("activeCred/type="+name, func(t *testing.T) {
+			t.Parallel()
+			cred := gatedCred(ty)
+			env := BuildEnvVars(AgentRunRequest{AgentSlug: "riley", CLIAdapter: "CLAUDE_CODE"}, &cred)
+			if envName, leaked := envCarries(env, bypassCanary); leaked {
+				t.Errorf("type %q: BuildEnvVars wrote the unclassified activeCred's plaintext "+
+					"into the agent env as %s= — the non-sidecar path must consult credpolicy "+
+					"like every other selector (exec_env.go BuildEnvVars)", ty, envName)
+			}
+			if partName, leaked := envCarries(env, bypassPartCanary); leaked {
+				t.Errorf("type %q: BuildEnvVars wrote the unclassified activeCred's SECRET part "+
+					"into the agent env as %s=", ty, partName)
+			}
+		})
+
+		t.Run("otherCredential/type="+name, func(t *testing.T) {
+			t.Parallel()
+			cred := gatedCred(ty)
+			req := AgentRunRequest{
+				AgentSlug:   "riley",
+				CLIAdapter:  "CLAUDE_CODE",
+				Credentials: []Credential{cred},
+			}
+			// activeCred nil: this credential is only reachable through the
+			// req.Credentials loop, the second unguarded site in the function.
+			env := BuildEnvVars(req, nil)
+			if envName, leaked := envCarries(env, bypassCanary); leaked {
+				t.Errorf("type %q: BuildEnvVars wrote an unclassified credential's plaintext "+
+					"into the agent env as %s= via the req.Credentials loop — a worker sub-agent "+
+					"dispatched with SkipSidecar=true takes exactly this path, so the same "+
+					"credential in the same Keeper state is withheld from a sidecar-built parent "+
+					"env and delivered anyway to its sub-agent (exec_env.go BuildEnvVars)", ty, envName)
+			}
+			if partName, leaked := envCarries(env, bypassPartCanary); leaked {
+				t.Errorf("type %q: BuildEnvVars wrote an unclassified credential's SECRET part "+
+					"into the agent env as %s= via the req.Credentials loop", ty, partName)
+			}
+		})
 	}
 }
