@@ -701,6 +701,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `routines.missed` channel category — once three consecutive failures show
   the path is broken rather than a blip. A run that started and then failed
   is not counted; it already has its own failure entry.
+- **Shipped surfaces stop claiming what they cannot show.** The Runs view's
+  header no longer says it spans routine runs — `GET /api/v1/runs` excludes
+  them by construction, so the honest label is the fix until the read side
+  changes. The three issue lifecycle events the server already emitted
+  (`issue.created`, `issue.deleted`, `issue.started`) now reach the browser
+  instead of being dropped by the realtime allowlist, and a guard test fails
+  when an emitted issue event is left unregistered. A schedule that the
+  circuit breaker disabled now shows its reason, failure streak, catch-up
+  policy and wake statistics — read-only; the editor is separate work.
 
   **Two regressions in the first cut of this fix, found in review and fixed
   in the same PR.** First, the registry generator only scanned
