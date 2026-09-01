@@ -649,6 +649,40 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   no longer tells the operator to treat the bundle as suspect — and says
   "more" rather than always "fewer" when a table landed extra rows rather
   than too few.
+- **The crew's shared credential store had no agent dimension, so one member's
+  endpoint credential answered another member's model call (#2052).** One
+  sidecar serves a whole crew container, and `CredStore.Select` took a provider
+  and nothing else: the credential a model call got was whichever one a
+  round-robin counter landed on, not one the calling agent had been granted.
+  While every provider had a fixed vendor upstream, that decided only whose key
+  paid. `OPENAI_COMPAT` takes its upstream FROM the credential, so it also
+  decided where the prompt went — agent A's traffic to agent B's gateway,
+  authenticated with B's key, with B's host allowlisted by #2051's union so
+  there was not even a `403` to notice. `docs/architecture.mdx` had described
+  the store as one "an agent can only read credentials its `agent_id` was
+  granted" throughout; that was the intent, never the code.
+
+  Every credential now travels with the crew members it was granted to, and the
+  store refuses to serve one to anybody else. The calling agent is resolved
+  from its own per-agent route token (#812), which the orchestrator derives per
+  agent and which no process sharing the container can forge, so the check
+  cannot be talked out of by the request. A member holding no credential for
+  the provider is refused with `503 no credential available` — a loud refusal
+  beats a silent crossover — and a caller whose identity cannot be established
+  at all (a sidecar running without route identity) is served crew-wide
+  credentials only, never one scoped to a named agent.
+
+  The grant you already made is the scope: a credential linked to the crew, or
+  bound at crew or workspace scope, reaches every member and stays available to
+  all of them; one granted to named agents reaches only those. Ownership is
+  computed per CREDENTIAL rather than per delivery, so every member of a crew
+  produces the same boot payload for the same credential — a value that differed
+  per member would move `sidecarConfigFingerprint` and restart the crew's shared
+  sidecar on every alternation between agents, which is the thrash #1160
+  removed. A grant covering every member of the crew is crew-wide in effect and
+  is delivered as such, which is the shape `autoAssignCredentials` leaves every
+  template-created crew in — so no existing crew's fingerprint moves and no
+  running sidecar restarts on upgrade.
 
 - **Restoring a bundle taken before the `issue_counters` re-key silently
   dropped every counter row (#2034).** `#1797` re-keyed `issue_counters`

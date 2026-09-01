@@ -581,6 +581,10 @@ func (h *InternalHandler) appendProxiedEndpointCredential(creds []mcpCredEntry, 
 		Provider: sidecarOpenAICompatProvider,
 		BaseURL:  ep.BaseURL,
 		Headers:  ep.Headers,
+		// #2052: the derived entry is only as crew-wide as the credential it
+		// came from. A per-agent ENDPOINT_URL override carries that member's
+		// grantees; the workspace default carries none and stays crew-wide.
+		AgentIDs: ep.AgentIDs,
 	}), true
 }
 
@@ -824,6 +828,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 			Provider:       d.Provider,
 			Username:       d.Username,
 			LeaseExpiresAt: d.LeaseExpiresAt,
+			AgentIDs:       d.GrantedAgentIDs,
 		}
 		dec, err := decryptCredential(d.EncryptedValue)
 		if err != nil {

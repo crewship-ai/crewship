@@ -197,6 +197,13 @@ type deliveredCredential struct {
 	// Nil for a credential with no parts, which is every credential that
 	// exists today — see credential_field_delivery.go.
 	Fields []deliveredCredentialField
+	// GrantedAgentIDs is the set of crew members holding this credential
+	// (#2052), or nil when it reaches the whole crew. It is what lets the
+	// crew-wide sidecar CredStore refuse to serve one member's endpoint
+	// credential to another. Computed per CREDENTIAL, so every member of the
+	// crew sees the same value — see credential_grantees.go for why that is not
+	// optional.
+	GrantedAgentIDs []string
 	// FieldConflicts are the parts that were refused a name. Carried rather
 	// than logged at the source so the caller, which knows the agent and has a
 	// logger, can report them; a part that vanishes with no trace is the exact
@@ -313,6 +320,20 @@ func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) (
 	rows.Close()
 	if err := attachDeliveredCredentialFields(ctx, db, out); err != nil {
 		return nil, nil, err
+	}
+
+	// The agent dimension the crew-wide sidecar CredStore needs (#2052).
+	// Attached HERE, at the same chokepoint the set itself is derived, for the
+	// reason this file's header gives: a second derivation elsewhere is always
+	// the one that misses a source. Skipped entirely when nothing was delivered.
+	if len(out) > 0 {
+		grantees, err := loadCrewCredentialGrantees(ctx, db, agentID)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i := range out {
+			out[i].GrantedAgentIDs = grantees.grantedTo(out[i].ID, agentID)
+		}
 	}
 	return out, notices, nil
 }

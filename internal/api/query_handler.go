@@ -663,6 +663,7 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 			Type:           d.Type,
 			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
+			AgentIDs:       d.GrantedAgentIDs,
 		}
 		dec, err := encryption.Decrypt(d.EncryptedValue)
 		if err != nil {

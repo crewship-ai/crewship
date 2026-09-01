@@ -27,7 +27,7 @@ func TestCredStoreSelectConcurrentRoundRobinEven(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			c := cs.Select(ProviderAnthropic)
+			c := cs.Select(ProviderAnthropic, "")
 			if c == nil {
 				t.Errorf("Select returned nil")
 				return

@@ -218,6 +218,12 @@ type credentialResponse struct {
 	// threaded through to the orchestrator or the crew sidecar receives no
 	// deadline and holds a leased key for the container's whole life.
 	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	// AgentIDs mirrors mcpCredEntry.AgentIDs: the crew members this credential
+	// is granted to (#2052), empty meaning crew-wide. Dropped here it would
+	// reach the orchestrator empty, the boot payload would call every
+	// credential crew-wide, and the sidecar's CredStore would go back to
+	// serving one member's endpoint credential to another with nothing said.
+	AgentIDs []string `json:"agent_ids,omitempty"`
 	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
 	// §2.2). Absent for every credential that has none, so an unchanged
 	// credential decodes to an unchanged struct. Dropping this key here would
@@ -501,6 +507,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			Headers:        c.Headers,
 			Username:       c.Username,
 			LeaseExpiresAt: c.LeaseExpiresAt,
+			AgentIDs:       c.AgentIDs,
 		}
 		for _, f := range c.Fields {
 			creds[i].Fields = append(creds[i].Fields, orchestrator.CredentialField{

@@ -958,6 +958,15 @@ func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider
 // Select picks the LOWEST Priority and round-robins within that tier, so
 // returning the first slice match could name a credential the proxy will never
 // choose. Ties keep slice order, which is Select's own pass-2 order.
+//
+// Select's third dimension — the acting agent (#2052) — needs no mirror here,
+// and that is a property of the input rather than an omission. req.Credentials
+// IS one agent's delivery, and the API tier guarantees the delivering agent is
+// among a credential's grantees (credential_grantees.go, grantedTo), so every
+// entry in this slice is one the sidecar would serve to THIS run. What changed
+// is on the other side: the store may now refuse a peer's credential it would
+// once have handed over, which can only make the set the proxy chooses from
+// smaller than the set this function sees.
 func credentialFor(req AgentRunRequest, s llmroute.Spec) (Credential, bool) {
 	now := time.Now()
 	var best Credential
@@ -1006,6 +1015,14 @@ func credentialLeaseLapsed(cred Credential, now time.Time) bool {
 // happened to return would 403 every other request, with both credentials valid
 // — the same failure as naming the wrong host, arriving intermittently, which is
 // harder to diagnose than never working at all.
+//
+// Still EVERY one after #2052 scoped Select by acting agent. The rotation this
+// exists for happens within one agent's own eligible set, and this slice is one
+// agent's delivery, so the hosts it names remain exactly the ones the sidecar
+// can dial for this run. Scoping can only remove a host from the sidecar's
+// reach, never add one, so the allowlist stays a superset — the safe direction:
+// a host on the list that is never dialled costs nothing, a host dialled that is
+// not on the list is a 403 on a valid credential.
 func credentialsFor(req AgentRunRequest, s llmroute.Spec) []Credential {
 	now := time.Now()
 	var out []Credential

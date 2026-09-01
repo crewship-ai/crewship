@@ -182,7 +182,7 @@ func TestSecurityEmptyCredentialToken(t *testing.T) {
 	cs.Load([]Credential{
 		{ID: "c1", Provider: ProviderAnthropic, Token: ""},
 	})
-	cred := cs.Select(ProviderAnthropic)
+	cred := cs.Select(ProviderAnthropic, "")
 	if cred == nil {
 		t.Fatal("expected credential")
 	}
@@ -406,7 +406,7 @@ func TestSecurityConcurrentCredentialRotation(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
-				cred := cs.Select(ProviderAnthropic)
+				cred := cs.Select(ProviderAnthropic, "")
 				if cred == nil {
 					// May happen during Load, that's OK
 					continue

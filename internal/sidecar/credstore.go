@@ -65,10 +65,57 @@ type Credential struct {
 	// slots, so they never reach the agent env. Empty for every built-in.
 	Headers map[string]string `json:"headers,omitempty"`
 
+	// AgentIDs is the set of crew members this credential was granted to
+	// (#2052). EMPTY means crew-wide — a credential linked to the crew, or bound
+	// at crew/workspace scope, which every member receives — and that is the
+	// shape every credential in the store had before this field existed, so an
+	// older boot payload keeps working unchanged.
+	//
+	// The store is crew-wide by construction (one sidecar per crew container),
+	// so without this Select answered "which provider?" and nothing else: the
+	// round-robin handed whichever credential came next to whoever asked. For
+	// the fixed-host providers that decided whose key paid; for OPENAI_COMPAT,
+	// whose upstream comes FROM the credential, it decided which gateway
+	// received the prompt.
+	//
+	// The set is the whole crew's grantees for this credential, not "the agent
+	// whose exec booted the sidecar" — the API tier computes it per credential
+	// and it is therefore identical no matter which member's exec built the
+	// payload. That is what keeps it out of the shared-sidecar restart thrash
+	// (#1160): a payload that differed per booting member would change the
+	// config fingerprint on every alternation.
+	//
+	// `omitempty` is load-bearing for the same reason as BaseURL's: a crew-wide
+	// credential must serialise byte-identically to the pre-#2052 payload, so
+	// the config fingerprint of an existing crew does not move.
+	AgentIDs []string `json:"agent_ids,omitempty"`
+
 	// leaseDeadline is LeaseExpiresAt parsed once at Load, so the hot Select path
 	// does no time parsing. Zero value means "no lease" (standing). Unexported,
 	// so it never round-trips through the boot JSON.
 	leaseDeadline time.Time
+}
+
+// grantedTo reports whether agentID may be served this credential.
+//
+// A credential with no agent ids is crew-wide and answers for every member,
+// including a caller whose identity could not be resolved. A credential WITH
+// agent ids answers only for the named ones — and never for an unidentified
+// caller, which is the least-privilege reading of "I cannot tell who is
+// asking". See Select for where that case comes from.
+func (c *Credential) grantedTo(agentID string) bool {
+	if len(c.AgentIDs) == 0 {
+		return true
+	}
+	if agentID == "" {
+		return false
+	}
+	for _, id := range c.AgentIDs {
+		if id == agentID {
+			return true
+		}
+	}
+	return false
 }
 
 // leaseLapsed reports whether this credential's lease has expired as of now.
@@ -130,11 +177,32 @@ func (cs *CredStore) Load(creds []Credential) {
 	cs.rr.Clear()
 }
 
-// Select picks the next active credential for a provider.
+// Select picks the next active credential for a provider, from among the ones
+// the ACTING agent is granted.
 // Credentials are grouped by Priority (lower = higher priority).
 // Within the highest-priority tier, round-robin rotation is used.
 // Returns nil if no credential is available.
-func (cs *CredStore) Select(provider ProviderType) *Credential {
+//
+// actingAgentID is the crew member behind the request, resolved from its
+// per-agent route token (Proxy.authorizeLLMRoute → Server.llmRouteIdentity).
+// It is required, not optional, and the reason is #2052: this store is
+// crew-wide — one sidecar per crew container — so before it existed the answer
+// to "which credential?" was decided by a round-robin counter rather than by
+// who was asking. A crossed credential used to mean only that the wrong key
+// paid, because every provider had a fixed vendor upstream; OPENAI_COMPAT takes
+// its upstream FROM the credential, so it now also means the prompt is sent to
+// another member's gateway. Nothing errors: the #2051 allowlist union covers
+// the peer's host, so there is not even a 403 to notice.
+//
+// An EMPTY actingAgentID means the caller could not be identified — a
+// token-less legacy deployment, where authorizeLLMRoute still falls through
+// (see its comment: absence is a legacy fallback only while this sidecar
+// advertises no keyed configuration). Such a caller is served crew-wide
+// credentials and nothing that names an agent. That is deliberately not "serve
+// everything": if the acting member cannot be established, the credentials an
+// operator scoped to ONE member are exactly the ones that must not be handed
+// out on a guess.
+func (cs *CredStore) Select(provider ProviderType, actingAgentID string) *Credential {
 	// READ lock only: the top-tier scan reads cs.creds, and round-robin now
 	// advances an atomic per-provider counter (not a map index), so concurrent
 	// Selects don't serialize on a write lock (#1081). Load/Remove/Reap still
@@ -153,11 +221,17 @@ func (cs *CredStore) Select(provider ProviderType) *Credential {
 	// Pass 1: find the best (lowest-numeric) Priority for this provider and
 	// count how many creds sit in that top tier. Done in a single scan instead
 	// of building an intermediate `candidates` slice.
+	//
+	// The ownership filter runs in BOTH passes for the same reason the lease
+	// filter does: applied to one pass only, a peer's credential would still
+	// inflate the tier count (and so shift the round-robin target) even though
+	// it can never be returned — which reads as an intermittent 503 on a crew
+	// whose credentials are all valid.
 	bestPriority := 0
 	topCount := 0
 	for i := range cs.creds {
 		c := &cs.creds[i]
-		if c.Provider != provider || c.leaseLapsed(now) {
+		if c.Provider != provider || c.leaseLapsed(now) || !c.grantedTo(actingAgentID) {
 			continue
 		}
 		if topCount == 0 || c.Priority < bestPriority {
@@ -174,6 +248,12 @@ func (cs *CredStore) Select(provider ProviderType) *Credential {
 	// Atomic round-robin within the top tier. LoadOrStore lazily creates the
 	// counter for a provider on first use; AddUint64-1 yields a 0-based ticket
 	// so the first Select maps to target 0 (unchanged from the old idx map).
+	//
+	// The counter stays keyed by PROVIDER, not by (provider, agent). Rotation is
+	// about spreading load across a provider's keys, and each member's eligible
+	// set is a subset of the same tier, so one ticket sequence still visits every
+	// credential a member holds; a per-agent counter would add an unbounded map
+	// keyed by a value from the request path for no distributional gain.
 	ctr, _ := cs.rr.LoadOrStore(provider, new(uint64))
 	target := int((atomic.AddUint64(ctr.(*uint64), 1) - 1) % uint64(topCount))
 
@@ -183,7 +263,8 @@ func (cs *CredStore) Select(provider ProviderType) *Credential {
 	seen := 0
 	for i := range cs.creds {
 		c := &cs.creds[i]
-		if c.Provider != provider || c.Priority != bestPriority || c.leaseLapsed(now) {
+		if c.Provider != provider || c.Priority != bestPriority || c.leaseLapsed(now) ||
+			!c.grantedTo(actingAgentID) {
 			continue
 		}
 		if seen == target {

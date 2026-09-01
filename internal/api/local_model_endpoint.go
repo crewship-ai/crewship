@@ -14,6 +14,15 @@ type localModelEndpoint struct {
 	BaseURL string
 	APIKey  string
 	Headers map[string]string
+	// AgentIDs carries the SOURCE credential's crew grantees (#2052) so the
+	// OPENAI_COMPAT entry appendProxiedEndpointCredential derives from it is
+	// scoped the same way the ENDPOINT_URL credential was. Nil for the
+	// workspace default, which applies to every agent.
+	//
+	// This is the per-agent endpoint credential in #2052's title: precedence 1
+	// below is an override held by ONE member, and the entry it produces lands
+	// in a CredStore the whole crew shares under a fixed synthetic id.
+	AgentIDs []string
 }
 
 // resolveLocalModelEndpoint returns the OpenAI-compatible endpoint a coding
@@ -46,6 +55,10 @@ func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Log
 			continue
 		}
 		if ep, ok := endpointFromValue(c.Value); ok {
+			// The derived OPENAI_COMPAT entry inherits this credential's crew
+			// scope (#2052): an endpoint granted to one member must not answer
+			// another member's model call out of the shared CredStore.
+			ep.AgentIDs = c.AgentIDs
 			return ep
 		}
 	}

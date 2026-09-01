@@ -430,9 +430,13 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		provider = spec.ID
-		cred := p.credStore.Select(ProviderType(spec.ID))
+		// The ACTING agent, not the store, decides which credential answers
+		// (#2052): the store is crew-wide, and a credential an operator granted
+		// to one member must not be handed to a sibling because a round-robin
+		// counter landed on it.
+		cred := p.credStore.Select(ProviderType(spec.ID), actorID)
 		if cred == nil {
-			p.logger.Error("no credential available", "provider", provider)
+			p.logger.Error("no credential available", "provider", provider, "agent_id", actorID)
 			http.Error(w, "no credential available for "+provider, http.StatusServiceUnavailable)
 			return
 		}
@@ -691,9 +695,15 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	if !allowed {
 		return
 	}
-	cred := p.credStore.Select(ProviderType(s.ID))
+	// Scoped to the acting agent (#2052). This is the path that matters most:
+	// OPENAI_COMPAT is reached here, and its upstream comes from the credential,
+	// so a credential picked for the wrong member sends this agent's prompt to
+	// another member's gateway with that member's key — allowlisted (the #2051
+	// union covers it) and therefore silent.
+	cred := p.credStore.Select(ProviderType(s.ID), actorID)
 	if cred == nil && s.RequireCredential {
-		p.logger.Error("no credential available for reverse proxy", "provider", s.ID, "path", r.URL.Path)
+		p.logger.Error("no credential available for reverse proxy",
+			"provider", s.ID, "path", r.URL.Path, "agent_id", actorID)
 		http.Error(w, "no credential available for "+s.ID, http.StatusServiceUnavailable)
 		return
 	}
