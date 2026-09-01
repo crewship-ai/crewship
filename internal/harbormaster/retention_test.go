@@ -17,6 +17,9 @@ import (
 type seedRow struct {
 	id, workspaceID, status string
 	decidedAgeDays          int // ignored when status == "pending"
+	// kind defaults to KindToolCall when empty, matching every existing
+	// caller — only tests that specifically care about kind need to set it.
+	kind Kind
 }
 
 func seedApprovalRows(t *testing.T, db *sql.DB, rows []seedRow) {
@@ -28,11 +31,15 @@ func seedApprovalRows(t *testing.T, db *sql.DB, rows []seedRow) {
 				Add(-time.Duration(r.decidedAgeDays) * 24 * time.Hour).
 				Format(timeFmt)
 		}
+		kind := r.kind
+		if kind == "" {
+			kind = KindToolCall
+		}
 		if _, err := db.Exec(
 			`INSERT INTO approvals_queue
 				(id, workspace_id, requested_by, kind, reason, status, decided_at, created_at)
-			 VALUES (?, ?, 'u1', 'tool_call', 'because', ?, ?, datetime('now'))`,
-			r.id, r.workspaceID, r.status, decidedAt,
+			 VALUES (?, ?, 'u1', ?, 'because', ?, ?, datetime('now'))`,
+			r.id, r.workspaceID, string(kind), r.status, decidedAt,
 		); err != nil {
 			t.Fatalf("seed approval row %s: %v", r.id, err)
 		}
@@ -104,6 +111,49 @@ func TestSweepApprovalsRetention_DeletesAgedTerminalRowsSparesFreshAndPending(t 
 		if !remaining[kept] {
 			t.Errorf("%s should have survived the sweep, was deleted", kept)
 		}
+	}
+}
+
+// TestSweepApprovalsRetention_SparesAutonomyGateRows pins the security fix
+// for the regression CodeRabbit flagged on #2254: a terminal
+// kind=autonomy_gate row is the ONLY thing stopping POST
+// .../missions/{id}/start from dispatching a mission that was denied (or
+// timed out) under an autonomy hold — see autonomyGateApproved in
+// internal/api/internal_autonomy_gate.go and the hasHold-not-approved 403
+// in internal/api/missions_internal.go. Sweeping it on the ordinary 90-day
+// terminal-row clock reintroduces "an unattended hold turning into a green
+// light", just on a delay. An ordinary terminal row of another kind, aged
+// the same amount, must still be swept — the carve-out is scoped to
+// autonomy_gate specifically, not a blanket exemption.
+func TestSweepApprovalsRetention_SparesAutonomyGateRows(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+
+	seedApprovalRows(t, db, []seedRow{
+		{id: "old-gate-denied", workspaceID: "ws_test", status: "denied", decidedAgeDays: 120, kind: KindAutonomyGate},
+		{id: "old-gate-timeout", workspaceID: "ws_test", status: "timeout", decidedAgeDays: 400, kind: KindAutonomyGate},
+		{id: "old-toolcall", workspaceID: "ws_test", status: "denied", decidedAgeDays: 120, kind: KindToolCall},
+	})
+
+	deleted, capped, err := SweepApprovalsRetention(context.Background(), db, "ws_test", DefaultApprovalsRetentionDays)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if capped {
+		t.Fatalf("sweep reported capped on a 3-row backlog")
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1 (old-toolcall only)", deleted)
+	}
+
+	remaining := approvalRowIDs(t, db, "ws_test")
+	for _, held := range []string{"old-gate-denied", "old-gate-timeout"} {
+		if !remaining[held] {
+			t.Errorf("%s is an autonomy_gate row and must survive the sweep regardless of age — it is the sole gate on mission start, not history", held)
+		}
+	}
+	if remaining["old-toolcall"] {
+		t.Errorf("old-toolcall is an ordinary terminal row and should have been swept")
 	}
 }
 

@@ -3906,7 +3906,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `crewship workspace update --approvals-retention-days`, where `0` means
   keep forever — the same as its `--credential-audit-retention-days` and
   `--audit-log-retention-days` neighbours on that command), a pending row is
-  never touched regardless of age, and the Article 17 cascade
+  never touched regardless of age, a `kind=autonomy_gate` row is never swept
+  regardless of age or status either — for a mission target that row is the
+  hold itself (`autonomyGateApproved` treats "no row" as "proceed"), not
+  history, so sweeping a denied or timed-out one would eventually let a
+  mission that was never approved start running unattended — and the
+  Article 17 cascade
   (`DELETE /api/v1/admin/users/{userId}/data`) now erases a subject's rows
   by `requested_by`/`decided_by` since the table has no `data_subject_id`
   column. Separately, and this is a behaviour change an integrator will

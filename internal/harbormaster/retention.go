@@ -65,16 +65,47 @@ package harbormaster
 //
 // Only rows in a terminal status (approved/denied/timeout/cancelled) with a
 // non-NULL decided_at are candidates. A pending row is never touched no
-// matter how old its created_at — the timeout sweeper (store_sweep.go) is
-// what retires a stale pending row to 'timeout'; deleting a still-pending
-// approval out from under an agent waiting on it would strand the wait
-// forever instead of failing it deterministically.
+// matter how old its created_at — not because deleting one would "strand"
+// an agent's wait (it would not: gate.go's poll loop already treats a
+// vanished row as denied and fails the wait deterministically, which is
+// exactly the behaviour the GDPR erasure cascade added alongside this sweep
+// relies on when IT deletes a pending row for a right-to-erasure request).
+// The real reason is that a pending row is the operator's only handle on an
+// async gate still awaiting a decision — retiring it is the timeout
+// sweeper's job (store_sweep.go flips a stale pending row to 'timeout'),
+// not retention's; retention only ever removes rows that are already
+// terminal.
+//
+// # kind=autonomy_gate is carved out of the sweep entirely
+//
+// Every other kind's row is pure history once it is terminal: the decision
+// is durably replayed elsewhere (journal_entries, reward-history) and the
+// row itself no longer gates anything. kind=autonomy_gate is the one
+// exception — for a mission target, the row IS the hold. Deny (or let the
+// timeout sweeper flip) an autonomy_gate row and NO marker is written on the
+// mission itself (applyAutonomyGateDecisionTx, internal_autonomy_gate.go);
+// the mission stays PLANNING and the terminal approvals_queue row is the
+// ONLY thing stopping POST .../missions/{id}/start from dispatching it
+// (autonomyGateApproved + missions_internal.go's hasHold-not-approved 403).
+// Sweep that row on the ordinary 90-day terminal-row clock and a denied
+// mission starts running, unattended, three months late.
+//
+// sweepableApprovalKinds is therefore an ALLOWLIST, not a denylist. A
+// denylist ("sweep everything except autonomy_gate") sweeps a brand new kind
+// by default the moment someone adds one — silence is exactly how this bug
+// shipped the first time. An allowlist fails the other way: a new kind is
+// simply never swept until someone deliberately opts it in here, which is a
+// missed cleanup, not a load-bearing row vanishing out from under a live
+// authorization check. kind carries no CHECK constraint (see
+// KindAutonomyGate's doc comment), so nothing else stops a new value from
+// reaching this column.
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -112,6 +143,30 @@ const (
 	// realistic daily accrual of decided approvals.
 	approvalsRetentionMaxBatches = 100
 )
+
+// sweepableApprovalKinds is the ALLOWLIST of approvals_queue.kind values the
+// retention sweep is permitted to delete once a row is terminal and aged
+// out. See the package comment "kind=autonomy_gate is carved out of the
+// sweep entirely" for why this is an allowlist rather than "every kind
+// except autonomy_gate": a new Kind must be deliberately added here before
+// its terminal rows are ever eligible, so a kind nobody has reasoned about
+// yet defaults to kept, not swept.
+//
+// KindAutonomyGate is deliberately absent — its terminal row is the sole
+// gate on POST .../missions/{id}/start, not history (see the package
+// comment). KindEphemeralHire is present: it was checked against the same
+// question (does anything read a terminal row of this kind back as
+// authoritative state?) and, unlike autonomy_gate, its own doc comment and
+// store_sweep.go confirm the staged agent's own row carries its inert
+// state — the approvals_queue row is not read back after the decision.
+var sweepableApprovalKinds = []Kind{
+	KindToolCall,
+	KindCostThreshold,
+	KindDestructiveOp,
+	KindTargetEnvironment,
+	KindCustom,
+	KindEphemeralHire,
+}
 
 // SweepApprovalsRetention deletes terminal approvals_queue rows for one
 // workspace whose decided_at is older than (now - retentionDays), in
@@ -163,10 +218,23 @@ func SweepApprovalsRetention(
 	// comment warns about.
 	cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour).Format(timeFmt)
 
-	const stmt = `DELETE FROM approvals_queue WHERE id IN (
+	// kind IN (...) is built from sweepableApprovalKinds rather than a fixed
+	// placeholder count so the allowlist has exactly one place to edit — see
+	// the package comment and sweepableApprovalKinds' doc comment.
+	placeholders := make([]string, len(sweepableApprovalKinds))
+	args := make([]any, 0, len(sweepableApprovalKinds)+3)
+	args = append(args, workspaceID)
+	for i, k := range sweepableApprovalKinds {
+		placeholders[i] = "?"
+		args = append(args, string(k))
+	}
+	args = append(args, cutoff, approvalsRetentionBatchRows)
+
+	stmt := `DELETE FROM approvals_queue WHERE id IN (
 		SELECT id FROM approvals_queue
 		WHERE workspace_id = ?
 		  AND status IN ('approved', 'denied', 'timeout', 'cancelled')
+		  AND kind IN (` + strings.Join(placeholders, ", ") + `)
 		  AND decided_at IS NOT NULL
 		  AND decided_at < ?
 		LIMIT ?
@@ -176,7 +244,7 @@ func SweepApprovalsRetention(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return deleted, false, ctxErr
 		}
-		res, execErr := db.ExecContext(ctx, stmt, workspaceID, cutoff, approvalsRetentionBatchRows)
+		res, execErr := db.ExecContext(ctx, stmt, args...)
 		if execErr != nil {
 			return deleted, false, fmt.Errorf("harbormaster: sweep approvals retention: %w", execErr)
 		}
