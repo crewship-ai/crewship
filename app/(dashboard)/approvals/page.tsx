@@ -10,6 +10,7 @@ import { ApprovalCard } from "@/components/features/approvals/approval-card"
 import { ApprovalDetail } from "@/components/features/approvals/approval-detail"
 import { useApprovals } from "@/hooks/use-approvals"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { isAdminTier } from "@/lib/permissions/tiers"
 import type { ApprovalRow, ApprovalStatus } from "@/lib/types/approvals"
 
 type FilterKey = "pending" | "decided" | "all"
@@ -25,20 +26,41 @@ const FILTERS: { key: FilterKey; label: string; apiStatus: ApprovalStatus }[] = 
  * approvals; clicking a card opens the right-side detail sheet.
  */
 export default function ApprovalsPage() {
-  const { workspaceId } = useWorkspace()
+  const { workspaceId, role } = useWorkspace()
   const searchParams = useSearchParams()
   const agentFilter = searchParams.get("agent_id")
   const [filter, setFilter] = useState<FilterKey>("pending")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
 
+  // GET /api/v1/approvals is roleManage (OWNER/ADMIN) server-side (#2233) —
+  // the same floor Decide/Cancel already had. Below that, don't even fetch
+  // (an enabled:false hook returns no error, so this can't be mistaken for
+  // the "not configured" empty state) and render an explicit access
+  // message instead of an empty "Inbox clear" that would misleadingly read
+  // as "there is nothing pending" rather than "you can't see this".
+  const canRead = isAdminTier(role)
   const apiStatus = FILTERS.find((f) => f.key === filter)?.apiStatus ?? "pending"
   const { rows, loading, error, notConfigured, refresh, patchRow } = useApprovals({
     status: apiStatus,
     workspaceId,
     pollMs: 15000,
-    enabled: Boolean(workspaceId),
+    enabled: Boolean(workspaceId) && canRead,
   })
+
+  if (!canRead) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-24 text-center">
+        <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
+          <Gavel className="h-4 w-4 text-muted-foreground/60" />
+        </div>
+        <div className="text-sm font-medium text-foreground/80">Approvals is an admin surface</div>
+        <div className="text-[11px] text-muted-foreground max-w-sm">
+          Only workspace owners and admins can review HITL approval requests.
+        </div>
+      </div>
+    )
+  }
 
   // "Decided" is pending=no — filter client-side because the backend
   // enumerates each decided status separately. Plus honour ?agent_id= from

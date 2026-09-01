@@ -682,6 +682,35 @@ empty value as "nothing to send" / "nothing to check," so every credential
 connected before this migration — MCP and every other OAuth provider
 (Google, Slack, GitHub, …) alike — keeps working exactly as it did.
 
+## 20260901134904 — Approvals retention window
+
+Adds `workspaces.approvals_retention_days`. `approvals_queue` had no
+retention of any kind — every terminal transition (approve/deny, cancel, the
+timeout sweeper, the sync-gate timeout) was an in-place `UPDATE` of
+`status`/`decided_*`; nothing was ever deleted, and rows were also
+`IntentInclude` for backup, so they survived into every bundle and restore.
+See issue #2233.
+
+The sweep (`internal/harbormaster/retention.go`) follows the shape of
+`internal/api/audit_retention.go` — a nullable per-workspace override, a
+daily ticker, bounded batched deletes — but resolves the column like
+`run_retention_days`, **not** like the audit pair:
+
+| Column | `NULL` or `0` means | Why |
+| --- | --- | --- |
+| `credential_audit_retention_days` / `audit_log_retention_days` | different things (`NULL` = default, `0` = keep forever) | Both are audit tables; an operator must be able to express "never delete" for a compliance record. |
+| `run_retention_days` / `approvals_retention_days` | the same thing (use the 90-day default) | Neither is a compliance record. Every terminal approval decision is already durably captured in the Crew Journal (`journal_entries`, via `AfterDecide`), so there is no operator intent a plain default can't already carry. |
+
+Only terminal rows (`status IN ('approved','denied','timeout','cancelled')`)
+with a non-`NULL` `decided_at` older than the window are ever deleted. A
+`pending` row is never touched regardless of age — that is the timeout
+sweeper's job (`internal/harbormaster/store_sweep.go`), and deleting a row an
+agent is still blocked on would strand the wait instead of failing it
+deterministically.
+
+`crewship workspace update --approvals-retention-days N` sets the override
+(`PATCH /api/v1/workspaces/{id}` — see [Workspaces](/api-reference/workspaces)).
+
 ## How to read this in operation
 
 When `crewshipd` starts, it logs each migration as it applies:

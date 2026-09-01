@@ -178,6 +178,15 @@ type workspaceResponse struct {
 	// internal/api/audit_retention.go.
 	CredentialAuditRetentionDays *int `json:"credential_audit_retention_days"`
 	AuditLogRetentionDays        *int `json:"audit_log_retention_days"`
+	// ApprovalsRetentionDays (#2233) is the per-workspace override for the
+	// approvals_queue retention sweep window in days. nil means "use
+	// harbormaster.DefaultApprovalsRetentionDays (90)" — see
+	// internal/harbormaster/retention.go. Unlike the audit pair above, an
+	// explicit 0 does NOT mean "keep forever"; it is treated the same as
+	// nil (the sweep resolves NULL-or-<=0 to the default) because
+	// approvals_queue is not a compliance record — every terminal decision
+	// is already durably captured in journal_entries.
+	ApprovalsRetentionDays *int `json:"approvals_retention_days"`
 	// Nested `_count` is the canonical shape the frontend consumes
 	// (#866.1). The flat `_count_*` keys are retained one release for
 	// back-compat with any older client and should be removed after.
@@ -212,6 +221,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			wm.role, wm.capabilities, w.allow_privileged_credentials,
 			w.run_retention_days, w.credential_audit_retention_days, w.audit_log_retention_days,
+			w.approvals_retention_days,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
@@ -233,6 +243,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
 			&ws.CreatedAt, &ws.UpdatedAt, &ws.CurrentUserRole, &capsJSON, &ws.AllowPrivilegedCredentials,
 			&ws.RunRetentionDays, &ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
+			&ws.ApprovalsRetentionDays,
 			&ws.CrewCount, &ws.AgentCount, &ws.MemberCount); err != nil {
 			replyInternalError(w, h.logger, "scan workspace", err)
 			return
@@ -266,6 +277,7 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials,
 			w.run_retention_days, w.credential_audit_retention_days, w.audit_log_retention_days,
+			w.approvals_retention_days,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
@@ -274,6 +286,7 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials,
 		&ws.RunRetentionDays, &ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
+		&ws.ApprovalsRetentionDays,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		if err == sql.ErrNoRows {

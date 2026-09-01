@@ -129,6 +129,12 @@ type updateWorkspaceRequest struct {
 	// internal/api/audit_retention.go.
 	CredentialAuditRetentionDays *int `json:"credential_audit_retention_days"`
 	AuditLogRetentionDays        *int `json:"audit_log_retention_days"`
+	// ApprovalsRetentionDays (#2233) — window for the approvals_queue
+	// retention sweep. nil leaves the column untouched. Like
+	// RunRetentionDays (and unlike the audit pair), 0 is rejected: there is
+	// no "keep forever" sentinel here, only "use the default" (nil) or a
+	// positive window — see internal/harbormaster/retention.go.
+	ApprovalsRetentionDays *int `json:"approvals_retention_days"`
 }
 
 // Update modifies workspace settings such as name, slug, logo, and preferred language.
@@ -171,6 +177,10 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AuditLogRetentionDays != nil && *req.AuditLogRetentionDays < 0 {
 		replyError(w, http.StatusBadRequest, "audit_log_retention_days must be 0 (keep forever) or a positive number of days")
+		return
+	}
+	if req.ApprovalsRetentionDays != nil && *req.ApprovalsRetentionDays <= 0 {
+		replyError(w, http.StatusBadRequest, "approvals_retention_days must be a positive number of days")
 		return
 	}
 
@@ -241,6 +251,9 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ub.Set("audit_log_retention_days", *req.AuditLogRetentionDays)
 	}
+	if req.ApprovalsRetentionDays != nil {
+		ub.Set("approvals_retention_days", *req.ApprovalsRetentionDays)
+	}
 	persisted := !ub.Empty()
 	if persisted {
 		query, args := ub.Build("workspaces", "id = ?", workspaceID)
@@ -255,6 +268,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials, w.run_retention_days,
 			w.credential_audit_retention_days, w.audit_log_retention_days,
+			w.approvals_retention_days,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
@@ -263,6 +277,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
 		&ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
+		&ws.ApprovalsRetentionDays,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		replyInternalError(w, h.logger, "get workspace after update", err)
@@ -297,6 +312,9 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AuditLogRetentionDays != nil {
 		changed = append(changed, "audit_log_retention_days")
+	}
+	if req.ApprovalsRetentionDays != nil {
+		changed = append(changed, "approvals_retention_days")
 	}
 	meta := map[string]interface{}{"fields": changed}
 	if req.AllowPrivilegedCredentials != nil {
