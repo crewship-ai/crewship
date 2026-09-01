@@ -298,6 +298,21 @@ quotes its own prompt back writes that text into the journal through
 them. Those are Layer-3 surfaces in the ordinary sense: the scrubber is
 what stands behind them.
 
+`peer.escalation` (raised by `POST /internal/escalations`, an internal
+sidecar-IPC route that — like the rest of that surface — carries a
+larger trusted payload and is left to its own per-handler cap rather
+than the public API's BodyCap) scrubs and bounds the same way: `reason`,
+`context`, and `metadata` in the payload, plus the summary line, are run
+through the credential scrubber and capped at 4096 characters each
+before the entry is written (#2238). This mirrors the inbox projection
+of the same escalation, which
+scrubs and bounds for the same reason but is not the concern here — the
+inbox row is deleted by the GDPR erasure cascade on request, while the
+journal row is explicitly excluded from it and, being hash-chained, has
+no after-the-fact redaction. Absent a write-time cap, `context` in
+particular — an arbitrary agent-supplied blob with no request-size limit
+on this route — would otherwise persist unbounded forever.
+
 For the keeper credential-use path (`/execute`), the scrubber additionally
 masks the **injected secret's own value** and its common encodings — literal,
 base64 (std/URL, padded and raw), base32, URL-escape, hex (lower/upper), and
