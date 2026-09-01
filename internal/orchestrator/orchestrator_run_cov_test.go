@@ -8,6 +8,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +17,9 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/provider"
+	_ "modernc.org/sqlite"
 )
 
 // ---- fakes ----
@@ -343,6 +346,153 @@ func TestRunAgent_ApprovalRequiredButApprovedProceeds(t *testing.T) {
 	}
 	if got := covRunStatus(t, st, "chat1"); got != "completed" {
 		t.Errorf("run status = %q, want completed", got)
+	}
+}
+
+// TestRunAgent_ApprovalGateScrubsAndBoundsUserPrompt is the regression test
+// for #2228: the approval-gate input used to carry
+// truncateStr(req.UserMessage, 500) verbatim, unscrubbed, into
+// approvals_queue.payload — weaker than the scrubbed 240-char preview
+// chat.user_message keeps one table over. A registered credential value
+// pasted into agent chat must not reach the gate input in the clear, in
+// EITHER of its two carriers: Args (which harbormaster also hashes into the
+// reward fingerprint, see the sibling #2234 test below) and Review (the
+// human-facing context introduced to fix #2234 without re-widening #2228).
+func TestRunAgent_ApprovalGateScrubsAndBoundsUserPrompt(t *testing.T) {
+	t.Parallel()
+	gate := &covGate{dec: ApprovalDecision{Approved: true}}
+	o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+	o.SetApprovalGate(gate)
+
+	const secret = "crewship-guard-approval-secret-4f8c1a9d"
+	req := covRunReq()
+	req.Credentials = []Credential{{ID: "c1", EnvVarName: "SOME_TOKEN", PlainValue: secret, Type: "API_KEY"}}
+	// The secret sits at the very front, well inside both the old 500-char
+	// cap and the new 240-char one, so neither cap is what would hide it.
+	req.UserMessage = secret + " " + strings.Repeat("deploy the thing please ", 40)
+
+	if err := o.RunAgent(context.Background(), req, nil); err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if len(gate.got) != 1 {
+		t.Fatalf("want 1 gate check, got %d", len(gate.got))
+	}
+	in := gate.got[0]
+
+	blob, err := json.Marshal(struct {
+		Args   map[string]any
+		Review map[string]any
+	}{in.Args, in.Review})
+	if err != nil {
+		t.Fatalf("marshal gate input: %v", err)
+	}
+	if strings.Contains(string(blob), secret) {
+		t.Fatalf("registered secret reached the approval-gate input: %s", blob)
+	}
+
+	// The human-facing preview must still be bounded — to the journal
+	// path's cap, not the old, wider one. truncateStr appends a one-rune
+	// ellipsis on top of the cap, so a truncated preview is
+	// journalUserMessageMaxChars+1 runes.
+	preview, _ := in.Review["user_prompt"].(string)
+	if n := len([]rune(preview)); n > journalUserMessageMaxChars+1 {
+		t.Errorf("review user_prompt = %d runes, want <= %d (journalUserMessageMaxChars+1)", n, journalUserMessageMaxChars+1)
+	}
+	if preview == "" {
+		t.Error("review user_prompt is empty — a human deciding this approval has no context at all")
+	}
+}
+
+// openRewardTestDB gives AdjustMode/RecordOutcome somewhere to read and
+// write: just the gate_reward_history table, matching the schema
+// internal/harbormaster's own tests create (approvals_queue is not needed —
+// neither function touches it).
+func openRewardTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`
+		CREATE TABLE gate_reward_history (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+			tool_name TEXT NOT NULL, args_hash TEXT NOT NULL,
+			outcome TEXT NOT NULL, decided_by TEXT,
+			decided_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			request_id TEXT);`); err != nil {
+		t.Fatalf("create gate_reward_history: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// TestRunAgent_ApprovalGateCohortMergesAcrossPrompts is the regression test
+// for #2234: before the fix, the gate's Args carried the user's message, so
+// harbormaster.HashArgs — which sorts and hashes every key AND value —
+// produced a different fingerprint for every differently-worded run of the
+// same agent. Reward history could never accumulate past one row per
+// cohort, so AdjustMode's quorum (RewardHistorySize/2) was unreachable and
+// gate auto-tuning silently could not learn anything for agent_run.
+//
+// This drives two real RunAgent calls with different wording, captures the
+// Args the real call site produces for each, and proves both that they
+// fingerprint into the same cohort AND that the merged cohort can actually
+// clear the quorum bar and flip the gate mode — not just that the hashes
+// happen to match.
+func TestRunAgent_ApprovalGateCohortMergesAcrossPrompts(t *testing.T) {
+	t.Parallel()
+	gate := &covGate{dec: ApprovalDecision{Approved: true}}
+	o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+	o.SetApprovalGate(gate)
+
+	req1 := covRunReq()
+	req1.UserMessage = "deploy the api"
+	if err := o.RunAgent(context.Background(), req1, nil); err != nil {
+		t.Fatalf("RunAgent (1): %v", err)
+	}
+	req2 := covRunReq()
+	req2.UserMessage = "deploy the api again, this time with the extra flags we discussed yesterday"
+	if err := o.RunAgent(context.Background(), req2, nil); err != nil {
+		t.Fatalf("RunAgent (2): %v", err)
+	}
+
+	gate.mu.Lock()
+	if len(gate.got) != 2 {
+		gate.mu.Unlock()
+		t.Fatalf("want 2 gate checks, got %d", len(gate.got))
+	}
+	args1, args2 := gate.got[0].Args, gate.got[1].Args
+	gate.mu.Unlock()
+
+	hash1, hash2 := harbormaster.HashArgs(args1), harbormaster.HashArgs(args2)
+	if hash1 != hash2 {
+		t.Fatalf("differently-worded runs of the same agent hashed into different cohorts (%s vs %s) — "+
+			"args1=%v args2=%v", hash1, hash2, args1, args2)
+	}
+
+	// Seed a quorum of approvals under the FIRST run's args, then look the
+	// cohort up under the SECOND run's args (as a live gate check would).
+	// If the fix didn't stick, the seeded rows and the lookup would sit
+	// under different hashes and AdjustMode would see nothing.
+	db := openRewardTestDB(t)
+	ctx := context.Background()
+	for i := 0; i < harbormaster.RewardHistorySize/2; i++ {
+		if err := harbormaster.RecordOutcome(ctx, db, "ws1", "agent_run", args1,
+			harbormaster.OutcomeApproved, "alice", fmt.Sprintf("req_%d", i)); err != nil {
+			t.Fatalf("seed reward history: %v", err)
+		}
+	}
+	adjusted, reason, err := harbormaster.AdjustMode(ctx, db, "ws1", "agent_run", args2, harbormaster.ModeSync)
+	if err != nil {
+		t.Fatalf("AdjustMode: %v", err)
+	}
+	if adjusted != harbormaster.ModeAsync {
+		t.Fatalf("quorum reached seeding under run 1's args did not carry over to run 2's lookup: "+
+			"adjusted=%v reason=%q", adjusted, reason)
 	}
 }
 

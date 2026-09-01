@@ -659,9 +659,21 @@ type ApprovalCheckInput struct {
 	AgentID     string
 	MissionID   string
 	Tool        string
-	Args        map[string]any
-	Mode        string // "none" | "async" | "sync"
-	UserID      string
+	// Args is both the rule-evaluator input and the reward-tuning
+	// fingerprint (harbormaster.HashArgs hashes it verbatim — key and
+	// value). It must therefore hold only values that are stable across
+	// repeated, unrelated calls of the same shape; a per-invocation value
+	// (a prompt, a path, a timestamp) hashes every call into its own
+	// cohort and silently defeats gate auto-tuning (#2234).
+	Args map[string]any
+	// Review carries extra context for a human deciding the approval —
+	// e.g. a scrubbed, bounded preview of the prompt that triggered the
+	// call. It is stored alongside Args in the approval row but is NOT
+	// part of the reward fingerprint, so a caller can put per-invocation,
+	// scrubbed text here without breaking cohorting.
+	Review map[string]any
+	Mode   string // "none" | "async" | "sync"
+	UserID string
 }
 
 type ApprovalDecision struct {

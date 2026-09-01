@@ -16,9 +16,21 @@ import (
 // ModeNone short-circuits (rules ignored), ModeAsync enqueues and
 // returns immediately, ModeSync blocks until decision/timeout.
 type GateInput struct {
-	Mode        Mode
-	Tool        string
-	Args        map[string]any
+	Mode Mode
+	Tool string
+	// Args is hashed verbatim (key and value, see HashArgs) both to look
+	// up reward history here and to record it in AfterDecide — so it must
+	// hold only values stable across repeated, unrelated calls of the same
+	// shape. A per-invocation value (a prompt, a path, a timestamp) makes
+	// every call its own cohort and silently defeats auto-tuning (#2234).
+	// It is also the input the rule Evaluator matches against.
+	Args map[string]any
+	// Review is caller-supplied context for a human deciding the request
+	// (e.g. a scrubbed prompt preview). It rides alongside Args in the
+	// stored payload under the "review" key but is deliberately excluded
+	// from both rule evaluation and the reward fingerprint — unlike Args,
+	// it may carry per-invocation text.
+	Review      map[string]any
 	WorkspaceID string
 	CrewID      string
 	AgentID     string
@@ -72,6 +84,19 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 			in.Tool, originalMode, adjusted, reason)
 	}
 
+	payload := map[string]any{
+		"tool": in.Tool,
+		"args": in.Args,
+	}
+	// review is a sibling of args, not nested under it, so a stored row
+	// still says exactly what call was gated (args) alongside the extra
+	// context a human used to decide (review) — and so extractToolArgs,
+	// which reads payload["args"] back out for RecordOutcome, never sees
+	// it. Omitted entirely when the caller has none, so the payload shape
+	// for every other tool is unchanged.
+	if len(in.Review) > 0 {
+		payload["review"] = in.Review
+	}
 	req := Request{
 		WorkspaceID: in.WorkspaceID,
 		CrewID:      in.CrewID,
@@ -80,10 +105,7 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 		RequestedBy: in.RequestedBy,
 		Kind:        kind,
 		Reason:      reason,
-		Payload: map[string]any{
-			"tool": in.Tool,
-			"args": in.Args,
-		},
+		Payload:     payload,
 		TimeoutSecs: in.TimeoutSecs,
 	}
 	id, err := Enqueue(ctx, db, j, req)
