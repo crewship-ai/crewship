@@ -544,6 +544,42 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Three Logs filter chips could never appear, and 65 entry types had no
+  chip at all (#2207).** The Crow's Nest type-chip row seeded its per-group
+  counters from a hand-kept list that had fallen three groups behind the
+  eighteen the UI defines, so counting an `audit`, `provisioning` or `chat`
+  entry incremented a counter that did not exist — `NaN`, which fails the
+  `count > 0` test the row uses to decide what to render. Those three chips
+  were unreachable no matter how many such entries were loaded, and the
+  visible chips' totals under-reported. The list is now derived from the
+  render order, so it cannot drift again.
+
+  Scanning the backend for every entry type it can emit finds 139, of which
+  65 had no group: they rendered grey with a raw dotted-string pill, and
+  because muting a chip is pushed to the server as an `exclude_entry_type`
+  filter and the catch-all group has no type list, they could not be filtered
+  out of a busy workspace's 5,000-entry window at all. Two new chips take the
+  families that had nowhere to go — **routine** (the fourteen `pipeline.*`
+  types plus the two `automation.*` refusals that explain why a routine did
+  not run) and **page** (all fifteen `page.*` types, including publishing,
+  public views and webhook credentials). The rest join the existing chips:
+  memory, credentials, approvals-and-trust, notifications, provisioning and
+  runtime freshness, missions, runs, chat, skills, system. The twelve the
+  frontend's entry-type list had never carried — among them
+  `page.owner_transferred`, `page.published` and
+  `onboarding.proposal_applied` — gained an icon and a place in the activity
+  sidebar's facets. `memory.priority_changed`, emitted as a bare string
+  literal since it shipped, is now a named constant on the Go side, so the
+  entry that records who changed a compaction-surviving marker is visible to
+  anything that reads the backend's declarations.
+
+  `hook.dispatch_error` was in the server-side `system` exclusion list but
+  not in the client's type→group map, so muting System dropped it on the
+  server while the client still called it ungrouped. The two maps now agree,
+  and a test asserts it in both directions. `docs/guides/crew-journal.mdx`
+  billed roughly ninety types as the "full entry-type catalog"; it now lists
+  all 139 with the chip each one filters under.
+
 - **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
   server refused it (#2195).** The standalone `kind: Agent` validator kept
   `COORDINATOR` in `validAgentRoles`, so a manifest carrying that role passed

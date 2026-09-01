@@ -129,6 +129,20 @@ const (
 	EntryMemoryUpdated      EntryType = "memory.updated"
 	EntryMemoryConsolidated EntryType = "memory.consolidated"
 	EntrySummaryGenerated   EntryType = "summary.generated"
+	// EntryMemoryPriorityChanged records a priority marker being raised or
+	// lowered on an existing entry (PATCH /api/v1/journal/{id}/priority).
+	// Priority is load-bearing — permanent entries are never compacted and
+	// pins land in curated pins.md — so the change is journaled rather than
+	// applied as a silent UPDATE, and the entry double-checks the
+	// journal_entry_priorities ledger: a fabricated row with no matching
+	// entry in the keyed chain is detectable by comparing the two.
+	//
+	// It had been emitted as a bare string literal from
+	// internal/api/journal_handler.go since it shipped, which made it the
+	// one type in the corpus with no constant anywhere — invisible to any
+	// check that reads the Go declarations. Promoted, not dropped: the
+	// entry is real, durable and already on disk in every workspace.
+	EntryMemoryPriorityChanged EntryType = "memory.priority_changed"
 	// EntryMemoryWriteRejected fires when a sidecar /memory/write call
 	// is rejected by the scrubber (credential pattern matched in block
 	// mode) or by a cap check (file would exceed AGENT.md/CREW.md/pins.md
