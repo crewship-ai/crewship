@@ -748,6 +748,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `crewship feedback create|list|delete` against a real server) so a real
   registration regression on this route family fails loudly instead of
   reading like this one did.
+- **Automations refuse event types and payload keys that could never fire
+  (#2271).** `event_type` was checked for shape only, so a well-formed nonsense
+  type saved with 201 and matched nothing forever. It is now checked against
+  a registry generated from the journal's entry types (130 of them), with a
+  drift test, and the error names valid alternatives. `payload_equals` keys
+  are validated for the event types whose payloads are known; for the rest
+  the error, the CLI help and the guide say plainly that no key validation is
+  possible, because no payload-schema registry exists.
 
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
