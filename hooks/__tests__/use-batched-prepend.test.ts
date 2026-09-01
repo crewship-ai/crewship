@@ -119,3 +119,46 @@ describe("useBatchedPrepend", () => {
     expect(prepend).not.toHaveBeenCalled()
   })
 })
+
+describe("useBatchedPrepend scope changes", () => {
+  it("discards a buffered batch when the scope key changes", async () => {
+    const prepend = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ scope }: { scope: string }) => useBatchedPrepend(prepend, PREPEND_FLUSH_MS, scope),
+      { initialProps: { scope: "live|crew_a" } },
+    )
+
+    // An entry arrives while the tail is live and filtered on crew_a...
+    act(() => {
+      result.current(entry("stale"))
+    })
+    expect(prepend).not.toHaveBeenCalled()
+
+    // ...and before the flush window closes, the user changes the filter.
+    // The buffered entry was fetched under the old query and must not be
+    // prepended to the list that replaced it.
+    rerender({ scope: "live|crew_b" })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREPEND_FLUSH_MS * 2)
+    })
+    expect(prepend).not.toHaveBeenCalled()
+  })
+
+  it("still delivers entries that arrive after the scope settles", async () => {
+    const prepend = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ scope }: { scope: string }) => useBatchedPrepend(prepend, PREPEND_FLUSH_MS, scope),
+      { initialProps: { scope: "live|crew_a" } },
+    )
+
+    rerender({ scope: "live|crew_b" })
+    act(() => {
+      result.current(entry("fresh"))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PREPEND_FLUSH_MS)
+    })
+    expect(prepend).toHaveBeenCalledTimes(1)
+    expect(prepend.mock.calls[0][0].map((e: JournalEntry) => e.id)).toEqual(["fresh"])
+  })
+})

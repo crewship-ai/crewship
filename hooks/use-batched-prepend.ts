@@ -24,10 +24,17 @@ export const PREPEND_FLUSH_MS = 250
  * Returns a stable callback safe to pass straight to `useJournalStream`'s
  * `onEntry`; `prependLive` is read through a ref so a caller that rebuilds
  * it every render does not reset the buffer.
+ *
+ * `scopeKey` identifies the list the buffered entries belong to — pass the
+ * same thing the list is keyed on (its query params, plus whatever pauses
+ * the tail). When it changes, anything still queued is discarded rather than
+ * flushed into a list it was not fetched for. Callers with a single fixed
+ * scope can omit it.
  */
 export function useBatchedPrepend(
   prependLive: (entries: JournalEntry | JournalEntry[]) => void,
   flushMs: number = PREPEND_FLUSH_MS,
+  scopeKey?: unknown,
 ): (entry: JournalEntry) => void {
   const pendingRef = useRef<JournalEntry[]>([])
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -37,16 +44,25 @@ export function useBatchedPrepend(
     prependRef.current = prependLive
   }, [prependLive])
 
+  // Drop the buffer whenever the list these entries belong to goes away —
+  // on unmount, and on every change of `scopeKey`.
+  //
+  // The scope arm is not housekeeping. `onEntry` checks the caller's own
+  // conditions (a paused live tail, a disabled tab) when an event ARRIVES,
+  // and up to `flushMs` passes before the batch is handed over. In that
+  // window the user can pause the tail or change a filter, and a queued
+  // entry belonging to the previous query would be prepended to the list
+  // that replaced it — a row the active filter says must not be there, which
+  // no later refresh removes because prependLive does not re-check scope.
   useEffect(() => {
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current)
         timerRef.current = null
       }
-      // Whatever is still buffered belongs to a list that is going away.
       pendingRef.current = []
     }
-  }, [])
+  }, [scopeKey])
 
   return useCallback(
     (entry: JournalEntry) => {

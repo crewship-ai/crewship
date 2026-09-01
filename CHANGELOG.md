@@ -853,8 +853,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `idx_journal_entries_priority … WHERE priority != 'normal'` the same way.
   And `run_id` — `(trace_id = ? OR actor_id = ? OR run_id = ?)` — could not be
   index-unioned at all, because `actor_id` had no index (`idx_journal_actor_ts`
-  is on actor_*type*), which made every `/journal/count?run_id=` a complete
-  table scan since `Count()` emits no `LIMIT`. Migration
+  is on actor_*type*), which made every `/journal/count?run_id=` scan the
+  whole workspace partition since `Count()` emits no `LIMIT`. Migration
   `20260831093500_journal_filter_indexes.sql` adds unconditional
   `(workspace_id, severity, ts)` and `(workspace_id, priority, ts)` indexes plus
   a partial `(workspace_id, actor_id, ts)`, drops the now-redundant

@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => ({
   prependLive: vi.fn(),
   capturedOnEntry: null as ((e: unknown) => void) | null,
   listEntries: [] as unknown[],
+  // Every options object the strip handed the stream hook, so a test can
+  // assert what it ASKED for and not merely what happened to arrive.
+  streamOptions: [] as { workspaceId: string | null; enabled: boolean }[],
 }))
 
 vi.mock("@/hooks/use-journal-list", () => ({
@@ -35,8 +38,13 @@ vi.mock("@/hooks/use-journal-list", () => ({
 }))
 
 vi.mock("@/hooks/use-journal-stream", () => ({
-  useJournalStream: (opts: { onEntry: (e: unknown) => void }) => {
+  useJournalStream: (opts: {
+    onEntry: (e: unknown) => void
+    workspaceId: string | null
+    enabled: boolean
+  }) => {
     mocks.capturedOnEntry = opts.onEntry
+    mocks.streamOptions.push({ workspaceId: opts.workspaceId, enabled: opts.enabled })
     return { status: "connected", lastError: null, gapDetected: false, reconnect: vi.fn() }
   },
 }))
@@ -59,6 +67,7 @@ beforeEach(() => {
   mocks.prependLive.mockClear()
   mocks.capturedOnEntry = null
   mocks.listEntries = []
+  mocks.streamOptions = []
   vi.useFakeTimers({ shouldAdvanceTime: true })
 })
 
@@ -104,6 +113,16 @@ describe("ResourcesStrip", () => {
     act(() => {
       vi.advanceTimersByTime(PREPEND_FLUSH_MS * 2)
     })
+    // The strip calls useJournalStream unconditionally — hooks cannot be
+    // called in a branch — so "does not subscribe" is a claim about the
+    // OPTIONS it passes, not about the call happening. Asserting only that
+    // nothing was prepended passes for a strip that subscribes eagerly,
+    // because this mock never delivers an entry on its own.
+    expect(mocks.streamOptions.length).toBeGreaterThan(0)
+    for (const opts of mocks.streamOptions) {
+      expect(opts.workspaceId).toBeNull()
+      expect(opts.enabled).toBe(false)
+    }
     expect(mocks.prependLive).not.toHaveBeenCalled()
   })
 })

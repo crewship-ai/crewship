@@ -338,8 +338,16 @@ describe("useJournalStream — backfill gap", () => {
 
   it("walks the cursor to backfill a gap larger than one page", async () => {
     useHybridTimers()
+    // Newest first, the order docs/api-reference/journal.mdx defines and
+    // queries.go emits (`ORDER BY ts DESC, id DESC`). Building the page
+    // oldest-first would test the hook against a shape no server sends, and
+    // an implementation that reverses each page instead of the whole walk
+    // would pass anyway.
     const page1 = Array.from({ length: POLL_LIMIT }, (_, i) =>
-      entry(`p1_${i}`, `2026-01-01T00:01:${String(i).padStart(2, "0")}.000Z`),
+      entry(
+        `p1_${POLL_LIMIT - 1 - i}`,
+        `2026-01-01T00:01:${String(POLL_LIMIT - 1 - i).padStart(2, "0")}.000Z`,
+      ),
     )
     mockFetch
       .mockResolvedValueOnce(okResponse(page1, "cursor-1"))
@@ -362,8 +370,15 @@ describe("useJournalStream — backfill gap", () => {
     expect(mockFetch.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(mockFetch.mock.calls[1][0] as string).toContain("cursor=cursor-1")
     expect(onEntry).toHaveBeenCalledTimes(POLL_LIMIT + 1)
-    // Oldest first across the whole catch-up, not per page.
-    expect(onEntry.mock.calls[0][0].id).toBe("p2_0")
+    // Oldest first across the WHOLE catch-up, not per page: the second page
+    // is older than the first, so it must be delivered before it. Asserting
+    // the complete sequence rather than just its head — checking only the
+    // first id passes for an implementation that reverses each page
+    // separately and hands back p1 newest-first behind it.
+    expect(onEntry.mock.calls.map(([e]: [{ id: string }]) => e.id)).toEqual([
+      "p2_0",
+      ...Array.from({ length: POLL_LIMIT }, (_, i) => `p1_${i}`),
+    ])
     // A gap that the cursor walk closed is not reported as lost.
     expect(result.current.gapDetected).toBe(false)
   })

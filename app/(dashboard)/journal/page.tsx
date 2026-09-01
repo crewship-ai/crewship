@@ -16,7 +16,7 @@ import { SubBar } from "@/components/layout/sub-bar"
 import { cn } from "@/lib/utils"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useBatchedPrepend } from "@/hooks/use-batched-prepend"
+import { useBatchedPrepend, PREPEND_FLUSH_MS } from "@/hooks/use-batched-prepend"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import { useUserPreference } from "@/hooks/use-user-preference"
@@ -391,7 +391,15 @@ export default function JournalPage() {
   // viewport, stats rail). useBatchedPrepend buffers a flush window and
   // hands the group to prependLive as one array, so the buffer is scanned
   // once for the whole flush rather than once per event.
-  const pushLive = useBatchedPrepend(prependLive)
+  // Keyed on the query the entries were fetched under AND on the pause
+  // state, so a batch buffered under one filter cannot land in the list that
+  // replaced it, and pausing the tail drops what is still in flight instead
+  // of letting it arrive 250 ms later.
+  const liveScopeKey = useMemo(
+    () => `${live ? "live" : "paused"}|${timelineEnabled ? "on" : "off"}|${JSON.stringify(queryParams)}`,
+    [live, timelineEnabled, queryParams],
+  )
+  const pushLive = useBatchedPrepend(prependLive, PREPEND_FLUSH_MS, liveScopeKey)
   const handleLive = useCallback(
     (entry: JournalEntry) => {
       if (!liveRef.current) return // live tail paused
