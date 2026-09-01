@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
@@ -228,7 +229,7 @@ func TestRequireAuth_CLITokenLookupError_Returns500(t *testing.T) {
 
 	plaintext := "crewship_cli_dbfail00112233445566778899"
 	hash := sha256Hex(plaintext)
-	if _, err := db.Exec(`INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
 		"clt-dbfail", userID, "will-fail", hash); err != nil {
 		t.Fatalf("seed cli token: %v", err)
 	}

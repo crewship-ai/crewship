@@ -736,13 +736,13 @@ func TestValidateCLIToken_NullFullName(t *testing.T) {
 	db := setupTestDB(t)
 
 	const userID = "invited-user-no-name"
-	if _, err := db.Exec(`INSERT INTO users (id, email) VALUES (?, ?)`, userID, "invited@example.com"); err != nil {
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO users (id, email) VALUES (?, ?)`, userID, "invited@example.com"); err != nil {
 		t.Fatalf("seed user with NULL full_name: %v", err)
 	}
 
 	plaintext := "crewship_cli_nullname0011223344556677889900"
 	hash := sha256Hex(plaintext)
-	if _, err := db.Exec(`INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
 		"clt-nullname", userID, "invited-token", hash); err != nil {
 		t.Fatalf("seed cli token: %v", err)
 	}
@@ -768,14 +768,14 @@ func TestValidateCLIToken_NonNullFullName(t *testing.T) {
 	db := setupTestDB(t)
 
 	const userID = "named-user"
-	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, ?)`,
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO users (id, email, full_name) VALUES (?, ?, ?)`,
 		userID, "named@example.com", "Ada Lovelace"); err != nil {
 		t.Fatalf("seed user with full_name: %v", err)
 	}
 
 	plaintext := "crewship_cli_named00011223344556677889900"
 	hash := sha256Hex(plaintext)
-	if _, err := db.Exec(`INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
 		"clt-named", userID, "named-token", hash); err != nil {
 		t.Fatalf("seed cli token: %v", err)
 	}
