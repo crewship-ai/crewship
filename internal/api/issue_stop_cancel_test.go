@@ -257,3 +257,87 @@ func TestRunAssignment_CancelRequested_StartsNoFurtherStep(t *testing.T) {
 		t.Errorf("agent resolver was consulted (agent_id=%q) — dispatch proceeded past the cancel check", fake.gotAgentID)
 	}
 }
+
+// TestFinishAssignment_CancelRequested_OverridesLateCompletion is the "run
+// ends CANCELLED" clause of golden scenario 5a for the mid-flight case: a
+// task that was actually RUNNING (not merely PENDING) when Stop landed.
+// There is no kill primitive for a shared crew container (see the comment
+// on finishAssignment, assignments_run.go), so the run keeps executing and
+// eventually reports its own outcome through the normal finishAssignment
+// path — the same path TestRunAssignment_CancelRequested_StartsNoFurtherStep
+// above proves is skipped entirely for a row that was still PENDING. Here
+// the row genuinely started, so the ONLY place left to intervene is the
+// terminal write itself: cancel_requested_at must win over whatever the
+// run reported, in both directions (a late success AND a late failure).
+func TestFinishAssignment_CancelRequested_OverridesLateCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		lateResult string
+		lateErrMsg string
+	}{
+		{name: "late success", lateResult: "all done, arrived after stop"},
+		{name: "late failure", lateErrMsg: "container blew up, arrived after stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, wsID, _, leadID, workerID, chatID := covAsgRig(t)
+
+			now := time.Now().UTC().Format(time.RFC3339)
+			assignmentID := "a-live-stopped"
+			// Shaped like a-running in TestIssue_Stop_StampsCancelRequestedOnLiveAssignments:
+			// RUNNING (it actually started — started_at is set) with
+			// cancel_requested_at stamped by Stop while it was in flight.
+			if _, err := h.db.Exec(`
+				INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at, started_at, cancel_requested_at, cancel_reason)
+				VALUES (?, ?, ?, ?, ?, 'do work', 'RUNNING', ?, ?, ?, 'issue stopped')`,
+				assignmentID, wsID, chatID, leadID, workerID, now, now, now); err != nil {
+				t.Fatalf("seed live-then-stopped assignment: %v", err)
+			}
+
+			// The run finishes on its own, late — exactly what finishAssignment
+			// receives whether the goroutine reports success or failure.
+			if ok := h.finishAssignment(context.Background(), assignmentID, "", chatID, "asg-worker", wsID,
+				tc.lateResult, tc.lateErrMsg, nil); !ok {
+				t.Fatal("finishAssignment should have won the terminal CAS (row was RUNNING, not already terminal)")
+			}
+
+			var status, errMsg string
+			if err := h.db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM assignments WHERE id = ?`, assignmentID).
+				Scan(&status, &errMsg); err != nil {
+				t.Fatalf("query assignment: %v", err)
+			}
+			// The one write scenario 5a actually promises: the STATUS column
+			// never resurrects as COMPLETED/FAILED once cancel_requested_at is
+			// set, regardless of what the run itself reported.
+			if status != "CANCELLED" {
+				t.Errorf("status = %q, want CANCELLED — cancel_requested_at must win over the run's own "+
+					"reported outcome (%s)", status, tc.name)
+			}
+			if tc.lateErrMsg != "" {
+				// FINDING (not asserted as a failure below — this is current,
+				// observed behavior, not a forced expectation): a late FAILED
+				// report is not fully suppressed. Only the status column is
+				// protected by finishAssignment's cancel_requested_at check
+				// (assignments_run.go:1049) — errVal is built from errMsg
+				// unconditionally a few lines later (:1057-1059) and lands in
+				// error_message on the CANCELLED row anyway. The same
+				// asymmetry reaches two other observable surfaces beyond this
+				// column: the switch at :1283-1310 tests `errMsg != ""` BEFORE
+				// `status == "CANCELLED"`, so the websocket broadcast for a
+				// late failure is "assignment_failed", not
+				// "assignment_cancelled" — contradicting that switch's own
+				// comment ("cancel_requested_at won even over a clean
+				// completion"); and the mission-comment block at :1239-1245
+				// posts "encountered an issue" with the failure text rather
+				// than a cancellation notice. A late FAILED callback does NOT
+				// "change nothing" on this branch — only a late COMPLETED one
+				// does. See the report for this audit for detail.
+				if errMsg != tc.lateErrMsg {
+					t.Errorf("error_message = %q, want it to still carry the late report's raw text (%q) — "+
+						"this assertion documents current behavior, not the ideal", errMsg, tc.lateErrMsg)
+				}
+			} else if errMsg != "" {
+				t.Errorf("error_message = %q, want empty for a late success report", errMsg)
+			}
+		})
+	}
+}
