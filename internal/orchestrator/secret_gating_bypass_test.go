@@ -518,18 +518,36 @@ func TestBypass_AbortedRunStillScrubsGatedSecretFiles(t *testing.T) {
 // This pin asserts BOTH halves precisely (env yes, disk no, and gated under
 // Keeper ON) so it cannot decay into "something happened". When #2092 lands,
 // this test flips to the withheld assertion and its name loses the suffix.
-func TestBypass_UnclassifiedTypeReachesEnvWhenKeeperIsOff_KnownResidual(t *testing.T) {
+func TestBypass_UnclassifiedTypeNeverReachesEnv(t *testing.T) {
 	t.Parallel()
 	req := bypassReq("VAULT_HANDLE")
 
-	env := BuildEnvVarsSidecar(req, false)
-	if _, inEnv := envCarries(env, bypassCanary); !inEnv {
-		t.Fatalf("#2092 appears to be FIXED: an unclassified type no longer reaches the " +
-			"agent env with Keeper off. Good — now invert this test to assert the " +
-			"withholding and drop the _KnownResidual suffix.")
+	// #2092: an unclassified type must never reach the agent env, in EITHER
+	// Keeper state. The fail-safe fallback row is
+	// {Delivery: DeliveryNone, KeeperGated: true} — DeliveryNone means no
+	// delivery channel at all, not even the Keeper-off legacy env path that
+	// SECRET uses.
+	for _, keeper := range []bool{true, false} {
+		if _, inEnv := envCarries(BuildEnvVarsSidecar(req, keeper), bypassCanary); inEnv {
+			t.Errorf("keeper=%v: an unclassified type reached the agent env — DeliveryNone "+
+				"must never be treated as the SECRET legacy env path", keeper)
+		}
 	}
 
-	// The half that does hold: never on disk, in either Keeper state.
+	// AgentEnvCredentialExposures must mirror the withholding: it must not
+	// report an exposure for a credential that BuildEnvVarsSidecar no longer
+	// injects.
+	for _, keeper := range []bool{true, false} {
+		for _, exp := range AgentEnvCredentialExposures(req, keeper) {
+			if exp.EnvVarName == req.Credentials[0].EnvVarName {
+				t.Errorf("keeper=%v: AgentEnvCredentialExposures reported an exposure for the "+
+					"withheld unclassified credential (%+v) — it must mirror BuildEnvVarsSidecar exactly",
+					keeper, exp)
+			}
+		}
+	}
+
+	// The half that already held: never on disk, in either Keeper state.
 	for _, keeper := range []bool{true, false} {
 		script, written, _, err := buildCredFileScript(req.Credentials, "/secrets/riley", keeper)
 		if err != nil {
@@ -540,11 +558,5 @@ func TestBypass_UnclassifiedTypeReachesEnvWhenKeeperIsOff_KnownResidual(t *testi
 				"file path reads credpolicy Delivery and must never deliver DeliveryNone",
 				keeper, written)
 		}
-	}
-
-	// And the half the residual does not touch: Keeper ON still withholds it.
-	if _, inEnv := envCarries(BuildEnvVarsSidecar(req, true), bypassCanary); inEnv {
-		t.Error("an unclassified type reached the agent env with Keeper ON — this is not " +
-			"the #2092 residual, it is the invariant itself failing")
 	}
 }

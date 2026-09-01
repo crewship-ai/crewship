@@ -482,11 +482,36 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	// control + audit trail — so they are not injected here. When Keeper is
 	// disabled, inject them directly as env vars (legacy mode). Table-driven
 	// (credpolicy) rather than a SECRET-only special case.
+	//
+	// #2092: both halves of the row are consulted, not just KeeperGated. A
+	// type with no explicit credpolicy row gets the fail-safe fallback
+	// {Delivery: DeliveryNone, KeeperGated: true} — KeeperGated alone would
+	// route it down this "legacy fallback" path exactly like SECRET, which
+	// contradicts DeliveryNone's promise that an unclassified type is not
+	// delivered to the agent AT ALL, by any channel. Only a type that
+	// actually has a delivery channel takes the legacy env path here.
+	//
+	// An unclassified type withheld this way has no /keeper/request path
+	// either (Keeper is off), so it becomes undeliverable rather than merely
+	// gated — a behaviour change for any legacy row relying on the old
+	// (wrong) fallback-as-SECRET treatment. WARN so an operator can find out
+	// why the credential vanished and add the missing credpolicy row.
 	if !keeperEnabled {
 		for _, cred := range req.Credentials {
-			if credpolicy.IsKeeperGated(cred.Type) && cred.EnvVarName != "" && cred.PlainValue != "" {
-				env = append(env, cred.EnvVarName+"="+cred.PlainValue)
+			if cred.EnvVarName == "" || cred.PlainValue == "" {
+				continue
 			}
+			pol := credpolicy.For(cred.Type)
+			if !pol.KeeperGated {
+				continue
+			}
+			if pol.Delivery == credpolicy.DeliveryNone {
+				slog.Default().Warn("credential withheld from agent env: unclassified type has no credpolicy delivery row, so it cannot be delivered by any path with Keeper off",
+					"agent_slug", req.AgentSlug, "env_var", cred.EnvVarName, "cred_type", cred.Type,
+					"hint", "add a credpolicy.TypePolicy row for this type in internal/credpolicy")
+				continue
+			}
+			env = append(env, cred.EnvVarName+"="+cred.PlainValue)
 		}
 	}
 
@@ -1202,9 +1227,19 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 	// request/execute flow when Keeper is enabled, but injected to env as a
 	// legacy fallback when it is off. This is the one exposure an operator can
 	// close, so flag it actionable. Table-driven (credpolicy).
+	//
+	// #2092: mirrors BuildEnvVarsSidecar's selector exactly — KeeperGated AND
+	// an actual delivery channel (Delivery != DeliveryNone). An unclassified
+	// type (the fail-safe fallback row) is no longer injected there, so it
+	// must not be reported as exposed here either, or this posture view
+	// over-reports a credential that was actually withheld.
 	if !keeperEnabled {
 		for _, cred := range req.Credentials {
-			if credpolicy.IsKeeperGated(cred.Type) && cred.EnvVarName != "" && cred.PlainValue != "" {
+			if cred.EnvVarName == "" || cred.PlainValue == "" {
+				continue
+			}
+			pol := credpolicy.For(cred.Type)
+			if pol.KeeperGated && pol.Delivery != credpolicy.DeliveryNone {
 				out = append(out, CredentialEnvExposure{
 					EnvVarName: cred.EnvVarName,
 					Type:       cred.Type,
