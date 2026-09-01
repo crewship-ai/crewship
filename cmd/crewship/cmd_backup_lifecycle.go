@@ -461,15 +461,36 @@ var backupRestoreCmd = &cobra.Command{
 		// none of the more specific reports above (columns_dropped, a PK
 		// collision) named. Never printed on a dry run — nothing was
 		// inserted to compare.
+		//
+		// A table can land FEWER rows than recorded (a collision, a
+		// dropped column) or MORE (a --as-workspace/--as-crew restore adds
+		// a row of its own — a re-signed journal chain entry, a
+		// restoring-admin membership row — that the bundle never carried).
+		// Split by direction so neither case is reported with the other's
+		// wording: "fewer" text pointing at a "more" row would send the
+		// operator after a collision that never happened.
 		if len(out.RowsInsertedShortfalls) > 0 {
-			details := make([]string, 0, len(out.RowsInsertedShortfalls))
+			var fewer, more []string
 			for _, m := range out.RowsInsertedShortfalls {
-				details = append(details, fmt.Sprintf("%s (recorded %d, landed %d)", m.Table, m.Recorded, m.Actual))
+				detail := fmt.Sprintf("%s (recorded %d, landed %d)", m.Table, m.Recorded, m.Actual)
+				if m.Actual < m.Recorded {
+					fewer = append(fewer, detail)
+				} else {
+					more = append(more, detail)
+				}
 			}
-			cli.PrintWarning(fmt.Sprintf(
-				"Fewer rows landed than the manifest recorded for %d table(s): %s.\n"+
-					"  Check ColumnsDropped and the tables above for a specific cause; if none apply, a primary-key collision on the target likely swallowed them.",
-				len(out.RowsInsertedShortfalls), strings.Join(details, "; ")))
+			if len(fewer) > 0 {
+				cli.PrintWarning(fmt.Sprintf(
+					"Fewer rows landed than the manifest recorded for %d table(s): %s.\n"+
+						"  Check ColumnsDropped and the tables above for a specific cause; if none apply, a primary-key collision on the target likely swallowed them.",
+					len(fewer), strings.Join(fewer, "; ")))
+			}
+			if len(more) > 0 {
+				cli.PrintWarning(fmt.Sprintf(
+					"More rows landed than the manifest recorded for %d table(s): %s.\n"+
+						"  Expected on a --as-workspace/--as-crew restore, which adds rows of its own (a re-signed journal chain entry, a restoring-admin membership row) that the original bundle did not carry — not a sign of a problem.",
+					len(more), strings.Join(more, "; ")))
+			}
 		}
 		return nil
 	},

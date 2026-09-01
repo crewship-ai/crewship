@@ -65,6 +65,52 @@ func compareRowCounts(recorded, actual map[string]int) []TableRowCountMismatch {
 	return out
 }
 
+// expectedInsertCounts adapts manifest.Contents.TableRowCounts for the
+// "rows inserted" comparison (see RestoreResult.RowsInsertedShortfalls's
+// doc comment). Unlike the payload comparison — which asks whether the
+// bundle IS what its manifest says — this one asks whether the insert
+// pass actually landed what the payload carries, and two tables are
+// designed to legitimately land fewer rows than the bundle carries, for
+// reasons that have nothing to do with a problem on THIS restore:
+//
+//   - skills: nonRemappablePKTables keeps its rows' IDs stable across a
+//     restore because skills.name/.slug are UNIQUE, and every instance
+//     seeds the bundled skills (SeedBundledSkills) with those same
+//     stable IDs on every boot, before any restore runs. A bundled
+//     skill's row already exists on the target with the same ID before
+//     the INSERT ever executes, so INSERT OR IGNORE no-ops by design —
+//     on every restore that carries a bundled skill, which is all of
+//     them. Excluded from the comparison outright, not floored to what
+//     landed: a genuinely new (non-bundled) skill failing to land needs
+//     a different diagnosis than "PK collision", and this aggregate
+//     count can't tell the two apart on its own.
+//   - users: reconciledUsers is exactly how many bundle user rows
+//     ReconcileUsersByEmail rewrote onto a matching target id (by email)
+//     before the insert pass — each of those now deliberately no-ops
+//     against the row it was aligned to, a merge rather than a
+//     collision. Subtracted from the recorded count (floored at 0) so
+//     any OTHER users shortfall — one reconciliation didn't already
+//     explain — still surfaces.
+func expectedInsertCounts(recorded map[string]int, reconciledUsers int) map[string]int {
+	if len(recorded) == 0 {
+		return recorded
+	}
+	adjusted := make(map[string]int, len(recorded))
+	for table, n := range recorded {
+		switch table {
+		case "skills":
+			continue
+		case "users":
+			n -= reconciledUsers
+			if n < 0 {
+				n = 0
+			}
+		}
+		adjusted[table] = n
+	}
+	return adjusted
+}
+
 // scanDumpFromTarEntry reads r as a zstd-compressed tar (the shape of an
 // unencrypted payload) looking only for db/dump.json, ignoring every other
 // entry. Returns (nil, nil) when the archive has no db/dump.json entry at
@@ -119,19 +165,55 @@ func scanDumpFromTarEntry(r io.Reader) (*DBDump, error) {
 // shape of report reads the same way everywhere it appears. what names
 // which comparison this is ("payload row counts", "rows inserted") since
 // the two mean different things — see PayloadRowCountMismatches's and
-// RowsInsertedShortfalls's doc comments on RestoreResult.
+// RowsInsertedShortfalls's doc comments on RestoreResult, and see
+// rowCountVerdict for how the closing sentence follows what.
+//
+// Each table's detail names which direction it went (Actual can be either
+// side of Recorded: a table can legitimately land MORE rows than recorded,
+// not just fewer — a forked restore's own journal re-sign notice or
+// restoring-admin membership row, for instance) so the report never claims
+// a shortfall for a table that actually came up with extra rows.
 func warnRowCountMismatches(logger func(string), what string, mismatches []TableRowCountMismatch) {
 	if len(mismatches) == 0 || logger == nil {
 		return
 	}
 	details := make([]string, 0, len(mismatches))
 	for _, m := range mismatches {
-		details = append(details, fmt.Sprintf("%s (recorded %d, actual %d)", m.Table, m.Recorded, m.Actual))
+		word, delta := "fewer", m.Recorded-m.Actual
+		if m.Actual > m.Recorded {
+			word, delta = "more", m.Actual-m.Recorded
+		}
+		details = append(details, fmt.Sprintf("%s (recorded %d, actual %d — %d %s)", m.Table, m.Recorded, m.Actual, delta, word))
 	}
 	logger(fmt.Sprintf(
-		"WARNING: %s do not match what the manifest recorded for %d table(s): %s. "+
-			"This bundle is not what its own manifest claims it is — treat it as suspect before relying on it for disaster recovery.",
-		what, len(mismatches), strings.Join(details, "; ")))
+		"WARNING: %s do not match what the manifest recorded for %d table(s): %s. %s",
+		what, len(mismatches), strings.Join(details, "; "), rowCountVerdict(what)))
+}
+
+// rowCountVerdict picks the operator-facing conclusion for a row-count
+// mismatch, keyed on what — warnRowCountMismatches' two callers mean
+// different things by "mismatch":
+//
+//   - "payload row counts" compares the decrypted payload against its OWN
+//     manifest (RestoreResult.PayloadRowCountMismatches): a divergence
+//     here means the bundle itself is not what it claims to be.
+//   - "rows inserted" compares what actually landed on the TARGET against
+//     the manifest (RestoreResult.RowsInsertedShortfalls): its own doc
+//     comment says this is about the target, not the bundle — a schema-
+//     skew column drop, a PK collision, or a row the restore itself added
+//     (a forked restore's journal re-sign notice, a restoring-admin
+//     membership row) can all produce a divergence here with the bundle
+//     entirely intact. Asserting "this bundle is suspect" for that case is
+//     the exact defect this function exists to avoid repeating.
+func rowCountVerdict(what string) string {
+	switch what {
+	case "payload row counts":
+		return "This bundle's payload does not match its own manifest — treat it as suspect before relying on it for disaster recovery."
+	case "rows inserted":
+		return "This is about what landed on the TARGET, not a problem with the bundle: check ColumnsDropped and the tables above for a schema-skew cause, a primary-key collision, or — on a forked restore — a row the restore added on its own, before treating anything here as suspect."
+	default:
+		return "Investigate before relying on this bundle for disaster recovery."
+	}
 }
 
 // completenessSkipReason explains why Verify could not check completeness,

@@ -541,3 +541,91 @@ func sameTableRowCountMismatches(got, want []TableRowCountMismatch) bool {
 	}
 	return true
 }
+
+// TestWarnRowCountMismatches_DirectionalWordingAndPerCallerVerdict is a
+// unit-level pin for defect (3) of the #2255 code-review fixes:
+//
+//   - the closing verdict sentence must follow `what` — the rows-inserted
+//     caller must NOT get the "this bundle is suspect" sentence, since
+//     RestoreResult.RowsInsertedShortfalls's own doc comment says that
+//     comparison is about the TARGET, not the bundle;
+//   - each table's detail must say whether it came up short or came up
+//     with MORE rows than recorded (compareRowCounts flags got != want,
+//     not just got < want) — a forked restore's own bookkeeping can
+//     legitimately land more rows than the manifest recorded, and
+//     labelling that "fewer" points the operator at a collision that
+//     never happened.
+func TestWarnRowCountMismatches_DirectionalWordingAndPerCallerVerdict(t *testing.T) {
+	var logged []string
+	logger := func(msg string) { logged = append(logged, msg) }
+
+	// Mixed direction: one table short (the designed skills no-op, left
+	// unexcluded here on purpose — this test is about wording, not
+	// expectedInsertCounts), one table with MORE rows than recorded (the
+	// shape a forked restore's own bookkeeping produces).
+	warnRowCountMismatches(logger, "rows inserted", []TableRowCountMismatch{
+		{Table: "skills", Recorded: 3, Actual: 1},
+		{Table: "workspace_members", Recorded: 0, Actual: 1},
+	})
+	if len(logged) != 1 {
+		t.Fatalf("expected exactly one warning, got %d: %+v", len(logged), logged)
+	}
+	msg := logged[0]
+	if !strings.Contains(msg, "skills (recorded 3, actual 1 — 2 fewer)") {
+		t.Errorf("shortfall table not labelled fewer:\n%s", msg)
+	}
+	if !strings.Contains(msg, "workspace_members (recorded 0, actual 1 — 1 more)") {
+		t.Errorf("surplus table not labelled more:\n%s", msg)
+	}
+	if strings.Contains(msg, "This bundle's payload does not match its own manifest") ||
+		strings.Contains(msg, "This bundle is not what its own manifest claims it is") {
+		t.Errorf("rows-inserted caller must not use the bundle-is-suspect verdict:\n%s", msg)
+	}
+	if !strings.Contains(msg, "This is about what landed on the TARGET, not a problem with the bundle") {
+		t.Errorf("rows-inserted caller missing its target-scoped verdict:\n%s", msg)
+	}
+
+	logged = nil
+	warnRowCountMismatches(logger, "payload row counts", []TableRowCountMismatch{
+		{Table: "workspaces", Recorded: 5, Actual: 1},
+	})
+	if len(logged) != 1 {
+		t.Fatalf("expected exactly one warning, got %d: %+v", len(logged), logged)
+	}
+	if !strings.Contains(logged[0], "This bundle's payload does not match its own manifest") {
+		t.Errorf("payload caller missing the bundle-is-suspect verdict:\n%s", logged[0])
+	}
+	if !strings.Contains(logged[0], "workspaces (recorded 5, actual 1 — 4 fewer)") {
+		t.Errorf("payload caller: mismatch detail not labelled fewer:\n%s", logged[0])
+	}
+}
+
+// TestExpectedInsertCounts_ExcludesSkillsAndDiscountsReconciledUsers is a
+// unit-level pin for defect (2)'s adjustment logic, independent of a full
+// restore round trip (see TestRestoreBackup_DesignedNoOpsNotReportedAsShortfalls
+// in the backup_test package for that).
+func TestExpectedInsertCounts_ExcludesSkillsAndDiscountsReconciledUsers(t *testing.T) {
+	recorded := map[string]int{
+		"skills":     3,
+		"users":      2,
+		"workspaces": 1,
+	}
+	got := expectedInsertCounts(recorded, 1 /* one reconciled user */)
+	if _, present := got["skills"]; present {
+		t.Errorf("expectedInsertCounts kept skills in the comparison: %+v", got)
+	}
+	if got["users"] != 1 {
+		t.Errorf("expectedInsertCounts[users] = %d, want 1 (2 recorded - 1 reconciled)", got["users"])
+	}
+	if got["workspaces"] != 1 {
+		t.Errorf("expectedInsertCounts[workspaces] = %d, want unchanged 1", got["workspaces"])
+	}
+
+	// A reconciled count exceeding recorded must floor at 0, not go
+	// negative — compareRowCounts would otherwise read a negative
+	// "recorded" as a real, very large mismatch against Actual.
+	got = expectedInsertCounts(map[string]int{"users": 1}, 5)
+	if got["users"] != 0 {
+		t.Errorf("expectedInsertCounts[users] = %d, want floored to 0", got["users"])
+	}
+}

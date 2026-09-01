@@ -183,7 +183,9 @@ type RestoreResult struct {
 	// their own more specific report (ColumnsDropped, the no-op-restore
 	// error); this is the summary that catches whatever they don't. Empty
 	// on a dry run (nothing was inserted to compare) and on a bundle with
-	// no recorded counts.
+	// no recorded counts. Never names "skills", and never counts a
+	// by-email-reconciled user row as short — see expectedInsertCounts's
+	// doc comment for why those two are excluded rather than reported.
 	RowsInsertedShortfalls []TableRowCountMismatch
 }
 
@@ -409,6 +411,25 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	if err := VerifyChecksum(manifest.Checksums.PayloadSHA256, hashed.Sum()); err != nil {
 		return nil, err
 	}
+
+	// #2009: snapshot the payload's row counts HERE, before anything below
+	// gets a chance to touch extracted.DBDump. This is what
+	// payloadMismatches (below, near the dry-run short-circuit) compares
+	// against the manifest — the question it answers is "does the bundle
+	// contain what its manifest claims", which is a property of the
+	// payload as extracted, not of whatever restore's own logic does to
+	// its in-memory copy afterward.
+	//
+	// That distinction is not academic: on a forked restore (--as-workspace
+	// / --as-crew), rechainForkedJournal appends a chain re-sign notice to
+	// journal_entries and ensureRestoringUserMembership can append a row to
+	// workspace_members — both AFTER this point, both legitimate, neither
+	// a sign the bundle disagrees with its manifest. Comparing post-mutation
+	// counts against the manifest (as an earlier version of this code did)
+	// made every forked restore of an otherwise-intact bundle print a
+	// false "payload does not match its own manifest" warning on
+	// workspace_members and journal_entries.
+	payloadTableRowCounts := tableRowCounts(extracted.DBDump)
 
 	// Disaster-recovery provenance (#1716). Two directions:
 	//
@@ -806,11 +827,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// Verify makes for an unencrypted bundle, run here unconditionally
 	// because restore already holds the decrypted dump regardless of
 	// encryption. Computed once and shared by both the dry-run and
-	// committed results below; extracted.DBDump has already been through
-	// any --as-workspace/--as-crew id/slug rewrites at this point, but
-	// those never add or remove rows, so the counts are unaffected by
-	// them.
-	payloadMismatches := compareRowCounts(manifest.Contents.TableRowCounts, tableRowCounts(extracted.DBDump))
+	// committed results below, from payloadTableRowCounts captured right
+	// after extraction — deliberately NOT re-derived from extracted.DBDump
+	// here, since by this point it may carry rows the --as-workspace /
+	// --as-crew fork path added on its own (journal re-sign notice,
+	// restoring-admin membership row); see payloadTableRowCounts's comment.
+	payloadMismatches := compareRowCounts(manifest.Contents.TableRowCounts, payloadTableRowCounts)
 	if !opts.FilesOnly {
 		// A --files-only resume applies no DB dump by design (see below) —
 		// warning about the payload's DB section here would read as a
@@ -920,6 +942,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	}
 
 	var stats RestoreStats
+	// Set inside the ReconcileUsersByEmail preInsertStep below, to however
+	// many bundle users it aligned onto a matching target id by email —
+	// each of those is expected to no-op on insert, not a shortfall. Read
+	// by expectedInsertCounts() at the rowsInsertedShortfalls comparison
+	// further down.
+	var reconciledUsers int
 	if extracted.DBDump != nil {
 		// PreInsert composition: --replace wipe FIRST (if enabled),
 		// THEN user-email reconciliation. The order matters when
@@ -971,6 +999,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			if err != nil {
 				return err
 			}
+			reconciledUsers = len(remap)
 			if opts.Logger != nil && len(remap) > 0 {
 				opts.Logger(fmt.Sprintf("user reconciliation: aligned %d bundle user(s) to target by email", len(remap)))
 			}
@@ -1047,7 +1076,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// IGNORE swallowed); this is the summary that catches whatever those
 	// don't. Empty on a dry run — stats.RowsInsertedByTable is nil there,
 	// since nothing was inserted to compare.
-	rowsInsertedShortfalls := compareRowCounts(manifest.Contents.TableRowCounts, stats.RowsInsertedByTable)
+	//
+	// expectedInsertCounts adjusts the recorded side first: skills and
+	// (partially) users are excluded/discounted because their shortfall
+	// is the designed outcome of an INSERT OR IGNORE, not a sign anything
+	// went wrong — see its doc comment.
+	rowsInsertedShortfalls := compareRowCounts(expectedInsertCounts(manifest.Contents.TableRowCounts, reconciledUsers), stats.RowsInsertedByTable)
 	warnRowCountMismatches(opts.Logger, "rows inserted", rowsInsertedShortfalls)
 
 	// No-op restore detection: the bundle carried rows but every one

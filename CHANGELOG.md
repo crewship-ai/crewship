@@ -630,6 +630,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   reported the same honest "not verified" way, never as a false pass or a
   new failure.
 
+  `payload_row_count_mismatches` is now taken BEFORE a `--as-workspace` /
+  `--as-crew` fork does its own bookkeeping (re-signing the journal chain,
+  adding the restoring admin to `workspace_members`) — those rows are the
+  restore's own doing, not the bundle disagreeing with its manifest, and
+  counting them the same way made every ordinary forked restore report the
+  bundle as suspect. `rows_inserted_shortfalls` no longer names a table
+  whose "shortfall" is INSERT OR IGNORE working as designed: bundled skills
+  reseed with the same IDs on every boot, and a user `crewship backup
+  restore` reconciles onto a matching target account by email intentionally
+  no-ops on insert. And the warning text for both now follows which one
+  fired — `rows_inserted_shortfalls` is about the *target*, not the bundle,
+  so it no longer tells the operator to treat the bundle as suspect — and
+  says "more" rather than always "fewer" when a table landed extra rows
+  rather than too few.
+
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
   conversation: a person opening a thread, a routine minting **one chat per
