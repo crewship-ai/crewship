@@ -47,14 +47,33 @@ var nonRemappablePKTablesForTest = map[string]bool{
 	"users":  true,
 }
 
-// forkAddedRows names tables a forked restore is EXPECTED to grow by MORE rows
-// than the bundle carried, because the restore itself writes one. Anything not
-// listed must match the bundle exactly.
-var forkAddedRows = map[string]int{
-	// ensureRestoringUserMembership (#1215) grants the admin who ran the
-	// restore membership on the brand-new workspace — without it the fork is
-	// unreachable to the person who just made it.
-	"workspace_members": 1,
+// forkExtraRows returns the rows a forked restore writes ON TOP of the ones the
+// bundle carries, per table. Anything not returned here must match the bundle
+// exactly.
+//
+// Computed from the bundle rather than hard-coded, because the one entry is
+// conditional: ensureRestoringUserMembership (#1215) grants the admin who ran
+// the restore membership on the brand-new workspace — without it the fork is
+// unreachable to the person who just made it — but it no-ops when the bundle
+// already carries that membership. Which of those two the row-per-table fixture
+// produces depends on which user its generated workspace_members row happens to
+// point at, so the expectation mirrors the production rule instead of guessing.
+//
+// journal_entries is deliberately NOT here. rechainForkedJournal (#2226)
+// appends a chain re-sign notice, but only for a workspace whose chain it
+// actually rewrote, and this fixture's entries are unchained (seq 0) so nothing
+// is re-signed and no notice is written. TestJournalChain_SurvivesForkedRestore
+// pins the notice against a real chain; if chained entries are ever added to
+// this fixture, this is the comment that explains the off-by-one.
+func forkExtraRows(dump *backup.DBDump, actorUserID string) map[string]int {
+	out := map[string]int{}
+	for _, r := range dump.Tables["workspace_members"] {
+		if r["user_id"] == actorUserID {
+			return out // already a member; the restore adds nothing
+		}
+	}
+	out["workspace_members"] = 1
+	return out
 }
 
 // knownForkDrops names tables whose rows a forked restore still SILENTLY LOSES,
@@ -468,6 +487,7 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 	assertNoFKViolations(t, source, "after every-table --as-workspace fork")
 
 	after := countBackupTableRows(t, source)
+	extra := forkExtraRows(dump, actor.UserID)
 	var lost []string
 	for _, table := range backup.BackupTables {
 		want := len(dump.Tables[table])
@@ -494,7 +514,7 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 			}
 			continue
 		}
-		want += forkAddedRows[table]
+		want += extra[table]
 		if got := after[table] - before[table]; got != want {
 			lost = append(lost, fmt.Sprintf(
 				"%s: bundle carried %d row(s), fork added %d", table, len(dump.Tables[table]), got))

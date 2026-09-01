@@ -345,11 +345,12 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			continue
 		}
 		for _, row := range rows {
-			// Non-PK unique identity first, and independent of the id
-			// rewrite below: a row the bundle carries without an id is
-			// not remapped at all, but a row that HAS one must not keep
-			// an instance-unique value the source still holds. See
-			// forkRegeneratedColumns for the failure mode.
+			// Non-PK unique identity, re-minted before the `id` rewrite
+			// below and deliberately ahead of its `continue`: a row the
+			// bundle carries with no id is inserted verbatim, so it
+			// collides on an instance-unique column just as readily as
+			// one that gets a new PK. See forkRegeneratedColumns for the
+			// failure mode this prevents.
 			for _, rc := range forkRegeneratedColumns[table] {
 				oldVal, ok := row[rc.column].(string)
 				if !ok || oldVal == "" {
