@@ -52,7 +52,7 @@ func (h *JournalHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q, err := parseJournalQuery(r, workspaceID)
+	q, err := h.journalQuery(r, workspaceID)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
@@ -87,7 +87,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
-	q, err := parseJournalQuery(r, workspaceID)
+	q, err := h.journalQuery(r, workspaceID)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
@@ -339,6 +339,12 @@ type flushNotifier interface {
 //	since, until      RFC3339 bounds
 //	cursor, limit     pagination
 //	q                 free-text search (FTS5)
+//
+// crew_id / agent_id (and their CSV counterparts) are taken verbatim
+// here; names and slugs are turned into ids afterwards by
+// resolveJournalRefs, which needs a database. Read handlers should go
+// through (*JournalHandler).journalQuery rather than calling this
+// directly so they never skip that step.
 func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, error) {
 	qs := r.URL.Query()
 	q := journal.Query{
@@ -431,8 +437,10 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 	// Free-text search via FTS5 (?q=…). Trimmed and rejected with 400
 	// when over 200 chars rather than silently truncated — silent
 	// truncation can drop the meaningful tail of the query and surprise
-	// the caller with seemingly unrelated matches. The phrase-quoting
-	// in journal.fts5Phrase neutralises operators inside the input.
+	// the caller with seemingly unrelated matches. journal.fts5Query
+	// then tokenises it: terms AND together in any order, the last one
+	// prefix-matches, and per-term quoting keeps FTS5 operators inside
+	// the input literal.
 	if v := qs.Get("q"); v != "" {
 		v = strings.TrimSpace(v)
 		const maxFTSQuery = 200
@@ -442,6 +450,142 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 		q.FTSQuery = v
 	}
 	return q, nil
+}
+
+// journalQuery parses the request's filters and then resolves any
+// human-typed crew/agent references into ids. Every read handler uses
+// it, so the three surfaces (list, stream, count) can never disagree
+// about what `agent_id=morgan` means.
+func (h *JournalHandler) journalQuery(r *http.Request, workspaceID string) (journal.Query, error) {
+	q, err := parseJournalQuery(r, workspaceID)
+	if err != nil {
+		return q, err
+	}
+	h.resolveJournalRefs(r.Context(), &q)
+	return q, nil
+}
+
+// resolveJournalRefs rewrites the crew/agent filters so they accept what
+// a human actually types. `agent_id` and `crew_id` were bound straight
+// into a SQL equality on the id column, which made the journal search
+// box's own placeholder example (`agent:viktor`) and
+// `crewship journal --agent morgan` return zero rows — a name is not an
+// id (#2206). Each reference is now matched against id, slug and
+// (case-insensitively) display name within the caller's workspace.
+//
+// Three deliberate choices:
+//
+//   - A reference that resolves to nothing is left exactly as typed, so
+//     it still filters on the id column. That keeps ids whose entity row
+//     is gone — hard-deleted, or soft-deleted long after the entries
+//     were written — pointing at their history, and keeps a typo
+//     unmatchable instead of silently widening to the whole workspace.
+//   - Display names are not unique (only slug is, per workspace), so an
+//     ambiguous name resolves to *every* match via the IN-clause form
+//     rather than an arbitrary single row.
+//   - Resolution is workspace-scoped, so one tenant's agent name can
+//     never resolve to another tenant's id.
+//
+// Failures are swallowed: a lookup that errors leaves the query filtering
+// on the raw reference, which is the pre-#2206 behaviour. A journal read
+// is not worth 500-ing over a name that could not be looked up.
+func (h *JournalHandler) resolveJournalRefs(ctx context.Context, q *journal.Query) {
+	if h.db == nil {
+		return
+	}
+	if ids := h.resolveEntityRefs(ctx, "agents", q.WorkspaceID, journalRefs(q.AgentID, q.AgentIDs)); ids != nil {
+		q.AgentID, q.AgentIDs = "", ids
+	}
+	if ids := h.resolveEntityRefs(ctx, "crews", q.WorkspaceID, journalRefs(q.CrewID, q.CrewIDs)); ids != nil {
+		q.CrewID, q.CrewIDs = "", ids
+	}
+}
+
+// journalRefs flattens the single- and multi-valued forms of a filter
+// into one slice, mirroring journal.Query's own precedence (the plural
+// field wins when set).
+func journalRefs(single string, multi []string) []string {
+	if len(multi) > 0 {
+		return multi
+	}
+	if single != "" {
+		return []string{single}
+	}
+	return nil
+}
+
+// resolveEntityRefs maps each reference to the ids it names in `table`
+// (which must be "agents" or "crews" — never user input). Returns nil
+// when there is nothing to resolve or the lookup fails, meaning "leave
+// the query alone".
+func (h *JournalHandler) resolveEntityRefs(ctx context.Context, table, workspaceID string, refs []string) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		matches, err := h.lookupEntityRef(ctx, table, workspaceID, ref)
+		if err != nil {
+			h.logger.Warn("journal: resolving filter reference failed",
+				"table", table, "err", err)
+			return nil
+		}
+		if len(matches) == 0 {
+			// Unresolvable: keep it as typed so a bare id (or a typo)
+			// behaves exactly as it did before.
+			matches = []string{ref}
+		}
+		for _, id := range matches {
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// lookupEntityRef returns the ids in workspaceID whose id, slug or name
+// matches ref. An exact id match short-circuits everything else so a
+// real id is never widened by an unrelated row that happens to be named
+// like it.
+func (h *JournalHandler) lookupEntityRef(ctx context.Context, table, workspaceID, ref string) ([]string, error) {
+	// The table name is interpolated, so it is checked against a literal
+	// allowlist here rather than trusted from the call site.
+	switch table {
+	case "agents", "crews":
+	default:
+		return nil, fmt.Errorf("journal: unsupported lookup table %q", table)
+	}
+	// LIMIT bounds the widening: a name shared by more entities than this
+	// is not a filter anyone meant to express.
+	// #nosec G202 -- table comes from the allowlist above, never user input.
+	query := `SELECT id, id = ? AS exact FROM ` + table + `
+		WHERE workspace_id = ? AND deleted_at IS NULL
+		  AND (id = ? OR lower(slug) = lower(?) OR lower(name) = lower(?))
+		ORDER BY exact DESC
+		LIMIT 100`
+	rows, err := h.db.QueryContext(ctx, query, ref, workspaceID, ref, ref, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		var exact bool
+		if err := rows.Scan(&id, &exact); err != nil {
+			return nil, err
+		}
+		if exact {
+			return []string{id}, nil
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // Get serves GET /api/v1/journal/{id}. Returns a single entry,
@@ -506,7 +650,7 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 		stripped.URL = &newURL
 	}
 
-	q, err := parseJournalQuery(stripped, workspaceID)
+	q, err := h.journalQuery(stripped, workspaceID)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return

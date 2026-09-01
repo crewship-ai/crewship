@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Query filters List and Stream reads. Zero fields are omitted from the
@@ -60,25 +61,69 @@ type Query struct {
 
 	// FTSQuery is a free-text search applied via the journal_entries_fts
 	// virtual table (migration 55). When non-empty, List joins the FTS5
-	// shadow table and adds a MATCH predicate. The string is treated as
-	// a single FTS5 phrase — special operators (NEAR, *, OR, etc.) are
-	// neutralised by wrapping in double quotes. Empty string → no FTS
-	// constraint, regular indexed lookup.
+	// shadow table and adds a MATCH predicate. The string is tokenised on
+	// whitespace and the terms AND together — word order does not matter
+	// and the last term prefix-matches, so a half-typed word still finds
+	// rows. Every term is quoted, so FTS5 operators (NEAR, OR, NOT, *,
+	// column filters) inside the input stay literal text. Empty string →
+	// no FTS constraint, regular indexed lookup. See fts5Query.
 	FTSQuery string
 }
 
-// fts5Phrase wraps the user's free-text search in FTS5 phrase quotes so
-// operators like NEAR / OR / * inside the input don't change the
-// query's meaning. Internal double quotes are doubled to escape them
-// per the FTS5 grammar. Returns empty when the input is whitespace.
-func fts5Phrase(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
+// fts5Query turns a user's free-text search into an FTS5 MATCH
+// expression. Each whitespace-separated term becomes its own quoted
+// phrase literal and the phrases are ANDed together, so `session morgan`
+// finds exactly what `morgan session` finds. The final term also gets a
+// trailing `*`, making it a prefix match: search is interactive and the
+// last word is usually the one still being typed, so `morg` has to reach
+// `morgan` rather than answering "no entries match" (#2206).
+//
+// Quoting every term is what preserves the operator-neutralisation
+// guarantee the original phrase-only implementation bought: a term like
+// AND / OR / NOT / NEAR(…) / `*` / `summary:x` / a stray `"` is inert
+// inside a phrase literal, so nothing a user types can restructure the
+// query or make SQLite raise a syntax error. Internal double quotes are
+// doubled per the FTS5 grammar.
+//
+// Terms with no letter or digit in them (a lone `*`, `--`, `…`) are
+// dropped: the tokenizer yields nothing for them, and an empty phrase
+// ANDed into the expression matches zero rows — which would turn
+// `morgan *` into a false empty result. Input consisting only of such
+// terms keeps the pre-tokenisation behaviour and stays unmatchable (an
+// empty phrase literal) rather than silently widening to "everything".
+//
+// Returns "" — meaning no FTS constraint at all — only for input that is
+// empty or whitespace.
+func fts5Query(s string) string {
+	terms := strings.Fields(s)
+	if len(terms) == 0 {
 		return ""
 	}
-	// Replace each `"` with `""` to escape it inside the phrase literal.
-	escaped := strings.ReplaceAll(s, `"`, `""`)
-	return `"` + escaped + `"`
+	phrases := make([]string, 0, len(terms))
+	for _, term := range terms {
+		if !hasTokenChar(term) {
+			continue
+		}
+		// Replace each `"` with `""` to escape it inside the phrase literal.
+		phrases = append(phrases, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
+	}
+	if len(phrases) == 0 {
+		return `""`
+	}
+	phrases[len(phrases)-1] += "*"
+	return strings.Join(phrases, " AND ")
+}
+
+// hasTokenChar reports whether s holds anything the FTS5 tokenizer would
+// turn into a searchable token. Approximated as "contains a letter or a
+// digit", which is what the `porter ascii` tokenizer indexes.
+func hasTokenChar(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildJournalFilters translates q's filter fields into WHERE conditions
@@ -170,8 +215,9 @@ func buildJournalFilters(q Query) (conds []string, args []any) {
 // applyFTS appends the FTS5 free-text predicate when q.FTSQuery is set
 // and returns the FROM clause to use. We JOIN the shadow table on rowid
 // (external-content FTS5 — see migration 55) and add a MATCH predicate.
-// The phrase quoting in fts5Phrase neutralises special operators so an
-// end-user typing `db OR foo*` doesn't unexpectedly broaden the search.
+// The per-term phrase quoting in fts5Query neutralises special operators
+// so an end-user typing `db OR foo*` doesn't unexpectedly broaden the
+// search, while still ANDing the terms so word order doesn't matter.
 //
 // Column references in the callers' SELECTs must be table-qualified
 // because the FTS shadow table also has `summary` and `payload`
@@ -180,10 +226,10 @@ func buildJournalFilters(q Query) (conds []string, args []any) {
 // unambiguous.
 func applyFTS(q Query, conds []string, args []any) ([]string, []any, string) {
 	from := "FROM journal_entries"
-	if phrase := fts5Phrase(q.FTSQuery); phrase != "" {
+	if match := fts5Query(q.FTSQuery); match != "" {
 		from = "FROM journal_entries JOIN journal_entries_fts fts ON fts.rowid = journal_entries.rowid"
 		conds = append(conds, "journal_entries_fts MATCH ?")
-		args = append(args, phrase)
+		args = append(args, match)
 	}
 	return conds, args, from
 }
