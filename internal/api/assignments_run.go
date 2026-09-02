@@ -320,7 +320,11 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	missionID := body.MissionID
 	if missionID == "" {
 		var exists int
-		derivedErr := h.db.QueryRowContext(r.Context(), `SELECT 1 FROM missions WHERE id = ?`, body.ChatID).Scan(&exists)
+		// Workspace-scoped like every other read (I7): a mission id from
+		// another workspace must not attribute this run, however unlikely a
+		// CUID collision is.
+		derivedErr := h.db.QueryRowContext(r.Context(),
+			`SELECT 1 FROM missions WHERE id = ? AND workspace_id = ?`, body.ChatID, body.WorkspaceID).Scan(&exists)
 		switch {
 		case derivedErr == nil:
 			missionID = body.ChatID
