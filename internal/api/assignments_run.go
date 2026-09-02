@@ -521,6 +521,25 @@ func (h *AssignmentHandler) runAssignment(
 	body createAssignmentBody,
 	target targetAgentInfo,
 ) {
+	// Tier 1 cooperative stop, checked before ANYTHING is spent on this
+	// assignment — before the pre_task_delegation hook below, before
+	// container provisioning, before the exec that would actually run the
+	// agent. Every door that reaches runAssignment (Create, DispatchAssignment,
+	// the dispatch-pump retry, and the @mention path — see the four call
+	// sites of runAssignment in this package) funnels through here, so this
+	// one check is what makes "stop starting new work" true regardless of
+	// which door dispatched this row. A row that was already RUNNING when
+	// Stop was called has already passed this point; finishAssignment
+	// applies the same cancel_requested_at check again once that run
+	// eventually completes, so a late completion still lands as CANCELLED
+	// rather than resurrecting as COMPLETED/FAILED.
+	if h.assignmentCancelRequested(ctx, assignmentID) {
+		h.logger.Info("assignment dispatch skipped: cancel already requested",
+			"assignment_id", assignmentID, "target", body.TargetSlug)
+		h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "", "", nil)
+		return
+	}
+
 	// Cross-surface exclusivity: at most one live RunAgent exec per AGENT,
 	// matching chatbridge.Bridge's per-chat guard on the chat-send door (see
 	// chatbridge.AgentRunLock's doc). Two runAssignment calls for the SAME
@@ -1116,6 +1135,17 @@ func (h *AssignmentHandler) finishAssignment(
 		status = "FAILED"
 	}
 
+	// Tier 1 cooperative stop: a cancel_requested_at stamp (written by issue
+	// Stop, internal/api/issue_handler_workflow.go) always wins over whatever
+	// the run itself reported — COMPLETED, FAILED, or anything else. There is
+	// no kill primitive for a shared crew container, so a run already in
+	// flight when Stop was called is not interrupted; this is what keeps its
+	// eventual, unstoppable completion from being recorded (and reported to
+	// OnAssignmentCompleted below) as anything other than CANCELLED.
+	if h.assignmentCancelRequested(ctx, assignmentID) {
+		status = "CANCELLED"
+	}
+
 	var resultVal, errVal interface{}
 	if result != "" {
 		resultVal = result
@@ -1199,9 +1229,12 @@ func (h *AssignmentHandler) finishAssignment(
 	{
 		termType := journal.EntryAssignmentDone
 		termSeverity := journal.SeverityInfo
-		if status == "FAILED" {
+		switch status {
+		case "FAILED":
 			termType = journal.EntryAssignmentFail
 			termSeverity = journal.SeverityWarn
+		case "CANCELLED":
+			termType = journal.EntryAssignmentCancel
 		}
 		// Routing/attribution for the feed: crew_id scopes a crew-filtered
 		// feed query, agent_id is the target, actor_id is the assigner so
@@ -1300,7 +1333,14 @@ func (h *AssignmentHandler) finishAssignment(
 				_ = h.db.QueryRowContext(ctx, `SELECT name FROM agents WHERE id = ?`, agentID).Scan(&agentName)
 
 				var commentBody string
-				if errMsg != "" {
+				if status == "CANCELLED" {
+					// cancel_requested_at wins even when the run itself
+					// reported a late failure (errMsg may be non-empty here)
+					// — this must be checked before errMsg != "" or a stopped
+					// run announces itself as failed. Never the failure
+					// framing/text, mirroring the broadcast switch below.
+					commentBody = fmt.Sprintf("**%s's work was cancelled.**", agentName)
+				} else if errMsg != "" {
 					// Durable, user-facing surface — never the raw error (may
 					// carry container/exec internals). The full errMsg already
 					// landed in assignments.error_message + the run journal
@@ -1328,7 +1368,10 @@ func (h *AssignmentHandler) finishAssignment(
 						cid, groupID.String, agentID, commentBody, now, now)
 					aid := generateCUID()
 					action := "task_completed"
-					if errMsg != "" {
+					switch {
+					case status == "CANCELLED":
+						action = "task_cancelled"
+					case errMsg != "":
 						action = "task_failed"
 					}
 					_, _ = h.db.ExecContext(ctx,
@@ -1343,7 +1386,23 @@ func (h *AssignmentHandler) finishAssignment(
 		return true
 	}
 
-	if errMsg != "" {
+	switch {
+	case status == "CANCELLED":
+		// cancel_requested_at wins over whatever the run itself reported —
+		// a clean completion (no error text either way) AND a late failure
+		// (errMsg may be non-empty here; see the error_message decision in
+		// this function's own comment above the CAS UPDATE). Checked before
+		// errMsg != "" specifically so a late failure that arrived after
+		// Stop still reads as cancelled, not failed — "assignment_completed"
+		// would be a lie here too (Stop was called and the row is not
+		// COMPLETED), so this case must come first, not merely before
+		// "default".
+		broadcastChannelEvent(h.hub, "session", chatID, "assignment_cancelled",
+			map[string]string{
+				"id":     assignmentID,
+				"target": targetSlug,
+			})
+	case errMsg != "":
 		// Chat bubble — user-facing, same sanitization as the mission
 		// comment above. The raw errMsg already reached the DB run
 		// record + journal entry earlier in this function.
@@ -1353,7 +1412,7 @@ func (h *AssignmentHandler) finishAssignment(
 				"target": targetSlug,
 				"error":  userFacingAssignmentError(errMsg),
 			})
-	} else {
+	default:
 		broadcastChannelEvent(h.hub, "session", chatID, "assignment_completed",
 			map[string]string{
 				"id":     assignmentID,
@@ -1374,6 +1433,25 @@ func (h *AssignmentHandler) finishAssignment(
 
 	h.logger.Info("assignment finished", "assignment_id", assignmentID, "status", status)
 	return true
+}
+
+// assignmentCancelRequested reports whether issue Stop
+// (internal/api/issue_handler_workflow.go) has stamped cancel_requested_at
+// on this assignment row — the Tier 1 cooperative signal that the runner
+// (runAssignment, finishAssignment above) checks before starting further
+// work and when deciding a late completion's terminal status.
+//
+// Best-effort, fails open (false) on a lookup error: this mirrors the
+// posture of finishAssignment's other best-effort reads in this file
+// (runAssignerID, crewID/assignedByID/assignedToID) — a DB hiccup here
+// must not turn into a spuriously-cancelled run.
+func (h *AssignmentHandler) assignmentCancelRequested(ctx context.Context, assignmentID string) bool {
+	var cancelAt sql.NullString
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT cancel_requested_at FROM assignments WHERE id = ?`, assignmentID).Scan(&cancelAt); err != nil {
+		return false
+	}
+	return cancelAt.Valid
 }
 
 // List handles GET /api/v1/crews/{crewId}/assignments.

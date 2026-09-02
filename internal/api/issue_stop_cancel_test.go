@@ -1,0 +1,346 @@
+package api
+
+// Coverage for PRD-ISSUES-AND-ROUTINES-2026 work package A1 ("Stop actually
+// stops (Tier 1), and terminal states hold"):
+//
+//   - IssueHandler.Stop now stamps cancel_requested_at on the issue's live
+//     (PENDING/RUNNING) assignment rows, in the same transaction as the
+//     existing mission_tasks/missions CANCELLED writes.
+//   - runAssignment (assignments_run.go) checks cancel_requested_at BEFORE
+//     spending anything on the assignment — before the pre_task_delegation
+//     hook, before flipping the row to RUNNING, before any container exec —
+//     and finishes it as CANCELLED instead. This is the "a stopped run
+//     starts no further step" behavior.
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
+
+func TestIssue_Stop_StampsCancelRequestedOnLiveAssignments(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "IN_PROGRESS")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	// assignments.chat_id is FK'd to chats(id). Mission dispatches satisfy
+	// this via ensureMissionChat, which lazily inserts a synthetic chat row
+	// keyed by the mission's own id (internal/orchestrator/mission_tasks.go)
+	// before ChatID: ms.ID is ever written onto an assignment.
+	if _, err := h.db.Exec(`
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, 'Mission: ENG-1', 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		id, leadID, wsID, now, now, now); err != nil {
+		t.Fatalf("seed mission chat: %v", err)
+	}
+	// A RUNNING assignment dispatched for this issue's task — mission
+	// dispatches stamp both chat_id and group_id with the mission id (see
+	// scheduleTask in internal/orchestrator/mission_tasks.go).
+	if _, err := h.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at, started_at)
+		VALUES ('a-running', ?, ?, ?, ?, 'do work', 'RUNNING', ?, ?, ?)`,
+		wsID, id, leadID, workerID, id, now, now); err != nil {
+		t.Fatalf("seed running assignment: %v", err)
+	}
+	// A terminal assignment from an earlier, already-finished task on the
+	// same issue — must NOT be touched (it is not "live").
+	if _, err := h.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at, finished_at)
+		VALUES ('a-done', ?, ?, ?, ?, 'already done', 'COMPLETED', ?, ?, ?)`,
+		wsID, id, leadID, workerID, id, now, now); err != nil {
+		t.Fatalf("seed completed assignment: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-1")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var cancelAt, status string
+	if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,''), status FROM assignments WHERE id='a-running'`).Scan(&cancelAt, &status); err != nil {
+		t.Fatalf("query a-running: %v", err)
+	}
+	if cancelAt == "" {
+		t.Errorf("a-running.cancel_requested_at not stamped by Stop")
+	}
+	// Tier 1: no kill primitive, so the row's status itself is left alone —
+	// the runner (runAssignment/finishAssignment) is what turns the flag
+	// into a terminal write once the run actually finishes.
+	if status != "RUNNING" {
+		t.Errorf("a-running.status = %q, want unchanged RUNNING (Stop does not itself terminate the row)", status)
+	}
+
+	var doneCancelAt string
+	if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,'') FROM assignments WHERE id='a-done'`).Scan(&doneCancelAt); err != nil {
+		t.Fatalf("query a-done: %v", err)
+	}
+	if doneCancelAt != "" {
+		t.Errorf("a-done.cancel_requested_at = %q, want empty (already-terminal rows must not be touched)", doneCancelAt)
+	}
+
+	var missionStatus string
+	h.db.QueryRow(`SELECT status FROM missions WHERE id=?`, id).Scan(&missionStatus)
+	if missionStatus != "CANCELLED" {
+		t.Errorf("mission status = %q, want CANCELLED", missionStatus)
+	}
+}
+
+// TestIssue_Stop_ReachesMentionDispatchedRun is the reconciliation this merge
+// exists for: a2-runs-attributable-to-issues (#2256) added
+// assignments.mission_id, and DispatchMention (internal/api/issue_mentions.go)
+// now stamps it on every mention-dispatched run. Stop's WHERE clause was
+// widened to match on mission_id directly instead of relying solely on the
+// chat_id/group_id heuristic — this proves that widening actually reaches a
+// mention-dispatched row (mission_id = the issue's mission id) rather than
+// silently stopping short of it.
+func TestIssue_Stop_ReachesMentionDispatchedRun(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-2", "IN_PROGRESS")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.Exec(`
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, 'Mission: ENG-2', 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		id, leadID, wsID, now, now, now); err != nil {
+		t.Fatalf("seed mission chat: %v", err)
+	}
+	// Shaped exactly like DispatchMention's insert (issue_mentions.go): chat_id
+	// and group_id are the mission id (a mention has no mission_tasks row, so
+	// group_id can't come from anywhere else), and mission_id is now stamped
+	// too.
+	if _, err := h.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, mission_id, created_at, started_at)
+		VALUES ('a-mentioned', ?, ?, ?, ?, 'reply to mention', 'RUNNING', ?, ?, ?, ?)`,
+		wsID, id, leadID, workerID, id, id, now, now); err != nil {
+		t.Fatalf("seed mention-dispatched assignment: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-2")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var cancelAt string
+	if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,'') FROM assignments WHERE id='a-mentioned'`).Scan(&cancelAt); err != nil {
+		t.Fatalf("query a-mentioned: %v", err)
+	}
+	if cancelAt == "" {
+		t.Errorf("a-mentioned.cancel_requested_at not stamped by Stop — mention-dispatched runs must still be reachable")
+	}
+}
+
+// TestIssue_Stop_FallsBackForDelegatedRunWithNoMissionID proves the other
+// half of the same reconciliation: mission_id is NOT threaded through every
+// door that can produce a live run for an issue. A sub-agent that delegates
+// further via /assign while executing inside a mission (or a
+// mention-dispatched run doing the same) creates its new row through
+// AssignmentHandler.Create — neither the sidecar's handleAssign
+// (internal/sidecar/assignment.go) nor the routine dispatcher's crewshipBody
+// (internal/api/crewship_actions.go) put mission_id in that request, so the
+// new row's mission_id is NULL. It DOES inherit chat_id = the mission id,
+// though (the delegating agent's own IPC chat_id, carried straight through by
+// insertCappedAssignment's ChatID/GroupID). If Stop's match were narrowed to
+// mission_id alone, this row would never be reached.
+func TestIssue_Stop_FallsBackForDelegatedRunWithNoMissionID(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-3", "IN_PROGRESS")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.Exec(`
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, 'Mission: ENG-3', 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		id, leadID, wsID, now, now, now); err != nil {
+		t.Fatalf("seed mission chat: %v", err)
+	}
+	// Shaped like a delegation hop (AssignmentHandler.Create /
+	// insertCappedAssignment): chat_id/group_id inherited from the delegating
+	// agent's IPC chat (the mission id), mission_id left NULL because neither
+	// caller of that door threads it through.
+	if _, err := h.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at, started_at)
+		VALUES ('a-delegated', ?, ?, ?, ?, 'sub-task', 'RUNNING', ?, ?, ?)`,
+		wsID, id, workerID, workerID, id, now, now); err != nil {
+		t.Fatalf("seed delegated assignment: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-3")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var cancelAt string
+	if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,'') FROM assignments WHERE id='a-delegated'`).Scan(&cancelAt); err != nil {
+		t.Fatalf("query a-delegated: %v", err)
+	}
+	if cancelAt == "" {
+		t.Errorf("a-delegated.cancel_requested_at not stamped by Stop — the chat_id/group_id fallback must still catch a NULL-mission_id delegation hop")
+	}
+}
+
+// TestRunAssignment_CancelRequested_StartsNoFurtherStep is the "a stopped
+// run starts no further step" test: an assignment whose cancel_requested_at
+// was already stamped (by Stop, before this dispatch goroutine got to run —
+// the PENDING-but-not-yet-executing case) must not be flipped to RUNNING,
+// must not reach the orchestrator, and must finish as CANCELLED.
+func TestRunAssignment_CancelRequested_StartsNoFurtherStep(t *testing.T) {
+	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	assignmentID := "a-precancelled"
+	if _, err := h.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at, cancel_requested_at, cancel_reason)
+		VALUES (?, ?, ?, ?, ?, 'do work', 'PENDING', ?, ?, 'issue stopped')`,
+		assignmentID, wsID, chatID, leadID, workerID, now, now); err != nil {
+		t.Fatalf("seed pre-cancelled assignment: %v", err)
+	}
+
+	body := createAssignmentBody{
+		TargetSlug:  "asg-worker",
+		Task:        "do work",
+		CrewID:      crewID,
+		WorkspaceID: wsID,
+		ChatID:      chatID,
+	}
+	target := targetAgentInfo{
+		ID: workerID, Slug: "asg-worker", Name: "Worker",
+		CLIAdapter: "CLAUDE_CODE", CrewSlug: "asg",
+	}
+
+	// h.orch is nil in covAsgRig — if the early cancel-check did NOT short
+	// circuit, runAssignment would still reach "if h.orch == nil" and finish
+	// the row FAILED("orchestrator not available") having already flipped it
+	// to RUNNING first. Asserting CANCELLED *and* started_at IS NULL below
+	// tells the two apart: only the early check produces both.
+	h.runAssignment(context.Background(), assignmentID, body, target)
+
+	var status, errMsg string
+	var startedAt, finishedAt *string
+	if err := h.db.QueryRow(`SELECT status, COALESCE(error_message,''), started_at, finished_at FROM assignments WHERE id=?`, assignmentID).
+		Scan(&status, &errMsg, &startedAt, &finishedAt); err != nil {
+		t.Fatalf("query assignment: %v", err)
+	}
+	if status != "CANCELLED" {
+		t.Fatalf("status = %q, want CANCELLED (errMsg=%q)", status, errMsg)
+	}
+	if startedAt != nil {
+		t.Errorf("started_at = %q, want NULL — the run must never have been flipped to RUNNING", *startedAt)
+	}
+	if finishedAt == nil {
+		t.Errorf("finished_at is NULL, want set — the assignment must have reached a terminal write")
+	}
+	if errMsg != "" {
+		t.Errorf("error_message = %q, want empty — this is a cancellation, not a failure", errMsg)
+	}
+
+	// The resolver would only be consulted once dispatch actually tries to
+	// build the run request (buildAssignmentRunRequest) — a step strictly
+	// after the RUNNING flip. Confirming it was never asked to resolve
+	// anything is a second, independent signal that no further step ran.
+	if fake, ok := h.resolver.(*fakeAgentResolver); ok && fake.gotAgentID != "" {
+		t.Errorf("agent resolver was consulted (agent_id=%q) — dispatch proceeded past the cancel check", fake.gotAgentID)
+	}
+}
+
+// TestFinishAssignment_CancelRequested_OverridesLateCompletion is the "run
+// ends CANCELLED" clause of golden scenario 5a for the mid-flight case: a
+// task that was actually RUNNING (not merely PENDING) when Stop landed.
+// There is no kill primitive for a shared crew container (see the comment
+// on finishAssignment, assignments_run.go), so the run keeps executing and
+// eventually reports its own outcome through the normal finishAssignment
+// path — the same path TestRunAssignment_CancelRequested_StartsNoFurtherStep
+// above proves is skipped entirely for a row that was still PENDING. Here
+// the row genuinely started, so the ONLY place left to intervene is the
+// terminal write itself: cancel_requested_at must win over whatever the
+// run reported, in both directions (a late success AND a late failure).
+func TestFinishAssignment_CancelRequested_OverridesLateCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		lateResult string
+		lateErrMsg string
+	}{
+		{name: "late success", lateResult: "all done, arrived after stop"},
+		{name: "late failure", lateErrMsg: "container blew up, arrived after stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, wsID, _, leadID, workerID, chatID := covAsgRig(t)
+
+			now := time.Now().UTC().Format(time.RFC3339)
+			assignmentID := "a-live-stopped"
+			// Shaped like a-running in TestIssue_Stop_StampsCancelRequestedOnLiveAssignments:
+			// RUNNING (it actually started — started_at is set) with
+			// cancel_requested_at stamped by Stop while it was in flight.
+			if _, err := h.db.Exec(`
+				INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at, started_at, cancel_requested_at, cancel_reason)
+				VALUES (?, ?, ?, ?, ?, 'do work', 'RUNNING', ?, ?, ?, 'issue stopped')`,
+				assignmentID, wsID, chatID, leadID, workerID, now, now, now); err != nil {
+				t.Fatalf("seed live-then-stopped assignment: %v", err)
+			}
+
+			// The run finishes on its own, late — exactly what finishAssignment
+			// receives whether the goroutine reports success or failure.
+			if ok := h.finishAssignment(context.Background(), assignmentID, "", chatID, "asg-worker", wsID,
+				tc.lateResult, tc.lateErrMsg, nil); !ok {
+				t.Fatal("finishAssignment should have won the terminal CAS (row was RUNNING, not already terminal)")
+			}
+
+			var status, errMsg string
+			if err := h.db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM assignments WHERE id = ?`, assignmentID).
+				Scan(&status, &errMsg); err != nil {
+				t.Fatalf("query assignment: %v", err)
+			}
+			// The one write scenario 5a actually promises: the STATUS column
+			// never resurrects as COMPLETED/FAILED once cancel_requested_at is
+			// set, regardless of what the run itself reported.
+			if status != "CANCELLED" {
+				t.Errorf("status = %q, want CANCELLED — cancel_requested_at must win over the run's own "+
+					"reported outcome (%s)", status, tc.name)
+			}
+			if tc.lateErrMsg != "" {
+				// DELIBERATE (not a leftover finding): error_message is kept
+				// unconditional. It is operator/diagnostic-facing — the run
+				// journal entry carries the same raw text unconditionally too
+				// (assignments_run.go, the entry built from acc/errMsg above
+				// the CAS UPDATE) — and every user-facing surface that
+				// renders a *failure* from this row is entry-type/status
+				// gated, not error_message-presence gated: the websocket
+				// broadcast switch checks `status == "CANCELLED"` BEFORE
+				// `errMsg != ""` (assignments_run.go, the switch above the
+				// workspace broadcast) so a late failure now emits
+				// "assignment_cancelled", and the mission-comment block
+				// checks `status == "CANCELLED"` first too, posting a
+				// cancellation notice instead of "encountered an issue".
+				// TestFinishAssignment_CancelRequested_LateFailure_* in
+				// assignments_run_cancel_leak_test.go covers those two
+				// surfaces directly. Losing the raw text from this column
+				// entirely would remove the only durable, queryable record of
+				// "what actually broke" for a run that both failed and was
+				// stopped, which is worse for debugging than a column that
+				// disagrees with the (correct) status field — see the report
+				// for this change for the readers checked before deciding.
+				if errMsg != tc.lateErrMsg {
+					t.Errorf("error_message = %q, want it to still carry the late report's raw text (%q) — "+
+						"this assertion documents current behavior, not the ideal", errMsg, tc.lateErrMsg)
+				}
+			} else if errMsg != "" {
+				t.Errorf("error_message = %q, want empty for a late success report", errMsg)
+			}
+		})
+	}
+}

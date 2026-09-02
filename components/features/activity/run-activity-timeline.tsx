@@ -50,6 +50,7 @@ export const RUN_WORK_ENTRY_TYPES = [
   "assignment.running",
   "assignment.completed",
   "assignment.failed",
+  "assignment.cancelled",
   "exec.command",
   "file.written",
   "network.egress",

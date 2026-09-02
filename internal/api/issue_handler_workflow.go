@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // Named so Start's 400 body is grep-able and a test can assert exactly
@@ -378,15 +380,70 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Cancel running/pending tasks
-	_, _ = h.db.ExecContext(r.Context(), `
-		UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,
-		now, missionID)
+	// One transaction: the DB-visible half of "stop" — mission_tasks,
+	// assignments, and missions — moves atomically, so no reader ever
+	// observes the issue as CANCELLED while a task or assignment it owns
+	// still looks live (or vice versa).
+	//
+	// This is Tier 1 (cooperative) only: there is no kill primitive for a
+	// shared crew container (internal/provider/container.go has
+	// Exec/ExecInspect, no Kill), so a running exec is not interrupted here.
+	// cancel_requested_at is the cooperative signal the runner checks before
+	// starting any further work (assignments_run.go's runAssignment) and
+	// consults when an already-in-flight run finishes late (finishAssignment)
+	// so it records CANCELLED instead of resurrecting the row as COMPLETED.
+	err = database.WithTx(r.Context(), h.db, func(tx *sql.Tx) error {
+		// Cancel running/pending tasks
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,
+			now, missionID); err != nil {
+			return err
+		}
 
-	// Update issue status → CANCELLED
-	_, err = h.db.ExecContext(r.Context(), `
-		UPDATE missions SET status = 'CANCELLED', completed_at = ?, updated_at = ? WHERE id = ?`,
-		now, now, missionID)
+		// Signal the live assignment(s) for this issue.
+		//
+		// mission_id (#2256) is the direct answer and the one preferred: every
+		// mission-task run (mission_tasks.go's scheduleTask), the lead-planning
+		// run (mission_tasks_planning.go's dispatchLeadPlanning), and a mention
+		// dispatch (issue_mentions.go's DispatchMention) stamp it explicitly.
+		//
+		// chat_id/group_id stay as a FALLBACK, not a redundant belt-and-braces
+		// check: a sub-agent that delegates further via /assign while running
+		// inside a mission (or a mention-dispatched run doing the same) creates
+		// its new assignment row through AssignmentHandler.Create
+		// (assignments_run.go), and neither caller of that door threads
+		// mission_id through —
+		//
+		//   - the sidecar's handleAssign (internal/sidecar/assignment.go) never
+		//     sets "mission_id" in the body it forwards, only actor_agent_id;
+		//   - the routine dispatcher's crewshipBody (crewship_actions.go)
+		//     injects workspace_id/crew_id/agent identity but not mission_id
+		//     either.
+		//
+		// That delegated row DOES inherit chat_id = the mission id, though:
+		// s.ipc.ChatID for a mission-task or mention-dispatched container is set
+		// to the mission id (mission_tasks.go:585, issue_mentions.go's ChatID:
+		// req.MissionID), and handleAssign carries that IPC chat_id straight
+		// through as the new assignment's chat_id. So a delegated sub-task has
+		// mission_id = NULL but chat_id = the mission id, and only the
+		// heuristic finds it. Dropping the fallback would make Stop silently
+		// stop reaching every delegation hop under a mission or a mention —
+		// worse than the heuristic it would replace.
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
+			 WHERE (mission_id = ? OR chat_id = ? OR group_id = ?) AND status IN ('PENDING', 'RUNNING')`,
+			now, missionID, missionID, missionID); err != nil {
+			return err
+		}
+
+		// Update issue status → CANCELLED
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE missions SET status = 'CANCELLED', completed_at = ?, updated_at = ? WHERE id = ?`,
+			now, now, missionID); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		internalError(w, r, h.logger, "stop issue: update", err)
 		return

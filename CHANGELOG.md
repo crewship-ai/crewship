@@ -972,6 +972,29 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   The restore now skips such a marker instead of aborting on the deferred
   foreign-key check, and reports the skip in `rows_inserted_shortfalls`.
 
+- **Stop now actually stops the next step, and a late failure report still
+  reads as cancelled (#2295).** `POST /issues/{identifier}/stop` cancelled the
+  issue's row and its pending tasks, but a run already `RUNNING` when Stop
+  was called kept executing to completion and, if it finished with an error
+  after the stop, the websocket broadcast and the mission comment both
+  reported it as a failure (`assignment_failed`, "encountered an issue") —
+  the opposite of what the operator who clicked Stop asked for. Stop is Tier
+  1 (cooperative): there is no kill primitive for a shared crew container, so
+  a run mid-exec is not interrupted. What changed is that the contract is now
+  actually enforced end to end. In one transaction, Stop stamps
+  `assignments.cancel_requested_at` on every live assignment for the issue.
+  `runAssignment` checks the stamp before spending anything on the row —
+  before the container exec, before the LLM call — so a run that has not yet
+  started never starts. `finishAssignment` checks the same stamp again when
+  an already-`RUNNING` run eventually completes, and now the check runs
+  *before* the websocket broadcast switch and the mission-comment block are
+  reached, not only before the `status` column write: a late `COMPLETED` or
+  `FAILED` report is recorded and announced as `CANCELLED` either way, and
+  `mission_activity` gets a dedicated `task_cancelled` action instead of
+  reusing `task_failed`. No further step is scheduled for the issue. A hard
+  kill that interrupts a run mid-exec remains a separate, not-yet-built
+  capability.
+
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
   conversation: a person opening a thread, a routine minting **one chat per

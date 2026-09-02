@@ -129,7 +129,7 @@ var issueStartCmd = &cobra.Command{
 
 var issueStopCmd = &cobra.Command{
 	Use:   "stop <identifier>",
-	Short: "Stop an issue — cancel running tasks",
+	Short: "Stop an issue — cooperative cancel; a step already running finishes",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -155,7 +155,7 @@ var issueStopCmd = &cobra.Command{
 			return err
 		}
 		resp.Body.Close()
-		cli.PrintSuccess(fmt.Sprintf("Stopped %s", identifier))
+		cli.PrintSuccess(fmt.Sprintf("Stop requested for %s — the current step will finish; no further step will start", identifier))
 		return nil
 	},
 }

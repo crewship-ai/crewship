@@ -28,6 +28,7 @@ var AllEntryTypes = []EntryType{
 	EntryApprovalTimeout,
 	EntryTrustGranted,
 	EntryTrustRevoked,
+	EntryAssignmentCancel,
 	EntryAssignmentDone,
 	EntryAssignmentCreate,
 	EntryAssignmentFail,
