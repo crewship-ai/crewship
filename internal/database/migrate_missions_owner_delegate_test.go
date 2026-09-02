@@ -123,7 +123,7 @@ func TestMigrate_MissionsOwnerDelegate_AgentDeleteSetsDelegateNull(t *testing.T)
 }
 
 // TestMigrateBackfillsMissionsOwnerDelegate drives the real backfill
-// migration (20260901220722) against a populated DB carrying both assignee
+// migration (20260902080722) against a populated DB carrying both assignee
 // kinds — the case this migration exists for — the way
 // TestMigrateBackfillsAssignmentsMissionID does: apply every migration once,
 // seed rows under the legacy assignee_type/assignee_id pair, clear just the
@@ -155,7 +155,7 @@ func TestMigrateBackfillsMissionsOwnerDelegate(t *testing.T) {
 		VALUES ('msn_od_already', 'ws_od', 'crew_od', 'agent_od_lead', 'trace-od-already', 'already linked', 'BACKLOG', 'issue',
 			'user', 'user_od_owner', 'user_od_owner', datetime('now'), datetime('now'))`)
 
-	if _, err := db.Exec(`DELETE FROM _migrations WHERE version = 20260901220722`); err != nil {
+	if _, err := db.Exec(`DELETE FROM _migrations WHERE version = 20260902080722`); err != nil {
 		t.Fatalf("clear backfill marker: %v", err)
 	}
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))

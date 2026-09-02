@@ -1,4 +1,4 @@
--- Backfill for 20260901220721_missions_owner_delegate.sql, which added the
+-- Backfill for 20260902080721_missions_owner_delegate.sql, which added the
 -- two columns with no backfill.
 --
 -- Separate migration file, not folded into the ADD COLUMN above: SQLite's

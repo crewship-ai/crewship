@@ -15,7 +15,7 @@
 --
 -- Nullable, no default, same as assignee_type/assignee_id themselves: an
 -- issue with nobody assigned says nothing about either slot. The companion
--- backfill migration (20260901220722) recovers what the legacy pair can
+-- backfill migration (20260902080722) recovers what the legacy pair can
 -- prove for existing rows.
 --
 -- ON DELETE SET NULL on both (F55, the same choice A2 made for
