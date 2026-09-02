@@ -938,6 +938,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   peer-query path; a run started through one of those can still collide with
   a live run for the same agent.
 - **Inbox read state is now per user, not shared (#TBD).** `PATCH
+- **Inbox read state is now per user, not shared (#2296).** `PATCH
   /api/v1/inbox/{id}` with `state=read` wrote the shared `read_at` /
   `read_by_user_id` columns on `inbox_items` with `COALESCE(existing, now)` —
   the first person to open a role-targeted item (e.g. a MANAGER escalation
