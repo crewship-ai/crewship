@@ -481,6 +481,11 @@ var startCmd = &cobra.Command{
 				// which is exactly how a two-rule loop ran 59 hops past a cap
 				// of 8.
 				autoReg.SetChainSource(pipeline.NewRunChainReader(deps.DB))
+				// A4 (PRD-ISSUES-AND-ROUTINES-2026.md §17, F20): without this,
+				// a repeated enqueue failure still gets its per-failure
+				// journal entry but never pages a human — the same
+				// degrade-quietly contract as an unwired IssueOpener.
+				autoReg.SetInboxAlerter(automation.NewDBInboxAlerter(deps.DB, logger))
 				autoReg.Start(ctx)
 				defer autoReg.Stop()
 				jw.AddCommitObserver(autoReg.Observer)

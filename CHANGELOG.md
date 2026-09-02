@@ -657,6 +657,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   types whose payloads are known; for the rest the error, the CLI help and the
   guide say plainly that no key validation is possible, because no
   payload-schema registry exists.
+- **A webhook or automation that fails to start a run is now visible, not
+  just logged (#2282).** Schedules already raised a journal entry and an inbox
+  card when they failed; a webhook fire failure wrote a database row only,
+  and an automation whose enqueue failed left nothing but a log line. Both
+  now emit a journal entry on every failure and one inbox card — kinds
+  `webhook_fire_failed` and `automation_enqueue_failed`, routed to the
+  `routines.missed` channel category — once three consecutive failures show
+  the path is broken rather than a blip. A run that started and then failed
+  is not counted; it already has its own failure entry.
 
   **Two regressions in the first cut of this fix, found in review and fixed
   in the same PR.** First, the registry generator only scanned

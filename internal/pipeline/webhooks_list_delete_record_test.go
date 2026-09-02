@@ -199,7 +199,7 @@ func TestWebhookStore_RecordFire_UpdatesLastFiredAtStatusRunIDAndCount(t *testin
 	wh := saveWebhookForTest(t, store, "ws_rf", "rf", "pln_rf")
 
 	before := time.Now().UTC()
-	if err := store.RecordFire(context.Background(), wh.ID, "run-abc-1", "COMPLETED"); err != nil {
+	if _, err := store.RecordFire(context.Background(), wh.ID, "run-abc-1", "COMPLETED"); err != nil {
 		t.Fatalf("RecordFire: %v", err)
 	}
 	after := time.Now().UTC().Add(time.Second) // tolerate sub-second jitter
@@ -239,7 +239,7 @@ func TestWebhookStore_RecordFire_FireCountIncrementsPerCall(t *testing.T) {
 	wh := saveWebhookForTest(t, store, "ws_inc", "inc", "pln_inc")
 
 	for i := 1; i <= 5; i++ {
-		if err := store.RecordFire(context.Background(), wh.ID, "run-i", "COMPLETED"); err != nil {
+		if _, err := store.RecordFire(context.Background(), wh.ID, "run-i", "COMPLETED"); err != nil {
 			t.Fatalf("RecordFire #%d: %v", i, err)
 		}
 		var n int64
@@ -262,7 +262,7 @@ func TestWebhookStore_RecordFire_EmptyRunIDStoresNull(t *testing.T) {
 	store := NewWebhookStore(db)
 	wh := saveWebhookForTest(t, store, "ws_null", "null", "pln_null")
 
-	if err := store.RecordFire(context.Background(), wh.ID, "", "FAILED"); err != nil {
+	if _, err := store.RecordFire(context.Background(), wh.ID, "", "FAILED"); err != nil {
 		t.Fatalf("RecordFire: %v", err)
 	}
 	var lastRunID interface{}
@@ -282,7 +282,7 @@ func TestWebhookStore_RecordFire_UnknownID_NoError(t *testing.T) {
 	db := openWebhookTestDB(t)
 	defer db.Close()
 	store := NewWebhookStore(db)
-	if err := store.RecordFire(context.Background(), "missing", "run-x", "COMPLETED"); err != nil {
+	if _, err := store.RecordFire(context.Background(), "missing", "run-x", "COMPLETED"); err != nil {
 		t.Errorf("unknown id should not error; got %v", err)
 	}
 }

@@ -305,6 +305,25 @@ Use it to stop a runaway rule. Do not use it where the number itself has to
 hold, such as billing or a contractual limit.
 </Warning>
 
+**Enqueue failure visibility.** A matched, coalesced rule that reaches the
+front of the queue and then fails to park its run — a database write error,
+not a policy refusal — writes an `automation.enqueue_failed` journal entry
+**every time**:
+
+```bash
+crewship journal --type automation.enqueue_failed
+```
+
+A single failure is treated as noise-tolerant (a momentary write blip) and is
+not surfaced beyond the journal entry. Once the **same rule** fails to enqueue
+**3 times in a row**, a MANAGER inbox card is raised; further failures past
+the third do not raise additional cards, and a later successful enqueue resets
+the streak so a future run of failures can alert again. This is separate from
+`automation.depth_exceeded` (a refused composition hop) and
+`automation.throttled` (the hourly cap) — both of those are the rule
+deliberately declining to fire; `automation.enqueue_failed` is the rule
+trying to fire and the write failing underneath it.
+
 ## Where rules show up in the UI
 
 There is no automation management screen — the CLI above is the whole write

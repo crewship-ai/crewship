@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS pipeline_webhooks (
     last_status              TEXT,
     last_run_id              TEXT,
     fire_count               INTEGER NOT NULL DEFAULT 0,
+    consecutive_fire_failures INTEGER NOT NULL DEFAULT 0,
     created_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at               TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     deleted_at               TEXT

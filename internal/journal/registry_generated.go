@@ -37,6 +37,7 @@ var AllEntryTypes = []EntryType{
 	EntryAuditEntityRestored,
 	EntryAuditEntityUpdated,
 	EntryAutomationDepthExceeded,
+	EntryAutomationEnqueueFailed,
 	EntryAutomationThrottled,
 	EntryBackupChainResigned,
 	EntryBudgetExceed,
@@ -129,6 +130,7 @@ var AllEntryTypes = []EntryType{
 	EntryPipelineStepSkipped,
 	EntryPipelineStepStarted,
 	EntryPipelineStepValidation,
+	EntryPipelineWebhookFireFailed,
 	EntryType("policy.changed"), // journalPolicyChanged, internal/api/crew_policy.go:34:7
 	EntryProvisioningBuildFailed,
 	EntryProvisioningBuilding,
