@@ -38,17 +38,26 @@ import (
 // through dispatchByID into the run.started journal entry.
 func TestDispatchByID_RequeuedMentionRow_PreservesAuthorAttribution(t *testing.T) {
 	t.Parallel()
-	h, db, _, agentIDs, chatID := dispatchPumpRig(t)
+	h, db, crewID, agentIDs, chatID := dispatchPumpRig(t)
 	rec := &recordingEmitter{}
 	h.SetJournal(rec)
 
 	const aid = "a_mention_requeue"
 	authorID := agentIDs[2] // a distinct agent id — the mention's author, not the target
+	// mission_id is a real foreign key since #2279, so the mention must point
+	// at a mission that exists — the same shape DispatchMention leaves behind.
+	const missionID = "m_mention_requeue"
+	if _, err := db.Exec(`
+		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES (?, 'test-workspace-id', ?, ?, 'trace-m_mention_requeue', 'M', 'IN_PROGRESS', datetime('now'), datetime('now'))`,
+		missionID, crewID, agentIDs[0]); err != nil {
+		t.Fatalf("seed mission: %v", err)
+	}
 	if _, err := db.Exec(`
 		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status,
 		                         group_id, mission_id, author_agent_id, created_at)
 		VALUES (?, 'test-workspace-id', ?, ?, ?, 'do the thing', 'QUEUED', ?, ?, ?, datetime('now'))`,
-		aid, chatID, authorID, agentIDs[0], chatID, chatID, authorID); err != nil {
+		aid, chatID, authorID, agentIDs[0], missionID, missionID, authorID); err != nil {
 		t.Fatalf("seed mention row: %v", err)
 	}
 
@@ -60,8 +69,8 @@ func TestDispatchByID_RequeuedMentionRow_PreservesAuthorAttribution(t *testing.T
 	if got, _ := entry.Payload["author_agent_id"].(string); got != authorID {
 		t.Errorf("run.started author_agent_id = %q, want %q — attribution was lost on re-dispatch", got, authorID)
 	}
-	if got := entry.MissionID; got != chatID {
-		t.Errorf("run.started mission_id = %q, want %q", got, chatID)
+	if got := entry.MissionID; got != missionID {
+		t.Errorf("run.started mission_id = %q, want %q", got, missionID)
 	}
 }
 
