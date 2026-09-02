@@ -36,7 +36,6 @@
 -- reach dispatchByID with a row that needed rebuilding), so there is no
 -- historical value to recover — a NULL/0 on an old row is the truthful
 -- "this was never re-dispatched from cold storage" answer, not a gap.
-ALTER TABLE assignments ADD COLUMN mission_id TEXT;
 ALTER TABLE assignments ADD COLUMN author_agent_id TEXT;
 ALTER TABLE assignments ADD COLUMN created_by_user_id TEXT;
 ALTER TABLE assignments ADD COLUMN lead_planning INTEGER NOT NULL DEFAULT 0;
@@ -47,4 +46,3 @@ ALTER TABLE assignments ADD COLUMN lead_planning INTEGER NOT NULL DEFAULT 0;
 -- in a server log line. Cleared when the row goes RUNNING.
 ALTER TABLE assignments ADD COLUMN queued_reason TEXT;
 
-CREATE INDEX IF NOT EXISTS idx_assignments_mission ON assignments(mission_id);
