@@ -20,6 +20,19 @@ import (
 // current state + PUT new state + workspace-scoped list. Patches
 // land via the same PUT to keep the audit trail (set_by_user_id +
 // set_at + reason) atomic with the value change.
+// journalPolicyChanged is written to the journal by every successful policy
+// PUT. Declared here rather than in internal/journal because that file
+// belongs to another slice — the string is the stable wire identifier and
+// moving the constant later changes nothing. A typed const (matching the
+// shape internal/api/pages_data.go and pages_transfer_owner.go already use)
+// rather than a bare literal on the Type field, so
+// internal/journalgen.ScanTree can find it: a bare string constant
+// assignable to journal.EntryType carries no textual marker at all, and
+// scanning for every "Type: <string>" field in the codebase to find the rare
+// real one would flag dozens of unrelated fields (WebSocket message kinds,
+// credential kinds) for every real hit.
+const journalPolicyChanged journal.EntryType = "policy.changed"
+
 type CrewPolicyHandler struct {
 	db       *sql.DB
 	logger   *slog.Logger
@@ -185,7 +198,7 @@ func (h *CrewPolicyHandler) Put(w http.ResponseWriter, r *http.Request) {
 	if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: workspaceID,
 		CrewID:      crewID,
-		Type:        "policy.changed",
+		Type:        journalPolicyChanged,
 		Severity:    journal.SeverityNotice,
 		ActorType:   journal.ActorUser,
 		ActorID:     userID,

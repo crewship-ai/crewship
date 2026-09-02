@@ -281,3 +281,53 @@ func TestStoreRejectsUnsupportedActionKindAtWriteTime(t *testing.T) {
 		t.Fatal("store accepted action_kind 'issue'")
 	}
 }
+
+// TestStoreCreateRefusesUnregisteredEventType pins that the event_type
+// registry check lives in Automation.Validate — which Store.Create calls —
+// not only in the HTTP handler. Before this (PRD-ISSUES-AND-ROUTINES-2026
+// §A3), the registry check was bolted onto internal/api/automations.go's own
+// validate method, so any OTHER writer reaching Store.Create directly (the
+// handler is the only one today, but internal/api/pages_wake.go's
+// reconcileWakeAutomations calls Automation.Validate the same way, precisely
+// so it does not have to duplicate this check) got no registry protection at
+// all — a rule with a typo'd or stale event type would insert successfully
+// and simply never fire.
+func TestStoreCreateRefusesUnregisteredEventType(t *testing.T) {
+	st, db := newStore(t)
+	seedWorkspace(t, db, "ws_1", "pl_1", "triage")
+	a := sample("ws_1", "a")
+	a.EventType = "totally.made_up"
+	if _, err := st.Create(context.Background(), a); err == nil {
+		t.Fatal("store accepted an unregistered event_type — the registry check must live in Automation.Validate, not only the HTTP handler")
+	}
+}
+
+// TestValidateRefusesUnregisteredEventTypeForAnIssueAutomation pins the
+// specific shape internal/api/pages_wake.go's reconcileWakeAutomations
+// builds and relies on Validate to gate (ActionKindIssue, no routine_slug —
+// see buildWakeAutomation). pages_wake.go's own doc comment says
+// "automation.Automation's own Validate still gates every row, so a rule
+// this file writes is a rule that package would have accepted" — this test
+// is what makes that true for event_type specifically. It cannot be driven
+// through pages_wake.go's real HTTP path because EventType there is a
+// hardcoded constant (journal.EntryPagePanelUpdated), never user input; this
+// pins the mechanism that path depends on directly.
+func TestValidateRefusesUnregisteredEventTypeForAnIssueAutomation(t *testing.T) {
+	a := Automation{
+		WorkspaceID: "ws_1",
+		Name:        "page wake",
+		Enabled:     true,
+		EventType:   "totally.made_up",
+		ActionKind:  ActionKindIssue,
+		Action: Action{Issue: &IssueAction{
+			CrewSlug: "devops",
+			Title:    "t",
+			Body:     "b",
+		}},
+		DebounceSeconds: DefaultDebounceSeconds,
+		MaxPerHour:      DefaultMaxPerHour,
+	}
+	if err := a.Validate(); err == nil {
+		t.Fatal("Validate accepted an unregistered event_type on an issue-kind automation")
+	}
+}

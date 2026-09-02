@@ -300,7 +300,7 @@ The superseded draft recorded twelve observations from a live dev1 session (two 
 | Status | Findings |
 |---|---|
 | FIXED-IN `a1` (Stop, terminal guards, `mission_id`, derivation, late-failure leak) | F1, F6 (Tier 1), F7, F9 |
-| FIXED-IN `a3` | F19 |
+| FIXED-IN `a3` (registry now scans every ad hoc `journal.EntryType` under `internal/`+`cmd/`, 140 types, not just `types.go`; sparse `PATCH` validates only what it changes) | F19 |
 | FIXED-IN `a4` | F20 |
 | FIXED-IN `a5` (docs, labels, stale comment) | F25, F26, F23 (docs half) |
 | FIXED-IN `a7` (with F37/F38 integration steps applied) | F27 |
@@ -1218,7 +1218,7 @@ Percentages over surface area were the wrong unit and rev 1 used them anyway. St
 |---|---|---|---|
 | Execution is attributable | every run carries `mission_id` | On `a1`, unmerged (F1) | A2 |
 | Stop does what its label says | scenario 5a green | On `a1`, unmerged; 5a proven for PENDING and RUNNING | A1 |
-| A trigger cannot be saved unable to fire | the A-scoped scenario in A8 | On `a3`, unmerged (F19) | A3 |
+| A trigger cannot be saved unable to fire | the A-scoped scenario in A8 | On `a3`, unmerged (F19); registry covers every declared/used entry type module-wide (140), payload-key checks cover only a curated subset, and PATCH validates only the fields it changes | A3 |
 | A trigger that fails is visible | A4 accept | On `a4`, unmerged (F20) | A4 |
 | Docs match code | A5 accept | On `a5`, unmerged (F25, F26) | A5 |
 | Shipped surfaces show what they claim | A6 accept | On `a6`/`a7`, unmerged; F33 read-side still open | A6, A7 |

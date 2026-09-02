@@ -23,7 +23,7 @@ func automationSchemaCatalog() map[string]DomainSchema {
 		"severities":  arr(str()),
 		"payload_equals": map[string]any{
 			"type": "object", "additionalProperties": true,
-			"description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. A key the emitter never writes is accepted and matches nothing, so check the keys for your event type first — mission.status_change carries action, details, and (on a status transition) from and to. POST /automations/preview names the offending clause.",
+			"description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. For an event type covered by the server's curated payload-key map, a key its emitter never writes is REJECTED at save time (400) naming the real keys — mission.status_change carries action, details, and (on a status transition) from and to. For an event type NOT covered by that map, a key the emitter never writes is accepted and matches nothing; POST /automations/preview names the offending clause either way.",
 		},
 	})
 	action := obj(map[string]any{
@@ -39,7 +39,7 @@ func automationSchemaCatalog() map[string]DomainSchema {
 		"name":         str(),
 		"enabled":      boolean(),
 		"event_type": map[string]any{"type": "string",
-			"description": "A journal entry type, e.g. mission.status_change. Exactly one per rule."},
+			"description": "A journal entry type, e.g. mission.status_change. Exactly one per rule. Checked at save time against the server's closed registry of every entry type actually declared or emitted; a value outside that registry is refused with 400, naming real alternatives."},
 		"matcher":     matcher,
 		"action_kind": map[string]any{"type": "string", "enum": []string{"routine"}},
 		"action":      action,

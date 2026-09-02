@@ -103,14 +103,14 @@ saved as a rule that never fires.
 | Flag | Type | Description |
 |---|---|---|
 | `--name` | `string` | Human-readable name. Required. |
-| `--event` | `string` | Journal entry type to watch, e.g. `mission.status_change`. Exactly one. Required. |
+| `--event` | `string` | Journal entry type to watch, e.g. `mission.status_change`. Exactly one. Required. Checked against the journal's closed registry at save time — an unregistered value is refused, naming real alternatives. |
 | `--routine` | `string` | Routine slug to run when an entry matches. Required. |
 | `--input` | `stringSlice` | Routine input as `key=value`; values may use `{{ event.* }}`. Repeatable. |
 | `--crew` | `stringSlice` | Only match entries from these crew IDs. Repeatable. |
 | `--agent` | `stringSlice` | Only match entries from these agent IDs. Repeatable. |
 | `--mission` | `stringSlice` | Only match entries on these mission IDs. Repeatable. |
 | `--severity` | `stringSlice` | Only match these severities: `info`, `notice`, `warn`, `error`. Repeatable. |
-| `--payload-equals` | `stringSlice` | Only match when a journal payload field equals this, as `key=value`. Repeatable. A key no emitter writes is accepted and matches nothing — see below. |
+| `--payload-equals` | `stringSlice` | Only match when a journal payload field equals this, as `key=value`. Repeatable. Checked at save time against a curated (not exhaustive) list of known keys per event type — see below. |
 | `--debounce-seconds` | `int` | Hold the enqueued run open this long for further events to coalesce into. Default 10. |
 | `--max-per-hour` | `int` | Burst brake: cap runs this automation may cause per hour. Default 60. Counted per server process and cleared by a restart — see [Automations → Burst control](/guides/automations#burst-control). |
 
@@ -118,19 +118,27 @@ A predicate flag you omit is "don't care"; omit all of them and every entry of
 the event type matches.
 
 <Warning>
-  Check the payload before you match on it. A `--payload-equals` key that no
-  emitter writes is accepted, saved, listed — and matches nothing, forever,
-  with no error anywhere:
+  Check the payload before you match on it, even now that `--payload-equals`
+  is checked at save time. The check only covers a curated set of event
+  types (`mission.status_change`, `mission.created`, `mission.assigned`,
+  `mission.comment`, `automation.throttled`, `automation.depth_exceeded`,
+  `pipeline.schedule.circuit_breaker_tripped`,
+  `pipeline.schedule.missed_occurrences`, `page.wake.fired` — see
+  [Automations → Payload key validation](/guides/automations#payload-key-validation));
+  for any other event type a key no emitter writes is still accepted, saved,
+  listed — and matches nothing, forever, with no error anywhere:
 
   ```bash
   crewship journal --type mission.status_change --lines 1 --format json
   ```
 
-  `mission.status_change` carries exactly two keys: `action` (a closed set —
-  `status_changed`, `review_approved`, `task_failed`, …) and `details` (prose,
-  e.g. `"BACKLOG → TODO"`). Match on `action`; read `details` inside the
-  routine via `{{ event.payload.details }}`. "Moved to DONE" is not
-  expressible as a predicate — the target status lives only in that prose. See
+  `mission.status_change` carries `action` (a closed set — `status_changed`,
+  `review_approved`, `task_failed`, …), `details` (prose, e.g.
+  `"BACKLOG → TODO"`), and `from`/`to` (only on `action=status_changed`).
+  Match on `action` for anything but a specific transition; read `details`
+  inside the routine via `{{ event.payload.details }}` rather than matching
+  on it — it's a sentence, not a field. `--payload-equals to=DONE` IS a valid
+  predicate for "moved to DONE". See
   [Automations → what `mission.status_change` actually carries](/guides/automations).
 </Warning>
 

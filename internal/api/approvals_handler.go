@@ -19,6 +19,13 @@ import (
 // handler is strictly reads + decide transitions for the human UI —
 // plus the agent-side side effects for kind=ephemeral_hire rows, whose
 // source of truth is the agents table (issue #1209).
+// journalApprovalAutoTuningReset is written when an operator resets the
+// rolling reward window for a tool. Typed const rather than a bare literal on
+// the Type field so internal/journalgen.ScanTree can find it — see
+// journalPolicyChanged in internal/api/crew_policy.go for why a bare literal
+// is not scannable.
+const journalApprovalAutoTuningReset journal.EntryType = "approval.auto_tuning_reset"
+
 type ApprovalsHandler struct {
 	db      *sql.DB
 	logger  *slog.Logger
@@ -379,7 +386,7 @@ func (h *ApprovalsHandler) ResetAutoTuning(w http.ResponseWriter, r *http.Reques
 	}
 	if _, emitErr := h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: workspaceID,
-		Type:        "approval.auto_tuning_reset",
+		Type:        journalApprovalAutoTuningReset,
 		ActorType:   journal.ActorUser,
 		ActorID:     actorID,
 		Severity:    journal.SeverityNotice,
