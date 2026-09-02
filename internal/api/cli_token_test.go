@@ -723,6 +723,78 @@ func TestIsCLIToken_AcceptsBothTiers(t *testing.T) {
 	}
 }
 
+// TestValidateCLIToken_NullFullName pins #2259: an invited member's
+// `users.full_name` row is NULL (workspace member invite creates the
+// user without one — see workspaces_provision.go), and full_name is a
+// nullable column (migrate_consts_v01_init.go). lookupCLIToken's SELECT
+// scanned it into a bare string, so `Scan` failed with "converting NULL
+// to string is unsupported" and every CLI call from a freshly invited
+// user 401'd as session_invalid — indistinguishable from a bad token.
+// This must succeed and report an empty name, matching the
+// COALESCE(full_name, ”) idiom already used by auth_recovery.go.
+func TestValidateCLIToken_NullFullName(t *testing.T) {
+	db := setupTestDB(t)
+
+	const userID = "invited-user-no-name"
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO users (id, email) VALUES (?, ?)`, userID, "invited@example.com"); err != nil {
+		t.Fatalf("seed user with NULL full_name: %v", err)
+	}
+
+	plaintext := "crewship_cli_nullname0011223344556677889900"
+	hash := sha256Hex(plaintext)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
+		"clt-nullname", userID, "invited-token", hash); err != nil {
+		t.Fatalf("seed cli token: %v", err)
+	}
+
+	gotUserID, gotEmail, gotName, err := ValidateCLIToken(context.Background(), db, plaintext, ValidateAuditContext{})
+	if err != nil {
+		t.Fatalf("ValidateCLIToken() with NULL full_name should succeed, got error: %v", err)
+	}
+	if gotUserID != userID {
+		t.Errorf("userID = %q, want %q", gotUserID, userID)
+	}
+	if gotEmail != "invited@example.com" {
+		t.Errorf("email = %q, want invited@example.com", gotEmail)
+	}
+	if gotName != "" {
+		t.Errorf("name = %q, want empty string for NULL full_name", gotName)
+	}
+}
+
+// TestValidateCLIToken_NonNullFullName is the sibling of the above: once
+// full_name is set, the value must still come through unchanged.
+func TestValidateCLIToken_NonNullFullName(t *testing.T) {
+	db := setupTestDB(t)
+
+	const userID = "named-user"
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO users (id, email, full_name) VALUES (?, ?, ?)`,
+		userID, "named@example.com", "Ada Lovelace"); err != nil {
+		t.Fatalf("seed user with full_name: %v", err)
+	}
+
+	plaintext := "crewship_cli_named00011223344556677889900"
+	hash := sha256Hex(plaintext)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
+		"clt-named", userID, "named-token", hash); err != nil {
+		t.Fatalf("seed cli token: %v", err)
+	}
+
+	gotUserID, gotEmail, gotName, err := ValidateCLIToken(context.Background(), db, plaintext, ValidateAuditContext{})
+	if err != nil {
+		t.Fatalf("ValidateCLIToken() error: %v", err)
+	}
+	if gotUserID != userID {
+		t.Errorf("userID = %q, want %q", gotUserID, userID)
+	}
+	if gotEmail != "named@example.com" {
+		t.Errorf("email = %q, want named@example.com", gotEmail)
+	}
+	if gotName != "Ada Lovelace" {
+		t.Errorf("name = %q, want Ada Lovelace", gotName)
+	}
+}
+
 func TestCLITokenCreate_TokenIsRandomAndUnique(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)

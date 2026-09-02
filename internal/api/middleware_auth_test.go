@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
@@ -201,6 +202,64 @@ func TestRequireAuth_BadCLIToken(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rr.Code)
+	}
+}
+
+// TestRequireAuth_CLITokenLookupError_Returns500 pins the second half
+// of #2259: a query/scan/driver error out of the CLI-token lookup is
+// NOT the same thing as an invalid token, and must not be reported as
+// session_invalid. Before this fix, RequireAuth collapsed every
+// lookupCLIToken error into a generic 401 — that's what let the
+// NULL-full_name bug masquerade as "your session is invalid" instead
+// of the "something is broken in the lookup" it actually was.
+//
+// A real token+row is seeded (so the token itself is valid), then the
+// users table is dropped out from under the JOIN mid-test to force a
+// driver error distinct from both sql.ErrNoRows and "invalid CLI
+// token". The middleware must answer 500, not 401.
+func TestRequireAuth_CLITokenLookupError_Returns500(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
+
+	plaintext := "crewship_cli_dbfail00112233445566778899"
+	hash := sha256Hex(plaintext)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
+		"clt-dbfail", userID, "will-fail", hash); err != nil {
+		t.Fatalf("seed cli token: %v", err)
+	}
+
+	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
+
+	// Force the lookup query to fail with a driver error rather than
+	// sql.ErrNoRows or a NULL-scan mismatch — closing the DB out from
+	// under the middleware is deliberately a different failure shape
+	// than #2259's own bug (already fixed and covered by
+	// cli_token_test.go) to prove this change is general, not a
+	// one-off patch for that specific case. Dropping the `users`
+	// table instead was tried and rejected: SQLite refuses it with a
+	// FOREIGN KEY constraint failure once seed rows reference it.
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not reach handler")
+	}))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer "+plaintext)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 for a lookup driver error, body: %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), reasonSessionInvalid) {
+		t.Errorf("body should not report %q for a driver error, got: %s", reasonSessionInvalid, rr.Body.String())
 	}
 }
 

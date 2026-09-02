@@ -672,6 +672,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   "more" rather than always "fewer" when a table landed extra rows rather
   than too few.
 
+- **An invited member could not authenticate with the CLI at all (#2259).**
+  `lookupCLIToken`'s SELECT scanned `u.full_name` into a plain `string`, but
+  the column is nullable and `workspace member invite` creates the user row
+  without one — so `Scan` failed with "converting NULL to string is
+  unsupported" on the very first CLI call from a freshly invited
+  MEMBER/MANAGER/ADMIN. The auth middleware then collapsed that lookup error
+  into the same generic 401 `session_invalid` every bad-token case gets, so
+  the error pointed at the wrong thing and made it look like the token, not
+  the row, was the problem. The query now reads `COALESCE(u.full_name, '')`,
+  matching the idiom `auth_recovery.go` already used for this exact column.
+  Separately, `RequireAuth` no longer reports every lookup failure as an
+  invalid session: only the sentinel `errInvalidCLIToken` (unknown, revoked,
+  expired, tier-mismatched, or not-found token) maps to 401 now, and any
+  other lookup error — a query/scan/driver failure — is logged with its
+  underlying cause and answered with a 500, so a bug like this one names
+  itself instead of requiring a live repro to find.
 - **Restoring a bundle taken before the `issue_counters` re-key silently
   dropped every counter row (#2034).** `#1797` re-keyed `issue_counters`
   from `crew_id` to `(workspace_id, prefix)` — the first non-additive

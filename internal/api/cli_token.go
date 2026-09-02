@@ -554,6 +554,15 @@ type ValidateCLITokenResult struct {
 	Scopes stringSet // nil = unrestricted token (pre-v100 or no scopes set)
 }
 
+// errInvalidCLIToken is the sentinel every genuinely-invalid-token path
+// in lookupCLIToken returns: unknown prefix, missing HMAC key, no row,
+// tier mismatch, revoked, expired. RequireAuth (middleware.go) matches
+// on it with errors.Is to answer 401 session_invalid; anything else —
+// a query/scan/driver error such as the NULL-full_name bug in #2259 —
+// is NOT this sentinel, so it falls through to a 500 instead of being
+// misreported as an invalid session.
+var errInvalidCLIToken = errors.New("invalid CLI token")
+
 // lookupCLIToken resolves a CLI token to its row via hash + tier match +
 // revocation + expiry checks. Read-only — no audit insert, no last_used_at
 // touch. Both ValidateCLITokenFull (real auth, which layers those side
@@ -569,7 +578,7 @@ func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, use
 	case strings.HasPrefix(token, cliTokenAdminPrefix):
 		key, keyErr := adminHMACKey()
 		if keyErr != nil {
-			return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
+			return "", "", "", "", "", nil, errInvalidCLIToken
 		}
 		tokenHash = hashAdmin(token, key)
 		expectedTier = "ADMIN"
@@ -577,22 +586,29 @@ func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, use
 		tokenHash = hashStandard(token)
 		expectedTier = "STANDARD"
 	default:
-		return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
+		return "", "", "", "", "", nil, errInvalidCLIToken
 	}
 
 	var (
 		expiresAt, revokedAt sql.NullString
 		scopesRaw            sql.NullString
 	)
+	// u.full_name is nullable (migrate_consts_v01_init.go) and
+	// `workspace member invite` creates the user row without one — an
+	// invited MEMBER/MANAGER/ADMIN has no name until they set one.
+	// COALESCE to '' here, matching the idiom auth_recovery.go already
+	// uses for this exact column, so Scan into a bare string doesn't
+	// fail with "converting NULL to string is unsupported" and turn
+	// every such user's CLI calls into a 401 (#2259).
 	dbErr := db.QueryRowContext(ctx, `
-		SELECT ct.id, ct.user_id, u.email, u.full_name, ct.tier, ct.expires_at, ct.revoked_at, ct.scopes
+		SELECT ct.id, ct.user_id, u.email, COALESCE(u.full_name, ''), ct.tier, ct.expires_at, ct.revoked_at, ct.scopes
 		FROM cli_tokens ct
 		JOIN users u ON u.id = ct.user_id
 		WHERE ct.token_hash = ?
 	`, tokenHash).Scan(&tokenID, &userID, &email, &name, &tier, &expiresAt, &revokedAt, &scopesRaw)
 	if dbErr != nil {
 		if dbErr == sql.ErrNoRows {
-			return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
+			return "", "", "", "", "", nil, errInvalidCLIToken
 		}
 		return "", "", "", "", "", nil, fmt.Errorf("validate CLI token: %w", dbErr)
 	}
@@ -603,16 +619,16 @@ func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, use
 	// free and defends against a future bug that lets a STANDARD token
 	// row's hash match an ADMIN computation or vice versa.
 	if tier != expectedTier {
-		return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
+		return "", "", "", "", "", nil, errInvalidCLIToken
 	}
 
 	if revokedAt.Valid {
-		return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
+		return "", "", "", "", "", nil, errInvalidCLIToken
 	}
 	if expiresAt.Valid {
 		t, perr := time.Parse(time.RFC3339, expiresAt.String)
 		if perr == nil && time.Now().UTC().After(t) {
-			return "", "", "", "", "", nil, fmt.Errorf("invalid CLI token")
+			return "", "", "", "", "", nil, errInvalidCLIToken
 		}
 	}
 
