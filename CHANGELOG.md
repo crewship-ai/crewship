@@ -794,6 +794,36 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   other lookup error — a query/scan/driver failure — is logged with its
   underlying cause and answered with a 500, so a bug like this one names
   itself instead of requiring a live repro to find.
+- **Every forked restore (`--as-workspace` / `--as-crew`) of a bundle
+  containing a live mission aborted on a `mission_activity` foreign-key
+  violation (#2260).** The error named the wrong row. `RemapIDs` regenerates
+  every primary key so a fork can land beside its source, and it had
+  correctly rewritten `mission_activity.mission_id` to the fork's brand-new
+  mission id — but `missions.trace_id` is `NOT NULL UNIQUE` with no workspace
+  in the key, and the source mission on the same instance was still holding
+  the bundle's value. `RestoreDump` inserts with `INSERT OR IGNORE`
+  (deliberately, so re-restoring a bundle is idempotent), so the forked
+  mission did not fail loudly on that collision — it was dropped in silence,
+  and its correctly-remapped activity rows landed pointing at a parent that
+  never arrived. The deferred `foreign_key_check` then blamed the child. Since
+  essentially every workspace has run a mission, this made `--as-workspace`
+  unusable in practice. A fork now regenerates identity, not merely primary
+  keys: `forkRegeneratedColumns` in `internal/backup/remap.go` declares the
+  columns that are unique per *instance* rather than per workspace, and pass 1
+  mints a fresh value for each — for `trace_id`, the source value's prefix
+  (`mission-`, `issue-`, `tr_`) is kept and only the identifying tail is
+  replaced, the same shape `internal/api` writes. Columns that are unique only
+  within a workspace stay untouched on purpose: `missions.identifier` was
+  rescoped to `UNIQUE(workspace_id, identifier)` by #1733, so the fork keeps
+  the issue identifiers a team already knows. Nothing stores a mission's
+  `trace_id` by value elsewhere — the `trace_id` on `journal_entries` and
+  `eval_runs` is an agent *run* id — so regenerating it breaks no reference.
+  Two tests: the reproduction, and an every-table fork that synthesises a row
+  into 102 of the 109 `BackupTables` entries and requires each remappable
+  table to gain exactly the rows the bundle carried. That second test found
+  seven more tables losing every row to the same class of collision
+  (capability tokens with a hashed twin, and unique keys over columns nothing
+  remaps); they are pinned by name in the test and filed as #2274.
 - **Restoring a bundle taken before the `issue_counters` re-key silently
   dropped every counter row (#2034).** `#1797` re-keyed `issue_counters`
   from `crew_id` to `(workspace_id, prefix)` — the first non-additive

@@ -145,6 +145,77 @@ var virtualForeignKeys = map[string][]foreignKeyEdge{
 	"issue_counters": {{column: "crew_id", refTable: "crews", refColumn: "id"}},
 }
 
+// forkRegeneratedColumns names columns a forked restore must give a NEW value
+// to because they carry an identity that is UNIQUE across the whole INSTANCE,
+// beyond the row's own primary key.
+//
+// Pass 1 regenerating `id` is what lets a fork land beside its source, and for
+// most tables that is the entire identity. It is not for a table that carries a
+// SECOND unique column: the source row is still sitting on the same instance
+// holding that value. RestoreDump inserts with INSERT OR IGNORE — deliberately,
+// so re-restoring a bundle is idempotent — so the forked row does not fail
+// loudly on the collision, it is dropped in silence. Every child row whose FK
+// pass 2 correctly rewrote to the fork's brand-new parent id then dangles, and
+// the deferred foreign_key_check blames the CHILD for a parent that never
+// arrived. That is #2260, where a single missions row took every
+// mission_activity row down with it and made --as-workspace unusable for any
+// workspace that had ever run a mission.
+//
+// Membership test, and it is the whole test: is the column unique per INSTANCE?
+// A column that is UNIQUE per workspace or per crew needs nothing here —
+// crews.slug, missions.identifier and pages.slug are all scoped by a column
+// that pass 2 already remaps, so the fork's rows land in a namespace of their
+// own. Only a bare `UNIQUE` with no scope column in the key belongs in this
+// map.
+//
+// Regenerating a value is only safe while nothing else stores it. Before adding
+// an entry, check that no other table references the column BY VALUE — a
+// regenerated token that some sibling row still quotes is worse than the
+// collision it fixes. missions.trace_id passes: it is read back on the mission
+// row itself (missions_internal.go) and handed to the progress writer for live
+// SSE fan-out, and the trace_id that journal_entries and eval_runs carry is an
+// agent RUN id (journal/runs.go groups runs by it), never a mission's.
+var forkRegeneratedColumns = map[string][]forkRegeneratedColumn{
+	// missions.trace_id is `TEXT NOT NULL UNIQUE` with no workspace in the
+	// key (migrate_consts_v02_v15.go). Its sibling `identifier` is NOT here:
+	// #1733 rescoped that one to UNIQUE(workspace_id, identifier), which is
+	// exactly the shape that needs no fork handling.
+	"missions": {{column: "trace_id", regenerate: newMissionTraceID}},
+}
+
+// forkRegeneratedColumn is one such column and the mint that replaces it. The
+// mint takes the OLD value so it can preserve whatever the value's shape says
+// about the row — see newMissionTraceID.
+type forkRegeneratedColumn struct {
+	column     string
+	regenerate func(old string) string
+}
+
+// missionTracePrefixRe matches the short lowercase tag the mission-creating
+// paths put in front of a trace id's random tail: `mission-` from the mission
+// and task-state creators, `issue-` from the two issue creators, `tr_` from
+// cartographer.Fork. Matching the prefix rather than enumerating the known
+// tags means a fifth creator with a fifth tag needs no change here.
+var missionTracePrefixRe = regexp.MustCompile(`^[a-z]{1,12}[-_]`)
+
+// defaultMissionTracePrefix is what a regenerated trace id gets when the
+// bundle's value carries no recognisable prefix — an old row, or one written
+// by something outside the current mint sites. `mission-` is the shape
+// internal/api mints for a mission created through the API.
+const defaultMissionTracePrefix = "mission-"
+
+// newMissionTraceID mints a replacement for a forked mission's trace_id,
+// keeping the source value's prefix so the fork's traces still say how the
+// mission was created, and swapping the identifying tail for a fresh CUID —
+// the same `<tag> + generateCUID()` shape internal/api writes.
+func newMissionTraceID(old string) string {
+	prefix := defaultMissionTracePrefix
+	if p := missionTracePrefixRe.FindString(old); p != "" {
+		prefix = p
+	}
+	return prefix + newRemapCUID()
+}
+
 // foreignKeyEdge captures one FK column's destination.
 type foreignKeyEdge struct {
 	column    string // column on the source table
@@ -274,6 +345,19 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			continue
 		}
 		for _, row := range rows {
+			// Non-PK unique identity, re-minted before the `id` rewrite
+			// below and deliberately ahead of its `continue`: a row the
+			// bundle carries with no id is inserted verbatim, so it
+			// collides on an instance-unique column just as readily as
+			// one that gets a new PK. See forkRegeneratedColumns for the
+			// failure mode this prevents.
+			for _, rc := range forkRegeneratedColumns[table] {
+				oldVal, ok := row[rc.column].(string)
+				if !ok || oldVal == "" {
+					continue
+				}
+				row[rc.column] = rc.regenerate(oldVal)
+			}
 			oldID, ok := row["id"].(string)
 			if !ok || oldID == "" {
 				continue
