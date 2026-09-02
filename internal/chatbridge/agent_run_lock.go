@@ -18,11 +18,17 @@ import "sync"
 // mission ids (ensureMissionChat mints one synthetic chat per MISSION, not
 // per agent), so keying exclusivity on chat id would not stop two such runs
 // from racing each other. AgentRunLock is keyed on AgentID instead — the one
-// identifier every producer of a RunAgent exec (chat send, /assign, an
-// @mention dispatch) agrees on — and one instance is shared between
-// chatbridge.Bridge and api.AssignmentHandler (see Bridge.AgentRunLock /
-// AssignmentHandler.SetAgentRunLock) so both doors that can start a live
-// exec for an agent claim the same slot.
+// identifier every producer of a RunAgent exec agrees on. ONE instance is
+// shared, and as of #2269 these producers claim it: the chat send
+// (Bridge.HandleChatMessage), /assign and @mention dispatch
+// (api.AssignmentHandler.runAssignment), the agent cron
+// (scheduler.Scheduler), and a routine's agent_run step
+// (pipeline.OrchestratorRunner). Three producers do NOT yet: the inbound
+// agent webhook route (internal/api/webhook.go), the direct agent-run route
+// (internal/server/routes_agent.go) and the peer-query path
+// (internal/api/query_handler.go). Each of those can still exec into a
+// busy agent's tmux session and kill the live run; they are listed in
+// CHANGELOG as a known limit rather than left to be discovered.
 //
 // Named a lock, not a gate: it is a lock ON AN AGENT (keyed by agent id),
 // held for the duration of one live RunAgent exec — "lock" says what it is

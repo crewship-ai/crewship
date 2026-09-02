@@ -40,5 +40,11 @@ ALTER TABLE assignments ADD COLUMN mission_id TEXT;
 ALTER TABLE assignments ADD COLUMN author_agent_id TEXT;
 ALTER TABLE assignments ADD COLUMN created_by_user_id TEXT;
 ALTER TABLE assignments ADD COLUMN lead_planning INTEGER NOT NULL DEFAULT 0;
+-- queued_reason answers the operator's question the QUEUED status alone
+-- cannot: is this row waiting on the crew's concurrency budget
+-- ('crew_budget', markAssignmentQueued) or on its own agent's live run
+-- ('agent_busy', requeueForLockLoss)? Before #2269 the answer lived only
+-- in a server log line. Cleared when the row goes RUNNING.
+ALTER TABLE assignments ADD COLUMN queued_reason TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_assignments_mission ON assignments(mission_id);

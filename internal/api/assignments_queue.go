@@ -126,7 +126,8 @@ func claimCrewSlot(ctx context.Context, db *sql.DB, assignmentID, crewID string,
 		UPDATE assignments
 		   SET status = 'RUNNING',
 		       running_at = datetime('now','subsec'),
-		       started_at = COALESCE(started_at, datetime('now','subsec'))
+		       started_at = COALESCE(started_at, datetime('now','subsec')),
+		       queued_reason = NULL
 		 WHERE id = ?
 		   AND status IN ('PENDING', 'QUEUED')
 		   AND EXISTS (
@@ -165,7 +166,8 @@ func markAssignmentQueued(ctx context.Context, db *sql.DB, assignmentID string) 
 	_, err := db.ExecContext(ctx, `
 		UPDATE assignments
 		   SET status = 'QUEUED',
-		       queued_at = datetime('now','subsec')
+		       queued_at = datetime('now','subsec'),
+		       queued_reason = 'crew_budget'
 		 WHERE id = ? AND status = 'PENDING'`, assignmentID)
 	if err != nil {
 		return fmt.Errorf("mark assignment queued: %w", err)
@@ -213,7 +215,8 @@ func requeueForLockLoss(ctx context.Context, db *sql.DB, assignmentID string) (b
 	res, err := db.ExecContext(ctx, `
 		UPDATE assignments
 		   SET status = 'QUEUED',
-		       queued_at = datetime('now','subsec')
+		       queued_at = datetime('now','subsec'),
+		       queued_reason = 'agent_busy'
 		 WHERE id = ? AND status IN ('PENDING', 'RUNNING')`, assignmentID)
 	if err != nil {
 		return false, fmt.Errorf("requeue for lock loss: %w", err)
@@ -251,7 +254,8 @@ func pumpCrewQueue(ctx context.Context, db *sql.DB, crewID string, budget int) (
 			UPDATE assignments
 			   SET status = 'RUNNING',
 			       running_at = datetime('now','subsec'),
-			       started_at = COALESCE(started_at, datetime('now','subsec'))
+			       started_at = COALESCE(started_at, datetime('now','subsec')),
+			       queued_reason = NULL
 			 WHERE id = (
 			   SELECT a.id FROM assignments a
 			     JOIN agents ag ON ag.id = a.assigned_to_id
