@@ -31,6 +31,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **An issue's owner and its delegate are two columns, not one polymorphic
+  assignee (#2297).** `missions` carried `assignee_type`/`assignee_id`, so
+  delegating an issue to an agent overwrote the person who owned it — the UI
+  then showed the agent where the owner had been, and unassigning left a
+  stale `assignee_type` behind. `missions.owner_user_id` and
+  `missions.delegate_agent_id` are now separate nullable foreign keys, both
+  `ON DELETE SET NULL`; the migration backfills them from the legacy pair.
+  Delegation writes only the delegate; `crewship issue start` refuses an
+  issue with no delegate, or whose delegate is not a live agent, with a named
+  400. The API returns `owner` and `delegate` objects beside the legacy
+  fields, and the issue header and Properties panel render both. Unassign
+  clears every one of the four columns.
+
 - **The public mission-start route now checks the #1768 autonomy gate
   (#2258).** `autonomyGateApproved` was consulted from exactly one place —
   the sidecar-facing `POST /api/v1/internal/missions/{missionId}/start` —

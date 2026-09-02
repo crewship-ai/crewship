@@ -39,12 +39,26 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 	creator := obj(map[string]any{
 		"type": str(), "id": str(), "name": str(),
 	}, "type", "id")
+	// issueOwner / issueDelegate (A10, invariant I5 — "delegating to an
+	// agent never changes the human owner"): the typed projection of
+	// missions.owner_user_id / delegate_agent_id, independent of each
+	// other and of the legacy assignee_type/assignee_id pair the "issue"
+	// schema below still carries for the migration window. Both omitempty
+	// on issueResponse (nil when nobody occupies that slot), so neither is
+	// in "issue"'s required list.
+	issueOwner := obj(map[string]any{
+		"id": str(), "name": str(),
+	}, "id")
+	issueDelegate := obj(map[string]any{
+		"id": str(), "name": str(),
+	}, "id")
 	issue := obj(map[string]any{
 		"id": str(), "workspace_id": str(), "crew_id": str(),
 		"crew_name": str(), "crew_slug": str(), "number": nullable("integer"),
 		"identifier": nullable("string"), "title": str(), "description": nullable("string"),
 		"status": str(), "priority": str(), "assignee_type": nullable("string"),
 		"assignee_id": nullable("string"), "assignee_name": nullable("string"),
+		"owner": ref("IssueOwner"), "delegate": ref("IssueDelegate"),
 		"due_date": nullable("string"), "sort_order": number(), "mission_type": str(),
 		"lead_agent_id": str(), "created_at": str(), "updated_at": str(),
 		"completed_at": nullable("string"), "labels": arrayOf(ref("Label")),
@@ -146,6 +160,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 
 	return map[string]any{
 		"Issue": issue, "IssueList": arrayOf(ref("Issue")), "IssueCreator": creator,
+		"IssueOwner": issueOwner, "IssueDelegate": issueDelegate,
 		"Label": label, "LabelList": arrayOf(ref("Label")),
 		"Skill": skill, "SkillDetail": skillDetail, "SkillList": arrayOf(ref("Skill")), "InstalledSkillAgent": installedAgent,
 		"Credential": credential, "CredentialList": arrayOf(ref("Credential")),

@@ -137,6 +137,50 @@ describe("IssueCardDetail", () => {
     expect(screen.getByText("3 pts")).toBeInTheDocument()
   })
 
+  // A10 (invariant I5 — "delegating to an agent never changes the human
+  // owner"): owner and delegate must render as two separate things, and an
+  // agent delegate must never appear in the owner's slot.
+  it("renders owner and delegate as two separate people, not one merged assignee", () => {
+    render(
+      <IssueCardDetail
+        issue={issue({
+          owner: { id: "user-nadia", name: "Nadia" },
+          delegate: { id: "agent-robin", name: "Robin" },
+        })}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        project={null}
+      />,
+    )
+    expect(screen.getByText("Owner")).toBeInTheDocument()
+    expect(screen.getByText("Delegate")).toBeInTheDocument()
+    expect(screen.getAllByText("Nadia").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Robin").length).toBeGreaterThan(0)
+    // The legacy single-"Assignee" row must not also render once the typed
+    // fields are present — that would be the same defect under a new name.
+    expect(screen.queryByText("Assignee")).toBeNull()
+  })
+
+  it("falls back to the legacy assignee row when neither owner nor delegate is set", () => {
+    // A row this client fetched before the A10 backfill reached it —
+    // covered separately from the typed-field case above so a regression
+    // in either path fails its own test.
+    render(
+      <IssueCardDetail
+        issue={issue({ owner: undefined, delegate: undefined })}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        project={null}
+      />,
+    )
+    expect(screen.getByText("Assignee")).toBeInTheDocument()
+    expect(screen.getAllByText("Robin").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Owner")).toBeNull()
+    expect(screen.queryByText("Delegate")).toBeNull()
+  })
+
   it("says what an unbound routine means rather than showing a blank row", () => {
     render(
       <IssueCardDetail

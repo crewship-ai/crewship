@@ -246,16 +246,26 @@ func insertIssueTx(ctx context.Context, tx *sql.Tx, logger *slog.Logger, s issue
 		return sql.NullString{String: str, Valid: str != ""}
 	}
 
+	// A10 (I5): the typed owner/delegate columns, derived from the same
+	// assignee_type/assignee_id this chokepoint already validated above —
+	// an agent assignee is a delegate, a user assignee is the human owner.
+	// This is the single INSERT both the agent-tool-call path
+	// (InternalIssueHandler.Create) and the recurring-issue dispatcher fire
+	// an issue through, so it is also where pages_wake_issue.go's
+	// auto-assigned LEAD agent (always assignee_type="agent") lands as a
+	// delegate, never an owner.
+	ownerUserID, delegateAgentID := ownerDelegateInsertValues(s.AssigneeType, s.AssigneeID)
+
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		                      title, description, status, number, identifier,
-		                      priority, assignee_type, assignee_id, project_id, milestone_id,
+		                      priority, assignee_type, assignee_id, owner_user_id, delegate_agent_id, project_id, milestone_id,
 		                      author_agent_id, author_chat_id, author_run_id, created_by_user_id, authored_via,
 		                      sort_order, mission_type, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
 		id, s.WorkspaceID, s.CrewID, leadAgentID, traceID,
 		s.Title, s.Description, number, identifier,
-		priority, s.AssigneeType, s.AssigneeID, s.ProjectID, s.MilestoneID,
+		priority, s.AssigneeType, s.AssigneeID, ownerUserID, delegateAgentID, s.ProjectID, s.MilestoneID,
 		nullable(s.AuthorAgentID), nullable(s.AuthorChatID), nullable(s.AuthorRunID), nullable(s.CreatedByUserID), authoredVia,
 		now, now)
 	if err != nil {

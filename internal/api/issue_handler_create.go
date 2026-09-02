@@ -232,18 +232,24 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		createdByUserID = sql.NullString{String: callerID, Valid: true}
 	}
 
+	// A10 (I5): the typed owner/delegate columns, derived from the same
+	// assignee_type/assignee_id the caller sent — an agent assignee is a
+	// delegate, a user assignee is the human owner. Legacy pair kept as the
+	// compatibility projection for the migration window.
+	ownerUserID, delegateAgentID := ownerDelegateInsertValues(req.AssigneeType, req.AssigneeID)
+
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		    title, description, status, number, identifier, priority,
-		    assignee_type, assignee_id, due_date, project_id, estimate,
+		    assignee_type, assignee_id, owner_user_id, delegate_agent_id, due_date, project_id, estimate,
 		    parent_issue_id, milestone_id, sort_order, mission_type,
 		    routine_id, routine_inputs_json,
 		    created_by_user_id, authored_via,
 		    created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, COALESCE(?, '{}'), ?, 'user_api', ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, COALESCE(?, '{}'), ?, 'user_api', ?, ?)`,
 		id, wsID, crewID, leadAgentID, traceID,
 		req.Title, req.Description, issueNumber, identifier, req.Priority,
-		req.AssigneeType, req.AssigneeID, req.DueDate, req.ProjectID,
+		req.AssigneeType, req.AssigneeID, ownerUserID, delegateAgentID, req.DueDate, req.ProjectID,
 		req.Estimate, req.ParentIssueID, req.MilestoneID,
 		req.RoutineID, routineInputsJSON,
 		createdByUserID,
@@ -281,6 +287,8 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Priority:      req.Priority,
 		AssigneeType:  req.AssigneeType,
 		AssigneeID:    req.AssigneeID,
+		Owner:         issueOwnerFromID(ownerUserID),
+		Delegate:      issueDelegateFromID(delegateAgentID),
 		DueDate:       req.DueDate,
 		SortOrder:     0,
 		MissionType:   "issue",

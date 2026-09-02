@@ -466,10 +466,18 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("mission comment journal emit failed", "error", jerr, "comment_id", commentID)
 		}
 
-		// Update assignee on the issue to the target agent
+		// Update assignee on the issue to the target agent. This is the
+		// delegation path invariant I5 exists for: delegating to an agent
+		// must set delegate_agent_id and must NEVER touch owner_user_id —
+		// pre-A10 this UPDATE overwrote the single polymorphic
+		// assignee_id/assignee_type slot, so delegating to an agent
+		// silently replaced whatever human owner was recorded there (rev-1
+		// dev1 observation 11, PRD-ISSUES-AND-ROUTINES-2026 §9.10). The
+		// legacy pair is still written alongside as the compatibility
+		// projection for the migration window.
 		_, _ = h.db.ExecContext(r.Context(),
-			`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', updated_at = ? WHERE id = ?`,
-			target.ID, now, body.ChatID)
+			`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', delegate_agent_id = ?, updated_at = ? WHERE id = ?`,
+			target.ID, target.ID, now, body.ChatID)
 
 		// Activity
 		activityID := generateCUID()

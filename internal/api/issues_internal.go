@@ -656,6 +656,10 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		if *req.AssigneeID == "" {
 			ub.SetNull("assignee_id")
 			ub.SetNull("assignee_type")
+			// A10: an explicit unassign clears whichever typed slot was
+			// occupied — the caller doesn't say which, and "assigned to
+			// nobody" must not leave a stale owner or delegate behind.
+			clearOwnerAndDelegate(ub)
 			assigneeChanged = true
 		} else {
 			assigneeType := ""
@@ -694,6 +698,9 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			}
 			ub.Set("assignee_type", assigneeType)
 			ub.Set("assignee_id", *req.AssigneeID)
+			// A10 (I5): route the write to the typed owner or delegate
+			// column alongside the legacy pair above.
+			setOwnerOrDelegate(ub, assigneeType, *req.AssigneeID)
 			assigneeChanged = true
 		}
 	}

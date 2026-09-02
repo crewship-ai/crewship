@@ -48,7 +48,7 @@ func TestCovIWReview_Guards(t *testing.T) {
 func TestCovIWStart_TaskResetOnRerun(t *testing.T) {
 	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
 	missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-20", "TODO")
-	if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent' WHERE id = ?`, workerID, missionID); err != nil {
+	if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', delegate_agent_id = ? WHERE id = ?`, workerID, workerID, missionID); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
 	if _, err := h.db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, iteration, result_summary, created_at, updated_at)
@@ -85,7 +85,7 @@ func TestCovIWStart_TaskResetOnRerun(t *testing.T) {
 func TestCovIWStart_DescriptionPropagatesToTask(t *testing.T) {
 	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
 	missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-21", "BACKLOG")
-	if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', description = 'fix the bug' WHERE id = ?`, workerID, missionID); err != nil {
+	if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', delegate_agent_id = ?, description = 'fix the bug' WHERE id = ?`, workerID, workerID, missionID); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestCovIWStart_DescriptionPropagatesToTask(t *testing.T) {
 func TestCovIWStart_ChatInsertError500(t *testing.T) {
 	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
 	missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-22", "TODO")
-	if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent' WHERE id = ?`, workerID, missionID); err != nil {
+	if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', delegate_agent_id = ? WHERE id = ?`, workerID, workerID, missionID); err != nil {
 		t.Fatalf("assign: %v", err)
 	}
 	if _, err := h.db.Exec(`DROP TABLE chats`); err != nil {
