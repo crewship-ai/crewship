@@ -701,7 +701,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `routines.missed` channel category — once three consecutive failures show
   the path is broken rather than a blip. A run that started and then failed
   is not counted; it already has its own failure entry.
-- **Shipped surfaces stop claiming what they cannot show.** The Runs view's
 - **Shipped surfaces stop claiming what they cannot show (#2291).** The Runs view's
   header no longer says it spans routine runs — `GET /api/v1/runs` excludes
   them by construction, so the honest label is the fix until the read side
