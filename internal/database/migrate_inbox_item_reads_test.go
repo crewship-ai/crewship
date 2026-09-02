@@ -159,7 +159,7 @@ func TestMigrate_InboxItemReads_Backfill(t *testing.T) {
 	// Replay the migration: drop its ledger row and re-run the full chain.
 	// (loadFileMigrations parses the filename's leading digits as the
 	// version, so this must match the migration file's stamp exactly.)
-	if _, err := db.Exec(`DELETE FROM _migrations WHERE version = 20260901180610`); err != nil {
+	if _, err := db.Exec(`DELETE FROM _migrations WHERE version = 20260902071500`); err != nil {
 		t.Fatalf("clear inbox_item_reads migration marker: %v", err)
 	}
 	if err := Migrate(ctx, db.DB, silent); err != nil {
