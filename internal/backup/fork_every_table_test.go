@@ -35,18 +35,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/backup"
 )
 
-// nonRemappablePKTablesForTest mirrors backup.nonRemappablePKTables, which is
-// package-private and cannot be reached from this external test package. These
-// tables are globally namespaced: a fork deliberately does NOT regenerate their
-// primary keys, so their bundle rows are expected to collide with the target's
-// existing rows and be dropped by INSERT OR IGNORE. Row-count parity does not
-// apply to them — which is why they are named here rather than the assertion
-// being loosened for everyone.
-var nonRemappablePKTablesForTest = map[string]bool{
-	"skills": true,
-	"users":  true,
-}
-
 // forkExtraRows returns the rows a forked restore writes ON TOP of the ones the
 // bundle carries, per table. Anything not returned here must match the bundle
 // exactly.
@@ -441,10 +429,15 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 	sort.Strings(skipped)
 	t.Logf("row-per-table fixture: seeded %d table(s); could not seed %d:\n  %s",
 		len(seeded), len(skipped), strings.Join(skipped, "\n  "))
-	if len(seeded) < 40 {
-		t.Fatalf("only %d of %d BackupTables entries got a row — the generator has "+
-			"stopped covering enough of the schema for this test to mean anything",
-			len(seeded), len(backup.BackupTables))
+	// Pinned to the coverage the fixture achieves today (102 of 109), not a
+	// token floor: a schema change that halves real coverage must fail here,
+	// not pass while the doc comment above still claims "every table". Lower
+	// it only with a reason written next to the new number.
+	const minSeeded = 100
+	if len(seeded) < minSeeded {
+		t.Fatalf("only %d of %d BackupTables entries got a row (floor %d) — the "+
+			"generator has stopped covering enough of the schema for this test "+
+			"to mean anything", len(seeded), len(backup.BackupTables), minSeeded)
 	}
 
 	// What the bundle actually carries, per table. Taken from the same public
@@ -453,6 +446,23 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 	dump, err := backup.DumpWorkspace(ctx, source, workspaceID)
 	if err != nil {
 		t.Fatalf("DumpWorkspace: %v", err)
+	}
+
+	// A table the generator seeded but whose row never reached the dump is
+	// coverage lost in silence: it is reported as seeded above, and the
+	// parity loop below skips it as want == 0. Name those, so a synthesised
+	// row that landed outside the workspace scope (an FK resolved to a
+	// parent the dump does not own) is visible rather than counted.
+	var seededButAbsent []string
+	for _, table := range seeded {
+		if len(dump.Tables[table]) == 0 {
+			seededButAbsent = append(seededButAbsent, table)
+		}
+	}
+	if len(seededButAbsent) > 0 {
+		sort.Strings(seededButAbsent)
+		t.Logf("seeded but absent from the workspace dump (%d), so exempt from "+
+			"parity:\n  %s", len(seededButAbsent), strings.Join(seededButAbsent, "\n  "))
 	}
 
 	before := countBackupTableRows(t, source)
@@ -494,7 +504,7 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 		if want == 0 {
 			continue
 		}
-		if nonRemappablePKTablesForTest[table] {
+		if backup.NonRemappablePKTablesForTest[table] {
 			// Globally namespaced: the bundle rows are meant to collide
 			// with the target's own and be ignored. Assert THAT, so a
 			// change of policy here fails loudly too.
