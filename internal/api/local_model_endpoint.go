@@ -64,14 +64,42 @@ func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Log
 	}
 
 	// 2. Workspace default: the newest ACTIVE ENDPOINT_URL credential in the
-	//    workspace that isn't scoped to a crew. Unassigned rows never appear
-	//    in `assigned`, so this direct query is what makes a single
+	//    workspace that is not claimed by a particular AGENT. Unassigned rows
+	//    never appear in `assigned`, so this direct query is what makes a single
 	//    workspace-wide endpoint apply to every agent.
+	//
+	//    The two NOT EXISTS clauses are #2052 arriving through DELIVERY rather
+	//    than through Select, and the comment that used to sit here described
+	//    them without the query implementing anything: it claimed the row was
+	//    one "that isn't scoped to a crew", and the predicate was `workspace_id
+	//    = ? AND type = ?`. So an agent with no endpoint credential of its own
+	//    picked up the newest ENDPOINT_URL in the WORKSPACE even when that row
+	//    was granted to exactly one peer — and appendProxiedEndpointCredential
+	//    then delivered it as a synthetic OPENAI_COMPAT credential with NO agent
+	//    ids, i.e. crew-wide. Scoping Select is no use against a credential that
+	//    arrives labelled as everybody's.
+	//
+	//    A row claimed by a specific agent is therefore not a workspace default,
+	//    and this branch skips it. If it was granted to THIS agent it has
+	//    already been returned by branch 1 above, where it keeps its scope.
+	//
+	//    Crew scope is deliberately NOT excluded here and the comment no longer
+	//    claims it is: this function is given a workspace and no crew, so it
+	//    cannot tell a link to this agent's crew from a link to another one.
+	//    Narrowing that needs the crew id threaded in — see the follow-up note
+	//    in credential_grantees.go's header.
 	var encValue string
 	err := db.QueryRowContext(ctx, `
-		SELECT encrypted_value FROM credentials
-		WHERE workspace_id = ? AND type = ? AND status = 'ACTIVE' AND deleted_at IS NULL
-		ORDER BY created_at DESC, id ASC
+		SELECT c.encrypted_value FROM credentials c
+		WHERE c.workspace_id = ? AND c.type = ? AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM agent_credentials ac WHERE ac.credential_id = c.id
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM credential_bindings b
+		      WHERE b.credential_id = c.id AND b.scope = 'AGENT'
+		  )
+		ORDER BY c.created_at DESC, c.id ASC
 		LIMIT 1
 	`, workspaceID, CredTypeEndpointURL).Scan(&encValue)
 	if err != nil {

@@ -217,3 +217,163 @@ func TestCredentialGrantees_LapsedPeerGrantIsNotAGrantee(t *testing.T) {
 	}
 	t.Fatal("agent A was not delivered its own credential")
 }
+
+// A member whose EXPLICIT grant has lapsed is not a grantee even when an
+// AGENT-scoped binding also names it.
+//
+// The explicit agent_credentials row is authoritative for its (agent,
+// credential) pair — the delivery query's binding arm suppresses on ANY such
+// row, lapsed included, so B receives nothing. Counting B here is the arm-1 bug
+// arriving through the binding table, and it amplifies the same way: the set
+// then covers every member of the crew, collapses to crew-wide, and the
+// credential ships unscoped to the member whose lease ran out.
+func TestCredentialGrantees_LapsedGrantSuppressesAgentBinding(t *testing.T) {
+	db := setupTestDB(t)
+	ensureEncryptionKey(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	const (
+		crewID = "grs-crew"
+		agentA = "grs-agent-a"
+		agentB = "grs-agent-b"
+	)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'C', 'grs-c')`, crewID, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, 'A', 'grs-a')`, agentA, crewID, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, 'B', 'grs-b')`, agentB, crewID, wsID)
+
+	seedCredentialEnc(t, db, wsID, userID, "grs-cred", "grs-cred", `{"baseURL":"https://a.example/v1","apiKey":"sk-a"}`)
+	execOrFatal(t, db, `UPDATE credentials SET provider = 'OPENAI_COMPAT', type = 'API_KEY' WHERE id = 'grs-cred'`)
+	// A holds it outright.
+	execOrFatal(t, db, `INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
+		VALUES ('grs-ac-a', ?, 'grs-cred', 'COMPAT_URL', 0, datetime('now'))`, agentA)
+	// B has an AGENT binding for it AND a lapsed explicit grant. The grant wins
+	// and suppresses the binding, so B is delivered nothing.
+	execOrFatal(t, db, `INSERT INTO credential_bindings (id, workspace_id, credential_id, slot, scope, agent_id, created_at)
+		VALUES ('grs-b1', ?, 'grs-cred', 'COMPAT_URL', 'AGENT', ?, datetime('now'))`, wsID, agentB)
+	execOrFatal(t, db, `INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, expires_at, created_at)
+		VALUES ('grs-ac-b', ?, 'grs-cred', 'COMPAT_URL', 0, ?, datetime('now'))`,
+		agentB, time.Now().UTC().Add(-24*time.Hour).Format(time.RFC3339))
+
+	// The premise: B really is delivered nothing. Assert it, so the test cannot
+	// pass for the wrong reason if delivery ever changes.
+	deliveredB, _, err := loadDeliveredCredentials(context.Background(), db, agentB)
+	if err != nil {
+		t.Fatalf("loadDeliveredCredentials(B): %v", err)
+	}
+	for _, d := range deliveredB {
+		if d.ID == "grs-cred" {
+			t.Fatalf("premise broken: B was delivered the credential its lapsed grant removed")
+		}
+	}
+
+	delivered, _, err := loadDeliveredCredentials(context.Background(), db, agentA)
+	if err != nil {
+		t.Fatalf("loadDeliveredCredentials(A): %v", err)
+	}
+	for _, d := range delivered {
+		if d.ID != "grs-cred" {
+			continue
+		}
+		if strings.Join(d.GrantedAgentIDs, ",") != agentA {
+			t.Fatalf("granted_agent_ids = %v, want [%s]: an AGENT binding shadowed by a "+
+				"lapsed explicit grant made the set look like the whole crew, so the "+
+				"credential ships unscoped", d.GrantedAgentIDs, agentA)
+		}
+		return
+	}
+	t.Fatal("agent A was not delivered its own credential")
+}
+
+// A soft-deleted crew member is neither a member nor a grantee. If it counted
+// as a grantee but not a member the set could exceed the crew and collapse to
+// crew-wide; if it counted as a member but not a grantee a genuinely crew-wide
+// grant would never collapse, and every crew with a deleted agent would gain
+// agent ids — moving its config fingerprint and restarting its sidecar for no
+// reason.
+func TestCredentialGrantees_SoftDeletedMemberCountsForNeither(t *testing.T) {
+	db := setupTestDB(t)
+	ensureEncryptionKey(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	const (
+		crewID = "grd-crew"
+		agentA = "grd-agent-a"
+		agentB = "grd-agent-b"
+		gone   = "grd-agent-gone"
+	)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'C', 'grd-c')`, crewID, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, 'A', 'grd-a')`, agentA, crewID, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, 'B', 'grd-b')`, agentB, crewID, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, deleted_at) VALUES (?, ?, ?, 'G', 'grd-g', datetime('now'))`,
+		gone, crewID, wsID)
+
+	seedCredentialEnc(t, db, wsID, userID, "grd-cred", "grd-cred", "tok")
+	execOrFatal(t, db, `UPDATE credentials SET provider = 'ANTHROPIC', type = 'API_KEY' WHERE id = 'grd-cred'`)
+	// Both LIVE members hold it; the deleted one does not. That is the whole
+	// live crew, so it must collapse to crew-wide.
+	execOrFatal(t, db, `INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
+		VALUES ('grd-ac-a', ?, 'grd-cred', 'ANTHROPIC_API_KEY', 0, datetime('now'))`, agentA)
+	execOrFatal(t, db, `INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
+		VALUES ('grd-ac-b', ?, 'grd-cred', 'ANTHROPIC_API_KEY', 0, datetime('now'))`, agentB)
+
+	delivered, _, err := loadDeliveredCredentials(context.Background(), db, agentA)
+	if err != nil {
+		t.Fatalf("loadDeliveredCredentials: %v", err)
+	}
+	for _, d := range delivered {
+		if d.ID != "grd-cred" {
+			continue
+		}
+		if d.GrantedAgentIDs != nil {
+			t.Fatalf("granted_agent_ids = %v, want nil: every LIVE member holds it, so a "+
+				"soft-deleted agent must not keep the set from collapsing to crew-wide",
+				d.GrantedAgentIDs)
+		}
+		return
+	}
+	t.Fatal("agent A was not delivered the credential")
+}
+
+// Arm 4: a CREW-scoped binding reaches every member, so it is crew-wide and
+// names nobody — the same answer the crew-link arm gives, through the binding
+// table. Untested it would be indistinguishable from the arm being absent, and
+// an absent crew-wide arm classifies a credential NARROWER than it is
+// delivered, which is a 503 for members that legitimately hold it.
+func TestCredentialGrantees_CrewScopedBindingIsCrewWide(t *testing.T) {
+	db := setupTestDB(t)
+	ensureEncryptionKey(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	const (
+		crewID = "grw-crew"
+		agentA = "grw-agent-a"
+		agentB = "grw-agent-b"
+	)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'C', 'grw-c')`, crewID, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, 'A', 'grw-a')`, agentA, crewID, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, 'B', 'grw-b')`, agentB, crewID, wsID)
+
+	seedCredentialEnc(t, db, wsID, userID, "grw-cred", "grw-cred", "tok")
+	execOrFatal(t, db, `UPDATE credentials SET provider = 'ANTHROPIC', type = 'API_KEY' WHERE id = 'grw-cred'`)
+	execOrFatal(t, db, `INSERT INTO credential_bindings (id, workspace_id, credential_id, slot, scope, crew_id, created_at)
+		VALUES ('grw-b1', ?, 'grw-cred', 'ANTHROPIC_API_KEY', 'CREW', ?, datetime('now'))`, wsID, crewID)
+
+	delivered, _, err := loadDeliveredCredentials(context.Background(), db, agentA)
+	if err != nil {
+		t.Fatalf("loadDeliveredCredentials: %v", err)
+	}
+	for _, d := range delivered {
+		if d.ID != "grw-cred" {
+			continue
+		}
+		if d.GrantedAgentIDs != nil {
+			t.Errorf("granted_agent_ids = %v, want nil: a CREW-scoped binding reaches "+
+				"every member", d.GrantedAgentIDs)
+		}
+		return
+	}
+	t.Fatal("the CREW-scoped binding delivered nothing")
+}

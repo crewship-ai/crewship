@@ -665,8 +665,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   Every credential now travels with the crew members it was granted to, and the
   store refuses to serve one to anybody else. The calling agent is resolved
   from its own per-agent route token (#812), which the orchestrator derives per
-  agent and which no process sharing the container can forge, so the check
-  cannot be talked out of by the request. A member holding no credential for
+  agent and which cannot be forged — it is an HMAC under a key the container
+  never sees. It can, however, be READ: crew members share one container and one
+  uid, and each member's token sits in its own environment and MCP config, so a
+  determined peer can present a sibling's. This is least privilege inside a
+  shared trust domain, which is what #2052 asks for — a crew is already one
+  trust domain — and not isolation from a hostile peer. A member holding no
+  credential for
   the provider is refused with `503 no credential available` — a loud refusal
   beats a silent crossover — and a caller whose identity cannot be established
   at all (a sidecar running without route identity) is served crew-wide

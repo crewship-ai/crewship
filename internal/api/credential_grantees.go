@@ -47,23 +47,41 @@ import (
 // every credential it receives is crew-wide by definition and this file does no
 // work for it.
 //
-// THE LOSING CASES, named rather than hidden. Both are credentials this file
-// calls crew-wide that ONE member's own delivery would have withheld:
+// THE LOSING CASES, named rather than hidden. All three come from one
+// simplification: the crew-wide arms ask whether a crew/workspace-scoped ROUTE
+// to the credential exists, and not whether that route actually WINS the slot
+// contest resolved_bindings runs in the delivery query. A route that exists but
+// loses still marks the credential crew-wide here.
 //
 //   - a binding at CREW scope that LOSES its slot to a more specific binding for
-//     that member;
-//   - a crew-linked credential whose explicit grant to that member has a lapsed
+//     one member. That member is delivered a different credential under the slot,
+//     yet can still select this one through the sidecar. Over-permissive for one
+//     member.
+//   - a WORKSPACE (or CREW) binding that loses its slot for EVERY member,
+//     alongside explicit agent_credentials grants that are what actually deliver
+//     the credential. The losing binding still marks it crew-wide, so the
+//     per-agent scoping is erased for the whole crew and the credential is
+//     served to members who were granted nothing — the exact defect #2052 is
+//     about, surviving inside the fix for it. This is the widest of the three
+//     and it is latent today only because the config fingerprint refuses a
+//     caller whose own credential set differs from the store's; it becomes LIVE
+//     the moment option (2) delivers the crew's whole set at boot and that
+//     fingerprint stops distinguishing members.
+//   - a crew-linked credential whose explicit grant to one member has a lapsed
 //     lease — the explicit grant is authoritative and removes the credential
 //     outright for them (see loadDeliveredCredentials' notes), while the crew
 //     link still reaches everyone else. (A lapsed grant no longer makes the
 //     member a GRANTEE — the query below gates on the lease — but a crew route
 //     that reaches everybody is crew-wide regardless of anyone's grant.)
 //
-// In both, that member could select through the sidecar a credential its own
-// delivery did not include. That is exactly today's behaviour, so neither is a
+// In all three a member can select through the sidecar a credential its own
+// delivery did not include. That is exactly today's behaviour, so none is a
 // regression, and a crew already shares a container and therefore a trust domain
-// (#2052's own framing). Narrowing them means re-running the whole delivery query
-// once per member, which is the cost the design above exists to avoid.
+// (#2052's own framing). Narrowing them means mirroring resolved_bindings' slot
+// contest here — or re-running the whole delivery query once per member, which
+// is the cost the design above exists to avoid. It has to be done before option
+// (2) lands, because that is the change that removes the gate currently hiding
+// the second one.
 //
 // The lease case is NOT rescued by the sidecar's own #1373 gate, and it would be
 // comfortable to claim it is: the store holds the credential as the CREW arm
@@ -162,9 +180,16 @@ const crewMembersSQL = `
 // Bind order is (agentID /* CTE */, leaseComparisonNow() /* explicit arm */) —
 // the WITH clause is first in the text, so its parameter is first in sequence.
 //
-// The binding arms need no lease gate: neither credential_bindings nor
-// credential_crews has an expires_at column, exactly as the delivery query's
-// own notes record.
+// The binding arms carry no lease gate of their own — neither
+// credential_bindings nor credential_crews has an expires_at column, exactly as
+// the delivery query's own notes record — but the AGENT arm still needs the
+// delivery query's explicit-grant suppression, and for the same amplifying
+// reason. An explicit agent_credentials row is AUTHORITATIVE for its (agent,
+// credential) pair: when one exists the binding does not deliver, and when that
+// row's lease has lapsed the member gets the credential from nowhere at all.
+// Naming such a member as a grantee here is the arm-1 bug through the binding
+// table — the set covers the crew, collapses to crew-wide, and the credential
+// ships unscoped to the member whose lease expired.
 var crewCredentialGranteesSQL = fmt.Sprintf(`
 	WITH agent_scope AS (
 		SELECT a.id AS agent_id, a.workspace_id AS workspace_id, a.crew_id AS crew_id
@@ -185,6 +210,10 @@ var crewCredentialGranteesSQL = fmt.Sprintf(`
 	JOIN agents peer ON peer.id = b.agent_id AND peer.deleted_at IS NULL
 	JOIN agent_scope s ON peer.crew_id = s.crew_id AND b.workspace_id = s.workspace_id
 	WHERE b.scope = 'AGENT'
+	  AND NOT EXISTS (
+	      SELECT 1 FROM agent_credentials ac2
+	      WHERE ac2.agent_id = peer.id AND ac2.credential_id = b.credential_id
+	  )
 
 	UNION ALL
 

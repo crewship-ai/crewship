@@ -213,9 +213,11 @@ func (cs *CredStore) Load(creds []Credential) {
 // out on a guess.
 func (cs *CredStore) Select(provider ProviderType, actingAgentID string) *Credential {
 	// READ lock only: the top-tier scan reads cs.creds, and round-robin now
-	// advances an atomic per-provider counter (not a map index), so concurrent
-	// Selects don't serialize on a write lock (#1081). Load/Remove/Reap still
-	// take the write lock, so the creds slice can't change under us.
+	// advances an atomic counter per (provider, acting agent) — not a map index
+	// — so concurrent Selects don't serialize on a write lock (#1081). See the
+	// LoadOrStore below for why the acting agent is part of that key.
+	// Load/Remove/Reap still take the write lock, so the creds slice can't
+	// change under us.
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 

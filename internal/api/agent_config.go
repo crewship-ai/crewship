@@ -931,6 +931,16 @@ func (h *InternalHandler) resolveOAuthAccessTokens(r *http.Request, creds []mcpC
 		if err := h.db.QueryRowContext(r.Context(),
 			"SELECT encrypted_value FROM credentials WHERE id = ? AND deleted_at IS NULL AND status = 'ACTIVE'", credID).Scan(&encVal); err == nil {
 			if dec, err := decryptCredential(encVal); err == nil && dec != "" && !isPendingSentinel(dec) {
+				// No AgentIDs, deliberately: this entry is crew-wide (#2052).
+				// resolveAgentCredentials is NOT the only producer of
+				// mcpCredEntry — this one and the MCP ${VAR} resolver in
+				// internal_mcp.go both build entries without ownership, and an
+				// entry with none is served to every member of the crew. Safe
+				// for an OAUTH2 access token, which credTypeToProvider drops
+				// before the CredStore ever sees it (AI_CLI_TOKEN / OAuth go in
+				// as env vars instead). A future producer whose entry DOES reach
+				// the store has to carry the grantee set, or it re-opens the
+				// crossover for exactly its own credentials.
 				creds = append(creds, mcpCredEntry{
 					ID:             credID,
 					EnvVar:         "_OAUTH_ACCESS_TOKEN:" + credID,
