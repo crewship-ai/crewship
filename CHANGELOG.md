@@ -352,7 +352,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Docs stopped contradicting the code on rollback, concurrency, and the
   monthly budget; the waitpoint approve-default asymmetry is now
-  documented instead of silently differing (A5).** No API or CLI behaviour
+  documented instead of silently differing (A5) (#2289).** No API or CLI behaviour
   changed. `docs/cli/routine.mdx` said `routine rollback` "creates a new
   version on top of HEAD" — it doesn't; `Store.Rollback` only repoints
   `head_version` (no version row is inserted), matching the CLI's own
