@@ -21,10 +21,10 @@ func TestCredStore_Reap(t *testing.T) {
 	if removed := cs.Reap(map[string]struct{}{"a": {}}); removed != 1 {
 		t.Fatalf("Reap removed = %d, want 1", removed)
 	}
-	if cs.Select(ProviderOpenAI) != nil {
+	if cs.Select(ProviderOpenAI, "") != nil {
 		t.Error("reaped (revoked) openai credential is still served by Select")
 	}
-	if cs.Select(ProviderAnthropic) == nil {
+	if cs.Select(ProviderAnthropic, "") == nil {
 		t.Error("kept anthropic credential was wrongly dropped")
 	}
 }
@@ -55,10 +55,10 @@ func TestSidecar_ReapRevokedCredentials_DropsMissing(t *testing.T) {
 
 	s.reapRevokedCredentials(context.Background())
 
-	if s.credStore.Select(ProviderOpenAI) != nil {
+	if s.credStore.Select(ProviderOpenAI, "") != nil {
 		t.Error("revoked credential b is still served after reap")
 	}
-	if s.credStore.Select(ProviderAnthropic) == nil {
+	if s.credStore.Select(ProviderAnthropic, "") == nil {
 		t.Error("live credential a was wrongly reaped")
 	}
 }
@@ -100,7 +100,7 @@ func TestSidecar_ReapRevokedCredentials_EvictsExpiredLease(t *testing.T) {
 
 	// Before expiry: the leased key is still listed, so the reaper keeps it.
 	s.reapRevokedCredentials(context.Background())
-	if s.credStore.Select(ProviderOpenAI) == nil {
+	if s.credStore.Select(ProviderOpenAI, "") == nil {
 		t.Fatal("valid (unexpired) lease was reaped early")
 	}
 
@@ -111,10 +111,10 @@ func TestSidecar_ReapRevokedCredentials_EvictsExpiredLease(t *testing.T) {
 
 	// After expiry: crewshipd omits the leased key → the reaper evicts it.
 	s.reapRevokedCredentials(context.Background())
-	if s.credStore.Select(ProviderOpenAI) != nil {
+	if s.credStore.Select(ProviderOpenAI, "") != nil {
 		t.Error("expired-lease credential is still served after reap — TTL not enforced end-to-end")
 	}
-	if s.credStore.Select(ProviderAnthropic) == nil {
+	if s.credStore.Select(ProviderAnthropic, "") == nil {
 		t.Error("standing (NULL-lease) credential was wrongly evicted")
 	}
 }
@@ -136,7 +136,7 @@ func TestSidecar_ReapRevokedCredentials_FetchError_KeepsCreds(t *testing.T) {
 
 	s.reapRevokedCredentials(context.Background())
 
-	if s.credStore.Select(ProviderAnthropic) == nil || s.credStore.Select(ProviderOpenAI) == nil {
+	if s.credStore.Select(ProviderAnthropic, "") == nil || s.credStore.Select(ProviderOpenAI, "") == nil {
 		t.Error("a fetch error must not reap any credential")
 	}
 }

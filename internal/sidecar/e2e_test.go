@@ -308,11 +308,11 @@ func TestE2ESidecarIntegration(t *testing.T) {
 			{ID: "anth-1", Provider: ProviderAnthropic, Token: realAnthKey, Priority: 1},
 			{ID: "anth-2", Provider: ProviderAnthropic, Token: backupAnthKey, Priority: 2},
 		})
-		c1 := cs.Select(ProviderAnthropic)
+		c1 := cs.Select(ProviderAnthropic, "")
 		if c1 == nil || c1.ID != "anth-1" {
 			t.Errorf("first select: got %v, want anth-1 (priority 1)", c1)
 		}
-		c2 := cs.Select(ProviderAnthropic)
+		c2 := cs.Select(ProviderAnthropic, "")
 		if c2 == nil || c2.ID != "anth-1" {
 			t.Errorf("second select: got %v, want anth-1 (only one in top tier)", c2)
 		}

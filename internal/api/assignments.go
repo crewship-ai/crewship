@@ -266,6 +266,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 			Type:           d.Type,
 			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
+			AgentIDs:       d.GrantedAgentIDs,
 		}
 		dec, err := encryption.Decrypt(d.EncryptedValue)
 		if err != nil {

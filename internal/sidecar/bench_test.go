@@ -24,7 +24,7 @@ func BenchmarkCredStoreSelect(b *testing.B) {
 	})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		cs.Select(ProviderAnthropic)
+		cs.Select(ProviderAnthropic, "")
 	}
 }
 
@@ -123,7 +123,7 @@ func BenchmarkProxyFullPipeline(b *testing.B) {
 		host := "api.anthropic.com"
 		al.IsAllowed(host)
 		spec, _ := llmroute.MatchHost(host)
-		cred := cs.Select(ProviderType(spec.ID))
+		cred := cs.Select(ProviderType(spec.ID), "")
 		req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages",
 			strings.NewReader(`{"model":"claude-3","max_tokens":1024}`))
 		llmroute.ApplyAuth(req, spec, cred.Token, cred.Headers)
