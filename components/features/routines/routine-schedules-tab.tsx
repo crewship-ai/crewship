@@ -11,6 +11,7 @@ import { RoutineListSkeleton } from "./routine-skeletons"
 import { Card, EmptyState, Pill, FieldLabel } from "./_shared"
 import { WakeGateChip } from "./routine-wake-gate-chip"
 import { describeCron } from "@/lib/cron-describe"
+import { scheduleHealth } from "@/lib/schedule-health"
 
 // RoutineSchedulesTab — cron-trigger CRUD restyled for the dashboard.
 // Card-wrapped list + inline form, Pill states, readable typography,
@@ -143,7 +144,9 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
           }
         >
           <ol className="divide-y divide-border/40">
-            {ours.map((s) => (
+            {ours.map((s) => {
+              const health = scheduleHealth(s)
+              return (
               <li key={s.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3">
                 <div
                   className={cn(
@@ -161,6 +164,14 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                     <Pill tone={s.enabled ? "purple" : "default"}>
                       {s.enabled ? "enabled" : "paused"}
                     </Pill>
+                    {/* Health — read-only. F18/A6: this is the only place a
+                        circuit-breaker-disabled schedule's reason is shown;
+                        the editor to change breaker settings is Track B. */}
+                    {(health.tone === "destructive" || health.tone === "warn") && (
+                      <Pill tone={health.tone} data-testid={`schedule-health-${s.id}`}>
+                        {health.label}
+                      </Pill>
+                    )}
                     <WakeGateChip wakePipelineSlug={s.wake_pipeline_slug} />
                   </div>
                   <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-[12px] text-muted-foreground">
@@ -169,6 +180,17 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                     <span>{s.timezone}</span>
                     <span className="text-foreground/70">— {describeCron(s.cron_expr)}</span>
                   </div>
+                  {health.reason && (
+                    <p
+                      className={cn(
+                        "text-[11px] leading-relaxed",
+                        health.tone === "destructive" ? "text-destructive" : "text-warn",
+                      )}
+                      data-testid={`schedule-health-reason-${s.id}`}
+                    >
+                      {health.reason}
+                    </p>
+                  )}
                   {(s.next_run_at || s.last_run_at) && (
                     <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
                       {s.next_run_at && (
@@ -186,6 +208,34 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                       )}
                     </div>
                   )}
+                  {/* Reliability telemetry — read-only (F18). Consecutive
+                      failures always shown so a slide toward the breaker is
+                      visible before it trips; catch-up and wake-gate stats
+                      only when they have ever fired, to keep a clean
+                      schedule's row from being cluttered with zeros. */}
+                  <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
+                    <span>
+                      Failures: <span className="text-foreground/85">{s.consecutive_failures}</span>
+                      <span className="opacity-60">/{s.max_consecutive_failures || "—"}</span>
+                    </span>
+                    {s.catchup_policy && (
+                      <span>
+                        Catch-up: <span className="text-foreground/85">{s.catchup_policy}</span>
+                      </span>
+                    )}
+                    {!!s.last_missed_count && (
+                      <span className="text-warn">Missed last tick: {s.last_missed_count}</span>
+                    )}
+                    {s.wake_pipeline_slug && (
+                      <span>
+                        Wake gate: <span className="text-foreground/85">{s.wake_fire_count ?? 0}</span> fired /{" "}
+                        <span className="text-foreground/85">{s.wake_check_count ?? 0}</span> checked
+                        {s.last_wake_status && (
+                          <span className="ml-1 opacity-80">({s.last_wake_status})</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
@@ -210,7 +260,8 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                   </Button>
                 </div>
               </li>
-            ))}
+              )
+            })}
           </ol>
         </Card>
       )}

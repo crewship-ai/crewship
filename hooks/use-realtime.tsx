@@ -59,6 +59,19 @@ export type RealtimeEventType =
   // VALID_REALTIME_TYPES — so an issue a human had open never learned that an
   // agent had written to it.
   | "issue.updated"
+  // Issue lifecycle events emitted alongside issue.updated but, until A6
+  // (docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md, #2125), missing from both this
+  // union and VALID_REALTIME_TYPES below — so handleMessage silently dropped
+  // every one of them. `issue.created` — `internal/api/issue_handler_create.go`
+  // (payload `{id}`) — also `issues_internal.go`, `recurring_issue_dispatcher.go`,
+  // `pages_wake_issue.go`. `issue.deleted` — `internal/api/issue_handler_update.go`
+  // (payload `{identifier}`), the only emitter. `issue.started` —
+  // `internal/api/issue_handler_workflow.go` (payload `{id, identifier, status}`),
+  // the only emitter. See `hooks/__tests__/realtime-allowlist-issue-events.test.ts`
+  // for the guard that keeps this list honest against the Go source.
+  | "issue.created"
+  | "issue.deleted"
+  | "issue.started"
   | "task.updated"
   | "peer_conversation.updated"
   | "crew.created"
@@ -138,7 +151,10 @@ interface RealtimeContextValue {
   subscribeChannel: (channel: string) => () => void
 }
 
-const VALID_REALTIME_TYPES: Set<string> = new Set([
+// Exported (only) so the guard test can check it against the Go emitters —
+// nothing in the app should read this directly; subscribe via
+// useRealtimeEvent instead.
+export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "run.started", "run.completed", "run.failed",
   "agent.status", "agent.created", "agent.updated", "agent.deleted",
   // PR-D F5 ephemeral lifecycle. Without these in the allowlist the
@@ -150,6 +166,10 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   // Without this, handleMessage drops every issue broadcast and the issue
   // detail can only learn about an agent's write by being reloaded.
   "issue.updated",
+  // A6 (#2125): these three were emitted server-side and dropped here.
+  // Registered together with issue.updated; see the RealtimeEventType union
+  // above for the emitter file:line for each.
+  "issue.created", "issue.deleted", "issue.started",
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   // Without this in the allowlist, workspace.deleted is dropped by
   // handleMessage and the redirect-on-delete listener never fires (#890).
