@@ -675,13 +675,32 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		return
 	}
 	switch {
-	case errors.Is(err, ws.ErrAgentBusy):
+	case errors.Is(err, chatbridge.ErrAgentBusyElsewhere):
+		// Since #2269 the run holding the agent's slot may be an assignment
+		// on an issue or a turn in another chat — not the user's own resend
+		// here — so silently dropping the deferred message is no longer
+		// safe: nothing else will deliver it. Tell the sender, the same way
+		// the build-failure branch above does, so they can resend once the
+		// agent is free. The plain ErrAgentBusy case below (the SAME chat
+		// already has a live run — most plausibly the user's own manual
+		// resend racing this one) keeps its zero-trace contract: that run
+		// will settle the UI, and a notice here would be a lie.
+		run.Emit(ws.ChatEvent{
+			Type:     "error",
+			Content:  "Your message was not delivered: the agent is busy with another run. Send it again once the agent is free.",
+			Metadata: map[string]any{"reason": "agent_busy"},
+		})
+		run.Emit(ws.ChatEvent{Type: "done", Content: ""})
 		// Another run (most plausibly the user's own manual resend, racing
 		// this one) already owns the chat's run slot. That run is the one
 		// that will complete and settle the UI; nothing further to do here,
 		// and nothing to stream — ws.ErrAgentBusy's contract is that the
 		// handler emitted NOTHING, and staying silent is what keeps this
 		// from being a second, redundant execution of the same message.
+	case errors.Is(err, ws.ErrAgentBusy):
+		// The SAME chat already has a live run — most plausibly the user's own
+		// manual resend racing this one. That run settles the UI; a notice here
+		// would be a lie and a second delivery a duplicate. Stay silent.
 		h.logger.Info("deferred message not resumed: a run was already in progress for this chat",
 			"chat_id", msg.ChatID)
 	case errors.Is(err, ws.ErrCrewProvisioning):
