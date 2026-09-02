@@ -188,6 +188,7 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
       }
 
     case "run.cancelled":
+    case "assignment.cancelled":
       return { ...base, tone: "warn", title: "Cancelled", detail: e.summary || undefined }
 
     case "run.timeout":
@@ -412,6 +413,7 @@ const RUN_TERMINAL_TYPES = new Set<string>([
   "run.timeout",
   "assignment.completed",
   "assignment.failed",
+  "assignment.cancelled",
   "pipeline.run.completed",
   "pipeline.run.failed",
 ])

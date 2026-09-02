@@ -107,6 +107,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "assignment.running",
       "assignment.completed",
       "assignment.failed",
+      "assignment.cancelled",
       "crew.action",
       "task.delegated",
     ],

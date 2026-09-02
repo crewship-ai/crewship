@@ -70,6 +70,7 @@ export const ISSUE_SCOPED_EVENT_TYPES: readonly string[] = [
   "assignment.running",
   "assignment.completed",
   "assignment.failed",
+  "assignment.cancelled",
   "task.delegated",
   "agent.mentioned",
   "peer.escalation",
