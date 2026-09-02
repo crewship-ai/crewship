@@ -31,7 +31,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
-- **The 1.0 known limits are written down where users read (#TBD).** The
+- **The 1.0 known limits are written down where users read (#2299).** The
   issue-mentions, routines and issue-detail guides now say plainly what Track
   A deliberately left for 1.1: a busy agent is woken after its live run rather
   than interrupted, and a chat to it bounces `agent_busy`; the routine
