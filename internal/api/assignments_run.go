@@ -284,70 +284,17 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Create assignment record in PENDING state (group_id = chat_id for mission linkage)
 	now := time.Now().UTC().Format(time.RFC3339)
-
-	// mission_id derivation (closes the gap left after #2256): the sidecar's
-	// handleAssign (internal/sidecar/assignment.go) and the routine
-	// dispatcher's crewshipBody (internal/api/crewship_actions.go) never put
-	// mission_id on this request — only the three original mission-work
-	// paths (mission_tasks.go, mission_tasks_planning.go, DispatchMention in
-	// issue_mentions.go) do. A delegation hop made FROM one of those runs (a
-	// sub-agent calling /assign again while it is itself executing inside a
-	// mission or a mention-dispatched run) would otherwise land with
-	// mission_id permanently NULL, which is exactly the "every run for this
-	// issue" gap #2256 set out to close.
-	//
-	// Derived here, once, rather than patching every caller: every creator
-	// of a synthetic mission chat on this schema — ensureMissionChat here
-	// and in internal/orchestrator/mission_tasks.go,
-	// mission_handler_mutate.go's Create, issue_handler_workflow.go's
-	// Start, cartographer's Fork, task_state.go — uses the mission's OWN id
-	// as the chat's primary key. So "does a missions row exist at this
-	// chat_id" is not a heuristic guess; it is the exact invariant those six
-	// writers maintain and the exact FK target assignments.mission_id
-	// points at (ON DELETE SET NULL).
-	//
-	// Checked by existence against missions(id), deliberately NOT by
-	// chats.mode = 'MISSION': a chat can carry that mode with no backing
-	// missions row — a mission hard-delete does not cascade to its chat
-	// (see the ON DELETE SET NULL rationale on the mission_id migration),
-	// and this package's own test fixtures (covAsgRig) seed a MISSION-mode
-	// chat with no missions row at all. Trusting mode alone would either
-	// mis-attribute an orphaned chat's delegation hops to a mission that no
-	// longer exists, or — because mission_id's FK has no matching
-	// row to point at — fail assignment creation outright. The existence
-	// check can't produce that false positive: it IS the FK's own
-	// precondition.
-	missionID := body.MissionID
-	if missionID == "" {
-		var exists int
-		// Workspace-scoped like every other read (I7): a mission id from
-		// another workspace must not attribute this run, however unlikely a
-		// CUID collision is.
-		derivedErr := h.db.QueryRowContext(r.Context(),
-			`SELECT 1 FROM missions WHERE id = ? AND workspace_id = ?`, body.ChatID, body.WorkspaceID).Scan(&exists)
-		switch {
-		case derivedErr == nil:
-			missionID = body.ChatID
-		case errors.Is(derivedErr, sql.ErrNoRows):
-			// Genuinely chat-only — no missions row at this id. Leave
-			// mission_id unset; that is the correct, honest answer.
-		default:
-			// Provenance, not a cap: a lookup failure here must not block
-			// the assignment. It just leaves mission_id unattributed.
-			h.logger.Warn("could not check chat_id against missions for mission_id derivation; leaving mission_id unset",
-				"error", derivedErr, "chat_id", body.ChatID)
-		}
-	}
-
 	assignmentID, err := insertCappedAssignment(r.Context(), h.db, scope, delegationLim,
 		agentCaller(assignedByID), cappedAssignment{
-			WorkspaceID: body.WorkspaceID,
-			ChatID:      body.ChatID,
-			TargetID:    target.ID,
-			Task:        body.Task,
-			GroupID:     body.ChatID,
-			CreatedAt:   now,
-			MissionID:   missionID,
+			WorkspaceID:     body.WorkspaceID,
+			ChatID:          body.ChatID,
+			TargetID:        target.ID,
+			Task:            body.Task,
+			GroupID:         body.ChatID,
+			CreatedAt:       now,
+			MissionID:       missionID, // derived above when the body omits it (#2279)
+			AuthorAgentID:   body.AuthorAgentID,
+			CreatedByUserID: body.CreatedByUserID,
 		})
 	if err != nil {
 		var refusal *delegationRefusal
@@ -566,28 +513,21 @@ func (h *AssignmentHandler) runAssignment(
 			// than FAILED (see requeueForLockLoss doc): the row is picked up
 			// again by pumpAndDispatch the next time ANY assignment in this
 			// crew completes (including, correctly, the one currently
-			// holding the lock — see releaseLock above), or by the
+			// holding the lock — see releaseLock above), by a fresh pump
+			// requeueLockLossAndMaybeDrain triggers itself when some OTHER
+			// crew member's row can use the slot this requeue just freed
+			// (defect #1, #2269 follow-up — before this fix, that pump never
+			// happened here at all, so a queued row for a DIFFERENT, idle
+			// agent could sit behind this bounce until an unrelated
+			// completion or the sweeper eventually got to it), or by the
 			// stuck-QUEUED sweeper as a backstop.
 			//
 			// The row may be RUNNING (claimCrewSlot/pumpCrewQueue already
 			// flipped it before calling us) or still PENDING (the
 			// LeadPlanning bypass never goes through the crew-budget CAS) —
-			// requeueForLockLoss accepts either.
-			requeued, rqErr := requeueForLockLoss(ctx, h.db, assignmentID)
-			switch {
-			case rqErr != nil:
-				h.logger.Error("assignment lock loss: requeue failed",
-					"assignment_id", assignmentID, "target", body.TargetSlug, "error", rqErr)
-			case !requeued:
-				// Row had already left PENDING/RUNNING (raced a cancel, the
-				// stuck-RUNNING sweeper, or a terminal write) before we
-				// could requeue it. Nothing to drop — whoever moved it
-				// already owns its fate.
-				h.logger.Warn("assignment lock loss: row was no longer PENDING/RUNNING, not requeued",
-					"assignment_id", assignmentID, "target", body.TargetSlug)
-			default:
-				h.emitAssignmentQueued(ctx, assignmentID, body.ChatID, body.WorkspaceID, body.CrewID, body.TargetSlug)
-			}
+			// requeueForLockLoss (inside requeueLockLossAndMaybeDrain)
+			// accepts either.
+			h.requeueLockLossAndMaybeDrain(ctx, assignmentID, body.CrewID, target.ID, body.ChatID, body.WorkspaceID, body.TargetSlug)
 			return
 		}
 		defer releaseLock()

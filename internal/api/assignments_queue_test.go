@@ -451,11 +451,17 @@ func TestQueue_PumpCrewQueue_FIFOByQueuedAt(t *testing.T) {
 	// 3 QUEUED rows with distinct queued_at, budget=2 with 0 inflight.
 	// Pump must claim the two oldest (a_first, a_second) and leave the
 	// newest (a_third) QUEUED.
-	db, crewID, agentIDs, chatID := queueTestRig(t, 1)
+	// Three DISTINCT agents, one row each: since the picker became
+	// agent-aware (#2269 — a row whose agent already has a RUNNING
+	// assignment is skipped, because claiming it would only bounce off
+	// AgentRunLock and be requeued), FIFO across the crew can only be
+	// observed across different agents. Same-agent behaviour is pinned
+	// separately by TestQueue_PumpCrewQueue_SkipsAgentWithLiveRun.
+	db, crewID, agentIDs, chatID := queueTestRig(t, 3)
 	setCrewBudget(t, db, crewID, 2)
-	insertAssignment(t, db, "a_third", "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "QUEUED")
+	insertAssignment(t, db, "a_third", "test-workspace-id", chatID, agentIDs[0], agentIDs[2], "QUEUED")
 	insertAssignment(t, db, "a_first", "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "QUEUED")
-	insertAssignment(t, db, "a_second", "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "QUEUED")
+	insertAssignment(t, db, "a_second", "test-workspace-id", chatID, agentIDs[0], agentIDs[1], "QUEUED")
 	// Force the timestamps; can't rely on insert order matching
 	// queued_at order. SQLite's datetime is second-precision unless
 	// we ask for subsec — use distinct seconds to be portable.
@@ -478,6 +484,32 @@ func TestQueue_PumpCrewQueue_FIFOByQueuedAt(t *testing.T) {
 	}
 }
 
+// TestQueue_PumpCrewQueue_SkipsAgentWithLiveRun pins the agent-aware
+// picker (#2269, review finding 4): two QUEUED rows for the SAME agent
+// with budget to spare must yield exactly ONE claim — the second would
+// only race into AgentRunLock, bounce, and be requeued, re-emitting
+// assignment_queued for nothing. Before the fix the pump was agent-blind
+// and claimed both.
+func TestQueue_PumpCrewQueue_SkipsAgentWithLiveRun(t *testing.T) {
+	db, crewID, agentIDs, chatID := queueTestRig(t, 1)
+	setCrewBudget(t, db, crewID, 5)
+	insertAssignment(t, db, "a_same_1", "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "QUEUED")
+	insertAssignment(t, db, "a_same_2", "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "QUEUED")
+	_, _ = db.Exec(`UPDATE assignments SET queued_at = '2026-05-17T10:00:00Z' WHERE id = 'a_same_1'`)
+	_, _ = db.Exec(`UPDATE assignments SET queued_at = '2026-05-17T10:00:01Z' WHERE id = 'a_same_2'`)
+
+	claimed, err := pumpCrewQueue(context.Background(), db, crewID, 5)
+	if err != nil {
+		t.Fatalf("pumpCrewQueue: %v", err)
+	}
+	if len(claimed) != 1 || claimed[0] != "a_same_1" {
+		t.Fatalf("claimed = %v, want exactly [a_same_1] — the agent's second row must wait for its first run to finish", claimed)
+	}
+	if got := assignmentStatus(t, db, "a_same_2"); got != "QUEUED" {
+		t.Errorf("a_same_2 status = %q, want QUEUED (same agent already RUNNING)", got)
+	}
+}
+
 func TestQueue_PumpCrewQueue_EmptyQueue_ReturnsEmpty(t *testing.T) {
 	// No QUEUED rows; pump must terminate without spinning or erroring.
 	db, crewID, _, _ := queueTestRig(t, 1)
@@ -492,11 +524,14 @@ func TestQueue_PumpCrewQueue_EmptyQueue_ReturnsEmpty(t *testing.T) {
 
 func TestQueue_PumpCrewQueue_RespectsBudgetCeiling(t *testing.T) {
 	// 5 QUEUED rows, 0 inflight, budget=3 → pump claims exactly 3.
-	db, crewID, agentIDs, chatID := queueTestRig(t, 1)
+	// Five DISTINCT agents (see TestQueue_PumpCrewQueue_FIFOByQueuedAt for
+	// why the picker is agent-aware): the budget ceiling is the only thing
+	// that may stop the pump here.
+	db, crewID, agentIDs, chatID := queueTestRig(t, 5)
 	setCrewBudget(t, db, crewID, 3)
 	for i := 0; i < 5; i++ {
 		id := "a_pump_" + string(rune('a'+i))
-		insertAssignment(t, db, id, "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "QUEUED")
+		insertAssignment(t, db, id, "test-workspace-id", chatID, agentIDs[0], agentIDs[i], "QUEUED")
 	}
 	// Force monotonic queued_at — pump's FIFO must serialise on this.
 	if _, err := db.Exec(`
