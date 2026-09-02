@@ -29,6 +29,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   missing, was already chronicled and is untouched.
 -->
 
+### Security
+
+- **The public mission-start route now checks the #1768 autonomy gate
+  (#2258).** `autonomyGateApproved` was consulted from exactly one place —
+  the sidecar-facing `POST /api/v1/internal/missions/{missionId}/start` —
+  and never from the public `POST /api/v1/crews/{crewId}/missions/{missionId}/start`
+  that `crewship mission start` calls. `applyAutonomyGateDecisionTx`
+  deliberately writes no marker on the mission row when a gate is denied —
+  the `approvals_queue` row is documented as the *only* door — so that
+  guarantee held only for agent-triggered starts. Any MANAGER (the route's
+  `roleCreate` requirement) could start a mission whose autonomy gate was
+  pending or had been explicitly denied, including by an OWNER, simply by
+  calling the public route instead of the internal one.
+
+  The internal route's check — fail-closed on pending/denied/cancelled/
+  timed-out — is now the shared helper `refuseUnlessAutonomyGateApproved`,
+  and both mission-start handlers call it, so the two routes refuse
+  identically and the next start-like route added does not repeat the
+  omission. A privileged human override of a hold is a separate feature
+  this does not add: it would need to be explicit and audited, not an
+  accident of which handler a request reaches.
+
 ### Added
 
 - **`crewship admin seed-inbox` fills the inbox with one row of every kind.**

@@ -423,23 +423,13 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	// operator approves it, PLANNING never becomes IN_PROGRESS and the
 	// MissionEngine is never handed the mission, so nothing it planned runs.
 	//
-	// autonomyGateApproved is fail-closed on purpose: pending, denied,
-	// cancelled and TIMED-OUT rows all answer false. A check phrased as "no
-	// pending row blocks me" would have let harbormaster's timeout sweeper
-	// turn an unattended hold into a green light.
-	approved, hasHold, gerr := autonomyGateApproved(r.Context(), h.db, wsID, missionID)
-	if gerr != nil {
-		h.logger.Error("mission start: read autonomy hold", "mission_id", missionID, "error", gerr)
-		replyError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	if hasHold && !approved {
-		writeJSON(w, http.StatusForbidden, map[string]string{
-			"error":      "Mission start rejected by policy",
-			"reason":     "the mission was created under an autonomy hold and has not been approved",
-			"mission_id": missionID,
-			"remedy":     "an OWNER/ADMIN must approve it (`crewship approvals approve <id>` or the /approvals page)",
-		})
+	// refuseUnlessAutonomyGateApproved is fail-closed on purpose: pending,
+	// denied, cancelled and TIMED-OUT rows all answer false. A check phrased
+	// as "no pending row blocks me" would have let harbormaster's timeout
+	// sweeper turn an unattended hold into a green light. #2258 — the public
+	// route (MissionHandler.Start) shares this exact helper now, so it can
+	// no longer walk around the hold this route enforces.
+	if !refuseUnlessAutonomyGateApproved(w, r, h.db, h.logger, wsID, missionID) {
 		return
 	}
 
