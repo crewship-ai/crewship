@@ -299,18 +299,19 @@ The superseded draft recorded twelve observations from a live dev1 session (two 
 
 | Status | Findings |
 |---|---|
-| FIXED-IN `a1` (Stop, terminal guards, `mission_id`, derivation, late-failure leak) | F1, F6 (Tier 1), F7, F9 |
-| FIXED-IN `a3` (registry now scans every ad hoc `journal.EntryType` under `internal/`+`cmd/`, 140 types, not just `types.go`; sparse `PATCH` validates only what it changes) | F19 |
-| FIXED-IN `a4` | F20 |
-| FIXED-IN `a5` (docs, labels, stale comment) | F25, F26, F23 (docs half) |
-| FIXED-IN `a7` (with F37/F38 integration steps applied) | F27 |
-| FIXED-IN `a9` | F2 (the kill; deferral semantics stay B2), F51 |
-| PARTIAL `a6` | F18 (read-only display; editor B9), F32 (3 of ~42), F33 (header now honest; read-side SQL unassigned) |
-| PARTIAL `t1` | F34 (scenarios 11–13 proven; the RunStore blind spot is OPEN and needs its own issue) |
+| MERGED — `a1` #2295 (Stop, terminal guards, late-failure leak) and `a2` #2279 (`mission_id`, derivation) | F1, F6 (Tier 1), F7, F9 |
+| MERGED — `a3` #2271 (registry now scans every ad hoc `journal.EntryType` under `internal/`+`cmd/`, 140 types, not just `types.go`; sparse `PATCH` validates only what it changes) | F19 |
+| MERGED — `a4` #2282 | F20 |
+| MERGED — `a5` #2289 (docs, labels, stale comment) | F25, F26, F23 (docs half) |
+| MERGED — `a7` #2296 (with F37/F38 integration steps applied; read markers of items that do not land on a fork are skipped and reported, #2274) | F27 |
+| MERGED — `a9` #2269 (5 of 7 producers guarded; webhook route, direct agent-run route and peer query are a labelled 1.0 limit) | F2 (the kill; deferral semantics stay B2), F51 |
+| MERGED (partial by design) — `a6` #2291 | F18 (read-only display; editor B9), F32 (3 of ~42), F33 (header now honest; read-side SQL unassigned) |
+| MERGED (partial by design) — `t1` #2293 | F34 (scenarios 11–13 proven; the RunStore blind spot is #2283) |
 | OPEN — Track B | F3, F4, F8, F10, F11, F13, F14, F15, F17, F21, F22, F28, F29, F30 |
-| OPEN — no package yet | F5 (sub-agent streaming), F33 read-side, F60, F61, the RunStore test blind spot |
+| OPEN — filed as issues | F5 (sub-agent streaming), F33 read-side (#2284), F60, F61, the RunStore test blind spot (#2283), issues board resilience (#2285, #2286), parallel-agent file ownership (#2287) |
 | ACCEPTED as constraints (design must respect, not fix) | F12 (N5), F16, F24, F31, F35, F36, F39, F40, F41, F42, F43, F44, F45, F46, F47, F48, F49, F50, F52–F59 |
-| Applied as integration steps in `a7` | F37, F38 |
+| Applied as integration steps in `a7` #2296 | F37, F38 |
+| MERGED — `a10` #2297 | F62 |
 
 ---
 
@@ -944,7 +945,7 @@ If 1.0 is genuinely meant to include Track B, that is a decision to *redefine 1.
 
 **A0 · Truth audit** (§7). Docs only. Now also re-measures the release-readiness numbers, since `RELEASE-1-0-READINESS-2026-08-10.md` is 283 commits stale and disclaims its own currency.
 
-**A1 · Stop actually stops (Tier 1), and terminal states hold.**
+**A1 · Stop actually stops (Tier 1), and terminal states hold.** *(merged #2295)*
 Cooperative cancellation per §10.3 Tier 1: `cancel_requested_at`, checked before any exec starts and again when the run reports back, and terminal-state guards on `mission_tasks` and `assignments`. **As built there is no mid-execution poll** — a run already inside its exec finishes that exec and is then recorded `CANCELLED`, and the mission engine schedules nothing further (proven for a live RUNNING run, `mission_tasks_stop_midflight_test.go`). That matches the promise exactly; do not describe it as more. `assignments` becomes reachable in `CANCELLED` (F9). The old stop route keeps its path and gains real behaviour. A late *failure* report on a stopped run now also reads as cancelled on every user-facing surface (broadcast, mission comment, activity), not only in `status`. UI label: "Stopping — will finish the current step".
 *Status:* on branch `a1-stop-actually-stops`, which also carries A2 (merged), the 5a proof tests and the late-failure fix.
 *Why 1.0:* a control that is documented and does nothing is the definition of the bar's condition #2. Fixes F6 (worst half) and F7 entirely.
@@ -952,54 +953,54 @@ Cooperative cancellation per §10.3 Tier 1: `cancel_requested_at`, checked befor
 
 > **Merge reconciliation, A1 ↔ A2 — done.** A2 is merged into `a1`. Stop now matches `mission_id` directly **and keeps the `chat_id OR group_id` fallback**, because one path still produces a live run with a NULL `mission_id`: a sub-agent delegating further via `/assign` from inside a mission (the sidecar and the routine dispatcher never send it). The server now derives `mission_id` from `chat_id` on that path (`EXISTS (SELECT 1 FROM missions WHERE id = chat_id)` — `ensureMissionChat` uses the mission id as the chat's primary key, and existence rather than `chats.mode` is the predicate because a hard-deleted mission leaves an orphaned MISSION-mode chat behind). Tests: `TestIssue_Stop_ReachesMentionDispatchedRun`, `TestIssue_Stop_FallsBackForDelegatedRunWithNoMissionID`, `TestAssignmentCreate_DerivesMissionIDFromChatID`.
 
-**A2 · Every run is attributable to its issue.**
+**A2 · Every run is attributable to its issue.** *(merged #2279)*
 `assignments.mission_id` + backfill + index. Nothing else from §9.4.
 *Why 1.0:* this is issue #2256 ("nothing records what caused what") and it is a data-model defect, not a feature. Small.
 *Accept:* one query returns every run for an issue; migration test covers a populated DB; `scripts/lint-migrations` clean; `internal/backup/intent.go` unchanged (no new table).
 *Status:* built on `a2-runs-attributable-to-issues`, merged into `a1`. Found while building it: the existing `GET .../issues/{identifier}/runs` only joined through `mission_tasks`, so every mention-dispatched run was missing from its own issue — now fixed there.
 
-**A3 · Triggers cannot be saved in a state where they can never fire.**
+**A3 · Triggers cannot be saved in a state where they can never fire.** *(merged #2271)*
 Closed event registry generated from `internal/journal/types.go`, membership validation replacing the shape regex (`internal/api/automations.go:71`), payload-key validation, and the 7-day "matched nothing" acknowledgement promoted from the opt-in preview endpoint into the create flow.
 *Why 1.0:* condition #2 again — the API accepts input it cannot honour, and the code comment admits it.
 *Accept:* an unregistered `event_type` is rejected naming the valid ones; a nonexistent payload key is rejected; a rule matching nothing in 7 days requires acknowledgement.
 *Status:* on `a3-closed-event-registry`. The registry is generated from `types.go` by an AST scan with a drift test (130 entry types, not the 117 the old comment claimed). **Limit, stated honestly in the error and the docs:** no payload-schema registry exists anywhere; nine event types are hand-verified, and a type outside that map gets no payload-key validation. The 7-day acknowledgement is not yet in the create flow.
 
-**A4 · Trigger failure is visible for all three trigger kinds.**
+**A4 · Trigger failure is visible for all three trigger kinds.** *(merged #2282)*
 Webhook fire failures and automation enqueue failures emit a journal entry and, on repetition, an inbox item — matching schedules (`internal/pipeline/schedules.go:1058-1069`). Fixes the bare `logger.Error` at `internal/automation/registry.go:734-736`.
 *Why 1.0:* condition #5, orchestration paths with behaviour-level evidence.
 *Accept:* each of the three kinds produces a durable, queryable record of "should have run, didn't".
 *Status:* on `a4-trigger-failure-visible`. Journal entry on every failure; one inbox card at three consecutive failures (lower than schedules' five, because here no run exists at all); a run that started and then failed is deliberately not counted — it already has `EntryPipelineRunFailed`.
 
-**A5 · The docs stop contradicting the code.**
+**A5 · The docs stop contradicting the code.** *(merged #2289)*
 Rollback (`docs/cli/routine.mdx:1097` says a new version is created; `internal/pipeline/versions.go:230-249` only repoints head); concurrency ("queue" vs the actual 429, `docs/guides/routines.mdx:2047`); the waitpoint empty-body asymmetry (`pipeline_waitpoint_callback.go:44-47` defaults true, the authed route false — pick one and document it); and the monthly-budget naming (F25 — either rename it to something that does not read as enforcement, or state on the page that it is reporting-only).
 *Why 1.0:* conditions #2, #4 and #7, verbatim.
 *Accept:* each of the four has a doc change, a test, or both; `docs-inventory -strict` clean.
 *Status:* on `a5-docs-match-code`. No behaviour changed: the waitpoint asymmetry is documented on both handlers with its security reasoning (authed fails closed; the public token callback fails open for `trigger.dev wait.forToken` parity) rather than unified; the budget field keeps its name and gains reporting-only statements in the API reference, the CLI help and every budget command's output.
 
-**A6 · Shipped surfaces tell the truth about what they show.**
+**A6 · Shipped surfaces tell the truth about what they show.** *(merged #2291)*
 `RunsView` subscribes to `pipeline.run.*` as well as `run.*` (F33); the three server-emitted issue events dropped by the allowlist are registered (#2125), with a test that fails when an emitted type is unregistered; schedule health — `disabled_reason`, `consecutive_failures`, `last_missed_count`, wake stats — is *displayed* read-only (the editor is Track B).
 *Why 1.0:* a view whose header claims workspace-wide coverage and silently omits a trigger class fails condition #2; a schedule disabled with no visible reason fails #7.
 *Accept:* the allowlist test catches a deliberately omitted registration; an auto-disabled schedule shows its reason; and the runs view's header states what it can and cannot show. **Not** "every trigger kind appears in the runs list" — F33 rev 3 shows that is read-side work in a separate package, and an accept criterion the package cannot satisfy is how a truth defect gets re-labelled as done.
 *Status:* on `a6-surfaces-tell-truth`. Frontend only; full Vitest (573 files) and a static-export build pass — the build needs `pnpm db:generate` first in any fresh clone or worktree, or it fails on a `TS2307` that looks like a code defect and is not.
 
-**A7 · Inbox read state is per user.**
+**A7 · Inbox read state is per user.** *(merged #2296)*
 `inbox_item_reads` (§9.7) with read state computed as a LEFT JOIN; existing columns retained.
 *Why 1.0:* on a multi-user workspace the current behaviour is a correctness bug (F27), not a missing feature — one person reading clears it for everyone.
 *Accept:* two users have independent read state; the existing columns still answer "someone dealt with it"; the table passes §16.1 in full.
 *Status:* on `a7-per-user-inbox-read`. `IntentInclude` for backup, deliberately unlike `notification_deliveries`. Found while building it: `inbox.Upsert` resurrecting an item to unread did not clear per-user markers — fixed, since it is the same class of bug.
 
-**A9 · Close the exclusivity gap the codebase already knows about** (rev 3 — confirmed from the exec wrapper, F51; implemented on `a9-exclusivity-guard`).
+**A9 · Close the exclusivity gap the codebase already knows about** (rev 3 — confirmed from the exec wrapper, F51; merged #2269).
 `tryMarkRunStart` (`internal/chatbridge/steer.go:60-77`) guards the chat door against two execs racing into one agent container. `runAssignment` — `/assign` and every @mention — did not consult it. Reading the exec wrapper settled the premise: the session name is `agent-<slug>` and the wrapper opens with `tmux kill-session`, so the second run kills the first (§2.2, F51 rev-3 addendum). Not a suspicion any more.
 *Why 1.0:* a known-corruption path with one unguarded door; condition #5 covers it.
 *As built:* the primitive is extracted into `chatbridge` (renamed `AgentRunLock` to avoid a grep collision with the pipeline integrations gate's `TestRunGate_*`/`ErrTestRunGateFailed`), keyed by agent id, shared by `HandleChatMessage` and `runAssignment`. A run that loses the lock is **requeued** (`QUEUED`, back of the crew FIFO), not failed — the completion pump already drains it. The chat door now also bounces when the agent is busy on an issue; that is correct (they collide) and is a visible behaviour change to call out in the changelog.
-*Accept:* two concurrent runs for the same agent cannot both be live; the loser lands `QUEUED` and is drained once the lock frees; the pump cannot force a live collision; tests run under `-race` with deterministic pre-held locks. Full `go test ./...` green on `c874b5463`.
+*Accept:* two concurrent runs for the same agent cannot both be live; the loser lands `QUEUED` and is drained once the lock frees; the pump cannot force a live collision; tests run under `-race` with deterministic pre-held locks. Full `go test ./...` green on `c874b5463`. **Coverage as merged (#2269):** the lock guards 5 of the 7 producers — `/assign`, @mention, mission task, lead planning and the chat door; the routine webhook route, the direct agent-run route and the peer query are not yet behind it and are written into the user docs as a 1.0 known limit (B0 docs).
 
-**A10 · Owner and delegate are separate columns** (§9.10; ported from rev 1; added rev 3).
+**A10 · Owner and delegate are separate columns** (§9.10; ported from rev 1; added rev 3; merged #2297).
 Two nullable FK columns on `missions`, backfilled from the polymorphic assignee; delegation never touches the owner; Start requires a typed executable delegate; DTOs expose both.
 *Why 1.0:* rev-1 dev1 observation 11 — the UI showed the agent as owner — is a truth defect in a shipped surface (condition #2), and F62 (Start does not check executability) is a correctness gap the typed FK closes for free.
 *Accept:* scenario 9 green (owner unchanged after delegation); Start refuses a non-agent delegate with a named error; the legacy assignee projection still reads correctly for old clients; §16.1 applied (the columns hold ids, not user text — no `data_subject_id`, but confirm with the GDPR export path).
 
-**A8 · The golden-scenario harness exists from the start.**
+**A8 · The golden-scenario harness exists from the start.** *(scenarios 11–13 merged #2293; 5a in #2295)*
 The runner, plus the scenarios Track A can actually prove: **5a** (cooperative stop), **11** (a schedule fires on time; a wake gate returning false suppresses and says so), **12** (catch-up honoured across three missed fire times, all three policies), **13** (duplicate webhook with the same idempotency key → one run), and a new **A-scoped** one: an automation rule that can never fire is rejected at save time.
 Note what this buys: 11, 12 and 13 exercise engine behaviour that is well built and, per §2.1, **has never once run on a real clone**. Proving them is exactly what 1.0 asks for. Moved here from rev 1's final phase, which contradicted §25.
 *Accept:* the harness runs in CI; each included scenario fails on the pre-A baseline (for 11–13, "fails" means the behaviour is unproven, so the first green run is itself the deliverable).

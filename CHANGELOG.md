@@ -31,6 +31,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **The 1.0 known limits are written down where users read (#2299).** The
+  issue-mentions, routines and issue-detail guides now say plainly what Track
+  A deliberately left for 1.1: a busy agent is woken after its live run rather
+  than interrupted, and a chat to it bounces `agent_busy`; the routine
+  webhook and direct agent-run routes are not yet behind that guard; routine
+  runs are missing from the Runs view (#2284); there is no cross-run
+  continuity; Stop is cooperative; and `DONE`/`COMPLETED` are still two words
+  for finished. The mentions guide also stops saying nothing is ever queued —
+  since #2269 a mention of a busy agent is.
+
 - **An issue's owner and its delegate are two columns, not one polymorphic
   assignee (#2297).** `missions` carried `assignee_type`/`assignee_id`, so
   delegating an issue to an agent overwrote the person who owned it — the UI
