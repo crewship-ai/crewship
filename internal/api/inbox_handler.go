@@ -76,6 +76,26 @@ func inboxVisibilityClause(userID, role string) (string, []interface{}) {
 	return clause, args
 }
 
+// inboxEffectiveStateExpr computes the `state` the API returns to ONE
+// caller (A7, PRD-ISSUES-AND-ROUTINES-2026.md §9.7). 'resolved' stays a
+// workspace-shared outcome — one decision closes the item for everyone,
+// exactly as before A7, so it is read straight off inbox_items.state.
+// 'read' vs 'unread' is per-user: inbox_items.read_at/read_by_user_id are
+// UNCHANGED underneath (still first-write-wins, still answering "has
+// ANYONE dealt with this" — see the migration's header) and are NOT what
+// decides this. Whether ir.user_id is non-NULL is, because every caller
+// of this expression must LEFT JOIN inboxReadsJoinClause ahead of it.
+const inboxEffectiveStateExpr = `CASE
+        WHEN state = 'resolved' THEN 'resolved'
+        WHEN ir.user_id IS NOT NULL THEN 'read'
+        ELSE 'unread'
+    END`
+
+// inboxReadsJoinClause is the LEFT JOIN inboxEffectiveStateExpr depends on.
+// Bind the caller's user id for its one placeholder, in text order, before
+// any other argument in the query.
+const inboxReadsJoinClause = ` LEFT JOIN inbox_item_reads ir ON ir.inbox_item_id = inbox_items.id AND ir.user_id = ?`
+
 func NewInboxHandler(db *sql.DB, logger *slog.Logger, hub *ws.Hub) *InboxHandler {
 	return &InboxHandler{db: db, logger: logger, hub: hub}
 }
@@ -206,12 +226,12 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		COALESCE(target_user_id, ''), COALESCE(target_role, ''),
 		title, COALESCE(body_md, ''),
 		COALESCE(sender_type, ''), COALESCE(sender_id, ''), COALESCE(sender_name, ''),
-		state, priority, blocking, payload_json,
-		COALESCE(read_at, ''), COALESCE(resolved_at, ''),
+		` + inboxEffectiveStateExpr + ` AS state, priority, blocking, payload_json,
+		COALESCE(inbox_items.read_at, ''), COALESCE(resolved_at, ''),
 		COALESCE(resolved_by_user_id, ''), COALESCE(resolved_action, ''),
 		created_at, updated_at
-	FROM inbox_items WHERE workspace_id = ?`)
-	args := []interface{}{workspaceID}
+	FROM inbox_items` + inboxReadsJoinClause + ` WHERE workspace_id = ?`)
+	args := []interface{}{user.ID, workspaceID}
 
 	visClause, visArgs := inboxVisibilityClause(user.ID, role)
 	q.WriteString(visClause)
@@ -226,7 +246,10 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		// the LIMIT window and silently push active items out of view.
 		q.WriteString(" AND state != 'resolved'")
 	case "unread", "read", "resolved":
-		q.WriteString(" AND state = ?")
+		// Filter on the per-caller computed state, not the raw shared
+		// column — a role-targeted item another recipient already read
+		// must still show up here as unread for THIS caller (A7).
+		q.WriteString(" AND " + inboxEffectiveStateExpr + " = ?")
 		args = append(args, state)
 	default:
 		replyError(w, http.StatusBadRequest, "invalid state")
@@ -296,8 +319,9 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	// kept in lockstep with the list query so a user's badge count
 	// matches the rows they can actually see.
 	var unreadCount int
-	countQuery := `SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ?` + visClause + ` AND state = 'unread'`
-	countArgs := append([]interface{}{workspaceID}, visArgs...)
+	countQuery := `SELECT COUNT(*) FROM inbox_items` + inboxReadsJoinClause + ` WHERE workspace_id = ?` + visClause +
+		` AND ` + inboxEffectiveStateExpr + ` = 'unread'`
+	countArgs := append([]interface{}{user.ID, workspaceID}, visArgs...)
 	if err := h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&unreadCount); err != nil {
 		h.logger.Warn("inbox unread count", "error", err)
 		unreadCount = 0
@@ -323,10 +347,11 @@ func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	visClause, visArgs := inboxVisibilityClause(user.ID, role)
-	args := append([]interface{}{workspaceID}, visArgs...)
+	args := append([]interface{}{user.ID, workspaceID}, visArgs...)
 	var n int
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ?`+visClause+` AND state = 'unread'`,
+		`SELECT COUNT(*) FROM inbox_items`+inboxReadsJoinClause+` WHERE workspace_id = ?`+visClause+
+			` AND `+inboxEffectiveStateExpr+` = 'unread'`,
 		args...).Scan(&n); err != nil {
 		h.logger.Warn("inbox unread count", "error", err)
 		replyError(w, http.StatusInternalServerError, "count failed")
@@ -357,7 +382,7 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	visClause, visArgs := inboxVisibilityClause(user.ID, role)
-	args := append([]interface{}{id, workspaceID}, visArgs...)
+	args := append([]interface{}{user.ID, id, workspaceID}, visArgs...)
 	var item inboxItemResponse
 	var blocking int
 	var payloadJSON string
@@ -365,11 +390,11 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 		COALESCE(target_user_id, ''), COALESCE(target_role, ''),
 		title, COALESCE(body_md, ''),
 		COALESCE(sender_type, ''), COALESCE(sender_id, ''), COALESCE(sender_name, ''),
-		state, priority, blocking, payload_json,
-		COALESCE(read_at, ''), COALESCE(resolved_at, ''),
+		`+inboxEffectiveStateExpr+` AS state, priority, blocking, payload_json,
+		COALESCE(inbox_items.read_at, ''), COALESCE(resolved_at, ''),
 		COALESCE(resolved_by_user_id, ''), COALESCE(resolved_action, ''),
 		created_at, updated_at
-	FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
+	FROM inbox_items`+inboxReadsJoinClause+` WHERE id = ? AND workspace_id = ?`+visClause,
 		args...).Scan(
 		&item.ID, &item.WorkspaceID, &item.Kind, &item.SourceID,
 		&item.TargetUserID, &item.TargetRole,
@@ -802,6 +827,9 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 
 	switch body.State {
 	case "read":
+		// Shared columns UNCHANGED (A7): still first-write-wins, still
+		// answering "has anyone dealt with this" — a different, still-useful
+		// question from the per-caller state this endpoint returns.
 		_, err = tx.ExecContext(r.Context(), `
 			UPDATE inbox_items
 			SET state = 'read',
@@ -810,7 +838,22 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 			    updated_at = ?
 			WHERE id = ?`,
 			now, user.ID, now, id)
+		// The per-caller marker (A7). ON CONFLICT DO NOTHING: idempotent,
+		// same first-write-wins spirit as the shared columns above — a
+		// second "mark read" by the same user doesn't need to move the
+		// timestamp forward.
+		if err == nil {
+			_, err = tx.ExecContext(r.Context(), `
+				INSERT INTO inbox_item_reads (inbox_item_id, user_id, read_at)
+				VALUES (?, ?, ?)
+				ON CONFLICT (inbox_item_id, user_id) DO NOTHING`,
+				id, user.ID, now)
+		}
 	case "unread":
+		// Shared columns UNCHANGED (A7): this still clears the workspace-
+		// wide "someone dealt with it" marker exactly as it always has —
+		// A7 only adds per-user state, it does not change what "unread"
+		// already did to the shared row.
 		_, err = tx.ExecContext(r.Context(), `
 			UPDATE inbox_items
 			SET state = 'unread',
@@ -822,6 +865,13 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 			    updated_at = ?
 			WHERE id = ?`,
 			now, id)
+		// Clears only the CALLER's own per-user marker (A7) — another
+		// user who already read this item keeps their own read state.
+		if err == nil {
+			_, err = tx.ExecContext(r.Context(), `
+				DELETE FROM inbox_item_reads WHERE inbox_item_id = ? AND user_id = ?`,
+				id, user.ID)
+		}
 	case "resolved":
 		_, err = tx.ExecContext(r.Context(), `
 			UPDATE inbox_items
@@ -983,6 +1033,8 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 
 		switch body.State {
 		case "read":
+			// See PatchState's "read" case: shared columns unchanged (A7),
+			// per-user marker upserted alongside.
 			_, err = tx.ExecContext(r.Context(), `
 				UPDATE inbox_items
 				SET state = 'read',
@@ -991,7 +1043,16 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 				    updated_at = ?
 				WHERE id = ?`,
 				now, user.ID, now, id)
+			if err == nil {
+				_, err = tx.ExecContext(r.Context(), `
+					INSERT INTO inbox_item_reads (inbox_item_id, user_id, read_at)
+					VALUES (?, ?, ?)
+					ON CONFLICT (inbox_item_id, user_id) DO NOTHING`,
+					id, user.ID, now)
+			}
 		case "unread":
+			// See PatchState's "unread" case: shared columns unchanged (A7),
+			// only the caller's own per-user marker is cleared.
 			_, err = tx.ExecContext(r.Context(), `
 				UPDATE inbox_items
 				SET state = 'unread', read_at = NULL, read_by_user_id = NULL,
@@ -999,6 +1060,11 @@ func (h *InboxHandler) BulkPatchState(w http.ResponseWriter, r *http.Request) {
 				    updated_at = ?
 				WHERE id = ?`,
 				now, id)
+			if err == nil {
+				_, err = tx.ExecContext(r.Context(), `
+					DELETE FROM inbox_item_reads WHERE inbox_item_id = ? AND user_id = ?`,
+					id, user.ID)
+			}
 		case "resolved":
 			_, err = tx.ExecContext(r.Context(), `
 				UPDATE inbox_items

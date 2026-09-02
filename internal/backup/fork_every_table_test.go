@@ -93,6 +93,7 @@ var knownForkDrops = map[string]string{
 	"page_public_tokens":    "UNIQUE token_hash — instance-wide by design (a shared hash is a cross-page read)",
 	"page_webhooks":         "UNIQUE token_hash — instance-wide by design",
 	"inbox_items":           "UNIQUE(kind, source_id) — neither column is remapped",
+	"inbox_item_reads":      "follows inbox_items (above): a read marker for an item that did not land is skipped by design and reported as a shortfall",
 	"message_feedback":      "UNIQUE(message_id, user_id, signal) — messages are not in BackupTables, so message_id is never remapped",
 }
 

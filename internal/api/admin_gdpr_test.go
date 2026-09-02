@@ -107,6 +107,29 @@ func (r *gdprTestRig) seedAll(t *testing.T) {
 	}
 }
 
+// seedInboxItemReads adds A7 per-user read markers (PRD-ISSUES-AND-ROUTINES-
+// 2026.md §9.7): one on ib1 (which seedAll already tags data_subject_id=
+// subj1, so ib1 itself is deleted by the data_subject_id cascade and its
+// read row goes with it via ON DELETE CASCADE — not proof the explicit
+// per-user DELETE works). ib2 is the real test: an item NOT about the
+// subject that the subject nonetheless opened — exactly the "role-targeted
+// escalation the subject happened to read" case the explicit cascade step
+// exists for. member1's marker on the SAME item must survive untouched.
+func (r *gdprTestRig) seedInboxItemReads(t *testing.T) {
+	t.Helper()
+	if _, err := r.db.Exec(`INSERT INTO inbox_items (id, workspace_id, kind, source_id, title)
+		VALUES ('ib2','ws1','escalation','esc-other','not about the subject')`); err != nil {
+		t.Fatalf("seed inbox_items ib2: %v", err)
+	}
+	if _, err := r.db.Exec(`
+		INSERT INTO inbox_item_reads (inbox_item_id, user_id, read_at) VALUES
+			('ib1', 'subj1',   '2026-08-01T00:00:00.000Z'),
+			('ib2', 'subj1',   '2026-08-02T00:00:00.000Z'),
+			('ib2', 'member1', '2026-08-03T00:00:00.000Z')`); err != nil {
+		t.Fatalf("seed inbox_item_reads: %v", err)
+	}
+}
+
 // adminReq crafts a request with workspace + admin role context
 // pre-plumbed. role can be overridden (e.g. for the RBAC test).
 func (r *gdprTestRig) adminReq(t *testing.T, method, body, userIDPath, role string) *http.Request {
@@ -168,6 +191,60 @@ func TestGDPRCascade_DeletesMemoryVersions(t *testing.T) {
 	}
 	if cnt != 1 {
 		t.Errorf("other subject memory_versions = %d, want 1 (cascade leaked)", cnt)
+	}
+}
+
+// TestGDPRCascade_DeletesInboxItemReads is the A7 addition to the GDPR
+// erasure cascade: the subject's OWN per-item read markers must be purged
+// even for items that are not "about" them (no data_subject_id match) —
+// the read marker is the subject's activity record, not content about a
+// third party. Another user's marker on the exact same item must survive.
+func TestGDPRCascade_DeletesInboxItemReads(t *testing.T) {
+	r := gdprTestSetup(t)
+	r.seedAll(t)
+	r.seedInboxItemReads(t)
+
+	rec := httptest.NewRecorder()
+	r.h.DeleteUserData(rec, r.adminReq(t, http.MethodDelete,
+		`{"reason":"sar"}`, r.targetID, "ADMIN"))
+	if rec.Code >= 400 {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
+	}
+
+	var subjRemaining int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM inbox_item_reads WHERE user_id = ?`, r.targetID).Scan(&subjRemaining); err != nil {
+		t.Fatalf("count subject's read markers: %v", err)
+	}
+	if subjRemaining != 0 {
+		t.Errorf("subject's inbox_item_reads remaining = %d, want 0", subjRemaining)
+	}
+
+	// member1's marker on ib2 — the SAME item the subject also read — must
+	// be untouched: this is the case that proves scoping is by user_id, not
+	// by a blanket delete on the item.
+	var otherRemaining int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM inbox_item_reads WHERE inbox_item_id = 'ib2' AND user_id = 'member1'`).Scan(&otherRemaining); err != nil {
+		t.Fatalf("count member1's read marker: %v", err)
+	}
+	if otherRemaining != 1 {
+		t.Errorf("member1's read marker on ib2 = %d, want 1 (must survive the subject's erasure)", otherRemaining)
+	}
+
+	// scope_json carries the count.
+	var scopeJSON string
+	if err := r.db.QueryRow(`SELECT COALESCE(scope_json,'') FROM gdpr_actions
+		WHERE workspace_id=? AND data_subject_id=? AND action='delete'`,
+		r.wsID, r.targetID).Scan(&scopeJSON); err != nil {
+		t.Fatalf("read scope_json: %v", err)
+	}
+	var scope map[string]int
+	if err := json.Unmarshal([]byte(scopeJSON), &scope); err != nil {
+		t.Fatalf("scope_json parse: %v body=%q", err, scopeJSON)
+	}
+	// ib1's read row is deleted by ib1's own removal (data_subject_id
+	// cascade), so only ib2's explicit per-user delete is counted here.
+	if scope["inbox_item_reads"] != 1 {
+		t.Errorf("scope.inbox_item_reads = %d, want 1 (the ib2 row explicit step 3b deleted)", scope["inbox_item_reads"])
 	}
 }
 
@@ -362,6 +439,45 @@ func TestGDPRExport_ReturnsAllUserData(t *testing.T) {
 	}
 	if cnt != 1 {
 		t.Errorf("export gdpr_actions = %d, want 1", cnt)
+	}
+}
+
+// TestGDPRExport_ReturnsInboxItemReads is the A7 addition to the Art. 15
+// access response: the subject's own per-item read activity, including on
+// an item that is not about them (ib2), and excluding another user's
+// marker on that same item.
+func TestGDPRExport_ReturnsInboxItemReads(t *testing.T) {
+	r := gdprTestSetup(t)
+	r.seedAll(t)
+	r.seedInboxItemReads(t)
+
+	rec := httptest.NewRecorder()
+	r.h.ExportUserData(rec, r.adminReq(t, http.MethodGet, "", r.targetID, "ADMIN"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export: %d %s", rec.Code, rec.Body.String())
+	}
+
+	var bundle struct {
+		InboxItemReads []struct {
+			InboxItemID string `json:"inbox_item_id"`
+			ReadAt      string `json:"read_at"`
+		} `json:"inbox_item_reads"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &bundle); err != nil {
+		t.Fatalf("parse bundle: %v", err)
+	}
+	if len(bundle.InboxItemReads) != 2 {
+		t.Fatalf("inbox_item_reads in bundle = %d, want 2 (ib1 + ib2, both read by the subject)", len(bundle.InboxItemReads))
+	}
+	seen := map[string]bool{}
+	for _, row := range bundle.InboxItemReads {
+		seen[row.InboxItemID] = true
+		if row.ReadAt == "" {
+			t.Errorf("read_at empty for %s", row.InboxItemID)
+		}
+	}
+	if !seen["ib1"] || !seen["ib2"] {
+		t.Errorf("expected ib1 and ib2 in export, got %+v", bundle.InboxItemReads)
 	}
 }
 

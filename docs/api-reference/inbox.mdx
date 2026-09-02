@@ -64,11 +64,11 @@ An item addressed to OWNER never appears for a MEMBER, even if both belong to th
 | `sender_type` | string \| omitted | `user` or `agent`. |
 | `sender_id` | string \| omitted | |
 | `sender_name` | string \| omitted | Pre-joined display name. |
-| `state` | `"unread"` \| `"read"` \| `"resolved"` | |
+| `state` | `"unread"` \| `"read"` \| `"resolved"` | Computed **for the calling user** — see the "Reading is per-user" note under [State transitions](#patch-apiv1inboxid). |
 | `priority` | string | `low` / `normal` / `high` / `urgent`. |
 | `blocking` | bool | When `true`, the source flow is paused until the item is resolved. |
 | `payload` | object \| omitted | Parsed JSON — inlined so the UI doesn't need a second `JSON.parse`. |
-| `read_at` | RFC3339 \| omitted | |
+| `read_at` | RFC3339 \| omitted | Legacy, workspace-shared: the first time **anyone** marked this item read. Not what `state` reflects — see the "Reading is per-user" note under [State transitions](#patch-apiv1inboxid). |
 | `resolved_at` | RFC3339 \| omitted | |
 | `resolved_by_user_id` | string \| omitted | |
 | `resolved_action` | string \| omitted | `approved`, `rejected`, `retried`, `cancelled` — what the human did. |
@@ -213,9 +213,17 @@ Generic kinds (`message`, `failed_run`) flip freely between all three states.
 
 #### State transitions
 
-- **→ read** sets `read_at` and `read_by_user_id` (both `COALESCE`'d so re-reading doesn't move the timestamp).
-- **→ unread** clears `read_at`, `read_by_user_id`, `resolved_at`, `resolved_by_user_id`, `resolved_action`.
-- **→ resolved** sets `resolved_at`, `resolved_by_user_id`, `resolved_action` (and overwrites whatever's currently set, in case the user resolved with a different action).
+- **→ read** marks the item read **for the calling user only**: it upserts the caller's row in `inbox_item_reads` (idempotent — a second "mark read" by the same user doesn't move the timestamp). It also still sets the legacy shared `read_at` / `read_by_user_id` columns on `inbox_items`, first-write-wins (`COALESCE`'d) — but those are not what `state` reflects in any response; see the note below.
+- **→ unread** clears only the **caller's own** row in `inbox_item_reads` — a role-targeted item another recipient already read stays `read` for them. It also clears the legacy shared `read_at`, `read_by_user_id`, `resolved_at`, `resolved_by_user_id`, `resolved_action` columns on `inbox_items`.
+- **→ resolved** sets `resolved_at`, `resolved_by_user_id`, `resolved_action` (and overwrites whatever's currently set, in case the user resolved with a different action). Unlike read/unread, **resolved is workspace-shared** — one decision closes the item for everyone who can see it.
+
+<Note>
+  **Reading is per-user.** `state` in every response (`GET /api/v1/inbox`, `GET /api/v1/inbox/{id}`, and the `unread_count` on both) is computed **for the calling user**: `resolved` is read straight off the shared `inbox_items.state` (one decision closes the item for everyone), but `read` vs `unread` comes from whether the caller has a row in the per-`(item, user)` table `inbox_item_reads`. Marking an item read or unread only ever affects the caller — a role-targeted item another recipient has already read still comes back `unread` for you, and marking it read yourself doesn't touch their state.
+
+  The legacy `read_at` / `read_by_user_id` columns on `inbox_items` are **kept** and still written on every read/unread transition, but they now answer a narrower, separate question — "has **anyone** dealt with this" (useful for e.g. an operator dashboard that doesn't care which manager looked) — and are no longer what `state` reports.
+
+  A refreshed item — one an upsert resurrects to `unread` (e.g. a stale escalation re-raised) — clears **every** caller's per-user read marker along with the shared columns, so it reads as `unread` again for everyone, including users who had read the earlier version.
+</Note>
 
 ## Bulk state transition
 
