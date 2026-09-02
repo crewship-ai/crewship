@@ -767,6 +767,24 @@ func quoteIdent(name string) string {
 // Rows are inserted in the order recorded in BackupTables so parent
 // rows land before children and FK enforcement does not explode on
 // crew.workspace_id etc.
+// orphanGuardedChildren names the child tables whose NOT NULL parent
+// reference may point at a row that legitimately did not land. Today that
+// is one table: inbox_item_reads follows inbox_items, and inbox_items is
+// UNIQUE(kind, source_id) instance-wide, so on a fork (--as-workspace /
+// --as-crew) its rows are INSERT OR IGNOREd away (#2274). Before A7 the read
+// state lived on inbox_items itself and vanished with it; as a child row it
+// would instead fail the deferred FK check and abort the restore. The insert
+// for a table listed here is conditional on the parent existing, and a row
+// skipped that way is counted as a shortfall — reported, never silent. When
+// #2274 scopes the unique key and inbox_items lands on a fork, the guard
+// becomes a no-op and this entry can go.
+var orphanGuardedChildren = map[string]struct {
+	column string // the child's FK column
+	parent string // the referenced table, whose PK is `id`
+}{
+	"inbox_item_reads": {column: "inbox_item_id", parent: "inbox_items"},
+}
+
 func RestoreDump(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	_, err := RestoreDumpTx(ctx, db, dump, func(context.Context) error { return nil })
 	return err
@@ -1024,6 +1042,21 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				strings.Join(cols, ","),
 				strings.Join(placeholders, ","),
 			)
+			if guard, ok := orphanGuardedChildren[table]; ok {
+				// The parent may legitimately not have landed (see
+				// orphanGuardedChildren); a row for a parent that is not
+				// there would fail the deferred FK check and abort the
+				// whole restore. Insert it only when the parent exists;
+				// a row skipped here is a genuine, reported shortfall.
+				query = fmt.Sprintf(
+					"INSERT OR IGNORE INTO %s (%s) SELECT %s WHERE EXISTS (SELECT 1 FROM %s WHERE id = ?)",
+					quoteIdent(table),
+					strings.Join(cols, ","),
+					strings.Join(placeholders, ","),
+					quoteIdent(guard.parent),
+				)
+				args = append(args, row[guard.column])
+			}
 			res, err := tx.ExecContext(ctx, query, args...)
 			if err != nil {
 				return stats, fmt.Errorf("backup: insert into %s: %w", table, err)

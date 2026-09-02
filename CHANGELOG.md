@@ -954,6 +954,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   every caller's per-user read marker, so a refreshed item reads as unread
   again for everyone, not just the caller who triggered the refresh.
 
+  On a fork (`backup restore --as-workspace` / `--as-crew`) inbox items
+  themselves do not land — `inbox_items` is UNIQUE(kind, source_id)
+  instance-wide (#2274) — so a read marker for one of them has no parent.
+  The restore now skips such a marker instead of aborting on the deferred
+  foreign-key check, and reports the skip in `rows_inserted_shortfalls`.
+
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
   conversation: a person opening a thread, a routine minting **one chat per
