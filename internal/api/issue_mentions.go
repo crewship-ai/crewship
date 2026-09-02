@@ -835,6 +835,7 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 		Task:        brief,
 		GroupID:     req.MissionID,
 		CreatedAt:   now,
+		MissionID:   req.MissionID,
 	})
 	if err != nil {
 		return "", err

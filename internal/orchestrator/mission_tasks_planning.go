@@ -251,11 +251,12 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	now := time.Now().UTC().Format(time.RFC3339)
 	assignmentID := generateID()
 	_, err = e.db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?)`,
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, mission_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?)`,
 		assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, ms.LeadAgentID,
 		"[PLANNING] "+title.String,
 		ms.ID,
+		ms.ID, // mission_id (#2256) — the lead-planning run for this mission
 		now,
 	)
 	if err != nil {

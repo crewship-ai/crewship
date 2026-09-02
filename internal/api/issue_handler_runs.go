@@ -66,15 +66,30 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Two ways a run names this issue, and a real clone has rows from both:
+	//
+	//   * a.mission_id (#2256) — every assignment-creating path stamps it
+	//     going forward, including a mention dispatch, which has no
+	//     mission_tasks row at all.
+	//   * mission_tasks.assignment_id — the pre-#2256 link, still the only
+	//     one a row written before this column existed can be found by.
+	//
+	// DISTINCT because a mission-task run satisfies both after the backfill
+	// / going-forward write, and the UNION-shaped OR would otherwise return
+	// it twice.
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT a.id, a.status, a.started_at, a.finished_at, a.result_summary,
+		SELECT DISTINCT a.id, a.status, a.started_at, a.finished_at, a.result_summary,
 		       a.error_message, a.task, COALESCE(ag.name, '')
-		FROM mission_tasks mt
-		JOIN assignments a ON a.id = mt.assignment_id
+		FROM assignments a
 		LEFT JOIN agents ag ON ag.id = a.assigned_to_id
-		WHERE mt.mission_id = ? AND a.workspace_id = ?
+		WHERE a.workspace_id = ?
+		  AND (
+		        a.mission_id = ?
+		        OR a.id IN (SELECT assignment_id FROM mission_tasks
+		                     WHERE mission_id = ? AND assignment_id IS NOT NULL)
+		      )
 		ORDER BY COALESCE(a.started_at, a.created_at) DESC
-		LIMIT 100`, missionID, wsID)
+		LIMIT 100`, wsID, missionID, missionID)
 	if err != nil {
 		internalError(w, r, h.logger, "issue runs: query", err)
 		return

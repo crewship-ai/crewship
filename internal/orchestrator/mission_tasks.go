@@ -544,11 +544,12 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	assignmentID := generateID()
 	if err := database.WithTx(ctx, e.db, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?)`,
+			INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, mission_id, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?)`,
 			assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, *task.AssignedAgentID,
 			taskBrief,
 			ms.ID, // group_id = mission_id for grouping
+			ms.ID, // mission_id (#2256) — this run IS a mission task's run
 			now,
 		); err != nil {
 			return fmt.Errorf("create assignment: %w", err)

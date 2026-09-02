@@ -631,6 +631,24 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **A run is now attributable to the issue that caused it, including
+  delegation hops and mention dispatches (#2279).** `assignments.mission_id`
+  is the direct link between a run and the issue it belongs to, but neither
+  of `AssignmentHandler.Create`'s two real callers — the sidecar's
+  `handleAssign` and the routine dispatcher's `crewshipBody` — ever set it,
+  so every delegation hop made from inside a mission task, lead-planning, or
+  mention-dispatched run created an assignment with `mission_id = NULL`,
+  invisible to `issue runs` and to Stop's live-run match alike. `Create` now
+  derives `mission_id` server-side when the body omits it: every synthetic
+  mission chat is created with the mission's own id as the chat's primary
+  key, so an existence check against `missions(id)` for the assignment's
+  `chat_id` is the exact FK precondition `mission_id` needs, not a
+  heuristic. Stop's own match now prefers `mission_id` directly over the old
+  `chat_id`/`group_id` heuristic, keeping that heuristic only as a fallback
+  for rows created before this change. `GET /issues/{identifier}/runs` and
+  `crewship issue runs` now return every run attributed to the issue —
+  mission tasks, mention-dispatched runs, and delegation-hop runs alike —
+  instead of only the mission-task rows a join could already reach.
 
 - **`backup verify` no longer calls a short bundle VALID (#2009).** Verify
   only ever checked the payload's SHA-256 against the manifest — integrity,

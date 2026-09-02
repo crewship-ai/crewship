@@ -577,7 +577,7 @@ The agent executions behind an issue. Issues run on the mission engine (not pipe
 GET /api/v1/crews/{crewId}/issues/{identifier}/runs?workspace_id={workspaceId}
 ```
 
-Lists the agent task-runs for an issue — each mission task joined to its `assignments` row (execution status, timing, result, error). Newest-first, capped at 100 rows.
+Lists every run attributed to an issue — not just mission tasks joined to their `assignments` row, but also mention-dispatched runs (an agent tagged in a comment) and delegation-hop runs (a sub-agent assigned further work via `/assign` mid-mission). Newest-first, capped at 100 rows.
 
 **Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
 
