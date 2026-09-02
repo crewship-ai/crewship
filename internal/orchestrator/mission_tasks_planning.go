@@ -250,14 +250,26 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	assignmentID := generateID()
+	// mission_id/author_agent_id/created_by_user_id/lead_planning: persisted
+	// on the row (not just threaded through DispatchRequest) so a lock-loss
+	// requeue's re-dispatch — dispatchByID, internal/api — rebuilds this
+	// EXACT door: LeadPlanning:true (a lead re-run without it loses its
+	// sidecar), the same reporter attribution, and mission_id read straight
+	// off the row rather than assumed equal to group_id (see #2269 follow-up).
+	nullIfEmpty := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
 	_, err = e.db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, mission_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?)`,
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at, mission_id, author_agent_id, created_by_user_id, lead_planning)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?, ?, ?, 1)`,
 		assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, ms.LeadAgentID,
 		"[PLANNING] "+title.String,
 		ms.ID,
-		ms.ID, // mission_id (#2256) — the lead-planning run for this mission
 		now,
+		ms.ID, nullIfEmpty(ms.AuthorAgentID), nullIfEmpty(ms.CreatedByUserID),
 	)
 	if err != nil {
 		e.logger.Error("create planning assignment", "error", err, "mission_id", ms.ID)

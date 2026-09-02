@@ -542,15 +542,26 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		return fmt.Errorf("ensure mission chat: %w", err)
 	}
 	assignmentID := generateID()
+	// mission_id/author_agent_id/created_by_user_id persisted on the row for
+	// the same reason the planning insert (mission_tasks_planning.go) does —
+	// dispatchByID's lock-loss re-dispatch rebuilds from the row alone.
+	// lead_planning is left at its column DEFAULT 0: this insert is a
+	// regular worker task, never the lead's own planning turn.
+	nullIfEmptyStr := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
 	if err := database.WithTx(ctx, e.db, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, mission_id, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?)`,
+			INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at, mission_id, author_agent_id, created_by_user_id)
+			VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?, ?, ?, ?)`,
 			assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, *task.AssignedAgentID,
 			taskBrief,
 			ms.ID, // group_id = mission_id for grouping
-			ms.ID, // mission_id (#2256) — this run IS a mission task's run
 			now,
+			ms.ID, nullIfEmptyStr(ms.AuthorAgentID), nullIfEmptyStr(ms.CreatedByUserID),
 		); err != nil {
 			return fmt.Errorf("create assignment: %w", err)
 		}

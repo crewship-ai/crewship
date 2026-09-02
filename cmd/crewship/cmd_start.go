@@ -364,6 +364,19 @@ var startCmd = &cobra.Command{
 		// announces steering_queued on the chat's WS session channel.
 		if apiRouter := srv.APIRouter(); apiRouter != nil {
 			apiRouter.SetSteerer(bridge)
+			// Share the per-agent exclusivity lock with AssignmentHandler
+			// (F51): a chat send and an /assign or @mention dispatch for
+			// the same agent must not both reach the tmux exec path at
+			// once. See chatbridge.AgentRunLock's doc comment.
+			if assign := apiRouter.Assignments(); assign != nil {
+				assign.SetAgentRunLock(bridge.AgentRunLock())
+				// Symmetric with the lock share above: a chat send's
+				// AgentRunLock release must be able to drain an assignment
+				// that queued behind it, not just wait for an unrelated
+				// crew completion or the stuck-QUEUED sweeper (#2269
+				// follow-up, defect 5). See chatbridge.AssignmentPumper.
+				bridge.SetAssignmentPumper(assign)
+			}
 		}
 		bridge.SetSteerBroadcaster(srv.WSHub())
 
@@ -566,6 +579,11 @@ var startCmd = &cobra.Command{
 				},
 				logger,
 			)
+			// Cross-surface exclusivity (#2269 follow-up, defect 6): a
+			// scheduled routine firing for an agent that's mid-assignment
+			// deletes the assignment's live tmux session otherwise — same
+			// lock the chat/assignment doors already share.
+			sched.SetAgentRunLock(bridge.AgentRunLock())
 			if schedulerLease != nil {
 				sched.SetLeaderGate(schedulerLease)
 			}
@@ -677,6 +695,10 @@ var startCmd = &cobra.Command{
 					CrewRuntime: func(ctx context.Context, crewID, workspaceID string) (provider.CrewConfig, error) {
 						return api.BuildCrewRuntimeConfig(ctx, deps.DB, crewID, workspaceID)
 					},
+					// Cross-surface exclusivity (#2269 follow-up, defect 6): an
+					// agent_run routine step and a live assignment/chat turn for
+					// the same agent must not both exec into its tmux session.
+					AgentRunLock: bridge.AgentRunLock(),
 				})
 				if err != nil {
 					logger.Error("pipeline orchestrator runner construct failed", "error", err)

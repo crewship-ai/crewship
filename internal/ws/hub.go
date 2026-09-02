@@ -56,7 +56,7 @@ type ChatHandler interface {
 // treat the terminal done as its run ending (finalizing the live turn and
 // unlocking the composer mid-generation). handleSendMessage maps this error
 // to a private, sender-only agent_busy frame instead.
-var ErrAgentBusy = errors.New("agent is already running for this chat")
+var ErrAgentBusy = errors.New("agent already has a live run")
 
 // ErrCrewProvisioning is returned (possibly wrapped) by
 // ChatHandler.HandleChatMessage when a message auto-triggered a devcontainer

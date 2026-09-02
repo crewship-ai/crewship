@@ -284,7 +284,6 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Create assignment record in PENDING state (group_id = chat_id for mission linkage)
 	now := time.Now().UTC().Format(time.RFC3339)
-
 	// mission_id derivation (closes the gap left after #2256): the sidecar's
 	// handleAssign (internal/sidecar/assignment.go) and the routine
 	// dispatcher's crewshipBody (internal/api/crewship_actions.go) never put
@@ -341,13 +340,15 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	assignmentID, err := insertCappedAssignment(r.Context(), h.db, scope, delegationLim,
 		agentCaller(assignedByID), cappedAssignment{
-			WorkspaceID: body.WorkspaceID,
-			ChatID:      body.ChatID,
-			TargetID:    target.ID,
-			Task:        body.Task,
-			GroupID:     body.ChatID,
-			CreatedAt:   now,
-			MissionID:   missionID,
+			WorkspaceID:     body.WorkspaceID,
+			ChatID:          body.ChatID,
+			TargetID:        target.ID,
+			Task:            body.Task,
+			GroupID:         body.ChatID,
+			CreatedAt:       now,
+			MissionID:       missionID, // derived above when the body omits it (#2279)
+			AuthorAgentID:   body.AuthorAgentID,
+			CreatedByUserID: body.CreatedByUserID,
 		})
 	if err != nil {
 		var refusal *delegationRefusal
@@ -512,6 +513,80 @@ func (h *AssignmentHandler) runAssignment(
 	body createAssignmentBody,
 	target targetAgentInfo,
 ) {
+	// Cross-surface exclusivity: at most one live RunAgent exec per AGENT,
+	// matching chatbridge.Bridge's per-chat guard on the chat-send door (see
+	// chatbridge.AgentRunLock's doc). Two runAssignment calls for the SAME
+	// agent — from /assign, an @mention, or a chat send racing an
+	// assignment — would otherwise both reach setupTmuxExec and race the
+	// identical tmux session name + /tmp scratch files
+	// (orchestrator.TmuxSessionName is keyed by agent slug alone, with no
+	// chat/run/mission component), so the second exec's `tmux kill-session`
+	// tears down the first run's live session mid-turn. Claimed FIRST,
+	// before the pre_task_delegation hook or any DB write, so a losing call
+	// spends nothing beyond this check — same "cheapest check first"
+	// placement as the hook comment below.
+	//
+	// h.agentRunLock is nil only when a caller hasn't wired SetAgentRunLock
+	// (tests, or a build that predates it); nil is fail-open (pre-existing
+	// unguarded behaviour) rather than fail-closed, matching h.provisioner
+	// and h.resolver's nil handling elsewhere in this file.
+	//
+	// releaseLock is called explicitly right before every finishAssignment
+	// call below (not just deferred) — see the rationale on
+	// requeueForLockLoss and finishAssignment's queue-drain step. In short:
+	// finishAssignment calls pumpAndDispatch synchronously, and that pump
+	// must see this agent's slot as free. A plain `defer h.agentRunLock.
+	// End(...)` only runs once runAssignment itself returns, which is AFTER
+	// the in-body finishAssignment call (and therefore after its pump
+	// already ran) — so the very completion that should unblock this
+	// agent's own queued row would find the lock still (falsely) held and
+	// requeue it again, stalling until an unrelated crew completion or the
+	// stuck-QUEUED sweeper eventually retries it. Calling releaseLock()
+	// immediately before each finishAssignment closes that window; the
+	// deferred call remains only as a safety net for a path that forgets to
+	// (or a panic).
+	lockReleased := false
+	releaseLock := func() {
+		if h.agentRunLock != nil && !lockReleased {
+			lockReleased = true
+			h.agentRunLock.End(target.ID)
+		}
+	}
+	if h.agentRunLock != nil {
+		if !h.agentRunLock.TryStart(target.ID) {
+			reason := fmt.Sprintf(
+				"agent %s already has a live run in progress; queuing this dispatch behind it "+
+					"instead of starting a second concurrent exec into the same agent "+
+					"container/tmux session — it will be picked up once the live run finishes",
+				body.TargetSlug)
+			h.logger.Info("assignment requeued: agent busy",
+				"assignment_id", assignmentID, "target", body.TargetSlug, "agent_id", target.ID,
+				"reason", reason)
+			// Losing the lock means nothing failed — the work merely has to
+			// wait its turn behind the agent's own live run. Requeue rather
+			// than FAILED (see requeueForLockLoss doc): the row is picked up
+			// again by pumpAndDispatch the next time ANY assignment in this
+			// crew completes (including, correctly, the one currently
+			// holding the lock — see releaseLock above), by a fresh pump
+			// requeueLockLossAndMaybeDrain triggers itself when some OTHER
+			// crew member's row can use the slot this requeue just freed
+			// (defect #1, #2269 follow-up — before this fix, that pump never
+			// happened here at all, so a queued row for a DIFFERENT, idle
+			// agent could sit behind this bounce until an unrelated
+			// completion or the sweeper eventually got to it), or by the
+			// stuck-QUEUED sweeper as a backstop.
+			//
+			// The row may be RUNNING (claimCrewSlot/pumpCrewQueue already
+			// flipped it before calling us) or still PENDING (the
+			// LeadPlanning bypass never goes through the crew-budget CAS) —
+			// requeueForLockLoss (inside requeueLockLossAndMaybeDrain)
+			// accepts either.
+			h.requeueLockLossAndMaybeDrain(ctx, assignmentID, body.CrewID, target.ID, body.ChatID, body.WorkspaceID, body.TargetSlug)
+			return
+		}
+		defer releaseLock()
+	}
+
 	// pre_task_delegation: the one point every delegation door (sidecar
 	// /assign's Create, its dispatch-pump retry, the mission engine's
 	// DispatchAssignment, and the @mention DispatchMention) converges on
@@ -556,6 +631,7 @@ func (h *AssignmentHandler) runAssignment(
 		}
 		h.logger.Info("assignment refused: "+reason,
 			"assignment_id", assignmentID, "target", body.TargetSlug, "error", hookErr)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("%s: %v", reason, hookErr), nil)
 		return
@@ -718,6 +794,7 @@ func (h *AssignmentHandler) runAssignment(
 		})
 
 	if h.orch == nil {
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", "orchestrator not available", acc)
 		return
 	}
@@ -734,6 +811,7 @@ func (h *AssignmentHandler) runAssignment(
 		if perr := h.provisioner.EnsureProvisioned(ctx, body.CrewID, body.WorkspaceID, 0); perr != nil {
 			h.logger.Error("ensure provisioned for assignment", "error", perr,
 				"assignment_id", assignmentID, "crew_id", body.CrewID)
+			releaseLock()
 			h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 				fmt.Sprintf("preparing the crew container failed: %v", perr), acc)
 			return
@@ -755,6 +833,7 @@ func (h *AssignmentHandler) runAssignment(
 	if cfgErr != nil {
 		h.logger.Error("resolve crew runtime config for assignment",
 			"error", cfgErr, "crew_id", body.CrewID, "assignment_id", assignmentID)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("resolve crew runtime config: %v", cfgErr), acc)
 		return
@@ -769,6 +848,7 @@ func (h *AssignmentHandler) runAssignment(
 	containerID, err = h.orch.GetOrCreateContainerCfg(ctx, crewCfg, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("container error: %v", err), acc)
 		return
@@ -803,6 +883,7 @@ func (h *AssignmentHandler) runAssignment(
 		// resolver / resolve failure). Surface it as an assignment failure
 		// rather than dispatch an MCP-blind, HITL-inert degraded run.
 		h.logger.Error("assignment dispatch build failed", "error", buildErr, "assignment_id", assignmentID)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("dispatch error: %v", buildErr), acc)
 		return
@@ -815,6 +896,7 @@ func (h *AssignmentHandler) runAssignment(
 	guardRelease, guardErr := refuseIfBackupInProgress(ctx, h.db, body.WorkspaceID)
 	if guardErr != nil {
 		h.logger.Warn("assignment refused — backup in progress", "assignment_id", assignmentID, "workspace_id", body.WorkspaceID)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", guardErr.Error(), acc)
 		return
 	}
@@ -836,11 +918,13 @@ func (h *AssignmentHandler) runAssignment(
 		if errors.Is(err, orchestrator.ErrAgentInBandFailure) {
 			partial = joinAssignmentOutput(outputParts)
 		}
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, partial,
 			fmt.Sprintf("execution error: %v", err), acc)
 		return
 	}
 
+	releaseLock()
 	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID,
 		joinAssignmentOutput(outputParts), "", acc)
 }
