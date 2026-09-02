@@ -170,6 +170,18 @@ editable. Dates are new: the old rail drew a row reading "Set dates" that had
 nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
 `target_date` all along.
 
+## Known limits in 1.0
+
+- **Stop is cooperative, not instant.** Stop cancels every step that has not
+  started and marks the issue `CANCELLED`; a step whose agent is already
+  executing finishes that execution first and is then recorded as
+  `CANCELLED` regardless of what it reports. There is no container kill.
+  The full contract is in the [issues API reference](/api-reference/issues).
+- **Two words for "finished".** Issues move to `DONE`; the engine records a
+  mission as `COMPLETED`. Both appear in the same status column and every
+  shipped filter treats them alike, so a reader of the raw API will see both.
+  Collapsing them is a 1.1 refactor.
+
 ## Where the code is
 
 | Piece | File |
