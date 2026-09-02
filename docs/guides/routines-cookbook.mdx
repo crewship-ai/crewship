@@ -305,7 +305,7 @@ Without `project_title`, the LLM step would see the entire JSON response (often 
 
 ### Idempotency vs concurrency — what's the difference?
 
-- **`concurrency_key`** gates *parallel* runs: if two requests with the same key arrive at the same time, the second one waits (or 429s) until the first finishes.
+- **`concurrency_key`** gates *parallel* runs: if two requests with the same key arrive while the first is still in flight, the second is rejected immediately with `429` and a `Retry-After` header — it does not wait or queue for the first to finish.
 - **`Idempotency-Key` HTTP header** dedupes *across time*: a second request with the same key (within the TTL) returns the original `run_id` with `status=DEDUPED` instead of executing again.
 
 Use both for a webhook handler. The concurrency key prevents a burst from fanning out; the idempotency header prevents a delayed retry from re-running an already-completed job.

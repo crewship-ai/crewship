@@ -1094,7 +1094,7 @@ crewship routine rollback summarize-text --to 3
 |------|:---:|-------------|
 | `--to` | ✓ | Target version number to roll back to |
 
-Creates a new version on top of HEAD whose definition equals v3's. History is preserved; you can roll forward by another rollback.
+Repoints the routine's HEAD at the target version and makes its definition live — no new version row is created (versions are deduped by content hash). History is preserved, so you can re-roll forward by another rollback.
 
 ## `crewship routine export <slug>`
 

@@ -372,6 +372,41 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Docs stopped contradicting the code on rollback, concurrency, and the
+  monthly budget; the waitpoint approve-default asymmetry is now
+  documented instead of silently differing (A5) (#2289).** No API or CLI behaviour
+  changed. `docs/cli/routine.mdx` said `routine rollback` "creates a new
+  version on top of HEAD" — it doesn't; `Store.Rollback` only repoints
+  `head_version` (no version row is inserted), matching the CLI's own
+  `--help` text, which the doc now matches too. `docs/guides/routines.mdx`
+  and `docs/guides/routines-cookbook.mdx` said two same-`concurrency_key`
+  requests "queue" (or "wait, or 429") — `RunRegistry.Acquire` always
+  rejects the second immediately with `429` + `Retry-After`; it never
+  queues or waits. That's a different mechanism than deferred dispatch's
+  `--debounce-key`, which genuinely coalesces and was already documented
+  correctly elsewhere — both docs now say so explicitly, and the
+  concurrency-gate docs now also note it has no cross-replica
+  coordination (single-process only). Separately: the authed
+  `POST .../pipelines/waitpoints/{token}/approve` defaults an omitted
+  `approved` to **false** (deny) while the public
+  `POST /api/v1/waitpoint-tokens/{token}` callback defaults it to **true**
+  (approve) — undocumented anywhere before this. Both defaults are kept
+  as-is (an existing test, `TestApproveWaitpoint_NoBody_DefaultsToApprovedFalse`,
+  already pins the authed default, and the public default matches its
+  documented `trigger.dev wait.forToken` design) but are now spelled out
+  with the security reasoning in `docs/api-reference/workspaces.mdx` and in
+  both handlers' doc comments — send `approved` explicitly rather than
+  relying on either default. And `MonthlyBudgetUSD` (`GET`/`PATCH
+  .../pipelines/{slug}/budget`) is reporting-only — it has zero references
+  in `internal/pipeline/executor.go` and never blocks a run; the enforced
+  gate is the DSL's per-run `max_cost_usd`. The field name reads as
+  enforcement, so rather than a breaking rename, every surface that shows
+  it now says so unmissably: a `<Warning>` on the API reference, and a
+  line printed by `crewship routine budget get/set/summary` and its
+  `--help` text. Also fixed a stale comment in `internal/database/database.go`
+  that still said `busy_timeout(5000ms)` next to the DSN pragma that has set
+  `busy_timeout(30000)` since the earlier login-lockout fix.
+
 - **The inbox column is the shared explorer now, and its filters are
   answerable.** `/inbox-v2` had a 190 px rail holding three nav rows and a
   permanent "all sources connected" block, plus three raw `<select>`s. Two of
