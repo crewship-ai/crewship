@@ -11,6 +11,7 @@ import { EmptyRoster } from "@/components/features/crews/empty-roster"
 import { BottomPanel, type BottomTab } from "@/components/features/crews/bottom-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
+import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 
 interface CrewData {
   id: string
@@ -67,6 +68,12 @@ export interface CrewsLayoutProps {
    *  flag — a legitimately empty workspace would otherwise never get
    *  its stale `?agent=` / `?crew=` param cleared. */
   loaded?: boolean
+  /** Server totals and paging for the explorer (usePagedList in the page). */
+  crewsTotal?: number | null
+  agentsTotal?: number | null
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
   onRefresh: () => void
 }
 
@@ -111,9 +118,21 @@ export function CrewsLayout({
   missions,
   workspaceId,
   loaded = false,
+  crewsTotal = null,
+  agentsTotal = null,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   onRefresh,
 }: CrewsLayoutProps) {
   const isMobile = useIsMobile()
+  // One provisioning read for the whole explorer: a crew whose image needs a
+  // rebuild or whose last build failed sorts into "Needs attention".
+  const provisioning = useProvisioningStatus(workspaceId)
+  const provisioningByCrew = useMemo(
+    () => new Map(provisioning.detail.map((d) => [d.id, d.status] as const)),
+    [provisioning.detail],
+  )
   const {
     selectedAgentSlug,
     selectedCrewSlug,
@@ -242,6 +261,8 @@ export function CrewsLayout({
         }}
         onOpenExplorer={() => setExplorerOverlayOpen(true)}
         crews={crews}
+        crewsTotal={crewsTotal}
+        agentsTotal={agentsTotal ?? agents.length}
       />
 
       {/* Main grid: explorer | canvas */}
@@ -281,6 +302,12 @@ export function CrewsLayout({
                     onToggleCollapse={() => setExplorerOverlayOpen(false)}
                     onCrewSelect={(id) => { handleCrewSelect(id); setExplorerOverlayOpen(false) }}
                     onAgentSelect={(id) => { handleAgentSelect(id); setExplorerOverlayOpen(false) }}
+                    crewsTotal={crewsTotal}
+                    agentsTotal={agentsTotal}
+                    hasMore={hasMore}
+                    loadingMore={loadingMore}
+                    onLoadMore={onLoadMore}
+                    provisioningByCrew={provisioningByCrew}
                   />
                 </motion.div>
               </>
@@ -297,6 +324,12 @@ export function CrewsLayout({
               onToggleCollapse={() => setExplorerCollapsed(!explorerCollapsed)}
               onCrewSelect={handleCrewSelect}
               onAgentSelect={handleAgentSelect}
+              crewsTotal={crewsTotal}
+              agentsTotal={agentsTotal}
+              hasMore={hasMore}
+              loadingMore={loadingMore}
+              onLoadMore={onLoadMore}
+              provisioningByCrew={provisioningByCrew}
             />
           </div>
         )}
