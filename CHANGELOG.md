@@ -31,6 +31,33 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **The inbox reads as decisions, and it is never blank (#2314).** A row is a
+  kind pill (Question, Link, Credential, Hire, Failed run, Missed run …), the
+  question without the "Agent escalation:" prefix, the crew and the agent by
+  name, the age or the expiry, and a verb. With nothing open the reading pane
+  carries the triage — what waits, what expires today, by crew, what is live,
+  the last decisions — and empty columns say what lands there. The detail
+  names the agent and the crew as links, turns every identifier into a "Where
+  this came from" link (chat, run, issue, routine, crew), shows the https
+  address a LINK escalation asks to open and the name a credential proposal
+  asks for, and says "An owner or admin decides this" instead of a role enum.
+  A staged hire has Deny. The page has a SubBar with counts, a Live pill,
+  History and Decide next.
+- **Chat says who you are talking to (#2314).** The header is the agent — face
+  with a status dot, name, status word, role, crew link, model label, skills ·
+  credentials · runs — with Copy link instead of a raw session id. An empty
+  conversation shows the agent card and "What <name> can do" from its skills;
+  a routine step's empty transcript says so instead of "Start a conversation".
+  The breadcrumb is Crews / <crew> / <agent> by name, never the slug and never
+  the onboarding Guide's identifier. The column says "13 more with Riley ·
+  Show all" from the server's total, and lists agents not yet talked to as
+  rows with Start.
+- **Escalation inbox rows say what they ask for, chats page, the Guide stays out
+  of rosters (#2314).** The inbox payload carries `link_url` and
+  `credential_name` (never the value); `crewship inbox get` prints them.
+  `GET /agents/{id}/chats` honours `limit`/`offset` with `X-Total-Count`
+  (`crewship chat list --limit/--offset`). `GET /agents` hides the setup
+  crew's agent unless `include_setup=1` (`crewship agent list --include-setup`).
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,
