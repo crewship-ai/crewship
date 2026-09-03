@@ -27,6 +27,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { deriveSessionTitle } from "@/lib/chat-title"
 import { useComposerStore } from "@/stores/composer-store"
 import { emitChatEvent } from "@/lib/telemetry"
+import { useAppStore } from "@/lib/store"
+import { chatBreadcrumbs } from "@/components/features/chat/chat-breadcrumbs"
 import { cn } from "@/lib/utils"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -53,6 +55,10 @@ interface ChatClientAgent extends ChatTreeAgent {
   suggested_prompts?: string | null
   /** `agents.ask_forms`, a JSON array as TEXT. */
   ask_forms?: string | null
+  /** The rest of the roster row the agent strip and the breadcrumb read. */
+  llm_model?: string | null
+  crew?: { name: string; slug: string; color?: string | null } | null
+  _count?: { skills?: number; credentials?: number; chats?: number } | null
 }
 
 /**
@@ -304,6 +310,14 @@ export function ChatClient() {
     () => tree.roster?.find((a) => a.slug === agentSlug) ?? null,
     [tree.roster, agentSlug],
   )
+
+  // The toolbar's path back out of the conversation, by NAME. The toolbar
+  // only has the URL, and the URL carries the slug; this page has the roster.
+  const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
+  useEffect(() => {
+    setBreadcrumbs(chatBreadcrumbs(agent ? { name: agent.name, slug: agent.slug, crew: agent.crew ?? null } : null))
+    return () => setBreadcrumbs([])
+  }, [agent, setBreadcrumbs])
 
   /**
    * The fetched lists with this page's read overrides applied.
@@ -664,6 +678,10 @@ export function ChatClient() {
       threadsLoaded={tree.threadsLoaded}
       scope={scope}
       onScopeChange={chooseScope}
+      // The fold: how many more each agent has on the server than the page
+      // holds, and the way to fetch them.
+      totalsByAgent={tree.totalsByAgent}
+      onShowAll={tree.loadAllFor}
       // Totals for the scopes this fetch is deliberately NOT returning, so
       // every bucket carries a count the way /routines' status buckets do.
       kindCounts={tree.kindCounts}
@@ -705,6 +723,11 @@ export function ChatClient() {
           // place the surface says that a thread was opened by a cron routine
           // rather than by a person.
           sessionOrigin={activeThread?.origin ?? null}
+          // Who you are talking to (the agent strip) and what kind of
+          // conversation this is (a routine step is a transcript, not
+          // something to "start").
+          agentMeta={agent}
+          sessionKind={activeThread ? classifyThread(activeThread) : "direct"}
           sessionId={sessionId}
           initialInput={handoffForThisSession ? handoffPrompt ?? undefined : undefined}
           autoSendInitial={handoffForThisSession}
