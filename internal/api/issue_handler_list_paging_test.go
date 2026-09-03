@@ -106,3 +106,25 @@ func TestIssueList_SearchByIdentifierOrTitle(t *testing.T) {
 		}
 	}
 }
+
+// An agent assignee carries its slug, so the board and the detail can link
+// the agent instead of printing a name nobody can follow.
+func TestIssueList_CarriesAssigneeSlug(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "IN_PROGRESS")
+	if _, err := h.db.Exec(`UPDATE missions SET assignee_type = 'agent', assignee_id = ? WHERE id = ?`, workerID, id); err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	h.List(rr, issueListRequest(t, userID, wsID, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	var page []issueResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(page) != 1 || page[0].AssigneeSlug == nil || *page[0].AssigneeSlug != "worker" {
+		t.Fatalf("assignee_slug missing or wrong; body=%s", rr.Body.String())
+	}
+}
