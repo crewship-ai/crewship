@@ -431,7 +431,8 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		// worse than the heuristic it would replace.
 		if _, err := tx.ExecContext(r.Context(), `
 			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
-			 WHERE (mission_id = ? OR chat_id = ? OR group_id = ?) AND status IN ('PENDING', 'RUNNING')`,
+			 WHERE (mission_id = ? OR chat_id = ? OR group_id = ?)
+			   AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')`,
 			now, missionID, missionID, missionID); err != nil {
 			return err
 		}

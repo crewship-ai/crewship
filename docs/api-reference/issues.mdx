@@ -387,7 +387,9 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
 <Warning>
   Stops an issue cooperatively, not instantly. In one transaction: every
   `PENDING`/`IN_PROGRESS`/`BLOCKED` mission task is marked `CANCELLED`,
-  every live assignment for the issue gets `cancel_requested_at` stamped,
+  every assignment for the issue that has not reached a terminal state —
+  running, pending, or still queued behind a busy agent or the crew budget —
+  gets `cancel_requested_at` stamped,
   and the issue itself moves to `CANCELLED`. There is no container kill —
   a run already executing when Stop is called keeps running. An
   assignment that hasn't started its exec yet sees the stamp first and

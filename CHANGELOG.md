@@ -31,6 +31,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **Stop now reaches a run that is still queued (#).** `issue stop`
+  stamped only `PENDING`/`RUNNING` assignments, so a run parked as `QUEUED`
+  — behind the agent's live run (#2269) or the crew budget — was missed:
+  once the agent freed up, the pump started it and it landed `COMPLETED` on
+  an issue that already read `CANCELLED` (seen live on dev1). Stop now stamps
+  every non-terminal assignment, and the queued row is recorded `CANCELLED`
+  without ever starting its exec.
+
 - **The 1.0 known limits are written down where users read (#2299).** The
   issue-mentions, routines and issue-detail guides now say plainly what Track
   A deliberately left for 1.1: a busy agent is woken after its live run rather
