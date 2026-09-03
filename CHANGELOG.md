@@ -689,6 +689,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **A suggestion or follow-up chip clicked twice can no longer send twice
+  while its session is still being created (#2121).** The chip handler read
+  `isStreaming` — a prop that cannot change until a send produces a render —
+  before awaiting `ensureSessionForSend()`, so two clicks landing inside a
+  draft session's create window both passed the guard and both sent; these
+  chips bypass `useMessageSubmit`, so the #2075 double-submit latch never
+  covered them. Unlike the composer's identical-duplicate case, a second
+  chip is a different question, so the fix disables the chip rail for the
+  duration of the create (extending the existing streaming disable
+  backwards) rather than latching or silently dropping it.
 - **Clearing a crew's issue prefix from the web UI now actually clears it,
   and the field accepts the same 16-character prefixes the API always has
   (#2118).** The Issue prefix control sent `{"issue_prefix": null}` on
