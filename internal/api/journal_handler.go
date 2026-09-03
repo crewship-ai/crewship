@@ -499,6 +499,11 @@ func (h *JournalHandler) resolveJournalRefs(ctx context.Context, q *journal.Quer
 	if ids := h.resolveEntityRefs(ctx, "crews", q.WorkspaceID, journalRefs(q.CrewID, q.CrewIDs)); ids != nil {
 		q.CrewID, q.CrewIDs = "", ids
 	}
+	// `mission_id` takes the issue identifier (ENG-4) as well as the id —
+	// the issue page and `crewship journal --mission` both have the
+	// identifier on hand. Same rule as agents and crews: unresolved stays
+	// as typed and matches nothing.
+	q.MissionID = resolveMissionRef(ctx, h.db, q.WorkspaceID, q.MissionID)
 }
 
 // journalRefs flattens the single- and multi-valued forms of a filter
