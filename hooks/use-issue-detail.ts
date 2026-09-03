@@ -29,8 +29,29 @@ import type { Mission } from "@/lib/types/mission"
  * The ref makes each incoming value win exactly once, so a re-render never
  * drags the reader back to a selection they have since clicked away from.
  */
-export function useUrlSelection(key: string) {
-  const fromUrl = useSearchParams().get(key)
+export interface UrlSelectionOptions {
+  /**
+   * Older spellings of the same parameter that inbound links still use
+   * (`/routines?routine=` where the page reads `?slug=`). Read when the key is
+   * absent; rewritten to the key on the first write, so a link that arrived
+   * under the alias leaves under the canonical name.
+   */
+  aliases?: readonly string[]
+}
+
+export function readUrlSelection(params: URLSearchParams, key: string, aliases: readonly string[] = []): string | null {
+  const direct = params.get(key)
+  if (direct) return direct
+  for (const alias of aliases) {
+    const v = params.get(alias)
+    if (v) return v
+  }
+  return null
+}
+
+export function useUrlSelection(key: string, options: UrlSelectionOptions = {}) {
+  const aliases = options.aliases ?? NO_ALIASES
+  const fromUrl = readUrlSelection(useSearchParams(), key, aliases)
   const [value, setValue] = useState<string | null>(fromUrl)
   const applied = useRef<string | null>(fromUrl)
 
@@ -46,13 +67,13 @@ export function useUrlSelection(key: string) {
   useEffect(() => {
     if (typeof window === "undefined") return
     const onPop = () => {
-      const next = new URLSearchParams(window.location.search).get(key)
+      const next = readUrlSelection(new URLSearchParams(window.location.search), key, aliases)
       applied.current = next
       setValue(next)
     }
     window.addEventListener("popstate", onPop)
     return () => window.removeEventListener("popstate", onPop)
-  }, [key])
+  }, [key, aliases])
 
   const select = useCallback(
     (next: string | null, opts?: { replace?: boolean }) => {
@@ -64,6 +85,7 @@ export function useUrlSelection(key: string) {
       const params = new URLSearchParams(window.location.search)
       if (next) params.set(key, next)
       else params.delete(key)
+      for (const alias of aliases) params.delete(alias)
       const qs = params.toString()
       const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname
       if (window.location.pathname + window.location.search === url) return
@@ -74,11 +96,13 @@ export function useUrlSelection(key: string) {
       if (opts?.replace) window.history.replaceState(null, "", url)
       else window.history.pushState(null, "", url)
     },
-    [key],
+    [key, aliases],
   )
 
   return [value, select] as const
 }
+
+const NO_ALIASES: readonly string[] = []
 
 /**
  * Which issue the /issues page has open.
