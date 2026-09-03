@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -225,7 +226,12 @@ func truncateForFailure(s string) string {
 //     unless it is wrapped in a helper that removes or bounds it. Rule 3 is
 //     what catches a sink that is NOT keyed on "cmd" — chat.user_message
 //     stored payload["content"] = req.UserMessage for as long as it existed,
-//     one entry type over from the guard that was watching the argv.
+//     one entry type over from the guard that was watching the argv;
+//  3. b. calling a package function that itself reads a prompt field without
+//     bounding it counts as naming the prompt. A one-line helper returning
+//     req.UserMessage hid the field access from every other rule, so the
+//     guard could be defeated by moving the read a single call away
+//     (promptDerivedFuncs, #2229).
 //
 // "Field" covers the three ways this package writes one: a map literal entry,
 // an index assignment onto a payload map, and the Summary/Payload fields of a
@@ -243,7 +249,12 @@ func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 		t.Fatal("no package sources found — the guard is scanning the wrong directory")
 	}
 
-	checked := 0
+	// Parse the whole package before auditing any of it. Rule 3b needs to
+	// know which package functions read the prompt, and that
+	// cannot be answered one file at a time — the helper and the emit site
+	// that calls it are routinely in different files.
+	fset := token.NewFileSet()
+	var parsed []*ast.File
 	for _, file := range files {
 		if strings.HasSuffix(file, "_test.go") {
 			continue
@@ -252,19 +263,24 @@ func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", file, err)
 		}
-		fset := token.NewFileSet()
 		f, err := parser.ParseFile(fset, file, src, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", file, err)
 		}
+		parsed = append(parsed, f)
+	}
 
+	derived := promptDerivedFuncs(parsed)
+
+	checked := 0
+	for _, f := range parsed {
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok {
 				continue
 			}
-			aliases := promptAliases(fn)
-			checked += auditPersistedFields(t, fset, fn, aliases)
+			aliases := promptAliases(fn, derived)
+			checked += auditPersistedFields(t, fset, fn, aliases, derived)
 		}
 	}
 
@@ -275,7 +291,7 @@ func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 
 // auditPersistedFields walks one function and reports how many "cmd" fields it
 // checked, failing t for each violation found.
-func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, aliases map[string]bool) int {
+func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, aliases, derived map[string]bool) int {
 	t.Helper()
 	checked := 0
 
@@ -294,7 +310,7 @@ func auditPersistedFields(t *testing.T, fset *token.FileSet, fn *ast.FuncDecl, a
 	}
 
 	promptField := func(value ast.Expr, where string) {
-		name, pos, leaked := promptBearingRef(value, aliases)
+		name, pos, leaked := promptBearingRef(value, aliases, derived, true)
 		if !leaked {
 			return
 		}
@@ -462,6 +478,74 @@ func boundedByHelper(e ast.Expr) bool {
 	return boundingHelpers[calleeName(call.Fun)]
 }
 
+// promptDerivedFuncs returns the package functions whose body reads a request's
+// UserMessage or SystemPrompt without bounding it — functions that therefore
+// carry prompt text out in whatever they return.
+//
+// This closes the hole a planted regression found while #2229 was being
+// written. The guard is a pure AST reader, so it cannot see through a call: a
+// helper as small as
+//
+//	func userPreviewFor(req AgentRunRequest) string { return req.UserMessage }
+//
+// hid the field access completely, and the local holding its result was an
+// alias of nothing, so `{"content": userPreviewFor(req)}` walked past every
+// rule. The behavioural test still caught it — but the static guard exists for
+// the emit site no behavioural test happens to drive, which is the whole reason
+// it was written.
+//
+// It also explains something worth knowing about the allowlist: the
+// journalUserMessage entry has never actually fired. Its only call assigns
+// into a local and the local is written into the payload, so the allowlist
+// check — which matches a call expression in the field itself — is never
+// reached to consult it. The entry stays because it states what the helper is
+// blessed for, but an allowlist entry that has never been exercised is a
+// comment rather than a policy, and this rule is what a policy looks like.
+//
+// Bounding is honoured here exactly as rule 3 honours it, so this rule is not
+// stricter than the one it extends — a helper that wraps its read in
+// truncateStr or utf8.RuneCountInString is not prompt-derived, which is why
+// promptRef and userMessageSizeLabel do not appear. Names already on
+// boundingHelpers are excluded outright: journalArgv and promptRef read the
+// prompt deliberately, and removing it or measuring it is what they are for.
+func promptDerivedFuncs(files []*ast.File) map[string]bool {
+	derived := map[string]bool{}
+	// Iterated to a fixed point rather than a fixed number of passes: a
+	// helper calling a helper calling a helper is caught whatever order the
+	// files happen to be globbed in, and however long the chain is. The set
+	// only ever grows, so this terminates in at most len(funcs) rounds.
+	for grew := true; grew; {
+		before := len(derived)
+		for _, f := range files {
+			for _, decl := range f.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Body == nil || boundingHelpers[fn.Name.Name] {
+					continue
+				}
+				aliases := promptAliases(fn, derived)
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					if derived[fn.Name.Name] {
+						return false
+					}
+					ret, ok := n.(*ast.ReturnStmt)
+					if !ok {
+						return true
+					}
+					for _, r := range ret.Results {
+						if _, _, leaked := promptBearingRef(r, aliases, derived, false); leaked {
+							derived[fn.Name.Name] = true
+							return false
+						}
+					}
+					return true
+				})
+			}
+		}
+		grew = len(derived) > before
+	}
+	return derived
+}
+
 // promptAliases returns the locals in fn that hold prompt text: assigned from a
 // request's UserMessage or SystemPrompt (directly or through a concatenation),
 // or from BuildCLICommand, which folds both into an argv.
@@ -470,7 +554,7 @@ func boundedByHelper(e ast.Expr) bool {
 // author had to write and name, and treating every result as still-prompt
 // would flag promptRef's own sha256 OF the prompt — the thing that exists so
 // the prompt does not have to be stored.
-func promptAliases(fn *ast.FuncDecl) map[string]bool {
+func promptAliases(fn *ast.FuncDecl, derived map[string]bool) map[string]bool {
 	aliases := map[string]bool{}
 	// Two passes so a chain (a := req.UserMessage; b := a) is caught
 	// regardless of the order ast.Inspect happens to visit in.
@@ -483,7 +567,7 @@ func promptAliases(fn *ast.FuncDecl) map[string]bool {
 					if !ok || i >= len(node.Rhs) || name.Name == "_" {
 						continue
 					}
-					if isPromptSource(node.Rhs[i], aliases) {
+					if isPromptSource(node.Rhs[i], aliases, derived) {
 						aliases[name.Name] = true
 					}
 				}
@@ -495,7 +579,7 @@ func promptAliases(fn *ast.FuncDecl) map[string]bool {
 					if name.Name == "_" || i >= len(node.Values) {
 						continue
 					}
-					if isPromptSource(node.Values[i], aliases) {
+					if isPromptSource(node.Values[i], aliases, derived) {
 						aliases[name.Name] = true
 					}
 				}
@@ -508,20 +592,28 @@ func promptAliases(fn *ast.FuncDecl) map[string]bool {
 
 // isPromptSource reports whether an assignment's right-hand side yields prompt
 // text: a bare or concatenated prompt reference, or a BuildCLICommand call.
-func isPromptSource(e ast.Expr, aliases map[string]bool) bool {
+func isPromptSource(e ast.Expr, aliases, derived map[string]bool) bool {
 	if call, ok := e.(*ast.CallExpr); ok {
-		return calleeName(call.Fun) == "BuildCLICommand"
+		name := calleeName(call.Fun)
+		return name == "BuildCLICommand" || derived[name]
 	}
-	_, _, leaked := promptBearingRef(e, aliases)
+	_, _, leaked := promptBearingRef(e, aliases, derived, true)
 	return leaked
 }
 
 // promptBearingRef reports whether e names prompt text without going through a
-// bounding helper. A request's UserMessage and SystemPrompt are matched on any
+// bounding helper.
+//
+// bareCmdIsPrompt controls the `cmd` name rule below. At an emit site `cmd` is
+// the argv by convention — often a parameter rather than an assignment, which
+// is why matching the name is the only way to see it. That convention holds at
+// the emit sites and nowhere else, so promptDerivedFuncs passes false: read
+// package-wide it flagged dbEngineForCall, whose `cmd` is a shell string pulled
+// out of a tool call's arguments and has nothing to do with an argv. A request's UserMessage and SystemPrompt are matched on any
 // receiver, not on the name `req`, so renaming the parameter does not silence
 // the guard; `cmd` and any local alias collected by promptAliases count too,
 // because BuildCLICommand folds both fields into that argv.
-func promptBearingRef(e ast.Expr, aliases map[string]bool) (string, token.Pos, bool) {
+func promptBearingRef(e ast.Expr, aliases, derived map[string]bool, bareCmdIsPrompt bool) (string, token.Pos, bool) {
 	if boundedByHelper(e) {
 		return "", token.NoPos, false
 	}
@@ -537,6 +629,14 @@ func promptBearingRef(e ast.Expr, aliases map[string]bool) (string, token.Pos, b
 			if boundedByHelper(v) {
 				return false
 			}
+			// Rule 3b: a package function that reads the prompt without
+			// bounding it carries the prompt out in its result, so calling it
+			// is calling the prompt. Without this the guard could be defeated
+			// by moving the read one call away — see promptDerivedFuncs.
+			if n := calleeName(v.Fun); derived[n] {
+				name, pos = "the result of `"+n+"()` (a package function that reads a prompt field without bounding it)", v.Pos()
+				return false
+			}
 		case *ast.SelectorExpr:
 			switch v.Sel.Name {
 			case "UserMessage", "SystemPrompt":
@@ -544,7 +644,7 @@ func promptBearingRef(e ast.Expr, aliases map[string]bool) (string, token.Pos, b
 				return false
 			}
 		case *ast.Ident:
-			if v.Name == "cmd" {
+			if v.Name == "cmd" && bareCmdIsPrompt {
 				name, pos = "the raw argv `cmd`", v.Pos()
 				return false
 			}
@@ -584,9 +684,8 @@ const (
 // from the implementation on purpose: a guard that reads the same constant it
 // is guarding cannot notice that constant being raised.
 const (
-	wantExecCmdArgvMaxChars     = 4096
-	wantExecCmdFieldMaxChars    = 512
-	wantChatUserMessageMaxChars = 240
+	wantExecCmdArgvMaxChars  = 4096
+	wantExecCmdFieldMaxChars = 512
 )
 
 // execCmdAdapterNames returns every registered CLI adapter plus the unknown
@@ -839,11 +938,27 @@ func TestExecCommandEmit_ShortMessageDoesNotEatTheBinary(t *testing.T) {
 	}
 }
 
-// TestChatUserMessageEmit_CapsAndScrubsPayloadContent is #2215's second sink.
-// chat.user_message stored payload["content"] = req.UserMessage verbatim and
-// uncapped, into the same append-only table, while its own summary was capped
-// at 240 chars — so the cap that existed was on the shorter of the two.
-func TestChatUserMessageEmit_CapsAndScrubsPayloadContent(t *testing.T) {
+// TestChatUserMessageEmit_PersistsNoMessageText is #2229: this entry now keeps
+// a MEASUREMENT of the message, never the message.
+//
+// #2212 bounded the payload to 240 chars and put it through the scrubber, which
+// is where the previous version of this test stopped. That bounded the exposure
+// and did not close it, and was never going to: the scrubber is defence in
+// depth and explicitly NOT a boundary (docs/security/threat-model.mdx, and the
+// comment on Scrubber.AddSecretValues), so a value nobody registered matches no
+// pattern. A token pasted at the START of a message sits well inside the first
+// 240 characters and walked through every layer.
+//
+// exec.command's answer applies here too: stop persisting the text. The whole
+// message already lives in the chat store, which IS erasable, and this entry
+// already carries chat_id — so the journal copy was duplicating erasable data
+// into the one table the GDPR erasure cascade deliberately skips
+// (internal/api/admin_gdpr.go).
+//
+// The table keeps the three message shapes that used to be interesting. What
+// changed is the claim: it is no longer "the scrubber caught it" but "there is
+// nothing here for it to catch".
+func TestChatUserMessageEmit_PersistsNoMessageText(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -851,28 +966,23 @@ func TestChatUserMessageEmit_CapsAndScrubsPayloadContent(t *testing.T) {
 		message            string
 		secret             string
 		registerCredential bool
-		wantTruncated      bool
 	}{
 		{
-			// A credential value the run holds: only per-run registration
-			// catches it, and it sits at the front so truncation cannot be
-			// what removed it.
-			name:               "registered credential value is scrubbed out of the payload",
+			// A credential value the run holds, at the front of the message so
+			// neither truncation nor position can be what removed it.
+			name:               "a registered credential value at the front of the message",
 			message:            execCmdPastedSecret + " — please deploy with that",
 			secret:             execCmdPastedSecret,
 			registerCredential: true,
 		},
 		{
-			// A provider-shaped key with no credentials loaded: the built-in
-			// patterns must still fire on the payload, not just the summary.
-			name:    "provider-shaped key is scrubbed with no credentials loaded",
+			name:    "a provider-shaped key with no credentials loaded",
 			message: execCmdBuiltinSecret + " — use this key",
 			secret:  execCmdBuiltinSecret,
 		},
 		{
-			name:          "a long message is capped, and the entry says so",
-			message:       strings.Repeat("u", 4096),
-			wantTruncated: true,
+			name:    "a message far longer than the cap the payload used to have",
+			message: strings.Repeat("u", 4096),
 		},
 	}
 
@@ -904,60 +1014,67 @@ func TestChatUserMessageEmit_CapsAndScrubsPayloadContent(t *testing.T) {
 			}
 			e := msgs[0]
 
-			content, ok := e.Payload["content"].(string)
-			if !ok {
-				t.Fatalf("chat.user_message payload content is %T, want string", e.Payload["content"])
+			// The key itself is gone, not merely emptied. A payload that still
+			// declares "content" invites the next author to fill it back in.
+			if v, ok := e.Payload["content"]; ok {
+				t.Errorf("chat.user_message payload still has a %q key (%T) — #2229 removed the message body, not just its contents", "content", v)
 			}
-			if n := len([]rune(content)); n > wantChatUserMessageMaxChars+1 {
-				t.Errorf("chat.user_message payload content is %d chars, want it capped at %d like the summary already was",
-					n, wantChatUserMessageMaxChars)
+			// "truncated" described a cap on stored text. With no stored text
+			// it has nothing to describe, and a stale false would read as
+			// "nothing was cut" about a message that is not there at all.
+			if v, ok := e.Payload["truncated"]; ok {
+				t.Errorf("chat.user_message payload still has a %q key (%v) — nothing is truncated when nothing is stored", "truncated", v)
+			}
+
+			// The whole payload is marshalled and searched, not just the keys
+			// this test knows about: a field added later is covered by the
+			// test as written rather than when someone remembers to extend it.
+			payload := execCmdPayloadJSON(t, e)
+			if strings.Contains(payload, tc.message) {
+				t.Errorf("the message body reached the chat.user_message payload: %s", truncateForFailure(payload))
+			}
+			if strings.Contains(e.Summary, tc.message) {
+				t.Errorf("the message body reached the chat.user_message summary: %q", truncateForFailure(e.Summary))
 			}
 			if tc.secret != "" {
-				if strings.Contains(content, tc.secret) {
-					t.Errorf("chat.user_message payload content leaked the secret into the hash-chained journal: %q", truncateForFailure(content))
+				if strings.Contains(payload, tc.secret) {
+					t.Errorf("the pasted secret reached the hash-chained journal payload: %s", truncateForFailure(payload))
 				}
 				if strings.Contains(e.Summary, tc.secret) {
-					t.Errorf("chat.user_message summary leaked the secret: %q", truncateForFailure(e.Summary))
-				}
-				if !strings.Contains(content, "[REDACTED") {
-					t.Error("no redaction marker in the payload content — the scrubber did not run")
+					t.Errorf("the pasted secret reached the entry summary: %q", truncateForFailure(e.Summary))
 				}
 			}
-			if truncated, _ := e.Payload["truncated"].(bool); truncated != tc.wantTruncated {
-				t.Errorf("chat.user_message payload truncated = %v, want %v", e.Payload["truncated"], tc.wantTruncated)
+
+			// What replaces the text: the true length, and the reference that
+			// makes the text retrievable from somewhere erasable.
+			wantChars := len([]rune(tc.message))
+			if e.Payload["length_chars"] != wantChars {
+				t.Errorf("payload length_chars = %v, want %d", e.Payload["length_chars"], wantChars)
 			}
-			// The full length is still recorded — the cap bounds what is
-			// stored, it does not hide that something was cut. In runes: the
-			// field is named chars, and one of these messages carries an em
-			// dash, which len() counts three times.
-			if e.Payload["length_chars"] != len([]rune(tc.message)) {
-				t.Errorf("payload length_chars = %v, want %d", e.Payload["length_chars"], len([]rune(tc.message)))
+			if e.Payload["chat_id"] != req.ChatID {
+				t.Errorf("payload chat_id = %v, want %q — without it the entry is a dead end", e.Payload["chat_id"], req.ChatID)
+			}
+			if e.Payload["agent_slug"] != req.AgentSlug {
+				t.Errorf("payload agent_slug = %v, want %q", e.Payload["agent_slug"], req.AgentSlug)
+			}
+			if e.Refs["chat_id"] != req.ChatID {
+				t.Errorf("refs chat_id = %v, want %q", e.Refs["chat_id"], req.ChatID)
+			}
+
+			// The summary is the Timeline row. It has to still say who said
+			// how much to whom, because that is what the row is read for.
+			wantSummary := fmt.Sprintf("user → %s: %d characters", req.AgentSlug, wantChars)
+			if e.Summary != wantSummary {
+				t.Errorf("summary = %q, want %q", e.Summary, wantSummary)
 			}
 		})
 	}
 }
 
-// TestChatUserMessageEmit_OpaqueSecretSurvivesTheScrub pins a LIMITATION, not
-// a property. It asserts the thing this entry still cannot do, so the trade-off
-// lives in code rather than only in a paragraph nobody re-reads.
-//
-// exec.command closed the opaque-secret case by removing the prompt-bearing
-// text outright — it could, because nothing needed a 41 KB system prompt in a
-// journal payload. chat.user_message cannot use the same move without changing
-// what the Timeline renders: the human's message IS the entry, and "what kicked
-// this off" is the whole reason the row exists. So its 240-char preview is
-// scrubbed, and a secret the scrubber does not recognise survives inside it —
-// the exact gap that makes the scrubber defence in depth rather than a
-// boundary.
-//
-// Raised by CodeRabbit on #2212; the decision (drop the text and keep only a
-// length plus chat_id, at the cost of the Timeline row) is #2229.
-//
-// If you are here because this test failed: the limitation was closed, which is
-// good. Replace this test with the assertion CodeRabbit asked for — that the
-// marker appears in neither the payload nor the summary — and update
-// docs/guides/crew-journal.mdx.
-func TestChatUserMessageEmit_OpaqueSecretSurvivesTheScrub(t *testing.T) {
+// TestChatUserMessageEmit_SummaryCountsOneCharacterSingular pins the one place
+// the count is rendered as prose. A summary reading "1 characters" is the kind
+// of thing that gets noticed in a screenshot and fixed in the payload.
+func TestChatUserMessageEmit_SummaryCountsOneCharacterSingular(t *testing.T) {
 	t.Parallel()
 
 	j := &covJournal{}
@@ -965,8 +1082,45 @@ func TestChatUserMessageEmit_OpaqueSecretSurvivesTheScrub(t *testing.T) {
 	o.SetJournal(j)
 
 	req := covRunReq()
-	// Unregistered, and shaped like nothing the pattern set knows. At the very
-	// front, so the cap is not what would remove it either.
+	req.UserMessage = "?"
+
+	if err := o.RunAgent(context.Background(), req, nil); err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+
+	msgs := j.byType("chat.user_message")
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 chat.user_message entry, got %d", len(msgs))
+	}
+	want := fmt.Sprintf("user → %s: 1 character", req.AgentSlug)
+	if msgs[0].Summary != want {
+		t.Errorf("summary = %q, want %q", msgs[0].Summary, want)
+	}
+}
+
+// TestChatUserMessageEmit_OpaqueSecretIsNotPersisted is the INVERSION of
+// TestChatUserMessageEmit_OpaqueSecretSurvivesTheScrub, not a replacement for
+// it. That test asserted the limitation on purpose — an opaque marker at the
+// front of the message reaching both payload and summary — so the trade-off
+// lived in code rather than only in a paragraph nobody re-reads, and so the day
+// it was closed the closure would be deliberate.
+//
+// #2229 closed it. Same marker, same position, same two surfaces; the
+// assertions are flipped. It is inverted rather than deleted because deleting
+// it would remove the only executable record that the gap ever existed, and the
+// next person to reintroduce a preview field would meet no resistance.
+func TestChatUserMessageEmit_OpaqueSecretIsNotPersisted(t *testing.T) {
+	t.Parallel()
+
+	j := &covJournal{}
+	o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+	o.SetJournal(j)
+
+	req := covRunReq()
+	// Unregistered, and shaped like nothing the pattern set knows — so the
+	// scrubber cannot be what removes it. At the very front, so the old
+	// 240-char cap could not have been what removed it either. What removes it
+	// is that the text is no longer stored.
 	req.UserMessage = execCmdPastedSecret + " — deploy with that please"
 
 	if err := o.RunAgent(context.Background(), req, nil); err != nil {
@@ -977,22 +1131,21 @@ func TestChatUserMessageEmit_OpaqueSecretSurvivesTheScrub(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("want 1 chat.user_message entry, got %d", len(msgs))
 	}
-	content, _ := msgs[0].Payload["content"].(string)
+	e := msgs[0]
 
-	if !strings.Contains(content, execCmdPastedSecret) {
-		t.Errorf("the opaque secret is gone from payload content — the limitation this test documents was closed; see the doc comment for what to do now: %q",
-			truncateForFailure(content))
+	if payload := execCmdPayloadJSON(t, e); strings.Contains(payload, execCmdPastedSecret) {
+		t.Errorf("the opaque secret is still in the payload of a hash-chained, append-only row: %s", truncateForFailure(payload))
 	}
-	if !strings.Contains(msgs[0].Summary, execCmdPastedSecret) {
-		t.Errorf("the opaque secret is gone from the summary — same as above: %q", truncateForFailure(msgs[0].Summary))
+	if strings.Contains(e.Summary, execCmdPastedSecret) {
+		t.Errorf("the opaque secret is still in the summary: %q", truncateForFailure(e.Summary))
 	}
-	// And the reference that makes closing it cheap is already there: the
-	// message lives in the chat, which unlike this row can be erased.
-	if msgs[0].Payload["chat_id"] != req.ChatID {
-		t.Errorf("payload chat_id = %v, want %q", msgs[0].Payload["chat_id"], req.ChatID)
+	// The reference that made closing this cheap, still present: the message
+	// itself lives in the chat, which unlike this row can be erased.
+	if e.Payload["chat_id"] != req.ChatID {
+		t.Errorf("payload chat_id = %v, want %q", e.Payload["chat_id"], req.ChatID)
 	}
-	if msgs[0].Payload["length_chars"] != len([]rune(req.UserMessage)) {
-		t.Errorf("payload length_chars = %v, want %d", msgs[0].Payload["length_chars"], len([]rune(req.UserMessage)))
+	if e.Payload["length_chars"] != len([]rune(req.UserMessage)) {
+		t.Errorf("payload length_chars = %v, want %d", e.Payload["length_chars"], len([]rune(req.UserMessage)))
 	}
 }
 

@@ -37,6 +37,7 @@ import {
 import { formatRelativeTime } from "@/lib/time"
 import { EgressAllowlistAction } from "./egress-allowlist-action"
 import { shortenId } from "./ids"
+import { ChatJumpLink } from "./chat-jump-link"
 
 /**
  * Row grid, left to right:
@@ -506,6 +507,12 @@ function Detail({
           denied host to the crew allowlist without leaving the timeline.
           Renders nothing for every other entry type. */}
       <EgressAllowlistAction entry={entry} />
+      {/* #2229 — a chat entry's summary is now a length, not a preview of the
+          message, so this link is the way back to what was actually said. The
+          journal row is permanent; the chat it points at can be erased, which
+          is the whole reason the text lives there and not here. Renders nothing
+          for an entry with no chat reference. */}
+      <ChatJumpLink entry={entry} />
       {entry.payload && Object.keys(entry.payload).length > 0 && (
         <DetailJson title="payload" value={entry.payload} />
       )}

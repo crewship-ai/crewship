@@ -584,7 +584,12 @@ func TestRunAgent_PreAgentStartDispatchFailureIsNotReportedAsBlock(t *testing.T)
 
 // ---- journal + state branches ----
 
-func TestRunAgent_LongUserMessageJournalTruncation(t *testing.T) {
+// Was TestRunAgent_LongUserMessageJournalTruncation, which asserted the summary
+// ended in an ellipsis because a long message was clipped into it. #2229 stopped
+// putting the message in the summary at all, so there is nothing left to clip:
+// the ellipsis assertion is inverted rather than dropped, because an ellipsis
+// reappearing here would mean message text had found its way back in.
+func TestRunAgent_LongUserMessageJournalsLengthNotText(t *testing.T) {
 	t.Parallel()
 	j := &covJournal{}
 	o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
@@ -598,8 +603,11 @@ func TestRunAgent_LongUserMessageJournalTruncation(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("want 1 chat.user_message entry, got %d", len(msgs))
 	}
-	if !strings.HasSuffix(msgs[0].Summary, "…") {
-		t.Errorf("summary must be truncated with ellipsis: %q", msgs[0].Summary)
+	if strings.Contains(msgs[0].Summary, "…") {
+		t.Errorf("summary carries a truncation ellipsis, which means it carries clipped message text: %q", msgs[0].Summary)
+	}
+	if want := "user → " + req.AgentSlug + ": 300 characters"; msgs[0].Summary != want {
+		t.Errorf("summary = %q, want %q", msgs[0].Summary, want)
 	}
 	if msgs[0].Payload["length_chars"] != 300 {
 		t.Errorf("payload length_chars = %v, want 300", msgs[0].Payload["length_chars"])

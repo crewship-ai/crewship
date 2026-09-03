@@ -120,30 +120,48 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 
 	// journalUserMessage scrubs the message against this run's credential
 	// values and the built-in patterns, then bounds it to
-	// journalUserMessageMaxChars. Computed once, up front, and reused for
-	// both the chat.user_message journal entry below and the approval-gate
-	// review text (#2228) — one policy, not two that can drift. Guarded on
-	// UserMessage being non-empty: a run with nothing to scrub (e.g.
-	// ApprovalMode == "none", or any call site that never had a chat
-	// message) has no journal entry to make and nothing for a human to
-	// review, so userPreview/userTruncated stay zero-valued and Review
-	// below stays nil rather than a map holding an empty preview.
+	// journalUserMessageMaxChars. Its one remaining consumer is the
+	// approval-gate review text (#2228) — the context a human needs to decide
+	// a gated run. The chat.user_message entry below no longer takes a preview
+	// from it (#2229): an approvals_queue row is ordinary, erasable data,
+	// while the journal is hash-chained, append-only and skipped by the
+	// erasure cascade, so the same bounded preview is affordable in one and
+	// not in the other. Guarded on UserMessage being non-empty: a run with
+	// nothing to scrub (e.g. ApprovalMode == "none", or any call site that
+	// never had a chat message) has nothing for a human to review, so
+	// userPreview/userTruncated stay zero-valued and Review below stays nil
+	// rather than a map holding an empty preview.
 	var userPreview string
 	var userTruncated bool
 
-	// Capture the user prompt that triggered this run as a journal
-	// entry. Lands in the Timeline as the "what kicked this off"
-	// signal — without it, a viewer scrolling through exec.command +
-	// network.egress can't reconstruct WHY the agent was doing those
-	// things. Best-effort: a journal hiccup never aborts the run.
+	// Record that the run was triggered by a user message. Lands in the
+	// Timeline as the "what kicked this off" marker — without it, a
+	// viewer scrolling through exec.command + network.egress cannot see
+	// that a human started this rather than a schedule, or reach the
+	// conversation it came from. Best-effort: a journal hiccup never
+	// aborts the run.
 	if req.UserMessage != "" {
+		// Kept inside the guard rather than hoisted above it: an empty
+		// message must leave Review nil, not {"user_prompt": ""} (#2250).
 		userPreview, userTruncated = journalUserMessage(req)
 
-		// The summary was already capped at 240 chars; the payload was the
-		// verbatim message, uncapped and unscrubbed, in the same append-only
-		// row (#2215). Both now come from the same bounded, scrubbed preview,
-		// so the payload can never carry more of a pasted secret than the
-		// summary rendered beside it.
+		// The entry records a MEASUREMENT of the message, never the message
+		// (#2229). #2212 had bounded the payload to 240 chars and put it
+		// through the scrubber, which bounded the exposure without closing it:
+		// the scrubber is defence in depth and explicitly not a boundary, so a
+		// token nobody registered matches no pattern, and one pasted at the
+		// start of a message sits well inside the first 240 characters.
+		//
+		// The move exec.command made applies here too. The message itself
+		// already lives in the chat store, which IS erasable, and this entry
+		// already carries chat_id — so the copy was duplicating erasable data
+		// into the one table the GDPR erasure cascade deliberately skips
+		// (internal/api/admin_gdpr.go), where nothing can redact it afterwards.
+		//
+		// What the Timeline loses is the preview; what it keeps is who said how
+		// much to whom, and the chat_id to read it in the place it can still be
+		// deleted from.
+		msgChars := utf8.RuneCountInString(req.UserMessage)
 		_, _ = o.getJournal().Emit(ctx, JournalEntry{
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
@@ -153,19 +171,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			Severity:    "info",
 			ActorType:   "user",
 			ActorID:     req.AgentID, // best available; agents-context call sites rarely carry user_id
-			Summary:     fmt.Sprintf("user → %s: %s", req.AgentSlug, userPreview),
+			Summary:     fmt.Sprintf("user → %s: %s", req.AgentSlug, userMessageSizeLabel(msgChars)),
 			Payload: map[string]any{
 				"chat_id":    req.ChatID,
 				"agent_slug": req.AgentSlug,
-				"content":    userPreview,
-				// The full length is still recorded: the cap bounds what is
-				// stored, it does not hide that something was cut. Counted in
-				// runes, because the field is named chars and every other
-				// bound this entry carries is a rune count — len() reported
-				// two to three times the character count for a non-ASCII
-				// message.
-				"length_chars": utf8.RuneCountInString(req.UserMessage),
-				"truncated":    userTruncated,
+				// Counted in runes, because the field is named chars — len()
+				// reported two to three times the character count for a
+				// non-ASCII message. There is deliberately no digest beside
+				// it: for a short message a digest is a verifier for exactly
+				// the pasted token this entry exists to keep out of the table.
+				// chat_id is the safe reference instead.
+				"length_chars": msgChars,
 			},
 			Refs: map[string]any{"chat_id": req.ChatID},
 		})
