@@ -307,6 +307,23 @@ describe("JournalPage — URL as the source of truth", () => {
   // Per-user reading preferences are deliberately NOT in the URL: a shared
   // link must not impose the sender's wrap / sort / refresh cadence on the
   // reader, and they already persist per user via /api/v1/me/preferences.
+  it("hydrates an issue focus from ?mission_id=, sends it to the list, and clears it", async () => {
+    // The issue page links "Journal for ENG-4" with the identifier; the
+    // server resolves it. The page must carry it to the query and hand the
+    // panel a clearable focus, or the link lands on the unfiltered timeline.
+    mountAt("mission_id=ENG-4")
+    await waitFor(() => expect(listParams.mission_id).toBe("ENG-4"))
+    expect(logsPanelProps.missionId).toBe("ENG-4")
+    ;(logsPanelProps.onClearMissionId as () => void)()
+    await waitFor(() => expect(lastPushed()).not.toContain("mission_id"))
+  })
+
+  it("reads crew and agent slugs the way entityHref writes them", async () => {
+    mountAt("crew_id=engineering&agent_id=robin")
+    await waitFor(() => expect(listParams.crew_id).toBe("engineering"))
+    expect(listParams.agent_id).toBe("robin")
+  })
+
   it("keeps per-user reading preferences out of the URL", async () => {
     mountAt("")
     await screen.findByTestId("logs-panel")
