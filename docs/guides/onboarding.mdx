@@ -35,6 +35,7 @@ The web wizard is a split screen: the form on the left, a live preview of what i
 - **A disabled Continue or Launch always says why**, in one line beside the button (no workspace name, no container runtime, an experimental toolchain, no token, no crew yet).
 - **Skip setup asks first.** The wizard is one-shot, so skipping lands on an empty dashboard; the confirmation says so and points at the dashboard checklist.
 - **If Crewship Guide cannot be reached**, the Crew step switches to templates and says so, rather than showing templates with no explanation.
+- **The Guide is not a colleague.** It lives in a crew of kind `setup`, and both the crew and its agent are hidden from every roster — `/crews`, `/agents`, the chat column, the Agents facet, mention pickers and routine reach — so a fresh workspace's `/chat` opens on nothing rather than on the Guide's seeded conversation. `GET /api/v1/agents?include_setup=1` and `crewship agent list --include-setup` are the explicit opt-in.
 - **A reload after Create does not strand you.** The "Built so far" panel reads the workspace's real crews back; when one exists but the page no longer holds its proposal, Launch stays enabled and finishes setup through `POST /api/v1/onboarding/complete` without deploying a second crew.
 - **Phones and tablets** stack the form above the preview; the stepper collapses to one row, every control meets the 44px touch target, and nothing scrolls horizontally.
 

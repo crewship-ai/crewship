@@ -105,6 +105,26 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// `limit` is the caller's, clamped to the old hard ceiling. The chat
+	// surface asks for ten rows per agent and folds the rest behind "N more ·
+	// Show all"; that fold is only truthful when the page it holds is the page
+	// it asked for. Absent, zero and negative all mean the default, and a
+	// number above the ceiling is clamped rather than refused — a page size is
+	// a preference, not a contract worth a 400.
+	limit, offset := parsePagination(r, 100, 100)
+
+	// The paging convention (docs/ux/CHANGELOG.md, wave 0): the body is the
+	// page, the total is a header. Counted inside the same kind partition, so
+	// "13 more with Riley" is the number of direct chats, not of routine steps.
+	var total int
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM chats c WHERE c.agent_id = ? AND c.workspace_id = ?`+kindWhere,
+		agentID, workspaceID).Scan(&total); err != nil {
+		replyInternalError(w, h.logger, "count agent chats", err)
+		return
+	}
+	writeListMeta(w, total, limit, offset)
+
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.agent_id, c.workspace_id, c.title, c.mode, c.status,
 			c.message_count, c.started_at, c.ended_at, c.created_at, c.origin,
@@ -114,8 +134,8 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		FROM chats c
 		WHERE c.agent_id = ? AND c.workspace_id = ?`+kindWhere+`
 		ORDER BY last_activity_at DESC
-		LIMIT 100
-	`, agentID, workspaceID)
+		LIMIT ? OFFSET ?
+	`, agentID, workspaceID, limit, offset)
 	if err != nil {
 		replyInternalError(w, h.logger, "list agent chats", err)
 		return

@@ -351,13 +351,16 @@ Rename by hand at any time with `crewship chat rename <chat-id> "<title>"` or th
 
 The Sessions sidebar orders by **last activity** — a session jumps to the top whenever a message lands in it, regardless of when it was created (`chats.last_activity_at`, migration v130). Sessions with replies you haven't seen show a subtle blue **unread badge** (dot + count). Read state is **per user**: a `chat_read_cursors` row records the last moment *you* marked the chat read, and `unread_count` is everything appended after that cursor that you didn't write yourself. Opening a session marks it read automatically; the badge and the inbox notification clear together.
 
-From the CLI, the same data drives `crewship chat list` (an `UNREAD` column plus `LAST ACTIVITY` ordering), and `crewship chat read` is the mark-read parity command:
+From the CLI, the same data drives `crewship chat list` (an `UNREAD` column plus `LAST ACTIVITY` ordering), and `crewship chat read` is the mark-read parity command. `--limit N` narrows the page (newest first; the server's default and ceiling are 100), `--offset` pages, both compose with `--kind`, and a cut page ends with a footer (`showing 1–10 of 19 · next page: --offset 10`):
 
 ```bash
 # Which sessions have replies I haven't seen?
 crewship chat list atlas
 # ID        TITLE            STATUS  MSGS  UNREAD  LAST ACTIVITY     ORIGIN
 # c_abc123  Deploy help      ACTIVE  6     2       2026-07-02 09:41  UI
+
+# The ten most recent direct conversations only
+crewship chat list atlas --kind direct --limit 10
 
 # Read the transcript, then clear the badge + bell item
 crewship chat c_abc123
@@ -368,6 +371,8 @@ crewship chat read c_abc123 --agent atlas   # skip the lookup scan
 # messages and read cursors go with it; creator or agent-editor only)
 crewship chat delete c_abc123 --yes
 ```
+
+`GET /api/v1/agents/{agentId}/chats` follows the paging convention: `?limit=&offset=` on the request (limit 1–100, default 100), the body is the page, and `X-Total-Count` carries the number of chats in the same `kind` partition — so a conversations column can say "13 more with Riley" and mean direct conversations, not routine steps.
 
 ### "Your agent replied" notifications {#your-agent-replied-notifications}
 
