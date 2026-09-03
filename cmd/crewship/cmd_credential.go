@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -88,17 +89,33 @@ every page. --search and --tag filter server-side.`,
 		limitSet := flags.Changed("limit")
 		cursor, _ := flags.GetString("cursor")
 		all, _ := flags.GetBool("all")
+		offset, _ := flags.GetInt("offset")
+		offsetSet := flags.Changed("offset")
 
 		if limitSet && limit <= 0 {
 			return fmt.Errorf("--limit must be a positive integer, got %d", limit)
+		}
+		if offsetSet && offset < 0 {
+			return fmt.Errorf("--offset must be zero or more, got %d", offset)
+		}
+		if offsetSet && (all || cursor != "") {
+			return fmt.Errorf("--offset pages by position and cannot be combined with --all or --cursor")
 		}
 
 		client := newAPIClient()
 		buildURL := func(cur string) string {
 			q := url.Values{}
-			// paginate=true opts into the cursor envelope; the server still
-			// returns a bare array to callers that don't ask, so this is safe.
-			q.Set("paginate", "true")
+			// --offset is the one convention every list command shares
+			// (#2303): limit/offset on the bare-array path, the window
+			// described in X-Total-Count / X-Limit / X-Offset. Without it the
+			// command keeps its older cursor mode.
+			if offsetSet {
+				q.Set("offset", strconv.Itoa(offset))
+			} else {
+				// paginate=true opts into the cursor envelope; the server still
+				// returns a bare array to callers that don't ask, so this is safe.
+				q.Set("paginate", "true")
+			}
 			// Always send an explicit limit. The paginated envelope defaults
 			// to 50 server-side, vs. the long-standing bare-array endpoint's
 			// 100 — without this, opting into pagination would silently
@@ -127,6 +144,7 @@ every page. --search and --tag filter server-side.`,
 
 		var creds []credRow
 		var lastNext *string
+		var lastResp *http.Response
 		cur := cursor
 		for pageNum := 0; ; pageNum++ {
 			if pageNum >= maxAllPages {
@@ -139,6 +157,7 @@ every page. --search and --tag filter server-side.`,
 			if err := cli.CheckError(resp); err != nil {
 				return err
 			}
+			lastResp = resp
 			var raw json.RawMessage
 			if err := cli.ReadJSON(resp, &raw); err != nil {
 				return err
@@ -199,6 +218,8 @@ every page. --search and --tag filter server-side.`,
 		// To stderr so stdout stays a clean, parseable table.
 		if !all && lastNext != nil && *lastNext != "" {
 			fmt.Fprintf(os.Stderr, "More results available — re-run with --all, or --cursor %s for the next page.\n", *lastNext)
+		} else if offsetSet {
+			printListFooter(f, readListMeta(lastResp), len(creds))
 		}
 		return nil
 	},
@@ -647,6 +668,7 @@ func init() {
 	credListCmd.Flags().String("search", "", "Filter by a substring of the name or description (server-side)")
 	credListCmd.Flags().String("tag", "", "Filter to credentials carrying this exact tag (server-side)")
 	credListCmd.Flags().Bool("all", false, "Fetch every page by following the cursor")
+	credListCmd.Flags().Int("offset", 0, "Rows to skip before the first one shown (positional paging; not with --all/--cursor)")
 
 	credCreateCmd.Flags().String("name", "", "Credential name (required)")
 	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN|ENDPOINT_URL (required)")
