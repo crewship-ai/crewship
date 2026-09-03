@@ -324,7 +324,19 @@ A "session" is a `chats` row. Sessions persist across page reloads, browser sess
 | `CRON` | Created by a scheduled trigger. |
 | `AGENT` | Created by a peer agent (agent-to-agent assignment). |
 
-Anything else (or empty) is stored as `NULL` so a rogue caller cannot shove arbitrary text into a UI-rendered chip. The Sessions sidebar renders a colored chip per origin — NULL rows show no chip. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
+Anything else (or empty) is stored as `NULL` so a rogue caller cannot shove arbitrary text into a UI-rendered chip. The chat header renders the origin as a status pill in words — **Routine step**, **Scheduled**, **Webhook**, **From the CLI**, **Delegated**; a chat started in the browser (`UI`) and a NULL row wear none. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
+
+### Who you are talking to
+
+The header of a conversation is the **agent strip**: the agent's face with a status dot (blue with a halo while running, green idle, red on error), its name, its status as a word, its role, its crew (a colour dot and a link), its model as a label — never a model id — and **N skills · M credentials · runs** as links into the crews canvas and the journal. The connection badge appears only while the socket is not connected; **Commands** opens the chat palette; **Copy link** puts the conversation's address on the clipboard (the session id used to be printed raw in the header — the address is the one form of it a person can use).
+
+The toolbar breadcrumb is a path of names — **Crews / Ops / Riley / Chat** — every crumb a link, published by the chat page once the roster resolves. It never shows the agent's slug, and never the onboarding Guide's internal identifier.
+
+An **empty conversation** is the agent card plus **What &lt;name&gt; can do**: the agent's own skills, each with a **Try it** prompt that opens the conversation from that skill. An agent with no skills gets one line and **Add a skill →**. A routine step or an issue chat is a transcript, not something to start: its empty state says "This step has not written anything yet" and links to a direct chat with the agent.
+
+### The column folds
+
+The column asks the server for ten conversations per agent and reads `X-Total-Count`; when an agent has more, a **More on the server** section says "13 more with Riley · Show all", and Show all fetches that agent's whole page. **Not started yet** lists agents you have never talked to as rows with a **Start** verb — six, then "N more agents" opens the picker. The onboarding Guide (a `kind=setup` crew) is hidden from the roster by the server; a deep link into the Guide's own conversation still opens, because the page asks once more with `include_setup=1` when the address names an agent the roster does not carry.
 
 Chat sessions honor the workspace `preferred_language` — the agent replies in it. Set it with `crewship workspace update --language <code>` (see [`crewship workspace`](/cli/workspace)).
 
@@ -351,13 +363,16 @@ Rename by hand at any time with `crewship chat rename <chat-id> "<title>"` or th
 
 The Sessions sidebar orders by **last activity** — a session jumps to the top whenever a message lands in it, regardless of when it was created (`chats.last_activity_at`, migration v130). Sessions with replies you haven't seen show a subtle blue **unread badge** (dot + count). Read state is **per user**: a `chat_read_cursors` row records the last moment *you* marked the chat read, and `unread_count` is everything appended after that cursor that you didn't write yourself. Opening a session marks it read automatically; the badge and the inbox notification clear together.
 
-From the CLI, the same data drives `crewship chat list` (an `UNREAD` column plus `LAST ACTIVITY` ordering), and `crewship chat read` is the mark-read parity command:
+From the CLI, the same data drives `crewship chat list` (an `UNREAD` column plus `LAST ACTIVITY` ordering), and `crewship chat read` is the mark-read parity command. `--limit N` narrows the page (newest first; the server's default and ceiling are 100), `--offset` pages, both compose with `--kind`, and a cut page ends with a footer (`showing 1–10 of 19 · next page: --offset 10`):
 
 ```bash
 # Which sessions have replies I haven't seen?
 crewship chat list atlas
 # ID        TITLE            STATUS  MSGS  UNREAD  LAST ACTIVITY     ORIGIN
 # c_abc123  Deploy help      ACTIVE  6     2       2026-07-02 09:41  UI
+
+# The ten most recent direct conversations only
+crewship chat list atlas --kind direct --limit 10
 
 # Read the transcript, then clear the badge + bell item
 crewship chat c_abc123
@@ -368,6 +383,8 @@ crewship chat read c_abc123 --agent atlas   # skip the lookup scan
 # messages and read cursors go with it; creator or agent-editor only)
 crewship chat delete c_abc123 --yes
 ```
+
+`GET /api/v1/agents/{agentId}/chats` follows the paging convention: `?limit=&offset=` on the request (limit 1–100, default 100), the body is the page, and `X-Total-Count` carries the number of chats in the same `kind` partition — so a conversations column can say "13 more with Riley" and mean direct conversations, not routine steps.
 
 ### "Your agent replied" notifications {#your-agent-replied-notifications}
 

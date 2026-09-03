@@ -233,8 +233,11 @@ export function decisionMetaFor(item: InboxItem): DecisionMeta | null {
     // would refuse them, and justified an audience wider than the people who can
     // act. The audience and the authority are one fact; this is its second copy,
     // and internal/api pins the first.
+    // "Access request" was the heading for EVERY escalation, including a
+    // yes/no question and a link to open. The heading is the first thing a
+    // person reads on the card; it should say what is being asked.
     return {
-      heading: "Access request",
+      heading: escalationHeading(item),
       tone: "warn",
       requires: "manage",
       resolveEndpoint: payloadString(item, "request_id")
@@ -336,4 +339,35 @@ export const OUTCOME_TONE: Record<string, "success" | "destructive" | "warn" | "
   dismissed: "default",
   retried: "blue",
   expired: "warn",
+}
+
+/** The decision card's heading for an escalation, by what it asks for. */
+export function escalationHeading(item: InboxItem): string {
+  if (item.payload?.request_type === "access") return "Access request"
+  switch (payloadString(item, "escalation_type")) {
+    case "LINK": return "A link to open"
+    case "CREDENTIAL": return "Credential request"
+    case "TEXT": return "Question from an agent"
+  }
+  return "Escalation"
+}
+
+/**
+ * Who may decide, in words. The card used to print the role enums verbatim
+ * ("OWNER or ADMIN decides this", "MANAGER+"), which README §6 rules out.
+ */
+export function deciderCopy(requires: "create" | "manage"): string {
+  return requires === "manage" ? "An owner or admin decides this" : "A manager or above decides this"
+}
+
+/**
+ * A valid https link the agent asked to open, from the row's payload. The
+ * server validates LINK metadata as https before it lands here; this is the
+ * client's own guard so a payload written by anything else cannot navigate a
+ * person to javascript: or to a bare host.
+ */
+export function linkToOpen(item: InboxItem): string | null {
+  const v = payloadString(item, "link_url")
+  if (!v || !/^https:\/\/[^\s/]+/i.test(v)) return null
+  return v
 }

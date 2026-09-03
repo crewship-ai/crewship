@@ -2,14 +2,20 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, Clock, Eye, EyeOff } from "lucide-react"
+import { AlertTriangle, ArrowUpRight, CircleDot, Clock, Eye, EyeOff, Link2, MessageSquare, ScrollText, Users } from "lucide-react"
 
 import { Appear, DetailCard, Pill, type DetailTone } from "@/components/ui/detail"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { StatusPill } from "@/components/ui/status-pill"
+import { entityHref } from "@/lib/entity-links"
+import { crewColor } from "@/app/(dashboard)/dashboard-helpers"
+import type { InboxLookup } from "@/components/features/inbox-v2/inbox-v2-types"
 import { RoutineProposalDiff } from "./routine-proposal-diff"
 import { Button } from "@/components/ui/button"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { FourEyesNotice } from "@/components/features/escalations/four-eyes-notice"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
+import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { InboxItem } from "@/hooks/use-inbox"
 
@@ -18,9 +24,10 @@ import { EvidenceFacts } from "./evidence-facts"
 import { KindActions } from "./kind-actions"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import {
-  absolute, canRole, categoryOf, decisionMetaFor, expiresIn, jumpFor, payloadNumber, remainingLabel, riskLevelOf,
-  payloadString, payloadStrings, since, subjectOf, type WorkspaceRole,
+  absolute, canRole, deciderCopy, decisionMetaFor, expiresIn, jumpFor, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
+  payloadString, payloadStrings, safeChatURL, since, subjectOf, type WorkspaceRole,
 } from "./inbox-derive"
+import { entryKindPill, inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
 
 // =============================================================================
 // The reading pane.
@@ -110,6 +117,29 @@ const CONTEXT_HIDE_KEYS = new Set([
   // Rendered as a badge beside the decision, so repeating it here as a raw
   // key/value reads as debug output rather than as the warning it is.
   "risk_level",
+  // Identifiers the pane renders as NAMES and LINKS (the identity strip and
+  // the "Where this came from" row). A cuid in a Context card is exactly the
+  // leak README §6 rules out, and it was the first thing a client saw.
+  "crew_id",
+  "invoking_crew_id",
+  "chat_id",
+  "agent_id",
+  "agent_slug",
+  "approval_id",
+  "credential_id",
+  "has_pending_credential",
+  "escalation_type",
+  "link_url",
+  "credential_name",
+  "pipeline_run_id",
+  "run_id",
+  "mission_id",
+  "issue_identifier",
+  "chat_url",
+  "schedule_id",
+  "pipeline_slug",
+  "request_id",
+  "request_type",
 ])
 
 function humanizeKey(k: string): string {
@@ -214,12 +244,14 @@ function MessageBody({ body }: { body: string }) {
 }
 
 export function DecisionCard({
-  item, role, onResolve, onRefresh,
+  item, role, onResolve, onRefresh, onDenyHire, crewHref,
 }: {
   item: InboxItem
   role: WorkspaceRole | null
   onResolve: (action: string) => void | Promise<void>
   onRefresh: () => void | Promise<void>
+  onDenyHire?: () => Promise<void>
+  crewHref?: string | null
 }) {
   const meta = decisionMetaFor(item)
   if (!meta) return null
@@ -310,18 +342,20 @@ export function DecisionCard({
             onResolve={onResolve}
             onRefresh={onRefresh}
             disabled={!allowed}
+            onDenyHire={onDenyHire}
+            crewHref={crewHref}
           />
         )}
 
         {!isResolved && !allowed && (
           <p className="type-meta text-muted-foreground">
-            {meta.requires === "manage" ? "OWNER or ADMIN decides this" : "MANAGER and up decides this"}
+            {deciderCopy(meta.requires)}
             {" — you can still archive it."}
           </p>
         )}
         {allowed && !isResolved && (
           <p className="type-meta text-muted-foreground-soft">
-            anyone in {meta.requires === "manage" ? "OWNER / ADMIN" : "MANAGER+"} can decide this
+            {deciderCopy(meta.requires)} · you can
           </p>
         )}
         {meta.missingEndpoint && (
@@ -362,6 +396,7 @@ export function DecisionSubject({ item }: { item: InboxItem }) {
   const rules = payloadNumber(item, "rules_count")
   const scanned = payloadNumber(item, "entries_scanned")
 
+  const link = linkToOpen(item)
   const chips: React.ReactNode[] = []
   if (credential) chips.push(<Pill key="cred" tone="warn">{credential}</Pill>)
   if (level) chips.push(<Pill key="lvl" tone="destructive">{level}</Pill>)
@@ -373,10 +408,28 @@ export function DecisionSubject({ item }: { item: InboxItem }) {
   if (rules != null) chips.push(<Pill key="rules" tone="purple">{rules} rules</Pill>)
   if (scanned != null) chips.push(<Pill key="scanned" tone="default">{scanned} entries scanned</Pill>)
 
-  if (chips.length === 0 && !intent && reasons.length === 0 && asks.length === 0) return null
+  if (chips.length === 0 && !intent && reasons.length === 0 && asks.length === 0 && !link) return null
 
   return (
     <div className="flex flex-col gap-2">
+      {/* What is being approved, ahead of everything: a LINK escalation used
+          to render "Escalation type LINK" and no address at all. The host is
+          spelled out because that is what a person checks before saying yes. */}
+      {link && (
+        <div className="flex flex-col gap-1">
+          <span className="type-meta uppercase tracking-wide text-muted-foreground-soft">What you are approving</span>
+          <div className="flex items-center gap-2.5 rounded-lg border border-primary/35 bg-primary/[0.06] px-3 py-2" data-testid="decision-link">
+            <Link2 className="h-4 w-4 shrink-0 text-primary-hover" />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <a href={link} target="_blank" rel="noopener noreferrer" className="truncate font-mono text-[12px] text-primary-hover hover:underline">{link}</a>
+              <span className="text-[11px] text-muted-foreground">{hostOf(link)} · the agent wants to open this address</span>
+            </span>
+            <Button asChild size="xs" variant="outline" className="gap-1">
+              <a href={link} target="_blank" rel="noopener noreferrer">Open link <ArrowUpRight className="h-3 w-3" /></a>
+            </Button>
+          </div>
+        </div>
+      )}
       {chips.length > 0 && <div className="flex flex-wrap items-center gap-1.5">{chips}</div>}
       {asks.map((a) => (
         <div key={a.key} className="flex flex-wrap items-baseline gap-1.5">
@@ -405,21 +458,69 @@ export function DecisionSubject({ item }: { item: InboxItem }) {
   )
 }
 
+/**
+ * One cell of the identity strip. No field caption: the strip used to print
+ * the payload key under every value (`sender_name`, `crew_id`, `created_at`),
+ * which is documentation for a developer, not identity for a client.
+ */
 function Definition({
-  label, value, field, mono,
+  label, value, mono,
 }: {
   label: string
   value: React.ReactNode
-  field: string
   mono?: boolean
 }) {
   return (
-    <div className="px-4 py-2">
+    <div className="min-w-0 px-4 py-2">
       <div className="type-meta uppercase tracking-wide text-muted-foreground-soft">{label}</div>
-      <div className={cn("type-row mt-0.5 truncate", mono && "font-mono text-[12px]")}>{value}</div>
-      <div className="type-meta truncate font-mono text-muted-foreground-soft">{field}</div>
+      <div className={cn("type-row mt-0.5 flex min-w-0 items-center gap-1.5 truncate", mono && "font-mono text-[12px]")}>{value}</div>
     </div>
   )
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+/** The crew id a row names, whichever key the producer used. */
+export function crewIdOf(item: InboxItem): string | null {
+  return payloadString(item, "invoking_crew_id") || payloadString(item, "crew_id") || null
+}
+
+/** The agent slug a row names — the key the roster is keyed by. */
+export function agentSlugOf(item: InboxItem): string | null {
+  return payloadString(item, "agent_slug") || (item.sender_type === "agent" ? item.sender_name ?? null : null) || null
+}
+
+/**
+ * Where this row came from, as links (README §5: an inbox item links to the
+ * object that raised it and the crew). Built through entityHref so none of
+ * them can point at a route that does not exist.
+ */
+export function originLinks(
+  item: InboxItem,
+  lookup?: InboxLookup,
+): { label: string; href: string; icon: LucideIcon }[] {
+  const out: { label: string; href: string; icon: LucideIcon }[] = []
+  const agentSlug = agentSlugOf(item)
+  const chatID = payloadString(item, "chat_id")
+  const chatURL = safeChatURL(item)
+  if (chatURL) out.push({ label: "Open chat", href: chatURL, icon: MessageSquare })
+  else if (chatID && agentSlug) out.push({ label: "Open chat", href: entityHref({ kind: "chat", agentSlug, sessionId: chatID }), icon: MessageSquare })
+  const run = payloadString(item, "pipeline_run_id") || payloadString(item, "run_id")
+  if (run) out.push({ label: "Open run", href: entityHref({ kind: "run", runId: run, pipelineSlug: payloadString(item, "pipeline_slug") || undefined }), icon: ArrowUpRight })
+  const issue = payloadString(item, "issue_identifier")
+  if (issue) out.push({ label: `Open ${issue}`, href: entityHref({ kind: "issue", identifier: issue }), icon: CircleDot })
+  const routine = payloadString(item, "pipeline_slug")
+  if (routine) out.push({ label: "Open routine", href: entityHref({ kind: "routine", slug: routine }), icon: ScrollText })
+  const crewID = crewIdOf(item)
+  const crew = crewID && lookup ? lookup.crewById.get(crewID) : null
+  if (crew) out.push({ label: `Open ${crew.name}`, href: entityHref({ kind: "crew", slug: crew.slug }), icon: Users })
+  return out
 }
 
 export interface InboxDetailProps {
@@ -429,6 +530,10 @@ export interface InboxDetailProps {
   onArchive: () => void | Promise<void>
   onMarkUnread: () => void
   onRefresh: (action?: string) => void | Promise<void>
+  /** Crews and agents by id/slug, so the strip can name them and link them. */
+  lookup?: InboxLookup
+  /** Deny a staged hire through its approvals-queue twin. */
+  onDenyHire?: () => Promise<void>
 }
 
 /**
@@ -446,13 +551,21 @@ function fourEyesAgentOf(item: InboxItem): string | null {
   return item.sender_name ?? null
 }
 
-export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh }: InboxDetailProps) {
+export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh, lookup, onDenyHire }: InboxDetailProps) {
   const isResolved = item.state === "resolved"
   const decision = decisionMetaFor(item)
   const jump = jumpFor(item)
-  const category = categoryOf(item)
   const subject = subjectOf(item)
   const runID = payloadString(item, "pipeline_run_id")
+  const kind = entryKindPill(inboxEntry(item))
+  const crewID = crewIdOf(item)
+  const crew = crewID && lookup ? lookup.crewById.get(crewID) ?? null : null
+  const agentSlug = agentSlugOf(item)
+  const agent = agentSlug && lookup ? lookup.agentBySlug.get(agentSlug) ?? null : null
+  const crewName = crew?.name ?? agent?.crew?.name ?? null
+  const crewSlug = crew?.slug ?? agent?.crew?.slug ?? null
+  const crewHref = crewSlug ? entityHref({ kind: "crew", slug: crewSlug }) : null
+  const links = originLinks(item, lookup)
 
   // Decision items are source-managed: the inbox PATCH rejects anything but
   // "read" while the SOURCE still exists, so they cannot be blind-archived.
@@ -492,7 +605,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
           disappear for exactly the rows whose only affordance it was. */}
       <Appear order={0}>
         {decision ? (
-          <DecisionCard item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} />
+          <DecisionCard item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} onDenyHire={onDenyHire} crewHref={crewHref} />
         ) : (
           <DetailCard>
             <div className="flex flex-col gap-3">
@@ -504,28 +617,62 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
         )}
       </Appear>
 
+      {/* Identity, as names and links: the agent, its crew, what kind of ask
+          this is and when it arrived. It used to print the crew's cuid under
+          a `crew_id` caption and the category as `agents.escalation`. */}
       <Appear order={1}>
         <DetailCard bare>
           <div className="grid grid-cols-2 divide-x divide-hairline sm:grid-cols-4">
             <Definition
-              label="Subject"
-              value={<ActorLabel actor={subject} size={20} />}
-              field={payloadString(item, "agent_name") ? "payload.agent_name" : "sender_name"}
+              label={subject.kind === "agent" ? "Agent" : "From"}
+              value={agent ? (
+                <Link href={entityHref({ kind: "agent", slug: agent.slug })} className="flex min-w-0 items-center gap-1.5 hover:underline">
+                  <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} agentId={agent.id} avatarUrl={agent.avatar_url} alt="" className="h-5 w-5 shrink-0 rounded-md" />
+                  <span className="truncate">{agent.name}</span>
+                  {agent.role_title && <span className="truncate text-[11px] text-muted-foreground">{agent.role_title}</span>}
+                </Link>
+              ) : (
+                <ActorLabel actor={subject} size={20} />
+              )}
             />
             <Definition
               label="Crew"
-              value={payloadString(item, "invoking_crew_id") || payloadString(item, "crew_id") || "—"}
-              field="crew_id"
+              value={crewName ? (
+                <Link href={crewHref ?? "#"} className="flex min-w-0 items-center gap-1.5 hover:underline">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: crewColor(crew?.color ?? agent?.crew?.color ?? null) }} aria-hidden />
+                  <span className="truncate">{crewName}</span>
+                </Link>
+              ) : (
+                <span className="text-muted-foreground">No crew</span>
+              )}
             />
-            <Definition label="Category" value={category} field="derived from kind" mono />
+            <Definition label="Kind" value={<StatusPill tone={kind.tone} label={kind.label} />} />
             <Definition
               label={isResolved ? "Resolved" : "Arrived"}
-              value={isResolved ? `${item.resolved_action ?? "closed"} · ${since(item.resolved_at)}` : absolute(item.created_at)}
-              field={isResolved ? "resolved_action" : "created_at"}
+              value={isResolved
+                ? <><StatusPill status={item.resolved_action ?? "resolved"} /><span className="text-muted-foreground">{since(item.resolved_at)}</span></>
+                : <>{absolute(item.created_at)}<span className="text-muted-foreground">· {since(item.created_at)}</span></>}
             />
           </div>
         </DetailCard>
       </Appear>
+
+      {/* Where this came from — the chat it was raised in, the run it
+          paused, the issue, the crew — every one a link (README §5). */}
+      {links.length > 0 && (
+        <Appear order={2}>
+          <DetailCard bare>
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+              <span className="type-meta uppercase tracking-wide text-muted-foreground-soft">Where this came from</span>
+              {links.map((l) => (
+                <Button asChild key={l.href} size="xs" variant="outline" className="gap-1.5">
+                  <Link href={l.href}><l.icon className="h-3 w-3" />{l.label}</Link>
+                </Button>
+              ))}
+            </div>
+          </DetailCard>
+        </Appear>
+      )}
 
       {item.kind === "waitpoint" && runID !== "" && (
         <Appear order={2}>
@@ -601,7 +748,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
                 Restore
               </button>
             )}
-            {jump && (
+            {jump && links.length === 0 && (
               <Button asChild size="xs" variant="ghost" className="ml-auto gap-1.5 text-primary">
                 <Link href={jump.href}>
                   <jump.icon className="h-3 w-3" />

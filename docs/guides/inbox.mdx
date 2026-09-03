@@ -20,7 +20,7 @@ Seven kinds of items get written through to `inbox_items` the moment their sourc
 | Kind | When it's created | Resolves via |
 |------|-------------------|--------------|
 | `waitpoint` | A routine hits a `wait` step of `kind: approval` (Harbormaster gate) | Approve / Deny — calls `/api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve` |
-| `escalation` | An agent or sub-task calls `/escalate` on the sidecar, or `internal/api/escalation_handler.go` records one | Mark resolved (decision is recorded in the escalation row separately) |
+| `escalation` | An agent or sub-task calls `/escalate` on the sidecar, or `internal/api/escalation_handler.go` records one. The payload says **what is being asked for**: `escalation_type` (`TEXT`, `LINK`, `CREDENTIAL`), `link_url` for a LINK (the https address the agent wants opened) and `credential_name` for a CREDENTIAL proposal — the name only, never the value. | Mark resolved (decision is recorded in the escalation row separately) |
 | `failed_run` | A `pipeline_run` reaches the `failed` terminal state | Retry (re-fires the routine with the same inputs) or Cancel |
 | `memory_consolidation` | The consolidator distils journal entries into candidate rules, or Keeper's memory-health sweep suggests one | **Accept** / **Reject** — `/api/v1/consolidate/proposed/{id}/approve\|reject`. OWNER/ADMIN only, so the row is addressed to `ADMIN`. |
 | `schedule_missed` | A cron schedule was overdue and dropped or deferred occurrences per its `catchup_policy` | **Run now** — fires the schedule out of cycle (`POST /api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}/run`, the same call as `crewship routine schedules now`) — or Dismiss. |
@@ -87,7 +87,17 @@ The detail panel's action row is what the source-of-truth call hangs off:
 
 When a row is resolved, the detail panel dims, the action row replaces itself with a "Resolved Xm ago · approved" line (or "Archived Xm ago · Restore" for archived rows), and the row moves to the **Archived** tab.
 
-## Readability & safety
+## The /inbox-v2 page
+
+The redesigned inbox (the **Inbox** entry in the rail; `/inbox` above is the older surface) follows the UI contract in `docs/ux/README.md` and the audit in `docs/ux/audit-conversations.md`:
+
+- **A page header** like every other page: Inbox · "94 need you · 0 updates · 9 decided" · a **Live** pill only while the realtime socket is connected · **History** · **Decide next**, which opens the oldest item waiting on you.
+- **A row is a decision, not a log line.** A kind pill (Question · Link · Credential · Hire · Approval · Failed run · Missed run · Paused schedule · Memory proposal · Reply · Issue), the question without the server's "Agent escalation:" prefix, the crew by name and colour, the agent by name, the age — or the expiry, in red inside the hour — and a verb: **Answer**, **Grant**, **Review**, **Approve**, **Retry**, **Run now**, **Re-enable**. In History the pill is the outcome (Approved, Rejected, Expired, Archived).
+- **The reading pane is never blank.** With nothing open it carries the triage: how many are waiting and how many expire today, the approvals, the crews asking (click one to narrow the list), what is live, the Updates line, and the last five decisions with their outcomes. With zero items it is the same card in its zero form, saying what lands here and linking to Routines and Crews.
+- **The detail names things.** The identity strip is the agent (face, name, role — a link to the agent), the crew (dot, name — a link), the kind as a pill and the arrival time. There are no cuids and no field captions; the identifiers become a **Where this came from** row of links: the chat the escalation was raised in, the run it paused, the issue, the routine, the crew. A **LINK** escalation shows **What you are approving** — the https address, its host and an **Open link** button. A credential proposal shows the credential's name. Card headings say what is asked: "Question from an agent", "A link to open", "Credential request". Who may decide reads "An owner or admin decides this", never a role enum.
+- **A staged hire has Deny.** The hire lands as a waitpoint here and as a row in the approvals queue; the inbox finds the queue twin (its payload names the inbox item) and wires its deny to the card, next to **Approve hire** and **Open crew**.
+- **Empty columns say what lands there** and link to where it comes from; a filtered column that matches nothing offers **Clear**.
+
 
 The inbox is the one surface that aggregates messages from every agent, routine, and curator — so it's also where raw machine output and leaked secrets would otherwise pile up. Several guards keep it human-readable and safe:
 
@@ -136,7 +146,7 @@ The Inbox has full CLI parity — everything the web surface exposes is scriptab
 | Command | What it does |
 |---------|--------------|
 | `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind`, `--limit` (defaults to 50; the server caps at 500), `--format json\|yaml\|quiet`. JSON carries `payload`, `sender_type`, agent-sender `avatar_seed` + `avatar_style`, and — so a script can see who a row is addressed to and who closed it — `target_role`, `resolved_by_user_id` and `resolved_at`. |
-| `crewship inbox get <id>` | Show one item with its full markdown body **and** the structured Context (payload) — the read counterpart of the web detail pane. `--format json` for scripting. |
+| `crewship inbox get <id>` | Show one item with its full markdown body **and** the structured Context (payload) — the read counterpart of the web detail pane. A LINK escalation prints its `link` and a credential proposal its `credential` on a labelled line above the body, so the fact that decides the verdict is not buried in the Context dump. `--format json` for scripting. |
 | `crewship inbox read <id>` | Mark an item as read. |
 | `crewship inbox unread <id>` | Flip back to unread (also the way to **restore** an archived item). |
 | `crewship inbox resolve <id>` | Mark resolved. Optional `--action approved\|denied\|retried\|cancelled\|acknowledged\|dismissed` to record the decision shape. |

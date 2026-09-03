@@ -3,14 +3,17 @@
 import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
-import { ShieldX } from "lucide-react"
+import { History, Inbox, ListChecks, ShieldX } from "lucide-react"
 import { toast } from "sonner"
 
 import type { WorkspaceRole } from "@/components/features/inbox/inbox-derive"
 import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/ui/status-pill"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { useApprovals, decideApproval } from "@/hooks/use-approvals"
 import { useInbox, useInboxItem } from "@/hooks/use-inbox"
+import { useRealtimeStatusSafe } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import { inboxBulk } from "@/lib/api/inbox"
@@ -25,7 +28,46 @@ import {
 import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
-import type { InboxV2Confirmation, InboxV2Entry, InboxV2View } from "./inbox-v2-types"
+import type {
+  InboxAgentRef, InboxCrewRef, InboxLookup, InboxV2Confirmation, InboxV2Entry, InboxV2View,
+} from "./inbox-v2-types"
+
+/**
+ * The crews and agents this workspace has, keyed the way rows name them.
+ *
+ * Rows carry a crew id and an agent slug; the page fetches each list once so
+ * every row and the reading pane can say "Ops · Riley" with a colour and a
+ * face. Both lists are the same endpoints the crews page reads; the setup
+ * crew's agent is excluded by the server.
+ */
+function useInboxLookup(workspaceId: string | null): InboxLookup {
+  const crews = useQuery<InboxCrewRef[]>({
+    queryKey: ["inbox-v2-crews", workspaceId ?? ""],
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId!)}&limit=500`, { signal })
+      if (!res.ok) throw new Error(`crews: ${res.status}`)
+      const rows = (await res.json()) as { id: string; name: string; slug: string; color?: string | null }[]
+      return (Array.isArray(rows) ? rows : []).map((c) => ({ id: c.id, name: c.name, slug: c.slug, color: c.color ?? null }))
+    },
+    enabled: Boolean(workspaceId),
+    staleTime: 60_000,
+  })
+  const agents = useQuery<InboxAgentRef[]>({
+    queryKey: ["inbox-v2-agents", workspaceId ?? ""],
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId!)}&limit=500`, { signal })
+      if (!res.ok) throw new Error(`agents: ${res.status}`)
+      const rows = (await res.json()) as InboxAgentRef[]
+      return Array.isArray(rows) ? rows : []
+    },
+    enabled: Boolean(workspaceId),
+    staleTime: 60_000,
+  })
+  return useMemo(() => ({
+    crewById: new Map((crews.data ?? []).map((c) => [c.id, c])),
+    agentBySlug: new Map((agents.data ?? []).map((a) => [a.slug, a])),
+  }), [crews.data, agents.data])
+}
 
 export function InboxV2() {
   const { workspaceId, role } = useWorkspace()
@@ -42,6 +84,9 @@ export function InboxV2() {
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
   const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch })
   const [collapsed, setCollapsed] = useState(false)
+  const lookup = useInboxLookup(workspaceId)
+  const wsStatus = useRealtimeStatusSafe()
+  const live = wsStatus === "connected"
 
   useInboxV2DeepLink(requestedID, requestedSearch, setSelectedKey, setFilters)
 
@@ -126,6 +171,13 @@ export function InboxV2() {
   const selectionMissing = Boolean(selectedKey) && !selected && feedsSettled
   const selectedInboxID = selected?.source === "inbox" ? selected.inboxItem?.id : null
   const detailedInbox = useInboxItem(workspaceId, selectedInboxID)
+  // A staged hire is one decision in two places: this waitpoint and a row in
+  // the approvals queue that carries `inbox_item_id`. The queue row is the one
+  // with a deny, so the twin is found here and its deny handed to the card.
+  const hireTwin = useMemo(() => {
+    if (!selectedInboxID) return null
+    return approvals.rows.find((row) => row.payload?.inbox_item_id === selectedInboxID && row.status === "pending") ?? null
+  }, [approvals.rows, selectedInboxID])
 
   const sourceState = sourceHealth({
     inboxError: active.error || resolved.error,
@@ -203,6 +255,19 @@ export function InboxV2() {
     await refreshAll()
   }
 
+  async function denyHire() {
+    if (!hireTwin) return
+    await decideApproval(hireTwin.id, "denied", "Denied from inbox", workspaceId)
+    approvals.patchRow(hireTwin.id, { status: "denied", decided_at: new Date().toISOString() })
+    await refreshAll()
+  }
+
+  /** The oldest thing waiting: the SubBar's primary action opens it. */
+  const next = useMemo(
+    () => [...feeds.action].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))[0] ?? null,
+    [feeds.action],
+  )
+
   function openEntry(entry: InboxV2Entry) {
     setSelectedKey(entry.key)
     setConfirmation(null)
@@ -216,7 +281,33 @@ export function InboxV2() {
   }
 
   return (
-    <div className="relative flex h-[calc(100vh-3rem)] min-h-0 overflow-hidden bg-background">
+    <div className="relative flex h-[calc(100vh-3rem)] min-h-0 flex-col overflow-hidden bg-background">
+      {/* The page header every other page has (README §2): what this is, the
+          counts, whether it is live, and the one primary action. The top bar
+          used to read only "Crewship" on this route. */}
+      <SubBar
+        icon={Inbox}
+        title="Inbox"
+        description={`${feeds.action.length} need you · ${feeds.updates.length} updates · ${feeds.history.length} decided`}
+        meta={<StatusPill tone={live ? "success" : "muted"} label={live ? "Live" : "Not live"} live={live} className="ml-1 hidden sm:inline-flex" />}
+        ariaLabel="Inbox"
+        actions={
+          <>
+            <SubBarSecondary icon={History} onClick={() => { setView("history"); setSelectedKey(null); setConfirmation(null) }}>
+              History
+            </SubBarSecondary>
+            <SubBarPrimary
+              icon={ListChecks}
+              disabled={!next}
+              title={next ? "Open the oldest item waiting on you" : "Nothing is waiting on you"}
+              onClick={() => { if (next) { setView("action"); openEntry(next) } }}
+            >
+              Decide next
+            </SubBarPrimary>
+          </>
+        }
+      />
+    <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {/* Same shell as routines-layout: a collapsible aside, w-9 when shut.
           The 190px view rail is gone — the views are a facet section inside
           this one column, the way Routines carries its status buckets. */}
@@ -247,6 +338,7 @@ export function InboxV2() {
             onOpen={openEntry}
             onMarkAllRead={view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
             onToggleCollapse={() => setCollapsed(true)}
+            lookup={lookup}
           />
         )}
       </aside>
@@ -285,8 +377,23 @@ export function InboxV2() {
           onInboxRefresh={async (item, action) => sourceRefresh(inboxEntry(item), action)}
           onApprovalDecide={approvalDecide}
           onArchiveGroup={archiveGroup}
+          lookup={lookup}
+          onDenyHire={hireTwin ? denyHire : undefined}
+          triage={{
+            action: feeds.action,
+            updates: feeds.updates,
+            history: feeds.history,
+            live,
+            onOpen: (entry) => {
+              const holds = feeds.history.includes(entry) ? "history" : feeds.updates.includes(entry) ? "updates" : "action"
+              setView(holds)
+              openEntry(entry)
+            },
+            onCrew: (crewName) => setFilters({ ...filters, search: crewName }),
+          }}
         />
       </main>
+    </div>
     </div>
   )
 }

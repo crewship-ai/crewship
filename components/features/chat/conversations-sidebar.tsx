@@ -31,7 +31,7 @@ import {
   type ChatKind,
   type ChatScope,
 } from "./chat-kind"
-import type { ChatTreeAgent, ChatTreeThread } from "./chat-tree-data"
+import { foldsFor, type ChatTreeAgent, type ChatTreeThread } from "./chat-tree-data"
 
 /**
  * The left column, built on the shared sidebar-kit primitives so it reads as
@@ -293,6 +293,10 @@ interface Props {
   onScopeChange: (scope: ChatScope) => void
   /** Per-kind totals from the fan-out, or null when the server did not say. */
   kindCounts?: Record<string, number> | null
+  /** Agent id → total chats of this scope on the server; the fold reads it. */
+  totalsByAgent?: Record<string, number>
+  /** Fetch every chat of this scope for one agent (the fold's "Show all"). */
+  onShowAll?: (agentId: string) => Promise<void>
   /**
    * Why the roster is missing, or null when it is not.
    *
@@ -334,6 +338,8 @@ export function ConversationsSidebar({
   scope,
   onScopeChange,
   kindCounts = null,
+  totalsByAgent,
+  onShowAll,
   loadError = null,
   threadErrors,
   threadsLoaded,
@@ -447,6 +453,24 @@ export function ConversationsSidebar({
   }, [activeScope, visible, now])
 
   const nFilters = activeFilterCount(filters)
+
+  // The fold (README §4): the page holds ten per agent, the server says how
+  // many there are, and the difference is a row that says so and fetches
+  // the rest. Without it the column presented ten as everything.
+  const folds = useMemo(() => foldsFor(threadsByAgent, totalsByAgent ?? {}), [threadsByAgent, totalsByAgent])
+  const [loadingAll, setLoadingAll] = useState<Record<string, boolean>>({})
+  const showAll = async (agentId: string) => {
+    if (!onShowAll) return
+    setLoadingAll((m) => ({ ...m, [agentId]: true }))
+    try {
+      await onShowAll(agentId)
+    } finally {
+      setLoadingAll((m) => ({ ...m, [agentId]: false }))
+    }
+  }
+  const foldRows = roster
+    .filter((a) => folds[a.id] > 0)
+    .map((a) => ({ agent: a, more: folds[a.id] }))
 
   return (
     // Width, border and background belong to the WRAPPER, the way
@@ -844,33 +868,78 @@ export function ConversationsSidebar({
                 )
               })}
 
+              {/* What the page did not show: one row per agent with more
+                  conversations on the server than the column holds. */}
+              {!query.trim() && nFilters === 0 && foldRows.length > 0 && (
+                <SidebarSection label="More on the server" count={foldRows.reduce((n, f) => n + f.more, 0)}>
+                  {foldRows.map(({ agent: a, more }) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => void showAll(a.id)}
+                      disabled={!!loadingAll[a.id]}
+                      data-testid="conversations-fold"
+                      className="kit-tap flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-60"
+                    >
+                      <AgentAvatar
+                        seed={a.avatar_seed || a.slug}
+                        style={a.avatar_style}
+                        agentId={a.id}
+                        avatarUrl={a.avatar_url}
+                        alt=""
+                        className="h-4 w-4 rounded-[5px]"
+                      />
+                      <span className="min-w-0 flex-1 truncate">
+                        {more} more with {a.name}
+                      </span>
+                      <span className="shrink-0 text-primary-hover">{loadingAll[a.id] ? "Loading…" : "Show all"}</span>
+                    </button>
+                  ))}
+                </SidebarSection>
+              )}
+
               {/* The roster, demoted to what it is on this screen: a way to
-                  start something, not a thing to browse. */}
+                  start something, not a thing to browse — but a LIST, each
+                  agent a row with a name and a verb, not four unlabeled 16px
+                  avatars and a comma list (docs/ux/audit-conversations.md
+                  P2-14). Six, then the rest behind the picker. */}
               {idle.length > 0 && (
                 <SidebarSection label="Not started yet" count={idle.length}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPicking(true)
-                      setQuery("")
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                  >
-                    <span className="flex">
-                      {idle.slice(0, 4).map((a) => (
-                        <AgentAvatar
-                          key={a.id}
-                          seed={a.avatar_seed || a.slug}
-                          style={a.avatar_style}
-                          agentId={a.id}
-                          avatarUrl={a.avatar_url}
-                          alt=""
-                          className="-mr-1.5 h-4 w-4 rounded-[5px] ring-1 ring-background"
-                        />
-                      ))}
-                    </span>
-                    <span className="ml-2 truncate">{idle.map((a) => a.name).join(", ")}</span>
-                  </button>
+                  {idle.slice(0, 6).map((a) => (
+                    <SidebarRow
+                      key={a.id}
+                      onSelect={() => onStartConversation(a)}
+                      className="items-center"
+                    >
+                      <AgentAvatar
+                        seed={a.avatar_seed || a.slug}
+                        style={a.avatar_style}
+                        agentId={a.id}
+                        avatarUrl={a.avatar_url}
+                        alt=""
+                        className="h-5 w-5 rounded-[6px]"
+                      />
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate">{a.name}</span>
+                        {a.role_title && <span className="truncate text-[10px] text-muted-foreground">{a.role_title}</span>}
+                      </span>
+                      <span className="shrink-0 rounded-md border border-border px-1.5 py-px text-[10px] text-muted-foreground" aria-hidden>
+                        Start
+                      </span>
+                    </SidebarRow>
+                  ))}
+                  {idle.length > 6 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPicking(true)
+                        setQuery("")
+                      }}
+                      className="kit-tap flex w-full items-center px-3 py-1.5 text-left text-[11px] text-primary-hover hover:underline"
+                    >
+                      {idle.length - 6} more agents
+                    </button>
+                  )}
                 </SidebarSection>
               )}
             </>
