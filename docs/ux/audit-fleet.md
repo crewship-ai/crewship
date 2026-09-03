@@ -392,7 +392,7 @@ The only `<Link>` on `/credentials` is the attention row's `/inbox-v2` href
     (`/issues?crew=`, Roster tab, `/routines?crew=`), add Chat (crew lead),
     Journal (`/journal?crew=<slug>`), Pages, Spend to the header meta line, and
     a Credentials section (slots bound to this crew, each "Install"/"Connect").
-11. Agent canvas: crew name as an `<a href="/crews?crew=…">`, "Manage skills"
+11. Agent canvas: crew name as a link to `/crews?crew=<slug>`, "Manage skills"
     footer links to `/skills?agent=<slug>`, Credentials footer links to
     `/credentials?id=<id>`, add a Spend cell (window + sparkline).
 12. Credential detail: every slot and assignment row becomes a link

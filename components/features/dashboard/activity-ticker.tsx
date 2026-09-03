@@ -42,12 +42,13 @@ function clock(iso: string): string {
 export function ActivityTicker({ workspaceId, reloadKey }: { workspaceId: string | null; reloadKey: number }) {
   const reduce = useReducedMotion()
   const { entries, loading, refresh } = useJournalList({ workspaceId, limit: TICKER_LIMIT, maxEntries: TICKER_LIMIT })
-  const first = React.useRef(true)
+  // Refresh on a reloadKey CHANGE only. useJournalList already reloads when
+  // workspaceId changes and hands back a new `refresh` identity; firing again
+  // on that identity raced the first request and could clear a good result.
+  const lastKey = React.useRef(reloadKey)
   React.useEffect(() => {
-    if (first.current) {
-      first.current = false
-      return
-    }
+    if (lastKey.current === reloadKey) return
+    lastKey.current = reloadKey
     void refresh()
   }, [reloadKey, refresh])
 
@@ -66,7 +67,7 @@ export function ActivityTicker({ workspaceId, reloadKey }: { workspaceId: string
             {rows.map((entry) => (
               <motion.li
                 key={entry.id}
-                layout="position"
+                layout={reduce ? false : "position"}
                 initial={reduce ? false : { opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={reduce ? undefined : { opacity: 0 }}

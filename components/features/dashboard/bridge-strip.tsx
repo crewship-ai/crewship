@@ -19,9 +19,10 @@ export interface BridgeData {
   idleAgents: number
   errorAgents: number
   crews: CrewSummary[]
-  /** Metered spend for the window, or null when paymaster has no ledger rows
-   *  (not configured, or a flat-rate subscription that meters nothing). */
-  spendUsd: number | null
+  /** Metered spend for the window; null when paymaster answered with no
+   *  ledger rows (not configured, or a flat-rate subscription that meters
+   *  nothing); undefined while it has not answered or failed. */
+  spendUsd: number | null | undefined
   runsTotal: number
   successPct: number | null
   failed: number
@@ -48,7 +49,7 @@ export function deriveBridge({
 }: {
   agents: AgentSummary[]
   crews: CrewSummary[]
-  spendRows: Array<{ cost_usd: number }> | null
+  spendRows: Array<{ cost_usd: number }> | null | undefined
   kpis: OutcomeKpiData
   attentionCount: number
   attentionKnown: boolean
@@ -57,7 +58,7 @@ export function deriveBridge({
 }): BridgeData {
   const working = agents.filter((a) => a.status === "RUNNING").length
   const errors = agents.filter((a) => a.status === "ERROR").length
-  const spend = spendRows && spendRows.length > 0 ? spendRows.reduce((sum, r) => sum + (r.cost_usd || 0), 0) : null
+  const spend = spendRows === undefined ? undefined : spendRows && spendRows.length > 0 ? spendRows.reduce((sum, r) => sum + (r.cost_usd || 0), 0) : null
   const next = schedules
     .filter((s) => s.enabled && s.next_run_at && new Date(s.next_run_at).getTime() > now)
     .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())[0] ?? null
@@ -121,7 +122,7 @@ export function BridgeStrip({
             {data.workingAgents > 0 ? (
               <><MetricNumber value={data.workingAgents} /> working · {data.idleAgents} idle</>
             ) : (
-              <>{data.idleAgents + data.errorAgents} agents ready</>
+              <>{data.idleAgents} {data.idleAgents === 1 ? "agent" : "agents"} ready</>
             )}
             {data.errorAgents > 0 && <span className="text-label font-medium text-destructive">· {data.errorAgents} error</span>}
           </span>
@@ -136,7 +137,12 @@ export function BridgeStrip({
         </Cell>
 
         <Cell label={`Spend · ${window}`}>
-          {data.spendUsd == null ? (
+          {data.spendUsd === undefined ? (
+            <>
+              <span className="text-[15px] font-semibold tracking-tight text-muted-foreground">—</span>
+              <span className="text-label text-muted-foreground">ledger unavailable</span>
+            </>
+          ) : data.spendUsd === null ? (
             <>
               <span className="text-[15px] font-semibold tracking-tight text-muted-foreground">not metered</span>
               <Link href="/paymaster" className="text-label text-primary-hover hover:underline">Paymaster →</Link>

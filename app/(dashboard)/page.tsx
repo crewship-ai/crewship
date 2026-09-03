@@ -213,9 +213,13 @@ export default function DashboardPage() {
     return new Map(rows.map((row) => [row.crew_id, row.cost_usd]))
   }, [spendQ.data])
 
-  const spendTotal = useMemo(
-    () => (spendByCrew ? Array.from(spendByCrew.values()).reduce((sum, v) => sum + v, 0) : null),
-    [spendByCrew],
+  // undefined = the ledger has not answered (pending or failed); null = it
+  // answered with no rows (not metered on this billing mode). The two used to
+  // collapse into "not metered", which is a claim about the billing mode made
+  // while the request was still in flight.
+  const spendTotal = useMemo<number | null | undefined>(
+    () => (spendQ.isPending || spendQ.isError ? undefined : spendByCrew ? Array.from(spendByCrew.values()).reduce((sum, v) => sum + v, 0) : null),
+    [spendByCrew, spendQ.isPending, spendQ.isError],
   )
 
   const runSeries = useMemo(
@@ -233,7 +237,7 @@ export default function DashboardPage() {
     () => deriveBridge({
       agents,
       crews,
-      spendRows: spendQ.data?.rows ?? null,
+      spendRows: spendQ.isPending || spendQ.isError ? undefined : (spendQ.data?.rows ?? null),
       kpis,
       attentionCount: attentionItems.length,
       attentionKnown: attention.inboxKnown,
@@ -348,7 +352,7 @@ export default function DashboardPage() {
             window={reportWindow}
             runSeries={runSeries}
             spendUsd={spendTotal}
-            spendPerRun={spendTotal != null && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
+            spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
           />
         </Appear>
 

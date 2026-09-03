@@ -41,8 +41,11 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 
 Type scale: `text-micro` / `text-label` / `text-body`; mono for ids, times,
 counts. Radii: cards 12px, chips 6px, pills full. Surfaces: `bg-card` on
-`bg-background`, borders `border-border/60`. Dark theme is primary; every
-colour must also read on light (`prefers-color-scheme`).
+`bg-background`, borders `border-border/60`. Dark theme is the one the app runs
+today (`app/layout.tsx` pins `dark`); design for it. Whether light is
+supported is PLAN.md decision D5 — until it is decided, do not spend time on
+light-theme readability, and do not paint colours that would be impossible
+there either.
 
 ## 3. Motion (all under `useReducedMotion`)
 

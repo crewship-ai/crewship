@@ -114,6 +114,9 @@ export function OnboardingCreatedPanel({
       if (r.status !== "fulfilled" || !r.value.ok) return []
       return asArray(await r.value.json().catch(() => null))
     }
+    // The crew count is a fact the wizard gates Launch on: a failed request
+    // must leave the last known count alone rather than report zero.
+    const crewsAnswered = crewsRes.status === "fulfilled" && crewsRes.value.ok
 
     const [crewRows, routineRows, pageRows] = await Promise.all([
       read(crewsRes),
@@ -129,7 +132,7 @@ export function OnboardingCreatedPanel({
           name: str(c, "name") || str(c, "slug"),
           agentCount: num(c, "agent_count", "agentCount", "agents"),
         }))
-    onCrewsFound?.(crews.length)
+    if (crewsAnswered) onCrewsFound?.(crews.length)
     setInv({
       crews,
       routines: routineRows.map((p) => ({

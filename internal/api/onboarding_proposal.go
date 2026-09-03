@@ -453,13 +453,13 @@ func (h *OnboardingProposalHandler) Create(w http.ResponseWriter, r *http.Reques
 		if validCrewIcon(icon) {
 			iconOverride = &icon
 		} else {
-			h.logger.Warn("onboarding proposal: unknown crew icon from setup agent, ignoring", "icon", icon)
+			h.logger.Warn("onboarding proposal: unknown crew icon from setup agent, ignoring", "icon_len", len(icon))
 		}
 	}
 	if color := normaliseCrewColor(req.CrewColor); color != "" {
 		colorOverride = &color
 	} else if strings.TrimSpace(req.CrewColor) != "" {
-		h.logger.Warn("onboarding proposal: unrecognised crew colour from setup agent, ignoring", "color", req.CrewColor)
+		h.logger.Warn("onboarding proposal: unrecognised crew colour from setup agent, ignoring", "color_len", len(strings.TrimSpace(req.CrewColor)))
 	}
 
 	payload, err := planOnboardingProposal(r.Context(), h.db, wsID, req.TemplateSlug, req.CrewName, req.CrewSlug, overrides, req.Agents, req.Tools)

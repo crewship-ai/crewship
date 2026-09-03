@@ -94,11 +94,44 @@ func parseModelCatalog(raw []byte) (modelCatalogFile, error) {
 		normalised[k] = p
 	}
 	c.Providers = normalised
+	adapters := make(map[string]catalogAdapter, len(c.Adapters))
 	for key, a := range c.Adapters {
-		if strings.TrimSpace(a.Default) == "" {
-			return c, fmt.Errorf("adapter %q: no default model", key)
+		k := strings.ToUpper(strings.TrimSpace(key))
+		if k == "" {
+			return c, fmt.Errorf("adapter with empty key")
 		}
+		if _, dup := adapters[k]; dup {
+			return c, fmt.Errorf("adapter %q: duplicate key", k)
+		}
+		a.Provider = strings.ToLower(strings.TrimSpace(a.Provider))
+		a.Default = strings.TrimSpace(a.Default)
+		if a.Provider == "" {
+			return c, fmt.Errorf("adapter %q: no provider", k)
+		}
+		if a.Default == "" {
+			return c, fmt.Errorf("adapter %q: no default model", k)
+		}
+		// When the adapter's provider is one the server curates, the default
+		// must be one of that provider's own rows — unless it is a
+		// provider-prefixed id ("anthropic/claude-sonnet-5"), which is the
+		// adapter's own vocabulary (OpenCode). Adapters on providers the server
+		// does not curate (Cursor, Factory) carry their own ids and are not
+		// checked here; validateCrewModel passes those through unchanged.
+		if p, ok := normalised[a.Provider]; ok && !p.LiveOnly && !strings.Contains(a.Default, "/") {
+			found := false
+			for _, m := range p.Models {
+				if m.ID == a.Default {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return c, fmt.Errorf("adapter %q: default %q is not a curated %s model", k, a.Default, a.Provider)
+			}
+		}
+		adapters[k] = a
 	}
+	c.Adapters = adapters
 	return c, nil
 }
 

@@ -100,6 +100,9 @@ func (h *InternalHandler) WorkspaceOverview(w http.ResponseWriter, r *http.Reque
 		index[c.ID] = len(out.Crews)
 		out.Crews = append(out.Crews, c)
 	}
+	if err := crewRows.Err(); err != nil {
+		h.logger.Warn("workspace overview: iterate crewRows", "error", err)
+	}
 	crewRows.Close()
 
 	agentRows, err := h.db.QueryContext(ctx, `
@@ -121,6 +124,9 @@ func (h *InternalHandler) WorkspaceOverview(w http.ResponseWriter, r *http.Reque
 			out.Crews[i].Agents = append(out.Crews[i].Agents, a)
 		}
 	}
+	if err := agentRows.Err(); err != nil {
+		h.logger.Warn("workspace overview: iterate agentRows", "error", err)
+	}
 	agentRows.Close()
 
 	routineRows, err := h.db.QueryContext(ctx, `
@@ -136,6 +142,9 @@ func (h *InternalHandler) WorkspaceOverview(w http.ResponseWriter, r *http.Reque
 			out.Routines = append(out.Routines, p)
 		}
 	}
+	if err := routineRows.Err(); err != nil {
+		h.logger.Warn("workspace overview: iterate routineRows", "error", err)
+	}
 	routineRows.Close()
 
 	pageRows, err := h.db.QueryContext(ctx, `SELECT name, slug FROM pages WHERE workspace_id = ? ORDER BY name`, wsID)
@@ -148,6 +157,9 @@ func (h *InternalHandler) WorkspaceOverview(w http.ResponseWriter, r *http.Reque
 		if err := pageRows.Scan(&p.Name, &p.Slug); err == nil {
 			out.Pages = append(out.Pages, p)
 		}
+	}
+	if err := pageRows.Err(); err != nil {
+		h.logger.Warn("workspace overview: iterate pageRows", "error", err)
 	}
 	pageRows.Close()
 
@@ -169,6 +181,9 @@ func (h *InternalHandler) WorkspaceOverview(w http.ResponseWriter, r *http.Reque
 		if err := credRows.Scan(&c.Name, &c.Provider, &c.Status); err == nil {
 			out.Credentials = append(out.Credentials, c)
 		}
+	}
+	if err := credRows.Err(); err != nil {
+		h.logger.Warn("workspace overview: iterate credRows", "error", err)
 	}
 	credRows.Close()
 

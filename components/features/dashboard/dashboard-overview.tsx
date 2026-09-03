@@ -521,8 +521,9 @@ export function OutcomeKpis({
   window: DashboardWindow
   /** Runs per bucket across all crews — the Completed tile's sparkline. */
   runSeries?: number[]
-  /** Metered spend for the window, null when paymaster has no ledger rows. */
-  spendUsd?: number | null
+  /** Metered spend for the window; null when paymaster answered with no
+   *  ledger rows; undefined while pending or after a failed fetch. */
+  spendUsd?: number | null | undefined
   spendPerRun?: number | null
 }) {
   const reduce = useReducedMotion()
@@ -571,8 +572,8 @@ export function OutcomeKpis({
       label: "Spend",
       icon: Gauge,
       tone: "text-warn bg-warn/10 border-warn/20",
-      value: spendUsd == null ? "—" : `$${spendUsd.toFixed(2)}`,
-      detail: spendUsd == null ? "not metered on this billing mode" : spendPerRun != null ? `ledger · $${spendPerRun.toFixed(3)} per run` : "metered ledger",
+      value: typeof spendUsd === "number" ? `$${spendUsd.toFixed(2)}` : "—",
+      detail: spendUsd === undefined ? "ledger unavailable" : spendUsd === null ? "not metered on this billing mode" : spendPerRun != null ? `ledger · $${spendPerRun.toFixed(3)} per run` : "metered ledger",
     },
   ]
 

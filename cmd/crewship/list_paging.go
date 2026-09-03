@@ -19,6 +19,8 @@ import (
 // 1 015.
 
 // addListPagingFlags registers --limit and --offset on a list command.
+//
+//nolint:unused // adopted by the list commands landing in #2302 (issues, missions) and #2303 (crews, agents, credentials)
 func addListPagingFlags(flags interface {
 	Int(name string, value int, usage string) *int
 }, defaultLimit int) {

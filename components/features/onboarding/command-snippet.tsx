@@ -15,15 +15,16 @@ function legacyCopy(text: string, onSuccess: () => void) {
   const ta = document.createElement("textarea")
   ta.value = text
   ta.setAttribute("readonly", "")
-  ta.style.position = "fixed"
-  ta.style.top = "-1000px"
-  ta.style.opacity = "0"
+  ta.setAttribute("aria-hidden", "true")
+  ta.className = "fixed -top-[1000px] left-0 opacity-0"
   document.body.appendChild(ta)
   ta.select()
   ta.setSelectionRange(0, text.length)
   try {
-    document.execCommand("copy")
-    onSuccess()
+    // execCommand answers false when the copy did not happen; a "Copied"
+    // tick over a clipboard that still holds the old value is the one
+    // outcome this fallback must not produce.
+    if (document.execCommand("copy")) onSuccess()
   } catch {
     // No clipboard at all — silent. The text is visible on screen so the
     // user can still select-and-copy by hand.

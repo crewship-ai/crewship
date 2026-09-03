@@ -25,7 +25,7 @@ func TestModelCatalog_CuratedIDsExistInSnapshot(t *testing.T) {
 				known[m.ID] = true
 			}
 			if len(known) == 0 {
-				t.Skipf("snapshot carries no models for %q — the trim changed; widen it or drop this provider here", snapshotID)
+				t.Fatalf("snapshot carries no models for %q — the models.dev trim no longer covers a curated provider", snapshotID)
 			}
 			for _, m := range CuratedModels(provider) {
 				if !known[m.ID] {

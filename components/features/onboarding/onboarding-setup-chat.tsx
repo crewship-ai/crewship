@@ -89,10 +89,11 @@ interface StarterPrompt {
   prompt: string
 }
 
-const STARTER_PROMPTS_BY_LANGUAGE: Record<string, { greeting: string; lead: string; prompts: StarterPrompt[] }> = {
+const STARTER_PROMPTS_BY_LANGUAGE: Record<string, { greeting: string; lead: string; footer: string; prompts: StarterPrompt[] }> = {
   English: {
     greeting: "Hi, I'm Crewship Guide.",
     lead: "Tell me what you'd like to hand off and I'll propose a crew of agents for it. Nothing is created until you click Create.",
+    footer: "Or describe it in your own words below.",
     prompts: [
       { title: "Watch a codebase", prompt: "I want a crew that reviews pull requests in my GitHub repo and flags risky changes." },
       { title: "Scrape and summarise", prompt: "I need a crew that collects listings from a website every morning and sends me a summary." },
@@ -103,6 +104,7 @@ const STARTER_PROMPTS_BY_LANGUAGE: Record<string, { greeting: string; lead: stri
   Czech: {
     greeting: "Ahoj, jsem Crewship Guide.",
     lead: "Napište mi, co chcete delegovat, a navrhnu vám pro to tým agentů. Nic se nevytvoří, dokud nekliknete na Create.",
+    footer: "Nebo to popište vlastními slovy níže.",
     prompts: [
       { title: "Hlídat kód", prompt: "Chci tým, který kontroluje pull requesty v mém GitHub repozitáři a upozorní na riskantní změny." },
       { title: "Stahovat a shrnovat", prompt: "Potřebuji tým, který každé ráno stáhne inzeráty z webu a pošle mi souhrn." },
@@ -740,9 +742,7 @@ function ConnectedSetupChat({
                 </motion.button>
               ))}
             </div>
-            <p className="mt-3 text-center text-[11px] text-muted-foreground">
-              Or describe it in your own words below.
-            </p>
+            <p className="mt-3 text-center text-[11px] text-muted-foreground">{starters.footer}</p>
           </div>
         )}
         {historyWarning && (

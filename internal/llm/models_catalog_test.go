@@ -53,11 +53,14 @@ func TestModelCatalog_OllamaIsLiveOnly(t *testing.T) {
 
 func TestModelCatalog_RejectsBrokenFile(t *testing.T) {
 	cases := map[string]string{
-		"not json":          `{`,
-		"no providers":      `{"providers":{}}`,
-		"empty id":          `{"providers":{"x":{"models":[{"id":""}]}}}`,
-		"duplicate id":      `{"providers":{"x":{"models":[{"id":"a"},{"id":"a"}]}}}`,
-		"default not a row": `{"providers":{"x":{"default":"b","models":[{"id":"a"}]}}}`,
+		"not json":              `{`,
+		"no providers":          `{"providers":{}}`,
+		"empty id":              `{"providers":{"x":{"models":[{"id":""}]}}}`,
+		"duplicate id":          `{"providers":{"x":{"models":[{"id":"a"},{"id":"a"}]}}}`,
+		"default not a row":     `{"providers":{"x":{"default":"b","models":[{"id":"a"}]}}}`,
+		"adapter no provider":   `{"providers":{"x":{"models":[{"id":"a"}]}},"adapters":{"A":{"default":"a"}}}`,
+		"adapter no default":    `{"providers":{"x":{"models":[{"id":"a"}]}},"adapters":{"A":{"provider":"x"}}}`,
+		"adapter default drift": `{"providers":{"x":{"models":[{"id":"a"}]}},"adapters":{"A":{"provider":"x","default":"zzz"}}}`,
 	}
 	for name, raw := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -86,5 +89,15 @@ func TestModelCatalog_AdaptersAndAux(t *testing.T) {
 	}
 	if HousekeepingModel("nope") != "" {
 		t.Error("unknown provider must answer empty")
+	}
+}
+
+func TestModelCatalog_AdapterKeysAreNormalised(t *testing.T) {
+	c, err := parseModelCatalog([]byte(`{"providers":{"x":{"models":[{"id":"a"}]}},"adapters":{" claude_code ":{"provider":"X","default":"a"}}}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := c.Adapters["CLAUDE_CODE"]; !ok {
+		t.Fatalf("adapter key not normalised: %v", c.Adapters)
 	}
 }

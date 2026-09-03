@@ -19,7 +19,7 @@ Assigned clusters (one agent per row; the rows share little code and much data):
 | D · Pages, settings, admin + integration | `/pages`, `/settings`, `/admin` and the review of A–C | the loosest coupling, plus someone has to keep the whole consistent |
 
 Do not edit files outside your cluster except `components/ui/*` shared
-primitives — and when you add or change one, say so in `docs/ux/CHANGELOG.md`
+primitives — and when you add or change one, say so in `docs/ux/PRIMITIVES.md`
 in one line, so the others pick it up.
 
 ## Working rules (non-negotiable)
@@ -62,7 +62,7 @@ impression.
    (§5), inconsistencies (§2), each with a screenshot reference.
 2. The fix, in the contract's order: dead ends → cross-links → anatomy → motion.
 3. Before/after screenshots at three widths in the PR description.
-4. One line per shared primitive you touched, in `docs/ux/CHANGELOG.md`.
+4. One line per shared primitive you touched, in `docs/ux/PRIMITIVES.md`.
 
 ## Known findings to start from (2026-09-03, demo data)
 
@@ -122,6 +122,6 @@ each other's work or knock dev3 over.
    rate-limited, review yourself to the same standard and say so. Never merge
    on red CI; the integrator merges.
 9. Docs ship with the change: update `docs/guides/<area>.mdx` and add one line
-   per shared primitive you touched to `docs/ux/CHANGELOG.md`.
+   per shared primitive you touched to `docs/ux/PRIMITIVES.md`.
 10. Report to crewship-3-90 at: backend done, UI P1 done, PR open. Do not ask
     questions the contract already answers; note assumptions in the PR.
