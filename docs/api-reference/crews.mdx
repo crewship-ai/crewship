@@ -71,7 +71,21 @@ GET /api/v1/crews?workspace_id={workspaceId}
 ```
 
 Returns up to 100 crews in the workspace, ordered by `created_at DESC, id DESC`.
-Use `limit` (maximum 500) and `offset` for pagination.
+Use `limit` (maximum 500) and `offset` for pagination; the onboarding setup
+crew is never listed and never counted.
+
+**Paging (every windowed list on this API):** the body stays a bare array; the
+window is described in three response headers so no consumer breaks:
+
+| Header | Meaning |
+|---|---|
+| `X-Total-Count` | rows matching the filter, before `limit`/`offset` |
+| `X-Limit` | the limit actually applied (after clamping) |
+| `X-Offset` | the offset actually applied |
+
+`q` is a case-insensitive substring search on the server (name and slug);
+it narrows the total as well as the page. The web app and the CLI read the
+headers to say "showing 1–100 of 103" instead of calling a page the whole.
 
 **Auth:** Session or CLI token + workspace membership
 
