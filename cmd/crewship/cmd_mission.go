@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -33,6 +34,16 @@ var missionListCmd = &cobra.Command{
 			}
 			path = "/api/v1/crews/" + crewID + "/missions"
 		}
+		params := url.Values{}
+		if q, _ := cmd.Flags().GetString("search"); q != "" {
+			params.Set("q", q)
+		}
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		setListPaging(params, limit, offset)
+		if enc := params.Encode(); enc != "" {
+			path += "?" + enc
+		}
 
 		resp, err := client.Get(path)
 		if err != nil {
@@ -41,6 +52,7 @@ var missionListCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		meta := readListMeta(resp)
 
 		var missions []struct {
 			ID        string `json:"id"`
@@ -58,6 +70,7 @@ var missionListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
+		defer printListFooter(f, meta, len(missions))
 		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "TASKS", "CREATED"}
 		var rows [][]string
 		for _, m := range missions {
@@ -225,6 +238,8 @@ func findLeadAgent(client *cli.Client, crewID string) (string, error) {
 
 func init() {
 	missionListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
+	missionListCmd.Flags().String("search", "", "Search missions by title or identifier (server-side)")
+	addListPagingFlags(missionListCmd.Flags(), 20)
 
 	missionCreateCmd.Flags().String("title", "", "Mission title (required)")
 	missionCreateCmd.Flags().String("description", "", "Mission description")

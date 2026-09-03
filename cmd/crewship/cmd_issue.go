@@ -218,11 +218,11 @@ var issueListCmd = &cobra.Command{
 			params.Set("label", v)
 		}
 		if v, _ := flags.GetString("search"); v != "" {
-			params.Set("search", v)
+			params.Set("q", v)
 		}
-		if v, _ := flags.GetInt("limit"); v > 0 {
-			params.Set("limit", fmt.Sprintf("%d", v))
-		}
+		limit, _ := flags.GetInt("limit")
+		offset, _ := flags.GetInt("offset")
+		setListPaging(params, limit, offset)
 
 		path := "/api/v1/issues"
 		if q := params.Encode(); q != "" {
@@ -237,12 +237,14 @@ var issueListCmd = &cobra.Command{
 			return err
 		}
 
+		meta := readListMeta(resp)
 		var issues []issueItem
 		if err := cli.ReadJSON(resp, &issues); err != nil {
 			return err
 		}
 
 		f := newFormatter()
+		defer printListFooter(f, meta, len(issues))
 		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "CREATOR", "CREW", "LABELS", "UPDATED"}
 		var rows [][]string
 		for _, iss := range issues {
@@ -374,8 +376,8 @@ func init() {
 	issueListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee ID")
 	issueListCmd.Flags().String("label", "", "Filter by label name")
-	issueListCmd.Flags().String("search", "", "Search issues by title or description")
-	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
+	issueListCmd.Flags().String("search", "", "Search issues by title or identifier (server-side)")
+	addListPagingFlags(issueListCmd.Flags(), 50)
 
 	// issue create flags
 	issueCreateCmd.Flags().String("crew", "", "Crew slug or ID (required)")
