@@ -8,6 +8,7 @@ import { type EntryGroup } from "@/lib/journal-style"
 import { annotateEntries, filterEntries, type AnnotatedEntry } from "@/lib/journal-perf"
 import { buildMatcher, parseStructuredQuery } from "@/lib/log-search"
 import { useUserPreference } from "@/hooks/use-user-preference"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { LogsToolbar, type SeverityFilter, type ScopeControl } from "./logs-toolbar"
 import { LogsTypeChips } from "./logs-type-chips"
 import { LogsHistogram } from "./logs-histogram"
@@ -182,6 +183,7 @@ export function LogsPanel({
   onSelectCrew,
   onSelectMission,
 }: LogsPanelProps) {
+  const isMobile = useIsMobile()
   const [internalQuery, setInternalQuery] = useState("")
   const query = queryProp ?? internalQuery
   const setQuery = useCallback((next: string) => {
@@ -448,9 +450,13 @@ export function LogsPanel({
           </motion.div>
         )}
       </AnimatePresence>
+      {/* On a phone the 280px rail took the timeline down to timestamps;
+          the rail is a desktop reading aid and does not render below md. */}
       <div
         className="flex-1 min-h-0 grid"
-        style={{ gridTemplateColumns: statsCollapsed ? "minmax(0,1fr) 28px" : "minmax(0,1fr) 280px" }}
+        style={{
+          gridTemplateColumns: isMobile ? "minmax(0,1fr)" : statsCollapsed ? "minmax(0,1fr) 28px" : "minmax(0,1fr) 280px",
+        }}
       >
         <div className="border-r border-border/50 min-h-0 overflow-hidden flex flex-col">
           {visibleCount === 0 ? (
@@ -487,7 +493,7 @@ export function LogsPanel({
             </>
           )}
         </div>
-        {statsCollapsed ? (
+        {isMobile ? null : statsCollapsed ? (
           <button
             type="button"
             onClick={() => setStatsCollapsed(false)}
