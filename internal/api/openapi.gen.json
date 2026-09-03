@@ -21533,6 +21533,14 @@
             }
           },
           {
+            "in": "query",
+            "name": "include_setup",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
