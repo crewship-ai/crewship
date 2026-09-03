@@ -39,6 +39,7 @@ import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import type { Mission } from "@/lib/types/mission"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
+import { Sparkline } from "@/components/features/dashboard/sparkline"
 import { cn } from "@/lib/utils"
 import { formatDuration, formatRelativeTime } from "@/lib/time"
 
@@ -185,6 +186,15 @@ export function capacitySignal(
   return { value: "Available", tone: "text-success" }
 }
 
+/** The verb on each attention row — what clicking it lets the person do. */
+const ATTENTION_ACTION: Record<string, string> = {
+  approvals: "Review",
+  failures: "Inspect",
+  capacity: "Details",
+  credentials: "Install",
+  schedules: "Review",
+}
+
 /** How many rows the strip renders as cards before it starts summarising. */
 const ATTENTION_VISIBLE = 3
 
@@ -266,13 +276,13 @@ export function AttentionStrip({
               return (
                 <motion.div
                   key={item.id}
-                  initial={reduce ? false : { opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  initial={reduce ? false : { opacity: 0, y: 8, backgroundColor: "rgba(30,123,254,0.16)" }}
+                  animate={{ opacity: 1, y: 0, backgroundColor: "rgba(30,123,254,0)" }}
                   exit={reduce ? undefined : { opacity: 0, y: -8 }}
-                  transition={{ duration: 0.28, delay: reduce ? 0 : index * 0.06 }}
+                  transition={{ duration: 0.28, delay: reduce ? 0 : index * 0.06, backgroundColor: { duration: 2.2, ease: "easeOut" } }}
                 >
                   <MotionLink href={item.href} className="h-full">
-                    <div className="group flex h-full items-center gap-3 px-4 py-4 transition-colors hover:bg-foreground/[0.025]">
+                    <div className="group flex h-full items-center gap-3 px-4 py-3.5 transition-colors hover:bg-foreground/[0.025]">
                       <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", ATTENTION_TONE[item.tone])}>
                         <Icon className="h-4 w-4" />
                       </span>
@@ -280,7 +290,11 @@ export function AttentionStrip({
                         <span className="block truncate text-body font-semibold text-foreground/90">{item.label}</span>
                         <span className="mt-0.5 block truncate text-label text-muted-foreground">{item.detail}</span>
                       </span>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground-soft transition-colors group-hover:text-foreground" />
+                      {/* A verb, not a chevron: the row exists so the person
+                          can act, and the label says what acting means. */}
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/70 px-2.5 py-1 text-label font-medium text-foreground/90 transition-colors group-hover:border-primary/50 group-hover:text-primary-hover">
+                        {ATTENTION_ACTION[item.id] ?? "Open"} <ChevronRight className="h-3.5 w-3.5" />
+                      </span>
                     </div>
                   </MotionLink>
                 </motion.div>
@@ -336,10 +350,13 @@ export function RunningNow({
   runs,
   agents,
   crews,
+  children,
 }: {
   runs: PipelineRun[]
   agents: AgentSummary[]
   crews: CrewSummary[]
+  /** Rendered under the run list — the activity ticker. */
+  children?: React.ReactNode
 }) {
   const reduce = useReducedMotion()
   const now = useNow(runs.length > 0)
@@ -355,12 +372,12 @@ export function RunningNow({
       className="h-full"
     >
       {runs.length === 0 ? (
-        <EmptyState icon={CheckCircle2} title="Nothing is running" detail="The fleet is ready for its next assignment." />
+        <InlineEmpty icon={CheckCircle2} text="Nothing is running — the fleet is ready for its next assignment." />
       ) : (
         <div className="overflow-x-auto">
           <div className="min-w-[650px]">
-            <div className="grid grid-cols-[minmax(160px,1fr)_minmax(190px,1.4fr)_90px_78px] gap-3 border-b border-border/60 px-2 pb-2 text-label text-muted-foreground">
-              <span>Agent / Crew</span><span>Work</span><span>Elapsed</span><span className="text-right">Action</span>
+            <div className="grid grid-cols-[minmax(160px,1fr)_minmax(190px,1.4fr)_110px_78px] gap-3 border-b border-border/60 px-2 pb-2 text-label text-muted-foreground">
+              <span>Agent / Crew</span><span>Work</span><span>Elapsed · cost</span><span className="text-right">Action</span>
             </div>
             <AnimatePresence initial={false}>
               {runs.slice(0, 5).map((run) => {
@@ -377,7 +394,7 @@ export function RunningNow({
                     transition={{ type: "spring", stiffness: 360, damping: 34 }}
                   >
                     <MotionLink href={`/activity?run=${encodeURIComponent(run.id)}`}>
-                      <div className="group grid grid-cols-[minmax(160px,1fr)_minmax(190px,1.4fr)_90px_78px] items-center gap-3 rounded-md border-b border-border/50 px-2 py-2.5 last:border-0 hover:bg-foreground/[0.025]">
+                      <div className="group grid grid-cols-[minmax(160px,1fr)_minmax(190px,1.4fr)_110px_78px] items-center gap-3 rounded-md border-b border-border/50 px-2 py-2.5 last:border-0 hover:bg-foreground/[0.025]">
                         <span className="flex min-w-0 items-center gap-2.5">
                           <LiveDot tone={waiting ? "warn" : "success"} />
                           <span className="min-w-0">
@@ -397,7 +414,10 @@ export function RunningNow({
                             {waiting ? "Waiting for approval" : run.current_step_id || "Starting…"}
                           </span>
                         </span>
-                        <span className="font-mono text-label tabular-nums text-muted-foreground">{elapsed(run.started_at, now)}</span>
+                        <span className="font-mono text-label tabular-nums text-muted-foreground">
+                          {elapsed(run.started_at, now)}
+                          {run.cost_usd > 0 && <span className="text-muted-foreground-soft"> · ${run.cost_usd.toFixed(2)}</span>}
+                        </span>
                         <span className="inline-flex items-center justify-end gap-1 text-label font-medium text-primary-hover">
                           View <ChevronRight className="h-3.5 w-3.5" />
                         </span>
@@ -410,6 +430,7 @@ export function RunningNow({
           </div>
         </div>
       )}
+      {children}
     </DashboardCard>
   )
 }
@@ -432,7 +453,7 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
       className="h-full"
     >
       {upcoming.length === 0 ? (
-        <EmptyState icon={CalendarClock} title="Nothing scheduled" detail="Add a trigger to a routine to see it here." />
+        <InlineEmpty icon={CalendarClock} text="Nothing scheduled." action={<Link href="/routines" className="text-primary-hover hover:underline">Add a trigger →</Link>} />
       ) : (
         <div className="flex flex-col">
           {upcoming.map((schedule) => (
@@ -450,7 +471,11 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
                 <span className="shrink-0 font-mono text-label tabular-nums text-muted-foreground">
                   {formatRelativeTime(schedule.next_run_at!)}
                 </span>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft group-hover:text-foreground" />
+                <span
+                  title={schedule.last_status ? `last run ${schedule.last_status}` : "never ran"}
+                  className={cn("h-2 w-2 shrink-0 rounded-full", scheduleDotClass(schedule.last_status))}
+                  aria-label={schedule.last_status ? `last run ${schedule.last_status}` : "never ran"}
+                />
               </div>
             </MotionLink>
           ))}
@@ -458,6 +483,16 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
       )}
     </DashboardCard>
   )
+}
+
+/** Pure: the colour of a schedule's "last run" dot. */
+export function scheduleDotClass(lastStatus: string | undefined): string {
+  if (!lastStatus) return "bg-muted-foreground/50"
+  const s = lastStatus.toLowerCase()
+  if (s === "completed" || s === "succeeded" || s === "success" || s === "ok") return "bg-success"
+  if (s === "failed" || s === "error" || s === "timeout") return "bg-destructive"
+  if (s === "running" || s === "queued") return "bg-primary"
+  return "bg-warn"
 }
 
 function MetricNumber({ value }: { value: number }) {
@@ -473,7 +508,21 @@ export interface OutcomeKpiData {
   p95Ms: number
 }
 
-export function OutcomeKpis({ data, window }: { data: OutcomeKpiData; window: DashboardWindow }) {
+export function OutcomeKpis({
+  data,
+  window,
+  runSeries = [],
+  spendUsd = null,
+  spendPerRun = null,
+}: {
+  data: OutcomeKpiData
+  window: DashboardWindow
+  /** Runs per bucket across all crews — the Completed tile's sparkline. */
+  runSeries?: number[]
+  /** Metered spend for the window, null when paymaster has no ledger rows. */
+  spendUsd?: number | null
+  spendPerRun?: number | null
+}) {
   const reduce = useReducedMotion()
   const cards = [
     {
@@ -482,6 +531,7 @@ export function OutcomeKpis({ data, window }: { data: OutcomeKpiData; window: Da
       tone: "text-success bg-success/10 border-success/20",
       value: <MetricNumber value={data.completed} />,
       detail: `successful runs · ${window}`,
+      series: runSeries,
     },
     {
       label: "Success",
@@ -512,12 +562,23 @@ export function OutcomeKpis({ data, window }: { data: OutcomeKpiData; window: Da
       value: data.p95Ms > 0 ? formatDuration(data.p95Ms) : "—",
       detail: data.p95Ms > 0 ? "95% finish within this" : "no duration samples",
     },
+    // The fourth tile the grid always had a slot for. It is the metered
+    // LEDGER, and it says so: on a flat-rate subscription paymaster meters
+    // nothing (#2193), and that case renders "not metered", never "$0.00".
+    {
+      label: "Spend",
+      icon: Gauge,
+      tone: "text-warn bg-warn/10 border-warn/20",
+      value: spendUsd == null ? "—" : `$${spendUsd.toFixed(2)}`,
+      detail: spendUsd == null ? "not metered on this billing mode" : spendPerRun != null ? `ledger · $${spendPerRun.toFixed(3)} per run` : "metered ledger",
+    },
   ]
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {cards.map((card, index) => {
         const Icon = card.icon
+        const series = "series" in card ? card.series : undefined
         return (
           <motion.div
             key={card.label}
@@ -528,7 +589,10 @@ export function OutcomeKpis({ data, window }: { data: OutcomeKpiData; window: Da
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-label font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</div>
-                <div className="mt-2 text-[28px] font-semibold leading-none tabular-nums text-foreground">{card.value}</div>
+                <div className="mt-2 flex items-end gap-3">
+                  <span className="text-[28px] font-semibold leading-none tabular-nums text-foreground">{card.value}</span>
+                  {series && series.length > 1 && <Sparkline values={series} color="#1E7BFE" width={84} height={26} className="mb-0.5 opacity-80" />}
+                </div>
               </div>
               <motion.span
                 initial={reduce ? false : { opacity: 0, rotate: -12, scale: 0.82 }}
@@ -658,12 +722,14 @@ export function SystemSignals({
   credentialGapCount,
   heldCrews,
   services,
+  realtimeStatus,
 }: {
   capacity: RuntimeCapacityResponse | null
   memory: MemoryHealthResponse | null
   credentialGapCount: number
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
   services: { running: number; total: number; checked: number; unchecked: number }
+  realtimeStatus?: string
 }) {
   const cap = capacitySignal(capacity, heldCrews)
   const rows = [
@@ -713,24 +779,46 @@ export function SystemSignals({
     },
   ]
 
+  if (realtimeStatus) {
+    rows.push({
+      label: "Realtime",
+      value: realtimeStatus === "connected" ? "connected" : realtimeStatus,
+      href: "/activity",
+      icon: Gauge,
+      tone: realtimeStatus === "connected" ? "text-success" : realtimeStatus === "connecting" ? "text-warn" : "text-destructive",
+    })
+  }
+
   return (
-    <DashboardCard title="System signals" icon={Gauge} hint="live checks" className="h-full">
-      <div className="flex flex-col">
+    <DashboardCard title="System" icon={Gauge} hint="live checks" className="h-full">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {rows.map((row) => {
           const Icon = row.icon
           return (
             <MotionLink key={row.label} href={row.href}>
-              <div className="group flex items-center gap-3 rounded-md border-b border-border/50 px-1 py-2.5 last:border-0 hover:bg-foreground/[0.025]">
-                <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-body text-foreground/80">{row.label}</span>
-                <span className={cn("shrink-0 text-label font-medium", row.tone)}>{row.value}</span>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft group-hover:text-foreground" />
+              <div className="group flex items-center gap-2.5 rounded-lg border border-border/60 px-3 py-2 transition-colors hover:border-border hover:bg-foreground/[0.025]">
+                <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-label text-foreground/85">{row.label}</span>
+                <span className={cn("shrink-0 truncate text-label font-medium", row.tone)}>{row.value}</span>
               </div>
             </MotionLink>
           )
         })}
       </div>
     </DashboardCard>
+  )
+}
+
+/** One line, an icon and an action — the empty state a card wears when it
+ *  has nothing to say. The old centred 150px block turned a healthy, idle
+ *  workspace into a screen that was mostly empty cards. */
+function InlineEmpty({ icon: Icon, text, action }: { icon: LucideIcon; text: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-border/60 px-3 py-2.5 text-label text-muted-foreground">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+      <span className="min-w-0 flex-1">{text}</span>
+      {action}
+    </div>
   )
 }
 
