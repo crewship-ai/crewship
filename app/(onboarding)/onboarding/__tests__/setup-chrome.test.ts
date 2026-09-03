@@ -390,3 +390,37 @@ describe("step 2 asks one question, then its consequence", () => {
     expect(stepTwo()).toMatch(/does not give them one/)
   })
 })
+
+// Each of these is a dead end a first-time user could walk into: a disabled
+// primary button with no stated reason, a Skip that cannot be undone one tap
+// away from Continue, a chat pane that vanished with no word why, and a
+// Launch that a page reload switched off for good.
+describe("the wizard never strands the person", () => {
+  it("says why the primary button is disabled, beside it", () => {
+    expect(PAGE).toContain("onboarding-blocking-reason")
+    const fn = PAGE.slice(PAGE.indexOf("const blockingReason"), PAGE.indexOf("const persistAdapterCredential"))
+    for (const step of ["step === 1", "step === 2", "step === 3"]) expect(fn).toContain(step)
+  })
+
+  it("asks before Skip, and Skip is not wired straight to the request", () => {
+    expect(PAGE).toMatch(/AlertDialogTitle>Skip setup\?/)
+    expect(PAGE).not.toMatch(/onClick=\{handleSkip\}/)
+  })
+
+  it("explains an unreachable Guide instead of silently showing templates", () => {
+    expect(PAGE).toContain("onboarding-guide-unavailable")
+  })
+
+  it("keeps Launch reachable after a reload when a crew already exists", () => {
+    const gate = PAGE.slice(PAGE.indexOf("const canContinue"), PAGE.indexOf("const blockingReason"))
+    expect(gate).toContain("existingCrewCount > 0")
+    // and that path must not deploy a second crew through /setup
+    const launch = PAGE.slice(PAGE.indexOf("async function handleLaunch"), PAGE.indexOf("async function handleSkip"))
+    expect(launch).toMatch(/existingCrewCount > 0[\s\S]*\/api\/v1\/onboarding\/complete/)
+  })
+
+  it("does not tell a phone user the chat is on the right", () => {
+    const step3 = PAGE.slice(PAGE.indexOf('step === 3 && crewMode === "chat"'), PAGE.indexOf('step === 3 && crewMode === "template"'))
+    expect(step3).not.toMatch(/on the right/)
+  })
+})

@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { WifiOff } from "lucide-react"
+import { MessageSquareText, WifiOff } from "lucide-react"
+import { motion } from "motion/react"
 import { useSession } from "@/hooks/use-auth"
 import { Spinner } from "@/components/ui/spinner"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -75,6 +76,44 @@ const FOLLOW_UP_PROMPTS_BY_LANGUAGE: Record<string, string[]> = {
 
 function followUpPrompts(language?: string): string[] {
   return FOLLOW_UP_PROMPTS_BY_LANGUAGE[language ?? "English"] ?? FOLLOW_UP_PROMPTS_BY_LANGUAGE.English
+}
+
+/** What the person sees before their first message — the chat used to open
+ *  on a single grey line ("What work should this crew take off your hands?")
+ *  above an empty box, which is the one screen in the wizard where a
+ *  first-time user has to invent something from nothing. These are concrete
+ *  openers, sent verbatim as the user's own message, in the language they
+ *  picked on step 1 (same rule as the follow-up chips above). */
+interface StarterPrompt {
+  title: string
+  prompt: string
+}
+
+const STARTER_PROMPTS_BY_LANGUAGE: Record<string, { greeting: string; lead: string; prompts: StarterPrompt[] }> = {
+  English: {
+    greeting: "Hi, I'm Crewship Guide.",
+    lead: "Tell me what you'd like to hand off and I'll propose a crew of agents for it. Nothing is created until you click Create.",
+    prompts: [
+      { title: "Watch a codebase", prompt: "I want a crew that reviews pull requests in my GitHub repo and flags risky changes." },
+      { title: "Scrape and summarise", prompt: "I need a crew that collects listings from a website every morning and sends me a summary." },
+      { title: "Write content", prompt: "I need a crew that drafts blog posts and social media updates from my notes." },
+      { title: "Keep the books", prompt: "I want a crew that sorts invoices, checks them against orders and prepares a monthly report." },
+    ],
+  },
+  Czech: {
+    greeting: "Ahoj, jsem Crewship Guide.",
+    lead: "Napište mi, co chcete delegovat, a navrhnu vám pro to tým agentů. Nic se nevytvoří, dokud nekliknete na Create.",
+    prompts: [
+      { title: "Hlídat kód", prompt: "Chci tým, který kontroluje pull requesty v mém GitHub repozitáři a upozorní na riskantní změny." },
+      { title: "Stahovat a shrnovat", prompt: "Potřebuji tým, který každé ráno stáhne inzeráty z webu a pošle mi souhrn." },
+      { title: "Psát obsah", prompt: "Potřebuji tým, který z mých poznámek připraví články na blog a příspěvky na sociální sítě." },
+      { title: "Vést účetnictví", prompt: "Chci tým, který třídí faktury, kontroluje je proti objednávkám a připraví měsíční report." },
+    ],
+  },
+}
+
+function starterPrompts(language?: string) {
+  return STARTER_PROMPTS_BY_LANGUAGE[language ?? "English"] ?? STARTER_PROMPTS_BY_LANGUAGE.English
 }
 
 /** A one-shot latch the composer can await instead of being refused.
@@ -187,10 +226,24 @@ export function OnboardingSetupChat({
   }, [])
 
   if (starting) {
+    // The same shell the live chat renders into, so the pane does not jump
+    // from a dashed placeholder to a full-height card when the Guide answers.
     return (
-      <div className="flex min-h-[248px] items-center justify-center gap-2 text-sm text-muted-foreground rounded-[20px] border border-dashed border-border bg-card/40">
-        <Spinner className="h-4 w-4" />
-        Waking up Crewship Guide…
+      <div
+        className="flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-[20px] border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none"
+        role="status"
+      >
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
+          <span className="h-7 w-7 shrink-0 animate-pulse rounded-lg bg-muted" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="h-3 w-28 animate-pulse rounded bg-muted" />
+            <div className="h-2.5 w-44 animate-pulse rounded bg-muted/70" />
+          </div>
+        </div>
+        <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Spinner className="h-4 w-4" />
+          Waking up Crewship Guide…
+        </div>
       </div>
     )
   }
@@ -574,6 +627,7 @@ function ConnectedSetupChat({
     await historyGateRef.current?.open
     return true
   }, [])
+  const starters = starterPrompts(language)
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {})
   }, [])
@@ -617,13 +671,23 @@ function ConnectedSetupChat({
           />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium tracking-tight">Crewship Guide</div>
+          <div className="flex items-center gap-1.5 text-sm font-medium tracking-tight">
+            Crewship Guide
+            <span
+              aria-hidden="true"
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                connectionStatus === "connected" ? "bg-success" : "bg-warn animate-pulse"
+              }`}
+            />
+          </div>
           <div className="text-[11px] text-muted-foreground truncate">
-            Tell it what you need — it&apos;ll propose a crew
+            {connectionStatus === "connected"
+              ? "Tell it what you need — it'll propose a crew"
+              : "Reconnecting to the Guide…"}
           </div>
         </div>
         {connectionStatus !== "connected" && (
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0">
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0" data-testid="onboarding-chat-connection">
             <WifiOff className="h-3 w-3" />
             {connectionStatus}
           </span>
@@ -638,8 +702,47 @@ function ConnectedSetupChat({
           </div>
         )}
         {historyReady && turns.length === 0 && (
-          <div className="py-6 text-center text-xs text-muted-foreground">
-            What work should this crew take off your hands?
+          <div className="px-1 py-4" data-testid="onboarding-chat-welcome">
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-primary/30 bg-primary/15">
+                <AgentAvatar
+                  seed={agentId}
+                  agentId={agentId}
+                  workspaceId={workspaceId}
+                  alt=""
+                  className="h-full w-full rounded-none"
+                />
+              </span>
+              <div className="min-w-0 space-y-1">
+                <div className="text-sm font-semibold tracking-tight">{starters.greeting}</div>
+                <p className="text-sm leading-relaxed text-muted-foreground">{starters.lead}</p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {starters.prompts.map((p, i) => (
+                <motion.button
+                  key={p.title}
+                  type="button"
+                  data-testid="onboarding-starter-prompt"
+                  onClick={() => sendMessageTracked(p.prompt)}
+                  disabled={connectionStatus !== "connected"}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: 0.05 * i, ease: [0.16, 1, 0.3, 1] }}
+                  whileTap={{ scale: 0.99 }}
+                  className="flex items-start gap-2.5 rounded-xl border border-border bg-background/60 p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <MessageSquareText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium tracking-tight">{p.title}</span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{p.prompt}</span>
+                  </span>
+                </motion.button>
+              ))}
+            </div>
+            <p className="mt-3 text-center text-[11px] text-muted-foreground">
+              Or describe it in your own words below.
+            </p>
           </div>
         )}
         {historyWarning && (

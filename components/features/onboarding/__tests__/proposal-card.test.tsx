@@ -197,3 +197,27 @@ describe("ProposalCard — nothing is written before Create", () => {
     expect(screen.getByRole("button", { name: /create/i })).not.toBeDisabled()
   })
 })
+
+describe("ProposalCard — the crew's look and a readable roster", () => {
+  it("draws the crew's own icon when the proposal carries one", () => {
+    const { container } = render(
+      <ProposalCard proposal={{ ...PROPOSAL, crewIcon: "eye", crewColor: "violet" }} onCreate={vi.fn()} />,
+    )
+    // CrewIcon renders an svg inside a tinted box; the generic Sparkles
+    // header is only the fallback for a proposal with no icon.
+    expect(container.querySelector("svg.lucide-sparkles")).toBeNull()
+    expect(container.querySelector("svg")).not.toBeNull()
+  })
+
+  it("shows every agent's full name and full role, never a truncated first letter", () => {
+    const longRole = "Reads open pull requests and their diffs, summarises the changes and flags spots that need a human look"
+    render(
+      <ProposalCard
+        proposal={{ ...PROPOSAL, agents: [{ name: "Recenzent PR", role: longRole, model: "claude-sonnet-5" }] }}
+        onCreate={vi.fn()}
+      />,
+    )
+    expect(screen.getByText("Recenzent PR")).toBeTruthy()
+    expect(screen.getByText(longRole)).toBeTruthy()
+  })
+})

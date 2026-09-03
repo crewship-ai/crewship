@@ -84,7 +84,18 @@ function num(o: Record<string, unknown>, ...keys: string[]): number {
   return 0
 }
 
-export function OnboardingCreatedPanel({ workspaceId }: { workspaceId: string | null }) {
+export function OnboardingCreatedPanel({
+  workspaceId,
+  onCrewsFound,
+}: {
+  workspaceId: string | null
+  /** Called after every poll with the number of real (non-setup) crews the
+   *  workspace holds. The wizard uses it to keep Launch reachable after a
+   *  reload: the crews a Create click made are durable, but the page state
+   *  that enabled Launch was not, and a person who refreshed after Create
+   *  used to land on a disabled Launch with no way to finish setup. */
+  onCrewsFound?: (count: number) => void
+}) {
   const [inv, setInv] = useState<CreatedInventory>(EMPTY)
   // Poll while the Crew step is open. The agent creates these from inside its
   // container with no path back to this tab, so there is no event to listen
@@ -110,15 +121,17 @@ export function OnboardingCreatedPanel({ workspaceId }: { workspaceId: string | 
       read(pagesRes),
     ])
 
-    setInv({
-      crews: crewRows
+    const crews = crewRows
         .filter((c) => str(c, "slug") !== SETUP_CREW_SLUG)
         .map((c) => ({
           id: str(c, "id"),
           slug: str(c, "slug"),
           name: str(c, "name") || str(c, "slug"),
           agentCount: num(c, "agent_count", "agentCount", "agents"),
-        })),
+        }))
+    onCrewsFound?.(crews.length)
+    setInv({
+      crews,
       routines: routineRows.map((p) => ({
         slug: str(p, "slug"),
         name: str(p, "name") || str(p, "slug"),
@@ -130,7 +143,7 @@ export function OnboardingCreatedPanel({ workspaceId }: { workspaceId: string | 
         panelCount: num(p, "panel_count", "panelCount"),
       })),
     })
-  }, [])
+  }, [onCrewsFound])
 
   useEffect(() => {
     if (!workspaceId) return

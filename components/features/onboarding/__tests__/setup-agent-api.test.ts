@@ -521,3 +521,26 @@ describe("startSetupAgentSession — real endpoint, never throws", () => {
     await expect(startSetupAgentSession()).resolves.toEqual({ ok: false, reason: "unavailable" })
   })
 })
+
+describe("crew icon and colour ride the proposal end to end", () => {
+  it("parses crew_icon / crew_color off the suggestion marker", () => {
+    const parsed = parseProposalSuggestion({
+      onboarding_proposal_suggestion: {
+        crew_name: "Hlídka PR",
+        crew_icon: "eye",
+        crew_color: "violet",
+        agents: [{ name: "Recenzent", role: "Reads PRs" }],
+      },
+    })
+    expect(parsed?.crewIcon).toBe("eye")
+    expect(parsed?.crewColor).toBe("violet")
+  })
+
+  it("leaves them undefined when the Guide named none", () => {
+    const parsed = parseProposalSuggestion({
+      onboarding_proposal_suggestion: { crew_name: "X", agents: [{ name: "A", role: "B" }] },
+    })
+    expect(parsed?.crewIcon).toBeUndefined()
+    expect(parsed?.crewColor).toBeUndefined()
+  })
+})
