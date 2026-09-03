@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useId, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow,
@@ -23,6 +22,7 @@ import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { RoutinesOverview } from "./routines-overview"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { type RoutineFilters } from "./routines-filter-sidebar"
@@ -55,6 +55,9 @@ interface RoutinesLayoutProps {
   workspaceId: string
 }
 
+/** `?routine=` is the older spelling two callers still emit. */
+const ROUTINE_SLUG_OPTIONS = { aliases: ["routine"] as const }
+
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const { pipelines, loading, error, refresh } = usePipelines(workspaceId)
   const isMobile = useIsMobile()
@@ -73,17 +76,16 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     authorAgentId: null,
     showEphemeral: false,
   })
-  // Deep-link support: /routines?slug=<slug> selects that routine on arrival.
-  // Every routine link across the app (activity rail rows, trace side panel,
-  // routine preview card, overview nodes) points here via routineHref(); read
-  // the param so those links actually open the routine instead of dead-ending
-  // on the unfiltered list. Lazy-init so the detail panel is open on first
-  // paint, plus an effect to re-select when navigating in with a new slug.
-  const slugParam = useSearchParams().get("slug")
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(slugParam)
-  useEffect(() => {
-    if (slugParam) setSelectedSlug(slugParam)
-  }, [slugParam])
+  // The selected routine lives in the URL: /routines?slug=<slug>.
+  //
+  // It used to be read from the URL once and then kept in component state,
+  // so picking a routine left the address bar at /routines — a reload lost
+  // the selection, Back left the page instead of closing the detail, and a
+  // routine could not be linked to except by typing. Every routine link in
+  // the app (routineHref, entityHref) points here with ?slug=; the dashboard's
+  // "Up next" and the issue's routine chip still say ?routine=, which is read
+  // as an alias and rewritten on the first pick.
+  const [selectedSlug, setSelectedSlug] = useUrlSelection("slug", ROUTINE_SLUG_OPTIONS)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
@@ -128,7 +130,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   void setBreadcrumbs
 
   const handleSelect = (slug: string) => {
-    setSelectedSlug((prev) => (prev === slug ? null : slug))
+    setSelectedSlug(selectedSlug === slug ? null : slug)
     // Picking a routine on a phone means "show me that", and the
     // overlay covering it would be the opposite.
     if (isMobile) setLeftCollapsed(true)
