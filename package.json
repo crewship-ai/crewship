@@ -171,7 +171,8 @@
       "sharp": ">=0.35.0",
       "@sentry/nextjs": "<10.72.0",
       "postcss>nanoid": "^3.3.18",
-      "@prisma/config>deepmerge-ts": "^8.0.0"
+      "@prisma/config>deepmerge-ts": "^8.0.0",
+      "prisma>mysql2": "^3.23.1"
     }
   },
   "devDependencies": {
