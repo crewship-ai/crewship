@@ -1,10 +1,11 @@
 "use client"
 
 import { useMemo } from "react"
+import Link from "next/link"
 
 import {
   AlertCircle, AlertTriangle, Bell, Brain, CircleSlash, Clock3, History,
-  ListChecks, MessageSquare, ShieldCheck, Workflow, type LucideIcon,
+  Inbox, ListChecks, MessageSquare, ShieldCheck, Workflow, type LucideIcon,
 } from "lucide-react"
 
 import { ActorAvatar } from "@/components/features/inbox/inbox-actor"
@@ -14,13 +15,19 @@ import {
   SidebarFacetOption, SidebarFilterPopover, SidebarRow, SidebarSearch,
   SidebarSection, SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { InlineEmpty } from "@/components/ui/inline-empty"
+import { StatusPill } from "@/components/ui/status-pill"
+import { entityHref } from "@/lib/entity-links"
+import { crewColor } from "@/app/(dashboard)/dashboard-helpers"
 import { cn } from "@/lib/utils"
 
 import {
-  deadlineBucket, entryType, facetCounts, INBOX_V2_TYPES, isArchivedNotDecided,
+  deadlineBucket, entryAgentRef, entryCrewId, entryKindPill, entryTitle, entryType, entryVerb,
+  facetCounts, INBOX_V2_TYPES, isArchivedNotDecided, outcomeStatus,
   type InboxV2DeadlineKey, type InboxV2Filters, type InboxV2TypeKey,
 } from "./inbox-v2-derive"
-import type { InboxV2Entry, InboxV2View } from "./inbox-v2-types"
+import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Entry, type InboxV2View } from "./inbox-v2-types"
 
 /**
  * The inbox column, built on the shared sidebar-kit — the same explorer
@@ -34,6 +41,10 @@ import type { InboxV2Entry, InboxV2View } from "./inbox-v2-types"
  * The popover is the KIT's, not a hand-rolled dropdown: it owns Escape, the
  * dismiss layer, the aria wiring, and — the reason it exists — staying OPEN
  * when a facet is picked, so two facets can be combined in one visit.
+ *
+ * The ROW is a decision, not a log line (docs/ux/audit-conversations.md
+ * P1-1): a kind pill, the question without the server's prefix, the crew and
+ * the agent by name, the age or the expiry, and a verb.
  */
 
 const VIEWS: { key: InboxV2View; label: string; icon: LucideIcon; tone: string }[] = [
@@ -79,11 +90,13 @@ interface Props {
   onToggleCollapse?: () => void
   /** Rendered as a section action, the way SidebarSection takes them. */
   onMarkAllRead?: () => void
+  /** Crews and agents by id/slug, so rows can name them. */
+  lookup?: InboxLookup
 }
 
 export function InboxV2Explorer({
   view, onView, viewCounts, entries, visible, filters, onFilters,
-  selectedKey, onOpen, onToggleCollapse, onMarkAllRead,
+  selectedKey, onOpen, onToggleCollapse, onMarkAllRead, lookup = EMPTY_INBOX_LOOKUP,
 }: Props) {
   // Memoised on the feed, not on the render: the explorer re-renders on every
   // keystroke in search, and the counts do not depend on the filters at all.
@@ -91,6 +104,7 @@ export function InboxV2Explorer({
   // character typed.
   const counts = useMemo(() => facetCounts(entries), [entries])
   const activeCount = (filters.type ? 1 : 0) + (filters.deadline ? 1 : 0) + (filters.unreadOnly ? 1 : 0)
+  const narrowed = activeCount > 0 || filters.search.trim() !== ""
   const set = (patch: Partial<InboxV2Filters>) => onFilters({ ...filters, ...patch })
 
   const sections = view === "updates"
@@ -112,7 +126,7 @@ export function InboxV2Explorer({
           <SidebarSearch
             value={filters.search}
             onValueChange={(search) => set({ search })}
-            placeholder="Search inbox, agents…"
+            placeholder="Search inbox, agents, crews…"
           />
         </div>
         <SidebarFilterPopover
@@ -244,18 +258,62 @@ export function InboxV2Explorer({
                   entry={entry}
                   selected={selectedKey === entry.key}
                   onOpen={() => onOpen(entry)}
+                  lookup={lookup}
                 />
               ))}
             </div>
           ))}
           {visible.length === 0 && (
-            <div className="flex items-center justify-center py-6 text-xs text-muted-foreground-soft">
-              {activeCount > 0 || filters.search ? "Nothing matches those filters" : "Nothing here"}
+            <div className="p-2">
+              <ExplorerEmpty
+                view={view}
+                narrowed={narrowed}
+                onClear={() => onFilters({ search: "", type: null, deadline: null, unreadOnly: false })}
+              />
             </div>
           )}
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * The column's empty state says what lands here and one way to make it
+ * appear (README §6) — "Nothing here" said neither.
+ */
+function ExplorerEmpty({ view, narrowed, onClear }: { view: InboxV2View; narrowed: boolean; onClear: () => void }) {
+  if (narrowed) {
+    return (
+      <InlineEmpty
+        icon={Inbox}
+        text="Nothing matches those filters."
+        action={
+          <button type="button" onClick={onClear} className="text-primary-hover hover:underline">
+            Clear
+          </button>
+        }
+      />
+    )
+  }
+  if (view === "updates") {
+    return (
+      <InlineEmpty
+        icon={Bell}
+        text="No updates. Agent replies, routine progress and issue reviews land here."
+        action={<Link href={entityHref({ kind: "routines" })} className="text-primary-hover hover:underline">Routines →</Link>}
+      />
+    )
+  }
+  if (view === "history") {
+    return <InlineEmpty icon={History} text="No decisions recorded yet. Decided and archived items stay here." />
+  }
+  return (
+    <InlineEmpty
+      icon={ListChecks}
+      text="Nothing is waiting on you. Approvals, questions from agents, failed runs and missed schedules land here."
+      action={<Link href={entityHref({ kind: "crew", slug: "" }).replace(/\?.*$/, "")} className="text-primary-hover hover:underline">Crews →</Link>}
+    />
   )
 }
 
@@ -266,20 +324,40 @@ function FacetCount({ value }: { value: number }) {
 }
 
 function EntryRow({
-  entry, selected, onOpen,
-}: { entry: InboxV2Entry; selected: boolean; onOpen: () => void }) {
+  entry, selected, onOpen, lookup,
+}: { entry: InboxV2Entry; selected: boolean; onOpen: () => void; lookup: InboxLookup }) {
   const deadlineMins = entry.deadlineAt
     ? Math.round((Date.parse(entry.deadlineAt) - Date.now()) / 60_000)
     : null
+  const pill = entryKindPill(entry)
+  const title = entryTitle(entry)
+  const verb = entryVerb(entry)
+  const crewId = entryCrewId(entry)
+  const crew = crewId ? lookup.crewById.get(crewId) ?? null : null
+  const ref = entryAgentRef(entry)
+  const agent = ref.slug ? lookup.agentBySlug.get(ref.slug) ?? null : null
+  const crewName = crew?.name ?? agent?.crew?.name ?? null
+  const crewTint = crewColor(crew?.color ?? agent?.crew?.color ?? null)
+  const agentLabel = agent?.name ?? ref.label
   const actor = entry.inboxItem ? subjectOf(entry.inboxItem) : null
   const type = entryType(entry)
   const Icon = type ? TYPE_ICON[type] : MessageSquare
   const expiring = deadlineMins != null && entry.actionable && deadlineBucket(entry) === "hour"
+  const outcome = entry.historical ? outcomeStatus(entry.outcome) : null
 
   return (
     <SidebarRow as="div" selected={selected} onSelect={onOpen} className="items-start py-1.5">
       <span className="relative mt-0.5 shrink-0">
-        {actor ? (
+        {agent ? (
+          <AgentAvatar
+            seed={agent.avatar_seed || agent.slug}
+            style={agent.avatar_style}
+            agentId={agent.id}
+            avatarUrl={agent.avatar_url}
+            alt=""
+            className="h-5 w-5 rounded-md"
+          />
+        ) : actor ? (
           <ActorAvatar actor={actor} size={20} />
         ) : (
           <span className={cn(
@@ -293,22 +371,40 @@ function EntryRow({
           <span aria-hidden className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-info ring-2 ring-card" />
         )}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className={cn("block truncate", entry.unread ? "font-semibold text-foreground" : "text-foreground/80")}>
-          {entry.title}
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-1.5">
+          {outcome ? <StatusPill status={outcome} /> : <StatusPill tone={pill.tone} label={pill.label} />}
+          <span className={cn("min-w-0 truncate", entry.unread ? "font-semibold text-foreground" : "text-foreground/80")}>
+            {title}
+          </span>
         </span>
-        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-          {entry.subject}
-          {entry.historical && entry.outcome ? ` · ${entry.outcome}` : ""}
+        <span className="flex min-w-0 items-center gap-1 truncate text-[11px] text-muted-foreground">
+          {crewName && (
+            <>
+              <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: crewTint }} aria-hidden />
+              <span className="truncate">{crewName}</span>
+              <span className="text-muted-foreground-soft">·</span>
+            </>
+          )}
+          <span className="truncate">{agentLabel}</span>
+          <span className="text-muted-foreground-soft">·</span>
+          <span className={cn("shrink-0 tabular-nums", expiring && "font-semibold text-destructive")}>
+            {deadlineMins != null && entry.actionable
+              ? deadlineMins > 0 ? `expires in ${remainingLabel(deadlineMins)}` : "expired"
+              : since(entry.createdAt)}
+          </span>
         </span>
       </span>
-      <span className={cn(
-        "shrink-0 self-start text-[10px] tabular-nums",
-        expiring ? "font-semibold text-destructive" : "text-muted-foreground-soft",
-      )}>
-        {deadlineMins != null && entry.actionable
-          ? deadlineMins > 0 ? remainingLabel(deadlineMins) : "expired"
-          : since(entry.createdAt)}
+      <span
+        className={cn(
+          "kit-tap mt-0.5 inline-flex h-6 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium",
+          entry.actionable
+            ? "border-border bg-card text-foreground group-hover:border-primary/40"
+            : "border-transparent text-muted-foreground",
+        )}
+        aria-hidden
+      >
+        {verb}
       </span>
     </SidebarRow>
   )
