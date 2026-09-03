@@ -12,6 +12,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { CLI_ADAPTERS, getProviderLabel } from "@/lib/cli-adapters"
+import { MODEL_CATALOG, adapterModels, providerModels, type CatalogModel } from "@/lib/model-catalog"
 import { cn } from "@/lib/utils"
 
 /**
@@ -20,30 +21,44 @@ import { cn } from "@/lib/utils"
  * cares about the model ID string. Anything not in this map renders
  * with bare ID, which is fine for genuinely-custom values.
  */
-export const MODEL_META: Record<string, { description: string; badge?: string; legacy?: boolean }> = {
-  // Anthropic — current
-  "claude-fable-5":             { description: "Most capable · premium flagship · 1M context", badge: "Premium" },
-  "claude-opus-4-8":            { description: "Flagship Opus · most capable general tier · 1M context", badge: "Latest" },
-  "claude-sonnet-5":            { description: "Balanced speed and capability · default pick", badge: "Default" },
-  "claude-haiku-4-5-20251001":  { description: "Fast and cheap · quick replies", badge: "Fast" },
-  // Anthropic — legacy
-  "claude-opus-4-7":            { description: "Older Opus — superseded by 4.8", badge: "Legacy", legacy: true },
-  "claude-sonnet-4-6":          { description: "Older Sonnet — superseded by Sonnet 5", badge: "Legacy", legacy: true },
-  "claude-opus-4-20250514":     { description: "Older Opus 4 — superseded by 4.8", badge: "Legacy", legacy: true },
-  "claude-sonnet-4-20250514":   { description: "Older Sonnet 4 — superseded by Sonnet 5", badge: "Legacy", legacy: true },
-  "claude-3-5-sonnet-20241022": { description: "Pre-4.x flagship", badge: "Legacy", legacy: true },
-  "claude-3-5-haiku-20241022":  { description: "Pre-4.x fast tier", badge: "Legacy", legacy: true },
-  // OpenAI
-  o3:           { description: "Frontier reasoning model", badge: "Reasoning" },
-  "o3-mini":    { description: "Smaller reasoning model", badge: "Reasoning" },
-  "o4-mini":    { description: "Newest small reasoning model", badge: "Fast" },
-  "gpt-4o":     { description: "Multimodal flagship", badge: "Multimodal" },
-  "gpt-4o-mini":{ description: "Smaller multimodal · cheap", badge: "Fast" },
-  // Google
-  "gemini-2.5-pro":   { description: "Google flagship · 1M-token context", badge: "Long ctx" },
-  "gemini-2.5-flash": { description: "Faster, cheaper Gemini", badge: "Fast" },
-  "gemini-2.0-flash": { description: "Older Flash · still supported", badge: "Legacy", legacy: true },
+export interface ModelMeta {
+  description: string
+  badge?: string
+  legacy?: boolean
 }
+
+// Derived from the catalog's `category` and `role`, not typed per id: the
+// per-id table this replaced still described gpt-4o and gemini-2.0-flash,
+// neither of which any picker offered any more, and had nothing to say about
+// half the ids they did.
+const CATEGORY_META: Record<string, { description: string; badge?: string }> = {
+  frontier: { description: "Current flagship tier · best for complex work" },
+  reasoning: { description: "Reasoning model · slower, deeper", badge: "Reasoning" },
+  fast: { description: "Fast and cheap · quick replies", badge: "Fast" },
+  cheap: { description: "Cheapest tier · mechanical, well-specified work", badge: "Cheap" },
+  legacy: { description: "Older generation · still served", badge: "Legacy" },
+  local: { description: "Runs on your own endpoint · no API key", badge: "Local" },
+}
+
+function metaFor(m: CatalogModel): ModelMeta {
+  const base = CATEGORY_META[m.category ?? ""] ?? { description: "" }
+  if (m.role === "default") return { description: `${base.description} · default pick`, badge: "Default" }
+  if (m.role === "top") return { description: base.description, badge: "Top" }
+  return { ...base, legacy: m.category === "legacy" }
+}
+
+function buildModelMeta(): Record<string, ModelMeta> {
+  const out: Record<string, ModelMeta> = {}
+  for (const provider of Object.keys(MODEL_CATALOG.providers)) {
+    for (const m of providerModels(provider)) out[m.id] = metaFor(m)
+  }
+  for (const key of Object.keys(MODEL_CATALOG.adapters)) {
+    for (const m of adapterModels(key)) if (!out[m.id]) out[m.id] = metaFor(m)
+  }
+  return out
+}
+
+export const MODEL_META: Record<string, ModelMeta> = buildModelMeta()
 
 interface ModelEntry {
   value: string

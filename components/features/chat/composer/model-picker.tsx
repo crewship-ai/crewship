@@ -5,47 +5,27 @@ import { useEffect, useState } from "react"
 import { ModelSelector, type ModelOption } from "@/components/ai-elements/model-selector"
 import { useComposerStore } from "@/stores/composer-store"
 import { apiFetch } from "@/lib/api-fetch"
+import { providerDefaultModel, providerModels } from "@/lib/model-catalog"
 
+// What the menu shows before — or instead of — the server's answer: the
+// catalog's Anthropic rows minus legacy ones, the OpenAI default, and the
+// first local suggestion. It used to be a hand-typed list of six that named
+// gpt-4o; now it cannot disagree with the pickers elsewhere in the app.
 const FALLBACK_MODELS: ModelOption[] = [
-  {
-    id: "claude-fable-5",
-    label: "Fable 5",
-    provider: "Anthropic",
-    description: "Most capable, premium flagship for hardest work",
-    badge: "Premium",
-  },
-  {
-    id: "claude-opus-4-8",
-    label: "Opus 4.8",
-    provider: "Anthropic",
-    description: "Flagship, best for complex analysis",
-    badge: "Pro",
-  },
-  {
-    id: "claude-sonnet-5",
-    label: "Sonnet 5",
-    provider: "Anthropic",
-    description: "Balanced speed and capability",
-    badge: "Default",
-  },
-  {
-    id: "claude-haiku-4-5",
-    label: "Haiku 4.5",
-    provider: "Anthropic",
-    description: "Fast, lightweight",
-  },
-  {
-    id: "gpt-4o",
-    label: "GPT-4o",
-    provider: "OpenAI",
-    description: "Multimodal flagship",
-  },
-  {
-    id: "llama3.1:70b",
-    label: "Llama 3.1 70B",
-    provider: "Ollama",
-    description: "Local model",
-  },
+  ...providerModels("anthropic")
+    .filter((m) => m.category !== "legacy")
+    .map((m) => ({
+      id: m.id,
+      label: m.label.replace(/^Claude /, ""),
+      provider: "Anthropic",
+      badge: m.role === "default" ? "Default" : m.role === "top" ? "Pro" : undefined,
+    })),
+  ...providerModels("openai")
+    .filter((m) => m.id === providerDefaultModel("openai"))
+    .map((m) => ({ id: m.id, label: m.label, provider: "OpenAI" })),
+  ...providerModels("ollama")
+    .slice(0, 1)
+    .map((m) => ({ id: m.id, label: m.label, provider: "Ollama", description: "Local model" })),
 ]
 
 export function ModelPicker() {

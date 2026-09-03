@@ -1,5 +1,6 @@
 import {
   AnthropicIcon,
+  ClaudeIcon,
   OpenAIIcon,
   GeminiIcon,
   OpenCodeIcon,
@@ -7,6 +8,7 @@ import {
   FactoryIcon,
 } from "@/components/icons/provider-icons"
 import type { ComponentType, SVGProps } from "react"
+import { adapterDefaultModel, adapterModels, catalogModelLabel } from "@/lib/model-catalog"
 
 /** A selectable LLM model with display label and API value. */
 export interface ModelOption {
@@ -52,185 +54,22 @@ export interface CLIAdapterConfig {
   caveat?: string
 }
 
-// ===== ANTHROPIC (Claude Code adapter) =====
+// ===== MODEL LISTS =====
 //
-// SOURCE OF TRUTH: internal/llm/models_curated.go → curatedModels["anthropic"].
-// That is the list the backend already serves at GET /api/v1/models and that
-// `crewship model` reads; this file must never offer an id it does not carry.
-// lib/__tests__/anthropic-models.test.ts parses the Go file and enforces the
-// subset relation, so the two cannot drift apart silently.
+// SOURCE OF TRUTH: config/models.json, read through lib/model-catalog.ts and,
+// on the server, through internal/llm.CuratedModels. This file used to carry
+// six hand-typed lists that drifted from the Go side (which still offered
+// gpt-4o while this offered GPT-5.5) and from each other; now an adapter's
+// list is whatever the catalog says it accepts, and adding a model is one
+// edit to one file that both the binary and the bundle pick up.
 //
-// What is offered here is deliberately NARROWER than the curated set: this
-// is the onboarding picker, which decides what a brand-new workspace starts
-// on, and it lists only what has actually been exercised end to end with
-// Claude Code. Anthropic publishing a model is not the same as Crewship
-// having run agents on it — an earlier version of this list was populated
-// from the model docs, which offered people five models of which one was
-// tested.
-//
-// Sonnet 5 is that one. Widening this list is a deliberate act: verify the
-// adapter against the model first, then add it here AND to the Go curated
-// list if it is missing there.
-//
-// The value is a bare alias, which is canonical and complete as-is — never
-// append a date suffix.
-const ANTHROPIC_MODELS: ModelOption[] = [
-  { value: "claude-sonnet-5", label: "Claude Sonnet 5", category: "frontier" },
-]
-
-/**
- * Display names for every Anthropic model that can end up stored on a
- * workspace — not just the ones this picker offers.
- *
- * The picker is deliberately narrow (see ANTHROPIC_MODELS), but a workspace
- * can be pointed at any curated model through the CLI or the API, and older
- * workspaces still carry ids from before the picker was trimmed. getModelLabel
- * resolves by scanning adapters, so an id missing from here renders as its raw
- * string — or worse, borrows another adapter's label: claude-sonnet-4-6 is
- * also registered under Cursor, and briefly relabelled live workspaces to
- * "Claude Sonnet 4.6 (Cursor)".
- *
- * Label-only. Nothing here is selectable; add to ANTHROPIC_MODELS for that,
- * and only after the adapter has been verified against the model.
- */
-const ANTHROPIC_LABELS: Record<string, string> = {
-  // Curated (internal/llm/models_curated.go) but not offered by the wizard.
-  "claude-fable-5": "Claude Fable 5",
-  "claude-opus-5": "Claude Opus 5",
-  "claude-opus-4-8": "Claude Opus 4.8",
-  "claude-haiku-4-5": "Claude Haiku 4.5",
-  // Superseded, still stored by workspaces created before the trim.
-  "claude-opus-4-7": "Claude Opus 4.7",
-  "claude-opus-4-6": "Claude Opus 4.6",
-  "claude-opus-4-5": "Claude Opus 4.5",
-  "claude-opus-4-5-20251101": "Claude Opus 4.5",
-  "claude-opus-4-1": "Claude Opus 4.1",
-  "claude-opus-4-1-20250805": "Claude Opus 4.1",
-  "claude-sonnet-4-6": "Claude Sonnet 4.6",
-  "claude-sonnet-4-5": "Claude Sonnet 4.5",
-  "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
-  "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
-}
-
-// ===== OPENAI — Codex CLI subset =====
-// Source: https://developers.openai.com/codex/models
-// Codex CLI accepts ONLY the GPT-5.x coding-tuned family — NOT the o-series
-// (despite o3/o4-mini being valid for the general API). Pre-fix list mixed
-// these; CLI silently rejects unknown models.
-const OPENAI_CODEX_MODELS: ModelOption[] = [
-  { value: "gpt-5.5", label: "GPT-5.5", category: "frontier" },
-  { value: "gpt-5.4", label: "GPT-5.4", category: "frontier" },
-  { value: "gpt-5.4-mini", label: "GPT-5.4 mini", category: "fast" },
-  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex", category: "frontier" },
-  { value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", category: "reasoning" },
-  { value: "gpt-5.2", label: "GPT-5.2", category: "legacy" },
-]
-
-// ===== GOOGLE GEMINI =====
-// Source: https://ai.google.dev/gemini-api/docs/models
-// 3.x family is preview; 2.5 is GA stable. gemini-2.0-flash + 1.5-pro removed
-// from current model index — out.
-const GOOGLE_MODELS: ModelOption[] = [
-  { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (Preview)", category: "frontier" },
-  { value: "gemini-3-flash-preview", label: "Gemini 3 Flash (Preview)", category: "fast" },
-  { value: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite (Preview)", category: "cheap" },
-  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", category: "frontier" },
-  { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", category: "fast" },
-  { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", category: "cheap" },
-]
-
-// ===== CURSOR (cursor-agent -m) =====
-// Source: cursor.com/docs/cli/reference/parameters
-// Cursor multiplexes — accepts underlying provider IDs + their in-house
-// Composer model. cursor-agent --list-models shows the live per-account list.
-const CURSOR_MODELS: ModelOption[] = [
-  { value: "composer", label: "Cursor Composer", category: "frontier" },
-  { value: "claude-fable-5", label: "Claude Fable 5 (Cursor)", category: "frontier" },
-  { value: "claude-opus-4-8", label: "Claude Opus 4.8 (Cursor)", category: "frontier" },
-  { value: "claude-sonnet-5", label: "Claude Sonnet 5 (Cursor)", category: "frontier" },
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7 (Cursor)", category: "legacy" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Cursor)", category: "legacy" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5 (Cursor)", category: "fast" },
-  { value: "gpt-5.5", label: "GPT-5.5 (Cursor)", category: "frontier" },
-  { value: "gpt-5.4", label: "GPT-5.4 (Cursor)", category: "frontier" },
-  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex (Cursor)", category: "frontier" },
-  { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (Cursor)", category: "frontier" },
-  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (Cursor)", category: "frontier" },
-  { value: "grok-4.1-fast", label: "Grok 4.1 Fast (Cursor)", category: "fast" },
-]
-
-// ===== FACTORY DROID (droid exec --model) =====
-// Source: https://docs.factory.ai/cli/droid-exec/overview + /models
-// Bare IDs (no provider prefix). -fast variants are premium-tier multiplier.
-// Custom format: custom:Display-Name-Index.
-const DROID_MODELS: ModelOption[] = [
-  { value: "claude-fable-5", label: "Claude Fable 5 (Droid)", category: "frontier" },
-  { value: "claude-opus-4-8", label: "Claude Opus 4.8 (Droid)", category: "frontier" },
-  { value: "claude-sonnet-5", label: "Claude Sonnet 5 (Droid)", category: "frontier" },
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7 (Droid)", category: "legacy" },
-  { value: "claude-opus-4-6", label: "Claude Opus 4.6 (Droid)", category: "legacy" },
-  { value: "claude-opus-4-6-fast", label: "Claude Opus 4.6 Fast (Droid)", category: "legacy" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Droid)", category: "legacy" },
-  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (Droid)", category: "fast" },
-  { value: "gpt-5.5", label: "GPT-5.5 (Droid)", category: "frontier" },
-  { value: "gpt-5.5-fast", label: "GPT-5.5 Fast (Droid)", category: "frontier" },
-  { value: "gpt-5.5-pro", label: "GPT-5.5 Pro (Droid)", category: "reasoning" },
-  { value: "gpt-5.4", label: "GPT-5.4 (Droid)", category: "frontier" },
-  { value: "gpt-5.4-fast", label: "GPT-5.4 Fast (Droid)", category: "frontier" },
-  { value: "gpt-5.4-mini", label: "GPT-5.4 mini (Droid)", category: "fast" },
-  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex (Droid)", category: "frontier" },
-  { value: "gpt-5.3-codex-fast", label: "GPT-5.3 Codex Fast (Droid)", category: "frontier" },
-  { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (Droid)", category: "frontier" },
-  { value: "gemini-3-flash-preview", label: "Gemini 3 Flash (Droid)", category: "fast" },
-  { value: "glm-5.1", label: "GLM 5.1 (Droid)", category: "frontier" },
-  { value: "kimi-k2.6", label: "Kimi K2.6 (Droid)", category: "frontier" },
-  { value: "minimax-m2.7", label: "MiniMax M2.7 (Droid)", category: "cheap" },
-]
-
-// ===== OPENCODE — curated provider/model list =====
-// Source: opencode.ai/docs/providers + models.dev
-// OpenCode accepts "provider/model" strings across 75+ providers. Curated
-// list of the most-deployed combinations.
-const OPENCODE_MODELS: ModelOption[] = [
-  { value: "anthropic/claude-fable-5", label: "Anthropic / Claude Fable 5", category: "frontier" },
-  { value: "anthropic/claude-opus-4-8", label: "Anthropic / Claude Opus 4.8", category: "frontier" },
-  { value: "anthropic/claude-sonnet-5", label: "Anthropic / Claude Sonnet 5", category: "frontier" },
-  { value: "anthropic/claude-opus-4-7", label: "Anthropic / Claude Opus 4.7", category: "legacy" },
-  { value: "anthropic/claude-sonnet-4-6", label: "Anthropic / Claude Sonnet 4.6", category: "legacy" },
-  { value: "anthropic/claude-haiku-4-5", label: "Anthropic / Claude Haiku 4.5", category: "fast" },
-  { value: "openai/gpt-5.5", label: "OpenAI / GPT-5.5", category: "frontier" },
-  { value: "openai/gpt-5.4", label: "OpenAI / GPT-5.4", category: "frontier" },
-  { value: "openai/gpt-5.4-mini", label: "OpenAI / GPT-5.4 mini", category: "fast" },
-  { value: "openai/gpt-5.4-nano", label: "OpenAI / GPT-5.4 nano", category: "cheap" },
-  { value: "openai/gpt-5.3-codex", label: "OpenAI / GPT-5.3 Codex", category: "frontier" },
-  { value: "openai/o3", label: "OpenAI / o3", category: "reasoning" },
-  { value: "openai/o3-pro", label: "OpenAI / o3 Pro", category: "reasoning" },
-  { value: "google/gemini-3.1-pro-preview", label: "Google / Gemini 3.1 Pro", category: "frontier" },
-  { value: "google/gemini-3-flash-preview", label: "Google / Gemini 3 Flash", category: "fast" },
-  { value: "google/gemini-2.5-pro", label: "Google / Gemini 2.5 Pro", category: "frontier" },
-  { value: "google/gemini-2.5-flash", label: "Google / Gemini 2.5 Flash", category: "fast" },
-  { value: "xai/grok-4.1-fast", label: "xAI / Grok 4.1 Fast", category: "fast" },
-  { value: "xai/grok-4", label: "xAI / Grok 4", category: "frontier" },
-  { value: "deepseek/deepseek-v4-flash", label: "DeepSeek / V4 Flash", category: "fast" },
-  { value: "deepseek/deepseek-v3.2", label: "DeepSeek / V3.2", category: "frontier" },
-  { value: "deepseek/deepseek-r1", label: "DeepSeek / R1", category: "reasoning" },
-  { value: "groq/llama-3.3-70b-versatile", label: "Groq / Llama 3.3 70B", category: "fast" },
-  { value: "groq/qwen-2.5-coder-32b", label: "Groq / Qwen 2.5 Coder 32B", category: "fast" },
-  { value: "moonshotai/kimi-k2.6", label: "Moonshot / Kimi K2.6", category: "frontier" },
-  { value: "zai/glm-5.1", label: "Z.ai / GLM 5.1", category: "frontier" },
-  { value: "minimax/minimax-m2.7", label: "MiniMax / M2.7", category: "cheap" },
-  { value: "openrouter/anthropic/claude-sonnet-4-6", label: "OpenRouter / Claude Sonnet 4.6", category: "frontier" },
-  { value: "openrouter/openai/gpt-5.5", label: "OpenRouter / GPT-5.5", category: "frontier" },
-  // Local models (#944) — served by the operator's OpenAI-compatible
-  // endpoint (Ollama et al.); requires CREWSHIP_LOCAL_MODEL_BASE_URL on the
-  // server and NO API key. Curated, tested shortlist only: community and
-  // upstream issues (anomalyco/opencode#1034, #4428) show tool-calling
-  // reliability degrades sharply below this tier, so we don't offer a
-  // free-form "any Ollama model" picker.
-  { value: "ollama/qwen2.5-coder:7b", label: "Ollama / Qwen2.5 Coder 7B (local, macOS-friendly)", category: "local" },
-  { value: "ollama/qwen3-coder:30b", label: "Ollama / Qwen3 Coder 30B (local)", category: "local" },
-  { value: "ollama/devstral:24b", label: "Ollama / Devstral Small 24B (local)", category: "local" },
-]
+// The onboarding picker offers the FULL Claude Code list. It was trimmed to
+// Sonnet 5 alone for a while, on the argument that only Sonnet had been run
+// end to end — which left a customer who pays for Opus unable to choose it
+// without leaving the wizard. The catalog's `default` (Sonnet 5) is what the
+// picker preselects; the rest are there to be chosen.
+const modelsFor = (adapterKey: string): ModelOption[] =>
+  adapterModels(adapterKey).map((m) => ({ value: m.id, label: m.label, category: m.category }))
 
 /**
  * True when the model routes to the operator's local OpenAI-compatible
@@ -263,11 +102,13 @@ export function isLocalModel(model?: string): boolean {
 export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
   CLAUDE_CODE: {
     label: "Claude Code",
-    icon: AnthropicIcon,
+    // The Claude starburst, not the Anthropic "A": it is the mark people
+    // know from the Claude app and from Claude Code's own splash screen.
+    icon: ClaudeIcon,
     provider: "ANTHROPIC",
     envVar: "ANTHROPIC_API_KEY",
-    models: ANTHROPIC_MODELS,
-    defaultModel: "claude-sonnet-5",
+    models: modelsFor("CLAUDE_CODE"),
+    defaultModel: adapterDefaultModel("CLAUDE_CODE"),
     description: "Anthropic's coding agent",
     status: "production",
   },
@@ -276,8 +117,8 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     icon: OpenCodeIcon,
     provider: "ANTHROPIC",
     envVar: "ANTHROPIC_API_KEY",
-    models: OPENCODE_MODELS,
-    defaultModel: "anthropic/claude-sonnet-5",
+    models: modelsFor("OPENCODE"),
+    defaultModel: adapterDefaultModel("OPENCODE"),
     description: "Open-source multi-provider CLI",
     status: "experimental",
     caveat:
@@ -288,8 +129,8 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     icon: OpenAIIcon,
     provider: "OPENAI",
     envVar: "OPENAI_API_KEY",
-    models: OPENAI_CODEX_MODELS,
-    defaultModel: "gpt-5.5",
+    models: modelsFor("CODEX_CLI"),
+    defaultModel: adapterDefaultModel("CODEX_CLI"),
     description: "OpenAI's coding agent",
     status: "experimental",
     caveat: "Not yet parity-tested against live runs.",
@@ -299,8 +140,8 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     icon: GeminiIcon,
     provider: "GOOGLE",
     envVar: "GOOGLE_API_KEY",
-    models: GOOGLE_MODELS,
-    defaultModel: "gemini-2.5-pro",
+    models: modelsFor("GEMINI_CLI"),
+    defaultModel: adapterDefaultModel("GEMINI_CLI"),
     description: "Google's coding agent",
     status: "experimental",
   },
@@ -309,8 +150,8 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     icon: CursorIcon,
     provider: "CURSOR",
     envVar: "CURSOR_API_KEY",
-    models: CURSOR_MODELS,
-    defaultModel: "composer",
+    models: modelsFor("CURSOR_CLI"),
+    defaultModel: adapterDefaultModel("CURSOR_CLI"),
     description: "Cursor's headless agent",
     status: "experimental",
     caveat: "MCP tools are not invoked in Cursor's headless mode (upstream limitation).",
@@ -320,8 +161,8 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     icon: FactoryIcon,
     provider: "FACTORY",
     envVar: "FACTORY_API_KEY",
-    models: DROID_MODELS,
-    defaultModel: "claude-sonnet-5",
+    models: modelsFor("FACTORY_DROID"),
+    defaultModel: adapterDefaultModel("FACTORY_DROID"),
     description: "Factory's autonomous coding agent",
     status: "experimental",
   },
@@ -368,18 +209,10 @@ export function getProviderLabel(provider: string): string {
  */
 export function getModelLabel(value: string): string {
   if (!value) return ""
-  // Anthropic names first. Scanning adapters alone is not enough once a
-  // model leaves ANTHROPIC_MODELS: claude-sonnet-4-6 is also registered
-  // under Cursor, whose label carries a "(Cursor)" suffix, so an existing
-  // Claude Code workspace on that model silently started reading "Claude
-  // Sonnet 4.6 (Cursor)".
-  const known = ANTHROPIC_LABELS[value]
-  if (known) return known
-  for (const adapter of Object.values(CLI_ADAPTERS)) {
-    const found = adapter.models.find((m) => m.value === value)
-    if (found) return found.label
-  }
-  return value
+  // Provider rows and aliases come first: claude-sonnet-4-6 is also an
+  // adapter row under Cursor with a "(Cursor)" suffix, and an existing Claude
+  // Code workspace on that model briefly read "Claude Sonnet 4.6 (Cursor)".
+  return catalogModelLabel(value) ?? value
 }
 
 /**

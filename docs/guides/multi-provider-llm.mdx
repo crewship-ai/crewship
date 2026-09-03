@@ -727,7 +727,20 @@ rates and is what catches an upstream repricing or a renamed id.
 <Note>
   **Three model vocabularies, one page each.** The **curated lists** behind
   `GET /api/v1/models` answer "which ids may I type" for four providers
-  ([Model discovery](/guides/model-discovery)). A provider's **live** `/v1/models`
+  ([Model discovery](/guides/model-discovery)). They live in one hand-edited
+  file, `config/models.json`, which the Go binary embeds (`config.ModelsJSON` →
+  `internal/llm.CuratedModels`) and the web bundle imports (`lib/model-catalog.ts`),
+  so every picker — onboarding, the agent form, the composer's model menu,
+  `crewship model list` — and the Guide's proposal validator read the same rows.
+  Each provider row may carry a `role` (`cheap`, `default`, `top`) that sizes the
+  crews the Guide proposes; each CLI adapter lists what it accepts, by reference
+  to a provider row or as its own id. The same roles drive everything else that
+  needs a model without being asked for one: routine execution tiers
+  (trivial/fast → `cheap`, moderate → default, smart → `top`), the Guide's own
+  model (`top`), a new agent's model (default), `crewship setup` defaults, and
+  the housekeeping calls — memory summaries, skill drafts, the crew designer,
+  keeper governance and the onboarding token probe — which all run the `cheap`
+  model (`internal/llm.HousekeepingModel`). A provider's **live** `/v1/models`
   answers "which ids can *this key* use". The **catalog** answers "what does this
   id cost", for eight providers. The catalog prices; it does not discover, and it
   is not a claim that Crewship can call the model.

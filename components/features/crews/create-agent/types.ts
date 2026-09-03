@@ -1,3 +1,4 @@
+import { adapterDefaultModel } from "@/lib/model-catalog"
 import type {
   AgentPersona,
   AgentRole,
@@ -89,7 +90,7 @@ export function initialAgentDraft(defaultCrewSlug: string | null): AgentDraft {
     editedPersonaPrompt: null,
 
     llmProvider: "ANTHROPIC",
-    llmModel: "claude-sonnet-4-6",
+    llmModel: adapterDefaultModel("CLAUDE_CODE"),
     cliAdapter: "CLAUDE_CODE",
     toolProfile: "CODING",
     memoryEnabled: true,

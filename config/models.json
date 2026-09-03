@@ -1,0 +1,200 @@
+{
+  "$comment": "The one list of models Crewship offers. Read by the Go binary (config.ModelsJSON → internal/llm.CuratedModels, the /api/v1/models fallback, `crewship model list`, the Guide's proposal validation) and by the web bundle (lib/model-catalog.ts → every picker, including onboarding). Edit here, nowhere else. `providers` are vendors the server can talk to directly; each model may carry a `role` (cheap | default | top) the Guide uses to size a crew, and `category` for grouping in pickers. `adapters` are the CLI toolchains; an adapter entry that is a plain string refers to a provider model by id (label and category come from there), an object is the adapter's own id/label. Order is most-capable-and-most-recent first — pickers render top to bottom.",
+  "version": 1,
+  "providers": {
+    "anthropic": {
+      "label": "Anthropic",
+      "default": "claude-sonnet-5",
+      "models": [
+        { "id": "claude-fable-5", "label": "Claude Fable 5", "category": "frontier" },
+        { "id": "claude-opus-5", "label": "Claude Opus 5", "category": "frontier", "role": "top" },
+        { "id": "claude-opus-4-8", "label": "Claude Opus 4.8", "category": "frontier" },
+        { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "category": "frontier", "role": "default" },
+        { "id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "category": "fast", "role": "cheap" },
+        { "id": "claude-opus-4-7", "label": "Claude Opus 4.7", "category": "legacy" },
+        { "id": "claude-opus-4-6", "label": "Claude Opus 4.6", "category": "legacy" },
+        { "id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6", "category": "legacy" }
+      ],
+      "aliases": {
+        "claude-opus-4-5": "Claude Opus 4.5",
+        "claude-opus-4-5-20251101": "Claude Opus 4.5",
+        "claude-opus-4-1": "Claude Opus 4.1",
+        "claude-opus-4-1-20250805": "Claude Opus 4.1",
+        "claude-sonnet-4-5": "Claude Sonnet 4.5",
+        "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+        "claude-haiku-4-5-20251001": "Claude Haiku 4.5"
+      }
+    },
+    "openai": {
+      "label": "OpenAI",
+      "default": "gpt-5.5",
+      "models": [
+        { "id": "gpt-5.5", "label": "GPT-5.5", "category": "frontier", "role": "default" },
+        { "id": "gpt-5.4", "label": "GPT-5.4", "category": "frontier" },
+        { "id": "gpt-5.4-mini", "label": "GPT-5.4 mini", "category": "fast", "role": "cheap" },
+        { "id": "gpt-5.4-nano", "label": "GPT-5.4 nano", "category": "cheap" },
+        { "id": "gpt-5.3-codex", "label": "GPT-5.3 Codex", "category": "frontier" },
+        { "id": "gpt-5.3-codex-spark", "label": "GPT-5.3 Codex Spark", "category": "reasoning" },
+        { "id": "o3", "label": "o3", "category": "reasoning", "role": "top" },
+        { "id": "o3-pro", "label": "o3 Pro", "category": "reasoning" },
+        { "id": "gpt-5.2", "label": "GPT-5.2", "category": "legacy" }
+      ]
+    },
+    "google": {
+      "label": "Google",
+      "default": "gemini-2.5-pro",
+      "models": [
+        { "id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro (Preview)", "category": "frontier", "role": "top" },
+        { "id": "gemini-3-flash-preview", "label": "Gemini 3 Flash (Preview)", "category": "fast" },
+        { "id": "gemini-3.1-flash-lite-preview", "label": "Gemini 3.1 Flash Lite (Preview)", "category": "cheap" },
+        { "id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro", "category": "frontier", "role": "default" },
+        { "id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash", "category": "fast" },
+        { "id": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash Lite", "category": "cheap", "role": "cheap" }
+      ]
+    },
+    "ollama": {
+      "label": "Ollama",
+      "live_only": true,
+      "$comment": "Discovered live from the daemon (/api/tags); the server never serves this list as curated. These are the tags the agent form suggests; the id sent through OpenCode is ollama/<tag>.",
+      "models": [
+        { "id": "qwen2.5-coder:32b", "label": "Qwen2.5 Coder 32B", "category": "local" },
+        { "id": "qwen3:32b", "label": "Qwen3 32B", "category": "local" },
+        { "id": "qwen3.5:14b", "label": "Qwen3.5 14B", "category": "local" },
+        { "id": "deepseek-r1:14b", "label": "DeepSeek R1 14B", "category": "local" },
+        { "id": "deepseek-r1:32b", "label": "DeepSeek R1 32B", "category": "local" },
+        { "id": "deepseek-coder:6.7b", "label": "DeepSeek Coder 6.7B", "category": "local" },
+        { "id": "llama3.3:70b", "label": "Llama 3.3 70B", "category": "local" },
+        { "id": "gpt-oss:20b", "label": "GPT-OSS 20B", "category": "local" },
+        { "id": "gpt-oss:120b", "label": "GPT-OSS 120B", "category": "local" },
+        { "id": "gemma3:12b", "label": "Gemma 3 12B", "category": "local" },
+        { "id": "phi4:14b", "label": "Phi-4 14B", "category": "local" },
+        { "id": "phi3:mini", "label": "Phi-3 mini", "category": "local" },
+        { "id": "mistral-nemo:12b", "label": "Mistral Nemo 12B", "category": "local" },
+        { "id": "codellama:13b", "label": "Code Llama 13B", "category": "local" },
+        { "id": "starcoder2:15b", "label": "StarCoder2 15B", "category": "local" },
+        { "id": "mixtral:8x7b", "label": "Mixtral 8x7B", "category": "local" }
+      ]
+    }
+  },
+  "adapters": {
+    "CLAUDE_CODE": {
+      "provider": "anthropic",
+      "default": "claude-sonnet-5",
+      "models": [
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-sonnet-5",
+        "claude-haiku-4-5",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6"
+      ]
+    },
+    "CODEX_CLI": {
+      "provider": "openai",
+      "default": "gpt-5.5",
+      "$comment": "Codex CLI accepts only the GPT-5.x family — not the o-series, which is valid for the general API but rejected by the CLI. Source: developers.openai.com/codex/models",
+      "models": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"]
+    },
+    "GEMINI_CLI": {
+      "provider": "google",
+      "default": "gemini-2.5-pro",
+      "models": [
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite"
+      ]
+    },
+    "CURSOR_CLI": {
+      "provider": "cursor",
+      "default": "composer",
+      "$comment": "cursor-agent -m multiplexes vendor ids plus its own Composer. cursor-agent --list-models shows the live per-account list.",
+      "models": [
+        { "id": "composer", "label": "Cursor Composer", "category": "frontier" },
+        { "id": "claude-fable-5", "label": "Claude Fable 5 (Cursor)", "category": "frontier" },
+        { "id": "claude-opus-4-8", "label": "Claude Opus 4.8 (Cursor)", "category": "frontier" },
+        { "id": "claude-sonnet-5", "label": "Claude Sonnet 5 (Cursor)", "category": "frontier" },
+        { "id": "claude-opus-4-7", "label": "Claude Opus 4.7 (Cursor)", "category": "legacy" },
+        { "id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (Cursor)", "category": "legacy" },
+        { "id": "claude-haiku-4-5", "label": "Claude Haiku 4.5 (Cursor)", "category": "fast" },
+        { "id": "gpt-5.5", "label": "GPT-5.5 (Cursor)", "category": "frontier" },
+        { "id": "gpt-5.4", "label": "GPT-5.4 (Cursor)", "category": "frontier" },
+        { "id": "gpt-5.3-codex", "label": "GPT-5.3 Codex (Cursor)", "category": "frontier" },
+        { "id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro (Cursor)", "category": "frontier" },
+        { "id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro (Cursor)", "category": "frontier" },
+        { "id": "grok-4.1-fast", "label": "Grok 4.1 Fast (Cursor)", "category": "fast" }
+      ]
+    },
+    "FACTORY_DROID": {
+      "provider": "factory",
+      "default": "claude-sonnet-5",
+      "$comment": "droid exec --model takes bare ids; -fast variants are the premium tier. Source: docs.factory.ai/cli/droid-exec",
+      "models": [
+        { "id": "claude-fable-5", "label": "Claude Fable 5 (Droid)", "category": "frontier" },
+        { "id": "claude-opus-4-8", "label": "Claude Opus 4.8 (Droid)", "category": "frontier" },
+        { "id": "claude-sonnet-5", "label": "Claude Sonnet 5 (Droid)", "category": "frontier" },
+        { "id": "claude-opus-4-7", "label": "Claude Opus 4.7 (Droid)", "category": "legacy" },
+        { "id": "claude-opus-4-6", "label": "Claude Opus 4.6 (Droid)", "category": "legacy" },
+        { "id": "claude-opus-4-6-fast", "label": "Claude Opus 4.6 Fast (Droid)", "category": "legacy" },
+        { "id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (Droid)", "category": "legacy" },
+        { "id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5 (Droid)", "category": "fast" },
+        { "id": "gpt-5.5", "label": "GPT-5.5 (Droid)", "category": "frontier" },
+        { "id": "gpt-5.5-fast", "label": "GPT-5.5 Fast (Droid)", "category": "frontier" },
+        { "id": "gpt-5.5-pro", "label": "GPT-5.5 Pro (Droid)", "category": "reasoning" },
+        { "id": "gpt-5.4", "label": "GPT-5.4 (Droid)", "category": "frontier" },
+        { "id": "gpt-5.4-fast", "label": "GPT-5.4 Fast (Droid)", "category": "frontier" },
+        { "id": "gpt-5.4-mini", "label": "GPT-5.4 mini (Droid)", "category": "fast" },
+        { "id": "gpt-5.3-codex", "label": "GPT-5.3 Codex (Droid)", "category": "frontier" },
+        { "id": "gpt-5.3-codex-fast", "label": "GPT-5.3 Codex Fast (Droid)", "category": "frontier" },
+        { "id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro (Droid)", "category": "frontier" },
+        { "id": "gemini-3-flash-preview", "label": "Gemini 3 Flash (Droid)", "category": "fast" },
+        { "id": "glm-5.1", "label": "GLM 5.1 (Droid)", "category": "frontier" },
+        { "id": "kimi-k2.6", "label": "Kimi K2.6 (Droid)", "category": "frontier" },
+        { "id": "minimax-m2.7", "label": "MiniMax M2.7 (Droid)", "category": "cheap" }
+      ]
+    },
+    "OPENCODE": {
+      "provider": "anthropic",
+      "default": "anthropic/claude-sonnet-5",
+      "$comment": "OpenCode takes provider/model strings across 75+ providers (opencode.ai/docs/providers, models.dev). Curated to the most-deployed combinations. ollama/* rows are local: they need CREWSHIP_LOCAL_MODEL_BASE_URL on the server and no API key; the shortlist is deliberate — tool calling degrades sharply below this tier (anomalyco/opencode#1034, #4428).",
+      "models": [
+        { "id": "anthropic/claude-fable-5", "label": "Anthropic / Claude Fable 5", "category": "frontier" },
+        { "id": "anthropic/claude-opus-4-8", "label": "Anthropic / Claude Opus 4.8", "category": "frontier" },
+        { "id": "anthropic/claude-sonnet-5", "label": "Anthropic / Claude Sonnet 5", "category": "frontier" },
+        { "id": "anthropic/claude-opus-4-7", "label": "Anthropic / Claude Opus 4.7", "category": "legacy" },
+        { "id": "anthropic/claude-sonnet-4-6", "label": "Anthropic / Claude Sonnet 4.6", "category": "legacy" },
+        { "id": "anthropic/claude-haiku-4-5", "label": "Anthropic / Claude Haiku 4.5", "category": "fast" },
+        { "id": "openai/gpt-5.5", "label": "OpenAI / GPT-5.5", "category": "frontier" },
+        { "id": "openai/gpt-5.4", "label": "OpenAI / GPT-5.4", "category": "frontier" },
+        { "id": "openai/gpt-5.4-mini", "label": "OpenAI / GPT-5.4 mini", "category": "fast" },
+        { "id": "openai/gpt-5.4-nano", "label": "OpenAI / GPT-5.4 nano", "category": "cheap" },
+        { "id": "openai/gpt-5.3-codex", "label": "OpenAI / GPT-5.3 Codex", "category": "frontier" },
+        { "id": "openai/o3", "label": "OpenAI / o3", "category": "reasoning" },
+        { "id": "openai/o3-pro", "label": "OpenAI / o3 Pro", "category": "reasoning" },
+        { "id": "google/gemini-3.1-pro-preview", "label": "Google / Gemini 3.1 Pro", "category": "frontier" },
+        { "id": "google/gemini-3-flash-preview", "label": "Google / Gemini 3 Flash", "category": "fast" },
+        { "id": "google/gemini-2.5-pro", "label": "Google / Gemini 2.5 Pro", "category": "frontier" },
+        { "id": "google/gemini-2.5-flash", "label": "Google / Gemini 2.5 Flash", "category": "fast" },
+        { "id": "xai/grok-4.1-fast", "label": "xAI / Grok 4.1 Fast", "category": "fast" },
+        { "id": "xai/grok-4", "label": "xAI / Grok 4", "category": "frontier" },
+        { "id": "deepseek/deepseek-v4-flash", "label": "DeepSeek / V4 Flash", "category": "fast" },
+        { "id": "deepseek/deepseek-v3.2", "label": "DeepSeek / V3.2", "category": "frontier" },
+        { "id": "deepseek/deepseek-r1", "label": "DeepSeek / R1", "category": "reasoning" },
+        { "id": "groq/llama-3.3-70b-versatile", "label": "Groq / Llama 3.3 70B", "category": "fast" },
+        { "id": "groq/qwen-2.5-coder-32b", "label": "Groq / Qwen 2.5 Coder 32B", "category": "fast" },
+        { "id": "moonshotai/kimi-k2.6", "label": "Moonshot / Kimi K2.6", "category": "frontier" },
+        { "id": "zai/glm-5.1", "label": "Z.ai / GLM 5.1", "category": "frontier" },
+        { "id": "minimax/minimax-m2.7", "label": "MiniMax / M2.7", "category": "cheap" },
+        { "id": "openrouter/anthropic/claude-sonnet-4-6", "label": "OpenRouter / Claude Sonnet 4.6", "category": "frontier" },
+        { "id": "openrouter/openai/gpt-5.5", "label": "OpenRouter / GPT-5.5", "category": "frontier" },
+        { "id": "ollama/qwen2.5-coder:7b", "label": "Ollama / Qwen2.5 Coder 7B (local, macOS-friendly)", "category": "local" },
+        { "id": "ollama/qwen3-coder:30b", "label": "Ollama / Qwen3 Coder 30B (local)", "category": "local" },
+        { "id": "ollama/devstral:24b", "label": "Ollama / Devstral Small 24B (local)", "category": "local" }
+      ]
+    }
+  }
+}

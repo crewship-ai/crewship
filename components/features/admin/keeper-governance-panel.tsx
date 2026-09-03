@@ -47,6 +47,7 @@ import { SettingsCard, SettingsRow } from "@/components/features/settings/shared
 import { useAbilities } from "@/hooks/use-abilities"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { apiFetch } from "@/lib/api-fetch"
+import { providerDefaultModel, providerModels } from "@/lib/model-catalog"
 import { adminFetch } from "@/lib/admin-api"
 import { cn } from "@/lib/utils"
 
@@ -107,6 +108,13 @@ interface GovernanceResponse {
 const GOV_PROVIDER_DEFAULT = "__server_default__"
 const GOV_CREDENTIAL_NONE = "__none__"
 
+/** The cheap catalog model for a provider — the same one the server's own
+ *  housekeeping uses (internal/llm.HousekeepingModel), so the hint here cannot name a
+ *  model the catalog no longer offers. */
+function auxModelHint(provider: string): string {
+  return providerModels(provider).find((m) => m.role === "cheap")?.id ?? providerDefaultModel(provider)
+}
+
 const GOV_MODEL_PROVIDERS: {
   value: string
   label: string
@@ -131,14 +139,14 @@ const GOV_MODEL_PROVIDERS: {
   {
     value: "anthropic",
     label: "Anthropic (Claude)",
-    modelHint: "claude-haiku-4-5",
+    modelHint: auxModelHint("anthropic"),
     catalogue: "ANTHROPIC",
     note: "Bills per decision against the API key you pick below. Sharper than a small local model on ambiguous intents.",
   },
   {
     value: "openai_compat",
     label: "OpenAI-compatible endpoint",
-    modelHint: "gpt-4o-mini",
+    modelHint: auxModelHint("openai"),
     catalogue: "OPENAI",
     note: "Any endpoint that speaks the OpenAI chat API. Needs an ENDPOINT_URL credential; add an API_KEY one if it authenticates.",
   },
