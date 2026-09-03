@@ -440,8 +440,15 @@ var issueRunsCmd = &cobra.Command{
 			return err
 		}
 		identifier := derefStr(issue.Identifier, issue.ID)
-		resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/issues/%s/runs",
-			issue.CrewID, url.PathEscape(identifier)))
+		params := url.Values{}
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		setListPaging(params, limit, offset)
+		path := fmt.Sprintf("/api/v1/crews/%s/issues/%s/runs", issue.CrewID, url.PathEscape(identifier))
+		if enc := params.Encode(); enc != "" {
+			path += "?" + enc
+		}
+		resp, err := client.Get(path)
 		if err != nil {
 			return err
 		}
@@ -449,9 +456,14 @@ var issueRunsCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		meta := readListMeta(resp)
 		var runs []struct {
 			ID            string `json:"id"`
+			RunID         string `json:"run_id"`
+			TraceID       string `json:"trace_id"`
 			Status        string `json:"status"`
+			AgentID       string `json:"agent_id"`
+			AgentSlug     string `json:"agent_slug"`
 			AgentName     string `json:"agent_name"`
 			Task          string `json:"task"`
 			StartedAt     string `json:"started_at"`
@@ -471,7 +483,10 @@ var issueRunsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"AGENT", "TASK", "STATUS", "STARTED", "DURATION", "SOURCE", "RESULT"}
+		defer printListFooter(f, meta, len(runs))
+		// RUN is the journal run id — what `crewship journal --run-id` and
+		// `/activity?run=` take. "—" means the assignment never reached a run.
+		headers := []string{"RUN", "AGENT", "TASK", "STATUS", "STARTED", "DURATION", "SOURCE", "RESULT"}
 		rows := make([][]string, 0, len(runs))
 		for _, run := range runs {
 			result := run.ErrorMessage
@@ -486,8 +501,17 @@ var issueRunsCmd = &cobra.Command{
 			if source == "" {
 				source = "-"
 			}
+			runID := run.RunID
+			if runID == "" {
+				runID = "—"
+			}
+			agent := run.AgentName
+			if run.AgentSlug != "" {
+				agent = run.AgentSlug
+			}
 			rows = append(rows, []string{
-				run.AgentName,
+				runID,
+				agent,
 				truncateStr(run.Task, 28),
 				run.Status,
 				issueRelativeTime(run.StartedAt),
@@ -713,6 +737,7 @@ func init() {
 		"Relation type: blocks, blocked_by, relates_to (alias: relates-to), duplicate_of (alias: duplicate-of)")
 
 	issueCmd.AddCommand(issueCommentsCmd)
+	addListPagingFlags(issueRunsCmd.Flags(), 100)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueChangesCmd.Flags().Bool("patch", false, "Print the raw unified diff instead of the file summary")
 	issueCmd.AddCommand(issueChangesCmd)
