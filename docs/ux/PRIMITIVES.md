@@ -1,5 +1,7 @@
 # Shared UI primitives — one line per change, newest first
 
+- 2026-09-03 · cluster A · `lib/store.ts` `BreadcrumbItem.href` — a crumb that is a place carries an href and the toolbar renders it as a Link; `onClick` crumbs stay buttons. `components/layout/app-toolbar.tsx` — the chat route's breadcrumb reads the store (names published by the chat page via `components/features/chat/chat-breadcrumbs.ts`) and falls back to the URL slug only while the roster loads, never for a slug starting with `_`.
+- 2026-09-03 · cluster A · `components/features/inbox/inbox-derive.ts` `deciderCopy()`, `escalationHeading()`, `linkToOpen()` — the words for who decides (never a role enum), the decision-card heading by what an escalation asks for, and the client-side https guard for `payload.link_url`. Reuse from any surface that renders an inbox item.
 - 2026-09-03 · wave 0 · `lib/entity-refs.ts` — `refHref("routine/x")` / `refLabel` turn stored `kind/slug` owner and producer refs into routes through entityHref; null for a kind with no page.
 - 2026-09-03 · wave 0 · `components/layout/sidebar-kit.tsx` + `.kit-tap` in globals.css — every kit control is 44px under a coarse pointer; add `kit-tap` to any new interactive element in a sidebar.
 - 2026-09-03 · wave 0 · `components/ui/status-pill.tsx` + `lib/format-status.ts` — THE status pill (dot + word, six tones) and the enum→word map. Replace every local pill map with it; add missing enums to format-status, never to a component.

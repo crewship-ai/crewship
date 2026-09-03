@@ -96,7 +96,17 @@ The detail panel's action row is what the source-of-truth call hangs off:
 
 When a row is resolved, the detail panel dims, the action row replaces itself with a "Resolved Xm ago · approved" line (or "Archived Xm ago · Restore" for archived rows), and the row moves to the **Archived** tab.
 
-## Readability & safety
+## The /inbox-v2 page
+
+The redesigned inbox (the **Inbox** entry in the rail; `/inbox` above is the older surface) follows the UI contract in `docs/ux/README.md` and the audit in `docs/ux/audit-conversations.md`:
+
+- **A page header** like every other page: Inbox · "94 need you · 0 updates · 9 decided" · a **Live** pill only while the realtime socket is connected · **History** · **Decide next**, which opens the oldest item waiting on you.
+- **A row is a decision, not a log line.** A kind pill (Question · Link · Credential · Hire · Approval · Failed run · Missed run · Paused schedule · Memory proposal · Reply · Issue), the question without the server's "Agent escalation:" prefix, the crew by name and colour, the agent by name, the age — or the expiry, in red inside the hour — and a verb: **Answer**, **Grant**, **Review**, **Approve**, **Retry**, **Run now**, **Re-enable**. In History the pill is the outcome (Approved, Rejected, Expired, Archived).
+- **The reading pane is never blank.** With nothing open it carries the triage: how many are waiting and how many expire today, the approvals, the crews asking (click one to narrow the list), what is live, the Updates line, and the last five decisions with their outcomes. With zero items it is the same card in its zero form, saying what lands here and linking to Routines and Crews.
+- **The detail names things.** The identity strip is the agent (face, name, role — a link to the agent), the crew (dot, name — a link), the kind as a pill and the arrival time. There are no cuids and no field captions; the identifiers become a **Where this came from** row of links: the chat the escalation was raised in, the run it paused, the issue, the routine, the crew. A **LINK** escalation shows **What you are approving** — the https address, its host and an **Open link** button. A credential proposal shows the credential's name. Card headings say what is asked: "Question from an agent", "A link to open", "Credential request". Who may decide reads "An owner or admin decides this", never a role enum.
+- **A staged hire has Deny.** The hire lands as a waitpoint here and as a row in the approvals queue; the inbox finds the queue twin (its payload names the inbox item) and wires its deny to the card, next to **Approve hire** and **Open crew**.
+- **Empty columns say what lands there** and link to where it comes from; a filtered column that matches nothing offers **Clear**.
+
 
 The inbox is the one surface that aggregates messages from every agent, routine, and curator — so it's also where raw machine output and leaked secrets would otherwise pile up. Several guards keep it human-readable and safe:
 
