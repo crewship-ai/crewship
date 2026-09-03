@@ -6,6 +6,7 @@ import { Menu, Plus, Users } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { CreateCrewDialog } from "./create-crew-dialog"
 import { CreateAgentDialog } from "./create-agent"
+import { explorerCountLine } from "./explorer-groups"
 
 export interface CrewsSubbarProps {
   workspaceId: string
@@ -22,6 +23,9 @@ export interface CrewsSubbarProps {
    *  narrowing to {id, name, slug} here is what left that picker with a
    *  colourless list of names. Optional so other callers need not change. */
   crews: { id: string; name: string; slug: string; icon?: string | null; color?: string | null; _count?: { agents: number } }[]
+  /** Server totals; the description must never say "100 crews" for 103. */
+  crewsTotal?: number | null
+  agentsTotal?: number | null
 }
 
 /**
@@ -40,6 +44,8 @@ export function CrewsSubbar({
   onAgentCreated,
   onOpenExplorer,
   crews,
+  crewsTotal = null,
+  agentsTotal = null,
 }: CrewsSubbarProps) {
   const router = useRouter()
   const params = useSearchParams()
@@ -65,11 +71,19 @@ export function CrewsSubbar({
     router.replace(`${url.pathname}${url.search}`, { scroll: false })
   }, [newParam, router])
 
-  // Live description: breadcrumb path when something is selected, otherwise a count.
+  // Live description: breadcrumb path when something is selected, otherwise
+  // the fleet's real size (X-Total-Count), pluralised.
+  const totals = explorerCountLine({
+    search: "",
+    crewsTotal,
+    agentsTotal,
+    matchedCrews: crews.length,
+    matchedAgents: agentsTotal ?? 0,
+  })
   const description =
     crewName || agentName
-      ? [crewName, agentName].filter(Boolean).join(" / ")
-      : `${crews.length} crews`
+      ? `${[crewName, agentName].filter(Boolean).join(" / ")} · ${totals}`
+      : totals
 
   return (
     <>
