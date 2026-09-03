@@ -20,7 +20,7 @@ Seven kinds of items get written through to `inbox_items` the moment their sourc
 | Kind | When it's created | Resolves via |
 |------|-------------------|--------------|
 | `waitpoint` | A routine hits a `wait` step of `kind: approval` (Harbormaster gate) | Approve / Deny — calls `/api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve` |
-| `escalation` | An agent or sub-task calls `/escalate` on the sidecar, or `internal/api/escalation_handler.go` records one | Mark resolved (decision is recorded in the escalation row separately) |
+| `escalation` | An agent or sub-task calls `/escalate` on the sidecar, or `internal/api/escalation_handler.go` records one. The payload says **what is being asked for**: `escalation_type` (`TEXT`, `LINK`, `CREDENTIAL`), `link_url` for a LINK (the https address the agent wants opened) and `credential_name` for a CREDENTIAL proposal — the name only, never the value. | Mark resolved (decision is recorded in the escalation row separately) |
 | `failed_run` | A `pipeline_run` reaches the `failed` terminal state | Retry (re-fires the routine with the same inputs) or Cancel |
 | `memory_consolidation` | The consolidator distils journal entries into candidate rules, or Keeper's memory-health sweep suggests one | **Accept** / **Reject** — `/api/v1/consolidate/proposed/{id}/approve\|reject`. OWNER/ADMIN only, so the row is addressed to `ADMIN`. |
 | `schedule_missed` | A cron schedule was overdue and dropped or deferred occurrences per its `catchup_policy` | **Run now** — fires the schedule out of cycle (`POST /api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}/run`, the same call as `crewship routine schedules now`) — or Dismiss. |
@@ -136,7 +136,7 @@ The Inbox has full CLI parity — everything the web surface exposes is scriptab
 | Command | What it does |
 |---------|--------------|
 | `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind`, `--limit` (defaults to 50; the server caps at 500), `--format json\|yaml\|quiet`. JSON carries `payload`, `sender_type`, agent-sender `avatar_seed` + `avatar_style`, and — so a script can see who a row is addressed to and who closed it — `target_role`, `resolved_by_user_id` and `resolved_at`. |
-| `crewship inbox get <id>` | Show one item with its full markdown body **and** the structured Context (payload) — the read counterpart of the web detail pane. `--format json` for scripting. |
+| `crewship inbox get <id>` | Show one item with its full markdown body **and** the structured Context (payload) — the read counterpart of the web detail pane. A LINK escalation prints its `link` and a credential proposal its `credential` on a labelled line above the body, so the fact that decides the verdict is not buried in the Context dump. `--format json` for scripting. |
 | `crewship inbox read <id>` | Mark an item as read. |
 | `crewship inbox unread <id>` | Flip back to unread (also the way to **restore** an archived item). |
 | `crewship inbox resolve <id>` | Mark resolved. Optional `--action approved\|denied\|retried\|cancelled\|acknowledged\|dismissed` to record the decision shape. |

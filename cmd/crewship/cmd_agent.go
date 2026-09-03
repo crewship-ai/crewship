@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -29,12 +30,22 @@ var agentListCmd = &cobra.Command{
 		client := newAPIClient()
 
 		path := "/api/v1/agents"
+		q := url.Values{}
 		if crewFilter, _ := cmd.Flags().GetString("crew"); crewFilter != "" {
 			crewID, err := resolveCrewID(client, crewFilter)
 			if err != nil {
 				return err
 			}
-			path += "?crew_id=" + crewID
+			q.Set("crew_id", crewID)
+		}
+		// The server hides the onboarding Guide's crew (kind=setup) from
+		// every roster; this is the explicit opt-in, sent only when asked so
+		// the default stays the server's.
+		if include, _ := cmd.Flags().GetBool("include-setup"); include {
+			q.Set("include_setup", "1")
+		}
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
 		}
 
 		resp, err := client.Get(path)
@@ -190,6 +201,7 @@ var agentGetCmd = &cobra.Command{
 
 func init() {
 	agentListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
+	agentListCmd.Flags().Bool("include-setup", false, "Also list the onboarding Guide (agents of the setup crew, hidden by default)")
 
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("slug", "", "Agent slug (auto-generated from name if empty)")

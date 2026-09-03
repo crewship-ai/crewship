@@ -234,6 +234,19 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		"reason":          inbox.RedactSecrets(body.Reason),
 		"escalation_type": escalationType,
 	}
+	// What is being approved travels WITH the request. The inbox is the
+	// surface with the Approve button, and it used to show "Escalation type
+	// LINK" and nothing else — the URL lived only on the escalations row, so
+	// a person approved an address they could not see. Same for a credential
+	// proposal, whose name was only in the title. The LINK metadata was
+	// validated as an https URL above; the credential NAME is operator
+	// metadata, never the value (redacted before it is stored, see above).
+	if escalationType == "LINK" && body.Metadata != "" {
+		inboxPayload["link_url"] = body.Metadata
+	}
+	if credentialName != "" {
+		inboxPayload["credential_name"] = credentialName
+	}
 	// Signal to the inbox UI that this CREDENTIAL escalation already has a
 	// proposed credential waiting in the vault, so it can show a one-click
 	// Approve (vs the legacy human-supplies-the-secret flow that routes to the

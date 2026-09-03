@@ -20,6 +20,19 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	crewID := r.URL.Query().Get("crew_id")
 	limit, offset := parseListPagination(r, 100, 500)
 
+	// The onboarding Guide lives in a crew of kind='setup'. GET /crews has
+	// always hidden that crew (crews_query.go); this list did not hide its
+	// agent, so every roster in the product — the chat column, the Agents
+	// facet, the mention picker, routine reach — offered a "Crewship Guide"
+	// nobody hired, and /chat opened on it because its seeded conversation
+	// was the freshest. Hidden by default; `include_setup=1` is the explicit
+	// opt-in for the one caller that means it (a deep link into the Guide's
+	// own chat). Agents with no crew are not setup agents and stay.
+	setupWhere := " AND COALESCE(c.kind, '') <> 'setup'"
+	if r.URL.Query().Get("include_setup") == "1" {
+		setupWhere = ""
+	}
+
 	// Main query: no more per-row scalar COUNT subqueries. Those are batched
 	// below in three GROUP BY queries keyed by agent_id so the cost is O(1)
 	// extra round-trips instead of O(N) per-row scans.
@@ -66,11 +79,11 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		LIMIT ? OFFSET ?`
 	if crewID != "" {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+" AND a.crew_id = ?"+orderBy,
+			listQuery+setupWhere+" AND a.crew_id = ?"+orderBy,
 			workspaceID, crewID, limit, offset)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+orderBy,
+			listQuery+setupWhere+orderBy,
 			workspaceID, limit, offset)
 	}
 
