@@ -67,7 +67,11 @@ import { shortenId } from "./ids"
  */
 // A static class, not an inline `gridTemplateColumns`: the template is
 // one fixed value, so Tailwind can see it at build time.
-const ROW_GRID = "grid-cols-[3px_84px_38px_124px_minmax(0,1fr)_62px_14px]"
+// Below md the row is two lines — the summary, then time · type · actor —
+// in three columns; the seven-column layout only starts at md. A 373px
+// fixed grid on a 390px screen showed the timestamps and nothing else.
+const ROW_GRID =
+  "grid-cols-[3px_minmax(0,1fr)_14px] md:grid-cols-[3px_84px_38px_124px_minmax(0,1fr)_62px_14px]"
 
 /**
  * Glyph stand-ins for the actors that have no avatar because they are
@@ -361,14 +365,14 @@ const LogRow = memo(function LogRow({
       </span>
       <time
         dateTime={ts}
-        className="font-mono text-[11px] tabular-nums text-muted-foreground/80 truncate"
+        className="hidden font-mono text-[11px] tabular-nums text-muted-foreground/80 truncate md:block"
       >
         {tsLabel}
       </time>
       {/* A div, not a span: CrewBadge renders a div once the crew has an
           icon, and a div inside a span is invalid — the parser closes the
           span and reparents the div out of this 38px column. */}
-      <div className="flex items-center gap-1">
+      <div className="hidden items-center gap-1 md:flex">
         <ActorAvatar agent={agent} agentId={entry.agent_id} actorType={entry.actor_type} />
         <CrewBadge crew={crew} />
       </div>
@@ -380,7 +384,7 @@ const LogRow = memo(function LogRow({
           the same 18 colours in the chips row, stats rail and histogram
           legend, where they are consumed as a background value — a
           parallel class map would be a second copy to keep in sync. */}
-      <span className="flex items-center gap-1 min-w-0" title={entry.entry_type}>
+      <span className="hidden items-center gap-1 min-w-0 md:flex" title={entry.entry_type}>
         <TypeIcon className="h-3 w-3 shrink-0" style={{ color: GROUP_COLOR[grp] }} />
         {/* Group membership is otherwise carried by colour alone. */}
         <span className="sr-only">{GROUP_LABEL[grp]} group</span>
@@ -396,7 +400,17 @@ const LogRow = memo(function LogRow({
       >
         {summary || "—"}
       </span>
-      <span className="text-right font-mono text-[10px] tabular-nums text-muted-foreground/70">
+      {/* The second line below md: what the hidden columns carried. */}
+      <span
+        className="col-start-2 flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-muted-foreground/70 md:hidden"
+        aria-hidden
+      >
+        <span className="tabular-nums">{tsLabel}</span>
+        <span style={{ color: GROUP_COLOR[grp] }} className="truncate">{entry.entry_type}</span>
+        {agent?.name && <span className="truncate">· {agent.name}</span>}
+        {crew?.name && <span className="truncate">· {crew.name}</span>}
+      </span>
+      <span className="hidden text-right font-mono text-[10px] tabular-nums text-muted-foreground/70 md:block">
         {formatRelativeTime(ts)}
       </span>
       {/* The disclosure is this button, not the row container. The

@@ -185,7 +185,7 @@ describe("LogsList row identity", () => {
     const row = getAllByTestId("virtuoso-row")[0]
     // lib/journal-icons.ts maps exec.command → Terminal.
     expect(row.querySelector("svg.lucide-terminal")).not.toBeNull()
-    expect(within(row).getByText("exec.command")).toBeInTheDocument()
+    expect(within(row).getAllByText("exec.command")[0]).toBeInTheDocument()
   })
 
   it("drops the redundant '<agent>:' prefix from the summary", () => {
