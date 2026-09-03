@@ -401,6 +401,11 @@ func subjectSightings(t *testing.T, db *sql.DB, wsID, userID string) map[string]
 // #1976.
 func columnCanNameAUser(col string) bool {
 	switch col {
+	// "userId" is not a typo: the NextAuth-era tables (accounts, sessions)
+	// spell it camelCase, and a sweep that only knows snake_case would call
+	// them clean without ever having looked.
+	case "userId":
+		return true
 	case "subject_id", "actor_id", "author_id", "user_id", "data_subject_id",
 		"requested_by", "decided_by", "created_by", "updated_by", "granted_by",
 		"changed_by", "invited_by", "resolved_by", "approved_by", "set_by",
