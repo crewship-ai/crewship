@@ -23,7 +23,7 @@ Auth: every subcommand requires an authenticated session (`crewship login`). All
 | --- | --- |
 | `chat <chat-id>` | Print the full message history of one chat as a rendered transcript. |
 | `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
-| `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes `KIND` (what wrote the chat) and `UNREAD` (replies you haven't seen). `--kind` narrows to one. |
+| `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes `KIND` (what wrote the chat) and `UNREAD` (replies you haven't seen). `--kind` narrows to one; `--limit` and `--offset` page (the server's default and ceiling are 100), and a cut page ends with `showing 1–10 of 19 · next page: --offset 10`. |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
 | `chat rename <chat-id> <title>` | Give the session a name — what `chat list`, the sidebar and reply notifications call it. Alias: `title`. |
 | `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/<attachment-id>/` in the container). |
@@ -277,6 +277,7 @@ On a busy agent the `routine` rows outnumber the rest by an order of magnitude �
 crewship chat list daniel --kind direct           # the ones you opened
 crewship chat list daniel --kind routine          # what ran on its own
 crewship chat list daniel --kind direct,issue     # comma-separates
+crewship chat list daniel --kind direct --limit 10 # the ten most recent, then --offset 10 for the next ten
 ```
 
 The filter runs **in the query, before the server's page limit**, which is the point of it: narrowing after the fact narrows a page routine rows have already filled. Omitted, every kind is listed — `--kind` narrows, it never reorders.
