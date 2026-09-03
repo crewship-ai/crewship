@@ -722,6 +722,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   (`crewship crew update <crew> --issue-prefix ""`) — and the panel now
   sends it too. The field's 5-character cap and hint text are also raised to
   the API's actual limit (`^[A-Za-z0-9_-]{1,16}$`, since #2035).
+- **The issues board now moves on its own instead of only on a manual
+  reload (#2257).** Every status-transition endpoint — the human and agent
+  PATCH, and the review-approve/request-changes/stop workflow actions — now
+  broadcasts a dedicated `issue.status_changed` event (`{id, identifier,
+  crew_id, status, from, to}`) alongside the existing `issue.updated`, and
+  `issue.created`/`issue.deleted` now carry `crew_id` too. The `/issues`
+  board (`OrchestrationLayout`) subscribes to the full issue.* event set for
+  the first time and reconciles rather than trusts: a change to the crew
+  currently in view triggers a debounced refetch, a change the active crew
+  filter can prove is off-screen is skipped, and a socket reconnect always
+  refetches so a dropped connection can't leave the board permanently wrong.
+  The decision logic is `components/features/orchestration/issue-realtime.ts`,
+  unit-tested independently of the component.
 - **A run is now attributable to the issue that caused it, including
   delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither
