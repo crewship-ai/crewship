@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 )
 
@@ -14,18 +13,16 @@ import (
 func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	// Pagination
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	// Pagination — the S1 convention: `?limit=&offset=`, clamped, with the
+	// total published in X-Total-Count so a client never has to count what
+	// it received (the board used to say "100 issues" at 1 015).
+	limit, offset := parsePagination(r, 50, 500)
 
-	query := issueSelectQuery() + `
-		WHERE m.workspace_id = ?`
+	// The WHERE clause is built once and used twice: for the page and for
+	// the COUNT(*) that feeds X-Total-Count. Keeping them apart is how the
+	// two drift — a filter that only reaches one of them makes the count
+	// lie about the list.
+	where := ` WHERE m.workspace_id = ?`
 	args := []interface{}{wsID}
 
 	// Default filter: only issues unless explicitly overridden
@@ -33,7 +30,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	if missionType == "" {
 		missionType = "issue"
 	}
-	query += " AND COALESCE(m.mission_type, 'mission') = ?"
+	where += " AND COALESCE(m.mission_type, 'mission') = ?"
 	args = append(args, missionType)
 
 	// Status filter (comma-separated)
@@ -44,7 +41,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 			placeholders[i] = "?"
 			args = append(args, strings.TrimSpace(s))
 		}
-		query += " AND m.status IN (" + strings.Join(placeholders, ",") + ")"
+		where += " AND m.status IN (" + strings.Join(placeholders, ",") + ")"
 	}
 
 	// Priority filter (comma-separated)
@@ -55,37 +52,47 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 			placeholders[i] = "?"
 			args = append(args, strings.TrimSpace(p))
 		}
-		query += " AND m.priority IN (" + strings.Join(placeholders, ",") + ")"
+		where += " AND m.priority IN (" + strings.Join(placeholders, ",") + ")"
 	}
 
 	// Project filter
 	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
-		query += " AND m.project_id = ?"
+		where += " AND m.project_id = ?"
 		args = append(args, projectID)
 	}
 
 	// Crew filter
 	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
-		query += " AND m.crew_id = ?"
+		where += " AND m.crew_id = ?"
 		args = append(args, crewID)
 	}
 
 	// Assignee filter
 	if assigneeID := r.URL.Query().Get("assignee_id"); assigneeID != "" {
-		query += " AND m.assignee_id = ?"
+		where += " AND m.assignee_id = ?"
 		args = append(args, assigneeID)
 	}
 
 	// Label filter
 	if labelName := r.URL.Query().Get("label"); labelName != "" {
-		query += " AND m.id IN (SELECT ml.mission_id FROM mission_labels ml JOIN labels l ON ml.label_id = l.id WHERE l.name = ?)"
+		where += " AND m.id IN (SELECT ml.mission_id FROM mission_labels ml JOIN labels l ON ml.label_id = l.id WHERE l.name = ?)"
 		args = append(args, labelName)
 	}
 
-	// Search (LIKE on title)
-	if search := r.URL.Query().Get("search"); search != "" {
-		query += " AND m.title LIKE ?"
-		args = append(args, "%"+search+"%")
+	// Search. `q` is the S1 spelling shared by every list; `search` stays
+	// as the older alias. It matches the title and the identifier, so a
+	// person who types "ENG-4" or "launch" finds the issue either way —
+	// the board's search box used to filter only the 100 rows it had loaded.
+	if search := issueSearchTerm(r); search != "" {
+		where += " AND (m.title LIKE ? OR m.identifier LIKE ?)"
+		args = append(args, "%"+search+"%", "%"+search+"%")
+	}
+
+	var total int
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM missions m"+where, args...).Scan(&total); err != nil {
+		internalError(w, r, h.logger, "count issues", err)
+		return
 	}
 
 	// Sort
@@ -98,7 +105,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	case "sort_order":
 		sortCol = "COALESCE(m.sort_order, 0)"
 	}
-	query += " ORDER BY " + sortCol + " DESC LIMIT ? OFFSET ?"
+	query := issueSelectQuery() + where + " ORDER BY " + sortCol + " DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
@@ -193,7 +200,17 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []issueResponse{}
 	}
+	writeListMeta(w, total, limit, offset)
 	writeJSON(w, http.StatusOK, result)
+}
+
+// issueSearchTerm reads the free-text search of an issue list: `q` first,
+// then the older `search`, trimmed. Empty means no search.
+func issueSearchTerm(r *http.Request) string {
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		return q
+	}
+	return strings.TrimSpace(r.URL.Query().Get("search"))
 }
 
 // ── 2. Create — POST /api/v1/crews/{crewId}/issues ─────────────────────────
