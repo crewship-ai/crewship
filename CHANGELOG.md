@@ -689,6 +689,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **A deploy-window blip no longer wedges the avatar-backfill latch shut for
+  the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
+  whenever a request 401s and `/api/auth/token/refresh` is itself
+  transiently unavailable — a 5xx, a network throw, or its own 10s abort —
+  which is a routine event during an API restart, exactly when several tabs
+  are re-rendering. #2199's latch treated a run of these identically to a
+  genuinely broken endpoint (the #2196 case) and stopped asking for the rest
+  of the JS session, recoverable only by a full reload. A run of 5xx or
+  transport failures now closes the rail for 60 seconds instead of
+  permanently, and still spends its budget; a run of 4xx (other than 403,
+  which already has its own refusal handling) still latches for the
+  session, since that is a property of the endpoint rather than of the
+  minute.
 - **A suggestion or follow-up chip clicked twice can no longer send twice
   while its session is still being created (#2121).** The chip handler read
   `isStreaming` — a prop that cannot change until a send produces a render —
