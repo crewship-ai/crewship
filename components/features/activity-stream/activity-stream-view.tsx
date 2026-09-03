@@ -296,6 +296,8 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     chains,
     hasUnrecordedRuns: chainsHaveUnrecorded,
     hasMore: chainsHaveMore,
+    error: chainsError,
+    refresh: refreshChains,
   } = useChains(workspaceId)
 
   // Picking a workflow is a selection like any other, so it goes through the
@@ -844,6 +846,8 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               loadedChainCount={chains.length}
               chainsHaveMore={chainsHaveMore}
               chainsHaveUnrecorded={chainsHaveUnrecorded}
+              chainsError={chainsError}
+              onRetryChains={() => void refreshChains()}
               routineBySlug={routineBySlug}
               selectedChain={railChain}
               onSelectChain={selectChain}

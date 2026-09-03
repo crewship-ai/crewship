@@ -61,7 +61,7 @@ export function issueRunsEmptyCopy(status: string): string {
  * timeline (issue → run → journal) and it was the one that could not be
  * followed.
  */
-export function IssueRunsCard({ issue, runs }: { issue: Mission; runs: IssueRun[] }) {
+export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mission; runs: IssueRun[]; unavailable?: boolean }) {
   const running = runs.filter((r) => r.status === "RUNNING").length
   const hint =
     runs.length === 0
@@ -83,7 +83,9 @@ export function IssueRunsCard({ issue, runs }: { issue: Mission; runs: IssueRun[
         ) : undefined
       }
     >
-      {runs.length === 0 ? (
+      {unavailable && runs.length === 0 ? (
+        <InlineEmpty icon={Play} text="Could not load the runs — try again above." className="border-destructive/40 text-destructive" />
+      ) : runs.length === 0 ? (
         <InlineEmpty icon={Play} text={issueRunsEmptyCopy(issue.status)} />
       ) : (
         <div className="flex flex-col">
