@@ -9,9 +9,12 @@ import type { AgentSummary } from "@/app/(dashboard)/dashboard-types"
 import { crewColor, formatCost } from "@/app/(dashboard)/dashboard-helpers"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
+import { StatusPill } from "@/components/ui/status-pill"
+import { entityHref } from "@/lib/entity-links"
+import { formatStatus } from "@/lib/format-status"
 import { cn } from "@/lib/utils"
 import type { FleetHealthRow } from "./dashboard-overview"
-import { Sparkline } from "./sparkline"
+import { Sparkline } from "@/components/ui/sparkline"
 import type { RunVolumeBucket } from "./run-volume-chart"
 
 export interface FleetCard {
@@ -72,14 +75,6 @@ export function prioritiseFleet(cards: FleetCard[]): FleetCard[] {
   )
 }
 
-const TONE_PILL = {
-  success: "border-success/25 bg-success/10 text-success",
-  blue: "border-primary/25 bg-primary/10 text-primary-hover",
-  warn: "border-warn/25 bg-warn/10 text-warn",
-  danger: "border-destructive/25 bg-destructive/10 text-destructive",
-  muted: "border-border bg-muted text-muted-foreground",
-} as const
-
 const AGENT_DOT: Record<string, string> = {
   RUNNING: "bg-primary shadow-[0_0_0_3px_rgba(30,123,254,0.25)]",
   ERROR: "bg-destructive",
@@ -120,23 +115,20 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
               <div className="flex items-center gap-3">
                 <CrewIcon icon={row.crew.icon || "users"} color={row.crew.color} size="md" />
                 <span className="min-w-0 flex-1">
-                  <Link href={`/crews?crew=${encodeURIComponent(row.crew.slug)}`} className="block truncate text-body font-semibold tracking-tight text-foreground hover:underline">
+                  <Link href={entityHref({ kind: "crew", slug: row.crew.slug })} className="block truncate text-body font-semibold tracking-tight text-foreground hover:underline">
                     {row.crew.name}
                   </Link>
                   <span className="block truncate text-label text-muted-foreground">
                     {card.agents.length} {card.agents.length === 1 ? "agent" : "agents"} · {row.detail}
                   </span>
                 </span>
-                <span className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-micro font-semibold", TONE_PILL[row.tone])}>
-                  <span className={cn("h-1.5 w-1.5 rounded-full", row.tone === "success" ? "bg-success" : row.tone === "blue" ? "bg-primary" : row.tone === "warn" ? "bg-warn" : row.tone === "danger" ? "bg-destructive" : "bg-muted-foreground")} />
-                  {row.status}
-                </span>
+                <StatusPill tone={row.tone} label={row.status} live={row.tone === "blue"} />
               </div>
 
               <div className="flex items-center gap-2">
                 <span className="flex items-center gap-1.5">
                   {card.agents.slice(0, 6).map((agent) => (
-                    <Link key={agent.id} href={`/chat/${encodeURIComponent(agent.slug)}`} title={`${agent.name} · ${agent.status.toLowerCase()}`} className="relative">
+                    <Link key={agent.id} href={entityHref({ kind: "chat", agentSlug: agent.slug })} title={`${agent.name} · ${formatStatus(agent.status).label}`} className="relative">
                       <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-7 w-7 rounded-lg bg-muted ring-1 ring-border" />
                       <span className={cn("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card", AGENT_DOT[agent.status] ?? "bg-muted-foreground")} aria-hidden />
                     </Link>
@@ -158,7 +150,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
                     {row.services.checked ? `${row.services.running}/${row.services.total} services` : "services unchecked"}
                   </span>
                 </span>
-                <Link href={`/crews?crew=${encodeURIComponent(row.crew.slug)}`} className="inline-flex items-center gap-1 text-label font-medium text-primary-hover">
+                <Link href={entityHref({ kind: "crew", slug: row.crew.slug })} className="inline-flex items-center gap-1 text-label font-medium text-primary-hover">
                   Open <ChevronRight className="h-3.5 w-3.5" />
                 </Link>
               </div>
@@ -190,13 +182,13 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
               {rest.map((card) => (
                 <Link
                   key={card.row.crew.id}
-                  href={`/crews?crew=${encodeURIComponent(card.row.crew.slug)}`}
+                  href={entityHref({ kind: "crew", slug: card.row.crew.slug })}
                   className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-label transition-colors hover:bg-foreground/[0.03]"
                 >
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: crewColor(card.row.crew.color) }} aria-hidden />
                   <span className="min-w-0 flex-1 truncate text-foreground/90">{card.row.crew.name}</span>
                   <span className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground">{card.agents.length}a · {card.runsTotal}r</span>
-                  <span className={cn("shrink-0 rounded-full border px-1.5 py-0.5 text-micro font-medium", TONE_PILL[card.row.tone])}>{card.row.status}</span>
+                  <StatusPill tone={card.row.tone} label={card.row.status} />
                 </Link>
               ))}
             </div>

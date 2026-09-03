@@ -1,5 +1,10 @@
 # Shared UI primitives — one line per change, newest first
 
+- 2026-09-03 · wave 0 · `components/ui/status-pill.tsx` + `lib/format-status.ts` — THE status pill (dot + word, six tones) and the enum→word map. Replace every local pill map with it; add missing enums to format-status, never to a component.
+- 2026-09-03 · wave 0 · `lib/entity-links.ts` — `entityHref()` for crew, agent, chat, issue(s), routine(s), run, journal, page, credential(s), inbox, spend. Build every cross-link through it.
+- 2026-09-03 · wave 0 · `components/ui/inline-empty.tsx` — the one-line empty state for cards.
+- 2026-09-03 · wave 0 · `components/ui/sparkline.tsx` — Sparkline moved here from the dashboard (old path re-exports).
+- 2026-09-03 · wave 0 · `hooks/use-paged-list.ts` — client half of the paging convention (`?limit&offset`, `X-Total-Count`); `total === null` means the endpoint does not page yet.
 - 2026-09-03 · `components/features/dashboard/sparkline.tsx` — `Sparkline` (draw-on-mount line) and `sparklinePoints`; safe to move to `components/ui` when a second area uses it.
 - 2026-09-03 · `app/(dashboard)/dashboard-helpers.ts` — `crewColor` now accepts hex as well as palette ids; `foldRunVolumeSeries` folds a many-series chart to top N + Other.
 - 2026-09-03 · `components/ui/crew-icon.tsx` and `components/icons/provider-icons.tsx` — real brand marks (Claude, OpenCode, Cursor); Factory stays a neutral glyph.

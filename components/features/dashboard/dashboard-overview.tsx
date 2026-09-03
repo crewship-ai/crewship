@@ -39,7 +39,8 @@ import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import type { Mission } from "@/lib/types/mission"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { Sparkline } from "@/components/features/dashboard/sparkline"
+import { Sparkline } from "@/components/ui/sparkline"
+import { InlineEmpty } from "@/components/ui/inline-empty"
 import { cn } from "@/lib/utils"
 import { formatDuration, formatRelativeTime } from "@/lib/time"
 
@@ -809,18 +810,7 @@ export function SystemSignals({
   )
 }
 
-/** One line, an icon and an action — the empty state a card wears when it
- *  has nothing to say. The old centred 150px block turned a healthy, idle
- *  workspace into a screen that was mostly empty cards. */
-function InlineEmpty({ icon: Icon, text, action }: { icon: LucideIcon; text: string; action?: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-border/60 px-3 py-2.5 text-label text-muted-foreground">
-      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-      <span className="min-w-0 flex-1">{text}</span>
-      {action}
-    </div>
-  )
-}
+
 
 function EmptyState({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
   return (

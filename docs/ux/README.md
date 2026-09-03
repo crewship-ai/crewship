@@ -26,14 +26,16 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 |---|---|---|
 | Page header | `SubBar` (`components/layout/sub-bar`) | icon, title, `N things · M things`, live meta, primary + secondary action |
 | Card | `DashboardCard` | 11px uppercase title, mono hint, `→` action link |
-| Empty state inside a card | `InlineEmpty` pattern (dashboard-overview.tsx) | ONE line, an icon, an action. Never a 150px centred block |
+| Empty state inside a card | `InlineEmpty` (`components/ui/inline-empty`) | ONE line, an icon, an action. Never a 150px centred block |
 | Empty page | `EmptyState` (`components/layout/empty-state`) | says what will appear here and the CLI/UI action that creates it |
-| Status | pill `rounded-full border px-2 py-0.5 text-micro font-semibold` in a tone | tones: success / warn / danger / blue / muted. Never a colour alone: dot + word |
+| Status | `StatusPill` (`components/ui/status-pill`) + `formatStatus` (`lib/format-status`) | tones: success / blue / warn / danger / muted / purple. Never a colour alone: dot + word. No local pill maps |
 | Crew | `CrewIcon` + name + colour dot | colour may be a palette id OR a hex — use `crewColor` / `crewColorHex` |
 | Agent | `AgentAvatar` with status dot | RUNNING blue with halo, ERROR red, idle green |
 | Model | `getModelLabel` | ids come from `config/models.json`, never typed in a component |
 | Numbers | `AnimatedNumber` | count up on mount; `tabular-nums` always |
-| Trend | `Sparkline` (`components/features/dashboard/sparkline`) | draws on mount, one hue, no axes |
+| Trend | `Sparkline` (`components/ui/sparkline`) | draws on mount, one hue, no axes |
+| Cross-link | `entityHref()` (`lib/entity-links`) | every link to a crew, agent, issue, routine, run, page, credential, chat goes through it |
+| Long list | `usePagedList` (`hooks/use-paged-list`) | `?limit&offset` + `X-Total-Count`; show `N of TOTAL` and a Show-more |
 | Disabled primary button | a one-line reason beside it | onboarding's `blocking reason` pattern |
 | Irreversible action | `AlertDialog` that says what is lost and where to recover | Skip setup, delete, nuke |
 

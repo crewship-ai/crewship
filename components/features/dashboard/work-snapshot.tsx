@@ -7,6 +7,9 @@ import { CircleDot } from "lucide-react"
 import type { Mission } from "@/lib/types/mission"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
+import { InlineEmpty } from "@/components/ui/inline-empty"
+import { StatusPill } from "@/components/ui/status-pill"
+import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
 
 export interface IssueBoardCounts {
@@ -49,17 +52,6 @@ export function issueBoardCounts(missions: Mission[]): IssueBoardCounts {
   return counts
 }
 
-const STATUS_PILL: Record<string, { label: string; className: string }> = {
-  IN_PROGRESS: { label: "In progress", className: "border-primary/25 bg-primary/10 text-primary-hover" },
-  REVIEW: { label: "Review", className: "border-warn/25 bg-warn/10 text-warn" },
-  COMPLETED: { label: "Done", className: "border-success/25 bg-success/10 text-success" },
-  DONE: { label: "Done", className: "border-success/25 bg-success/10 text-success" },
-  FAILED: { label: "Failed", className: "border-destructive/25 bg-destructive/10 text-destructive" },
-  BACKLOG: { label: "Backlog", className: "border-border bg-muted text-muted-foreground" },
-  TODO: { label: "Todo", className: "border-border bg-muted text-muted-foreground" },
-  PLANNING: { label: "Planning", className: "border-border bg-muted text-muted-foreground" },
-}
-
 export function WorkSnapshot({ missions, workspaceId }: { missions: Mission[]; workspaceId: string | null }) {
   const counts = React.useMemo(() => issueBoardCounts(missions), [missions])
   const recent = React.useMemo(
@@ -81,10 +73,7 @@ export function WorkSnapshot({ missions, workspaceId }: { missions: Mission[]; w
       className="h-full"
     >
       {missions.length === 0 ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border/60 px-3 py-3 text-label text-muted-foreground">
-          <span>No issues yet. Give a crew its first task and it lands here.</span>
-          <Link href="/issues?create=1" className="shrink-0 text-primary-hover hover:underline">New issue →</Link>
-        </div>
+        <InlineEmpty icon={CircleDot} text="No issues yet. Give a crew its first task and it lands here." action={<Link href="/issues?create=1" className="shrink-0 text-primary-hover hover:underline">New issue →</Link>} />
       ) : (
         <>
           <div className="mb-3 grid grid-cols-4 gap-2" data-testid="dashboard-issue-board">
@@ -97,13 +86,12 @@ export function WorkSnapshot({ missions, workspaceId }: { missions: Mission[]; w
           </div>
           <div className="flex flex-col">
             {recent.map((mission) => {
-              const pill = STATUS_PILL[mission.status] ?? { label: mission.status.toLowerCase().replace("_", " "), className: "border-border bg-muted text-muted-foreground" }
               const owner = mission.assignee_name || mission.lead_agent_name || mission.crew_name || ""
               const ownerSeed = mission.lead_agent_slug || mission.assignee_id || owner
               return (
                 <Link
                   key={mission.id}
-                  href={mission.identifier ? `/issues/${mission.identifier}` : "/issues"}
+                  href={mission.identifier ? entityHref({ kind: "issue", identifier: mission.identifier }) : entityHref({ kind: "issues" })}
                   className="group flex items-center gap-2.5 border-t border-border/50 py-2 transition-colors hover:bg-foreground/[0.025]"
                 >
                   <span className="w-14 shrink-0 truncate font-mono text-micro text-muted-foreground">{mission.identifier ?? "—"}</span>
@@ -111,7 +99,7 @@ export function WorkSnapshot({ missions, workspaceId }: { missions: Mission[]; w
                   {owner && (
                     <AgentAvatar seed={ownerSeed} workspaceId={workspaceId} alt={owner} className="h-5 w-5 shrink-0 rounded-md bg-muted ring-1 ring-border" />
                   )}
-                  <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-micro font-medium", pill.className)}>{pill.label}</span>
+                  <StatusPill status={mission.status} />
                 </Link>
               )
             })}
