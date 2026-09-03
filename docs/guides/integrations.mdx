@@ -242,6 +242,23 @@ MCP Server (stdio or HTTP transport)
 External Service (GitHub, Slack, etc.)
 ```
 
+### Crew tools on /integrations
+
+**Integrations → Tools (MCP) → Crew tools** lists every crew-scoped MCP server
+in the workspace: the crew it belongs to (a link to that crew's Settings), how
+many agents may call it, and its auth state as a pill — *Connected*, *No
+credential*, *Expired*, or *No auth needed* for a `stdio` server that takes
+none. The gaps sort first.
+
+**Connect** on a row without a credential binds one to every agent in the crew
+(`PATCH /agents/{id}/integrations/{binding}` for agents that already have a
+binding, `POST /agents/{id}/integrations` for the rest), either from the vault
+or through OAuth for an HTTP endpoint. A crew's own **Needs you** strip and its
+Settings → Integrations list link here as `/integrations?tab=tools&section=crew-tools&server=<id>`,
+which opens that row connecting.
+
+The same list on the CLI: `crewship integration crews-overview`.
+
 ### Who gets which server
 
 Every workspace- and crew-scoped MCP server stores its audience in a
