@@ -98,6 +98,8 @@ export interface OrchestrationLayoutProps {
   onRefresh: () => void
   onMissionCreated: () => void
   mode?: OrchestrationMode
+  /** The shell's fetch failed; rendered in place of the board with a retry, never as "no issues". */
+  loadError?: string | null
 }
 
 const ORCH_DRAWER_TABS = [
@@ -146,6 +148,7 @@ export function OrchestrationLayout({
   onRefresh,
   onMissionCreated: _onMissionCreated,
   mode = "default",
+  loadError = null,
 }: OrchestrationLayoutProps) {
   const isMobile = useIsMobile()
 
@@ -185,6 +188,7 @@ export function OrchestrationLayout({
 
   // Issues state
   const [issues, setIssues] = useState<Mission[]>([])
+  const [issuesError, setIssuesError] = useState<string | null>(null)
   const [issueLabels, setIssueLabels] = useState<IssueLabel[]>([])
   // Persisted per-user — most teams stick with one of board/list and a
   // refresh shouldn't bounce them back to board if they prefer list.
@@ -336,8 +340,15 @@ export function OrchestrationLayout({
     if (!workspaceId) return
     try {
       const res = await apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=100`)
-      if (res.ok) setIssues(await res.json())
-    } catch { /* ignore */ }
+      if (res.ok) {
+        setIssues(await res.json())
+        setIssuesError(null)
+      } else {
+        setIssuesError(`Could not load issues (HTTP ${res.status})`)
+      }
+    } catch (e) {
+      setIssuesError(e instanceof Error ? e.message : "Could not reach the server")
+    }
   }, [workspaceId])
 
   const fetchIssueLabels = useCallback(async () => {
@@ -883,8 +894,22 @@ export function OrchestrationLayout({
                 }
                 onClear={() => setFilterStatuses([])}
               />
-              {/* Board or List view */}
-              <div className="px-4 pb-4 h-[calc(100%-90px)]">
+              {/* A failed load is not an empty board (S6): say what failed,
+                  keep the filters, offer a retry. */}
+              {(issuesError || loadError) && (
+                <div
+                  role="alert"
+                  className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-label text-destructive"
+                >
+                  <span className="min-w-0 flex-1">{issuesError ?? loadError}</span>
+                  <Button size="sm" variant="outline" className="h-7" onClick={() => { void fetchIssues(); onRefresh() }}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+              {/* Board or List view. The pane scrolls; the board no longer
+                  pins itself to a viewport height with per-column scrollers. */}
+              <div className="px-4 pb-4">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || filterProjectId || "all"}-${filterStatuses.join(",") || "all"}-${filterPriority || "all"}`}
