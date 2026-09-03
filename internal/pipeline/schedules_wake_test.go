@@ -47,7 +47,7 @@ func newWakeTestRig(t *testing.T) (*sql.DB, *ScheduleStore, *PipelineScheduler) 
 	db := openScheduleTestDB(t)
 	store := NewScheduleStore(db)
 	pipelines := NewStore(db)
-	exec := NewExecutor(pipelines, NewResolver(db), newMockRunner(), nil)
+	exec := newScheduleExecutor(pipelines, NewResolver(db), newMockRunner(), db)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return db, store, NewPipelineScheduler(store, pipelines, exec, logger)
 }

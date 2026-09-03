@@ -29,24 +29,21 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
-// goldenWebhookRig wraps webhookHandlerRig and additionally wires a
-// RunStore — pipeline_runs persistence is an OPT-IN dependency
-// (PipelineHandler.runStore, pipelines.go:35, "optional; nil → ...
-// no persistence") that webhookHandlerRig does NOT wire, and neither
-// does any pre-existing FireWebhook test. That means the entire
-// existing webhook suite has only ever checked the HTTP response body,
-// never the actual pipeline_runs table a duplicate-delivery claim is
-// really about. Wire it here so these golden tests check the same
-// ground truth production's /run-records endpoint would.
+// goldenWebhookRig used to additionally wire a RunStore that
+// webhookHandlerRig itself did not — pipeline_runs persistence was an
+// OPT-IN dependency (PipelineHandler.runStore, pipelines.go, "optional;
+// nil → ... no persistence") that no pre-existing FireWebhook test wired,
+// so the entire existing webhook suite had only ever checked the HTTP
+// response body, never the actual pipeline_runs table a duplicate-delivery
+// claim is really about. #2283 moved that wiring into webhookHandlerRig
+// itself (pipeline_webhooks_test.go) so every webhook test gets it by
+// default, not just the golden ones — this is now a thin alias kept so
+// existing call sites in this file don't need to change.
 func goldenWebhookRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string) {
 	t.Helper()
-	h, db, userID, wsID := webhookHandlerRig(t)
-	h.SetRunStore(pipeline.NewRunStore(db))
-	return h, db, userID, wsID
+	return webhookHandlerRig(t)
 }
 
 // goldenWebhookRunCount counts real pipeline_runs rows for a pipeline —

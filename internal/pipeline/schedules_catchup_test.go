@@ -42,7 +42,7 @@ func TestPipelineScheduler_Catchup_OnceIsDefaultAndUnchanged(t *testing.T) {
 	pipelineStore := NewStore(db)
 	resolver := NewResolver(db)
 	runner := &stubAgentRunner{}
-	exec := NewExecutor(pipelineStore, resolver, runner, nil)
+	exec := newScheduleExecutor(pipelineStore, resolver, runner, db)
 
 	// Due 5 whole minutes ago on an every-minute cron — a real backlog of
 	// several occurrences, all dropped except the one that fires.
@@ -92,7 +92,7 @@ func TestPipelineScheduler_Catchup_Skip(t *testing.T) {
 	pipelineStore := NewStore(db)
 	resolver := NewResolver(db)
 	runner := &stubAgentRunner{}
-	exec := NewExecutor(pipelineStore, resolver, runner, nil)
+	exec := newScheduleExecutor(pipelineStore, resolver, runner, db)
 
 	dueAt := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Minute)
 	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: schedule created_at/updated_at are not ordered/compared in SQL; next_run_at (the compared column) uses tsformatForTest
@@ -143,7 +143,7 @@ func TestPipelineScheduler_Catchup_All(t *testing.T) {
 	pipelineStore := NewStore(db)
 	resolver := NewResolver(db)
 	runner := &stubAgentRunner{}
-	exec := NewExecutor(pipelineStore, resolver, runner, nil)
+	exec := newScheduleExecutor(pipelineStore, resolver, runner, db)
 
 	dueAt := time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Minute)
 	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: schedule created_at/updated_at are not ordered/compared in SQL; next_run_at (the compared column) uses tsformatForTest
@@ -210,7 +210,7 @@ func TestPipelineScheduler_Catchup_OnTimeIgnoresPolicy(t *testing.T) {
 			pipelineStore := NewStore(db)
 			resolver := NewResolver(db)
 			runner := &stubAgentRunner{}
-			exec := NewExecutor(pipelineStore, resolver, runner, nil)
+			exec := newScheduleExecutor(pipelineStore, resolver, runner, db)
 
 			// next_run_at IS ordered/compared in SQL by listDueSchedules, so
 			// seed it with the same fixed-width tsformat the store writes.
