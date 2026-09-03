@@ -22,7 +22,15 @@ import {
 // failure with the BuildKit log tail. Collapsible is a tiny details/summary
 // wrapper used by the Settings tab. Extracted from crew-canvas.tsx.
 
-function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string; crewSlug: string; workspaceId: string }) {
+function ProvisioningBanner({ crewId, crewSlug, workspaceId, needsOwnedByStrip = false }: {
+  crewId: string
+  crewSlug: string
+  workspaceId: string
+  /** The crew canvas's "Needs you" strip carries the rebuild and failed
+   *  rows with their verbs (crew-needs-you.tsx); this banner then keeps only
+   *  the live build progress and the recent-build summary. */
+  needsOwnedByStrip?: boolean
+}) {
   const provisioning = useProvisioningStatus(workspaceId)
   const { acknowledge } = provisioning
   const crew = provisioning.detail.find((d) => d.id === crewId)
@@ -50,6 +58,9 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
   const recentCompleted = crew.status !== "failed" && crew.recent?.outcome === "completed"
   const isNeedsProvision = crew.status === "needs_provision"
   if (crew.status !== "running" && crew.status !== "failed" && !isNeedsProvision && !recentCompleted) {
+    return null
+  }
+  if (needsOwnedByStrip && (crew.status === "failed" || isNeedsProvision)) {
     return null
   }
 
