@@ -689,6 +689,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **Clearing a crew's issue prefix from the web UI now actually clears it,
+  and the field accepts the same 16-character prefixes the API always has
+  (#2118).** The Issue prefix control sent `{"issue_prefix": null}` on
+  clear; the server decodes a JSON `null` as "field absent" and the write is
+  gated on the field being present (`crews_update.go`), so the PATCH
+  silently no-opped and the value reverted on the next render with no error
+  shown. `""` is the documented clear — it already worked from the CLI
+  (`crewship crew update <crew> --issue-prefix ""`) — and the panel now
+  sends it too. The field's 5-character cap and hint text are also raised to
+  the API's actual limit (`^[A-Za-z0-9_-]{1,16}$`, since #2035).
 - **A run is now attributable to the issue that caused it, including
   delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither
