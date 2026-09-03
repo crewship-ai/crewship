@@ -9,6 +9,10 @@ import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-pick
 import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBanner } from "./crew-canvas-banner"
+import { CrewNeedsYou } from "./crew-needs-you"
+import { deriveCrewNeeds, withDevcontainerFeature, type CrewNeed, type NeedGap } from "./crew-needs"
+import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
+import { entityHref } from "@/lib/entity-links"
 import { CrewPrivilegedBadge } from "./crew-privileged-badge"
 import {
   CanvasShell,
@@ -94,6 +98,10 @@ export function CrewCanvas({
   const [issues, setIssues] = useState<IssuesSnapshot | null>(null)
   const [recentIssues, setRecentIssues] = useState<IssueRow[]>([])
   const [integrations, setIntegrations] = useState<CrewIntegration[] | null>(null)
+  const [gaps, setGaps] = useState<NeedGap[]>([])
+  const [needBusy, setNeedBusy] = useState<string | null>(null)
+  const provisioning = useProvisioningStatus(workspaceId)
+  const provisioningCrew = provisioning.detail.find((d) => d.id === crew?.id)
   const [members, setMembers] = useState<CrewMemberRow[] | null>(null)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [activityFilter, setActivityFilter] = useState<"all" | string>("all") // "all" | agentId
@@ -143,6 +151,21 @@ export function CrewCanvas({
     return () => { cancelled = true }
   }, [crew, workspaceId])
 
+  // Which bound credentials this crew cannot actually read: the image lacks
+  // the CLI. GET /crews/{id}/credential-readiness answers per crew; a failed
+  // call contributes nothing rather than a false "nothing missing".
+  useEffect(() => {
+    if (!crew) return
+    let cancelled = false
+    apiFetch(`/api/v1/crews/${crew.id}/credential-readiness?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { gaps?: NeedGap[] } | null) => {
+        if (!cancelled) setGaps(Array.isArray(data?.gaps) ? data.gaps : [])
+      })
+      .catch(() => { if (!cancelled) setGaps([]) })
+    return () => { cancelled = true }
+  }, [crew, workspaceId, provisioningCrew?.status])
+
   // Fetch workspace-user members lazily — only when the Roster tab is opened.
   useEffect(() => {
     if (!crew || tab !== "roster" || members !== null) return
@@ -178,6 +201,50 @@ export function CrewCanvas({
       toast.error(`${verb} failed: ${err instanceof Error ? err.message : err}`)
     }
   }, [crew, agentsForCrew.length, onCrewChanged, workspaceId])
+
+  const needs = useMemo(
+    () => (crew ? deriveCrewNeeds({
+      crewSlug: crew.slug,
+      agents: agentsForCrew,
+      provisioning: provisioningCrew?.status,
+      provisioningError: provisioningCrew?.error,
+      gaps,
+      integrations: integrations ?? [],
+    }) : []),
+    [crew, agentsForCrew, provisioningCrew?.status, provisioningCrew?.error, gaps, integrations],
+  )
+
+  const triggerBuild = useCallback(async () => {
+    if (!crew) return
+    setNeedBusy("build")
+    try {
+      const r = await apiFetch(`/api/v1/crews/${crew.id}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
+      if (!r.ok) throw new Error(await r.text())
+      toast.success(`Rebuilding ${crew.name}'s image — usually 30–90 s`)
+    } catch (err) {
+      toast.error(`Build did not start: ${err instanceof Error ? err.message : err}`)
+    } finally {
+      setNeedBusy(null)
+    }
+  }, [crew, workspaceId])
+
+  // "Install gh": add the devcontainer feature the readiness check named,
+  // then rebuild — the one click the audit asked for, instead of prose that
+  // said "add the feature and rebuild".
+  const installTool = useCallback(async (need: CrewNeed & { action: { kind: "install" } }) => {
+    if (!crew) return
+    setNeedBusy(need.id)
+    try {
+      await patch({ devcontainer_config: withDevcontainerFeature(crew.devcontainer_config, need.action.feature) })
+      const r = await apiFetch(`/api/v1/crews/${crew.id}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
+      if (!r.ok) throw new Error(await r.text())
+      toast.success(`Installing ${need.action.tool} — ${crew.name}'s image is rebuilding`)
+    } catch (err) {
+      toast.error(`Could not install ${need.action.tool}: ${err instanceof Error ? err.message : err}`)
+    } finally {
+      setNeedBusy(null)
+    }
+  }, [crew, patch, workspaceId])
 
   const handleDelete = useCallback(async () => {
     if (!crew) return
@@ -297,7 +364,14 @@ export function CrewCanvas({
         </div>
       </header>
 
-      <ProvisioningBanner crewId={crew.id} crewSlug={crew.slug} workspaceId={workspaceId} />
+      <CrewNeedsYou
+        needs={needs}
+        busyId={needBusy === "build" ? needs.find((n) => n.action.kind === "build")?.id ?? null : needBusy}
+        onBuild={triggerBuild}
+        onInstall={installTool}
+        inboxHref={entityHref({ kind: "inbox" })}
+      />
+      <ProvisioningBanner crewId={crew.id} crewSlug={crew.slug} workspaceId={workspaceId} needsOwnedByStrip />
 
       {/* Tabs */}
       <CanvasTabs<CrewTab> tabs={TABS} active={tab} onChange={setTab} idPrefix="crew-canvas" label="Crew sections" />

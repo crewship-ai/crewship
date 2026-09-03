@@ -1,5 +1,6 @@
 # Shared UI primitives — one line per change, newest first
 
+- 2026-09-03 · cluster C · `lib/entity-links.ts` — `integrations` ref (`tab`, `section`, `server`) so a crew tool can be opened where Connect lives.
 - 2026-09-03 · cluster C · `lib/entity-links.ts` — `inbox` ref takes `agentSlug` (`/inbox-v2?agent=`), the way an agent canvas hands a decision to the inbox.
 - 2026-09-03 · wave 0 · `lib/entity-refs.ts` — `refHref("routine/x")` / `refLabel` turn stored `kind/slug` owner and producer refs into routes through entityHref; null for a kind with no page.
 - 2026-09-03 · wave 0 · `components/layout/sidebar-kit.tsx` + `.kit-tap` in globals.css — every kit control is 44px under a coarse pointer; add `kit-tap` to any new interactive element in a sidebar.
