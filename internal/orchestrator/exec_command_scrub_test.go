@@ -623,7 +623,7 @@ func promptBearingRef(e ast.Expr, aliases, derived map[string]bool, bareCmdIsPro
 			// is calling the prompt. Without this the guard could be defeated
 			// by moving the read one call away — see promptDerivedFuncs.
 			if n := calleeName(v.Fun); derived[n] {
-				name, pos = "`"+n+"()`, which reads prompt text without bounding it", v.Pos()
+				name, pos = "the result of `"+n+"()` (a package function that reads a prompt field without bounding it)", v.Pos()
 				return false
 			}
 		case *ast.SelectorExpr:
