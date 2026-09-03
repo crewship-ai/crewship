@@ -344,3 +344,51 @@ func TestFinishAssignment_CancelRequested_OverridesLateCompletion(t *testing.T) 
 		})
 	}
 }
+
+// TestIssue_Stop_StampsQueuedAssignments pins #2312: a run parked as QUEUED —
+// behind the agent's live run (#2269) or the crew budget — has not started
+// its exec yet, which is exactly the row the Tier-1 stamp exists for. Stop
+// used to stamp only PENDING/RUNNING rows, so the pump later drained the
+// queued row into a full run that landed COMPLETED on a CANCELLED issue
+// (seen live on dev1, 2026-09-03).
+func TestIssue_Stop_StampsQueuedAssignments(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "IN_PROGRESS")
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.Exec(`
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, 'Mission: ENG-1', 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		id, leadID, wsID, now, now, now); err != nil {
+		t.Fatalf("seed mission chat: %v", err)
+	}
+	for _, row := range []struct{ id, status, reason string }{
+		{"a-queued-busy", "QUEUED", "agent_busy"},
+		{"a-queued-budget", "QUEUED", "crew_budget"},
+		{"a-pending", "PENDING", ""},
+	} {
+		if _, err := h.db.Exec(`
+			INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, mission_id, queued_reason, created_at)
+			VALUES (?, ?, ?, ?, ?, 'do work', ?, ?, ?, NULLIF(?, ''), ?)`,
+			row.id, wsID, id, leadID, workerID, row.status, id, id, row.reason, now); err != nil {
+			t.Fatalf("seed %s: %v", row.id, err)
+		}
+	}
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-1")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	for _, aid := range []string{"a-queued-busy", "a-queued-budget", "a-pending"} {
+		var cancelAt string
+		if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,'') FROM assignments WHERE id=?`, aid).Scan(&cancelAt); err != nil {
+			t.Fatalf("query %s: %v", aid, err)
+		}
+		if cancelAt == "" {
+			t.Errorf("%s.cancel_requested_at not stamped by Stop — the pump would start it on a CANCELLED issue (#2312)", aid)
+		}
+	}
+}
