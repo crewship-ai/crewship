@@ -10,15 +10,19 @@ import { toast } from "sonner"
 
 import { InboxDetail } from "@/components/features/inbox/inbox-detail"
 import type { WorkspaceRole } from "@/components/features/inbox/inbox-derive"
-import { canRole, remainingLabel, since } from "@/components/features/inbox/inbox-derive"
+import { canRole, deciderCopy, remainingLabel, since } from "@/components/features/inbox/inbox-derive"
 import { Button } from "@/components/ui/button"
-import { DetailCard, Pill } from "@/components/ui/detail"
+import { DetailCard } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
 import { Textarea } from "@/components/ui/textarea"
 import type { InboxItem } from "@/hooks/use-inbox"
+import { entityHref } from "@/lib/entity-links"
 import { formatDateTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
-import type { InboxV2Confirmation, InboxV2Entry } from "./inbox-v2-types"
+import { entryKindPill, outcomeStatus } from "./inbox-v2-derive"
+import { InboxTriage } from "./inbox-v2-triage"
+import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Confirmation, type InboxV2Entry } from "./inbox-v2-types"
 
 interface Props {
   entry: InboxV2Entry | null
@@ -36,6 +40,19 @@ interface Props {
   onInboxRefresh: (item: InboxItem, action?: string) => Promise<void>
   onApprovalDecide: (entry: InboxV2Entry, decision: "approved" | "denied", comment: string) => Promise<void>
   onArchiveGroup: (entry: InboxV2Entry) => Promise<void>
+  /** Crews and agents by id/slug, so the pane names things instead of ids. */
+  lookup?: InboxLookup
+  /** Deny for a staged hire, wired through its approvals-queue twin. */
+  onDenyHire?: () => Promise<void>
+  /** What the triage card shows when nothing is open. */
+  triage?: {
+    action: InboxV2Entry[]
+    updates: InboxV2Entry[]
+    history: InboxV2Entry[]
+    live: boolean
+    onOpen: (entry: InboxV2Entry) => void
+    onCrew: (crewName: string) => void
+  }
 }
 
 export function InboxV2Detail(props: Props) {
@@ -57,6 +74,11 @@ export function InboxV2Detail(props: Props) {
           </p>
         </div>
       )
+    }
+    // Never blank (README §1, §6): with nothing open the pane carries the
+    // triage — what is waiting, by crew, what is running, what was decided.
+    if (props.triage) {
+      return <InboxTriage {...props.triage} lookup={props.lookup ?? EMPTY_INBOX_LOOKUP} />
     }
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -80,11 +102,13 @@ export function InboxV2Detail(props: Props) {
           onArchive={() => props.onInboxArchive(item)}
           onMarkUnread={() => { void props.onInboxMarkUnread(item) }}
           onRefresh={(action) => props.onInboxRefresh(item, action)}
+          lookup={props.lookup}
+          onDenyHire={props.onDenyHire}
         />
       </div>
     )
   }
-  if (entry.source === "approval") return <ApprovalDetail entry={entry} role={props.role} onDecide={props.onApprovalDecide} />
+  if (entry.source === "approval") return <ApprovalDetail entry={entry} role={props.role} onDecide={props.onApprovalDecide} lookup={props.lookup ?? EMPTY_INBOX_LOOKUP} />
   if (entry.source === "mission") return <MissionDetail entry={entry} />
   return <GroupedIncident entry={entry} onArchive={props.onArchiveGroup} />
 }
@@ -122,13 +146,17 @@ function DecisionConfirmation({
 }
 
 function ApprovalDetail({
-  entry, role, onDecide,
+  entry, role, onDecide, lookup,
 }: {
   entry: InboxV2Entry
   role: WorkspaceRole | null
   onDecide: Props["onApprovalDecide"]
+  lookup: InboxLookup
 }) {
   const row = entry.approval!
+  const kind = entryKindPill(entry)
+  const crew = row.crew_id ? lookup.crewById.get(row.crew_id) ?? null : null
+  const agent = row.agent_id ? [...lookup.agentBySlug.values()].find((a) => a.id === row.agent_id) ?? null : null
   const [comment, setComment] = useState("")
   const [busy, setBusy] = useState<"approved" | "denied" | null>(null)
   useEffect(() => setComment(""), [row.id])
@@ -156,7 +184,7 @@ function ApprovalDetail({
           <div className="flex flex-wrap items-center gap-2">
             <ShieldAlert className="h-4 w-4 text-warn" />
             <span className="text-sm font-semibold">{pending ? "Waiting on your decision" : "Decision record"}</span>
-            <Pill tone={row.kind === "destructive_op" ? "destructive" : "warn"}>{row.kind.replaceAll("_", " ")}</Pill>
+            <StatusPill tone={row.kind === "destructive_op" ? "danger" : kind.tone} label={kind.label} />
             {deadlineMins != null && pending && (
               <span className="ml-auto text-xs font-medium text-destructive">
                 {deadlineMins > 0 ? `expires in ${remainingLabel(deadlineMins)}` : "expired"}
@@ -165,8 +193,20 @@ function ApprovalDetail({
           </div>
           <div>
             <h2 className="text-xl font-semibold">{entry.title}</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Requested by {entry.subject} · {formatDateTime(row.created_at)}
+            <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+              <span>Requested by</span>
+              {agent ? (
+                <Link href={entityHref({ kind: "agent", slug: agent.slug })} className="text-foreground hover:underline">{agent.name}</Link>
+              ) : (
+                <span>{entry.subject}</span>
+              )}
+              {crew && (
+                <>
+                  <span>·</span>
+                  <Link href={entityHref({ kind: "crew", slug: crew.slug })} className="text-foreground hover:underline">{crew.name}</Link>
+                </>
+              )}
+              <span>· {formatDateTime(row.created_at)}</span>
             </p>
           </div>
           <div>
@@ -188,16 +228,16 @@ function ApprovalDetail({
                 <Button disabled={!allowed || busy !== null} variant="outline" onClick={() => void decide("denied")} className="gap-2">
                   <X className="h-4 w-4" /> {busy === "denied" ? "Denying…" : "Deny"}
                 </Button>
-                {!allowed && <span className="self-center text-xs text-muted-foreground">OWNER or ADMIN decides this</span>}
+                <span className="self-center text-xs text-muted-foreground">{deciderCopy("manage")}{allowed ? " · you can" : ""}</span>
               </div>
             </>
           )}
           {!pending && (
-            <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-sm">
-              <span className="font-semibold capitalize">{row.status}</span>
-              {row.decided_by && <> by <span className="font-mono text-xs">{row.decided_by}</span></>}
-              {row.decided_at && <> · {formatDateTime(row.decided_at)}</>}
-              {row.decision_comment && <p className="mt-2 text-muted-foreground">{row.decision_comment}</p>}
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-sm">
+              <StatusPill status={outcomeStatus(row.status) ?? row.status} />
+              {row.decided_by && <span className="text-muted-foreground">by a person</span>}
+              {row.decided_at && <span className="text-muted-foreground">· {formatDateTime(row.decided_at)}</span>}
+              {row.decision_comment && <p className="w-full text-muted-foreground">{row.decision_comment}</p>}
             </div>
           )}
         </div>
@@ -207,12 +247,16 @@ function ApprovalDetail({
         <HumanContext payload={row.payload ?? {}} />
       </DetailCard>
 
-      <DetailCard bare>
-        <div className="flex flex-wrap gap-2 px-4 py-3">
-          {row.crew_id && <Button asChild size="sm" variant="ghost"><Link href={`/crews/${encodeURIComponent(row.crew_id)}`}>Open crew <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
-          {row.mission_id && <Button asChild size="sm" variant="ghost"><Link href={`/missions/${encodeURIComponent(row.mission_id)}/timeline`}>Open mission <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
-        </div>
-      </DetailCard>
+      {(crew || agent || row.mission_id) && (
+        <DetailCard bare>
+          <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground-soft">Where this came from</span>
+            {agent && <Button asChild size="xs" variant="outline"><Link href={entityHref({ kind: "chat", agentSlug: agent.slug })}>Chat with {agent.name} <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
+            {crew && <Button asChild size="xs" variant="outline"><Link href={entityHref({ kind: "crew", slug: crew.slug })}>Open {crew.name} <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
+            {row.mission_id && <Button asChild size="xs" variant="outline"><Link href={`/missions/${encodeURIComponent(row.mission_id)}/timeline`}>Open mission <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
+          </div>
+        </DetailCard>
+      )}
     </div>
   )
 }

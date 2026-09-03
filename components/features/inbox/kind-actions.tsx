@@ -37,11 +37,22 @@ export function KindActions({
   onResolve,
   onRefresh,
   disabled,
+  onDenyHire,
+  crewHref,
 }: {
   item: InboxItem
   onResolve: (action: string) => void | Promise<void>
   onRefresh: (action?: string) => void | Promise<void>
   disabled: boolean
+  /**
+   * Deny a staged hire. The hire lands in two places — this waitpoint and a
+   * row in the approvals queue — and only the queue row has a deny. The page
+   * that holds both wires the twin's deny through here; without it the card
+   * still names where to go.
+   */
+  onDenyHire?: () => Promise<void>
+  /** Where the crew this row belongs to lives, when the page could resolve it. */
+  crewHref?: string | null
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const wrap = async (action: string, fn: () => Promise<void>) => {
@@ -163,13 +174,43 @@ export function KindActions({
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approved" ? "Approving…" : "Approve hire"}
             </Button>
-            {/* No deny counterpart exists for approve-hire yet — the
-                PENDING_REVIEW agent stays put until the operator fires
-                it from the crew. Surface that explicitly so the
-                missing button doesn't read as broken UI. */}
-            <span className="text-[11px] text-muted-foreground">
-              To deny, fire the agent from its crew page.
-            </span>
+            {/* approve-hire has no deny of its own; the approvals-queue
+                twin does, and the inbox page wires it through onDenyHire.
+                Where the page cannot (an older server, or the twin has not
+                arrived), the card still says where to go — and links it. */}
+            {onDenyHire ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled || busy !== null}
+                onClick={() =>
+                  wrap("denied", async () => {
+                    try {
+                      await onDenyHire()
+                    } catch (e) {
+                      toast.error(e instanceof Error ? `Deny failed: ${e.message}` : "Deny failed")
+                      return
+                    }
+                    toast.success("Hire denied — the agent will not start")
+                    await onRefresh("denied")
+                  })
+                }
+                className="gap-1.5"
+              >
+                <XCircle className="h-3 w-3" />
+                {busy === "denied" ? "Denying…" : "Deny"}
+              </Button>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">
+                To deny, fire the agent from{" "}
+                {crewHref ? <Link href={crewHref} className="text-primary-hover hover:underline">its crew page</Link> : "its crew page"}.
+              </span>
+            )}
+            {crewHref && (
+              <Button asChild size="sm" variant="ghost" className="gap-1.5">
+                <Link href={crewHref}>Open crew</Link>
+              </Button>
+            )}
           </div>
         )
       }

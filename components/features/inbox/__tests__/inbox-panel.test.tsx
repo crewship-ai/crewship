@@ -328,9 +328,14 @@ describe("context", () => {
     expect(pane.queryByText("sk-supersecret")).not.toBeInTheDocument()
   })
 
-  it("leaves a plain identifier alone — a run id is not a secret", () => {
+  it("leaves a plain identifier alone — a run id is not a secret, and it is a link", () => {
     render(<InboxList />)
     fireEvent.click(list().getByText("Approve promote"))
-    expect(within(screen.getByTestId("reading-pane")).getByText("r1")).toBeInTheDocument()
+    // The id is not masked behind a reveal toggle; it is also no longer a
+    // bare cuid in the Context card — it is the "Open run" link the pane
+    // builds from it (README §5, §6).
+    const pane = within(screen.getByTestId("reading-pane"))
+    expect(pane.getByRole("link", { name: /Open run/ }).getAttribute("href")).toContain("r1")
+    expect(pane.queryByText("••••••••")).not.toHaveTextContent("r1")
   })
 })
