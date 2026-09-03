@@ -116,7 +116,7 @@ export default function JournalPage() {
   // author freeze these values at mount cannot form. Writes happen in event
   // handlers only. See hooks/use-journal-url-state.ts.
   const { state: url, search: urlSearch, setParams, applyParams } = useJournalUrlState()
-  const { timeRange, customRange, crewId, agentId, traceId, severity, muted } = url
+  const { timeRange, customRange, crewId, agentId, traceId, missionId, severity, muted } = url
 
   // Visible tabs depends on role. Admin-only tabs are filtered out for
   // non-admins. The deeplink defaults to timeline if the user lacks
@@ -153,6 +153,12 @@ export default function JournalPage() {
   )
   const setTraceId = useCallback(
     (id: string) => setParams({ trace_id: id || null }),
+    [setParams],
+  )
+  // One issue's timeline — the way in from the issue page ("Journal for
+  // ENG-4"), and the way an expanded row jumps to everything about its issue.
+  const setMissionId = useCallback(
+    (id: string) => setParams({ mission_id: id || null }),
     [setParams],
   )
   // Severity + muted-groups are LIFTED out of LogsPanel so we can mirror
@@ -361,6 +367,7 @@ export default function JournalPage() {
       crew_id: structured.serverParams.crew_id ?? (crewId || undefined),
       agent_id: structured.serverParams.agent_id ?? (agentId || undefined),
       trace_id: traceId || structured.serverParams.trace_id || undefined,
+      mission_id: missionId || undefined,
       entry_type: structured.serverParams.entry_type,
       severity: structured.serverParams.severity ?? severityParam,
       actor_type: structured.serverParams.actor_type,
@@ -370,7 +377,7 @@ export default function JournalPage() {
       since,
       until,
     }
-  }, [timeRange, customRange, crewId, agentId, traceId, severity, muted, excludedTypes, structured])
+  }, [timeRange, customRange, crewId, agentId, traceId, missionId, severity, muted, excludedTypes, structured])
 
   // Only the Timeline tab consumes the journal list + SSE stream.
   const timelineEnabled = !wsLoading && activeTab === "timeline"
@@ -595,9 +602,12 @@ export default function JournalPage() {
                 onMutedChange={setMuted}
                 traceId={traceId}
                 onClearTraceId={() => setTraceId("")}
+                missionId={missionId}
+                onClearMissionId={() => setMissionId("")}
                 onSelectTrace={setTraceId}
                 onSelectAgent={setAgentId}
                 onSelectCrew={onCrewChange}
+                onSelectMission={setMissionId}
                 query={searchDraft}
                 onQueryChange={setSearchDraft}
                 onServerSearch={commitSearch}

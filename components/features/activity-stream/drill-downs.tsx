@@ -294,7 +294,55 @@ function runStatusTone(status: string): StatItem["tone"] {
   }
 }
 
+/**
+ * What the journal knows about a run as an AGENT run: who ran it, for which
+ * crew, on which issue. GET /api/v1/runs/{id} answers for runs the mission
+ * engine dispatched (they carry `mission_identifier`) and 404s for a routine
+ * run, which has no run.* entries — so the links are drawn from what comes
+ * back and nothing is invented for the other kind.
+ */
+interface RunMeta {
+  agent_slug?: string
+  agent_name?: string
+  crew_name?: string
+  crew_slug?: string
+  mission_id?: string
+  mission_identifier?: string
+}
+
+function useRunMeta(runID: string): RunMeta | null {
+  const [meta, setMeta] = React.useState<RunMeta | null>(null)
+  React.useEffect(() => {
+    let cancelled = false
+    setMeta(null)
+    apiFetch(`/api/v1/runs/${encodeURIComponent(runID)}`)
+      .then(async (r) => (r.ok ? ((await r.json()) as RunMeta) : null))
+      .then((m) => {
+        if (!cancelled) setMeta(m)
+      })
+      .catch(() => {
+        if (!cancelled) setMeta(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [runID])
+  return meta
+}
+
+/** The §5 links of a run — routine, issue, agent, crew, journal — each through entityHref. */
+export function runRelatedLinks(runID: string, routineSlug: string | undefined, meta: RunMeta | null) {
+  const out: { label: string; href: string }[] = []
+  if (routineSlug) out.push({ label: `Routine · ${routineSlug}`, href: entityHref({ kind: "routine", slug: routineSlug }) })
+  if (meta?.mission_identifier) out.push({ label: `Issue · ${meta.mission_identifier}`, href: entityHref({ kind: "issue", identifier: meta.mission_identifier }) })
+  if (meta?.agent_slug) out.push({ label: `Agent · ${meta.agent_name ?? meta.agent_slug}`, href: entityHref({ kind: "agent", slug: meta.agent_slug }) })
+  if (meta?.crew_slug) out.push({ label: `Crew · ${meta.crew_name ?? meta.crew_slug}`, href: entityHref({ kind: "crew", slug: meta.crew_slug }) })
+  out.push({ label: "Journal · this run", href: entityHref({ kind: "journal", traceId: runID }) })
+  return out
+}
+
 export function RunDrillDown({ workspaceId, runID, routineSlug: knownSlug }: RunDrillDownProps) {
+  const meta = useRunMeta(runID)
   const resolved = useRoutineSlugOfRun(workspaceId, runID, knownSlug)
   const routineSlug = resolved || undefined
   const resolving = resolved === null
@@ -333,6 +381,21 @@ export function RunDrillDown({ workspaceId, runID, routineSlug: knownSlug }: Run
           <h1 className="min-w-0 font-mono text-base font-semibold tracking-tight">{runID}</h1>
           {run && <Pill tone={runStatusTone(run.status)}>{run.status}</Pill>}
           {routineSlug && <Pill tone="default">{routineSlug}</Pill>}
+        </div>
+        {/* Where this run leads — the second leg of the one timeline. A run
+            used to be a dead end: nothing on this page linked its issue, its
+            agent or its journal. */}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="run-related-links">
+          {runRelatedLinks(runID, routineSlug, meta).map((l) => (
+            <a
+              key={l.href}
+              href={l.href}
+              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-foreground hover:border-primary hover:no-underline"
+            >
+              {l.label}
+              <span aria-hidden className="text-muted-foreground">→</span>
+            </a>
+          ))}
         </div>
       </Appear>
 

@@ -1,5 +1,7 @@
 "use client"
 
+import { entityHref } from "@/lib/entity-links"
+
 import { memo, useState, useCallback } from "react"
 import Image from "next/image"
 import { Virtuoso } from "react-virtuoso"
@@ -129,6 +131,8 @@ interface LogsListProps {
   onSelectTrace?: (traceId: string) => void
   onSelectAgent?: (agentId: string) => void
   onSelectCrew?: (crewId: string) => void
+  /** Detail-row jump: narrow the timeline to this row's issue. */
+  onSelectMission?: (missionId: string) => void
 }
 
 /**
@@ -137,7 +141,7 @@ interface LogsListProps {
  * Click a row to expand it inline and reveal payload + refs as
  * formatted JSON. Multiple rows can be open at once.
  */
-export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached, onSelectTrace, onSelectAgent, onSelectCrew }: LogsListProps) {
+export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached, onSelectTrace, onSelectAgent, onSelectCrew, onSelectMission }: LogsListProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const toggleExpand = useCallback((id: string) => {
@@ -156,7 +160,7 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached,
   // refetch, so a single `agent.updated` event would sweep the whole
   // mounted list three times whether or not the data changed. Reading
   // the maps here means only a real map swap reaches the rows.
-  const { agents, crews } = useJournalLookup()
+  const { agents, crews, missions } = useJournalLookup()
   const stylesVersion = useAvatarStylesVersion()
 
   // A fresh closure per item per render defeats React.memo on LogRow —
@@ -172,13 +176,15 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached,
         onToggle={toggleExpand}
         agent={e.agent_id ? agents.get(e.agent_id) : undefined}
         crew={e.crew_id ? crews.get(e.crew_id) : undefined}
+        missionIdentifier={e.mission_id ? missions.get(e.mission_id)?.identifier : undefined}
         stylesVersion={stylesVersion}
         onSelectTrace={onSelectTrace}
         onSelectAgent={onSelectAgent}
         onSelectCrew={onSelectCrew}
+        onSelectMission={onSelectMission}
       />
     ),
-    [wrap, expanded, toggleExpand, agents, crews, stylesVersion, onSelectTrace, onSelectAgent, onSelectCrew],
+    [wrap, expanded, toggleExpand, agents, crews, missions, stylesVersion, onSelectTrace, onSelectAgent, onSelectCrew, onSelectMission],
   )
 
   if (entries.length === 0) {
@@ -298,9 +304,11 @@ const LogRow = memo(function LogRow({
   onToggle,
   agent,
   crew,
+  missionIdentifier,
   onSelectTrace,
   onSelectAgent,
   onSelectCrew,
+  onSelectMission,
 }: {
   entry: JournalEntry
   wrap: boolean
@@ -309,6 +317,8 @@ const LogRow = memo(function LogRow({
   /** Resolved by the list, so the row never subscribes to the lookup. */
   agent: AgentLookup | undefined
   crew: CrewLookup | undefined
+  /** ENG-4 for the row's mission, when the lookup knows it — the link back to the issue. */
+  missionIdentifier?: string
   /**
    * Bumped when a lazily-imported DiceBear collection finishes loading.
    * Never read here — it exists so this memo boundary invalidates and
@@ -318,6 +328,7 @@ const LogRow = memo(function LogRow({
   onSelectTrace?: (traceId: string) => void
   onSelectAgent?: (agentId: string) => void
   onSelectCrew?: (crewId: string) => void
+  onSelectMission?: (missionId: string) => void
 }) {
   const sev = severityOf(entry.severity)
   const grp = groupOf(entry.entry_type)
@@ -427,9 +438,11 @@ const LogRow = memo(function LogRow({
           <Detail
             entry={entry}
             sev={sev}
+            missionIdentifier={missionIdentifier}
             onSelectTrace={onSelectTrace}
             onSelectAgent={onSelectAgent}
             onSelectCrew={onSelectCrew}
+            onSelectMission={onSelectMission}
           />
         </div>
       )}
@@ -440,15 +453,19 @@ const LogRow = memo(function LogRow({
 function Detail({
   entry,
   sev,
+  missionIdentifier,
   onSelectTrace,
   onSelectAgent,
   onSelectCrew,
+  onSelectMission,
 }: {
   entry: JournalEntry
   sev: ReturnType<typeof severityOf>
+  missionIdentifier?: string
   onSelectTrace?: (traceId: string) => void
   onSelectAgent?: (agentId: string) => void
   onSelectCrew?: (crewId: string) => void
+  onSelectMission?: (missionId: string) => void
 }) {
   // Each meta row carries an optional jump handler. Fields with a
   // handler render as a button (Filter to this trace / agent / crew);
@@ -470,7 +487,11 @@ function Detail({
       value: entry.crew_id,
       jump: entry.crew_id && onSelectCrew ? () => onSelectCrew(entry.crew_id as string) : undefined,
     },
-    { key: "mission_id", value: entry.mission_id },
+    {
+      key: "mission_id",
+      value: entry.mission_id,
+      jump: entry.mission_id && onSelectMission ? () => onSelectMission(entry.mission_id as string) : undefined,
+    },
     {
       key: "trace_id",
       value: entry.trace_id,
@@ -502,6 +523,17 @@ function Detail({
           ) : null,
         )}
       </div>
+      {/* The way back to the issue from its journal — the leg the one timeline
+          never had. Only when the lookup knows the identifier; a cuid has no page. */}
+      {entry.mission_id && missionIdentifier && (
+        <a
+          href={entityHref({ kind: "issue", identifier: missionIdentifier })}
+          className="inline-flex items-center gap-1 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-mono text-primary hover:border-primary"
+          data-testid="journal-open-issue"
+        >
+          open issue {missionIdentifier} →
+        </a>
+      )}
       {/* #1377 — a blocked-egress row carries its own remediation: add the
           denied host to the crew allowlist without leaving the timeline.
           Renders nothing for every other entry type. */}
