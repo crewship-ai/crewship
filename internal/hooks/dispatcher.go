@@ -47,6 +47,12 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 		return nil
 	}
 
+	// Snapshot the write epoch before querying so the negative-cache Store
+	// below can tell whether a concurrent hooks_config write landed while
+	// this call was in flight — see dispatchWriteEpoch's doc comment for
+	// exactly what race this closes.
+	epochBeforeLookup := dispatchWriteEpoch.Load()
+
 	hooks, err := ListByEvent(ctx, db, ec.WorkspaceID, ec.CrewID, event)
 	if err != nil {
 		// No policy decision happened: the registry could not be read.
@@ -57,10 +63,26 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 		return &DispatchError{Event: event, Cause: err}
 	}
 	if len(hooks) == 0 {
+		// Test seam for the TOCTOU dispatchWriteEpoch closes: always nil in
+		// production. A test sets it to land a concurrent Register (or any
+		// hooks_config write) deterministically in the window between the
+		// ListByEvent read above and the epoch re-check below, instead of
+		// racing goroutines for it. Same shape as store.go's
+		// updateEventRaceHookForTest — unsynchronised on purpose, so a test
+		// using it must not run under t.Parallel() or overlap another
+		// Dispatch call in a different goroutine.
+		if dispatchRaceHookForTest != nil {
+			dispatchRaceHookForTest()
+		}
 		// Nothing registered for this triple — cache it so the next call
 		// on this hot path skips ListByEvent entirely. Deliberately NOT
 		// cached when hooks is non-empty: see dispatch_cache.go for why.
-		negativeDispatchCache.Store(cacheKey, struct{}{})
+		// Skipped (not an error — just don't cache) if a write landed
+		// since epochBeforeLookup was read: this exact zero-rows result
+		// might already be stale.
+		if dispatchWriteEpoch.Load() == epochBeforeLookup {
+			negativeDispatchCache.Store(cacheKey, struct{}{})
+		}
 		return nil
 	}
 

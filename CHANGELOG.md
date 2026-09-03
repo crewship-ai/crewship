@@ -4416,7 +4416,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `hooks.InvalidateCache(workspaceID)` for any writer introduced outside
   the package. Invalidation is single-process: a second `crewshipd` writer
   would serve a stale negative until its own next write, called out as a
-  follow-up rather than built now.
+  follow-up rather than built now. A write-epoch counter closes a narrow
+  TOCTOU found in review: a hook registered for the exact triple `Dispatch`
+  is checking, landing between its `ListByEvent` read and its cache write,
+  could otherwise be cached as a permanent false negative — `Dispatch` now
+  re-checks the epoch before caching and skips caching (not an error, just
+  a forgone optimization for that one call) if a write landed in between.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

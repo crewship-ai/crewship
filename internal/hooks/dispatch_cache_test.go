@@ -114,3 +114,66 @@ func TestDispatch_NegativeCache_InvalidatedByRegister(t *testing.T) {
 		t.Fatal("handler never ran — Register did not invalidate the negative cache entry from the earlier miss")
 	}
 }
+
+// TestDispatch_NegativeCache_ConcurrentRegisterDuringLookupDoesNotStaleForever
+// reproduces, deterministically, the TOCTOU dispatchWriteEpoch exists to
+// close: a hook registered for the exact triple Dispatch is checking,
+// landing in the narrow window between Dispatch's (already-empty)
+// ListByEvent read and its cache Store. Without the epoch re-check,
+// Dispatch would cache a negative that InvalidateCache already ran past —
+// permanently masking the hook until an unrelated write to the same
+// workspace happens to invalidate it. dispatchRaceHookForTest lands the
+// write deterministically in that exact window instead of racing
+// goroutines for it, the same technique store.go's
+// updateEventRaceHookForTest uses for its own TOCTOU.
+func TestDispatch_NegativeCache_ConcurrentRegisterDuringLookupDoesNotStaleForever(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
+	db := openTestDB(t)
+	ctx := context.Background()
+	ec := EventContext{WorkspaceID: "ws_test"}
+
+	hit := make(chan struct{}, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case hit <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	dispatchRaceHookForTest = func() {
+		// Fires after Dispatch's own ListByEvent already saw zero rows,
+		// before its epoch re-check. Register a hook for the exact same
+		// triple right here — the window the race needs.
+		if _, err := Register(ctx, db, Hook{
+			WorkspaceID:   "ws_test",
+			Event:         EventPreAgentStart,
+			HandlerKind:   HandlerKindHTTP,
+			HandlerConfig: map[string]any{"url": ts.URL},
+			Blocking:      true,
+			Enabled:       true,
+		}, false); err != nil {
+			t.Fatalf("register during race window: %v", err)
+		}
+	}
+	t.Cleanup(func() { dispatchRaceHookForTest = nil })
+
+	if err := Dispatch(ctx, db, nil, EventPreAgentStart, ec); err != nil {
+		t.Fatalf("first dispatch (racing the register) = %v, want nil", err)
+	}
+	dispatchRaceHookForTest = nil // only the first call's lookup should race a write
+
+	// The hook registered mid-race must still be reachable — the whole
+	// point of the epoch check is that Dispatch must not have cached a
+	// negative for a triple that, by the time it cached, already had a
+	// row.
+	if err := Dispatch(ctx, db, nil, EventPreAgentStart, ec); err != nil {
+		t.Fatalf("second dispatch = %v, want nil", err)
+	}
+	select {
+	case <-hit:
+	case <-time.After(time.Second):
+		t.Fatal("handler never ran — the negative cache went stale from a write that raced the lookup")
+	}
+}
