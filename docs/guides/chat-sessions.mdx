@@ -324,7 +324,19 @@ A "session" is a `chats` row. Sessions persist across page reloads, browser sess
 | `CRON` | Created by a scheduled trigger. |
 | `AGENT` | Created by a peer agent (agent-to-agent assignment). |
 
-Anything else (or empty) is stored as `NULL` so a rogue caller cannot shove arbitrary text into a UI-rendered chip. The Sessions sidebar renders a colored chip per origin — NULL rows show no chip. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
+Anything else (or empty) is stored as `NULL` so a rogue caller cannot shove arbitrary text into a UI-rendered chip. The chat header renders the origin as a status pill in words — **Routine step**, **Scheduled**, **Webhook**, **From the CLI**, **Delegated**; a chat started in the browser (`UI`) and a NULL row wear none. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
+
+### Who you are talking to
+
+The header of a conversation is the **agent strip**: the agent's face with a status dot (blue with a halo while running, green idle, red on error), its name, its status as a word, its role, its crew (a colour dot and a link), its model as a label — never a model id — and **N skills · M credentials · runs** as links into the crews canvas and the journal. The connection badge appears only while the socket is not connected; **Commands** opens the chat palette; **Copy link** puts the conversation's address on the clipboard (the session id used to be printed raw in the header — the address is the one form of it a person can use).
+
+The toolbar breadcrumb is a path of names — **Crews / Ops / Riley / Chat** — every crumb a link, published by the chat page once the roster resolves. It never shows the agent's slug, and never the onboarding Guide's internal identifier.
+
+An **empty conversation** is the agent card plus **What &lt;name&gt; can do**: the agent's own skills, each with a **Try it** prompt that opens the conversation from that skill. An agent with no skills gets one line and **Add a skill →**. A routine step or an issue chat is a transcript, not something to start: its empty state says "This step has not written anything yet" and links to a direct chat with the agent.
+
+### The column folds
+
+The column asks the server for ten conversations per agent and reads `X-Total-Count`; when an agent has more, a **More on the server** section says "13 more with Riley · Show all", and Show all fetches that agent's whole page. **Not started yet** lists agents you have never talked to as rows with a **Start** verb — six, then "N more agents" opens the picker. The onboarding Guide (a `kind=setup` crew) is hidden from the roster by the server; a deep link into the Guide's own conversation still opens, because the page asks once more with `include_setup=1` when the address names an agent the roster does not carry.
 
 Chat sessions honor the workspace `preferred_language` — the agent replies in it. Set it with `crewship workspace update --language <code>` (see [`crewship workspace`](/cli/workspace)).
 
