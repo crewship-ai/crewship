@@ -55,6 +55,7 @@ crewship agent list --crew backend-team
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--crew` | `string` | | Filter by crew slug or ID. |
+| `--include-setup` | `bool` | `false` | Also list the onboarding Guide — agents of the `kind=setup` crew, which the server hides from every roster by default (`?include_setup=1`). |
 
 **Output columns:** SLUG, ROLE, CREW, STATUS, ADAPTER, MEMORY
 
