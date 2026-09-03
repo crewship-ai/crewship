@@ -183,7 +183,7 @@ function Cell({
         side="bottom"
         align="center"
         sideOffset={6}
-        className="w-[480px] p-0 border-border/60 bg-card/95 backdrop-blur"
+        className="w-[min(480px,calc(100vw-2rem))] p-0 border-border/60 bg-card/95 backdrop-blur"
       >
         <ChartPanel label={label} Icon={Icon} values={values} color={color} latest={latest} format={format} max={max} />
       </PopoverContent>
