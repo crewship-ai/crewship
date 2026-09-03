@@ -4394,6 +4394,26 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `budget.exceeded` journal entry itself is unchanged and still emits every
   call.
 
+- **`hooks.Dispatch` no longer queries `hooks_config` when nothing is
+  registered (#2154).** `Dispatch` called `ListByEvent` unconditionally
+  before its early return, so a workspace with zero hooks paid the same
+  lookup as one with ten — on every LLM call (`pre_llm_call` +
+  `post_llm_call`), every observed tool call, every delegation hop, every
+  peer query, and every breached budget. A negative cache inside `Dispatch`,
+  keyed `(workspace_id, crew_id, event)`, now remembers "nothing enabled
+  here" and returns immediately without touching the database; only the
+  negative case is cached, so a workspace that does have hooks still pays
+  the query on every call, because the `Matcher` pass that follows is
+  per-call and a cached row set can't safely stand in for it. `Register`,
+  `Update`, `Delete` and `SetEnabled` in `internal/hooks/store.go` — the
+  only writers to `hooks_config` — invalidate every cached entry for that
+  workspace on a successful write, coarse (workspace-wide, not just the
+  touched `(crew_id, event)` pair) but always correct, via an exported
+  `hooks.InvalidateCache(workspaceID)` for any writer introduced outside
+  the package. Invalidation is single-process: a second `crewshipd` writer
+  would serve a stale negative until its own next write, called out as a
+  follow-up rather than built now.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
