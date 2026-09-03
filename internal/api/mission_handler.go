@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -101,17 +102,34 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	includeTasks := r.URL.Query().Get("include_tasks") == "true"
 
-	limit, offset := parsePagination(r, 20, 100)
+	// The board asks for 50 with tasks attached; 200 is the ceiling because
+	// every row can carry its task list. The total goes out in
+	// X-Total-Count (writeListMeta), so the header count no longer depends
+	// on the page size.
+	limit, offset := parsePagination(r, 20, 200)
 
-	query := missionSelectColumns + `
-		WHERE m.workspace_id = ?`
+	where := ` WHERE m.workspace_id = ?`
 	args := []interface{}{wsID}
 
 	if status != "" {
-		query += " AND m.status = ?"
+		where += " AND m.status = ?"
 		args = append(args, status)
 	}
-	query += " ORDER BY m.created_at DESC LIMIT ? OFFSET ?"
+	// Server-side search on title and identifier (`q`, same spelling as
+	// /api/v1/issues) so a client can find a mission outside the loaded page.
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		where += " AND (m.title LIKE ? OR m.identifier LIKE ?)"
+		args = append(args, "%"+q+"%", "%"+q+"%")
+	}
+
+	var total int
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM missions m JOIN agents a ON a.id = m.lead_agent_id"+where, args...).Scan(&total); err != nil {
+		internalError(w, r, h.logger, "count all missions", err)
+		return
+	}
+
+	query := missionSelectColumns + where + " ORDER BY m.created_at DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
@@ -170,6 +188,7 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []missionResponse{}
 	}
+	writeListMeta(w, total, limit, offset)
 	writeJSON(w, http.StatusOK, result)
 }
 
