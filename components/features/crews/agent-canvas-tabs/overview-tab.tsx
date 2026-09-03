@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { AgentConnectorsCard } from "@/components/features/integrations/composio/access-editor"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
+import { entityHref } from "@/lib/entity-links"
 import { withReturnTo } from "@/lib/return-to"
 
 import { DetailCell, type DetailCellItem, type DetailCellTone } from "../canvas/detail-cell"
@@ -239,7 +240,7 @@ export function OverviewTab({
           ]}
           items={issueItems}
           footerLabel={`Open filtered by ${agent.slug}`}
-          footerHref="/orchestration/issues"
+          footerHref={entityHref({ kind: "issues", assigneeSlug: agent.slug })}
         />
         <DetailCell
           order={1}
