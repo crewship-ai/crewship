@@ -106,6 +106,7 @@ type runResponse struct {
 	AgentName                  *string              `json:"agent_name,omitempty"`
 	AgentSlug                  *string              `json:"agent_slug,omitempty"`
 	CrewName                   *string              `json:"crew_name,omitempty"`
+	CrewSlug                   *string              `json:"crew_slug,omitempty"`
 }
 
 type runListResponse struct {
@@ -504,7 +505,7 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 	}
 
 	type lookup struct {
-		name, slug, crewName sql.NullString
+		name, slug, crewName, crewSlug sql.NullString
 	}
 	enriched := make(map[string]lookup, len(agentIDs))
 	if len(agentIDs) > 0 {
@@ -513,7 +514,7 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 		for i := 1; i < len(agentIDs); i++ {
 			ph += ",?"
 		}
-		query := `SELECT a.id, a.name, a.slug, c.name
+		query := `SELECT a.id, a.name, a.slug, c.name, c.slug
 			FROM agents a
 			LEFT JOIN crews c ON c.id = a.crew_id
 			WHERE a.workspace_id = ? AND a.id IN (` + ph + `)`
@@ -525,7 +526,7 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			for rows.Next() {
 				var id string
 				var l lookup
-				if err := rows.Scan(&id, &l.name, &l.slug, &l.crewName); err == nil {
+				if err := rows.Scan(&id, &l.name, &l.slug, &l.crewName, &l.crewSlug); err == nil {
 					enriched[id] = l
 				}
 			}
@@ -643,6 +644,10 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			if l.crewName.Valid {
 				c := l.crewName.String
 				resp.CrewName = &c
+			}
+			if l.crewSlug.Valid && l.crewSlug.String != "" {
+				c := l.crewSlug.String
+				resp.CrewSlug = &c
 			}
 		}
 		out = append(out, resp)
