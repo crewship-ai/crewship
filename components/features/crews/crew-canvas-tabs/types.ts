@@ -75,12 +75,19 @@ export interface IssueRow {
   created_at?: string
 }
 
+/** A crew-scoped MCP server as GET /crews/{id}/integrations returns it.
+ *  The Settings tab used to read `type` and `status`, two fields the API
+ *  never sent, so both rendered blank while auth_status said "missing". */
 export interface CrewIntegration {
   id: string
-  integration_id: string
   name: string
-  type: string
-  status: string
+  display_name: string
+  transport: string
+  endpoint: string | null
+  enabled: boolean
+  agent_binding_count: number
+  /** "connected", "missing", "expired", "none" */
+  auth_status: string
 }
 
 export interface MemberUser {

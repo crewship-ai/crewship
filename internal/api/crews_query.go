@@ -17,7 +17,22 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, offset := parseListPagination(r, 100, 500)
+	limit, offset := parsePagination(r, 100, 500)
+
+	// The total is what the window is cut from; it uses the same predicate as
+	// the page below (workspace, not deleted, not the setup crew) so the two
+	// can never disagree (writeListMeta, list_count.go).
+	// ?q= is the server-side search every paged list takes (#2303): a
+	// client that only holds one page cannot search the rest of the list
+	// itself. Case-insensitive substring on name and slug.
+	searchSQL, searchArgs := listSearchClause(r, "c.name", "c.slug")
+	total, err := countListRows(r.Context(), h.db,
+		`SELECT COUNT(*) FROM crews c WHERE c.workspace_id = ? AND c.deleted_at IS NULL AND c.kind != 'setup'`+searchSQL,
+		append([]any{workspaceID}, searchArgs...)...)
+	if err != nil {
+		replyInternalError(w, h.logger, "count crews", err)
+		return
+	}
 
 	// The two per-row COUNT subqueries below look like the classic N+1 to
 	// rewrite as a grouped LEFT JOIN, but measurement says otherwise
@@ -59,12 +74,13 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		-- docs/prd/conversational-onboarding.md §5.3 item 2;
 		-- onboarding_setup_crew.go creates the rows this excludes.
 		AND c.kind != 'setup'
+		`+searchSQL+`
 		-- c.id DESC is the pagination tiebreaker: c.created_at is second-precision,
 		-- so timestamp ties are realistic and would otherwise make LIMIT/OFFSET
 		-- windows drop or duplicate rows between pages.
 		ORDER BY c.created_at DESC, c.id DESC
 		LIMIT ? OFFSET ?
-	`, workspaceID, limit, offset)
+	`, append(append([]any{workspaceID}, searchArgs...), limit, offset)...)
 	if err != nil {
 		replyInternalError(w, h.logger, "list crews", err)
 		return
@@ -93,6 +109,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []crewResponse{}
 	}
 
+	writeListMeta(w, total, limit, offset)
 	writeJSON(w, http.StatusOK, result)
 }
 

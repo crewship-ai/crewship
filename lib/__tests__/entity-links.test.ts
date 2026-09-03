@@ -22,6 +22,16 @@ describe("entityHref", () => {
     expect(entityHref({ kind: "run", runId: "run_1" })).toBe("/activity?run=run_1")
   })
 
+  it("opens the inbox filtered to one agent — the decision banner's way out", () => {
+    expect(entityHref({ kind: "inbox", agentSlug: "alex" })).toBe("/inbox-v2?agent=alex")
+    expect(entityHref({ kind: "inbox" })).toBe("/inbox-v2")
+  })
+
+  it("opens a crew tool on the integrations page, where Connect lives", () => {
+    expect(entityHref({ kind: "integrations", tab: "tools", section: "crew-tools", server: "srv_1" })).toBe("/integrations?tab=tools&section=crew-tools&server=srv_1")
+    expect(entityHref({ kind: "integrations" })).toBe("/integrations")
+  })
+
   it("encodes and drops empty params", () => {
     expect(entityHref({ kind: "chat", agentSlug: "a b", sessionId: "" })).toBe("/chat/a%20b")
     expect(entityHref({ kind: "journal", missionId: "m/1" })).toBe("/journal?mission_id=m%2F1")

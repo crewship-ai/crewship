@@ -18,7 +18,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	crewID := r.URL.Query().Get("crew_id")
-	limit, offset := parseListPagination(r, 100, 500)
+	limit, offset := parsePagination(r, 100, 500)
 
 	// The onboarding Guide lives in a crew of kind='setup'. GET /crews has
 	// always hidden that crew (crews_query.go); this list did not hide its
@@ -28,9 +28,25 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	// was the freshest. Hidden by default; `include_setup=1` is the explicit
 	// opt-in for the one caller that means it (a deep link into the Guide's
 	// own chat). Agents with no crew are not setup agents and stay.
-	setupWhere := " AND COALESCE(c.kind, '') <> 'setup'"
+	// Subquery rather than the joined c.kind so the same clause serves the
+	// COUNT (no join) and the page (join) — one predicate, one total.
+	setupWhere := " AND (a.crew_id IS NULL OR a.crew_id NOT IN (SELECT id FROM crews WHERE COALESCE(kind, '') = 'setup'))"
 	if r.URL.Query().Get("include_setup") == "1" {
 		setupWhere = ""
+	}
+
+	// Total before the window, same predicate as the page.
+	searchSQL, searchArgs := listSearchClause(r, "a.name", "a.slug", "a.role_title")
+	countQuery := `SELECT COUNT(*) FROM agents a WHERE a.workspace_id = ? AND a.deleted_at IS NULL` + setupWhere + searchSQL
+	countArgs := append([]any{workspaceID}, searchArgs...)
+	if crewID != "" {
+		countQuery += " AND a.crew_id = ?"
+		countArgs = append(countArgs, crewID)
+	}
+	total, err := countListRows(r.Context(), h.db, countQuery, countArgs...)
+	if err != nil {
+		replyInternalError(w, h.logger, "count agents", err)
+		return
 	}
 
 	// Main query: no more per-row scalar COUNT subqueries. Those are batched
@@ -55,7 +71,6 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	`
 
 	var rows *sql.Rows
-	var err error
 
 	// PR-D F5 order: live agents (expired_at IS NULL) come first;
 	// ghosts (expired_at IS NOT NULL) fall to the end of the list.
@@ -77,14 +92,15 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		COALESCE(a.expired_at, a.created_at) DESC,
 		a.id DESC
 		LIMIT ? OFFSET ?`
+	pageArgs := append([]any{workspaceID}, searchArgs...)
 	if crewID != "" {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+setupWhere+" AND a.crew_id = ?"+orderBy,
-			workspaceID, crewID, limit, offset)
+			listQuery+setupWhere+searchSQL+" AND a.crew_id = ?"+orderBy,
+			append(pageArgs, crewID, limit, offset)...)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+setupWhere+orderBy,
-			workspaceID, limit, offset)
+			listQuery+setupWhere+searchSQL+orderBy,
+			append(pageArgs, limit, offset)...)
 	}
 
 	if err != nil {
@@ -187,6 +203,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	writeListMeta(w, total, limit, offset)
 	writeJSON(w, http.StatusOK, result)
 }
 

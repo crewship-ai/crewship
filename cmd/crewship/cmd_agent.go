@@ -29,8 +29,10 @@ var agentListCmd = &cobra.Command{
 
 		client := newAPIClient()
 
-		path := "/api/v1/agents"
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
 		q := url.Values{}
+		setListPaging(q, limit, offset)
 		if crewFilter, _ := cmd.Flags().GetString("crew"); crewFilter != "" {
 			crewID, err := resolveCrewID(client, crewFilter)
 			if err != nil {
@@ -44,6 +46,7 @@ var agentListCmd = &cobra.Command{
 		if include, _ := cmd.Flags().GetBool("include-setup"); include {
 			q.Set("include_setup", "1")
 		}
+		path := "/api/v1/agents"
 		if enc := q.Encode(); enc != "" {
 			path += "?" + enc
 		}
@@ -75,6 +78,7 @@ var agentListCmd = &cobra.Command{
 			}
 			rows = append(rows, []string{a.Slug, a.AgentRole, crewName, a.Status, a.CLIAdapter, mem})
 		}
+		defer printListFooter(f, readListMeta(resp), len(agents))
 		return f.Auto(agents, headers, rows)
 	},
 }
@@ -202,6 +206,7 @@ var agentGetCmd = &cobra.Command{
 func init() {
 	agentListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 	agentListCmd.Flags().Bool("include-setup", false, "Also list the onboarding Guide (agents of the setup crew, hidden by default)")
+	addListPagingFlags(agentListCmd.Flags(), 0)
 
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("slug", "", "Agent slug (auto-generated from name if empty)")
