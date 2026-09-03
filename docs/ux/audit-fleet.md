@@ -134,7 +134,7 @@ that installs it. Today:
   API renders an empty fleet with no error and no retry.
 - `CanvasShell` "Could not load crew/agent" has no retry
   (`canvas-base.tsx:221-228`).
-- Every bottom-panel tab: "Failed to load: {error}" with no retry.
+- Every bottom-panel tab: "Failed to load: `{error}`" with no retry.
 - `use-agent-relations.ts:104-107` turns any failed fetch into `[]`, so a 500 on
   credentials renders the false alarm "No credential assigned — its first run
   will fail".
@@ -399,7 +399,7 @@ The only `<Link>` on `/credentials` is the attention row's `/inbox-v2` href
     `/credentials?id=<id>`, add a Spend cell (window + sparkline).
 12. Credential detail: every slot and assignment row becomes a link
     (`/crews?crew=`, `/crews?agent=`), "MCP integrations" lists them by name
-    with a link, readiness gap row gets a **Rebuild with <tool>** button that
+    with a link, readiness gap row gets a **Rebuild with `<tool>`** button that
     opens the crew's container features section.
 13. Reasons next to every disabled primary listed in §2 (copy the
     create-agent `validationHint` pattern); convert `title`-only reasons to
