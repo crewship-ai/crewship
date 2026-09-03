@@ -26,18 +26,23 @@ func NewRunHandler(db *sql.DB, logger *slog.Logger) *RunHandler {
 }
 
 type runResponse struct {
-	ID           string          `json:"id"`
-	AgentID      string          `json:"agent_id"`
-	ChatID       *string         `json:"chat_id"`
-	WorkspaceID  string          `json:"workspace_id"`
-	TriggeredBy  *string         `json:"triggered_by"`
-	TriggerType  string          `json:"trigger_type"`
-	Status       string          `json:"status"`
-	StartedAt    *string         `json:"started_at"`
-	FinishedAt   *string         `json:"finished_at"`
-	ErrorMessage *string         `json:"error_message"`
-	ExitCode     *int            `json:"exit_code"`
-	Metadata     json.RawMessage `json:"metadata"`
+	ID      string  `json:"id"`
+	AgentID string  `json:"agent_id"`
+	ChatID  *string `json:"chat_id"`
+	// MissionID and MissionIdentifier name the issue the run worked on —
+	// the id for filtering, the identifier (ENG-4) for a link a person can
+	// read. Both omitted for chat-only runs, which have no issue.
+	MissionID         *string         `json:"mission_id,omitempty"`
+	MissionIdentifier *string         `json:"mission_identifier,omitempty"`
+	WorkspaceID       string          `json:"workspace_id"`
+	TriggeredBy       *string         `json:"triggered_by"`
+	TriggerType       string          `json:"trigger_type"`
+	Status            string          `json:"status"`
+	StartedAt         *string         `json:"started_at"`
+	FinishedAt        *string         `json:"finished_at"`
+	ErrorMessage      *string         `json:"error_message"`
+	ExitCode          *int            `json:"exit_code"`
+	Metadata          json.RawMessage `json:"metadata"`
 	// Model is the model the run actually resolved to (session-init ground
 	// truth) — lets an operator verify Opus-vs-Sonnet on a subscription.
 	// Omitted when unknown (older runs, non-Claude adapters).
@@ -206,6 +211,9 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: workspaceID,
 		Status:      journal.RunStatus(statusRaw),
 		AgentID:     r.URL.Query().Get("agent_id"),
+		// ?mission_id= takes the id or the identifier (ENG-4): the issue
+		// page links here with what it has on screen.
+		MissionID:   resolveMissionRef(r.Context(), h.db, workspaceID, r.URL.Query().Get("mission_id")),
 		TriggerType: r.URL.Query().Get("trigger"),
 		Tag:         r.URL.Query().Get("tag"),
 		Limit:       limit,
@@ -522,6 +530,46 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 		}
 	}
 
+	// Same bounded lookup for the issues the page's runs belong to, so a
+	// row can say "ENG-4" instead of a cuid nothing links.
+	identifiers := map[string]string{}
+	{
+		missionIDs := make([]any, 0, len(aggregated))
+		seenM := map[string]struct{}{}
+		for _, r := range aggregated {
+			if r.MissionID == "" {
+				continue
+			}
+			if _, ok := seenM[r.MissionID]; ok {
+				continue
+			}
+			seenM[r.MissionID] = struct{}{}
+			missionIDs = append(missionIDs, r.MissionID)
+		}
+		if len(missionIDs) > 0 {
+			ph := "?"
+			for i := 1; i < len(missionIDs); i++ {
+				ph += ",?"
+			}
+			args := make([]any, 0, len(missionIDs)+1)
+			args = append(args, workspaceID)
+			args = append(args, missionIDs...)
+			rows, err := h.db.QueryContext(ctx,
+				`SELECT id, COALESCE(identifier, '') FROM missions WHERE workspace_id = ? AND id IN (`+ph+`)`, args...)
+			if err == nil {
+				for rows.Next() {
+					var id, ident string
+					if err := rows.Scan(&id, &ident); err == nil {
+						identifiers[id] = ident
+					}
+				}
+				_ = rows.Close()
+			} else {
+				h.logger.Warn("enrich runs mission lookup failed", "error", err)
+			}
+		}
+	}
+
 	out := make([]runResponse, 0, len(aggregated))
 	for _, r := range aggregated {
 		resp := runResponse{
@@ -552,6 +600,13 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 		if r.ChatID != "" {
 			c := r.ChatID
 			resp.ChatID = &c
+		}
+		if r.MissionID != "" {
+			m := r.MissionID
+			resp.MissionID = &m
+			if ident := identifiers[r.MissionID]; ident != "" {
+				resp.MissionIdentifier = &ident
+			}
 		}
 		if r.TriggeredBy != "" {
 			t := r.TriggeredBy

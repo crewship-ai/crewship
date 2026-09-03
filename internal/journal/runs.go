@@ -53,9 +53,13 @@ func runStatusFromTerminal(terminalType string) RunStatus {
 // entries. Field set chosen to be a strict superset of what
 // /api/v1/runs returns today — no API contract change.
 type RunAggregated struct {
-	ID           string // trace_id
-	WorkspaceID  string
-	AgentID      string
+	ID          string // trace_id
+	WorkspaceID string
+	AgentID     string
+	// MissionID is the issue the run worked on, stamped on run.started by
+	// the dispatcher (assignments_run.go) — empty for chat-only runs. It is
+	// what lets a run row name its issue and an issue list its runs.
+	MissionID    string
 	ChatID       string
 	TriggeredBy  string
 	TriggerType  string
@@ -161,6 +165,9 @@ type MCPServerError struct {
 type RunsQuery struct {
 	WorkspaceID string
 	AgentID     string
+	// MissionID narrows to the runs of one issue (mission id, not
+	// identifier — the API layer resolves ENG-4 to the id).
+	MissionID   string
 	Status      RunStatus // RUNNING / COMPLETED / FAILED / CANCELLED / TIMEOUT
 	TriggerType string
 	Tag         string // matches a value inside metadata.tags array
@@ -190,6 +197,7 @@ var runAggregateProjections = []struct {
 	{"finished_at", true, "MAX(CASE WHEN entry_type IN %s THEN ts END) AS finished_at"},
 	{"terminal_type", true, "MAX(CASE WHEN entry_type IN %s THEN entry_type END) AS terminal_type"},
 	{"agent_id", false, "MAX(CASE WHEN entry_type = 'run.started' THEN agent_id END) AS agent_id"},
+	{"mission_id", false, "MAX(CASE WHEN entry_type = 'run.started' THEN mission_id END) AS mission_id"},
 	{"triggered_by", false, "MAX(CASE WHEN entry_type = 'run.started' THEN actor_id END) AS triggered_by"},
 	{"started_payload", false, "MAX(CASE WHEN entry_type = 'run.started' THEN payload END) AS started_payload"},
 	{"terminal_payload", true, "MAX(CASE WHEN entry_type IN %s THEN payload END) AS terminal_payload"},
@@ -273,13 +281,21 @@ func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, in
 	}
 
 	cte, cteArgs := runAggregatesCTE(
-		[]string{"started_at", "finished_at", "terminal_type", "agent_id",
+		[]string{"started_at", "finished_at", "terminal_type", "agent_id", "mission_id",
 			"triggered_by", "started_payload", "terminal_payload"},
 		strings.Join(innerConds, " AND "))
 	// Outer WHERE — filters that operate on derived columns (status,
 	// json_extract on payload.trigger_type or .tags).
 	outerConds := []string{"started_at IS NOT NULL"}
 	var outerArgs []any
+	// Mission is an outer filter on the projected column, not an inner one
+	// on every entry: only run.started is guaranteed to carry mission_id
+	// (older terminal entries may not), and pruning the terminal entry
+	// would report a finished run as still running.
+	if q.MissionID != "" {
+		outerConds = append(outerConds, "mission_id = ?")
+		outerArgs = append(outerArgs, q.MissionID)
+	}
 	if q.Status != "" {
 		switch q.Status {
 		case RunStatusRunning:
@@ -311,7 +327,7 @@ func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, in
 
 	listSQL := cte + `
 SELECT trace_id, started_at, finished_at, terminal_type,
-       agent_id, triggered_by, started_payload, terminal_payload
+       agent_id, mission_id, triggered_by, started_payload, terminal_payload
 FROM run_aggregates
 WHERE ` + strings.Join(outerConds, " AND ") + `
 ORDER BY started_at DESC
@@ -400,12 +416,12 @@ func GetRunByID(ctx context.Context, db *sql.DB, workspaceID, traceID string) (*
 	}
 
 	cte, cteArgs := runAggregatesCTE(
-		[]string{"started_at", "finished_at", "terminal_type", "agent_id",
+		[]string{"started_at", "finished_at", "terminal_type", "agent_id", "mission_id",
 			"triggered_by", "started_payload", "terminal_payload"},
 		"workspace_id = ? AND trace_id = ? AND entry_type LIKE 'run.%'")
 	q := cte + `
 SELECT trace_id, started_at, finished_at, terminal_type,
-       agent_id, triggered_by, started_payload, terminal_payload
+       agent_id, mission_id, triggered_by, started_payload, terminal_payload
 FROM run_aggregates
 WHERE started_at IS NOT NULL
 LIMIT 1`
@@ -434,23 +450,24 @@ LIMIT 1`
 }
 
 // scanRunAggregated scans one run_aggregates row — column order (trace_id,
-// started_at, finished_at, terminal_type, agent_id, triggered_by,
+// started_at, finished_at, terminal_type, agent_id, mission_id, triggered_by,
 // started_payload, terminal_payload) — into a RunAggregated, decoding the
 // run.started / terminal JSON payloads into the derived fields.
 func scanRunAggregated(rows *sql.Rows, workspaceID string) (RunAggregated, error) {
 	var (
-		traceID, startedTS                             string
-		finishedTS, terminalType, agentID, triggeredBy sql.NullString
-		startedPayload, terminalPayload                sql.NullString
+		traceID, startedTS                                        string
+		finishedTS, terminalType, agentID, missionID, triggeredBy sql.NullString
+		startedPayload, terminalPayload                           sql.NullString
 	)
 	if err := rows.Scan(&traceID, &startedTS, &finishedTS, &terminalType,
-		&agentID, &triggeredBy, &startedPayload, &terminalPayload); err != nil {
+		&agentID, &missionID, &triggeredBy, &startedPayload, &terminalPayload); err != nil {
 		return RunAggregated{}, fmt.Errorf("journal: scan run: %w", err)
 	}
 	r := RunAggregated{
 		ID:          traceID,
 		WorkspaceID: workspaceID,
 		AgentID:     agentID.String,
+		MissionID:   missionID.String,
 		TriggeredBy: triggeredBy.String,
 	}
 	if t, perr := parseJournalTS(startedTS); perr == nil {
@@ -645,7 +662,7 @@ func countRuns(ctx context.Context, db *sql.DB,
 	innerConds []string, innerArgs []any,
 	outerConds []string, outerArgs []any) (int, error) {
 	cte, cteArgs := runAggregatesCTE(
-		[]string{"started_at", "terminal_type", "started_payload"},
+		[]string{"started_at", "terminal_type", "mission_id", "started_payload"},
 		strings.Join(innerConds, " AND "))
 	q := cte + `
 SELECT COUNT(*) FROM run_aggregates
