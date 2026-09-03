@@ -735,6 +735,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   refetches so a dropped connection can't leave the board permanently wrong.
   The decision logic is `components/features/orchestration/issue-realtime.ts`,
   unit-tested independently of the component.
+- **The realtime allowlist stopped silently dropping most of the documented
+  event vocabulary (#2125).** `hooks/use-realtime.tsx`'s
+  `VALID_REALTIME_TYPES` had drifted from `docs/api-reference/websocket.mdx`
+  — 40 workspace-channel event types the server already emits (projects,
+  milestones, integrations, feature flags, triage rules, recurring issues,
+  the escalation terminal states, and more) were silently discarded by
+  `handleMessage`, with no error and no log. All of them are now
+  registered, a Vitest parity gate
+  (`hooks/__tests__/realtime-allowlist-docs-parity.test.ts`) reads the
+  documented vocabulary straight off that doc page and fails if the
+  allowlist ever misses one again, and a dropped frame now logs a
+  `console.warn` once per type (not per frame) instead of vanishing. No new
+  subscribers were added for the 40 types — registering them is the durable
+  half of the fix; wiring a consumer per surface is separate, future work.
 - **A run is now attributable to the issue that caused it, including
   delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither
