@@ -69,12 +69,36 @@ const MAX_CONSECUTIVE_REFUSALS = 5
  * what that looked like in production — eight failed writes per view of
  * `/crews`, for the life of the feature. So a run of failures latches the
  * session off the way a run of refusals does, and a failure spends its budget.
+ *
+ * The threshold is shared by both failure classes below (#2203) — only what
+ * happens once it is reached differs.
  */
 const MAX_CONSECUTIVE_FAILURES = 5
 
+/**
+ * How long a run of TRANSIENT failures (5xx, thrown/network) closes the rail
+ * for, instead of the permanent stop a run of 4xx failures earns (#2203).
+ *
+ * `apiFetch` synthesizes a 503 whenever the original request 401s and
+ * `/api/auth/token/refresh` is itself transiently unavailable — a 5xx, a
+ * network throw, or its own 10s abort (lib/api-fetch.ts). That is a routine
+ * event during an API restart or a deploy, which is to say: exactly the
+ * window in which several tabs are open and re-rendering. A permanent latch
+ * on that is #2196's bug wearing a different status code — the fix there was
+ * "a broken endpoint should stop asking", not "any bad minute should stop
+ * asking forever". A run of 400s is still a property of the endpoint and
+ * keeps the permanent `stopped` latch below.
+ */
+const TRANSIENT_STOP_MS = 60_000
+
 let consecutiveRefusals = 0
-let consecutiveFailures = 0
+/** Consecutive 4xx (other than 403/409) — a property of the endpoint. */
+let consecutiveEndpointFailures = 0
+/** Consecutive 5xx or thrown/network errors — a property of the minute. */
+let consecutiveTransientFailures = 0
 let stopped = false
+/** Set while a run of transient failures is serving out its cool-down. */
+let stoppedUntil = 0
 
 /** The per-load upload ceiling. Exported so tests don't hard-code it. */
 export function avatarBackfillBudget(): number {
@@ -119,6 +143,15 @@ export async function queueAvatarBackfill(
   workspaceId: string | null | undefined,
 ): Promise<void> {
   if (!agentId || stopped) return
+  if (stoppedUntil) {
+    // Window still open — stay shut.
+    if (Date.now() < stoppedUntil) return
+    // Window elapsed: this is a fresh run's first attempt, not evidence the
+    // endpoint recovered on its own — reset the run so the next agent gets a
+    // clean read instead of one failure away from tripping the latch again.
+    stoppedUntil = 0
+    consecutiveTransientFailures = 0
+  }
   // No workspace, no write. The PUT is registered behind wsCtx, which resolves
   // the workspace from ?workspace_id, a {workspaceId} path segment, or the
   // X-Workspace-ID header. This route has no workspace segment and apiFetch
@@ -178,9 +211,10 @@ export async function queueAvatarBackfill(
       consecutiveRefusals = 0
       if (res.status === 409) {
         // Someone else stored one first. That is the race working as
-        // designed: the endpoint is healthy, so it clears the failure run,
+        // designed: the endpoint is healthy, so it clears both failure runs,
         // and nothing of ours was stored, so the budget comes back.
-        consecutiveFailures = 0
+        consecutiveEndpointFailures = 0
+        consecutiveTransientFailures = 0
         spent--
       } else if (!res.ok) {
         // Deliberately includes two statuses that are arguably per-agent
@@ -198,29 +232,57 @@ export async function queueAvatarBackfill(
         // status the roster can still render. If a surface ever does render
         // agents it cannot write to, revisit this — with a test that tells
         // the two cases apart.
-        noteFailure()
+        //
+        // A 5xx is a different animal (#2203): `apiFetch` itself synthesizes
+        // a 503 whenever token refresh is transiently unavailable, so it is
+        // reachable on every write in flight during an ordinary deploy —
+        // never evidence this endpoint is broken the way a 400 is.
+        if (res.status >= 500) {
+          noteTransientFailure()
+        } else {
+          noteEndpointFailure()
+        }
       } else {
-        consecutiveFailures = 0
+        consecutiveEndpointFailures = 0
+        consecutiveTransientFailures = 0
       }
     }
   } catch {
     // Offline, aborted navigation, server restart. The avatar still renders
     // from its seed; a later session retries. Unlike a refusal the attempt
     // keeps its budget — what the budget limits is requests fired, not bytes
-    // stored — and a run of these gives up for the session.
-    noteFailure()
+    // stored — and a run of these gives up for a while (#2203: temporarily,
+    // not for the rest of the session — see noteTransientFailure).
+    noteTransientFailure()
   }
 }
 
 /**
- * Record a write that failed for a reason that is not a permission refusal,
- * and give up for the rest of the session once enough arrive in a row.
+ * Record a write that failed for a reason that is a property of the
+ * ENDPOINT — a 4xx other than 403/409 — and give up for the rest of the
+ * session once enough arrive in a row.
  *
  * Deliberately does not refund the budget — see MAX_CONSECUTIVE_FAILURES.
  */
-function noteFailure(): void {
-  consecutiveFailures++
-  if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) stopped = true
+function noteEndpointFailure(): void {
+  consecutiveEndpointFailures++
+  if (consecutiveEndpointFailures >= MAX_CONSECUTIVE_FAILURES) stopped = true
+}
+
+/**
+ * Record a write that failed for a reason that is a property of THIS
+ * MINUTE — a 5xx, or a thrown/network error — and close the rail for
+ * `TRANSIENT_STOP_MS` rather than for the rest of the session (#2203).
+ *
+ * Also does not refund the budget: #2199's fix (a failure spends its budget)
+ * still has to hold here, or a deploy-window run of these re-attempts the
+ * full per-load allowance on every subsequent load.
+ */
+function noteTransientFailure(): void {
+  consecutiveTransientFailures++
+  if (consecutiveTransientFailures >= MAX_CONSECUTIVE_FAILURES) {
+    stoppedUntil = Date.now() + TRANSIENT_STOP_MS
+  }
 }
 
 /** Test-only: clear the session guards between cases. */
@@ -228,6 +290,8 @@ export function _resetAvatarBackfillForTest(): void {
   attempted.clear()
   spent = 0
   stopped = false
+  stoppedUntil = 0
   consecutiveRefusals = 0
-  consecutiveFailures = 0
+  consecutiveEndpointFailures = 0
+  consecutiveTransientFailures = 0
 }

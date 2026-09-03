@@ -689,6 +689,39 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **A deploy-window blip no longer wedges the avatar-backfill latch shut for
+  the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
+  whenever a request 401s and `/api/auth/token/refresh` is itself
+  transiently unavailable — a 5xx, a network throw, or its own 10s abort —
+  which is a routine event during an API restart, exactly when several tabs
+  are re-rendering. #2199's latch treated a run of these identically to a
+  genuinely broken endpoint (the #2196 case) and stopped asking for the rest
+  of the JS session, recoverable only by a full reload. A run of 5xx or
+  transport failures now closes the rail for 60 seconds instead of
+  permanently, and still spends its budget; a run of 4xx (other than 403,
+  which already has its own refusal handling) still latches for the
+  session, since that is a property of the endpoint rather than of the
+  minute.
+- **A suggestion or follow-up chip clicked twice can no longer send twice
+  while its session is still being created (#2121).** The chip handler read
+  `isStreaming` — a prop that cannot change until a send produces a render —
+  before awaiting `ensureSessionForSend()`, so two clicks landing inside a
+  draft session's create window both passed the guard and both sent; these
+  chips bypass `useMessageSubmit`, so the #2075 double-submit latch never
+  covered them. Unlike the composer's identical-duplicate case, a second
+  chip is a different question, so the fix disables the chip rail for the
+  duration of the create (extending the existing streaming disable
+  backwards) rather than latching or silently dropping it.
+- **Clearing a crew's issue prefix from the web UI now actually clears it,
+  and the field accepts the same 16-character prefixes the API always has
+  (#2118).** The Issue prefix control sent `{"issue_prefix": null}` on
+  clear; the server decodes a JSON `null` as "field absent" and the write is
+  gated on the field being present (`crews_update.go`), so the PATCH
+  silently no-opped and the value reverted on the next render with no error
+  shown. `""` is the documented clear — it already worked from the CLI
+  (`crewship crew update <crew> --issue-prefix ""`) — and the panel now
+  sends it too. The field's 5-character cap and hint text are also raised to
+  the API's actual limit (`^[A-Za-z0-9_-]{1,16}$`, since #2035).
 - **A run is now attributable to the issue that caused it, including
   delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither
