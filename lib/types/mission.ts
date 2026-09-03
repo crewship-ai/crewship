@@ -133,6 +133,8 @@ export interface Mission {
   // agent in owner's place.
   owner?: IssueOwner | null
   delegate?: IssueDelegate | null
+  /** The agent assignee's slug — what its page is keyed on. Absent for a user. */
+  assignee_slug?: string | null
   due_date?: string | null
   sort_order?: number
   mission_type?: MissionType

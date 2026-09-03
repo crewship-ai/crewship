@@ -84,6 +84,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Issues, missions and an issue's runs page with `?limit=&offset=`, publish the total in `X-Total-Count` / `X-Limit` / `X-Offset`, and `?q=` searches on the server** — the board printed the size of the page it received (#2302).
+- **An issue's runs carry `run_id`, `trace_id`, `agent_id` and `agent_slug`; `/api/v1/runs` rows carry `mission_id`, `mission_identifier` and `crew_slug` and filter by `?mission_id=`; `/api/v1/journal?mission_id=` accepts the issue identifier** — the issue → run → journal path had no ids to follow (#2302).
+- **CLI: `issue list`, `mission list` and `issue runs` take `--limit`/`--offset` and end a table with "showing 1–50 of 1 015"; `issue runs` shows the run id; `history --issue ENG-4` and `journal --mission ENG-4` take the identifier** (#2302).
+- **The issue detail lists every run with a status word and links the run, the agent, the crew and the issue's journal; the routine chip links `?slug=`** — it showed the newest run alone with a name nothing linked (#2302).
+- **`/routines` and `/activity` keep their selection in the URL** — a reload resumes the routine or the walk, Back closes it, and a drill-down can be linked; `/routines?routine=` still lands; a bare `/activity?run=` resolves its routine from the journal; the run page links its routine, issue, agent, crew and journal, and the agent link no longer points at a dead route (#2302).
+- **`/journal?mission_id=ENG-4` narrows the timeline to one issue with a clearable pill that links the issue; an expanded row links its issue; the Runs tab shows the issue each run worked on and links the crew** (#2302).
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,

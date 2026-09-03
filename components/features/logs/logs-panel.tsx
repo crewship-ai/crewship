@@ -119,6 +119,9 @@ interface LogsPanelProps {
    */
   traceId?: string
   onClearTraceId?: () => void
+  /** Issue focus — the mission id or identifier the timeline is narrowed to. */
+  missionId?: string
+  onClearMissionId?: () => void
 
   /**
    * Detail-row jump handlers passed through to LogsList. Wire each one
@@ -129,6 +132,7 @@ interface LogsPanelProps {
   onSelectTrace?: (traceId: string) => void
   onSelectAgent?: (agentId: string) => void
   onSelectCrew?: (crewId: string) => void
+  onSelectMission?: (missionId: string) => void
 }
 
 /**
@@ -171,9 +175,12 @@ export function LogsPanel({
   cappedAt,
   traceId,
   onClearTraceId,
+  missionId,
+  onClearMissionId,
   onSelectTrace,
   onSelectAgent,
   onSelectCrew,
+  onSelectMission,
 }: LogsPanelProps) {
   const [internalQuery, setInternalQuery] = useState("")
   const query = queryProp ?? internalQuery
@@ -402,6 +409,8 @@ export function LogsPanel({
         onRefreshRateChange={onRefreshRateChange}
         traceId={traceId}
         onClearTraceId={onClearTraceId}
+        missionId={missionId}
+        onClearMissionId={onClearMissionId}
       />
       <LogsTypeChips
         counts={stage.groupCounts}
@@ -463,6 +472,7 @@ export function LogsPanel({
                   onSelectTrace={onSelectTrace}
                   onSelectAgent={onSelectAgent}
                   onSelectCrew={onSelectCrew}
+                  onSelectMission={onSelectMission}
                 />
               </div>
               {(loadingMore || (hasMore === false && visibleCount > 0) || cappedAt) && (
