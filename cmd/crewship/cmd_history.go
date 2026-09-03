@@ -51,6 +51,7 @@ Examples:
 		since, _ := cmd.Flags().GetString("since")
 		statusFlag, _ := cmd.Flags().GetString("status")
 		agentFlag, _ := cmd.Flags().GetString("agent")
+		issueFlag, _ := cmd.Flags().GetString("issue")
 		withPrompts, _ := cmd.Flags().GetBool("prompts")
 
 		var sinceTime time.Time
@@ -74,6 +75,10 @@ Examples:
 			}
 			q.Set("agent_id", id)
 		}
+		if issueFlag != "" {
+			// The server resolves an identifier (ENG-4) or an id.
+			q.Set("mission_id", issueFlag)
+		}
 
 		resp, err := client.Get("/api/v1/runs?" + q.Encode())
 		if err != nil {
@@ -85,14 +90,16 @@ Examples:
 
 		var body struct {
 			Data []struct {
-				ID          string  `json:"id"`
-				AgentSlug   *string `json:"agent_slug"`
-				AgentName   *string `json:"agent_name"`
-				ChatID      *string `json:"chat_id"`
-				Status      string  `json:"status"`
-				TriggerType string  `json:"trigger_type"`
-				CreatedAt   string  `json:"created_at"`
-				FinishedAt  *string `json:"finished_at"`
+				ID                string  `json:"id"`
+				AgentSlug         *string `json:"agent_slug"`
+				AgentName         *string `json:"agent_name"`
+				ChatID            *string `json:"chat_id"`
+				Status            string  `json:"status"`
+				TriggerType       string  `json:"trigger_type"`
+				MissionID         *string `json:"mission_id"`
+				MissionIdentifier *string `json:"mission_identifier"`
+				CreatedAt         string  `json:"created_at"`
+				FinishedAt        *string `json:"finished_at"`
 			} `json:"data"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
@@ -159,11 +166,19 @@ Examples:
 					statusColor = cli.Yellow
 				}
 
-				fmt.Printf("%s%s%s  %s%-18s%s  %s%-10s%s  %-6s",
+				// The issue the run worked on, when there is one — the
+				// identifier (ENG-4) that `crewship issue get` takes.
+				issue := "-"
+				if r.MissionIdentifier != nil && *r.MissionIdentifier != "" {
+					issue = *r.MissionIdentifier
+				} else if r.MissionID != nil && *r.MissionID != "" {
+					issue = *r.MissionID
+				}
+				fmt.Printf("%s%s%s  %s%-18s%s  %s%-10s%s  %-6s  %-8s",
 					cli.Dim, ts, cli.Reset,
 					cli.Bold, truncateString(slug, 18), cli.Reset,
 					statusColor, r.Status, cli.Reset,
-					r.TriggerType)
+					r.TriggerType, issue)
 
 				if preview, ok := previews[r.ID]; ok {
 					fmt.Printf("  %q", truncateString(firstLine(preview), 60))
@@ -278,6 +293,7 @@ func init() {
 	historyCmd.Flags().String("since", "24h", "Time window (1h, 24h, 7d, or RFC3339)")
 	historyCmd.Flags().String("status", "", "Filter by status (running|completed|failed)")
 	historyCmd.Flags().String("agent", "", "Filter by agent slug or ID")
+	historyCmd.Flags().String("issue", "", "Only runs that worked on this issue (identifier such as ENG-4, or mission ID)")
 	historyCmd.Flags().Bool("prompts", false, "Fetch first user prompt per run (slower)")
 	addWatchFlag(historyCmd)
 	historyCmd.RunE = watchWrap(historyCmd.RunE)
