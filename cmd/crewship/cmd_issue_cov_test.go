@@ -184,7 +184,7 @@ func TestIssueListRunE_FiltersForwarded(t *testing.T) {
 	q := calls[0].Query
 	for _, want := range []string{
 		"status=TODO", "priority=high", "crew_id=" + covCrewIDCli6,
-		"assignee_id=agent-1", "label=bug", "search=panic", "limit=5",
+		"assignee_id=agent-1", "label=bug", "q=panic", "limit=5",
 	} {
 		if !strings.Contains(q, want) {
 			t.Errorf("query missing %q: %q", want, q)
