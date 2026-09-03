@@ -81,6 +81,9 @@ func TestRunHandler_List_MissionIdentifierAndFilter(t *testing.T) {
 			if r.MissionID == nil || *r.MissionID != "m_eng7" || r.MissionIdentifier == nil || *r.MissionIdentifier != "ENG-7" {
 				t.Fatalf("run_a mission = %v / %v, want m_eng7 / ENG-7", r.MissionID, r.MissionIdentifier)
 			}
+			if r.CrewSlug == nil || *r.CrewSlug != "engineering" {
+				t.Fatalf("run_a crew_slug = %v, want engineering (the crew page is keyed on it)", r.CrewSlug)
+			}
 		case "run_chat":
 			if r.MissionID != nil || r.MissionIdentifier != nil {
 				t.Fatalf("chat run must carry no mission: %v / %v", r.MissionID, r.MissionIdentifier)

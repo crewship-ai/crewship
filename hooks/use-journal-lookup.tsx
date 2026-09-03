@@ -47,6 +47,8 @@ export interface MissionLookup {
   id: string
   title: string
   status: string
+  /** ENG-4 — what the issue page is keyed on. Absent on a mission without one. */
+  identifier?: string
 }
 
 export interface JournalLookupValue {

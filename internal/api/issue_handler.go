@@ -274,6 +274,9 @@ type issueResponse struct {
 	AssigneeType *string `json:"assignee_type"`
 	AssigneeID   *string `json:"assignee_id"`
 	AssigneeName *string `json:"assignee_name,omitempty"`
+	// AssigneeSlug is set for an agent assignee — what the agent's page is
+	// keyed on, so a client can link the assignee instead of naming it.
+	AssigneeSlug *string `json:"assignee_slug,omitempty"`
 	// Owner and Delegate (A10, invariant I5 — "delegating to an agent never
 	// changes the human owner") are the typed projection of missions'
 	// owner_user_id / delegate_agent_id columns, independent of each other
@@ -499,6 +502,10 @@ func issueSelectQuery() string {
 			WHEN m.assignee_type = 'agent' THEN (
 				SELECT name FROM agents WHERE id = m.assignee_id AND workspace_id = m.workspace_id)
 		END,
+		CASE
+			WHEN m.assignee_type = 'agent' THEN (
+				SELECT slug FROM agents WHERE id = m.assignee_id AND workspace_id = m.workspace_id)
+		END,
 		m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
 		m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
 		m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
@@ -526,7 +533,7 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 	err := row.Scan(
 		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
 		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
+		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName, &issue.AssigneeSlug,
 		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
 		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
