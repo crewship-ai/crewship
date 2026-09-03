@@ -177,7 +177,13 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	// filters (#1033). Filters apply in BOTH the legacy and paginated modes.
 	where := "c.workspace_id = ? AND c.deleted_at IS NULL " + visFilter
 	whereArgs := append([]any{workspaceID}, visArgs...)
-	if search := strings.TrimSpace(q.Get("search")); search != "" {
+	// `q` is the shared name every paged list uses for its search (#2303);
+	// `search` stays as the older spelling of the same thing.
+	search := strings.TrimSpace(q.Get("q"))
+	if search == "" {
+		search = strings.TrimSpace(q.Get("search"))
+	}
+	if search != "" {
 		where += ` AND (c.name LIKE ? ESCAPE '\' OR IFNULL(c.description,'') LIKE ? ESCAPE '\')`
 		like := "%" + escapeLikeWildcards(search) + "%"
 		whereArgs = append(whereArgs, like, like)
@@ -193,12 +199,19 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	// the response is the {credentials, next_cursor, limit} envelope; without
 	// it the endpoint keeps returning a bare array (offset-paginated) exactly
 	// as before, so every existing consumer is untouched.
-	if q.Get("paginate") == "true" {
-		h.listCredentialsPaginated(w, r, where, whereArgs, q)
+	// Total before any window, same predicate as both paths.
+	total, err := countListRows(r.Context(), h.db, "SELECT COUNT(*) FROM credentials c WHERE "+where, whereArgs...)
+	if err != nil {
+		replyInternalError(w, h.logger, "count credentials", err)
 		return
 	}
 
-	limit, offset := parseListPagination(r, 100, 500)
+	if q.Get("paginate") == "true" {
+		h.listCredentialsPaginated(w, r, where, whereArgs, q, total)
+		return
+	}
+
+	limit, offset := parsePagination(r, 100, 500)
 	args := append(append([]any{}, whereArgs...), limit, offset)
 	query := credentialSelectPrefix + where + `
 		-- c.id ASC is the pagination tiebreaker: (type, created_at) alone can
@@ -212,6 +225,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.enrichCredentials(r.Context(), result)
+	writeListMeta(w, total, limit, offset)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -225,7 +239,7 @@ type credentialListPage struct {
 
 // listCredentialsPaginated serves the paginate=true path: keyset cursor
 // pagination ordered by (created_at DESC, id DESC), returning the envelope.
-func (h *CredentialHandler) listCredentialsPaginated(w http.ResponseWriter, r *http.Request, where string, whereArgs []any, q url.Values) {
+func (h *CredentialHandler) listCredentialsPaginated(w http.ResponseWriter, r *http.Request, where string, whereArgs []any, q url.Values, total int) {
 	limit := 50
 	if v := strings.TrimSpace(q.Get("limit")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -269,6 +283,10 @@ func (h *CredentialHandler) listCredentialsPaginated(w http.ResponseWriter, r *h
 		nextCursor = &c
 	}
 	h.enrichCredentials(r.Context(), result)
+	// A cursor page has no offset; the total and the page size still describe
+	// the window, so the same two headers as the offset path carry them.
+	w.Header().Set("X-Total-Count", strconv.Itoa(total))
+	w.Header().Set("X-Limit", strconv.Itoa(limit))
 	writeJSON(w, http.StatusOK, credentialListPage{Credentials: result, NextCursor: nextCursor, Limit: limit})
 }
 
