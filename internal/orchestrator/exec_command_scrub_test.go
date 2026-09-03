@@ -510,9 +510,12 @@ func boundedByHelper(e ast.Expr) bool {
 // prompt deliberately, and removing it or measuring it is what they are for.
 func promptDerivedFuncs(files []*ast.File) map[string]bool {
 	derived := map[string]bool{}
-	// Two passes, so a helper that calls another helper is caught whichever
-	// order the files happen to be globbed in.
-	for pass := 0; pass < 2; pass++ {
+	// Iterated to a fixed point rather than a fixed number of passes: a
+	// helper calling a helper calling a helper is caught whatever order the
+	// files happen to be globbed in, and however long the chain is. The set
+	// only ever grows, so this terminates in at most len(funcs) rounds.
+	for grew := true; grew; {
+		before := len(derived)
 		for _, f := range files {
 			for _, decl := range f.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
@@ -538,6 +541,7 @@ func promptDerivedFuncs(files []*ast.File) map[string]bool {
 				})
 			}
 		}
+		grew = len(derived) > before
 	}
 	return derived
 }
