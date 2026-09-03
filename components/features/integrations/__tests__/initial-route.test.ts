@@ -13,6 +13,7 @@ describe("initialIntegrationsRoute", () => {
       tab: "notifications",
       notifySection: "connections",
       mcpSection: "accounts",
+      server: null,
     })
   })
 
@@ -40,6 +41,16 @@ describe("initialIntegrationsRoute", () => {
       tab: "notifications",
       notifySection: "connections",
       mcpSection: "accounts",
+      server: null,
     })
+  })
+
+  it("opens Crew tools on the tools tab, carrying the server a Connect link named", () => {
+    const r = initialIntegrationsRoute("?tab=tools&section=crew-tools&server=srv_1")
+    expect(r.tab).toBe("tools")
+    expect(r.mcpSection).toBe("crew-tools")
+    expect(r.server).toBe("srv_1")
+    // The server only means something on the tools tab.
+    expect(initialIntegrationsRoute("?tab=notifications&server=srv_1").server).toBeNull()
   })
 })
