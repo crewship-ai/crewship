@@ -119,6 +119,12 @@ interface Props {
   relations: IssueRelation[]
   /** Newest first, as the endpoint returns them. */
   runs?: IssueRun[]
+  /**
+   * Sub-resources whose fetch failed ("comments", "history", "runs", …).
+   * Their cards say so instead of claiming emptiness — a 500 on comments is
+   * not "nobody has said anything" (S6).
+   */
+  unavailable?: readonly string[]
   /** The issue's project, already resolved by the caller. */
   project?: Project | null
   /**
@@ -189,6 +195,7 @@ export function IssueCardDetail({
   activities,
   relations,
   runs = [],
+  unavailable = [],
   project,
   actions,
   agents,
@@ -454,7 +461,7 @@ export function IssueCardDetail({
           {/* Every run on the issue — the first leg of the one timeline. It sat
               in the rail as `runs[0]` alone; the rest were fetched and dropped. */}
           <Appear order={6}>
-            <IssueRunsCard issue={issue} runs={runs} />
+            <IssueRunsCard issue={issue} runs={runs} unavailable={unavailable.includes("runs")} />
           </Appear>
         </div>
 
@@ -759,7 +766,7 @@ export function IssueCardDetail({
             <div className="space-y-4">
             {comments.length === 0 ? (
               <p className="text-[12px] text-muted-foreground">
-                Nobody has said anything about this issue yet.
+                {unavailable.includes("comments") ? "Could not load the comments — try again above." : "Nobody has said anything about this issue yet."}
               </p>
             ) : (
               <ul className="space-y-4">
@@ -810,7 +817,7 @@ export function IssueCardDetail({
             </div>
           ) : activities.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
-              No recorded changes since this issue was opened.
+              {unavailable.includes("history") ? "Could not load the history — try again above." : "No recorded changes since this issue was opened."}
             </p>
           ) : (
             <ul className="space-y-2 text-[12px]">

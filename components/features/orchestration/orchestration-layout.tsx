@@ -101,6 +101,8 @@ export interface OrchestrationLayoutProps {
   onRefresh: () => void
   onMissionCreated: () => void
   mode?: OrchestrationMode
+  /** The shell's fetch failed; rendered in place of the board with a retry, never as "no issues". */
+  loadError?: string | null
 }
 
 const ORCH_DRAWER_TABS = [
@@ -149,6 +151,7 @@ export function OrchestrationLayout({
   onRefresh,
   onMissionCreated: _onMissionCreated,
   mode = "default",
+  loadError = null,
 }: OrchestrationLayoutProps) {
   const isMobile = useIsMobile()
 
@@ -902,6 +905,21 @@ export function OrchestrationLayout({
                 }
                 onClear={() => setFilterStatuses([])}
               />
+              {/* The shell's own fetches (missions, crews, agents, connections)
+                  failing is not an empty board either (S6): name it, keep the
+                  filters, offer a retry. The issue list's own failure is the
+                  panel or banner below. */}
+              {loadError && !issuesError && (
+                <div
+                  role="alert"
+                  className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-label text-destructive"
+                >
+                  <span className="min-w-0 flex-1">{loadError}</span>
+                  <Button size="sm" variant="outline" className="h-7" onClick={() => { void fetchIssues(); onRefresh() }}>
+                    Try again
+                  </Button>
+                </div>
+              )}
               {/* #2286: a fetch error must render as an error, never as an
                   empty board — an empty board and a broken fetch used to be
                   indistinguishable. With nothing loaded at all, the error
