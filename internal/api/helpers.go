@@ -130,6 +130,25 @@ func capacityHint(n int) int {
 // defaultLimit) — otherwise a request for ?limit=1000 against
 // (defaultLimit=20, maxLimit=100) would silently return 20 instead of 100 and
 // shift pagination windows in surprising ways.
+// writeListMeta publishes the paging facts of a list response as headers,
+// leaving the body's shape untouched. Every list that pages the S1 way
+// (`?limit=&offset=`) sets the same three so one client hook can read them:
+//
+//	X-Total-Count  rows matching the filter before limit/offset
+//	X-Limit        the limit actually applied (after clamping)
+//	X-Offset       the offset actually applied
+//
+// Headers rather than an envelope because the bodies are bare arrays that
+// dozens of callers unmarshal directly; a wrapper would break every one of
+// them for a number they can read from a header. The API is served from the
+// same origin as the UI, so no CORS expose list is needed.
+func writeListMeta(w http.ResponseWriter, total, limit, offset int) {
+	h := w.Header()
+	h.Set("X-Total-Count", strconv.Itoa(total))
+	h.Set("X-Limit", strconv.Itoa(limit))
+	h.Set("X-Offset", strconv.Itoa(offset))
+}
+
 func parsePagination(r *http.Request, defaultLimit, maxLimit int) (limit, offset int) {
 	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
