@@ -552,8 +552,14 @@ export function RunsView({
         </div>
 
         {error && (
-          <div className="text-[11px] text-destructive px-3 py-2 rounded-md border border-destructive/30 bg-destructive/5">
-            {error}
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-2 text-[11px] text-destructive px-3 py-2 rounded-md border border-destructive/30 bg-destructive/5"
+          >
+            <span className="min-w-0 flex-1">{error}</span>
+            <Button size="sm" variant="outline" className="h-7" onClick={() => void fetchRuns()}>
+              Try again
+            </Button>
           </div>
         )}
 
@@ -635,12 +641,12 @@ export function RunsView({
                     }}
                     title={`Open trace ${run.id.slice(0, 8)} in Timeline`}
                     className={cn(
-                      "grid items-center gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors cursor-pointer outline-none focus-visible:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-success/40",
+                      "grid items-center gap-x-3 gap-y-1 px-4 py-2 hover:bg-white/[0.02] transition-colors cursor-pointer outline-none focus-visible:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-success/40",
+                      RUN_GRID_ROW,
                       idx < runs.length - 1 && "border-b border-border/40",
                     )}
-                    style={{ gridTemplateColumns: RUN_GRID }}
                   >
-                    <span className="text-[10px] font-mono text-muted-foreground/60">
+                    <span className="hidden text-[10px] font-mono text-muted-foreground/60 md:block">
                       #{run.id.slice(0, 8)}
                     </span>
                     <Link
@@ -654,12 +660,12 @@ export function RunsView({
                       <Link
                         href={entityHref({ kind: "crew", slug: run.crew_slug })}
                         onClick={(e) => e.stopPropagation()}
-                        className="text-[11px] text-muted-foreground truncate hover:underline"
+                        className="hidden text-[11px] text-muted-foreground truncate hover:underline md:block"
                       >
                         {run.crew_name}
                       </Link>
                     ) : (
-                      <span className="text-[11px] text-muted-foreground truncate">
+                      <span className="hidden text-[11px] text-muted-foreground truncate md:block">
                         {run.crew_name ?? <span className="text-muted-foreground/40">—</span>}
                       </span>
                     )}
@@ -692,10 +698,10 @@ export function RunsView({
                         className="text-[10px]"
                       />
                     </div>
-                    <span className="text-[11px] text-muted-foreground truncate">
+                    <span className="hidden text-[11px] text-muted-foreground truncate md:block">
                       {triggerLabel(run.trigger_type)}
                     </span>
-                    <span className="text-[10px] font-mono text-indigo-300/80 truncate">
+                    <span className="hidden text-[10px] font-mono text-indigo-300/80 truncate md:block">
                       {run.model ? shortModel(run.model) : <span className="text-muted-foreground/40">—</span>}
                     </span>
                     <span className="text-[11px] font-mono tabular-nums text-muted-foreground text-right">
@@ -711,7 +717,7 @@ export function RunsView({
                     <Link
                       href={agentCanvasHref(run.agent_slug)}
                       onClick={(e) => e.stopPropagation()}
-                      className="text-muted-foreground/60 hover:text-foreground transition-colors justify-self-end"
+                      className="hidden text-muted-foreground/60 hover:text-foreground transition-colors justify-self-end md:block"
                       aria-label="Open agent"
                     >
                       <ExternalLink className="h-3 w-3" />
@@ -762,6 +768,10 @@ export function RunsView({
 // vs the legacy list).
 const RUN_GRID =
   "80px minmax(0,1.2fr) minmax(0,1fr) 72px 108px 84px 84px 80px minmax(0,0.9fr) 20px"
+// The same template as a class for the rows, which are two columns below md
+// (the 584px grid used to clip inside overflow-hidden on a phone).
+const RUN_GRID_ROW =
+  "grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[80px_minmax(0,1.2fr)_minmax(0,1fr)_72px_108px_84px_84px_80px_minmax(0,0.9fr)_20px]"
 
 /* ----------------------------------------------------------------- *
  *  Live pulse strip                                                  *

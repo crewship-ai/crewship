@@ -20,6 +20,9 @@
 // against real data without ever being able to write.
 
 import * as React from "react"
+import Link from "next/link"
+
+import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -98,6 +101,10 @@ export function IssueDetailSurface({
   const [runs, setRuns] = React.useState<IssueRun[]>([])
   const [subIssues, setSubIssues] = React.useState<Mission[]>([])
   const [codeLinks, setCodeLinks] = React.useState<IssueCodeLink[]>([])
+  // Sub-resources whose fetch FAILED, by name. A 500 on comments used to
+  // render "Nobody has said anything about this issue yet" — an empty state
+  // standing in for an error, which the reader cannot tell apart (S6).
+  const [subFailed, setSubFailed] = React.useState<string[]>([])
 
   const [roster, setRoster] = React.useState<Roster>(EMPTY_ROSTER)
   const [milestones, setMilestones] = React.useState<Milestone[]>([])
@@ -167,27 +174,38 @@ export function IssueDetailSurface({
   const fetchSubResources = React.useCallback(async () => {
     if (!base) return
     const mine = ++subReq.current
-    const get = (path: string) =>
+    const failed: string[] = []
+    const get = (path: string, label: string) =>
       apiFetch(`${base}/${path}?${qs}`)
-        .then((r) => (r.ok ? r.json() : []))
-        .catch(() => [])
+        .then((r) => {
+          if (r.ok) return r.json()
+          failed.push(label)
+          return null
+        })
+        .catch(() => {
+          failed.push(label)
+          return null
+        })
     const [cs, as, rs, rn, sub, cl] = await Promise.all([
-      get("comments"),
-      get("activity"),
-      get("relations"),
-      get("runs"),
-      get("subtasks"),
+      get("comments", "comments"),
+      get("activity", "history"),
+      get("relations", "links"),
+      get("runs", "runs"),
+      get("subtasks", "sub-issues"),
       // The pull requests attached to this issue. Same crew + identifier as
       // its siblings, and it goes stale on the same writes.
-      get("code-links"),
+      get("code-links", "pull requests"),
     ])
     if (mine !== subReq.current) return
-    setComments(Array.isArray(cs) ? cs : [])
-    setActivities(Array.isArray(as) ? as : [])
-    setRelations(Array.isArray(rs) ? rs : [])
-    setRuns(Array.isArray(rn) ? rn : [])
-    setSubIssues(Array.isArray(sub) ? sub : (sub?.subtasks ?? []))
-    setCodeLinks(Array.isArray(cl) ? cl : [])
+    // A failed resource keeps what it had rather than emptying: an error
+    // must not erase the comments that were on screen a second ago.
+    if (cs !== null) setComments(Array.isArray(cs) ? cs : [])
+    if (as !== null) setActivities(Array.isArray(as) ? as : [])
+    if (rs !== null) setRelations(Array.isArray(rs) ? rs : [])
+    if (rn !== null) setRuns(Array.isArray(rn) ? rn : [])
+    if (sub !== null) setSubIssues(Array.isArray(sub) ? sub : (sub?.subtasks ?? []))
+    if (cl !== null) setCodeLinks(Array.isArray(cl) ? cl : [])
+    setSubFailed(failed)
   }, [base, qs])
 
   React.useEffect(() => {
@@ -625,9 +643,24 @@ export function IssueDetailSurface({
   if (loading) return <DetailSkeleton />
 
   if (error || !issue) {
+    const notFound = error === "Issue not found" || !error
     return (
       <div className="grid h-full place-items-center p-6 text-center">
-        <p className="text-[13px] text-muted-foreground">{error ?? "Issue not found"}</p>
+        <div className="flex flex-col items-center gap-3">
+          <p className="text-[13px] text-muted-foreground">
+            {notFound ? `No issue is called ${identifier} in this workspace.` : (error ?? "Issue not found")}
+          </p>
+          <div className="flex items-center gap-2">
+            {!notFound && (
+              <Button size="sm" variant="outline" onClick={() => void fetchIssue()}>
+                Try again
+              </Button>
+            )}
+            <Link href="/issues" className="text-[12px] text-primary hover:underline">
+              Back to issues
+            </Link>
+          </div>
+        </div>
       </div>
     )
   }
@@ -635,8 +668,23 @@ export function IssueDetailSurface({
   const project = roster.projects.find((p) => p.id === issue.project_id) ?? null
 
   return (
+    <>
+    {subFailed.length > 0 && (
+      <div
+        role="alert"
+        className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive"
+      >
+        <span className="min-w-0 flex-1">
+          Could not load {subFailed.join(", ")} for this issue. What is shown may be out of date.
+        </span>
+        <Button size="sm" variant="outline" className="h-7" onClick={() => void fetchSubResources()}>
+          Try again
+        </Button>
+      </div>
+    )}
     <IssueCardDetail
       issue={issue}
+      unavailable={subFailed}
       comments={comments}
       activities={activities}
       relations={relations}
@@ -672,6 +720,7 @@ export function IssueDetailSurface({
         />
       }
     />
+    </>
   )
 }
 

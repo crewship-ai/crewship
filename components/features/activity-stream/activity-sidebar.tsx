@@ -525,6 +525,9 @@ export interface ActivitySidebarProps {
    */
   chainsHaveMore: boolean
   chainsHaveUnrecorded: boolean
+  /** The workflow index failed to load. Not an empty workspace — say so, offer a retry. */
+  chainsError?: string | null
+  onRetryChains?: () => void
   /**
    * Routines by slug, for a row's icon, colour and human name.
    *
@@ -570,6 +573,8 @@ export function ActivitySidebar({
   loadedChainCount,
   chainsHaveMore,
   chainsHaveUnrecorded,
+  chainsError = null,
+  onRetryChains,
   routineBySlug,
   selectedChain,
   onSelectChain,
@@ -928,6 +933,16 @@ export function ActivitySidebar({
           // section header reading "ISSUES TOUCHED 0" with nothing under it and
           // no sentence saying why — a bare zero over a blank column, which is
           // the exact wall of zeros this rail was rebuilt to delete.
+          chainsError ? (
+            <div role="alert" className="mx-2 my-2 flex flex-col gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive">
+              <span>Could not load the workflow index: {chainsError}</span>
+              {onRetryChains && (
+                <button type="button" onClick={onRetryChains} className="w-fit rounded border border-destructive/40 px-2 py-0.5 hover:bg-destructive/10">
+                  Try again
+                </button>
+              )}
+            </div>
+          ) : (
           <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground-soft">
             {emptyLensCopy({
               lens,
@@ -938,6 +953,7 @@ export function ActivitySidebar({
               chainsHaveUnrecorded,
             })}
           </p>
+          )
         ) : lens === "workflows" ? (
           // Radix needs a provider in scope or every TooltipTrigger renders a
           // plain child and the hover card silently never appears. Same delay as
