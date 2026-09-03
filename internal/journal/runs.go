@@ -255,22 +255,49 @@ var runTerminalEntryTypes = func() []string {
 // actor_id is the run's OWN id (internal/pipeline/journal.go), not the
 // triggering actor, so projecting it into triggered_by would put a run
 // pointing at itself into a field callers read as "who kicked this off".
+// originalStartCond is the predicate started_at/agent_id/started_payload
+// filter on: a 'started'-family row that is NOT a resume marker. A
+// pipeline/routine run whose execution parks on a wait:approval gate, a
+// wait:event signal, or a boot-time restart re-enters via
+// pipelineEmitContext.emitRunResumed (internal/pipeline/journal.go), which
+// emits a SECOND EntryPipelineRunStarted row for the SAME run — same
+// actor_id, later ts, and payload.resumed=true (there is no dedicated
+// "resumed" entry type; emitRunResumed reuses started with a marker).
+// Ad-hoc runs never re-emit run.started (internal/api/assignments_run.go
+// has exactly one call site), so this is a no-op for them — payload.resumed
+// is simply absent, and COALESCE(...,0)=0 always holds.
+//
+// Without this filter, MAX(ts) over BOTH the original and every resume
+// picks the LATEST re-entry instead of the run's true start — a routine
+// that was approved three hours after it parked would report a three-hour-
+// old run as having started seconds ago, and MAX() over started_payload (a
+// TEXT column) would pick whichever candidate payload sorts
+// lexicographically largest, unrelated to which row produced the chosen
+// timestamp. Excluding resumed rows leaves exactly one 'started'-family row
+// per run — the original emitRunStarted / assignments_run.go emit — so MAX
+// over a single candidate is trivially correct again.
+const originalStartCond = "entry_type IN ('run.started','pipeline.run.started') " +
+	"AND COALESCE(json_extract(payload, '$.resumed'), 0) = 0"
+
 var runAggregateProjections = []struct {
 	name     string
 	terminal bool
 	expr     string
 }{
-	{"started_at", false, "MAX(CASE WHEN entry_type IN ('run.started','pipeline.run.started') THEN ts END) AS started_at"},
+	{"started_at", false, "MAX(CASE WHEN " + originalStartCond + " THEN ts END) AS started_at"},
 	{"finished_at", true, "MAX(CASE WHEN entry_type IN %s THEN ts END) AS finished_at"},
 	{"terminal_type", true, "MAX(CASE WHEN entry_type IN %s THEN entry_type END) AS terminal_type"},
-	{"agent_id", false, "MAX(CASE WHEN entry_type IN ('run.started','pipeline.run.started') THEN agent_id END) AS agent_id"},
+	{"agent_id", false, "MAX(CASE WHEN " + originalStartCond + " THEN agent_id END) AS agent_id"},
 	{"triggered_by", false, "MAX(CASE WHEN entry_type = 'run.started' THEN actor_id END) AS triggered_by"},
-	{"started_payload", false, "MAX(CASE WHEN entry_type IN ('run.started','pipeline.run.started') THEN payload END) AS started_payload"},
+	{"started_payload", false, "MAX(CASE WHEN " + originalStartCond + " THEN payload END) AS started_payload"},
 	{"terminal_payload", true, "MAX(CASE WHEN entry_type IN %s THEN payload END) AS terminal_payload"},
 	// kind discriminates which engine produced the group (RunKind). A group
 	// is homogeneous, so MAX over a constant string per matching row is
 	// stable — every row in an "agent" group ties into 'agent', every row in
-	// a "pipeline" group into 'pipeline'.
+	// a "pipeline" group into 'pipeline'. Deliberately NOT filtered by
+	// originalStartCond — a resumed row still carries entry_type
+	// 'pipeline.run.started', so it still says which engine produced the
+	// group.
 	{"kind", false, "MAX(CASE WHEN entry_type LIKE 'pipeline.run.%' THEN 'pipeline' ELSE 'agent' END) AS kind"},
 }
 

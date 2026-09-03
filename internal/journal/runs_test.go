@@ -569,3 +569,123 @@ func TestGetRunByID_PipelineRun(t *testing.T) {
 		t.Errorf("cross-tenant leak: %+v", leaked)
 	}
 }
+
+// TestListRuns_PipelineResumeDoesNotOverwriteStartedAt pins a defect the
+// #2284 widening itself introduced (caught in self-review before merge): a
+// pipeline/routine run that parks on a waitpoint and later resumes re-emits
+// pipeline.run.started via pipelineEmitContext.emitRunResumed
+// (internal/pipeline/journal.go) — same actor_id, a LATER ts, and
+// payload.resumed=true. Naively widening started_at's projection to
+// MAX(ts) over 'run.started' OR 'pipeline.run.started' (with no filter for
+// the resume marker) would make MAX(ts) pick the resume time instead of the
+// run's true original start — a routine approved three hours after it
+// parked would report itself as having started seconds ago. Ad-hoc runs
+// never hit this (internal/api/assignments_run.go has exactly one
+// run.started call site per trace_id), so this is pipeline-only.
+func TestListRuns_PipelineResumeDoesNotOverwriteStartedAt(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	ctx := context.Background()
+	originalStart := time.Now().UTC().Add(-3 * time.Hour)
+	resumedAt := time.Now().UTC().Add(-5 * time.Minute)
+	completedAt := time.Now().UTC()
+
+	// Original start.
+	if _, err := w.Emit(ctx, Entry{
+		WorkspaceID: "ws_test",
+		AgentID:     "agent_a",
+		Type:        EntryPipelineRunStarted,
+		ActorType:   ActorOrchestrator,
+		ActorID:     "routine_resumed",
+		Summary:     "started",
+		Payload: map[string]any{
+			"mode":              "run",
+			"invoking_agent_id": "agent_a",
+			"pipeline_id":       "pl_test",
+			"pipeline_slug":     "test-routine",
+			"run_id":            "routine_resumed",
+		},
+		TS: originalStart,
+	}); err != nil {
+		t.Fatalf("emit started: %v", err)
+	}
+	// Resume — same run, same entry type, later ts, resumed marker. Mirrors
+	// pipelineEmitContext.emitRunResumed's payload shape.
+	if _, err := w.Emit(ctx, Entry{
+		WorkspaceID: "ws_test",
+		AgentID:     "agent_a",
+		Type:        EntryPipelineRunStarted,
+		ActorType:   ActorOrchestrator,
+		ActorID:     "routine_resumed",
+		Summary:     "resumed after approval",
+		Payload: map[string]any{
+			"mode":              "run",
+			"invoking_agent_id": "agent_a",
+			"pipeline_id":       "pl_test",
+			"pipeline_slug":     "test-routine",
+			"run_id":            "routine_resumed",
+			"resumed":           true,
+			"resume_reason":     "approval",
+			"restored_steps":    2,
+		},
+		TS: resumedAt,
+	}); err != nil {
+		t.Fatalf("emit resumed: %v", err)
+	}
+	// Terminal.
+	if _, err := w.Emit(ctx, Entry{
+		WorkspaceID: "ws_test",
+		AgentID:     "agent_a",
+		Type:        EntryPipelineRunCompleted,
+		ActorType:   ActorOrchestrator,
+		ActorID:     "routine_resumed",
+		Summary:     "completed",
+		Payload: map[string]any{
+			"total_duration_ms": float64(1000),
+			"pipeline_id":       "pl_test",
+			"pipeline_slug":     "test-routine",
+			"run_id":            "routine_resumed",
+		},
+		TS: completedAt,
+	}); err != nil {
+		t.Fatalf("emit completed: %v", err)
+	}
+	_ = w.Flush(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	run, err := GetRunByID(ctx, db, "ws_test", "routine_resumed")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil")
+	}
+	gotStart := run.StartedAt.UTC()
+	wantStart := originalStart.Truncate(time.Millisecond)
+	if !gotStart.Equal(wantStart) {
+		t.Errorf("started_at: got %v want %v (the original start, not the %v resume) — diff from resume: %v",
+			gotStart, wantStart, resumedAt, gotStart.Sub(wantStart))
+	}
+	// started_payload must correlate with the SAME (original) row too — a
+	// resumed=true payload leaking into the fields callers decode from
+	// started_payload (mode, metadata, chat_id) would be the same class of
+	// defect one level worse: MAX() over the payload TEXT column has no
+	// reason to agree with MAX() over ts.
+	if run.Metadata != nil {
+		if _, ok := run.Metadata["resumed"]; ok {
+			t.Errorf("started_payload leaked the resumed marker into decoded fields: %+v", run.Metadata)
+		}
+	}
+
+	// ListRuns must agree with GetRunByID.
+	runs, _, err := ListRuns(ctx, db, RunsQuery{WorkspaceID: "ws_test"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(runs) != 1 || !runs[0].StartedAt.UTC().Equal(wantStart) {
+		t.Errorf("ListRuns started_at: got %+v want %v", runs, wantStart)
+	}
+}
