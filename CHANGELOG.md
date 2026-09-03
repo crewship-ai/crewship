@@ -4392,7 +4392,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   breach once. Not built: tiered re-firing on a much larger breach (e.g.
   10% over vs. 400% over) — noted in the PR as a possible follow-up. The
   `budget.exceeded` journal entry itself is unchanged and still emits every
-  call.
+  call. The debounce state holds one entry per budget (overwritten in
+  place as its period/limit change via a `CompareAndSwap` retry), not one
+  per `(budget, period, limit)` ever seen — an earlier draft keyed the
+  latter, which meant a regularly-breaching hourly budget grew the map
+  forever over a long `crewshipd` uptime; found in review before merge.
 
 - **`hooks.Dispatch` no longer queries `hooks_config` when nothing is
   registered (#2154).** `Dispatch` called `ListByEvent` unconditionally

@@ -193,3 +193,39 @@ func TestAnnounceBudgetBreach(t *testing.T) {
 		})
 	}
 }
+
+// TestAnnounceBudgetBreach_ConcurrentCallersExactlyOneWinner races many
+// goroutines through announceBudgetBreach for the same brand-new budget
+// identity at once. breachAnnounced now overwrites a single entry per
+// identity (bounded map size — see the type's doc comment) instead of
+// creating a new map entry per (budget, period, limit) triple, which means
+// two goroutines can race to make the exact same period/limit transition;
+// the CompareAndSwap retry loop is what has to keep exactly one of them
+// winning. Run with -race to also catch a plain data race, not just a
+// logic race.
+func TestAnnounceBudgetBreach_ConcurrentCallersExactlyOneWinner(t *testing.T) {
+	breachAnnounced = sync.Map{} // isolate from other tests, and from repeat runs under -count>1
+	b := Budget{ID: "b-concurrent-1", WorkspaceID: "ws-concurrent-1", ScopeKind: ScopeWorkspace, ScopeID: "ws-concurrent-1", Window: WindowDay, LimitUSD: 1.0}
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+
+	const n = 50
+	var wg sync.WaitGroup
+	var announcedCount int32
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if announceBudgetBreach(b, now) {
+				atomic.AddInt32(&announcedCount, 1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if announcedCount != 1 {
+		t.Fatalf("announceBudgetBreach returned true for %d of %d concurrent callers, want exactly 1", announcedCount, n)
+	}
+}
