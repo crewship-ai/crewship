@@ -10,12 +10,14 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { isGhost, effectiveStatus } from "@/lib/agent-ephemeral"
 import { SidebarToolbar, SidebarSearch, SidebarRow, SidebarCollapseButton, SidebarSection } from "@/components/layout/sidebar-kit"
 import {
+  EXPLORER_FOLD,
   explorerCountLine,
   foldRows,
   groupExplorerCrews,
   type ExplorerAgent,
   type ExplorerCrew,
   type ExplorerCrewRow,
+  type ExplorerGroupKey,
   type ProvisioningState,
 } from "./explorer-groups"
 
@@ -76,23 +78,27 @@ export function CrewsExplorer({
   provisioningByCrew,
 }: CrewsExplorerProps) {
   const [search, setSearch] = useState("")
-  const [showAllIdle, setShowAllIdle] = useState(false)
+  // Every group folds after six (README §4: priority, cap, fold). On a host
+  // without a container runtime every crew "needs a rebuild", and an
+  // unfolded attention group of a hundred is the wall the fold exists for.
+  const [showAll, setShowAll] = useState<Partial<Record<ExplorerGroupKey, boolean>>>({})
 
   const grouped = useMemo(
     () => groupExplorerCrews({ crews, agents, search, provisioningByCrew }),
     [crews, agents, search, provisioningByCrew],
   )
 
-  // Open the crews that need a look and the selected one; a hundred idle
-  // crews stay closed until asked. A crew that ENTERS attention opens too.
+  // Open the first few crews that need a look and the selected one; the rest
+  // stay closed until asked. A crew that ENTERS the visible attention rows
+  // opens too.
   const [expandedCrews, setExpandedCrews] = useState<Set<string>>(() => new Set())
   useEffect(() => {
     setExpandedCrews((prev) => {
       const next = new Set(prev)
       let changed = false
-      for (const g of grouped.groups) {
-        if (g.key !== "attention") continue
-        for (const r of g.rows) if (!next.has(r.crew.id)) { next.add(r.crew.id); changed = true }
+      const attention = grouped.groups.find((g) => g.key === "attention")
+      for (const r of attention?.rows.slice(0, EXPLORER_FOLD) ?? []) {
+        if (!next.has(r.crew.id)) { next.add(r.crew.id); changed = true }
       }
       if (selectedCrewId && !next.has(selectedCrewId)) { next.add(selectedCrewId); changed = true }
       return changed ? next : prev
@@ -240,7 +246,8 @@ export function CrewsExplorer({
               />
             ) : (
               grouped.groups.map((group) => {
-                const { visible, hidden } = group.key === "idle" ? foldRows(group.rows, showAllIdle) : { visible: group.rows, hidden: 0 }
+                const { visible, hidden } = foldRows(group.rows, showAll[group.key] === true)
+                const rest = group.key === "attention" ? "need attention" : group.key === "running" ? "running" : "idle"
                 return (
                   <SidebarSection
                     key={group.key}
@@ -256,10 +263,10 @@ export function CrewsExplorer({
                     {hidden > 0 && (
                       <button
                         type="button"
-                        onClick={() => setShowAllIdle(true)}
+                        onClick={() => setShowAll((prev) => ({ ...prev, [group.key]: true }))}
                         className="kit-tap mx-1 my-1 flex w-[calc(100%-0.5rem)] items-center justify-between rounded-md border border-border/60 px-2.5 py-1.5 text-left type-nav-sub hover:bg-foreground/[0.03]"
                       >
-                        <span className="text-muted-foreground"><span className="font-medium text-foreground/90">{hidden} more {hidden === 1 ? "crew" : "crews"}</span> · idle</span>
+                        <span className="text-muted-foreground"><span className="font-medium text-foreground/90">{hidden} more {hidden === 1 ? "crew" : "crews"}</span> · {rest}</span>
                         <span className="inline-flex items-center gap-1 text-primary-hover">Show all <ChevronRight className="h-3 w-3" /></span>
                       </button>
                     )}
