@@ -842,7 +842,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
         </div>
-        {turns.length === 0 && !historyLoading && (
+        {turns.length === 0 && !historyLoading && sessionKind === "direct" && (
           <div className="px-4 pb-2 shrink-0">
             <AskRail
               questions={defaultSuggestions}
@@ -914,7 +914,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
         </div>
-        {turns.length === 0 && !historyLoading && (
+        {/* Starter chips are for a conversation; a routine step or an issue
+            chat is a transcript, and "Help me get started" under one is
+            noise. */}
+        {turns.length === 0 && !historyLoading && sessionKind === "direct" && (
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
             <AskRail
               questions={defaultSuggestions}

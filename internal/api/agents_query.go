@@ -28,7 +28,11 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	// was the freshest. Hidden by default; `include_setup=1` is the explicit
 	// opt-in for the one caller that means it (a deep link into the Guide's
 	// own chat). Agents with no crew are not setup agents and stay.
-	setupWhere := " AND COALESCE(c.kind, '') <> 'setup'"
+	//
+	// A subquery on the agent's crew rather than a predicate on the joined
+	// crew row, so the same clause can sit in a COUNT that does not join and
+	// the total and the page cannot disagree.
+	setupWhere := " AND (a.crew_id IS NULL OR a.crew_id NOT IN (SELECT id FROM crews WHERE COALESCE(kind, '') = 'setup'))"
 	if r.URL.Query().Get("include_setup") == "1" {
 		setupWhere = ""
 	}

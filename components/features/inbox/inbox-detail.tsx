@@ -27,7 +27,7 @@ import {
   absolute, canRole, deciderCopy, decisionMetaFor, expiresIn, jumpFor, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
   payloadString, payloadStrings, safeChatURL, since, subjectOf, type WorkspaceRole,
 } from "./inbox-derive"
-import { entryKindPill, inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
+import { entryKindPill, entryTitle, inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
 
 // =============================================================================
 // The reading pane.
@@ -311,7 +311,9 @@ export function DecisionCard({
           )}
         </div>
 
-        <div className="text-body font-semibold">{item.title}</div>
+        {/* The question, not the server's "Agent escalation:" prefix — the
+            kind pill beside the heading already says what this is. */}
+        <div className="text-body font-semibold">{entryTitle(inboxEntry(item))}</div>
 
         <DecisionSubject item={item} />
 
@@ -609,7 +611,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
         ) : (
           <DetailCard>
             <div className="flex flex-col gap-3">
-              <div className="text-body font-semibold">{item.title}</div>
+              <div className="text-body font-semibold">{entryTitle(inboxEntry(item))}</div>
               <DecisionSubject item={item} />
               <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={isResolved} />
             </div>
