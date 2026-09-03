@@ -149,7 +149,13 @@ var adminGDPRDeleteCmd = &cobra.Command{
 	Use:     "delete <user-id-or-email>",
 	Aliases: []string{"erase"},
 	Short:   "Irreversibly erase every row referencing a user (admin)",
-	Long: `Right to erasure: removes every row referencing this user in this workspace.
+	Long: `Right to erasure: leaves this user unnamed by this workspace's rows.
+
+Content about them is deleted. History they authored is kept and anonymised.
+Capabilities they issued — page grants, public page links, inbound webhook
+tokens — are revoked, and stop working at once. The receipt breaks that down
+per table, with the verb in the label; only rows that went away are in the
+total. Rows in OTHER workspaces are untouched: those are a separate request.
 
 The reason is not paperwork — it is the audit trail, and it is what answers
 "why was this person's data removed" a year from now. This cannot be undone.

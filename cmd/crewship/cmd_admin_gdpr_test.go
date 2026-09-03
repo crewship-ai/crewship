@@ -95,6 +95,43 @@ func TestAdminGDPRDelete(t *testing.T) {
 		}
 	})
 
+	// #1976: the erasure now also unnames the subject on four Pages tables,
+	// with a different verb per table — a version is anonymised (the row
+	// stays), a grant/link/webhook is revoked (the row goes). The receipt an
+	// operator pastes into a SAR ticket has to say which happened, so the
+	// scope keys carry the verb and the CLI must print them as sent.
+	t.Run("surfaces the per-table Pages verbs in the receipt", func(t *testing.T) {
+		stub := covStub(t)
+		stub.OnDelete("/api/v1/admin/users/u-1/data", func(r *http.Request, body []byte) (int, []byte, string) {
+			return 202, []byte(`{"action_id":"act-3","data_subject":"u-1","workspace_id":"ws-1",` +
+				`"rows_deleted":4,"scope":{"page_versions_anonymised":3,"page_grants_removed":2,` +
+				`"page_public_tokens_revoked":1,"page_webhooks_revoked":1}}`), "application/json"
+		})
+		covResetFlags(t, adminGDPRDeleteCmd)
+		_ = adminGDPRDeleteCmd.Flags().Set("reason", "SAR #1976")
+		_ = adminGDPRDeleteCmd.Flags().Set("yes", "true")
+		out := covCaptureAll(t, func() {
+			if err := adminGDPRDeleteCmd.RunE(adminGDPRDeleteCmd, []string{"u-1"}); err != nil {
+				t.Errorf("RunE: %v", err)
+			}
+		})
+		for _, want := range []string{
+			"page_versions_anonymised",
+			"page_grants_removed",
+			"page_public_tokens_revoked",
+			"page_webhooks_revoked",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("receipt does not report %s:\n%s", want, out)
+			}
+		}
+		// An anonymised version is not a deleted row, so the total must not
+		// silently absorb it — 4 is what the server counted as removed.
+		if !strings.Contains(out, "Erased 4 rows") {
+			t.Errorf("row total misreported:\n%s", out)
+		}
+	})
+
 	// 207 is a 2xx, so CheckError passes it through: without an explicit
 	// check the operator is told the erasure succeeded when part of it
 	// failed, and a scripted SAR queue records the ticket as closed.

@@ -39,6 +39,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   every non-terminal assignment, and the queued row is recorded `CANCELLED`
   without ever starting its exec.
 
+- **Erasing a user left them named on four Pages tables (#1976).** The
+  Article 17 cascade transferred the subject's pages and stopped, so
+  `page_versions.author_user_id`, `page_grants.granted_by_user_id`,
+  `page_public_tokens.created_by_user_id` and
+  `page_webhooks.created_by_user_id` still carried the name of a person whose
+  SAR ticket had been closed as "erased" — and the public links and inbound
+  webhook tokens they had issued were still live. Every one of those columns
+  already declares what should become of it when the human goes away (three
+  `ON DELETE CASCADE`, one `SET NULL`), and none of them ever fired, because a
+  workspace-scoped erasure deliberately never deletes the `users` row. The
+  cascade now runs those declared actions itself, inside the erased workspace
+  only: the page version keeps its history and loses its author, while the
+  grants (including grants naming the subject), public `/p/{token}` links and
+  webhook tokens are revoked by removal and stop working at once. The receipt
+  and the `gdpr_actions` audit row gained a count per table with the verb in
+  the key (`page_versions_anonymised`, `page_grants_removed`,
+  `page_public_tokens_revoked`, `page_webhooks_revoked`); an anonymised row is
+  not counted in `rows_deleted`, because nothing was deleted. The contract the
+  erasure now keeps — *the subject is unnamed in that workspace*, with the
+  append-only accountability tables the one deliberate exception — is written
+  down in `docs/security/gdpr.mdx` where the operator running it reads.
+
 - **The 1.0 known limits are written down where users read (#2299).** The
   issue-mentions, routines and issue-detail guides now say plainly what Track
   A deliberately left for 1.1: a busy agent is woken after its live run rather

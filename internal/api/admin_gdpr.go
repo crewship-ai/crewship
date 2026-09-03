@@ -124,6 +124,26 @@ import (
 // refuses rather than deleting some rows and leaving the page problem for
 // later. See transferOrRefuseUserPages below.
 //
+// Owning a page is not the only way a person is named on the Pages tables,
+// and the other four ways went unhandled until #1976: page_versions
+// (author_user_id), page_grants (granted_by_user_id, and a 'user' subject),
+// page_public_tokens and page_webhooks (created_by_user_id). Each carries an
+// FK action that says what should become of it when the human goes away —
+// SET NULL for the version, CASCADE for the three capabilities — and none of
+// them ever fires, because this cascade deliberately never deletes the
+// `users` row. erasePagesIdentity (pages_erase_identity.go) runs those
+// declared actions inside this one workspace, which is what makes the
+// contract below true.
+//
+// # The contract: unnamed IN THIS WORKSPACE
+//
+// A workspace-scoped erasure promises that the subject is not named by this
+// workspace's rows — not that the person is gone from the instance. The same
+// human in another workspace is a separate SAR ticket answered by a separate
+// call, and every statement here is therefore scoped through workspace_id (or,
+// for tables that have none, through a join that reaches one). The one
+// deliberate exception is the excluded list below.
+//
 // # Idempotency
 //
 // Running DELETE twice for the same user is a no-op the second time
@@ -216,6 +236,15 @@ type gdprActionScope struct {
 	// owned them (§7.1 rule 1b). Never a delete count — a page is never
 	// deleted by this cascade, only reassigned.
 	PagesTransferred int `json:"pages_transferred,omitempty"`
+	// The four Pages tables that named the subject and had nothing removing
+	// them (#1976) — see pages_erase_identity.go. The keys carry the VERB,
+	// not just the table, because the two outcomes are different promises to
+	// the operator: an anonymised version still exists, a revoked capability
+	// does not. `crewship admin gdpr delete` prints these keys verbatim.
+	PageVersionsAnonymised  int `json:"page_versions_anonymised,omitempty"`
+	PageGrantsRemoved       int `json:"page_grants_removed,omitempty"`
+	PagePublicTokensRevoked int `json:"page_public_tokens_revoked,omitempty"`
+	PageWebhooksRevoked     int `json:"page_webhooks_revoked,omitempty"`
 }
 
 // newGDPRActionID returns a short hex id for a gdpr_actions row.
@@ -302,6 +331,9 @@ func (h *AdminGDPRHandler) transferOrRefuseUserPages(ctx context.Context, action
 //   - inbox_items rows tagged data_subject_id = user are gone.
 //   - approvals_queue rows where the user was requester or decider are
 //     gone (#2233).
+//   - page_versions in this workspace no longer name the subject as author
+//     (the versions themselves stay), and the page_grants, page_public_tokens
+//     and page_webhooks rows they issued are gone (#1976).
 //   - gdpr_actions has a 'delete' row with scope_json + status=
 //     'completed' (or 'failed' with error populated).
 //
@@ -623,6 +655,31 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// 6) the Pages tables that NAME the subject without owning anything
+	// (#1976): page_versions authorship is anonymised, and the grants,
+	// public links and webhook tokens they issued are revoked by removal.
+	// See pages_erase_identity.go for why each table gets the verb it does
+	// — in short, it runs the FK action the schema already declares for a
+	// vanished user, scoped to this workspace.
+	//
+	// Not folded into step 0: step 0 must be able to REFUSE the whole
+	// erasure before anything mutates, which is why it runs first. This is
+	// an ordinary cascade step and behaves like the others — a failure is
+	// recorded in firstErr and answered with a 207, not a refusal, because
+	// by now rows have already gone.
+	pagesIdentity, err := erasePagesIdentity(r.Context(), h.db, wsID, targetID)
+	if err != nil {
+		h.logger.Warn("gdpr delete: pages identity erasure failed",
+			"action_id", actionID, "workspace_id", wsID, "target", targetID, "err", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	scope.PageVersionsAnonymised = pagesIdentity.VersionsAnonymised
+	scope.PageGrantsRemoved = pagesIdentity.GrantsRemoved
+	scope.PagePublicTokensRevoked = pagesIdentity.PublicTokensRevoked
+	scope.PageWebhooksRevoked = pagesIdentity.WebhooksRevoked
+
 	// Punted: lessons.md content scan. We do not have a content-
 	// aware redactor at this layer and a naive substring sweep
 	// could corrupt lesson semantics. Log a clear warning so the
@@ -635,7 +692,12 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 
 	h.finalizeGDPRAction(r.Context(), actionID, scope, firstErr)
 
-	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.InboxItemReads + scope.UserModels + scope.ApprovalsQueue
+	// rows_deleted counts rows that went AWAY. An anonymised page version did
+	// not go away — it lost a name — so it is reported in scope and nowhere
+	// else, the same distinction pages_transferred already draws.
+	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.InboxItemReads +
+		scope.UserModels + scope.ApprovalsQueue +
+		scope.PageGrantsRemoved + scope.PagePublicTokensRevoked + scope.PageWebhooksRevoked
 	status := http.StatusAccepted
 	resp := map[string]any{
 		"action_id":    actionID,
