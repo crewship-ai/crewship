@@ -122,14 +122,6 @@ func capacityHint(n int) int {
 	return min(n, maxListCapacity)
 }
 
-// parsePagination reads "limit" and "offset" query params, clamping limit to
-// [1, maxLimit] with the given default, and offset to >= 0.
-//
-// Unparseable, missing, or non-positive limits fall back to defaultLimit.
-// Limits larger than maxLimit are clamped DOWN to maxLimit (not reset to
-// defaultLimit) — otherwise a request for ?limit=1000 against
-// (defaultLimit=20, maxLimit=100) would silently return 20 instead of 100 and
-// shift pagination windows in surprising ways.
 // writeListMeta publishes the paging facts of a list response as headers,
 // leaving the body's shape untouched. Every list that pages the S1 way
 // (`?limit=&offset=`) sets the same three so one client hook can read them:
@@ -149,6 +141,14 @@ func writeListMeta(w http.ResponseWriter, total, limit, offset int) {
 	h.Set("X-Offset", strconv.Itoa(offset))
 }
 
+// parsePagination reads "limit" and "offset" query params, clamping limit to
+// [1, maxLimit] with the given default, and offset to >= 0.
+//
+// Unparseable, missing, or non-positive limits fall back to defaultLimit.
+// Limits larger than maxLimit are clamped DOWN to maxLimit (not reset to
+// defaultLimit) — otherwise a request for ?limit=1000 against
+// (defaultLimit=20, maxLimit=100) would silently return 20 instead of 100 and
+// shift pagination windows in surprising ways.
 func parsePagination(r *http.Request, defaultLimit, maxLimit int) (limit, offset int) {
 	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
