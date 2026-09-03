@@ -226,7 +226,12 @@ func truncateForFailure(s string) string {
 //     unless it is wrapped in a helper that removes or bounds it. Rule 3 is
 //     what catches a sink that is NOT keyed on "cmd" — chat.user_message
 //     stored payload["content"] = req.UserMessage for as long as it existed,
-//     one entry type over from the guard that was watching the argv.
+//     one entry type over from the guard that was watching the argv;
+//  3. b. calling a package function that itself reads a prompt field without
+//     bounding it counts as naming the prompt. A one-line helper returning
+//     req.UserMessage hid the field access from every other rule, so the
+//     guard could be defeated by moving the read a single call away
+//     (promptDerivedFuncs, #2229).
 //
 // "Field" covers the three ways this package writes one: a map literal entry,
 // an index assignment onto a payload map, and the Summary/Payload fields of a
@@ -244,8 +249,8 @@ func TestExecCommandEmitSites_UseScrubbedArgv(t *testing.T) {
 		t.Fatal("no package sources found — the guard is scanning the wrong directory")
 	}
 
-	// Parse the whole package before auditing any of it. The second rule
-	// below needs to know which package functions read the prompt, and that
+	// Parse the whole package before auditing any of it. Rule 3b needs to
+	// know which package functions read the prompt, and that
 	// cannot be answered one file at a time — the helper and the emit site
 	// that calls it are routinely in different files.
 	fset := token.NewFileSet()
@@ -490,10 +495,12 @@ func boundedByHelper(e ast.Expr) bool {
 // it was written.
 //
 // It also explains something worth knowing about the allowlist: the
-// journalUserMessage entry #2229 removes had never fired. Nothing ever reached
-// the allowlist check to consult it, because the call it was meant to bless was
-// invisible for this same reason. An allowlist entry that has never been
-// exercised is not a policy, it is a comment.
+// journalUserMessage entry has never actually fired. Its only call assigns
+// into a local and the local is written into the payload, so the allowlist
+// check — which matches a call expression in the field itself — is never
+// reached to consult it. The entry stays because it states what the helper is
+// blessed for, but an allowlist entry that has never been exercised is a
+// comment rather than a policy, and this rule is what a policy looks like.
 //
 // Bounding is honoured here exactly as rule 3 honours it, so this rule is not
 // stricter than the one it extends — a helper that wraps its read in
