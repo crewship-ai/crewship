@@ -228,6 +228,8 @@ crewship issue start BE-42
 
 Stop an issue -- a cooperative cancel, not an instant kill. Marks pending/in-progress tasks `CANCELLED` and stamps `cancel_requested_at` on every live assignment; a run that hasn't started its exec yet never starts, one already mid-exec finishes that exec and is then recorded `CANCELLED` regardless of what it reports. No further step is scheduled. There is no container kill, so nothing mid-exec is interrupted.
 
+Also reaches a run an `@mention` dispatched on an issue that was never started (`BACKLOG`/`TODO`): the assignment gets the same `cancel_requested_at` stamp, and the issue's own status is left unchanged. `stop` still refuses when the issue is not `IN_PROGRESS`/`REVIEW` and has no live run to reach.
+
 ```bash
 crewship issue stop <identifier>
 crewship issue stop BE-42
