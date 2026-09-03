@@ -54,6 +54,10 @@ type lookupMissionEntry struct {
 	ID     string `json:"id"`
 	Title  string `json:"title"`
 	Status string `json:"status"`
+	// Identifier (ENG-4) is what the issue page is keyed on; empty for a
+	// mission that predates identifiers. A journal row that names a mission
+	// can link the issue only with this.
+	Identifier string `json:"identifier,omitempty"`
 }
 
 type journalLookupResponse struct {
@@ -171,7 +175,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// by created_at DESC so the most recent missions land first within
 	// the cap (older missions still reachable via the missions page).
 	missionRows, err := h.db.QueryContext(r.Context(), `
-		SELECT id, title, status
+		SELECT id, title, status, COALESCE(identifier, '')
 		FROM missions
 		WHERE workspace_id = ?
 		ORDER BY created_at DESC
@@ -183,7 +187,7 @@ func (h *JournalLookupHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	for missionRows.Next() {
 		var m lookupMissionEntry
-		if err := missionRows.Scan(&m.ID, &m.Title, &m.Status); err != nil {
+		if err := missionRows.Scan(&m.ID, &m.Title, &m.Status, &m.Identifier); err != nil {
 			_ = missionRows.Close()
 			h.logger.Error("journal lookup: scan mission", "err", err)
 			replyError(w, http.StatusInternalServerError, "lookup failed")
