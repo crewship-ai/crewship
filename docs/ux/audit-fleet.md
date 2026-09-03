@@ -318,14 +318,16 @@ The only `<Link>` on `/credentials` is the attention row's `/inbox-v2` href
    `GET /crews`, `/agents`, `/credentials` without `limit` → 100; with
    `limit=1000` → 103 / 308 / 112. `/crews` says "100 crews"
    (`scale/s-crews-roster-1440.png`), `/credentials` says "100 secrets"
-   (`scale/s-credentials-1440.png`). `?crew=crew-101` toasts **"Crew
-   "crew-101" not found"** and drops the param
-   (`scale/s-crew-101-beyond-cap-1440.png`). Worse: `?agent=agent-050-1` — an
-   agent in a crew that IS listed — toasts "Agent not found" because the agents
-   list is capped too (`scale/s-agent-101-1-beyond-cap-1440.png`); Crew 050's
-   header says "3 agents" while its Agents card says 0
-   (`scale/s-crew-050-1440.png`). Every workspace over 100 agents loses agents
-   from this screen and every deep link to them.
+   (`scale/s-credentials-1440.png`). The list is newest-first, so the three
+   seed crews and `crew-001`…`crew-003` fall past the window: `?crew=crew-001`
+   toasts **"Crew not found"** and drops the param. (The audit run used
+   `crew-101`, which does not exist — the same toast, for a different reason;
+   `crew-001` is the honest example.) Worse: `?agent=agent-050-1` — an agent in
+   a crew that IS listed — toasts "Agent not found" because the agents list is
+   capped too (`scale/s-agent-101-1-beyond-cap-1440.png`); Crew 050's header
+   says "3 agents" while its Agents card says 0 (`scale/s-crew-050-1440.png`).
+   Every workspace over 100 agents loses agents from this screen and every
+   deep link to them.
 2. Explorer: no grouping, no sort (API order, newest first), no attention
    ordering, no result count, no cap/fold, no virtualisation — 300 agent rows
    plus 100 crew rows in one column. Search filters by agent name/slug/role
