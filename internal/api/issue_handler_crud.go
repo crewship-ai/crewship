@@ -40,7 +40,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		placeholders := make([]string, len(statuses))
 		for i, s := range statuses {
 			placeholders[i] = "?"
-			whereArgs = append(whereArgs, strings.TrimSpace(s))
+			args = append(args, strings.TrimSpace(s))
 		}
 		where += " AND m.status IN (" + strings.Join(placeholders, ",") + ")"
 	}
@@ -51,7 +51,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		placeholders := make([]string, len(priorities))
 		for i, p := range priorities {
 			placeholders[i] = "?"
-			whereArgs = append(whereArgs, strings.TrimSpace(p))
+			args = append(args, strings.TrimSpace(p))
 		}
 		where += " AND m.priority IN (" + strings.Join(placeholders, ",") + ")"
 	}
