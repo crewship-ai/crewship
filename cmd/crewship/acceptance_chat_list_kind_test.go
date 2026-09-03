@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,8 @@ type chatListStub struct {
 	mu      sync.Mutex
 	queries []string
 	body    string
+	// total, when set, is published as X-Total-Count the way the server does.
+	total int
 }
 
 func (s *chatListStub) start(t *testing.T) *httptest.Server {
@@ -41,7 +44,13 @@ func (s *chatListStub) start(t *testing.T) *httptest.Server {
 			s.mu.Lock()
 			s.queries = append(s.queries, r.URL.RawQuery)
 			body := s.body
+			total := s.total
 			s.mu.Unlock()
+			if total > 0 {
+				w.Header().Set("X-Total-Count", strconv.Itoa(total))
+				w.Header().Set("X-Limit", r.URL.Query().Get("limit"))
+				w.Header().Set("X-Offset", r.URL.Query().Get("offset"))
+			}
 			_, _ = w.Write([]byte(body))
 		default:
 			w.WriteHeader(http.StatusNotFound)

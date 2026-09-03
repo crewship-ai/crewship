@@ -58,6 +58,7 @@ crewship agent list --crew backend-team
 | `--limit` | `int` | server default (100) | Rows per page; the server caps it at 500. |
 | `--offset` | `int` | `0` | Rows to skip — page with `--offset 100`, `200`, … |
 | `--q` | `string` | | Server-side search on name, slug and role title (case-insensitive substring); the total narrows with it. |
+| `--include-setup` | `bool` | `false` | Also list the onboarding Guide — agents of the `kind=setup` crew, which the server hides from every roster by default (`?include_setup=1`). |
 
 When the table is a window on a longer list, the human formats end with
 `showing 1–100 of 308 · next page: --offset 100`; machine formats print the

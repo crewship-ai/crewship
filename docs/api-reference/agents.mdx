@@ -214,6 +214,7 @@ GET /api/v1/agents?workspace_id={workspaceId}
 | `limit` | integer | Optional. Page size, default `100`, maximum `500` |
 | `offset` | integer | Optional. Rows to skip |
 | `q` | string | Optional. Server-side search on name, slug and role title |
+| `include_setup` | `1` | Optional. Also return agents of the onboarding Guide's crew (`kind=setup`). Hidden by default from every roster and every total, the way `GET /crews` hides the crew itself. |
 
 **Paging (every windowed list on this API):** the body stays a bare array; the
 window is described in three response headers so no consumer breaks:

@@ -386,6 +386,15 @@ Examples:
 				fmt.Printf("%sfrom %s%s\n", cli.Dim, from, cli.Reset)
 			}
 			fmt.Printf("%sid %s%s\n", cli.Dim, item.ID, cli.Reset)
+			// What is being approved, on its own labelled line and above the
+			// body: the Context dump at the bottom is a key/value list nobody
+			// should have to mine for the one fact that decides the verdict.
+			if link, ok := item.Payload["link_url"].(string); ok && link != "" {
+				fmt.Printf("%slink%s        %s\n", cli.Dim, cli.Reset, link)
+			}
+			if name, ok := item.Payload["credential_name"].(string); ok && name != "" {
+				fmt.Printf("%scredential%s  %s\n", cli.Dim, cli.Reset, name)
+			}
 			if item.ResolvedAction != "" {
 				fmt.Printf("%sresolved · %s%s\n", cli.Green, item.ResolvedAction, cli.Reset)
 			}
