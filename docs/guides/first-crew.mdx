@@ -77,6 +77,33 @@ Every agent has one of two roles that determines their capabilities:
   </Step>
 </Steps>
 
+## The Crews screen
+
+`/crews` is the fleet: crews on the left, the selected crew or agent on the
+right.
+
+- **The explorer** groups crews by what needs a person first — *Needs
+  attention* (an agent in error, a failed or pending container build, a
+  credential whose CLI is missing from the image, an agent waiting on your
+  decision), then *Running*, then *Idle*. The idle majority folds after six
+  behind "N more crews · Show all". The line under the search is the
+  workspace's real size (`103 crews · 308 agents`, from the API's
+  `X-Total-Count`), or "N crews · M agents match" while you search; a search
+  that matches nothing says so and offers Clear.
+- **Needs you** sits above a crew's tabs and only when there is something to
+  do. Each row carries its verb: *Build now* / *Retry build* (rebuild the
+  container image), *Install gh* (adds the devcontainer feature the readiness
+  check named and rebuilds), *Connect* (a crew tool without a credential —
+  opens it on Integrations), *Inspect* (an agent in error), *Review* (an agent
+  waiting on a decision, in the inbox). A healthy crew shows no strip.
+- **Settings → Integrations** shows each crew tool's transport, bound agents
+  and auth state, with Connect beside a gap.
+- **The roster** (no selection) is a table on a desktop and a one-column list
+  on a phone; the onboarding guide agent is never listed.
+
+Lists are windowed at 500 rows; when a fleet is larger the explorer says how
+many rows are not loaded and loads them on ask.
+
 ## Running Your First Mission
 
 <Steps>

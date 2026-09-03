@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { invalidate } from "@/lib/stale-cache"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useSession } from "@/hooks/use-auth"
 import { useNotificationChannels } from "@/hooks/use-notification-channels"
 import { useNotificationProviders } from "@/hooks/use-notification-providers"
@@ -50,6 +51,7 @@ import { IntegrationsExplorer, type ExplorerSection } from "./explorer"
 import { mcpFacets, notificationFacets } from "./facets"
 import { EMPTY_MCP_FILTERS, type McpFilters } from "./mcp-filters"
 import { ConnectionsView } from "./views/connections-view"
+import { CrewToolsView } from "./views/crew-tools-view"
 import { ConnectionDetail } from "./views/connection-detail"
 import { ToolAccountDetail } from "./views/tool-account-detail"
 import { buildServiceOptions, catalogSections, catalogSize } from "./service-catalog"
@@ -128,6 +130,17 @@ const MCP_SECTIONS: Omit<ExplorerSection<TabKey>, "count">[] = [
 
 type IntegrationsTab = (typeof TABS)[number]["id"]
 
+/** The Tools tab's sections: Composio's six views plus the crew-scoped MCP
+ *  servers, which lived on neither tab until #2303. */
+type ToolsSection = TabKey | "crew-tools"
+
+const CREW_TOOLS_SECTION: ExplorerSection<ToolsSection> = {
+  key: "crew-tools",
+  label: "Crew tools",
+  icon: Wrench,
+  hint: "MCP servers a crew's agents call, and whether each has a credential",
+}
+
 /**
  * Where a `?tab=&section=` link opens.
  *
@@ -140,19 +153,23 @@ type IntegrationsTab = (typeof TABS)[number]["id"]
 export function initialIntegrationsRoute(search: string): {
   tab: IntegrationsTab
   notifySection: NotifySection
-  mcpSection: TabKey
+  mcpSection: ToolsSection
+  /** `?server=`: the crew tool a "Connect" link elsewhere points at. */
+  server: string | null
 } {
   const p = new URLSearchParams(search)
   const tab: IntegrationsTab = p.get("tab") === "tools" ? "tools" : "notifications"
   const section = p.get("section")
 
   const notifyMatch = NOTIFY_SECTIONS.find((s) => s.key === section)
-  const mcpMatch = MCP_SECTIONS.find((s) => s.key === section)
+  const mcpMatch = section === "crew-tools" ? CREW_TOOLS_SECTION : MCP_SECTIONS.find((s) => s.key === section)
+  const server = p.get("server")
 
   return {
     tab,
     notifySection: tab === "notifications" && notifyMatch ? notifyMatch.key : "connections",
-    mcpSection: tab === "tools" && mcpMatch ? (mcpMatch.key as TabKey) : "accounts",
+    mcpSection: tab === "tools" && mcpMatch ? (mcpMatch.key as ToolsSection) : "accounts",
+    server: tab === "tools" && server ? server : null,
   }
 }
 
@@ -160,7 +177,7 @@ export function initialIntegrationsRoute(search: string): {
  * What the Tools panel shows before a key is saved. Offering the six real
  * sections would be six dead ends; one row that says what to do is not.
  */
-const SETUP_ONLY_SECTION: ExplorerSection<TabKey>[] = [
+const SETUP_ONLY_SECTION: ExplorerSection<ToolsSection>[] = [
   { key: "catalog", label: "Setup", icon: KeyRound, hint: "Add a Composio API key" },
 ]
 
@@ -211,7 +228,8 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   // Tools tab: which of Composio's six views is showing, and the facets that
   // narrow it. Held here because the left panel renders them and the main
   // column obeys them — the same split every other tab already uses.
-  const [mcpSection, setMcpSection] = React.useState<TabKey>("accounts")
+  const [mcpSection, setMcpSection] = React.useState<ToolsSection>("accounts")
+  const [linkedServerId, setLinkedServerId] = React.useState<string | null>(null)
   const [mcpFilters, setMcpFilters] = React.useState<McpFilters>(EMPTY_MCP_FILTERS)
   const [apiKeyOpen, setApiKeyOpen] = React.useState(false)
   const [composioStatus, setComposioStatus] = React.useState<ComposioStatus>({
@@ -232,7 +250,17 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     setTab(r.tab)
     setNotifySection(r.notifySection)
     setMcpSection(r.mcpSection)
+    setLinkedServerId(r.server)
   }, [])
+
+  // On a phone the rail is 280px of a 390px screen: it does not sit beside the
+  // content, it replaces it, and the KPI cards beside it rendered one word per
+  // line. Collapse it when the viewport narrows and open it as an overlay
+  // instead — the same treatment /credentials gives its rail.
+  const isMobile = useIsMobile()
+  React.useEffect(() => {
+    if (isMobile) setCollapsed(true)
+  }, [isMobile])
 
   // Keep the URL naming what is on screen, so any view here can be linked to —
   // by /settings' retired tabs, by the docs, by a colleague pasting "look at
@@ -462,7 +490,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     [rows.length, deliveries.length, canSeeDeliveries],
   )
 
-  const mcpSections: ExplorerSection<TabKey>[] = React.useMemo(() => {
+  const mcpSections: ExplorerSection<ToolsSection>[] = React.useMemo(() => {
     const c = composioStatus.counts
     const counts: Partial<Record<TabKey, React.ReactNode>> = {
       catalog: c.apps || undefined,
@@ -470,8 +498,12 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
       agents: c.agentsTotal ? `${c.agentsBound}/${c.agentsTotal}` : undefined,
       mcp: c.endpoints || undefined,
     }
-    return MCP_SECTIONS.map((sec) => ({ ...sec, count: counts[sec.key] }))
-  }, [composioStatus.counts])
+    // Crew tools first: they exist on every instance, Composio only with a key.
+    const composio: ExplorerSection<ToolsSection>[] = composioStatus.configured
+      ? MCP_SECTIONS.map((sec) => ({ ...sec, count: counts[sec.key] }))
+      : SETUP_ONLY_SECTION
+    return [CREW_TOOLS_SECTION, ...composio]
+  }, [composioStatus.counts, composioStatus.configured])
 
   const notifyFacetGroups = React.useMemo(
     () => notificationFacets(rows, filters, setFilters),
@@ -609,10 +641,21 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         }
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* Tapping away closes the overlay; without it the only way back to
+            the content on a phone is a collapse button the rail is covering. */}
+        {isMobile && !collapsed && (
+          <button
+            type="button"
+            aria-label="Close the integrations list"
+            onClick={() => setCollapsed(true)}
+            className="absolute inset-0 z-20 bg-black/50"
+          />
+        )}
         <aside
           className={cn(
             "shrink-0 border-r border-white/[0.06] bg-card transition-all",
+            isMobile && !collapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
             // `overflow-hidden` only while collapsing, where it is what keeps
             // the content from spilling out of a 36px rail. Leaving it on when
             // expanded clipped the Filter popover at the panel's edge — the
@@ -629,13 +672,19 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
             /* Same component, different inputs. The facets differ because
                Kind/Status/Scope/Service filter nothing here — but the toolbar,
                the Filter popover and the section rows are identical. */
-            <IntegrationsExplorer<TabKey>
+            <IntegrationsExplorer<ToolsSection>
               sectionsLabel="Tools (MCP)"
-              sections={composioStatus.configured ? mcpSections : SETUP_ONLY_SECTION}
-              section={composioStatus.configured ? mcpSection : "catalog"}
-              onSectionChange={(next) =>
-                composioStatus.configured ? setMcpSection(next) : setApiKeyOpen(true)
-              }
+              sections={mcpSections}
+              section={composioStatus.configured || mcpSection === "crew-tools" ? mcpSection : "catalog"}
+              onSectionChange={(next) => {
+                if (next === "crew-tools" || composioStatus.configured) {
+                  setMcpSection(next)
+                  setSelectedAccountId(null)
+                  if (isMobile) setCollapsed(true)
+                } else {
+                  setApiKeyOpen(true)
+                }
+              }}
               search={search}
               onSearchChange={setSearch}
               searchPlaceholder="Search apps, tools, agents…"
@@ -767,7 +816,16 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                 />
               )}
 
-              {tab === "tools" && !selectedAccount && (
+              {tab === "tools" && !selectedAccount && mcpSection === "crew-tools" && (
+                <CrewToolsView
+                  workspaceId={workspaceId}
+                  search={search}
+                  initialServerId={linkedServerId}
+                  canManage={canManageWorkspace}
+                />
+              )}
+
+              {tab === "tools" && !selectedAccount && mcpSection !== "crew-tools" && (
                 <div className="space-y-4 p-4 md:p-6">
                   {composioStatus.configured && (
                     <>
@@ -808,7 +866,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                   )}
                   <ComposioIntegrations
                     embedded
-                    section={composioStatus.configured ? mcpSection : undefined}
+                    section={composioStatus.configured ? (mcpSection as TabKey) : undefined}
                     search={search}
                     apiKeyOpen={apiKeyOpen}
                     onApiKeyOpenChange={setApiKeyOpen}
