@@ -6,6 +6,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { CrewsLayout } from "@/components/features/crews/crews-layout"
 import { apiFetch } from "@/lib/api-fetch"
+import { visibleFleetAgents } from "@/lib/fleet-visibility"
 
 interface CrewData {
   id: string
@@ -92,9 +93,12 @@ export default function CrewsPage() {
         apiFetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=20&include_tasks=true`, { signal: controller.signal }),
       ])
       if (controller.signal.aborted) return
-      if (crewsRes.ok) setCrews(await crewsRes.json())
+      const crewRows: CrewData[] = crewsRes.ok ? await crewsRes.json() : []
+      if (crewsRes.ok) setCrews(crewRows)
       if (controller.signal.aborted) return
-      if (agentsRes.ok) setAgents(await agentsRes.json())
+      // The onboarding guide lives in a crew the crews list never returns;
+      // it must not be the first row of the client's fleet (lib/fleet-visibility).
+      if (agentsRes.ok) setAgents(visibleFleetAgents(await agentsRes.json(), crewRows))
       if (controller.signal.aborted) return
       if (missionsRes.ok) setMissions(await missionsRes.json())
     } catch (err) {
