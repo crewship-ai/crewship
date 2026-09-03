@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
@@ -28,6 +29,7 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
+import { entityHref } from "@/lib/entity-links"
 
 import {
   CanvasShell,
@@ -115,6 +117,7 @@ export function AgentCanvas({
   onSelectCrew,
   onOpenFiles,
 }: AgentCanvasProps) {
+  const router = useRouter()
   const {
     entity: agent,
     setEntity: setAgent,
@@ -535,6 +538,11 @@ export function AgentCanvas({
           peerMessages={peerMessages}
           patch={patch}
           onStop={isRunning ? handleStop : undefined}
+          // The "Waiting on your decision" notice used to render with no
+          // button at all (audit-fleet.md §6 P1.3): it stated the agent was
+          // stopped and offered nothing. The inbox filtered to this agent is
+          // where the decision is taken.
+          onOpenInbox={() => router.push(entityHref({ kind: "inbox", agentSlug: agent.slug }))}
           onOpenConfig={() => setTab("config")}
           onAgentChanged={onAgentChanged}
         />
