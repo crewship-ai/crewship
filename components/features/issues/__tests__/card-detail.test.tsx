@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, within, fireEvent } from "@testing-library/react"
 
 import { IssueCardDetail } from "../issue-card-detail"
 import { ProjectCardDetail } from "../project-card-detail"
@@ -207,35 +207,33 @@ describe("IssueCardDetail", () => {
     expect(screen.getByText(/Not started yet/)).toBeInTheDocument()
   })
 
-  it("tints the last run by how it ended", () => {
-    const { container, rerender } = render(
+  it("lists every run with its status as a word, and links the run when it has one", () => {
+    render(
       <IssueCardDetail
         issue={issue({ status: "COMPLETED" })}
         comments={[]}
         activities={[]}
         relations={[]}
-        runs={[{ id: "run_1", status: "COMPLETED", duration_ms: 23700, agent_name: "Robin" }]}
+        runs={[
+          { id: "asg_1", run_id: "run_1", status: "COMPLETED", duration_ms: 23700, agent_name: "Robin", agent_slug: "robin", task: "Build the page" },
+          { id: "asg_2", status: "FAILED", duration_ms: 900, error_message: "exit 1", agent_name: "Sam" },
+        ]}
         project={null}
       />,
     )
-    expect(screen.getByText("Last run · completed")).toBeInTheDocument()
-    expect(container.querySelector(".from-success\\/\\[0\\.06\\]")).not.toBeNull()
-
-    rerender(
-      <IssueCardDetail
-        issue={issue({ status: "FAILED" })}
-        comments={[]}
-        activities={[]}
-        relations={[]}
-        runs={[{ id: "run_2", status: "FAILED", duration_ms: 900, error_message: "exit 1" }]}
-        project={null}
-      />,
-    )
-    // The wash is the whole point: it says how this ended before a word of
-    // it is read, so a failed run must not keep the success gradient.
-    expect(container.querySelector(".from-destructive\\/\\[0\\.06\\]")).not.toBeNull()
-    expect(container.querySelector(".from-success\\/\\[0\\.06\\]")).toBeNull()
+    // Both runs, not runs[0] alone; the raw enum never reaches the screen.
+    const rows = screen.getAllByTestId("issue-run-row")
+    expect(rows).toHaveLength(2)
+    expect(within(rows[0]).getByText("Done")).toBeInTheDocument()
+    expect(within(rows[1]).getByText("Failed")).toBeInTheDocument()
+    expect(screen.queryByText("COMPLETED")).toBeNull()
     expect(screen.getByText("exit 1")).toBeInTheDocument()
+    // The run that reached the journal opens; the one that did not says so.
+    expect(screen.getByRole("link", { name: /open run/i })).toHaveAttribute("href", "/activity?run=run_1")
+    expect(screen.getByText("no run")).toBeInTheDocument()
+    // The Related card names the crew, the journal and Activity as links.
+    expect(screen.getByRole("link", { name: /trace ENG-4/i })).toHaveAttribute("href", "/journal?mission_id=ENG-4")
+    expect(screen.getByRole("link", { name: /all runs$/i }).getAttribute("href")).toMatch(/^\/activity\?mission=/)
   })
 
   it("keeps the rail in view instead of stranding it beside a long description", () => {

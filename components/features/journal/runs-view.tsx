@@ -66,6 +66,7 @@ import {
   Zap,
 } from "lucide-react"
 import Link from "next/link"
+import { entityHref } from "@/lib/entity-links"
 import { useRouter } from "next/navigation"
 
 import { Skeleton } from "@/components/ui/skeleton"
@@ -144,6 +145,10 @@ interface Run {
   agent_name?: string
   agent_slug?: string
   crew_name?: string
+  crew_slug?: string
+  /** The issue the run worked on — id to filter by, identifier to link. Absent on a chat-only run. */
+  mission_id?: string
+  mission_identifier?: string
   triggerer: { id: string; email: string; full_name: string | null } | null
 }
 
@@ -602,6 +607,7 @@ export function RunsView({
                 <div>Run</div>
                 <div>Agent</div>
                 <div>Crew</div>
+                <div>Issue</div>
                 <div>Status</div>
                 <div>Trigger</div>
                 <div>Model</div>
@@ -657,9 +663,32 @@ export function RunsView({
                     >
                       {run.agent_name ?? <span className="text-muted-foreground/60">Unknown</span>}
                     </Link>
-                    <span className="text-[11px] text-muted-foreground truncate">
-                      {run.crew_name ?? <span className="text-muted-foreground/40">—</span>}
-                    </span>
+                    {run.crew_name && run.crew_slug ? (
+                      <Link
+                        href={entityHref({ kind: "crew", slug: run.crew_slug })}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-[11px] text-muted-foreground truncate hover:underline"
+                      >
+                        {run.crew_name}
+                      </Link>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground truncate">
+                        {run.crew_name ?? <span className="text-muted-foreground/40">—</span>}
+                      </span>
+                    )}
+                    {/* The issue the run worked on — the way back from a run
+                        to the issue, which the journal never had. */}
+                    {run.mission_identifier ? (
+                      <Link
+                        href={entityHref({ kind: "issue", identifier: run.mission_identifier })}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-[11px] font-mono text-primary truncate hover:underline"
+                      >
+                        {run.mission_identifier}
+                      </Link>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground/40">—</span>
+                    )}
                     <div>
                       <StatusBadge
                         status={canonicalStatus}
@@ -745,7 +774,7 @@ export function RunsView({
 // Shared grid template so header + rows stay aligned (adds a Model column
 // vs the legacy list).
 const RUN_GRID =
-  "80px minmax(0,1.2fr) minmax(0,1fr) 108px 84px 84px 80px minmax(0,0.9fr) 20px"
+  "80px minmax(0,1.2fr) minmax(0,1fr) 72px 108px 84px 84px 80px minmax(0,0.9fr) 20px"
 
 /* ----------------------------------------------------------------- *
  *  Live pulse strip                                                  *

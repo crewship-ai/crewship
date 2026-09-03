@@ -38,7 +38,6 @@ import * as React from "react"
 import Link from "next/link"
 import {
   ArrowUpRight,
-  CheckCircle2,
   CircleDot,
   Clock,
   Flag,
@@ -51,14 +50,12 @@ import {
   Tag,
   UserCircle2,
   Users,
-  XCircle,
   Zap,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { formatDate, formatDurationDecimal, relTime, timeAgo } from "@/lib/time"
 import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
-import { TintedCard, TintedFacts, type TintTone } from "./tinted-card"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
@@ -97,6 +94,8 @@ import {
   type CodeLinkEdit,
 } from "@/components/features/issues/issue-code-links-card"
 import { getCrewIconDef } from "@/lib/entities"
+import { entityHref } from "@/lib/entity-links"
+import { IssueRunsCard, issueRunLinks, type IssueRun } from "@/components/features/issues/issue-runs-card"
 import { issueFacts, issuePriorityTone, issueStatusTone } from "@/lib/issue-facts"
 import { automationsForIssue, type Automation } from "@/lib/automations"
 import { runProvenance } from "@/lib/run-provenance"
@@ -111,18 +110,7 @@ import type {
   Project,
 } from "@/lib/types/mission"
 
-/** `GET /api/v1/crews/{crewId}/issues/{identifier}/runs` (issue_handler_runs.go). */
-export interface IssueRun {
-  id: string
-  status: string
-  agent_name?: string
-  task?: string
-  started_at?: string
-  ended_at?: string
-  duration_ms: number
-  result_summary?: string
-  error_message?: string
-}
+export type { IssueRun } from "@/components/features/issues/issue-runs-card"
 
 interface Props {
   issue: Mission
@@ -271,7 +259,7 @@ export function IssueCardDetail({
                     {issue.crew_name && (
                       <>
                         <span aria-hidden>·</span>
-                        <span>{issue.crew_name}</span>
+                        <CrewLink issue={issue} />
                       </>
                     )}
                     {/* Owner and delegate render as two separate chips — an
@@ -305,14 +293,7 @@ export function IssueCardDetail({
                     {!issue.owner && !issue.delegate && issue.assignee_name && (
                       <>
                         <span aria-hidden>·</span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2">
-                          <AgentAvatar
-                            seed={issue.assignee_id ?? issue.assignee_name}
-                            className="h-4 w-4"
-                            alt=""
-                          />
-                          <span className="font-medium">{issue.assignee_name}</span>
-                        </span>
+                        <AssigneeLink issue={issue} />
                       </>
                     )}
                   </div>
@@ -469,6 +450,12 @@ export function IssueCardDetail({
           {/* Live agent work — exec, files, network, llm — while the issue is
               running. Rendered by the host; nothing here when it is quiet. */}
           {runActivity && <Appear order={5}>{runActivity}</Appear>}
+
+          {/* Every run on the issue — the first leg of the one timeline. It sat
+              in the rail as `runs[0]` alone; the rest were fetched and dropped. */}
+          <Appear order={6}>
+            <IssueRunsCard issue={issue} runs={runs} />
+          </Appear>
         </div>
 
         {/* The rail follows the reader. A description longer than the rail
@@ -500,7 +487,7 @@ export function IssueCardDetail({
               first of all a thing that either worked or did not, and the
               wash says which before a word of it is read. */}
           <Appear order={4}>
-            <LatestRun run={runs[0] ?? null} issue={issue} />
+            <RelatedCard issue={issue} runs={runs} />
           </Appear>
 
           {/* One header, not two. The old rail wrapped a panel that drew its
@@ -535,7 +522,7 @@ export function IssueCardDetail({
                       <MilestonePicker issue={issue} edit={edit} />
                     </EditRow>
                     <EditRow icon={Users} label="Crew">
-                      {issue.crew_name ?? <Muted>Unassigned</Muted>}
+                      {issue.crew_name ? <CrewLink issue={issue} /> : <Muted>Unassigned</Muted>}
                     </EditRow>
                   </>
                 ) : (
@@ -579,22 +566,11 @@ export function IssueCardDetail({
                       // Fallback for a row this client fetched before the A10
                       // backfill reached it — neither typed field is present.
                       <Row icon={UserCircle2} label="Assignee">
-                        {issue.assignee_name ? (
-                          <span className="inline-flex items-center gap-1.5">
-                            <AgentAvatar
-                              seed={issue.assignee_id ?? issue.assignee_name}
-                              className="h-4 w-4"
-                              alt=""
-                            />
-                            {issue.assignee_name}
-                          </span>
-                        ) : (
-                          <Muted>Unassigned</Muted>
-                        )}
+                        {issue.assignee_name ? <AssigneeLink issue={issue} /> : <Muted>Unassigned</Muted>}
                       </Row>
                     )}
                     <Row icon={Users} label="Crew">
-                      {issue.crew_name ?? <Muted>Unassigned</Muted>}
+                      {issue.crew_name ? <CrewLink issue={issue} /> : <Muted>Unassigned</Muted>}
                     </Row>
                   </>
                 )}
@@ -627,7 +603,7 @@ export function IssueCardDetail({
                     label={issue.routine_name}
                     note={issue.routine_slug ?? undefined}
                     tone="purple"
-                    href={`/routines?routine=${encodeURIComponent(issue.routine_slug ?? "")}`}
+                    href={issue.routine_slug ? entityHref({ kind: "routine", slug: issue.routine_slug }) : undefined}
                   />
                 ) : null}
                 {issue.routine_name ? (
@@ -953,61 +929,86 @@ function RunSourceBreakdown({ sources }: { sources: RunSource[] }) {
   )
 }
 
-/**
- * How the last attempt ended.
- *
- * The one tinted card on the page. An issue that has run is first of all a
- * thing that either worked or did not, and the wash says which before a word
- * of it is read — the treatment the routine detail uses for its Last run, and
- * the reason it is worth copying.
- *
- * Reads `assignments` through the issue's tasks, so "nothing has run" is the
- * honest answer for an issue nobody started, not a card full of dashes.
- */
-function LatestRun({ run, issue }: { run: IssueRun | null; issue: Mission }) {
-  if (!run) {
-    return (
-      <DetailCard title="Runs">
-        <p className="text-[12px] text-muted-foreground">
-          {issue.status === "BACKLOG" || issue.status === "TODO"
-            ? "Not started yet — nothing has run."
-            : "No agent run recorded against this issue."}
-        </p>
-      </DetailCard>
-    )
-  }
-
-  const tone = runTint(run.status)
-  const Icon = tone === "success" ? CheckCircle2 : tone === "destructive" ? XCircle : Clock
-
+/** The crew, as a link to its page — the name used to be plain text in four places. */
+function CrewLink({ issue }: { issue: Mission }) {
+  const inner = (
+    <span className="inline-flex items-center gap-1.5">
+      <Users className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+      {issue.crew_name}
+    </span>
+  )
+  if (!issue.crew_slug) return inner
   return (
-    <TintedCard
-      tone={tone}
-      icon={Icon}
-      title={`Last run · ${run.status.toLowerCase()}`}
-      subtitle={run.id}
-    >
-      <TintedFacts
-        items={[
-          { label: "started", value: run.started_at ? relTime(run.started_at) : "—" },
-          {
-            label: "duration",
-            value: run.duration_ms > 0 ? formatDurationDecimal(run.duration_ms) : "—",
-          },
-          { label: "agent", value: run.agent_name || "—" },
-        ]}
-      />
-      {run.error_message && (
-        <p className="line-clamp-2 text-[11px] text-destructive/90">{run.error_message}</p>
-      )}
-      <Link
-        href={`/activity?mission=${encodeURIComponent(issue.id)}`}
-        className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
-      >
-        Open full trace
-        <ArrowUpRight className="h-3 w-3" />
-      </Link>
-    </TintedCard>
+    <Link href={entityHref({ kind: "crew", slug: issue.crew_slug })} className="hover:underline">
+      {inner}
+    </Link>
+  )
+}
+
+/** The assignee: an agent links to its page; a person has none. */
+function AssigneeLink({ issue }: { issue: Mission }) {
+  const inner = (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2">
+      <AgentAvatar seed={issue.assignee_id ?? issue.assignee_name ?? ""} className="h-4 w-4" alt="" />
+      <span className="font-medium">{issue.assignee_name}</span>
+    </span>
+  )
+  if (issue.assignee_type !== "agent" || !issue.assignee_slug) return inner
+  return (
+    <Link href={entityHref({ kind: "agent", slug: issue.assignee_slug })} className="hover:underline">
+      {inner}
+    </Link>
+  )
+}
+
+/**
+ * Where the issue leads. The links README §5 asks of an issue, in one card,
+ * each through entityHref so none can point at a route that does not exist.
+ * The run page and the journal carry the same links back.
+ */
+function RelatedCard({ issue, runs }: { issue: Mission; runs: IssueRun[] }) {
+  const current = runs.find((r) => r.status === "RUNNING") ?? runs[0]
+  const links = issueRunLinks(issue, current)
+  const runWord = current ? current.status.toLowerCase().replace(/_/g, " ") : ""
+  return (
+    <DetailCard title="Related" icon={ArrowUpRight}>
+      <dl className="space-y-0.5">
+        <Row icon={Users} label="Crew">
+          {issue.crew_name ? <CrewLink issue={issue} /> : <Muted>Unassigned</Muted>}
+        </Row>
+        <Row icon={UserCircle2} label="Agent">
+          {issue.assignee_name ? <AssigneeLink issue={issue} /> : <Muted>Unassigned</Muted>}
+        </Row>
+        <Row icon={Clock} label={current?.status === "RUNNING" ? "Current run" : "Latest run"}>
+          {current ? (
+            links.run ? (
+              <Link href={links.run} className="inline-flex items-center gap-1 hover:underline">
+                {current.agent_name ?? "run"} · {runWord}
+                <ArrowUpRight className="h-3 w-3" />
+              </Link>
+            ) : (
+              <span>
+                {current.agent_name ?? "run"} · {runWord}
+              </span>
+            )
+          ) : (
+            <Muted>none yet</Muted>
+          )}
+        </Row>
+        <Row icon={GitBranch} label="Journal">
+          <Link href={links.journal} className="inline-flex items-center gap-1 hover:underline">
+            trace {issue.identifier ?? "this issue"}
+            <ArrowUpRight className="h-3 w-3" />
+          </Link>
+        </Row>
+        <Row icon={GitBranch} label="Activity">
+          <Link href={links.activity} className="inline-flex items-center gap-1 hover:underline">
+            all runs
+            <ArrowUpRight className="h-3 w-3" />
+          </Link>
+        </Row>
+      </dl>
+    </DetailCard>
   )
 }
 
@@ -1048,13 +1049,6 @@ function DescriptionEditor({
   )
 }
 
-function runTint(status: string): TintTone {
-  const s = status.toLowerCase()
-  if (s === "completed" || s === "succeeded" || s === "success") return "success"
-  if (s === "failed" || s === "error" || s === "cancelled") return "destructive"
-  if (s === "in_progress" || s === "running") return "info"
-  return "neutral"
-}
 
 /* ------------------------------------------------------------------ *
  *  Pieces                                                             *
