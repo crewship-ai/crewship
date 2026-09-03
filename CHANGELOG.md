@@ -31,7 +31,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
-- **Stop now reaches a run that is still queued (#).** `issue stop`
+- **Stop now reaches a run that is still queued (#2317).** `issue stop`
   stamped only `PENDING`/`RUNNING` assignments, so a run parked as `QUEUED`
   — behind the agent's live run (#2269) or the crew budget — was missed:
   once the agent freed up, the pump started it and it landed `COMPLETED` on
