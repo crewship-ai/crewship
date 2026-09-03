@@ -5,32 +5,38 @@
 // claim it "spans ALL runs in the workspace (routine + ad-hoc
 // agent/chat/user)" while only subscribing to run.* — never
 // pipeline.run.* — so a routine-triggered run never repainted this view
-// live (F33). That subscription gap is fixed below (A6,
-// docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md).
+// live (F33). That subscription gap was fixed by A6
+// (docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md), which also documented the
+// read-side gap it exposed but didn't fix: a routine run writes
+// journal_entries with entry_type 'pipeline.run.*' and never sets trace_id
+// (internal/pipeline/journal.go), so the old `/api/v1/runs` filter
+// (`entry_type LIKE 'run.%' AND trace_id IS NOT NULL`) could never surface
+// one.
 //
-// IMPORTANT — the claim above is still not fully true after that fix, and
-// this comment says so on purpose (the point of A6 is that a shipped
-// surface's own header must not overstate what it shows): a routine run
-// writes journal_entries with entry_type 'pipeline.run.*' and never sets
-// trace_id (internal/journal/queries.go:39-40, "pipeline/routine runs
-// never set TraceID"). /api/v1/runs (internal/journal/runs.go:264-267)
-// requires `entry_type LIKE 'run.%' AND trace_id IS NOT NULL`, which
-// 'pipeline.run.*' never matches — a pipeline/routine run reaches neither
-// this table nor the KPI/breakdown rows above it, whether or not the
-// routine has an agent_run step (agent-kind pipeline steps run through
-// internal/pipeline/runner_orchestrator.go / runner_llm.go, which emit no
-// run.* journal entries at all — a fully separate path from the
-// assignments/mission runner that does). The subscription below makes the
-// live pulse strip and table *refetch* when a routine fires, which is real
-// and worth having, but the refetch still returns nothing for that run:
-// the gap is in the read-side SQL, not in this component. See F33.
+// #2284 closes that gap on the read side (internal/journal/runs.go):
+// `/api/v1/runs` now groups pipeline.run.* rows by actor_id (which
+// internal/pipeline/journal.go stamps to the run's own id) alongside
+// run.* rows grouped by trace_id, and tags each row `kind: "agent" |
+// "pipeline"` so a caller can tell them apart. That fixes the live pulse
+// strip and the recent-runs table below (section 1 and section 4 — both
+// read `/api/v1/runs`), so the claim in this file's own history is worth
+// restating honestly, not overstating again: it is now true for THOSE two
+// sections.
 //
-// Four sections:
-//   1. Live pulse strip  — running executions across the whole fleet, live.
-//   2. KPI row           — outcome split + success rate + duration percentiles.
-//   3. Breakdown row     — by trigger / top crews / by model.
-//   4. Recent runs table — demoted list; each row deep-links to the Activity
-//                          trace. Adds the resolved Model column.
+// Two things it deliberately does NOT touch (#2284's decision was to widen
+// the read side only, not unify how the two engines stamp runs — that has
+// separate consequences for correlation and cost roll-ups):
+//   - The KPI row (section 2) and breakdown row (section 3) come from
+//     `/api/v1/runs/insights` (journal.RunInsights), which still filters
+//     ad-hoc runs only. A routine run's outcome doesn't move those numbers.
+//   - `stats.running/today/failed` embedded in the `/api/v1/runs` response
+//     itself (journal.RunStats) is likewise still ad-hoc-only.
+//   - A routine run's row still deep-links to `/journal?tab=timeline&
+//     trace_id=<id>` like every other row; since it has no trace_id, that
+//     Timeline view currently comes back empty for it (journal.Query
+//     already has a RunID filter that ORs trace_id/actor_id and would fix
+//     this — internal/journal/queries.go — but wiring the Timeline tab to
+//     use it is a separate, frontend-only follow-up).
 //
 // Four sections:
 //   1. Live pulse strip  — running executions across the whole fleet, live.
@@ -42,10 +48,7 @@
 // Data:
 //   - /api/v1/runs               — the recent-runs table + live strip (status=RUNNING).
 //   - /api/v1/runs/insights      — sections 2 & 3 (windowed aggregates).
-// Both refresh silently on run.* AND pipeline.run.* WebSocket events —
-// the latter is what actually reaches this component when a routine
-// fires (see the header note on why the refetch can still come back
-// empty for those).
+// Both refresh silently on run.* AND pipeline.run.* WebSocket events.
 
 import { useCallback, useEffect, useState } from "react"
 import {
@@ -128,6 +131,10 @@ interface Run {
   agent_id: string
   status: string
   trigger_type: string
+  /** "agent" (ad-hoc) or "pipeline" (routine) — see #2284. Optional so an
+   *  older cached response (or a server that predates the field) degrades
+   *  to the "agent" rendering rather than throwing. */
+  kind?: string
   started_at: string | null
   finished_at: string | null
   error_message: string | null
@@ -163,7 +170,13 @@ const TRIGGER_LABEL: Record<string, string> = {
   unknown: "Other",
 }
 
-function triggerLabel(key: string): string {
+// A routine run's trigger_type is always empty — the pipeline engine's
+// journal entries don't currently carry a trigger_type payload field the way
+// an ad-hoc run's do (#2284 widened the read side, deliberately not the
+// write side). Falling back on `kind` here means a routine run's Trigger
+// cell reads "Routine" instead of blank.
+function triggerLabel(key: string, kind?: string): string {
+  if (!key) return kind === "pipeline" ? "Routine" : "—"
   return TRIGGER_LABEL[key] ?? (key.charAt(0) + key.slice(1).toLowerCase())
 }
 
@@ -664,7 +677,7 @@ export function RunsView({
                       />
                     </div>
                     <span className="text-[11px] text-muted-foreground truncate">
-                      {triggerLabel(run.trigger_type)}
+                      {triggerLabel(run.trigger_type, run.kind)}
                     </span>
                     <span className="text-[10px] font-mono text-indigo-300/80 truncate">
                       {run.model ? shortModel(run.model) : <span className="text-muted-foreground/40">—</span>}
@@ -787,7 +800,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
                 {run.crew_name ?? "—"}
               </span>
               <span className="text-[10px] font-mono text-notice/80 hidden md:block">
-                {triggerLabel(run.trigger_type)}
+                {triggerLabel(run.trigger_type, run.kind)}
               </span>
               {run.model && (
                 <span className="shrink-0 rounded border border-indigo-500/40 px-1 py-0 text-[9px] text-indigo-300 hidden md:block">

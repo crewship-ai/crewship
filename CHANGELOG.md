@@ -799,6 +799,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `console.warn` once per type (not per frame) instead of vanishing. No new
   subscribers were added for the 40 types — registering them is the durable
   half of the fix; wiring a consumer per surface is separate, future work.
+- **Routine runs now reach `GET /api/v1/runs` and the Runs view (#2284).**
+  The endpoint aggregated `journal_entries` under `trace_id IS NOT NULL AND
+  entry_type LIKE 'run.%'` — a filter a routine run's `pipeline.run.*`
+  entries structurally could never match, since `internal/pipeline/journal.go`
+  stamps `actor_id` to the run's own id and never sets `trace_id` at all
+  (#2291 made the Runs view's header stop overclaiming this; this is the read
+  fix behind it). `journal.ListRuns` and `journal.GetRunByID` now group on
+  `COALESCE(trace_id, actor_id)`, admitting `pipeline.run.*` rows alongside
+  `run.*` ones, and tag every row `kind: "agent" | "pipeline"` so a caller
+  can tell the two apart — `crewship run list` shows a KIND column. A
+  cancelled routine run (which reuses `pipeline.run.failed` — there is no
+  dedicated `pipeline.run.cancelled` entry type) reports `CANCELLED`, not
+  `FAILED`. Deliberately not widened: `GET /api/v1/runs/insights` and the
+  `stats` tile embedded in `GET /api/v1/runs` itself still aggregate ad-hoc
+  runs only — unifying cost roll-ups and correlation across the two engines
+  is a separate decision this PR did not make.
 - **A run is now attributable to the issue that caused it, including
   delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither

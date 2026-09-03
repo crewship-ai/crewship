@@ -606,10 +606,15 @@ var runListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		// Six columns is what fits: they answer "which run, whose, how did it
-		// end". Model and the session-provenance fields are per-run detail —
-		// `crewship run get <id>` shows them without squeezing the listing.
-		headers := []string{"ID", "AGENT", "STATUS", "TRIGGER", "CREATED", "FINISHED"}
+		// Seven columns is what fits: they answer "which run, whose, how did
+		// it end, and which engine ran it". Model and the session-provenance
+		// fields are per-run detail — `crewship run get <id>` shows them
+		// without squeezing the listing. KIND was added for #2284: before
+		// that fix, every row here was necessarily an ad-hoc agent run, so
+		// the column would have said nothing; now a routine run can appear
+		// too and the column is how a script (or a human) tells them apart
+		// without guessing from TRIGGER, which routine runs don't populate.
+		headers := []string{"ID", "AGENT", "STATUS", "KIND", "TRIGGER", "CREATED", "FINISHED"}
 		var rows [][]string
 		for _, r := range result.Data {
 			finished := "-"
@@ -627,7 +632,7 @@ var runListCmd = &cobra.Command{
 			if len(id) > 16 {
 				id = f.ShortID(r.ID, id[:16])
 			}
-			rows = append(rows, []string{id, derefStr(r.AgentSlug, ""), r.Status, r.TriggerType, r.CreatedAt, finished})
+			rows = append(rows, []string{id, derefStr(r.AgentSlug, ""), r.Status, r.Kind, r.TriggerType, r.CreatedAt, finished})
 		}
 		if err := f.Auto(result.Data, headers, rows); err != nil {
 			return err
@@ -753,6 +758,12 @@ func runDetailPairs(r *cli.RunDetail) [][]string {
 	pairs := [][]string{
 		{"ID", r.ID},
 		{"Status", r.Status},
+	}
+	// Kind (agent vs pipeline, #2284) is a plain string, not a pointer like
+	// the optional fields below — but a server that predates the field
+	// leaves it "" on decode, so still guard rather than print a blank row.
+	if r.Kind != "" {
+		pairs = append(pairs, []string{"Kind", r.Kind})
 	}
 	add := func(label string, v *string) {
 		if v != nil && *v != "" {

@@ -73,6 +73,44 @@ func (f *runsTestFixture) emitRunRow(t *testing.T, traceID, status, trigger stri
 	insertJournal(traceID+"_t", terminalKind, when.Add(time.Minute), `{"exit_code":0}`)
 }
 
+// emitPipelineRunRow inserts a pipeline.run.started + (optional) terminal
+// journal entry pair for a routine run, keyed by actor_id rather than
+// trace_id — the shape internal/pipeline/journal.go actually writes (#2284).
+// status="CANCELLED" writes pipeline.run.failed with payload.status
+// "CANCELLED" (there is no dedicated pipeline.run.cancelled entry type).
+func (f *runsTestFixture) emitPipelineRunRow(t *testing.T, runID, status string, when time.Time) {
+	t.Helper()
+	ctx := context.Background()
+
+	insertJournal := func(id, kind string, ts time.Time, payload string) {
+		_, err := f.h.db.ExecContext(ctx, `
+			INSERT INTO journal_entries
+				(id, workspace_id, agent_id, ts, entry_type, severity, priority, actor_type, actor_id, summary, payload, refs, trace_id)
+			VALUES (?, ?, ?, ?, ?, 'info', 'normal', 'orchestrator', ?, 'r', ?, '{}', NULL)`,
+			id, f.wsID, f.agent, ts.UTC().Format("2006-01-02T15:04:05.000Z"),
+			kind, runID, payload)
+		if err != nil {
+			t.Fatalf("insert %s/%s: %v", kind, runID, err)
+		}
+	}
+
+	startedPayload := `{"mode":"run","pipeline_id":"pl_test","pipeline_slug":"test-routine","run_id":"` + runID + `"}`
+	insertJournal(runID+"_s", "pipeline.run.started", when, startedPayload)
+	if status == "" {
+		return
+	}
+	switch status {
+	case "COMPLETED":
+		insertJournal(runID+"_t", "pipeline.run.completed", when.Add(time.Minute),
+			`{"total_duration_ms":1200,"total_cost_usd":0.05,"pipeline_id":"pl_test","pipeline_slug":"test-routine","run_id":"`+runID+`"}`)
+	case "FAILED", "CANCELLED":
+		insertJournal(runID+"_t", "pipeline.run.failed", when.Add(time.Minute),
+			`{"failed_at_step":"step_1","error_message":"boom","status":"`+status+`","pipeline_id":"pl_test","pipeline_slug":"test-routine","run_id":"`+runID+`"}`)
+	default:
+		t.Fatalf("unknown status %q", status)
+	}
+}
+
 func TestRunHandler_List_RequiresWorkspace(t *testing.T) {
 	f := newRunsTestFixture(t)
 	req := httptest.NewRequest("GET", "/api/v1/runs", nil)
@@ -120,6 +158,49 @@ func TestRunHandler_List_HappyPath(t *testing.T) {
 	}
 	if resp.Data[0].CrewName == nil || *resp.Data[0].CrewName != "Engineering" {
 		t.Errorf("crew_name not enriched: %v", resp.Data[0].CrewName)
+	}
+}
+
+// TestRunHandler_List_IncludesPipelineRuns is the handler-level pin for
+// #2284: GET /api/v1/runs must surface routine (pipeline) runs alongside
+// ad-hoc ones, with a `kind` field a client can use to tell them apart.
+func TestRunHandler_List_IncludesPipelineRuns(t *testing.T) {
+	f := newRunsTestFixture(t)
+	now := time.Now().UTC()
+	f.emitRunRow(t, "run_a", "COMPLETED", "USER", now.Add(-3*time.Minute))
+	f.emitPipelineRunRow(t, "routine_a", "COMPLETED", now.Add(-2*time.Minute))
+
+	req := httptest.NewRequest("GET", "/api/v1/runs", nil)
+	req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	f.h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp runListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("data len=%d want 2 (ad-hoc + routine): %+v", len(resp.Data), runIDs(resp.Data))
+	}
+	byID := map[string]runResponse{}
+	for _, r := range resp.Data {
+		byID[r.ID] = r
+	}
+	adhoc, ok := byID["run_a"]
+	if !ok || adhoc.Kind != "agent" || adhoc.Status != "COMPLETED" {
+		t.Errorf("ad-hoc run: got %+v", adhoc)
+	}
+	routine, ok := byID["routine_a"]
+	if !ok {
+		t.Fatalf("routine run missing from /api/v1/runs response: %+v", resp.Data)
+	}
+	if routine.Kind != "pipeline" || routine.Status != "COMPLETED" {
+		t.Errorf("routine run: got %+v want kind=pipeline status=COMPLETED", routine)
+	}
+	if resp.Pagination.Total != 2 {
+		t.Errorf("pagination.total=%d want 2", resp.Pagination.Total)
 	}
 }
 

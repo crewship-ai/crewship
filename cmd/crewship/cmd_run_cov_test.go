@@ -667,11 +667,15 @@ func TestRunListRunE(t *testing.T) {
 		setupStubCLICov(t, stub)
 
 		finished := "2026-01-02T00:00:00Z"
+		// The second row is a routine/pipeline run (kind="pipeline", #2284) —
+		// before that fix the server could never return one of these at all,
+		// so this pins that the CLI's own KIND column (the contract for
+		// distinguishing the two engines) renders what the server sends.
 		stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{
 			"data": []map[string]any{
-				{"id": "run_aaaaaaaaaaaaaaaaaaaa", "agent_slug": "viktor", "status": "COMPLETED",
+				{"id": "run_aaaaaaaaaaaaaaaaaaaa", "agent_slug": "viktor", "status": "COMPLETED", "kind": "agent",
 					"trigger_type": "MANUAL", "created_at": "2026-01-01T00:00:00Z", "finished_at": finished},
-				{"id": "r2", "agent_slug": "eva", "status": "RUNNING",
+				{"id": "r2", "agent_slug": "eva", "status": "RUNNING", "kind": "pipeline",
 					"trigger_type": "SCHEDULE", "created_at": "2026-01-01T01:00:00Z", "finished_at": nil},
 			},
 		}))
@@ -682,7 +686,7 @@ func TestRunListRunE(t *testing.T) {
 		if err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
-		for _, want := range []string{"viktor", "COMPLETED", "eva", "RUNNING", "run_aaaaaaaaaaaa"} {
+		for _, want := range []string{"viktor", "COMPLETED", "eva", "RUNNING", "run_aaaaaaaaaaaa", "agent", "pipeline"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("stdout missing %q; got:\n%s", want, out)
 			}

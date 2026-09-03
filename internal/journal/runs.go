@@ -1,9 +1,23 @@
 package journal
 
-// Run aggregation over the journal stream. Each agent run is one trace
-// (trace_id == run.id); the per-run journal entries (run.started + one
-// terminal run.{completed|failed|cancelled|timeout}) reconstruct the
-// equivalent of the legacy agent_runs row via GROUP BY trace_id.
+// Run aggregation over the journal stream. Two engines write runs and key
+// them differently, and this file reads both without unifying the write
+// side (#2284 — that unification has its own consequences for correlation
+// and cost roll-ups and is a separate decision):
+//
+//   - An ad-hoc agent run is one trace (trace_id == run.id); its
+//     journal entries (run.started + one terminal
+//     run.{completed|failed|cancelled|timeout}) reconstruct the equivalent
+//     of the legacy agent_runs row via GROUP BY trace_id.
+//   - A pipeline/routine run never sets trace_id
+//     (internal/pipeline/journal.go); its entries
+//     (pipeline.run.started + one terminal
+//     pipeline.run.{completed|failed}) are grouped by actor_id instead,
+//     which that package stamps to the run's own id on every emit.
+//
+// runAggregatesCTE's grouping key is COALESCE(trace_id, actor_id) so both
+// shapes fall out of one query; RunAggregated.Kind says which engine
+// produced a given row.
 //
 // This is the read-side that backs /api/v1/runs once Phase E lands.
 // The write side (run.* emits) is Phase C.
@@ -30,15 +44,38 @@ const (
 	RunStatusTimeout   RunStatus = "TIMEOUT"
 )
 
+// RunKind discriminates which engine produced a RunAggregated: an ad-hoc
+// agent/chat execution (internal/api/assignments_run.go, entry_type
+// 'run.*', keyed by trace_id) or a routine/pipeline run
+// (internal/pipeline/journal.go, entry_type 'pipeline.run.*', keyed by
+// actor_id — see the ListRuns doc comment for why the two engines need
+// different keys). Added for #2284 so a caller can tell the two apart
+// without inferring it from TriggerType, which pipeline runs don't
+// currently populate.
+type RunKind string
+
+const (
+	RunKindAgent    RunKind = "agent"
+	RunKindPipeline RunKind = "pipeline"
+)
+
 // runStatusFromTerminal maps a run's terminal entry_type onto the
 // legacy RunStatus enum. NULL (no terminal yet) → RUNNING; an empty or
 // unknown terminal_type would only happen in a corrupt row (we always
 // emit terminal alongside DB UPDATE) so it also maps to RUNNING.
+//
+// Pipeline/routine terminals (EntryPipelineRunCompleted/Failed, #2284) map
+// the same way an ad-hoc run's do, with one wrinkle handled by the caller,
+// not here: internal/pipeline/journal.go's emitRunFailed reuses
+// EntryPipelineRunFailed for BOTH a real failure and a mid-flight cancel
+// (there is no dedicated pipeline.run.cancelled entry type), riding the real
+// outcome on payload.status instead. scanRunAggregated reads that override
+// after calling this function.
 func runStatusFromTerminal(terminalType string) RunStatus {
 	switch terminalType {
-	case string(EntryRunCompleted):
+	case string(EntryRunCompleted), string(EntryPipelineRunCompleted):
 		return RunStatusCompleted
-	case string(EntryRunFailed):
+	case string(EntryRunFailed), string(EntryPipelineRunFailed):
 		return RunStatusFailed
 	case string(EntryRunCancelled):
 		return RunStatusCancelled
@@ -53,12 +90,14 @@ func runStatusFromTerminal(terminalType string) RunStatus {
 // entries. Field set chosen to be a strict superset of what
 // /api/v1/runs returns today — no API contract change.
 type RunAggregated struct {
-	ID           string // trace_id
-	WorkspaceID  string
-	AgentID      string
-	ChatID       string
-	TriggeredBy  string
-	TriggerType  string
+	ID          string // trace_id (ad-hoc runs) or actor_id (pipeline/routine runs) — see RunKind.
+	WorkspaceID string
+	AgentID     string
+	ChatID      string
+	TriggeredBy string
+	TriggerType string
+	// Kind says which engine produced this row. See RunKind.
+	Kind         RunKind
 	Status       RunStatus
 	StartedAt    time.Time
 	FinishedAt   *time.Time
@@ -177,43 +216,100 @@ var terminalEntryTypes = []string{
 	string(EntryRunTimeout),
 }
 
+// pipelineRunTerminalEntryTypes are the terminal entry types a
+// pipeline/routine run writes (internal/pipeline/journal.go). There is no
+// pipeline.run.cancelled or pipeline.run.timeout — a run cancelled
+// mid-flight is still recorded as EntryPipelineRunFailed, with the real
+// outcome riding on payload.status="CANCELLED" instead (see
+// runStatusFromTerminal and scanRunAggregated's override).
+var pipelineRunTerminalEntryTypes = []string{
+	string(EntryPipelineRunCompleted),
+	string(EntryPipelineRunFailed),
+}
+
+// runTerminalEntryTypes is the union of terminalEntryTypes and
+// pipelineRunTerminalEntryTypes — #2284 widened the terminal-* projections
+// below to cover both engines' runs with one IN-list. Built once from the
+// two slices above (rather than via append(terminalEntryTypes, ...)) so
+// growing it can never alias, and silently corrupt, terminalEntryTypes' own
+// backing array.
+var runTerminalEntryTypes = func() []string {
+	out := make([]string, 0, len(terminalEntryTypes)+len(pipelineRunTerminalEntryTypes))
+	out = append(out, terminalEntryTypes...)
+	out = append(out, pipelineRunTerminalEntryTypes...)
+	return out
+}()
+
 // runAggregateProjections is the canonical set of MAX(CASE WHEN ...) column
 // projections the run_aggregates CTE can expose, in canonical order. Entries
 // with terminal=true carry a %s slot for the terminal entry-type IN-list and
 // consume one set of terminal placeholders each.
+//
+// started_at/agent_id/started_payload match BOTH 'run.started' (ad-hoc) and
+// 'pipeline.run.started' (routine, #2284) — a run_aggregates group is always
+// homogeneous (one trace_id/actor_id belongs to exactly one engine, see
+// runAggregatesCTE), so admitting both literals here costs nothing when only
+// one of them is actually present in a given group.
+//
+// triggered_by deliberately stays 'run.started'-only: a pipeline run's
+// actor_id is the run's OWN id (internal/pipeline/journal.go), not the
+// triggering actor, so projecting it into triggered_by would put a run
+// pointing at itself into a field callers read as "who kicked this off".
 var runAggregateProjections = []struct {
 	name     string
 	terminal bool
 	expr     string
 }{
-	{"started_at", false, "MAX(CASE WHEN entry_type = 'run.started' THEN ts END) AS started_at"},
+	{"started_at", false, "MAX(CASE WHEN entry_type IN ('run.started','pipeline.run.started') THEN ts END) AS started_at"},
 	{"finished_at", true, "MAX(CASE WHEN entry_type IN %s THEN ts END) AS finished_at"},
 	{"terminal_type", true, "MAX(CASE WHEN entry_type IN %s THEN entry_type END) AS terminal_type"},
-	{"agent_id", false, "MAX(CASE WHEN entry_type = 'run.started' THEN agent_id END) AS agent_id"},
+	{"agent_id", false, "MAX(CASE WHEN entry_type IN ('run.started','pipeline.run.started') THEN agent_id END) AS agent_id"},
 	{"triggered_by", false, "MAX(CASE WHEN entry_type = 'run.started' THEN actor_id END) AS triggered_by"},
-	{"started_payload", false, "MAX(CASE WHEN entry_type = 'run.started' THEN payload END) AS started_payload"},
+	{"started_payload", false, "MAX(CASE WHEN entry_type IN ('run.started','pipeline.run.started') THEN payload END) AS started_payload"},
 	{"terminal_payload", true, "MAX(CASE WHEN entry_type IN %s THEN payload END) AS terminal_payload"},
+	// kind discriminates which engine produced the group (RunKind). A group
+	// is homogeneous, so MAX over a constant string per matching row is
+	// stable — every row in an "agent" group ties into 'agent', every row in
+	// a "pipeline" group into 'pipeline'.
+	{"kind", false, "MAX(CASE WHEN entry_type LIKE 'pipeline.run.%' THEN 'pipeline' ELSE 'agent' END) AS kind"},
 }
 
 // runAggregatesCTE assembles the shared "WITH run_aggregates AS (...)" query
-// prefix: one row per trace_id, columns picked via the MAX(CASE WHEN ...)
-// idiom which is portable SQL and uses the already-built index
-// (idx_journal_ws_trace). cols selects projections by name; output always
+// prefix: one row per run, columns picked via the MAX(CASE WHEN ...) idiom
+// which is portable SQL. cols selects projections by name; output always
 // follows the canonical order in runAggregateProjections. innerWhere is the
 // raw WHERE text applied during grouping (filters on indexed columns, so
 // SQLite can prune before the GROUP BY).
 //
+// The grouping key is COALESCE(trace_id, actor_id), aliased "trace_id" so
+// every downstream SELECT/GROUP BY/ORDER BY reference below stays unchanged:
+// an ad-hoc run's rows always carry a non-NULL trace_id (COALESCE picks it,
+// actor_id — the triggering actor, not the run — is never consulted); a
+// pipeline/routine run's rows never set trace_id (#2284), so COALESCE falls
+// back to actor_id, which internal/pipeline/journal.go stamps to the run's
+// own id on every emit. The two never collide within one query: innerWhere
+// only admits pipeline.run.* rows when they lack a trace_id and run.* rows
+// when they have one (see ListRuns/GetRunByID).
+//
+// Index note: idx_journal_ws_trace (workspace_id, trace_id) WHERE trace_id
+// IS NOT NULL covers the ad-hoc branch only — a pipeline/routine run's rows
+// fall outside that partial index (trace_id IS NULL there by construction)
+// and are found via the workspace_id/entry_type prefix instead. Acceptable
+// at current pipeline-run volumes; a follow-up migration could add a
+// matching partial index on (workspace_id, actor_id) WHERE entry_type LIKE
+// 'pipeline.run.%' if that scan ever shows up in profiling.
+//
 // The returned args bind the terminal IN-list placeholders — one copy of
-// terminalEntryTypes per terminal projection selected, in projection order.
-// They MUST come before innerWhere's own args in the final arg list, because
-// the IN-lists appear in the SELECT clause ahead of the WHERE.
+// runTerminalEntryTypes per terminal projection selected, in projection
+// order. They MUST come before innerWhere's own args in the final arg list,
+// because the IN-lists appear in the SELECT clause ahead of the WHERE.
 func runAggregatesCTE(cols []string, innerWhere string) (string, []any) {
 	want := make(map[string]bool, len(cols))
 	for _, c := range cols {
 		want[c] = true
 	}
-	terminalIN := "(" + sqlInPlaceholders(len(terminalEntryTypes)) + ")"
-	lines := []string{"    SELECT trace_id"}
+	terminalIN := "(" + sqlInPlaceholders(len(runTerminalEntryTypes)) + ")"
+	lines := []string{"    SELECT COALESCE(trace_id, actor_id) AS trace_id"}
 	var args []any
 	for _, p := range runAggregateProjections {
 		if !want[p.name] {
@@ -222,7 +318,7 @@ func runAggregatesCTE(cols []string, innerWhere string) (string, []any) {
 		expr := p.expr
 		if p.terminal {
 			expr = fmt.Sprintf(expr, terminalIN)
-			for _, t := range terminalEntryTypes {
+			for _, t := range runTerminalEntryTypes {
 				args = append(args, t)
 			}
 		}
@@ -236,14 +332,18 @@ func runAggregatesCTE(cols []string, innerWhere string) (string, []any) {
 	return cte, args
 }
 
-// ListRuns groups journal_entries by trace_id over run.* event types and
-// returns one RunAggregated per trace. Total is the unfiltered-by-paging
-// row count so callers can render pagination state.
+// ListRuns groups journal_entries by run — trace_id for an ad-hoc run.* run,
+// actor_id for a pipeline/routine pipeline.run.* run (#2284, see the
+// runAggregatesCTE doc comment) — and returns one RunAggregated per run.
+// Total is the unfiltered-by-paging row count so callers can render
+// pagination state.
 //
 // Index used: idx_journal_ws_trace (workspace_id, trace_id) WHERE
-// trace_id IS NOT NULL — Phase D migration v60. Without it SQLite would
-// fall back to a full table scan; with it the workspace prefix is a
-// covering range scan.
+// trace_id IS NOT NULL — Phase D migration v60 — covers the ad-hoc branch.
+// Without it SQLite would fall back to a full table scan for that branch;
+// with it the workspace prefix is a covering range scan. The pipeline/
+// routine branch (trace_id IS NULL by construction) isn't covered by that
+// partial index; see runAggregatesCTE's index note.
 // maxRunsPage caps a single ListRuns page. Doubles as the pre-allocation size
 // for the result slice — see the make() call below.
 const maxRunsPage = 100
@@ -261,10 +361,16 @@ func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, in
 
 	// Inner WHERE (applied during grouping) — filters that touch indexed
 	// columns directly, so SQLite can prune before the GROUP BY.
+	//
+	// The OR'd condition is #2284: an ad-hoc run's rows carry trace_id
+	// (require it non-NULL to stay on idx_journal_ws_trace); a
+	// pipeline/routine run's rows never set trace_id at all
+	// (internal/pipeline/journal.go), so that branch is keyed on entry_type
+	// alone and picked up by runAggregatesCTE's COALESCE(trace_id, actor_id)
+	// grouping key instead.
 	innerConds := []string{
 		"workspace_id = ?",
-		"trace_id IS NOT NULL",
-		"entry_type LIKE 'run.%'",
+		"((trace_id IS NOT NULL AND entry_type LIKE 'run.%') OR entry_type LIKE 'pipeline.run.%')",
 	}
 	innerArgs := []any{q.WorkspaceID}
 	if q.AgentID != "" {
@@ -274,7 +380,7 @@ func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, in
 
 	cte, cteArgs := runAggregatesCTE(
 		[]string{"started_at", "finished_at", "terminal_type", "agent_id",
-			"triggered_by", "started_payload", "terminal_payload"},
+			"triggered_by", "started_payload", "terminal_payload", "kind"},
 		strings.Join(innerConds, " AND "))
 	// Outer WHERE — filters that operate on derived columns (status,
 	// json_extract on payload.trigger_type or .tags).
@@ -285,14 +391,20 @@ func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, in
 		case RunStatusRunning:
 			outerConds = append(outerConds, "terminal_type IS NULL")
 		case RunStatusCompleted:
-			outerConds = append(outerConds, "terminal_type = ?")
-			outerArgs = append(outerArgs, string(EntryRunCompleted))
+			outerConds = append(outerConds, "terminal_type IN (?, ?)")
+			outerArgs = append(outerArgs, string(EntryRunCompleted), string(EntryPipelineRunCompleted))
 		case RunStatusFailed:
-			outerConds = append(outerConds, "terminal_type = ?")
-			outerArgs = append(outerArgs, string(EntryRunFailed))
+			// pipeline.run.failed also covers a mid-flight CANCEL (no
+			// dedicated pipeline.run.cancelled entry type — see
+			// runStatusFromTerminal) so a FAILED filter must exclude the
+			// rows whose payload.status says otherwise.
+			outerConds = append(outerConds,
+				"(terminal_type = ? OR (terminal_type = ? AND COALESCE(json_extract(terminal_payload, '$.status'), 'FAILED') <> 'CANCELLED'))")
+			outerArgs = append(outerArgs, string(EntryRunFailed), string(EntryPipelineRunFailed))
 		case RunStatusCancelled:
-			outerConds = append(outerConds, "terminal_type = ?")
-			outerArgs = append(outerArgs, string(EntryRunCancelled))
+			outerConds = append(outerConds,
+				"(terminal_type = ? OR (terminal_type = ? AND json_extract(terminal_payload, '$.status') = 'CANCELLED'))")
+			outerArgs = append(outerArgs, string(EntryRunCancelled), string(EntryPipelineRunFailed))
 		case RunStatusTimeout:
 			outerConds = append(outerConds, "terminal_type = ?")
 			outerArgs = append(outerArgs, string(EntryRunTimeout))
@@ -311,7 +423,7 @@ func ListRuns(ctx context.Context, db *sql.DB, q RunsQuery) ([]RunAggregated, in
 
 	listSQL := cte + `
 SELECT trace_id, started_at, finished_at, terminal_type,
-       agent_id, triggered_by, started_payload, terminal_payload
+       agent_id, triggered_by, started_payload, terminal_payload, kind
 FROM run_aggregates
 WHERE ` + strings.Join(outerConds, " AND ") + `
 ORDER BY started_at DESC
@@ -381,16 +493,21 @@ LIMIT ? OFFSET ?`
 	return out, total, nil
 }
 
-// GetRunByID looks up a single run by trace_id, scoped to workspaceID.
-// Returns (nil, nil) when no such run exists in the caller's workspace —
-// callers translate that into a 404 themselves so cross-tenant lookups
-// stay masked as "not found" rather than leaking existence.
+// GetRunByID looks up a single run by id — trace_id for an ad-hoc run,
+// actor_id for a pipeline/routine run (#2284; the caller passes one id and
+// GetRunByID tries both, since it doesn't know which engine produced it) —
+// scoped to workspaceID. Returns (nil, nil) when no such run exists in the
+// caller's workspace — callers translate that into a 404 themselves so
+// cross-tenant lookups stay masked as "not found" rather than leaking
+// existence.
 //
-// Runs the same run_aggregates CTE as ListRuns with trace_id folded into
-// the inner WHERE, so it hits idx_journal_ws_trace (or the narrower
-// idx_journal_ws_trace_runs partial index once migration v153 lands) as
-// an exact probe instead of ListRuns' unbounded-offset page scan
-// (internal/api/runs.go RunHandler.Get used to page up to 1000 rows).
+// Runs the same run_aggregates CTE as ListRuns with the id folded into the
+// inner WHERE, so the ad-hoc branch hits idx_journal_ws_trace (or the
+// narrower idx_journal_ws_trace_runs partial index once migration v153
+// lands) as an exact probe instead of ListRuns' unbounded-offset page scan
+// (internal/api/runs.go RunHandler.Get used to page up to 1000 rows). The
+// pipeline/routine branch has no equivalent index yet — see
+// runAggregatesCTE's index note.
 func GetRunByID(ctx context.Context, db *sql.DB, workspaceID, traceID string) (*RunAggregated, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("journal: GetRunByID requires workspace_id")
@@ -399,20 +516,25 @@ func GetRunByID(ctx context.Context, db *sql.DB, workspaceID, traceID string) (*
 		return nil, fmt.Errorf("journal: GetRunByID requires trace_id")
 	}
 
+	// #2284: an ad-hoc run is found by trace_id; a pipeline/routine run
+	// never sets trace_id and is found by actor_id instead (see the
+	// runAggregatesCTE doc comment). The caller passes one id and doesn't
+	// know which engine produced it, so both branches are tried — traceID
+	// is bound to both placeholders.
 	cte, cteArgs := runAggregatesCTE(
 		[]string{"started_at", "finished_at", "terminal_type", "agent_id",
-			"triggered_by", "started_payload", "terminal_payload"},
-		"workspace_id = ? AND trace_id = ? AND entry_type LIKE 'run.%'")
+			"triggered_by", "started_payload", "terminal_payload", "kind"},
+		"workspace_id = ? AND ((trace_id = ? AND entry_type LIKE 'run.%') OR (actor_id = ? AND entry_type LIKE 'pipeline.run.%'))")
 	q := cte + `
 SELECT trace_id, started_at, finished_at, terminal_type,
-       agent_id, triggered_by, started_payload, terminal_payload
+       agent_id, triggered_by, started_payload, terminal_payload, kind
 FROM run_aggregates
 WHERE started_at IS NOT NULL
 LIMIT 1`
 
-	args := make([]any, 0, len(cteArgs)+2)
+	args := make([]any, 0, len(cteArgs)+3)
 	args = append(args, cteArgs...)
-	args = append(args, workspaceID, traceID)
+	args = append(args, workspaceID, traceID, traceID)
 
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -435,16 +557,17 @@ LIMIT 1`
 
 // scanRunAggregated scans one run_aggregates row — column order (trace_id,
 // started_at, finished_at, terminal_type, agent_id, triggered_by,
-// started_payload, terminal_payload) — into a RunAggregated, decoding the
-// run.started / terminal JSON payloads into the derived fields.
+// started_payload, terminal_payload, kind) — into a RunAggregated, decoding
+// the run.started / terminal JSON payloads into the derived fields.
 func scanRunAggregated(rows *sql.Rows, workspaceID string) (RunAggregated, error) {
 	var (
 		traceID, startedTS                             string
 		finishedTS, terminalType, agentID, triggeredBy sql.NullString
 		startedPayload, terminalPayload                sql.NullString
+		kind                                           sql.NullString
 	)
 	if err := rows.Scan(&traceID, &startedTS, &finishedTS, &terminalType,
-		&agentID, &triggeredBy, &startedPayload, &terminalPayload); err != nil {
+		&agentID, &triggeredBy, &startedPayload, &terminalPayload, &kind); err != nil {
 		return RunAggregated{}, fmt.Errorf("journal: scan run: %w", err)
 	}
 	r := RunAggregated{
@@ -452,6 +575,10 @@ func scanRunAggregated(rows *sql.Rows, workspaceID string) (RunAggregated, error
 		WorkspaceID: workspaceID,
 		AgentID:     agentID.String,
 		TriggeredBy: triggeredBy.String,
+		Kind:        RunKindAgent,
+	}
+	if kind.String == "pipeline" {
+		r.Kind = RunKindPipeline
 	}
 	if t, perr := parseJournalTS(startedTS); perr == nil {
 		r.StartedAt = t
@@ -504,6 +631,17 @@ func scanRunAggregated(rows *sql.Rows, workspaceID string) (RunAggregated, error
 					r.Model = m
 				}
 				r.applySessionProvenance(v)
+			}
+			// A pipeline.run.failed terminal covers both a real failure AND
+			// a mid-flight cancel — internal/pipeline/journal.go's
+			// emitRunFailed has no dedicated pipeline.run.cancelled entry
+			// type, so it rides the real outcome on payload.status instead
+			// (#2284). runStatusFromTerminal already mapped this row to
+			// FAILED; override to CANCELLED when the payload says so.
+			if terminalType.String == string(EntryPipelineRunFailed) {
+				if v, ok := p["status"].(string); ok && v == "CANCELLED" {
+					r.Status = RunStatusCancelled
+				}
 			}
 		}
 	}
@@ -644,8 +782,12 @@ func decodeMCPServerErrors(v any) []MCPServerError {
 func countRuns(ctx context.Context, db *sql.DB,
 	innerConds []string, innerArgs []any,
 	outerConds []string, outerArgs []any) (int, error) {
+	// terminal_payload is needed here too — not just by ListRuns' own SELECT
+	// — because the FAILED/CANCELLED branches of the outerConds this
+	// function receives (built in ListRuns) json_extract it to tell a
+	// pipeline.run.failed cancel apart from a real failure (#2284).
 	cte, cteArgs := runAggregatesCTE(
-		[]string{"started_at", "terminal_type", "started_payload"},
+		[]string{"started_at", "terminal_type", "started_payload", "terminal_payload"},
 		strings.Join(innerConds, " AND "))
 	q := cte + `
 SELECT COUNT(*) FROM run_aggregates

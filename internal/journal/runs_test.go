@@ -57,6 +57,83 @@ func emitRun(t *testing.T, w *Writer, ws, agentID, runID, status, trigger string
 	}
 }
 
+// emitPipelineRun writes a pipeline.run.started + terminal entry pair the way
+// internal/pipeline/journal.go's pipelineEmitContext actually stamps them:
+// ActorID = runID and TraceID left empty — routine runs never set trace_id
+// (#2284). status="" leaves the run RUNNING (only pipeline.run.started is
+// written). status="CANCELLED" writes pipeline.run.failed with
+// payload.status="CANCELLED", which is how emitRunFailed records a run
+// cancelled mid-flight — there is no dedicated pipeline.run.cancelled entry
+// type, see internal/pipeline/journal.go emitRunFailed.
+func emitPipelineRun(t *testing.T, w *Writer, ws, agentID, runID, status string, when time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := w.Emit(ctx, Entry{
+		WorkspaceID: ws,
+		AgentID:     agentID,
+		Type:        EntryPipelineRunStarted,
+		ActorType:   ActorOrchestrator,
+		ActorID:     runID,
+		Summary:     "Pipeline test-routine started",
+		Payload: map[string]any{
+			"mode":              "run",
+			"invoking_agent_id": agentID,
+			"pipeline_id":       "pl_test",
+			"pipeline_slug":     "test-routine",
+			"run_id":            runID,
+		},
+		TS: when,
+	})
+	if err != nil {
+		t.Fatalf("emit pipeline started: %v", err)
+	}
+	if status == "" {
+		return
+	}
+	switch status {
+	case "COMPLETED":
+		_, err = w.Emit(ctx, Entry{
+			WorkspaceID: ws,
+			AgentID:     agentID,
+			Type:        EntryPipelineRunCompleted,
+			ActorType:   ActorOrchestrator,
+			ActorID:     runID,
+			Summary:     "Pipeline test-routine completed",
+			Payload: map[string]any{
+				"total_duration_ms": float64(1200),
+				"total_cost_usd":    0.05,
+				"pipeline_id":       "pl_test",
+				"pipeline_slug":     "test-routine",
+				"run_id":            runID,
+			},
+			TS: when.Add(2 * time.Minute),
+		})
+	case "FAILED", "CANCELLED":
+		_, err = w.Emit(ctx, Entry{
+			WorkspaceID: ws,
+			AgentID:     agentID,
+			Type:        EntryPipelineRunFailed,
+			ActorType:   ActorOrchestrator,
+			ActorID:     runID,
+			Summary:     "Pipeline test-routine failed",
+			Payload: map[string]any{
+				"failed_at_step": "step_1",
+				"error_message":  "boom",
+				"status":         status,
+				"pipeline_id":    "pl_test",
+				"pipeline_slug":  "test-routine",
+				"run_id":         runID,
+			},
+			TS: when.Add(2 * time.Minute),
+		})
+	default:
+		t.Fatalf("unknown status %q", status)
+	}
+	if err != nil {
+		t.Fatalf("emit pipeline terminal: %v", err)
+	}
+}
+
 func TestListRuns_GroupsByTrace(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
@@ -361,5 +438,134 @@ func TestListRuns_LimitClampAllocation(t *testing.T) {
 		if len(got) != 50 {
 			t.Errorf("limit=%d: got %d rows want default 50", lim, len(got))
 		}
+	}
+}
+
+// TestListRuns_IncludesPipelineRuns is the red→green pin for #2284: a
+// routine (pipeline) run writes pipeline.run.* entries keyed by ActorID, not
+// trace_id (internal/pipeline/journal.go), so the pre-fix filter
+// (`trace_id IS NOT NULL AND entry_type LIKE 'run.%'`) structurally could
+// never surface it — GET /api/v1/runs, and therefore /journal?tab=runs, was
+// blind to an entire class of execution. Seeds one ad-hoc run.* trace and one
+// pipeline.run.* run side by side and asserts both come back with the
+// correct kind and status.
+func TestListRuns_IncludesPipelineRuns(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	now := time.Now().UTC()
+	emitRun(t, w, "ws_test", "agent_a", "adhoc_1", "COMPLETED", "USER", now.Add(-5*time.Minute))
+	emitPipelineRun(t, w, "ws_test", "agent_b", "routine_1", "COMPLETED", now.Add(-3*time.Minute))
+	_ = w.Flush(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	runs, total, err := ListRuns(context.Background(), db, RunsQuery{WorkspaceID: "ws_test"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("total: got %d want 2 (ad-hoc + routine)", total)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("rows: got %d want 2: %+v", len(runs), runs)
+	}
+
+	byID := map[string]RunAggregated{}
+	for _, r := range runs {
+		byID[r.ID] = r
+	}
+
+	adhoc, ok := byID["adhoc_1"]
+	if !ok {
+		t.Fatalf("ad-hoc run missing from results: %+v", runs)
+	}
+	if adhoc.Kind != RunKindAgent {
+		t.Errorf("ad-hoc run kind: got %q want %q", adhoc.Kind, RunKindAgent)
+	}
+	if adhoc.Status != RunStatusCompleted {
+		t.Errorf("ad-hoc run status: got %q want COMPLETED", adhoc.Status)
+	}
+
+	routine, ok := byID["routine_1"]
+	if !ok {
+		t.Fatalf("pipeline/routine run missing from results — the read-side filter is still blind to pipeline.run.*: %+v", runs)
+	}
+	if routine.Kind != RunKindPipeline {
+		t.Errorf("routine run kind: got %q want %q", routine.Kind, RunKindPipeline)
+	}
+	if routine.Status != RunStatusCompleted {
+		t.Errorf("routine run status: got %q want COMPLETED", routine.Status)
+	}
+	if routine.AgentID != "agent_b" {
+		t.Errorf("routine run agent_id: got %q want agent_b", routine.AgentID)
+	}
+}
+
+// TestListRuns_PipelineRunCancelledStatus pins that a routine run cancelled
+// mid-flight reports CANCELLED, not FAILED — internal/pipeline/journal.go's
+// emitRunFailed reuses EntryPipelineRunFailed for both outcomes (there is no
+// dedicated pipeline.run.cancelled entry type) and rides the real status on
+// payload.status instead.
+func TestListRuns_PipelineRunCancelledStatus(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	now := time.Now().UTC()
+	emitPipelineRun(t, w, "ws_test", "agent_a", "routine_cancel", "CANCELLED", now)
+	_ = w.Flush(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	runs, _, err := ListRuns(context.Background(), db, RunsQuery{WorkspaceID: "ws_test"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != "routine_cancel" {
+		t.Fatalf("got %+v", runs)
+	}
+	if runs[0].Status != RunStatusCancelled {
+		t.Errorf("status: got %q want CANCELLED", runs[0].Status)
+	}
+}
+
+// TestGetRunByID_PipelineRun mirrors TestGetRunByID for the pipeline/routine
+// path: the single-run lookup must find a run keyed by ActorID (no
+// trace_id), scoped to the caller's workspace like every other journal read.
+func TestGetRunByID_PipelineRun(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO workspaces (id) VALUES ('ws_other')`); err != nil {
+		t.Fatal(err)
+	}
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	now := time.Now().UTC()
+	emitPipelineRun(t, w, "ws_test", "agent_a", "routine_1", "COMPLETED", now.Add(-10*time.Minute))
+	emitPipelineRun(t, w, "ws_other", "agent_a", "routine_1_other_tenant", "COMPLETED", now.Add(-9*time.Minute))
+	_ = w.Flush(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	run, err := GetRunByID(context.Background(), db, "ws_test", "routine_1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil — GetRunByID is still blind to pipeline.run.*")
+	}
+	if run.ID != "routine_1" || run.Status != RunStatusCompleted || run.Kind != RunKindPipeline {
+		t.Errorf("got %+v", run)
+	}
+
+	// Cross-tenant lookup must not leak.
+	leaked, err := GetRunByID(context.Background(), db, "ws_test", "routine_1_other_tenant")
+	if err != nil {
+		t.Fatalf("get cross-tenant: %v", err)
+	}
+	if leaked != nil {
+		t.Errorf("cross-tenant leak: %+v", leaked)
 	}
 }
