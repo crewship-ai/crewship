@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/llm"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -89,11 +90,16 @@ type onboardingProposalAgentInput struct {
 // split; the shared-table guarantee above still holds for every OTHER
 // provider, where both callers really do read the same row.
 func providerRuntimeDefaults(provider string) (cliAdapter, model string) {
+	// The model half comes from config/models.json's provider default, so it
+	// is by construction an id validateCrewModel accepts — the two used to be
+	// separate tables, and they disagreed (see the tests around
+	// providerRuntimeDefaults for the crew that got a Claude id on an OpenAI
+	// adapter as a result).
 	switch strings.ToUpper(strings.TrimSpace(provider)) {
 	case "OPENAI":
-		return "CODEX_CLI", "gpt-5.5"
+		return "CODEX_CLI", llm.DefaultModel("openai")
 	case "GOOGLE":
-		return "GEMINI_CLI", "gemini-2.5-pro"
+		return "GEMINI_CLI", llm.DefaultModel("google")
 	case "CURSOR":
 		return "CURSOR_CLI", "composer"
 	case "FACTORY":
@@ -352,8 +358,13 @@ func (h *OnboardingProposalHandler) SetJournal(j journal.Emitter) {
 }
 
 type onboardingProposalCreateRequest struct {
-	CrewName     string                         `json:"crew_name"`
-	CrewSlug     string                         `json:"crew_slug"`
+	CrewName string `json:"crew_name"`
+	CrewSlug string `json:"crew_slug"`
+	// CrewIcon / CrewColor are the Guide's choice for the card and the crew
+	// row (lib/crew-icons.ts vocabulary, mirrored in crew_icons.go). Checked
+	// against that vocabulary and otherwise dropped — never stored as typed.
+	CrewIcon     string                         `json:"crew_icon,omitempty"`
+	CrewColor    string                         `json:"crew_color,omitempty"`
 	TemplateSlug string                         `json:"template_slug"`
 	LLMProvider  string                         `json:"llm_provider"`
 	LLMModel     string                         `json:"llm_model"`
@@ -437,7 +448,32 @@ func (h *OnboardingProposalHandler) Create(w http.ResponseWriter, r *http.Reques
 		h.logger.Warn("onboarding proposal create: seed builtin templates", "error", err)
 	}
 
+	var iconOverride, colorOverride *string
+	if icon := strings.TrimSpace(req.CrewIcon); icon != "" {
+		if validCrewIcon(icon) {
+			iconOverride = &icon
+		} else {
+			h.logger.Warn("onboarding proposal: unknown crew icon from setup agent, ignoring", "icon", icon)
+		}
+	}
+	if color := normaliseCrewColor(req.CrewColor); color != "" {
+		colorOverride = &color
+	} else if strings.TrimSpace(req.CrewColor) != "" {
+		h.logger.Warn("onboarding proposal: unrecognised crew colour from setup agent, ignoring", "color", req.CrewColor)
+	}
+
 	payload, err := planOnboardingProposal(r.Context(), h.db, wsID, req.TemplateSlug, req.CrewName, req.CrewSlug, overrides, req.Agents, req.Tools)
+	if err == nil {
+		// The Guide's look wins over the template's: the template only ever
+		// contributed a default here, and a bespoke crew has no template at
+		// all, which is exactly when a chosen icon matters most.
+		if iconOverride != nil {
+			payload.CrewIcon = iconOverride
+		}
+		if colorOverride != nil {
+			payload.CrewColor = colorOverride
+		}
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, errTemplateNotFound):

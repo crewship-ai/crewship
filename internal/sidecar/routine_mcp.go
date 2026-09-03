@@ -196,6 +196,15 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 		InputSchema: routineMCPDiscoverSchema,
 	},
 	{
+		Name: "workspace_overview",
+		Description: "Read-only snapshot of what this workspace actually holds: every crew with its agents " +
+			"(names, slugs, roles, models), icons and colours; routines; pages; the number of open issues; " +
+			"and which credential providers exist (names only — never a value). Call it before advising " +
+			"about existing state or naming any crew/agent slug, and whenever the person asks what they " +
+			"have. Takes no arguments and changes nothing.",
+		InputSchema: routineMCPListSchema,
+	},
+	{
 		Name: "validate_manifest",
 		Description: "Validate an authored Crewship YAML manifest with the same parser and offline schemas used by " +
 			"`crewship apply`. Supports every current crewship/v1 kind, including Crew, Agent, Routine and Page, " +
@@ -350,6 +359,8 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		status, bodyBytes = s.savePage(r.Context(), save, actingAgentID)
 	case "list_routines":
 		status, bodyBytes = s.listPipelines(r.Context(), "")
+	case "workspace_overview":
+		status, bodyBytes = s.workspaceOverview(r.Context())
 	case "discover_capabilities":
 		var disco struct {
 			Crew string `json:"crew"`

@@ -45,6 +45,10 @@ const (
 
 var onboardingTemplateSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// A palette id ("blue") or a six-digit hex, with or without '#'. Anything
+// else is dropped before it reaches the card.
+var onboardingCrewColorRe = regexp.MustCompile(`^(#?[0-9a-fA-F]{6}|[a-z]{3,12})$`)
+
 // onboardingToolNameRe is the shape a mise tool id can take. Same character
 // class MiseConfig.Validate enforces at build time, applied early so a name
 // carrying a path traversal or a shell metacharacter never travels further.
@@ -66,8 +70,13 @@ type onboardingProposalAgentSuggestion struct {
 // and its own trusted derivation. No agent-authored prompts or permissions
 // are trusted.
 type onboardingProposalSuggestion struct {
-	CrewName     string                              `json:"crew_name"`
-	CrewSlug     string                              `json:"crew_slug,omitempty"`
+	CrewName string `json:"crew_name"`
+	CrewSlug string `json:"crew_slug,omitempty"`
+	// CrewIcon / CrewColor: the Guide's pick for the crew's look. Shape only
+	// here (a kebab-case icon name; a palette id or a hex) — membership in the
+	// real icon vocabulary is checked by the API, which owns that list.
+	CrewIcon     string                              `json:"crew_icon,omitempty"`
+	CrewColor    string                              `json:"crew_color,omitempty"`
 	TemplateSlug string                              `json:"template_slug"`
 	LLMProvider  string                              `json:"llm_provider,omitempty"`
 	LLMModel     string                              `json:"llm_model,omitempty"`
@@ -109,6 +118,14 @@ func onboardingProposalMetadata(agentSlug, text string) map[string]any {
 	suggestion.TemplateSlug = strings.TrimSpace(suggestion.TemplateSlug)
 	suggestion.LLMProvider = strings.ToUpper(strings.TrimSpace(suggestion.LLMProvider))
 	suggestion.LLMModel = strings.TrimSpace(suggestion.LLMModel)
+	suggestion.CrewIcon = strings.TrimSpace(suggestion.CrewIcon)
+	if suggestion.CrewIcon != "" && !onboardingTemplateSlugRe.MatchString(suggestion.CrewIcon) {
+		suggestion.CrewIcon = ""
+	}
+	suggestion.CrewColor = strings.TrimSpace(suggestion.CrewColor)
+	if suggestion.CrewColor != "" && !onboardingCrewColorRe.MatchString(suggestion.CrewColor) {
+		suggestion.CrewColor = ""
+	}
 	if suggestion.CrewName == "" || utf8.RuneCountInString(suggestion.CrewName) > onboardingProposalCrewNameMaxLen {
 		return nil
 	}

@@ -90,6 +90,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/message-count", internalAuth(http.HandlerFunc(internal.IncrementMessageCount)))
 	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/title", internalAuth(http.HandlerFunc(internal.UpdateChatTitle)))
 	r.mux.Handle("GET /api/v1/internal/crews", internalAuth(http.HandlerFunc(internal.ListCrews)))
+	r.mux.Handle("GET /api/v1/internal/workspace/overview", internalAuth(http.HandlerFunc(internal.WorkspaceOverview)))
 	r.mux.Handle("POST /api/v1/internal/crews", internalAuth(http.HandlerFunc(internal.CreateCrew)))
 	r.mux.Handle("POST /api/v1/internal/agents", internalAuth(http.HandlerFunc(internal.CreateAgent)))
 	// PR-D F5: LEAD-initiated ephemeral hire. Sidecar /spawn proxies

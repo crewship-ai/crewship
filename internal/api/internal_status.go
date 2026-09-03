@@ -24,6 +24,157 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
+// WorkspaceOverview handles GET /api/v1/internal/workspace/overview?workspace_id=...
+//
+// One read-only bundle of what the workspace actually holds, for the
+// sidecar's workspace_overview tool: crews with their agents, icons and
+// models; routines; pages; open issues; and which credential providers exist
+// — names only, never a value, never an encrypted blob. This is what lets
+// Crewship Guide advise about a workspace it can see instead of one it
+// remembers from earlier turns. The reserved setup crew is filtered out of
+// the crew list for the same reason it is hidden from the fleet: it is not
+// the person's crew.
+func (h *InternalHandler) WorkspaceOverview(w http.ResponseWriter, r *http.Request) {
+	wsID := r.URL.Query().Get("workspace_id")
+	if wsID == "" {
+		replyError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	ctx := r.Context()
+
+	type agentEntry struct {
+		Name       string `json:"name"`
+		Slug       string `json:"slug"`
+		RoleTitle  string `json:"role_title,omitempty"`
+		CLIAdapter string `json:"cli_adapter,omitempty"`
+		LLMModel   string `json:"llm_model,omitempty"`
+		Status     string `json:"status,omitempty"`
+	}
+	type crewEntry struct {
+		ID     string       `json:"id"`
+		Name   string       `json:"name"`
+		Slug   string       `json:"slug"`
+		Icon   string       `json:"icon,omitempty"`
+		Color  string       `json:"color,omitempty"`
+		Agents []agentEntry `json:"agents"`
+	}
+	type routineEntry struct {
+		Name   string `json:"name"`
+		Slug   string `json:"slug"`
+		Status string `json:"status,omitempty"`
+	}
+	type pageEntry struct {
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	}
+	type credentialEntry struct {
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+		Status   string `json:"status,omitempty"`
+	}
+	type overview struct {
+		Crews       []crewEntry       `json:"crews"`
+		Routines    []routineEntry    `json:"routines"`
+		Pages       []pageEntry       `json:"pages"`
+		OpenIssues  int               `json:"open_issues"`
+		Credentials []credentialEntry `json:"credentials"`
+	}
+	out := overview{Crews: []crewEntry{}, Routines: []routineEntry{}, Pages: []pageEntry{}, Credentials: []credentialEntry{}}
+
+	crewRows, err := h.db.QueryContext(ctx, `
+		SELECT id, name, slug, COALESCE(icon, ''), COALESCE(color, '')
+		FROM crews
+		WHERE workspace_id = ? AND deleted_at IS NULL AND COALESCE(kind, '') <> 'setup'
+		ORDER BY name`, wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "workspace overview: crews", err)
+		return
+	}
+	index := map[string]int{}
+	for crewRows.Next() {
+		var c crewEntry
+		if err := crewRows.Scan(&c.ID, &c.Name, &c.Slug, &c.Icon, &c.Color); err != nil {
+			continue
+		}
+		c.Agents = []agentEntry{}
+		index[c.ID] = len(out.Crews)
+		out.Crews = append(out.Crews, c)
+	}
+	crewRows.Close()
+
+	agentRows, err := h.db.QueryContext(ctx, `
+		SELECT crew_id, name, slug, COALESCE(role_title, ''), COALESCE(cli_adapter, ''), COALESCE(llm_model, ''), COALESCE(status, '')
+		FROM agents
+		WHERE workspace_id = ? AND deleted_at IS NULL
+		ORDER BY name`, wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "workspace overview: agents", err)
+		return
+	}
+	for agentRows.Next() {
+		var crewID string
+		var a agentEntry
+		if err := agentRows.Scan(&crewID, &a.Name, &a.Slug, &a.RoleTitle, &a.CLIAdapter, &a.LLMModel, &a.Status); err != nil {
+			continue
+		}
+		if i, ok := index[crewID]; ok {
+			out.Crews[i].Agents = append(out.Crews[i].Agents, a)
+		}
+	}
+	agentRows.Close()
+
+	routineRows, err := h.db.QueryContext(ctx, `
+		SELECT name, slug, COALESCE(status, '') FROM pipelines
+		WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY name`, wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "workspace overview: routines", err)
+		return
+	}
+	for routineRows.Next() {
+		var p routineEntry
+		if err := routineRows.Scan(&p.Name, &p.Slug, &p.Status); err == nil {
+			out.Routines = append(out.Routines, p)
+		}
+	}
+	routineRows.Close()
+
+	pageRows, err := h.db.QueryContext(ctx, `SELECT name, slug FROM pages WHERE workspace_id = ? ORDER BY name`, wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "workspace overview: pages", err)
+		return
+	}
+	for pageRows.Next() {
+		var p pageEntry
+		if err := pageRows.Scan(&p.Name, &p.Slug); err == nil {
+			out.Pages = append(out.Pages, p)
+		}
+	}
+	pageRows.Close()
+
+	if err := h.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM missions
+		WHERE workspace_id = ? AND status NOT IN ('done', 'closed', 'cancelled', 'canceled')`, wsID).Scan(&out.OpenIssues); err != nil {
+		h.logger.Warn("workspace overview: open issues", "error", err)
+	}
+
+	credRows, err := h.db.QueryContext(ctx, `
+		SELECT name, COALESCE(provider, ''), COALESCE(status, '') FROM credentials
+		WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY name`, wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "workspace overview: credentials", err)
+		return
+	}
+	for credRows.Next() {
+		var c credentialEntry
+		if err := credRows.Scan(&c.Name, &c.Provider, &c.Status); err == nil {
+			out.Credentials = append(out.Credentials, c)
+		}
+	}
+	credRows.Close()
+
+	writeJSON(w, http.StatusOK, out)
+}
+
 // ListCrews handles GET /api/v1/internal/crews?workspace_id=...
 // Used by the sidecar on behalf of agents discovering workspace topology.
 func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
