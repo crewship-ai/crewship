@@ -84,6 +84,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **The crews screen says how big the fleet is, and what needs you (#2318).**
+  `/crews` used to show the API's 100-row window as the whole workspace —
+  "100 crews" on 103, and a deep link past the window said "not found". The
+  explorer now reports the real total, groups crews by what needs a person
+  (Needs attention → Running → Idle), folds every group after six, counts
+  search matches and says when nothing matches. A crew canvas opens with a
+  "Needs you" strip — rebuild pending, a credential whose CLI is missing from
+  the image, an MCP server without a credential, an agent in error or waiting
+  — each row with the one action that resolves it (Build now, Install, Connect,
+  Inspect, Review). The agent's decision banner has its button, the Issues
+  cell no longer links to a 404, the roster fits a phone, and the onboarding
+  guide is no longer the first row of the fleet.
+- **Crew tools on Integrations, and Connect (#2318).** Crew-scoped MCP servers
+  lived on neither tab of `/integrations`; Tools (MCP) gains a Crew tools
+  section listing each server with its crew, bound agents and auth state, and
+  *Connect* binds a vault credential or an OAuth token to every agent in the
+  crew. The page's rail now opens as an overlay on a phone. A crew's
+  Settings → Integrations shows the auth state it used to leave blank.
+- **List endpoints describe their window (#2318).** `GET /api/v1/crews`,
+  `/agents` and `/credentials` return `X-Total-Count`, `X-Limit` and
+  `X-Offset` (bodies unchanged) and take `?q=` for a server-side search;
+  `crewship crew list`, `agent list` and `credential list` take
+  `--limit`/`--offset` and end with `showing 1–100 of 103 · next page:
+  --offset 100` in human formats.
+
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,
