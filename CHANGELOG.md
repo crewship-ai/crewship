@@ -4370,6 +4370,30 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   this issue's scope of scrubbing agent-supplied text — tracked as a
   follow-up rather than silently left unredacted.
 
+- **`on_budget_exceeded` now fires once per breach, not once per LLM call
+  while over budget (#2153).** `hooks/types.go` documents the policy/limit
+  events — `on_approval_requested`, `on_guardrail_triggered`,
+  `on_budget_exceeded` — as firing once per triggering condition, but
+  `paymaster.Enforce` dispatched it from inside the per-status loop with
+  nothing recording that a breach had already been announced: it fired on
+  every call made while a budget stayed over, and twice on a single call
+  that breached two budgets. A journal row absorbs repeats fine; a hook
+  routed to pagerduty or Slack does not. `paymaster.announceBudgetBreach`
+  now debounces per `(workspace_id, crew_id-if-the-budget-is-crew-scoped,
+  budget_id, period, limit_usd)` — the first call to push a budget over in
+  a given period dispatches, later calls in the same period do not, and it
+  fires again once the period rolls (the same boundary `sumSpend` uses) or
+  the limit is raised and breached again (folding the limit into the key
+  gets re-fire-on-raise for free, without a separate invalidation path).
+  Two budgets breached by the same call still dispatch once each — that is
+  two distinct triggering conditions, not a repeat of one. The debounce
+  state is in-memory only (mirrors `enforceLocks`' existing trade-off in
+  the same file); a `crewshipd` restart can re-announce an already-seen
+  breach once. Not built: tiered re-firing on a much larger breach (e.g.
+  10% over vs. 400% over) — noted in the PR as a possible follow-up. The
+  `budget.exceeded` journal entry itself is unchanged and still emits every
+  call.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
