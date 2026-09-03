@@ -69,6 +69,8 @@
  */
 
 import * as React from "react"
+import Link from "next/link"
+import { refHref, refLabel } from "@/lib/entity-refs"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 
 import { EmptyState } from "@/components/layout/empty-state"
@@ -304,6 +306,16 @@ export function PageView({
   // which a module-level counter is not.
   const tabIdScope = React.useId()
 
+  const ownerHref = refHref(page?.ownerRef)
+  // Distinct producers behind panels that have never been produced.
+  const silentProducers = React.useMemo(() => {
+    const out: string[] = []
+    for (const panel of page?.panels ?? []) {
+      if (panel.snapshot.state === "never_produced" && panel.producer && !out.includes(panel.producer)) out.push(panel.producer)
+    }
+    return out
+  }, [page])
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumb back-bar — inside the content area, matching /routines and
@@ -327,10 +339,33 @@ export function PageView({
             just change" is a property of a panel, and each is said in exactly
             one place. */}
         <div className="ml-auto flex shrink-0 items-center gap-3">
-          {page?.ownerLabel && (
-            <span className="type-page-meta shrink-0 text-muted-foreground-soft">
-              {page.ownerLabel}
+          {/* Every producer that has never pushed, named and linked — the
+              overview said "1 never produced" and this bar said nothing about
+              WHO was meant to fill it (docs/ux/PLAN.md D1). */}
+          {silentProducers.length > 0 && (
+            <span className="type-page-meta inline-flex min-w-0 items-center gap-1.5 text-warn" data-testid="page-silent-producers">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" aria-hidden />
+              {silentProducers.length === 1 ? "waiting on" : `${silentProducers.length} panels waiting on`}{" "}
+              {silentProducers.slice(0, 2).map((ref, i) => {
+                const href = refHref(ref)
+                return (
+                  <React.Fragment key={ref}>
+                    {i > 0 && ", "}
+                    {href ? <Link href={href} className="text-primary-hover hover:underline">{refLabel(ref)}</Link> : <span>{refLabel(ref)}</span>}
+                  </React.Fragment>
+                )
+              })}
+              {silentProducers.length > 2 && ` +${silentProducers.length - 2}`}
             </span>
+          )}
+          {page?.ownerLabel && (
+            ownerHref ? (
+              <Link href={ownerHref} className="type-page-meta shrink-0 text-muted-foreground-soft hover:text-primary-hover hover:underline" data-testid="page-owner-link">
+                {page.ownerLabel}
+              </Link>
+            ) : (
+              <span className="type-page-meta shrink-0 text-muted-foreground-soft">{page.ownerLabel}</span>
+            )
           )}
           <LiveIndicator liveness={live} />
         </div>

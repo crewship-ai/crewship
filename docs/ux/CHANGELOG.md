@@ -1,5 +1,6 @@
 # Shared UI primitives — one line per change, newest first
 
+- 2026-09-03 · wave 0 · `lib/entity-refs.ts` — `refHref("routine/x")` / `refLabel` turn stored `kind/slug` owner and producer refs into routes through entityHref; null for a kind with no page.
 - 2026-09-03 · wave 0 · `components/layout/sidebar-kit.tsx` + `.kit-tap` in globals.css — every kit control is 44px under a coarse pointer; add `kit-tap` to any new interactive element in a sidebar.
 - 2026-09-03 · wave 0 · `components/ui/status-pill.tsx` + `lib/format-status.ts` — THE status pill (dot + word, six tones) and the enum→word map. Replace every local pill map with it; add missing enums to format-status, never to a component.
 - 2026-09-03 · wave 0 · `lib/entity-links.ts` — `entityHref()` for crew, agent, chat, issue(s), routine(s), run, journal, page, credential(s), inbox, spend. Build every cross-link through it.

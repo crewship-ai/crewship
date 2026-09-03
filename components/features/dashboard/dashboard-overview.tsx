@@ -41,6 +41,7 @@ import { AnimatedNumber } from "@/components/ui/animated-number"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { Sparkline } from "@/components/ui/sparkline"
 import { InlineEmpty } from "@/components/ui/inline-empty"
+import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
 import { formatDuration, formatRelativeTime } from "@/lib/time"
 
@@ -254,7 +255,7 @@ export function AttentionStrip({
             </span>
           )}
         </div>
-        <Link href="/inbox" className="inline-flex items-center gap-1 text-label text-primary-hover hover:underline">
+        <Link href={entityHref({ kind: "inbox" })} className="inline-flex items-center gap-1 text-label text-primary-hover hover:underline">
           Open Inbox <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       </div>
@@ -839,11 +840,11 @@ export function buildAttentionItems({
   const scheduleProblems = inbox.filter((item) => item.kind === "schedule_missed")
   const held = heldCrews.length
 
-  if (approvals.length > 0) items.push({ id: "approvals", label: `${approvals.length} approval${approvals.length === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: "/inbox", tone: "warn", icon: Clock3 })
-  if (failures.length > 0) items.push({ id: "failures", label: `${failures.length} failed run${failures.length === 1 ? "" : "s"}`, detail: "Investigate and retry", href: "/inbox?kind=failed_run", tone: "danger", icon: XCircle })
+  if (approvals.length > 0) items.push({ id: "approvals", label: `${approvals.length} approval${approvals.length === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox" }), tone: "warn", icon: Clock3 })
+  if (failures.length > 0) items.push({ id: "failures", label: `${failures.length} failed run${failures.length === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: "failed_run" }), tone: "danger", icon: XCircle })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
   if (credentialGapCount > 0) items.push({ id: "credentials", label: `${credentialGapCount} credential tool gap${credentialGapCount === 1 ? "" : "s"}`, detail: "Install missing crew tools", href: "/credentials", tone: "blue", icon: KeyRound })
-  if (scheduleProblems.length > 0) items.push({ id: "schedules", label: `${scheduleProblems.length} schedule alert${scheduleProblems.length === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: "/inbox", tone: "warn", icon: CalendarClock })
+  if (scheduleProblems.length > 0) items.push({ id: "schedules", label: `${scheduleProblems.length} schedule alert${scheduleProblems.length === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: entityHref({ kind: "inbox" }), tone: "warn", icon: CalendarClock })
   return items
 }
 

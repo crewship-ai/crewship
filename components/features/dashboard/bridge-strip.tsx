@@ -11,6 +11,7 @@ import { AnimatedNumber } from "@/components/ui/animated-number"
 import { crewColor, formatCost } from "@/app/(dashboard)/dashboard-helpers"
 import { formatDuration, formatRelativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
+import { entityHref } from "@/lib/entity-links"
 import type { OutcomeKpiData } from "./dashboard-overview"
 
 export interface BridgeData {
@@ -169,7 +170,7 @@ export function BridgeStrip({
             </span>
             <span className="text-label text-muted-foreground">{data.attentionCount === 0 && data.attentionKnown ? "nothing blocked" : data.attentionKnown ? (data.attentionCount === 1 ? "item below" : "items below") : "checking…"}</span>
           </span>
-          <Link href="/inbox" className="inline-flex items-center gap-1 text-label text-primary-hover hover:underline">Open inbox <ArrowRight className="h-3 w-3" /></Link>
+          <Link href={entityHref({ kind: "inbox" })} className="inline-flex items-center gap-1 text-label text-primary-hover hover:underline">Open inbox <ArrowRight className="h-3 w-3" /></Link>
         </Cell>
 
         <Cell label="Next run" className="col-span-2 md:col-span-1">
