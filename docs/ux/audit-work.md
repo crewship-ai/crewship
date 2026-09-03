@@ -141,7 +141,7 @@ selection on refusal (`issues-list-view.tsx:449-480`), and a detail that uses
 | I-4 | list filtered to zero | With a search that matches nothing the board renders five empty columns and no "0 results, clear search"; the list shows "Create your first issue" even though issues exist. | `shots/scale/issues-search-1440.png` (search matched 10; the four empty columns read "No issues") |
 | I-5 | fetch errors | Every list fetch swallows errors (`orchestration-page-shell.tsx:41-46`, `orchestration-layout.tsx:335-369`): a 500 renders "No issues yet". In the detail, all six sub-resources fall back to `[]` (`issue-detail-surface.tsx:170-183`), so a failed comments call renders "Nobody has said anything about this issue yet." No retry anywhere. | code |
 | I-6 | unknown identifier | `/issues/ENG-9999` renders one grey sentence, "Issue not found", with no back link, retry or search (`issue-detail-surface.tsx:627-633`); the breadcrumb keeps the bad id. | `shots/baseline/issue-missing-1440.png` |
-| I-7 | bottom drawer | Six unlabeled icons on mobile (`orchestration-layout.tsx:1069`); "Select an issue to inspect its {tab}" as the empty pane; Runs tab shows raw `run.status` text (`bottom-panel/runs-tab.tsx:104`) and "Failed to load: HTTP 500" with no retry (`:79`); Docker tab is developer tooling on a client screen. | `shots/baseline/issues-390.png` (row of icons at the bottom) |
+| I-7 | bottom drawer | Six unlabeled icons on mobile (`orchestration-layout.tsx:1069`); "Select an issue to inspect its `{tab}`" as the empty pane; Runs tab shows raw `run.status` text (`bottom-panel/runs-tab.tsx:104`) and "Failed to load: HTTP 500" with no retry (`:79`); Docker tab is developer tooling on a client screen. | `shots/baseline/issues-390.png` (row of icons at the bottom) |
 | I-8 | leaks | Metadata band prints the raw cuid (`issue-card-detail.tsx:824`), the latest-run card's subtitle is the raw assignment id (`:932`) and its title lower-cases the enum, `Last run · in_progress` (`:931`); History rows print `a.action.replace(/_/g," ")` and raw `details` (`:1061-1064`); `via` shows `user_api` (`:822`). | code |
 | I-9 | mobile 390 | Explorer becomes an overlay, fine; but the collapsed-explorer button floats over the board toggle (`orchestration-layout.tsx:606-613`); the detail's rich-text toolbar wraps into three rows of 20 icons (`shots/baseline/issue-ENG-1-page-390.png`). Drawer tab targets are 28 px tall (`:1058`). | screenshots |
 | I-10 | disabled without reason | Bulk Status/Priority buttons and the create modal's submit have no stated reason when inert; `Run routine` disappears instead of disabling (`issue-card-detail.tsx:554-557`, acceptable because the Routine card explains). | code |
@@ -260,7 +260,7 @@ with `N routines · M runs`, `DashboardCard` for all six cards, `KpiCard`,
   SubBar `meta` slot (no live indicator at all).
 - §1 order: KPIs first, "Waiting on you" fourth.
 - Dead code in the folder: `routine-overview-tab.tsx`, `routines-filter-sidebar.tsx`
-  (which had the only "{n} of {N}" result count), `live-run-row.tsx` belongs to
+  (which had the only `{n} of {N}` result count), `live-run-row.tsx` belongs to
   the header bell.
 
 ### Scale (139 routines)
