@@ -159,6 +159,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   *Connect* binds a vault credential or an OAuth token to every agent in the
   crew. The page's rail now opens as an overlay on a phone. A crew's
   Settings → Integrations shows the auth state it used to leave blank.
+- **Deleting and revoking ask properly (#2318).** Deleting a crew or an agent,
+  removing a skill or a credential from an agent, deleting a notification
+  connection and revoking or removing a Composio account no longer use the
+  browser's `confirm()`. One dialog says what is lost, what is kept and where
+  to recover; deleting a crew asks for its slug typed back; a failed action
+  keeps the dialog open.
 - **List endpoints describe their window (#2318).** `GET /api/v1/crews`,
   `/agents` and `/credentials` return `X-Total-Count`, `X-Limit` and
   `X-Offset` (bodies unchanged) and take `?q=` for a server-side search;

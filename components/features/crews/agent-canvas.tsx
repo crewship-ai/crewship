@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Pill } from "@/components/ui/detail"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
@@ -287,9 +288,9 @@ export function AgentCanvas({
     }
   }, [agent, patch])
 
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const handleDelete = useCallback(async () => {
     if (!agent) return
-    if (!confirm(`Delete agent "${agent.name}"? Sessions and runs are kept for 30 days, then purged.`)) return
     try {
       const res = await apiFetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -297,6 +298,7 @@ export function AgentCanvas({
       onAgentChanged()
     } catch (err) {
       toast.error(`Delete failed: ${err instanceof Error ? err.message : err}`)
+      throw err
     }
   }, [agent, onAgentChanged, workspaceId])
 
@@ -434,7 +436,7 @@ export function AgentCanvas({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={handleDelete}
+                  onClick={() => setConfirmDelete(true)}
                   className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -575,6 +577,20 @@ export function AgentCanvas({
         </DialogContent>
       </Dialog>
 
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete agent ${agent.name}?`}
+        description="The agent stops and leaves its crew. It cannot be undone."
+        consequences={[
+          { tone: "lost", text: "Its credential and connector grants are removed" },
+          { tone: "kept", text: "Sessions and runs stay readable for 30 days, then are purged" },
+          { tone: "kept", text: "Issues it was assigned stay open, unassigned" },
+        ]}
+        confirmLabel="Delete agent"
+        destructive
+        onConfirm={handleDelete}
+      />
     </CanvasShell>
   )
 }
