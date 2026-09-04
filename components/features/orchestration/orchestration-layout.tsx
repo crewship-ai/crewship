@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
@@ -49,10 +49,9 @@ import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orch
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
-import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import { shouldRefetchForIssueEvent } from "@/components/features/orchestration/issue-realtime"
 import { useIssueDetail } from "@/hooks/use-issue-detail"
 import { useIssuesList } from "@/hooks/use-issues-list"
+import { useIssueBoardRealtime } from "@/hooks/use-issue-board-realtime"
 import { useProjectDetail } from "@/hooks/use-project-detail"
 import { parseSavedViews, applySavedView, issueViews } from "@/lib/saved-views"
 import { IssuesBoardInline, IssuesListInline } from "@/components/features/orchestration/issues-inline"
@@ -229,39 +228,14 @@ export function OrchestrationLayout({
   const [filterStatuses, setFilterStatuses] = useState<MissionStatus[]>([])
   const [filterPriority, setFilterPriority] = useState<IssuePriority | null>(null)
 
-  // Realtime: agents create and advance issues live, and until #2257 the
-  // board only reflected that on a manual reload — nothing here subscribed
-  // to any issue.* event. `onRefresh` is the same full-list refetch
-  // `mission.updated` already drives (missions is fetched workspace-wide;
-  // there is no per-crew endpoint to selectively refresh), debounced so a
-  // lead splitting a brief into five sub-issues in a few seconds fires one
-  // request, not five. shouldRefetchForIssueEvent additionally skips a
-  // refetch the active crew filter can already prove is off-screen.
-  const issueRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const debouncedIssueRefetch = useCallback(() => {
-    if (issueRefetchTimerRef.current !== null) clearTimeout(issueRefetchTimerRef.current)
-    issueRefetchTimerRef.current = setTimeout(() => {
-      issueRefetchTimerRef.current = null
-      onRefresh()
-    }, 200)
-  }, [onRefresh])
-  useEffect(() => () => {
-    if (issueRefetchTimerRef.current !== null) clearTimeout(issueRefetchTimerRef.current)
-  }, [])
-  const handleIssueBoardEvent = useCallback(
-    (event: RealtimeEvent) => {
-      if (shouldRefetchForIssueEvent(event.type, event.payload, filterCrewId)) {
-        debouncedIssueRefetch()
-      }
-    },
-    [filterCrewId, debouncedIssueRefetch],
-  )
-  useRealtimeEvent("issue.created", handleIssueBoardEvent)
-  useRealtimeEvent("issue.updated", handleIssueBoardEvent)
-  useRealtimeEvent("issue.status_changed", handleIssueBoardEvent)
-  useRealtimeEvent("issue.started", handleIssueBoardEvent)
-  useRealtimeEvent("issue.deleted", handleIssueBoardEvent)
-  useRealtimeEvent("issues.bulk_updated", handleIssueBoardEvent)
+  // Realtime: agents create and advance issues live. #2257 (PR #2310)
+  // registered the issue.* subscriptions for the first time, but its client
+  // half was incomplete — the debounced refetch called `onRefresh`
+  // (missions/crews/agents/connections), never the board's own separate
+  // `issues` state, so a live issue.created never actually repainted the
+  // board. useIssueBoardRealtime (hooks/use-issue-board-realtime.ts) is the
+  // fix, and carries the full reasoning + the realtime.reconnected half.
+  useIssueBoardRealtime({ filterCrewId, fetchIssues, onRefresh })
 
   const [showCreateIssue, setShowCreateIssue] = useState(false)
   const [showCreateProject, setShowCreateProject] = useState(false)

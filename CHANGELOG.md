@@ -722,6 +722,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   failure and names the likely cause (a scoped token, possibly transient)
   in the error message, with a retry action, rather than rendering an empty
   board that looks like a workspace with no issues.
+- **A live issue.created/issue.status_changed/etc. event still never
+  repainted the issues board — completing #2257's client half (#2257,
+  #2310).** #2310 registered the board's issue.* realtime subscriptions for
+  the first time, but wired the debounced refetch to `onRefresh`
+  (`OrchestrationPageShell.fetchData` — missions/crews/agents/connections),
+  never to the board's own separate `issues` state
+  (`useIssuesList`/`fetchIssues`, #2285/#2286 above). So the subscription
+  fired, Graph/Timeline data moved, and the issues board itself stayed
+  stale until a manual reload — exactly the symptom #2257 shipped to fix.
+  The wiring is now `hooks/use-issue-board-realtime.ts`, unit-testable
+  without mounting `OrchestrationLayout`: it calls both `fetchIssues` (the
+  board's pagination-preserving refetch) and `onRefresh` (still needed for
+  Graph/Timeline/Activity), debounced together, and also refreshes issues
+  on `realtime.reconnected` — which had the identical gap.
 - **A deploy-window blip no longer wedges the avatar-backfill latch shut for
   the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
   whenever a request 401s and `/api/auth/token/refresh` is itself
