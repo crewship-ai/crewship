@@ -1074,7 +1074,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   capability.
 
 - **Stop now reaches a run a mention started on an issue that was never
-  started (#TBD).** A mention (`@agent` on an issue's comments) can dispatch
+  started (#2320).** A mention (`@agent` on an issue's comments) can dispatch
   a run while the issue itself is still `BACKLOG`/`TODO` — #2279 attributes
   that run to the issue the same way a mission-task run is (`mission_id`,
   with the `chat_id`/`group_id` fallback) — but `POST
