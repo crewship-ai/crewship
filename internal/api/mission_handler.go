@@ -42,15 +42,29 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	limit, offset := parsePagination(r, 20, 100)
 
-	query := missionSelectColumns + `
-		WHERE m.crew_id = ? AND m.workspace_id = ?`
+	where := " WHERE m.crew_id = ? AND m.workspace_id = ?"
 	args := []interface{}{crewID, wsID}
 
 	if status != "" {
-		query += " AND m.status = ?"
+		where += " AND m.status = ?"
 		args = append(args, status)
 	}
-	query += " ORDER BY m.created_at DESC LIMIT ? OFFSET ?"
+	// The same contract as ListAll: `crewship mission list --crew X --search Y`
+	// reaches this handler, and until now `q` was dropped on the floor here
+	// while the footer had no total to print.
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		where += " AND (m.title LIKE ? OR m.identifier LIKE ?)"
+		args = append(args, "%"+q+"%", "%"+q+"%")
+	}
+
+	var total int
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM missions m JOIN agents a ON a.id = m.lead_agent_id"+where, args...).Scan(&total); err != nil {
+		internalError(w, r, h.logger, "count crew missions", err)
+		return
+	}
+
+	query := missionSelectColumns + where + " ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
@@ -93,6 +107,7 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []missionResponse{}
 	}
+	writeListMeta(w, total, limit, offset)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -129,7 +144,8 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := missionSelectColumns + where + " ORDER BY m.created_at DESC LIMIT ? OFFSET ?"
+	// m.id breaks created_at ties so two pages never share or skip a row.
+	query := missionSelectColumns + where + " ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?"
 	args = append(args, limit, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)

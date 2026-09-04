@@ -40,8 +40,9 @@ export interface UrlSelectionOptions {
 }
 
 export function readUrlSelection(params: URLSearchParams, key: string, aliases: readonly string[] = []): string | null {
-  const direct = params.get(key)
-  if (direct) return direct
+  // A key that is present, even empty, is the reader's word: `?slug=` next
+  // to `?routine=legacy` means nothing is selected, not the legacy value.
+  if (params.has(key)) return params.get(key) || null
   for (const alias of aliases) {
     const v = params.get(alias)
     if (v) return v

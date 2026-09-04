@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react"
 import { IssueCard } from "./issue-card"
 import { StatusIcon, statusLabel } from "./status-icon"
 import { InlineEmpty } from "@/components/ui/inline-empty"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { CirclePlus } from "lucide-react"
 import type { Mission, MissionStatus } from "@/lib/types/mission"
@@ -68,9 +69,9 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
           text="No issues yet. Create one here, or `crewship issue create --crew <slug> --title …`."
           action={
             onCreateClick ? (
-              <button type="button" onClick={onCreateClick} className="text-label text-primary-hover hover:underline">
+              <Button type="button" variant="link" size="xs" onClick={onCreateClick} className="h-auto p-0 text-label text-primary-hover">
                 New issue →
-              </button>
+              </Button>
             ) : undefined
           }
         />

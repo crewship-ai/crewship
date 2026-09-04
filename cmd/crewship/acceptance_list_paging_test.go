@@ -32,7 +32,15 @@ type pagedListStub struct {
 func (s *pagedListStub) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/issues" && r.URL.Path != "/api/v1/missions" {
+		if r.URL.Path == "/api/v1/crews" {
+			// resolveCrewID's slug scan, so `--crew backend-team` lands on the
+			// crew-scoped list below.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":"crew_1","slug":"backend-team","name":"Backend"}]`))
+			return
+		}
+		isMissions := r.URL.Path == "/api/v1/missions" || r.URL.Path == "/api/v1/crews/crew_1/missions"
+		if r.URL.Path != "/api/v1/issues" && !isMissions {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"detail":"no stub for ` + r.URL.Path + `"}`))
 			return
@@ -55,7 +63,7 @@ func (s *pagedListStub) start(t *testing.T) *httptest.Server {
 		w.Header().Set("X-Total-Count", "7")
 		w.Header().Set("X-Limit", limit)
 		w.Header().Set("X-Offset", offset)
-		if r.URL.Path == "/api/v1/missions" {
+		if isMissions {
 			_, _ = w.Write([]byte(`[{"id":"m1","title":"Harborlight launch","status":"IN_PROGRESS","lead_agent_slug":"alex","created_at":"2026-09-03T10:00:00Z"}]`))
 			return
 		}
@@ -157,5 +165,25 @@ func TestAcceptance_MissionList_PagingAndSearchReachServer(t *testing.T) {
 	}
 	if !strings.Contains(out, "showing 7–7 of 7") {
 		t.Fatalf("footer on the last page must not offer a next page; got:\n%s", out)
+	}
+}
+
+// `--crew` switches the command to GET /api/v1/crews/{id}/missions; that
+// handler used to drop `q` and publish no total, so `--crew X --search Y`
+// listed every mission of the crew under a footer that could not count.
+func TestAcceptance_MissionList_CrewScopedSearchReachesServer(t *testing.T) {
+	stub := &pagedListStub{}
+	srv := stub.start(t)
+
+	out, err := runPagedListCLI(t, srv.URL, "mission", "list", "--crew", "backend-team", "--search", "Harbor", "--limit", "1", "--offset", "6")
+	if err != nil {
+		t.Fatalf("mission list --crew: %v\n%s", err, out)
+	}
+	q := stub.lastQuery(t)
+	if q.Get("q") != "Harbor" || q.Get("limit") != "1" || q.Get("offset") != "6" {
+		t.Fatalf("search/paging did not reach the crew-scoped list: query=%v", q)
+	}
+	if !strings.Contains(out, "showing 7–7 of 7") {
+		t.Fatalf("footer must read the crew-scoped total; got:\n%s", out)
 	}
 }

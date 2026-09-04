@@ -68,6 +68,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// bucket and group_by each default, so only metric carries the `!`.
 	// openapi: query metric:string! window:string bucket:string group_by:string
 	r.mux.Handle("GET /api/v1/metrics/timeseries", authed(wsCtx(http.HandlerFunc(metricsH.Timeseries))))
+	// openapi: query limit:integer offset:integer q:string status:string
 	r.mux.Handle("GET /api/v1/crews/{crewId}/missions", authed(wsCtx(http.HandlerFunc(missions.List))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/missions", roleCreate, missions.Create)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/missions/{missionId}", authed(wsCtx(http.HandlerFunc(missions.Get))))

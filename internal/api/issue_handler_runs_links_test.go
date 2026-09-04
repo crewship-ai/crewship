@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 )
 
@@ -115,5 +116,42 @@ func TestIssueRuns_Pages(t *testing.T) {
 	}
 	if got := headerInt(t, rr, "X-Offset"); got != 1 {
 		t.Fatalf("X-Offset = %d, want 1", got)
+	}
+}
+
+// Assignments started in the same second used to page on sort_key alone, and
+// SQLite is free to order ties differently per query — a run could sit on two
+// pages while another sat on none. a.id DESC is the tiebreak.
+func TestIssueRuns_SameStartPagesCleanly(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	m1 := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "IN_PROGRESS")
+	all := []string{"asg_1", "asg_2", "asg_3", "asg_4", "asg_5"}
+	for _, id := range all {
+		seedMissionAssignment(t, h, wsID, m1, workerID, id, "COMPLETED", "ok", "2026-06-01T10:00:00Z", "2026-06-01T10:00:00Z")
+	}
+	seen := map[string]int{}
+	for offset := 0; offset < len(all); offset += 2 {
+		req := issueRunsRequest(t, userID, wsID, crewID, "ENG-1")
+		q := req.URL.Query()
+		q.Set("limit", "2")
+		q.Set("offset", strconv.Itoa(offset))
+		req.URL.RawQuery = q.Encode()
+		rr := httptest.NewRecorder()
+		h.ListRuns(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("offset %d: status = %d; body=%s", offset, rr.Code, rr.Body.String())
+		}
+		var page []issueRunDTO
+		if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+			t.Fatalf("offset %d: unmarshal: %v", offset, err)
+		}
+		for _, run := range page {
+			seen[run.ID]++
+		}
+	}
+	for _, id := range all {
+		if seen[id] != 1 {
+			t.Errorf("%s appeared on %d pages, want exactly 1", id, seen[id])
+		}
 	}
 }
