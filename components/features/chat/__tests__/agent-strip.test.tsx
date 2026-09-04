@@ -1,6 +1,8 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
+import { entityHref } from "@/lib/entity-links"
+
 import { AgentStrip, agentStatusPill } from "../agent-strip"
 
 vi.mock("@/components/ui/agent-avatar", () => ({
@@ -26,7 +28,9 @@ describe("AgentStrip", () => {
     expect(screen.getByRole("link", { name: /Ops/ }).getAttribute("href")).toBe("/crews?crew=ops")
     expect(screen.getByRole("link", { name: "3 skills" }).getAttribute("href")).toBe("/crews?agent=riley&tab=skills")
     expect(screen.getByRole("link", { name: "1 credential" }).getAttribute("href")).toBe("/crews?agent=riley&tab=credentials")
-    expect(screen.getByRole("link", { name: "runs" }).getAttribute("href")).toBe("/journal?agent=riley")
+    // Through entityHref, so the assertion follows the journal's query key
+    // rather than pinning one spelling of it.
+    expect(screen.getByRole("link", { name: "runs" }).getAttribute("href")).toBe(entityHref({ kind: "journal", agentSlug: "riley" }))
     // The model is a label, never the id.
     expect(screen.queryByText("claude-sonnet-4-5")).not.toBeInTheDocument()
   })
