@@ -785,6 +785,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   on the new head → rate-limit notices) failed on main (`reviewed`) and now
   reports `throttled`; the #2038/#1729 fixtures this shares logic with are
   untouched and stay green.
+- **A recent-order sort could put the earlier of two invocations first, in
+  the same second, for pipelines that had never raced a clock before
+  (#2294).** `internal/pipeline/store.go` wrote `created_at` / `updated_at` /
+  `last_invoked_at` with `time.RFC3339Nano`, which trims trailing zero
+  fractional digits — two instants in the same wall-clock second can then
+  serialise to strings of different width, and `List`'s
+  `ORDER BY COALESCE(last_invoked_at, created_at) DESC` compares them as
+  TEXT: `Z` (0x5A) sorts after `0` (0x30), so a shorter, more-trimmed string
+  can sort AFTER a longer one even though it encodes an earlier instant.
+  Pinned with a deterministic (clock-injected, not raced) test reproducing
+  the issue's own collision — `…18.1Z` (05:38:18.100000000) versus
+  `…18.10001Z` (05:38:18.100010000, 10µs later) — which failed on main for
+  both the `created_at` and `last_invoked_at` write paths.
+  `internal/pipeline` now writes every timestamp through the existing
+  `internal/tsformat` package (fixed 9-digit fraction, #990) instead of
+  `time.RFC3339Nano` directly, and a new migration
+  (`20260903190851_pipelines_timestamp_fixed_width`) pads every existing
+  `pipelines` and `pipeline_versions` row to match, so an old (trimmed) row
+  and a new (fixed-width) row compare correctly against each other.
+  `internal/pipeline/waitpoints.go` and `idempotency.go` carry the same
+  `time.RFC3339Nano` pattern under an explicit `tsformat:allow` and are left
+  alone here — see the PR for why each is judged safe on its own terms.
 - **A deploy-window blip no longer wedges the avatar-backfill latch shut for
   the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
   whenever a request 401s and `/api/auth/token/refresh` is itself
