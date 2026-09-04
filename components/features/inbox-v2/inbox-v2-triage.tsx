@@ -16,7 +16,7 @@ import { crewColor } from "@/app/(dashboard)/dashboard-helpers"
 import { cn } from "@/lib/utils"
 
 import { deadlineBucket, entryAgentRef, entryCrewId, entryTitle, outcomeStatus } from "./inbox-v2-derive"
-import type { InboxLookup, InboxV2Entry } from "./inbox-v2-types"
+import { resolveAgent, type InboxLookup, type InboxV2Entry } from "./inbox-v2-types"
 
 /**
  * The reading pane when nothing is open.
@@ -36,8 +36,8 @@ export function InboxTriage({
   lookup: InboxLookup
   live: boolean
   onOpen: (entry: InboxV2Entry) => void
-  /** Narrow the list to one crew (by its name — the search box matches it). */
-  onCrew: (crewName: string) => void
+  /** Narrow the list to one crew, by id — the crew facet. */
+  onCrew: (crewId: string) => void
 }) {
   const now = Date.now()
   const stats = useMemo(() => {
@@ -47,12 +47,13 @@ export function InboxTriage({
       return b === "hour" || b === "today"
     }).length
     const approvals = action.filter((e) => e.source === "approval" || e.inboxItem?.kind === "waitpoint").length
-    const byCrew = new Map<string, { name: string; color: string | null; count: number; unread: number }>()
+    const byCrew = new Map<string, { id: string | null; name: string; color: string | null; count: number; unread: number }>()
     for (const e of action) {
       const id = entryCrewId(e)
       const crew = id ? lookup.crewById.get(id) : null
-      const key = crew?.name ?? "No crew"
-      const cur = byCrew.get(key) ?? { name: key, color: crew?.color ?? null, count: 0, unread: 0 }
+      const key = crew?.id ?? (id ? `?${id}` : "none")
+      const name = crew?.name ?? (id ? (lookup.ready ? "Another crew" : "…") : "No crew")
+      const cur = byCrew.get(key) ?? { id: crew?.id ?? null, name, color: crew?.color ?? null, count: 0, unread: 0 }
       cur.count += 1
       if (e.unread) cur.unread += 1
       byCrew.set(key, cur)
@@ -111,10 +112,11 @@ export function InboxTriage({
               <div className="flex flex-col gap-2.5">
                 {stats.crews.map((c) => (
                   <button
-                    key={c.name}
+                    key={c.id ?? c.name}
                     type="button"
-                    onClick={() => onCrew(c.name)}
-                    className="group flex items-center gap-3 rounded-md text-left hover:bg-foreground/[0.03]"
+                    disabled={!c.id}
+                    onClick={() => { if (c.id) onCrew(c.id) }}
+                    className="group flex items-center gap-3 rounded-md text-left hover:bg-foreground/[0.03] disabled:cursor-default disabled:hover:bg-transparent"
                   >
                     <span className="flex w-28 shrink-0 items-center gap-1.5 truncate text-label">
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: crewColor(c.color) }} aria-hidden />
@@ -170,7 +172,7 @@ export function InboxTriage({
             <div className="flex flex-col">
               {recent.map((e) => {
                 const ref = entryAgentRef(e)
-                const agent = ref.slug ? lookup.agentBySlug.get(ref.slug) : null
+                const agent = resolveAgent(lookup, ref)
                 return (
                   <button key={e.key} type="button" onClick={() => onOpen(e)} className="flex items-center gap-2.5 border-b border-border/50 py-2 text-left last:border-0 hover:bg-foreground/[0.025]">
                     <StatusPill status={outcomeStatus(e.outcome) ?? "RESOLVED"} />

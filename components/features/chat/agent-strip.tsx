@@ -5,6 +5,7 @@ import { Sparkles } from "lucide-react"
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { StatusPill } from "@/components/ui/status-pill"
+import { formatStatus, type StatusTone } from "@/lib/format-status"
 import { entityHref } from "@/lib/entity-links"
 import { getModelLabel } from "@/lib/cli-adapters"
 import { crewColor } from "@/app/(dashboard)/dashboard-helpers"
@@ -34,15 +35,16 @@ export interface AgentStripAgent {
   _count?: { skills?: number; credentials?: number; chats?: number } | null
 }
 
-export function agentStatusPill(status: string | null | undefined): { label: string; tone: "blue" | "success" | "danger" | "muted"; live: boolean } {
-  switch ((status ?? "").toUpperCase()) {
-    case "RUNNING": return { label: "Running", tone: "blue", live: true }
-    case "ERROR": return { label: "Error", tone: "danger", live: false }
-    case "QUEUED": return { label: "Queued", tone: "muted", live: false }
-    case "OFFLINE": return { label: "Offline", tone: "muted", live: false }
-    case "": return { label: "Idle", tone: "success", live: false }
-    default: return { label: "Idle", tone: "success", live: false }
-  }
+/**
+ * The agent's status as the shared map spells it (lib/format-status), so the
+ * strip cannot call a paused or pending-review agent "Idle" while the crews
+ * canvas beside it says otherwise. An agent with no status at all is idle —
+ * that is the roster's default.
+ */
+export function agentStatusPill(status: string | null | undefined): { label: string; tone: StatusTone; live: boolean } {
+  const raw = (status ?? "").trim()
+  const meta = formatStatus(raw || "IDLE")
+  return { label: meta.label, tone: meta.tone, live: raw.toUpperCase() === "RUNNING" }
 }
 
 export function AgentStrip({
@@ -79,6 +81,8 @@ export function AgentStrip({
             st.tone === "blue" && "bg-primary shadow-[0_0_0_3px_rgba(30,123,254,0.25)]",
             st.tone === "success" && "bg-success",
             st.tone === "danger" && "bg-destructive",
+            st.tone === "warn" && "bg-warn",
+            st.tone === "purple" && "bg-purple",
             st.tone === "muted" && "bg-muted-foreground",
           )}
         />

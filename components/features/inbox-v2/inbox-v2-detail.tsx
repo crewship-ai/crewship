@@ -16,6 +16,7 @@ import { DetailCard } from "@/components/ui/detail"
 import { StatusPill } from "@/components/ui/status-pill"
 import { Textarea } from "@/components/ui/textarea"
 import type { InboxItem } from "@/hooks/use-inbox"
+import { useSession } from "@/hooks/use-auth"
 import { entityHref } from "@/lib/entity-links"
 import { formatDateTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
@@ -156,7 +157,8 @@ function ApprovalDetail({
   const row = entry.approval!
   const kind = entryKindPill(entry)
   const crew = row.crew_id ? lookup.crewById.get(row.crew_id) ?? null : null
-  const agent = row.agent_id ? [...lookup.agentBySlug.values()].find((a) => a.id === row.agent_id) ?? null : null
+  const agent = row.agent_id ? lookup.agentById.get(row.agent_id) ?? null : null
+  const me = useSession().data?.user?.id ?? null
   const [comment, setComment] = useState("")
   const [busy, setBusy] = useState<"approved" | "denied" | null>(null)
   useEffect(() => setComment(""), [row.id])
@@ -235,7 +237,7 @@ function ApprovalDetail({
           {!pending && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-sm">
               <StatusPill status={outcomeStatus(row.status) ?? row.status} />
-              {row.decided_by && <span className="text-muted-foreground">by a person</span>}
+              {row.decided_by && <span className="text-muted-foreground">{me && row.decided_by === me ? "by you" : "by a person"}</span>}
               {row.decided_at && <span className="text-muted-foreground">· {formatDateTime(row.decided_at)}</span>}
               {row.decision_comment && <p className="w-full text-muted-foreground">{row.decision_comment}</p>}
             </div>

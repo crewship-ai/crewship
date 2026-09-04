@@ -29,46 +29,8 @@ import {
 import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
-import type {
-  InboxAgentRef, InboxCrewRef, InboxLookup, InboxV2Confirmation, InboxV2Entry, InboxV2View,
-} from "./inbox-v2-types"
-
-/**
- * The crews and agents this workspace has, keyed the way rows name them.
- *
- * Rows carry a crew id and an agent slug; the page fetches each list once so
- * every row and the reading pane can say "Ops · Riley" with a colour and a
- * face. Both lists are the same endpoints the crews page reads; the setup
- * crew's agent is excluded by the server.
- */
-function useInboxLookup(workspaceId: string | null): InboxLookup {
-  const crews = useQuery<InboxCrewRef[]>({
-    queryKey: ["inbox-v2-crews", workspaceId ?? ""],
-    queryFn: async ({ signal }) => {
-      const res = await apiFetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId!)}&limit=500`, { signal })
-      if (!res.ok) throw new Error(`crews: ${res.status}`)
-      const rows = (await res.json()) as { id: string; name: string; slug: string; color?: string | null }[]
-      return (Array.isArray(rows) ? rows : []).map((c) => ({ id: c.id, name: c.name, slug: c.slug, color: c.color ?? null }))
-    },
-    enabled: Boolean(workspaceId),
-    staleTime: 60_000,
-  })
-  const agents = useQuery<InboxAgentRef[]>({
-    queryKey: ["inbox-v2-agents", workspaceId ?? ""],
-    queryFn: async ({ signal }) => {
-      const res = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId!)}&limit=500`, { signal })
-      if (!res.ok) throw new Error(`agents: ${res.status}`)
-      const rows = (await res.json()) as InboxAgentRef[]
-      return Array.isArray(rows) ? rows : []
-    },
-    enabled: Boolean(workspaceId),
-    staleTime: 60_000,
-  })
-  return useMemo(() => ({
-    crewById: new Map((crews.data ?? []).map((c) => [c.id, c])),
-    agentBySlug: new Map((agents.data ?? []).map((a) => [a.slug, a])),
-  }), [crews.data, agents.data])
-}
+import { useInboxLookup } from "@/components/features/inbox/use-inbox-lookup"
+import type { InboxV2Confirmation, InboxV2Entry, InboxV2View } from "./inbox-v2-types"
 
 export function InboxV2() {
   const { workspaceId, role } = useWorkspace()
@@ -397,7 +359,7 @@ export function InboxV2() {
               setView(holds)
               openEntry(entry)
             },
-            onCrew: (crewName) => setFilters({ ...filters, search: crewName }),
+            onCrew: (crewId) => setFilters({ ...filters, crew: crewId }),
           }}
         />
       </main>

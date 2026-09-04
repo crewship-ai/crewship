@@ -269,6 +269,9 @@ export interface InboxV2Filters {
   type: InboxV2TypeKey | null
   deadline: InboxV2DeadlineKey | null
   unreadOnly: boolean
+  /** One crew, by id — a real field on every source (README §4: a filter has
+   *  to be answerable). The triage's "By crew" sets it. */
+  crew: string | null
 }
 
 export const EMPTY_INBOX_V2_FILTERS: InboxV2Filters = {
@@ -276,6 +279,7 @@ export const EMPTY_INBOX_V2_FILTERS: InboxV2Filters = {
   type: null,
   deadline: null,
   unreadOnly: false,
+  crew: null,
 }
 
 /** The type facet a row answers to. A grouped advisory answers as its members. */
@@ -385,6 +389,7 @@ export function filterEntries(
     if (filters.unreadOnly && !entry.unread) return false
     if (filters.type && entryType(entry) !== filters.type) return false
     if (filters.deadline && deadlineBucket(entry, now) !== filters.deadline) return false
+    if (filters.crew && entryCrewId(entry) !== filters.crew) return false
     return matchesSearch(entry, filters.search)
   })
 }
@@ -524,15 +529,23 @@ export function entryCrewId(entry: InboxV2Entry): string | null {
  * display name in payload.agent_name (which is not on the roster yet), so
  * both are offered and the caller resolves what it can.
  */
-export function entryAgentRef(entry: InboxV2Entry): { slug: string | null; label: string } {
+export function entryAgentRef(entry: InboxV2Entry): { slug: string | null; id: string | null; label: string } {
   if (entry.source === "approval") {
-    const slug = entry.approval?.agent_id ?? null
-    return { slug, label: entry.subject }
+    // The queue names the agent by ID and `requested_by` is often a user id
+    // or empty; the label falls back to "Agent" rather than to a cuid.
+    const id = entry.approval?.agent_id ?? null
+    const label = entry.approval?.requested_by && !looksLikeId(entry.approval.requested_by) ? entry.approval.requested_by : "Agent"
+    return { slug: null, id, label }
   }
   const item = entry.inboxItem
-  if (!item) return { slug: null, label: entry.subject }
+  if (!item) return { slug: null, id: null, label: entry.subject }
   const slug = payloadString(item, "agent_slug") || (item.sender_type === "agent" ? item.sender_name ?? null : null)
-  return { slug: slug || null, label: entry.subject }
+  return { slug: slug || null, id: payloadString(item, "agent_id") || null, label: entry.subject }
+}
+
+/** A cuid-shaped string is an identifier, never a name to print. */
+export function looksLikeId(value: string): boolean {
+  return /^(c[a-z0-9]{20,}|ap_[0-9a-f]{12,}|[0-9a-f-]{32,})$/i.test(value)
 }
 
 /**

@@ -8,6 +8,11 @@ const refresh = vi.fn().mockResolvedValue(undefined)
 
 let role = "OWNER"
 
+// The pane names crews and agents through this lookup; the network it
+// would use is not this suite's concern.
+vi.mock("../use-inbox-lookup", () => ({
+  useInboxLookup: () => ({ crewById: new Map(), agentBySlug: new Map(), agentById: new Map(), ready: true }),
+}))
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", role }),
   useCurrentWorkspaceId: () => "ws-test",

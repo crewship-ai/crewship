@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { readTotalCount } from "@/hooks/use-paged-list"
 import { useWorkspace } from "@/hooks/use-workspace"
 
 import { httpError, scopeErrorMessage, useRetry } from "./scope-fetch"
@@ -238,10 +239,16 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
         // unknown slug comes back absent from that answer too, and the page
         // says so.
         if (ensureSlug && !rows.some((a) => a.slug === ensureSlug)) {
-          const r2 = await apiFetch(`${base}&include_setup=1`)
-          if (r2.ok) {
-            const more: A[] = await r2.json()
-            if (Array.isArray(more) && more.some((a) => a.slug === ensureSlug)) return more
+          // Guarded on its own: a second request that fails must not throw
+          // away the roster the first one already returned.
+          try {
+            const r2 = await apiFetch(`${base}&include_setup=1`)
+            if (r2.ok) {
+              const more: A[] = await r2.json()
+              if (Array.isArray(more) && more.some((a) => a.slug === ensureSlug)) return more
+            }
+          } catch {
+            /* the default roster stands */
           }
         }
         return rows
@@ -310,7 +317,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
             // same "the server did not say" as an absent header, and the
             // column already knows how to draw that.
             const counts = parseKindCounts(r.headers?.get(CHAT_KIND_COUNTS_HEADER) ?? null)
-            const total = readTotal(r.headers?.get("X-Total-Count") ?? null)
+            const total = r.headers ? readTotalCount(r.headers) : null
             return r.json().then((rows: unknown) => [rows, counts, total] as const)
           })
           .then(
@@ -372,15 +379,25 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   const loadAllFor = useCallback(
     async (agentId: string) => {
       if (!workspaceId) return
-      const r = await apiFetch(
-        `/api/v1/agents/${encodeURIComponent(agentId)}/chats` +
-          `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${AGENT_CHAT_PAGE_CEILING}` +
-          (kind ? `&kind=${encodeURIComponent(kind)}` : ""),
-      )
-      if (!r.ok) throw httpError(r.status)
-      const rows: unknown = await r.json()
-      const total = readTotal(r.headers?.get("X-Total-Count") ?? null)
-      setThreadsByAgent((prev) => ({ ...prev, [agentId]: Array.isArray(rows) ? (rows as ChatTreeThread[]) : [] }))
+      // Page through to the total: the server clamps a page at the ceiling,
+      // and an agent with more than a hundred routine steps would otherwise
+      // keep a fold that "Show all" never clears.
+      const all: ChatTreeThread[] = []
+      let total: number | null = null
+      for (let offset = 0; offset < AGENT_CHAT_SHOW_ALL_CAP; offset += AGENT_CHAT_PAGE_CEILING) {
+        const r = await apiFetch(
+          `/api/v1/agents/${encodeURIComponent(agentId)}/chats` +
+            `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${AGENT_CHAT_PAGE_CEILING}&offset=${offset}` +
+            (kind ? `&kind=${encodeURIComponent(kind)}` : ""),
+        )
+        if (!r.ok) throw httpError(r.status)
+        const rows: unknown = await r.json()
+        const page = Array.isArray(rows) ? (rows as ChatTreeThread[]) : []
+        all.push(...page)
+        total = readTotalCount(r.headers) ?? total
+        if (page.length < AGENT_CHAT_PAGE_CEILING || (total != null && all.length >= total)) break
+      }
+      setThreadsByAgent((prev) => ({ ...prev, [agentId]: all }))
       if (total != null) setTotalsByAgent((prev) => ({ ...prev, [agentId]: total }))
     },
     [workspaceId, kind],
@@ -404,13 +421,9 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
 
 /** The server's ceiling for one page of chats (internal/api/agent_chats.go). */
 export const AGENT_CHAT_PAGE_CEILING = 100
-
-/** Read X-Total-Count; null when the server did not say. */
-export function readTotal(raw: string | null): number | null {
-  if (raw == null) return null
-  const n = Number(raw)
-  return Number.isFinite(n) && n >= 0 ? n : null
-}
+/** How far "Show all" walks before it stops: ten pages is a thousand chats
+ *  in one scope for one agent, which is a search problem, not a column. */
+export const AGENT_CHAT_SHOW_ALL_CAP = 1000
 
 /**
  * The folds a column should show: for every agent whose page is shorter than
