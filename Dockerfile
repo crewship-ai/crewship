@@ -68,6 +68,11 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+# config/ is the embedded model catalog (config/embed.go + models.json),
+# imported by internal/llm since #2305 — a root-level package like schemas/,
+# and missing from this stage the same way (#2328). scripts/dockerfile-sources
+# fails the Go suite when a root package the binaries import is not copied.
+COPY config/ ./config/
 # schemas/ is a root-level package (embed.go + routine.v1.json) imported by
 # internal/api and cmd/crewship (#849). It must be copied like any other
 # source dir or the in-image `go build ./cmd/crewship` fails to resolve
