@@ -886,13 +886,14 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
 
               {tab === "notifications" && notifySection === "preferences" && (
                 <div className="p-4 md:p-6">
-                  <NotificationPrefsSection workspaceId={workspaceId} />
+                  <NotificationPrefsSection workspaceId={workspaceId} search={search} />
                 </div>
               )}
 
               {tab === "notifications" && notifySection === "deliveries" && (
                 <DeliveriesView
                   deliveries={deliveries}
+                  search={search}
                   rows={rows}
                   loading={deliveriesLoading}
                   error={deliveriesError}

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { filterDeliveries } from "../delivery-search"
 import { Clock, Lock } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
@@ -39,6 +40,8 @@ function reasonFor(d: NotificationDelivery): string {
 
 interface DeliveriesViewProps {
   deliveries: NotificationDelivery[]
+  /** The page's search box; matches category, title, status, error and channel. */
+  search?: string
   rows: ConnectionRow[]
   loading: boolean
   error: string | null
@@ -46,7 +49,8 @@ interface DeliveriesViewProps {
 }
 
 export function DeliveriesView({
-  deliveries,
+  deliveries: allDeliveries,
+  search = "",
   rows,
   loading,
   error,
@@ -57,6 +61,10 @@ export function DeliveriesView({
     for (const r of rows) m.set(r.id, r.name)
     return m
   }, [rows])
+  const deliveries = React.useMemo(
+    () => filterDeliveries(allDeliveries, search, (id) => channelName.get(id)),
+    [allDeliveries, search, channelName],
+  )
 
   if (forbidden) {
     return (
@@ -107,7 +115,7 @@ export function DeliveriesView({
               Deliveries
             </span>
             <span className="font-mono text-[10px] text-muted-foreground/60">
-              {deliveries.length} most recent
+              {search.trim() ? `${deliveries.length} of ${allDeliveries.length} match` : `${deliveries.length} most recent`}
             </span>
           </div>
           <div className="overflow-x-auto">

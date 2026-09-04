@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import { channelMatches } from "./delivery-search"
 import { Bell, BellOff, Check, Globe, Mail, MessageSquare, Send, VolumeX } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,8 @@ import { SettingsCard, SettingsEmpty } from "@/components/features/settings/shar
 
 interface NotificationPrefsSectionProps {
   workspaceId: string
+  /** The page's search box, narrowing the connection columns. */
+  search?: string
 }
 
 function channelIcon(type: string) {
@@ -33,7 +36,7 @@ function channelIcon(type: string) {
  * their own personal channels. A cell toggles off/immediate; the "*" mute
  * row overrides every cell for that channel.
  */
-export function NotificationPrefsSection({ workspaceId }: NotificationPrefsSectionProps) {
+export function NotificationPrefsSection({ workspaceId, search = "" }: NotificationPrefsSectionProps) {
   const { channels, loading: channelsLoading } = useNotificationChannels(workspaceId)
   const { cells, loading: prefsLoading, error, setCell } = useNotificationPrefs(workspaceId)
   const [pendingKey, setPendingKey] = useState<string | null>(null)
@@ -41,7 +44,10 @@ export function NotificationPrefsSection({ workspaceId }: NotificationPrefsSecti
   const { sendTest } = useNotificationChannels(workspaceId)
 
   const loading = channelsLoading || prefsLoading
-  const usableChannels = useMemo(() => channels.filter((c) => c.enabled), [channels])
+  const usableChannels = useMemo(
+    () => channels.filter((c) => c.enabled && channelMatches(c, search)),
+    [channels, search],
+  )
 
   const stateOf = useCallback(
     (category: string, channelId: string): PrefCell["state"] => {
