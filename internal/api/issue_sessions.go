@@ -17,10 +17,15 @@ package api
 //     shape (issue_handler_runs.go): resolve the issue, scope to its
 //     workspace, one query, newest-first.
 //
-// What is deliberately NOT here: the partial unique index that makes
-// assignments.session_id an exclusivity key (§9.4, B3), and anything about
-// delivery/wake (§9.3, B2). Both are named in the PRD as separate work
-// packages and this file does not reach for either.
+// What is deliberately NOT here: delivery/wake bookkeeping (§9.3, B2, lives
+// in issue_deliveries.go) and the state machine transitions of §10.1 beyond
+// 'pending'. The partial unique index that makes assignments.session_id an
+// exclusivity key (§9.4, B3 — idx_assignments_one_active_per_session,
+// 20260904172200_assignments_one_active_per_session.sql) DOES reach into
+// this file as of B3: resolveOrCreateIssueAgentSessionTx below is the half
+// of the insert-path rewrite that runs inside DispatchMention's transaction
+// alongside insertCappedAssignment (delegation_limits.go) — see that
+// function's doc comment for the other half.
 
 import (
 	"context"
@@ -38,8 +43,50 @@ import (
 // moves onto unconditionally) gets a kill switch.
 const issueAgentSessionsFlagKey = "issue_agent_sessions"
 
+// dbConn is the subset of *sql.DB / *sql.Tx the session-resolve and
+// assignment-insert write path shares. *sql.DB satisfies it for every
+// caller that has no reason to hold a transaction open; DispatchMention
+// (issue_mentions.go, B3 — §9.4) passes a *sql.Tx instead, so
+// resolveOrCreateIssueAgentSessionTx and insertCappedAssignment run inside
+// the SAME transaction as the fan-out guard — the thing §9.4 says the
+// exclusivity index "guards nothing" without. Modelled on auditExecer
+// (credential_audit.go), the same split for the same reason.
+type dbConn interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // resolveOrCreateIssueAgentSession returns the id of the (mission, agent)
 // session, creating it in state 'pending' if none exists yet.
+//
+// This is the flag-checked, no-transaction convenience form: it reads
+// issueAgentSessionsFlagKey (which needs a concrete *sql.DB —
+// featureflags.IsEnabled has no *sql.Tx overload) and, if enabled, delegates
+// the actual write to resolveOrCreateIssueAgentSessionTx. Kept for any
+// caller that has no reason to hold a transaction open across the call;
+// DispatchMention is not that caller as of B3 — see this function's sibling.
+//
+// Returns ("", nil) when the flag is off: the caller treats that exactly
+// like "no session" and simply does not set assignments.session_id, which
+// is the column's own default.
+func resolveOrCreateIssueAgentSession(ctx context.Context, db *sql.DB, workspaceID, missionID, agentID string) (string, error) {
+	enabled, err := featureflags.IsEnabled(ctx, db, workspaceID, issueAgentSessionsFlagKey)
+	if err != nil {
+		return "", err
+	}
+	if !enabled {
+		return "", nil
+	}
+	return resolveOrCreateIssueAgentSessionTx(ctx, db, workspaceID, missionID, agentID)
+}
+
+// resolveOrCreateIssueAgentSessionTx is resolveOrCreateIssueAgentSession's
+// write half, with the flag check split out so DispatchMention (B3) can run
+// it inside the SAME transaction as insertCappedAssignment's fan-out guard.
+// Callers are responsible for the flag check (see resolveOrCreateIssueAgentSession)
+// and for the transaction's lifetime — this function neither begins nor
+// commits/rolls one back.
 //
 // One UPSERT against UNIQUE(mission_id, agent_id)
 // (20260904095702_issue_agent_sessions.sql), not a SELECT-then-INSERT: two
@@ -53,21 +100,9 @@ const issueAgentSessionsFlagKey = "issue_agent_sessions"
 // high-water mark (§11.6) ONLY on the INSERT branch — an existing session
 // keeps whatever version it was opened under; re-stamping on every reuse
 // would defeat the point of pinning it.
-//
-// Returns ("", nil) when the flag (issueAgentSessionsFlagKey) is off: the
-// caller (DispatchMention) treats that exactly like "no session" and simply
-// does not set assignments.session_id, which is the column's own default.
-func resolveOrCreateIssueAgentSession(ctx context.Context, db *sql.DB, workspaceID, missionID, agentID string) (string, error) {
-	enabled, err := featureflags.IsEnabled(ctx, db, workspaceID, issueAgentSessionsFlagKey)
-	if err != nil {
-		return "", err
-	}
-	if !enabled {
-		return "", nil
-	}
-
+func resolveOrCreateIssueAgentSessionTx(ctx context.Context, conn dbConn, workspaceID, missionID, agentID string) (string, error) {
 	var agentVersion sql.NullInt64
-	if err := db.QueryRowContext(ctx,
+	if err := conn.QueryRowContext(ctx,
 		`SELECT MAX(version) FROM agent_config_history WHERE agent_id = ?`, agentID,
 	).Scan(&agentVersion); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
@@ -75,7 +110,7 @@ func resolveOrCreateIssueAgentSession(ctx context.Context, db *sql.DB, workspace
 
 	newID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = db.ExecContext(ctx, `
+	_, err := conn.ExecContext(ctx, `
 		INSERT INTO issue_agent_sessions
 		    (id, workspace_id, mission_id, agent_id, state, last_consumed_seq,
 		     agent_version, last_activity_at, created_at, updated_at)
@@ -87,7 +122,7 @@ func resolveOrCreateIssueAgentSession(ctx context.Context, db *sql.DB, workspace
 	}
 
 	var sessionID string
-	if err := db.QueryRowContext(ctx,
+	if err := conn.QueryRowContext(ctx,
 		`SELECT id FROM issue_agent_sessions WHERE mission_id = ? AND agent_id = ?`,
 		missionID, agentID,
 	).Scan(&sessionID); err != nil {

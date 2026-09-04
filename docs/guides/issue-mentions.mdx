@@ -180,17 +180,30 @@ Two more rules the dispatch inherits from the assign path:
 
 Written down on purpose (they are release conditions, not footnotes):
 
-- **A busy agent is woken later, not interrupted — but you are told either
-  way.** An agent can have one live run at a time. Mentioning it while it is
-  running — on this issue or any other — queues the mention behind the live
-  run; it is dispatched when that run ends, with the brief it would have had.
-  The mention never reaches the turn already in progress. Before this, a
-  second run for the same agent killed the first one mid-turn; queueing is
-  the fix, steering a live turn is future work. What changed: the delivery is
-  now recorded and acknowledged (`issue.delivery.acked`) the instant you
-  post, whether or not the agent is free — a busy agent still finishes its
-  current turn first, but you no longer have to guess whether the comment
-  was even received while you wait for it.
+- **A follow-up on the SAME issue never starts a second run — it is folded
+  into the one already going, when it can reach it.** One (issue, agent)
+  session may have at most one live run, enforced at the database level (a
+  partial unique index on `assignments.session_id`), not by a check-then-act
+  read that a fast second comment could race past. Mentioning the same agent
+  again while its run on THIS issue is still going does not queue a second
+  dispatch at all: the follow-up's brief is appended onto the active run's
+  own task, which reaches it if the run has not started its exec yet (still
+  admitted, or queued behind the agent's own per-agent slot below) — but not
+  a run whose exec is already under way, since there is no channel to inject
+  text into a turn already in progress (steering a live turn is future
+  work). Either way the delivery this follow-up belongs to is recorded,
+  acknowledged (`issue.delivery.acked`) the instant you post, and marked
+  consumed once that one run finishes — one run, not two, and nothing is
+  silently dropped even on the turns the append cannot reach.
+- **A busy agent is woken later, not interrupted, on a DIFFERENT issue.**
+  Beyond the same-session case above, an agent still has only one live run
+  at a time across every issue and chat it touches. Mentioning it while it
+  is busy on another issue queues the mention behind that live run; it is
+  dispatched as its OWN new run once the agent frees up, with the brief it
+  would have had. Before this existed, a second run for the same agent
+  killed the first one mid-turn; queueing is the fix. The delivery is
+  recorded and acknowledged the instant you post either way, so you are not
+  left guessing whether the comment was received while you wait.
 - **A chat message to an agent busy on an issue bounces.** The chat reports
   `agent_busy` rather than starting a second run into the same container.
   Wait for the run to finish, or watch it from the issue.

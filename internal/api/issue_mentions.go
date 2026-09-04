@@ -78,6 +78,14 @@ const (
 	mentionDispatchRefused    = "refused"
 	mentionDispatchSkipped    = "skipped"
 	mentionDispatchFailed     = "failed"
+	// mentionDispatchQueued is B3's outcome (§9.4/§17, #2339): the session's
+	// exclusivity slot was already held by a live run, so no new assignment
+	// was written — the delivery is attached to that run instead (see
+	// dispatchOne's *sessionBusyError branch) and consumed the ordinary way
+	// when it finishes. Distinct from mentionDispatchDispatched precisely
+	// because no NEW run was started for this delivery; an operator reading
+	// dispatch_state should be able to tell the two apart.
+	mentionDispatchQueued = "queued"
 )
 
 // mentionTaskMaxBody bounds how much of a comment is copied into the task an
@@ -486,6 +494,17 @@ func (m mentionRecorder) dispatchOne(ctx context.Context, mc mentionContext, men
 	case err == nil:
 		return mentionDispatchDispatched, id, ""
 	default:
+		// B3 (§9.4, #2339): the session's exclusivity slot was already
+		// held by a live run — id names it. Not a refusal (nobody said no
+		// to this work; it is already being done) and not a failure: the
+		// delivery is attached to the run id already returned and consumed
+		// the ordinary way when that run finishes. See
+		// DispatchMention's `if attached` branch for what "attached" does
+		// and does not deliver.
+		var busy *sessionBusyError
+		if errors.As(err, &busy) {
+			return mentionDispatchQueued, id, busy.Error()
+		}
 		var refusal dispatchRefusal
 		if errors.As(err, &refusal) {
 			// A gate saying no is not a failure of this code — it is the gate
@@ -545,7 +564,7 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 		commentVal = mc.CommentID
 	}
 	resolvedState := "failed"
-	if state == mentionDispatchDispatched {
+	if state == mentionDispatchDispatched || state == mentionDispatchQueued {
 		resolvedState = "consumed"
 	}
 	_, err := m.db.ExecContext(ctx, `
@@ -1025,36 +1044,77 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 		createdByUserID = req.AuthorID
 	}
 
-	// Resolve-or-create the (issue, target agent) session — §9.2, B1
-	// (#2332). This is the write path the accept line's "a mention reuses an
-	// existing session rather than creating a second" is proven against: the
-	// UPSERT behind resolveOrCreateIssueAgentSession is keyed on
-	// UNIQUE(mission_id, agent_id), so two mentions of the same agent on the
-	// same issue — however close together — resolve to the same row. Best-
-	// effort like the rest of this dispatch's bookkeeping (the journal emit
-	// above, the activity log below): a session lookup failure must not
-	// refuse a dispatch the caps have already approved. Empty when the
-	// issueAgentSessionsFlagKey flag is off.
-	sessionID, sessErr := resolveOrCreateIssueAgentSession(ctx, h.db, req.WorkspaceID, req.MissionID, target.ID)
-	if sessErr != nil {
-		h.logger.Warn("dispatch mention: resolve issue agent session", "error", sessErr,
-			"mission_id", req.MissionID, "agent_id", target.ID)
-	}
-
-	assignmentID, err := insertCappedAssignment(ctx, h.db, scope, lim, caller, cappedAssignment{
-		WorkspaceID:     req.WorkspaceID,
-		ChatID:          req.MissionID,
-		TargetID:        target.ID,
-		Task:            brief,
-		GroupID:         req.MissionID,
-		CreatedAt:       now,
-		MissionID:       req.MissionID,
-		AuthorAgentID:   authorAgentID,
-		CreatedByUserID: createdByUserID,
-		SessionID:       sessionID,
-	})
+	// Resolve-or-create the (issue, target agent) session and insert the new
+	// PENDING assignment for it inside ONE transaction — §9.2 (B1, #2332)
+	// for the session, §9.4 (B3, #2339) for making that resolve-or-create
+	// atomic with the insert it gates. See resolveSessionAndInsertAssignment's
+	// doc comment for why the two cannot be split across separate
+	// autocommit statements without reopening the TOCTOU the exclusivity
+	// index exists to close.
+	//
+	// attached reports the B3 case: idx_assignments_one_active_per_session
+	// already held this session's slot, so NO new assignment was written —
+	// assignmentID instead names the run already in flight. This dispatch
+	// call is a follow-up on a turn that has not finished yet, not a new
+	// turn, so it is folded into that run rather than started as a second
+	// one — see the `if attached` branch below for exactly what "folded
+	// in" means and does not mean.
+	assignmentID, attached, err := resolveSessionAndInsertAssignment(
+		ctx, h.db, h.logger, req.WorkspaceID, req.MissionID, target.ID,
+		scope, lim, caller, cappedAssignment{
+			WorkspaceID:     req.WorkspaceID,
+			ChatID:          req.MissionID,
+			TargetID:        target.ID,
+			Task:            brief,
+			GroupID:         req.MissionID,
+			CreatedAt:       now,
+			MissionID:       req.MissionID,
+			AuthorAgentID:   authorAgentID,
+			CreatedByUserID: createdByUserID,
+		})
 	if err != nil {
 		return "", err
+	}
+
+	if attached {
+		// The turn already running for this session absorbs the follow-up
+		// instead of a second exec starting. Deliberately NOT
+		// chatbridge.Bridge.Steer: Steer queues into the chat's
+		// CONVERSATION HISTORY for the next turn to read, but
+		// buildAssignmentRunRequest sets req.SkipConvHistory = true
+		// unconditionally for every assignment/mention run
+		// (assignments_run.go — F13), so history queued there is never read
+		// back on this run shape, next turn or otherwise. Steering into it
+		// would look like a real queue while silently guaranteeing the text
+		// is never seen — worse than doing nothing.
+		//
+		// What actually happens instead lives in sessionBusyErrorFor
+		// (delegation_limits.go): the brief this follow-up would have used
+		// is appended onto the ACTIVE run's own `task` column, in the same
+		// transaction that discovered the session was busy. That reaches a
+		// run whose exec has not started yet (still PENDING, or QUEUED
+		// behind chatbridge.AgentRunLock and picked up again by
+		// dispatchByID, which reads task fresh from the row) — but not a
+		// run whose exec is already under way, since runAssignment's
+		// goroutine was handed body.Task as a Go value, not a row id it
+		// re-reads. There is no live-injection channel anywhere in this
+		// codebase (non-goal N1); B3 does not add one. That limit is
+		// written up in docs/guides/issue-mentions.mdx.
+		//
+		// Either way the delivery this call is servicing still lands on
+		// assignmentID — dispatchOne (below) records it as queued rather
+		// than dispatched, and persist sets claimed_by_run_id to it, so
+		// consumeDeliveriesForRun marks it consumed the ordinary way when
+		// that run finishes. "one run, two consumed deliveries" (the B3
+		// accept line) holds regardless of whether the append above
+		// reached the model.
+		h.logger.Info("mention queued behind the session's active run",
+			"assignment_id", assignmentID,
+			"mission_id", req.MissionID,
+			"comment_id", req.CommentID,
+			"target", target.Slug,
+		)
+		return assignmentID, &sessionBusyError{SessionID: "", ActiveAssignmentID: assignmentID}
 	}
 
 	body := createAssignmentBody{

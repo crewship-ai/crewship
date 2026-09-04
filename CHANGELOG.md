@@ -227,6 +227,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   mention history outweighs the automatic-recovery benefit, so a delivery
   left `claimed` across a restore stays that way until B4's lease sweep
   ships (`internal/backup/intent.go`'s F37 comment on the table).
+- **One active turn per session — a mention on a busy issue folds into the run already going instead of racing a second one (#TBD).**
+  A partial unique index, `idx_assignments_one_active_per_session` on
+  `assignments(session_id) WHERE status IN ('PENDING','QUEUED','RUNNING')`,
+  makes invariant I2 (PRD-ISSUES-AND-ROUTINES-2026 §9.4, work package B3)
+  a database guarantee rather than a read-then-write check a fast second
+  comment could still race past. `resolveOrCreateIssueAgentSession` and
+  `insertCappedAssignment` now run inside one transaction
+  (`resolveSessionAndInsertAssignment`), closing the exact TOCTOU window
+  §9.4 named between resolving a session and inserting its run. A second
+  `@mention` that lands while the session's run is still `PENDING`,
+  `QUEUED` or `RUNNING` never starts a second run: `insertCappedAssignment`
+  turns the constraint violation into a typed `*sessionBusyError` naming
+  the run already holding the slot, rather than a raw SQL error reaching
+  the caller, and the follow-up's brief is appended onto that run's own
+  `task` so a run that has not yet started its exec still sees it — a run
+  already executing does not, since there is no live-injection channel
+  into a turn already in progress (unchanged; steering a live turn is
+  still future work). The delivery either mention created is attached to
+  the one run either way and is marked `consumed` through the existing B2
+  path once that run finishes: two comments 2s apart produce one run and
+  two consumed deliveries. `docs/guides/issue-mentions.mdx`'s known limits
+  and `docs/api-reference/issues.mdx`'s Sessions section say what changed.
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,
