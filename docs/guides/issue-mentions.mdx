@@ -180,21 +180,23 @@ Two more rules the dispatch inherits from the assign path:
 
 Written down on purpose (they are release conditions, not footnotes):
 
-- **A follow-up on the SAME issue never starts a second run — it is folded
-  into the one already going, when it can reach it.** One (issue, agent)
+- **A follow-up on the SAME issue never starts a second run — it waits for
+  the one already going, then rides the NEXT run.** One (issue, agent)
   session may have at most one live run, enforced at the database level (a
   partial unique index on `assignments.session_id`), not by a check-then-act
   read that a fast second comment could race past. Mentioning the same agent
   again while its run on THIS issue is still going does not queue a second
-  dispatch at all: the follow-up's brief is appended onto the active run's
-  own task, which reaches it if the run has not started its exec yet (still
-  admitted, or queued behind the agent's own per-agent slot below) — but not
-  a run whose exec is already under way, since there is no channel to inject
-  text into a turn already in progress (steering a live turn is future
-  work). Either way the delivery this follow-up belongs to is recorded,
-  acknowledged (`issue.delivery.acked`) the instant you post, and marked
-  consumed once that one run finishes — one run, not two, and nothing is
-  silently dropped even on the turns the append cannot reach.
+  dispatch: the delivery is recorded and acknowledged
+  (`issue.delivery.acked`) the instant you post, but it is left unclaimed —
+  the run already in progress cannot see it (there is no channel to inject
+  text into a turn already under way; steering a live turn is future work,
+  and there is no "re-read the task mid-run" path either). The moment that
+  run actually finishes, every comment queued behind it — one or several —
+  is folded into exactly ONE new run, with all of their text in that run's
+  own brief before its exec starts. So a burst of five follow-ups while an
+  agent is busy produces one extra run, not five, and not zero: nothing is
+  silently dropped, and nothing is marked read before an agent has actually
+  read it.
 - **A busy agent is woken later, not interrupted, on a DIFFERENT issue.**
   Beyond the same-session case above, an agent still has only one live run
   at a time across every issue and chat it touches. Mentioning it while it

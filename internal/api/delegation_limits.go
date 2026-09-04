@@ -640,7 +640,7 @@ func insertCappedAssignment(
 		// own WHERE excludes NULL session_id rows entirely (no two NULLs
 		// collide in a unique index).
 		if a.SessionID != "" && isSessionExclusivityErr(err) {
-			if busyErr := sessionBusyErrorFor(ctx, db, a.SessionID, a.Task); busyErr != nil {
+			if busyErr := sessionBusyErrorFor(ctx, db, a.SessionID); busyErr != nil {
 				return "", busyErr
 			}
 			// The lookup found no in-flight run for this session after
@@ -675,10 +675,17 @@ func insertCappedAssignment(
 // agent should not do this work at all"; a session-busy result means "this
 // exact work is already being done, by the run this error names". The two
 // need different handling at the call site: a refusal is reported to the
-// agent that asked; a session-busy result is absorbed into the run already
-// in flight (steered into its chat, its delivery attached to
-// ActiveAssignmentID) and never surfaces as a dispatch failure at all — see
-// DispatchMention (issue_mentions.go).
+// agent that asked; a session-busy result is absorbed WITHOUT ever claiming
+// the delivery under ActiveAssignmentID — that run cannot see it (see
+// sessionBusyErrorFor's doc comment for why not, and the review finding
+// that killed an earlier revision's task-append attempt) — so
+// mentionRecorder.deliverAndDispatch (issue_mentions.go) releases the
+// delivery back to 'pending' instead. dispatchQueuedFollowUpsForSession
+// (assignments_run.go), called from finishAssignment right after
+// consumeDeliveriesForRun, is what actually picks pending deliveries back
+// up once ActiveAssignmentID finishes and the session's slot is free again.
+// A session-busy result never surfaces as a dispatch failure to the human
+// who wrote the comment either way — see DispatchMention.
 type sessionBusyError struct {
 	SessionID          string
 	ActiveAssignmentID string
@@ -710,42 +717,38 @@ func isSessionExclusivityErr(err error) bool {
 }
 
 // sessionBusyErrorFor resolves which run currently holds sessionID's
-// exclusivity slot and — this is B3's answer to "the existing steering
-// queue" the PRD's own wording assumes — appends followUpTask onto that
-// run's OWN task column, rather than routing it through
-// internal/chatbridge/steer.go.
+// exclusivity slot.
 //
-// That deviation from the PRD's literal wording is deliberate and is
-// written up in the PR description: chatbridge.Steer queues a message into
-// the chat's CONVERSATION HISTORY for the next turn to read, but every
-// assignment/mention run sets req.SkipConvHistory = true unconditionally
-// (buildAssignmentRunRequest, assignments_run.go — F13), so a run dispatched
-// through DispatchMention never reads that history back on any turn, next or
-// otherwise. Steering into it would durably persist the follow-up while
-// silently guaranteeing it is never seen — worse than not queuing it at all.
-// The task column IS read fresh on every actual dispatch (dispatchByID
-// "loads every input runAssignment needs straight from the row",
-// assignments_dispatch_pump.go), so appending there is the mechanism that
-// can actually deliver text on this run shape.
+// It used to also append the follow-up's brief onto that run's OWN task
+// column, on the theory that dispatchByID re-reads task fresh on any actual
+// (re)dispatch. Review on #2342 found that claim false in the case that
+// actually matters: runAssignment's goroutine captures body.Task as a Go
+// VALUE at the moment DispatchMention spawns it (assignments_run.go), not a
+// row id it re-reads, so the append reached only a row that happened to be
+// re-queued through dispatchByID — not the ordinary RUNNING or
+// freshly-PENDING winner golden scenario 3 is about. Meanwhile the caller
+// was claiming the follow-up's delivery under ActiveAssignmentID
+// regardless, so consumeDeliveriesForRun marked it 'consumed' once that run
+// finished whether or not the agent had ever seen the text — exactly the
+// "consumed at the next step boundary" the PRD's own wording forbids being
+// a lie. Deleted rather than fixed in place: there is no live-injection
+// channel into an in-progress turn anywhere in this codebase (non-goal N1),
+// so nothing this function could still reach makes the claim true.
 //
-// The honest limit, stated here and in docs/guides/issue-mentions.mdx: this
-// reaches a run that has not yet reached its own exec — still PENDING, or
-// QUEUED behind chatbridge.AgentRunLock/the crew budget and picked back up
-// by dispatchByID — because DispatchMention hands runAssignment's goroutine
-// body.Task as a Go value, not a row id it re-reads, so a run whose exec has
-// ALREADY started captured its own copy before this UPDATE runs and will
-// never see it. There is no live-injection channel anywhere in this
-// codebase (non-goal N1); B3 does not invent one. What it guarantees is the
-// bookkeeping half regardless: the delivery this follow-up belongs to is
-// still attached to ActiveAssignmentID (by the caller) and consumed when
-// that run finishes, so "one run, two consumed deliveries" (the accept
-// line) holds even on the turns this append cannot reach.
+// What actually reaches the agent is dispatchQueuedFollowUpsForSession
+// (assignments_run.go, called from finishAssignment): the caller
+// (issue_mentions.go's deliverAndDispatch) leaves this delivery 'pending'
+// instead of claiming it here, and once ActiveAssignmentID finishes —
+// freeing the session's slot — every 'pending' delivery for the session is
+// folded into ONE new, real dispatch and claimed under THAT run, which
+// therefore really does have the text in its own task/brief before its
+// exec starts.
 //
 // Uses the SAME conn the failed INSERT ran on — when that is a *sql.Tx
-// (DispatchMention's case), this read-then-write is inside the one write
-// transaction SQLite serialises every writer through, so it sees the exact
-// state the failed INSERT collided with, not a state some other writer has
-// since moved on from.
+// (DispatchMention's case), this read is inside the one write transaction
+// SQLite serialises every writer through, so it sees the exact state the
+// failed INSERT collided with, not a state some other writer has since
+// moved on from.
 //
 // Returns nil (not an error) when no in-flight row is found: the row that
 // won the race must have reached a terminal status in the instant between
@@ -753,7 +756,7 @@ func isSessionExclusivityErr(err error) bool {
 // solve — the caller (insertCappedAssignment) falls back to the raw
 // constraint error, which is a true statement (the INSERT really did lose)
 // even though the slot has since freed up again.
-func sessionBusyErrorFor(ctx context.Context, db dbConn, sessionID, followUpTask string) *sessionBusyError {
+func sessionBusyErrorFor(ctx context.Context, db dbConn, sessionID string) *sessionBusyError {
 	var activeID string
 	err := db.QueryRowContext(ctx, `
 		SELECT id FROM assignments
@@ -761,16 +764,6 @@ func sessionBusyErrorFor(ctx context.Context, db dbConn, sessionID, followUpTask
 		 ORDER BY created_at DESC LIMIT 1`, sessionID).Scan(&activeID)
 	if err != nil || activeID == "" {
 		return nil
-	}
-	if followUpTask != "" {
-		// Best-effort: even a failed UPDATE here does not orphan anything —
-		// the delivery still gets attached to ActiveAssignmentID by the
-		// caller (issue_mentions.go) and consumed when that run finishes,
-		// which is the part the accept line actually requires.
-		_, _ = db.ExecContext(ctx,
-			`UPDATE assignments SET task = task || ? WHERE id = ?`,
-			"\n\n---\nFollow-up received while this run was already in progress:\n"+followUpTask,
-			activeID)
 	}
 	return &sessionBusyError{SessionID: sessionID, ActiveAssignmentID: activeID}
 }
@@ -792,14 +785,15 @@ func sessionBusyErrorFor(ctx context.Context, db dbConn, sessionID, followUpTask
 //     (idx_assignments_one_active_per_session, 20260904172200_assignments_one_active_per_session.sql):
 //     no new row is written; (existingRunID, true, sessionID, nil) is
 //     returned instead, so the caller (DispatchMention) treats the
-//     follow-up as belonging to the run already in flight — its brief
-//     appended onto that run's task (sessionBusyErrorFor), its delivery
-//     attached to that run — rather than as a dispatch failure (§10.5).
-//     sessionID here is the REAL id resolveOrCreateIssueAgentSessionTx
-//     resolved, not the empty string a caller that only kept the bool
-//     would be left rebuilding a *sessionBusyError with — a bug caught in
-//     review on #2342 (the "attached" branch was constructing one with
-//     SessionID left blank).
+//     follow-up as belonging to the run already in flight rather than as a
+//     dispatch failure (§10.5) — WITHOUT claiming its delivery under that
+//     run (see sessionBusyErrorFor and dispatchQueuedFollowUpsForSession,
+//     assignments_run.go, for why not and what happens instead). sessionID
+//     here is the REAL id resolveOrCreateIssueAgentSessionTx resolved, not
+//     the empty string a caller that only kept the bool would be left
+//     rebuilding a *sessionBusyError with — a bug caught in review on
+//     #2342 (the "attached" branch was constructing one with SessionID
+//     left blank).
 //   - a flag-read/begin-tx/session-resolve fault falls back to the
 //     session-less insert (below): (id, false, "", err).
 //   - anything else (a DB fault, a fan-out/depth refusal) returns the error

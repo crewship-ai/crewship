@@ -33,6 +33,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -223,6 +224,38 @@ func failClaimedDelivery(ctx context.Context, db *sql.DB, deliveryID string) (bo
 	return n > 0, nil
 }
 
+// releaseClaimedDelivery reverts a delivery from 'claimed' back to
+// 'pending' — the CAS deliverAndDispatch (issue_mentions.go) uses when
+// dispatch turned out to be a B3 session-busy result
+// (mentionDispatchQueued, §9.4, #2339).
+//
+// claimDelivery has to run BEFORE the dispatch attempt (it is what
+// collapses concurrent identical redeliveries of the SAME event to one
+// winner — see its own doc comment), so by the time a session-busy result
+// comes back the delivery is already 'claimed'. But the run that result
+// names is not going to consume it — it is the run already in flight, and
+// it cannot see a comment that arrived after its own exec started.
+// Review on #2342 caught an earlier revision claiming it under that run
+// anyway: consumeDeliveriesForRun would then mark it 'consumed' the moment
+// that run finished, regardless of whether anything had actually read the
+// text. 'pending', not 'failed': the work still needs doing.
+// dispatchQueuedFollowUpsForSession (assignments_run.go) picks 'pending'
+// rows for the (mission, agent) pair back up once the session's active run
+// actually finishes and folds them into one new, real dispatch.
+func releaseClaimedDelivery(ctx context.Context, db *sql.DB, deliveryID string) (bool, error) {
+	res, err := db.ExecContext(ctx, `
+		UPDATE mission_comment_mentions SET state = 'pending'
+		WHERE id = ? AND state = 'claimed'`, deliveryID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // abandonPendingDelivery resolves a delivery that never got claimed because
 // the claim CAS itself errored (SQLITE_BUSY or similar) — as distinct from
 // LOSING the claim race (claimDelivery's ordinary (false, nil), handled by
@@ -265,6 +298,44 @@ func consumeDeliveriesForRun(ctx context.Context, db *sql.DB, runID string) (int
 	res, err := db.ExecContext(ctx, `
 		UPDATE mission_comment_mentions SET state = 'consumed'
 		WHERE claimed_by_run_id = ? AND state = 'claimed'`, runID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// claimPendingDeliveriesByID claims a specific, pre-selected set of
+// 'pending' deliveries under runID in ONE statement — state and
+// claimed_by_run_id together, so a failure partway through never leaves a
+// delivery 'claimed' with no run that will ever consume it (the same class
+// of gap attachDeliveryRun's doc comment names for the two-write shape an
+// earlier revision of THIS path had).
+//
+// Used by dispatchQueuedFollowUpsForSession (assignments_run.go) with the
+// EXACT ids its own SELECT (pendingFollowUpsFor) just read — not a fresh
+// `WHERE mission_id=? AND agent_id=? AND state='pending'` predicate at
+// claim time, which would also sweep up a delivery from a brand-new
+// mention that arrived in the split second between that SELECT and this
+// UPDATE: a comment whose text never made it into the brief this run was
+// just given, claimed under it anyway, and later marked 'consumed' without
+// ever being read — precisely the lie review caught elsewhere on this
+// path. Passing exact ids closes that window: a delivery not in the list
+// stays 'pending' for the next run to finish on this session to pick up.
+func claimPendingDeliveriesByID(ctx context.Context, db *sql.DB, deliveryIDs []string, runID string) (int64, error) {
+	if len(deliveryIDs) == 0 || runID == "" {
+		return 0, nil
+	}
+	placeholders := make([]string, len(deliveryIDs))
+	args := make([]any, 0, len(deliveryIDs)+1)
+	args = append(args, runID)
+	for i, id := range deliveryIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	res, err := db.ExecContext(ctx,
+		`UPDATE mission_comment_mentions SET state = 'claimed', claimed_by_run_id = ?
+		  WHERE state = 'pending' AND id IN (`+strings.Join(placeholders, ",")+`)`,
+		args...)
 	if err != nil {
 		return 0, err
 	}

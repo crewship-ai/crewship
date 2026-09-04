@@ -1,7 +1,7 @@
 package api
 
-// TestMentions_FollowUpDuringActiveSessionAttachesToTheSameRun is the
-// delivery-consumption half of B3's accept line (PRD-ISSUES-AND-ROUTINES-
+// TestMentions_FollowUpDuringActiveSessionIsQueuedNotClaimedByTheRunInFlight
+// is the mentionRecorder half of B3's accept line (PRD-ISSUES-AND-ROUTINES-
 // 2026 §9.4/§17, #2339):
 //
 //	"two comments 2s apart produce one run and two consumed deliveries"
@@ -9,22 +9,31 @@ package api
 // The DB-level half (the exclusivity index itself, and
 // resolveSessionAndInsertAssignment's no-TOCTOU insert path) is proven
 // directly against delegation_limits.go in delegation_limits_session_test.go.
-// This file proves the OTHER half: that mentionRecorder — the caller of
-// DispatchMention — turns a *sessionBusyError into a delivery that attaches
-// to the run already in flight and is marked consumed the ordinary way
-// (consumeDeliveriesForRun, assignments_run.go's finishAssignment) once that
-// run finishes, rather than into a second run or a lost delivery.
+// The "eventually consumed" half — a *sessionBusyError's delivery folded
+// into one new run once the run it collided with actually finishes, with
+// the follow-up text reaching that new run's own brief — is proven against
+// the real dispatch path in issue_session_followups_test.go.
+//
+// THIS file proves the piece between those two: that mentionRecorder — the
+// caller of DispatchMention — reads a *sessionBusyError and releases the
+// delivery back to 'pending' (releaseClaimedDelivery, issue_deliveries.go)
+// rather than claiming it under the run already in flight. An earlier
+// revision claimed it there instead, and review on #2342 caught the
+// consequence: consumeDeliveriesForRun would mark it 'consumed' the moment
+// that run finished, whether or not the run had ever seen the second
+// comment — a run captures its own task as a Go value at dispatch time
+// (assignments_run.go) and never re-reads the row, so it could not have.
 //
 // Uses a hand-written stub dispatcher rather than the real AssignmentHandler
 // because the real one's DispatchMention races a background goroutine
 // (runAssignment) that this repo's other mention tests rely on finishing
-// fast (orch is nil in every test fixture, so the run fails almost
-// immediately) — too fast to reliably observe an in-flight second mention
-// without a flaky sleep. The stub instead deterministically reproduces the
-// exact contract DispatchMention promises under B3: first call succeeds
-// with a fresh id; every later call for the SAME target returns that same
-// id wrapped in a *sessionBusyError, exactly as
-// resolveSessionAndInsertAssignment does once the index is engaged.
+// fast (no resolver wired in any test fixture) — too fast to reliably
+// observe an in-flight second mention without a flaky sleep. The stub
+// instead deterministically reproduces the exact contract DispatchMention
+// promises under B3: first call succeeds with a fresh id; every later call
+// for the SAME target returns that same id wrapped in a *sessionBusyError,
+// exactly as resolveSessionAndInsertAssignment does once the index is
+// engaged.
 
 import (
 	"context"
@@ -59,7 +68,7 @@ func (s *sessionBusyStubDispatcher) DispatchMention(_ context.Context, req menti
 	return id, nil
 }
 
-func TestMentions_FollowUpDuringActiveSessionAttachesToTheSameRun(t *testing.T) {
+func TestMentions_FollowUpDuringActiveSessionIsQueuedNotClaimedByTheRunInFlight(t *testing.T) {
 	f := setupMentionFixture(t)
 
 	stub := &sessionBusyStubDispatcher{}
@@ -75,8 +84,8 @@ func TestMentions_FollowUpDuringActiveSessionAttachesToTheSameRun(t *testing.T) 
 	}
 	// The stub never inserts into `assignments` itself (it is not the real
 	// AssignmentHandler) — seed the row its id names so the FK on
-	// mission_comment_mentions.assignment_id/claimed_by_run_id is satisfied,
-	// matching what a real DispatchMention call would have written.
+	// mission_comment_mentions.assignment_id is satisfied, matching what a
+	// real DispatchMention call would have written.
 	execOrFatal(t, f.db, `
 		INSERT INTO assignments
 		    (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, created_at, mission_id)
@@ -87,8 +96,9 @@ func TestMentions_FollowUpDuringActiveSessionAttachesToTheSameRun(t *testing.T) 
 	// fresh dispatch.
 	f.comment(t, "first "+mentionToken("lead", f.target))
 	// Comment 2, "2s later": the session's slot is already held by
-	// activeRunID (per the stub's contract) — must attach, not dispatch a
-	// second run.
+	// activeRunID (per the stub's contract) — must be queued, not folded
+	// into a second dispatch, and NOT claimed under a run that cannot see
+	// it.
 	f.comment(t, "second "+mentionToken("lead", f.target))
 
 	if got := stub.calls(); got != 2 {
@@ -107,7 +117,6 @@ func TestMentions_FollowUpDuringActiveSessionAttachesToTheSameRun(t *testing.T) 
 		t.Fatalf("assignments for this mission = %d, want 1 (\"one run\")", runCount)
 	}
 
-	// Both deliveries claimed the SAME run.
 	rows, err := f.db.Query(`
 		SELECT id, dispatch_state, state, COALESCE(claimed_by_run_id,'')
 		  FROM mission_comment_mentions WHERE mission_id = ? ORDER BY position, created_at`, f.missionID)
@@ -127,53 +136,47 @@ func TestMentions_FollowUpDuringActiveSessionAttachesToTheSameRun(t *testing.T) 
 	if len(got) != 2 {
 		t.Fatalf("mission_comment_mentions rows = %d, want 2 (one per comment)", len(got))
 	}
-	for i, r := range got {
-		if r.claimedBy != activeRunID {
-			t.Errorf("delivery %d (dispatch_state=%s): claimed_by_run_id = %q, want %q (the run in flight)",
-				i, r.dispatchState, r.claimedBy, activeRunID)
-		}
-	}
-	// The first delivery is the fresh dispatch; the second is B3's queued
-	// outcome — distinguishable on dispatch_state, which is exactly why
-	// mentionDispatchQueued exists as a value distinct from
-	// mentionDispatchDispatched (an operator reading the timeline can tell
-	// "started a new run" apart from "folded into the run already going").
+
+	// The first delivery is the fresh dispatch: claimed by the run that IS
+	// processing it, dispatch_state 'dispatched'.
 	if got[0].dispatchState != mentionDispatchDispatched {
 		t.Errorf("first delivery dispatch_state = %q, want %q", got[0].dispatchState, mentionDispatchDispatched)
 	}
+	if got[0].state != "claimed" {
+		t.Errorf("first delivery state = %q, want claimed (the run it belongs to has not finished)", got[0].state)
+	}
+	if got[0].claimedBy != activeRunID {
+		t.Errorf("first delivery claimed_by_run_id = %q, want %q", got[0].claimedBy, activeRunID)
+	}
+
+	// The second is B3's queued outcome — dispatch_state distinguishes it
+	// from the first (mentionDispatchQueued, not mentionDispatchDispatched,
+	// so an operator can tell "folded in" apart from "started a new run"),
+	// but critically it is back at 'pending', NOT 'claimed' under
+	// activeRunID: that run cannot see this comment (see the file doc
+	// comment for why), so nothing may mark it consumed on that run's
+	// account. dispatchQueuedFollowUpsForSession (assignments_run.go) is
+	// what actually claims and consumes it, once a run that CAN see the
+	// text is dispatched — proven end to end in
+	// issue_session_followups_test.go, not here.
 	if got[1].dispatchState != mentionDispatchQueued {
 		t.Errorf("second delivery dispatch_state = %q, want %q", got[1].dispatchState, mentionDispatchQueued)
 	}
-
-	// Both are still 'claimed' — neither is 'consumed' yet, because the run
-	// they are attached to has not finished. This is the state the ordinary
-	// B2 consumption path (finishAssignment -> consumeDeliveriesForRun)
-	// expects to find when the run actually completes.
-	for i, r := range got {
-		if r.state != "claimed" {
-			t.Errorf("delivery %d state = %q, want %q before the run finishes", i, r.state, "claimed")
-		}
+	if got[1].state != "pending" {
+		t.Errorf("second delivery state = %q, want pending — it must not be claimed by a run that cannot see it", got[1].state)
+	}
+	if got[1].claimedBy != "" {
+		t.Errorf("second delivery claimed_by_run_id = %q, want empty", got[1].claimedBy)
 	}
 
-	// "two consumed deliveries": simulate the run reaching its terminal
-	// status exactly the way finishAssignment does — via the same
-	// consumeDeliveriesForRun this test does not want to re-implement.
+	// The winner's own delivery still consumes normally once it finishes —
+	// this half of the pipeline is unchanged by B3's redesign.
 	n, err := consumeDeliveriesForRun(context.Background(), f.db, activeRunID)
 	if err != nil {
 		t.Fatalf("consumeDeliveriesForRun: %v", err)
 	}
-	if n != 2 {
-		t.Fatalf("consumeDeliveriesForRun consumed %d rows, want 2", n)
-	}
-
-	var consumedCount int
-	if err := f.db.QueryRow(
-		`SELECT COUNT(*) FROM mission_comment_mentions WHERE mission_id = ? AND state = 'consumed'`,
-		f.missionID).Scan(&consumedCount); err != nil {
-		t.Fatalf("count consumed: %v", err)
-	}
-	if consumedCount != 2 {
-		t.Fatalf("consumed deliveries = %d, want 2 (the B3 accept line)", consumedCount)
+	if n != 1 {
+		t.Fatalf("consumeDeliveriesForRun consumed %d rows, want 1 (the first delivery only — the second was never claimed by this run)", n)
 	}
 }
 

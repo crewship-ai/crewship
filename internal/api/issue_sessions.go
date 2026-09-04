@@ -5,13 +5,16 @@ package api
 //
 // Two things live here:
 //
-//   - resolveOrCreateIssueAgentSession, the write side. Called from
-//     DispatchMention (issue_mentions.go) so the B1 accept line ("a mention
+//   - resolveOrCreateIssueAgentSessionTx, the write side. Called from
+//     DispatchMention (issue_mentions.go, via resolveSessionAndInsertAssignment
+//     in delegation_limits.go as of B3) so the B1 accept line ("a mention
 //     reuses an existing session rather than creating a second") is proven at
-//     the one entry point B1 wires it into. The state machine transitions
-//     themselves (§10.1: pending -> active on a claimed run, -> idle on run
-//     end, the lease/idle sweeps into error/stale) are NOT this package's
-//     job — B1 creates a session in 'pending' and stops there; B2/B4 move it.
+//     the one entry point B1 wires it into. resolveOrCreateIssueAgentSession
+//     (no transaction) is the same write path's TEST-ONLY convenience form —
+//     see its own doc comment. The state machine transitions themselves
+//     (§10.1: pending -> active on a claimed run, -> idle on run end, the
+//     lease/idle sweeps into error/stale) are NOT this package's job — B1
+//     creates a session in 'pending' and stops there; B2/B4 move it.
 //   - ListSessions, the read side — GET .../issues/{identifier}/sessions,
 //     the CLI's `issue sessions` command reads this. Mirrors ListRuns'
 //     shape (issue_handler_runs.go): resolve the issue, scope to its
@@ -63,12 +66,22 @@ type dbConn interface {
 // resolveOrCreateIssueAgentSession returns the id of the (mission, agent)
 // session, creating it in state 'pending' if none exists yet.
 //
-// This is the flag-checked, no-transaction convenience form: it reads
-// issueAgentSessionsFlagKey (which needs a concrete *sql.DB —
-// featureflags.IsEnabled has no *sql.Tx overload) and, if enabled, delegates
-// the actual write to resolveOrCreateIssueAgentSessionTx. Kept for any
-// caller that has no reason to hold a transaction open across the call;
-// DispatchMention is not that caller as of B3 — see this function's sibling.
+// TEST-ONLY as of B3 (#2339, review on #2342): this is the flag-checked,
+// no-transaction convenience form B1 originally wired into DispatchMention
+// directly. DispatchMention has called resolveSessionAndInsertAssignment
+// (delegation_limits.go) since B3 instead, because the session
+// resolve-or-create and the admission insert have to share one transaction
+// or the exclusivity index's TOCTOU comes back (§9.4) — so this function
+// has had no production caller since. Kept, not deleted, because
+// issue_sessions_test.go's B1-era tests still exercise
+// resolveOrCreateIssueAgentSessionTx (the part that actually matters)
+// through this wrapper, and duplicating its four-line flag-check-then-call
+// body into every one of those tests would be a worse trade than one
+// unused-by-production function with an honest comment. If a second
+// production caller ever needs the no-transaction shape, this is exactly
+// what it should reach for; until then, do not add one without checking
+// whether it can share resolveSessionAndInsertAssignment's transaction
+// instead.
 //
 // Returns ("", nil) when the flag is off: the caller treats that exactly
 // like "no session" and simply does not set assignments.session_id, which

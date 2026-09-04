@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // sessionExclusivityCaller/scope/lim mirror exactly what DispatchMention
@@ -108,15 +109,20 @@ func TestSessionExclusivity_SecondInsertAttachesToActiveRun(t *testing.T) {
 		t.Fatalf("assignments for this mission = %d, want 1 — one run, not two", n)
 	}
 
-	// The follow-up's brief reached the run that IS live (sessionBusyErrorFor's
-	// task-append — see its doc comment for why this, not chatbridge.Steer,
-	// is B3's answer to "the existing steering queue").
+	// The winner's task is untouched by the second call — the follow-up's
+	// text does NOT land here any more (review on #2342 found the earlier
+	// task-append could not reach a RUNNING or freshly-PENDING winner, only
+	// the rare requeued case, while the caller still marked the delivery
+	// consumed regardless — see sessionBusyErrorFor's doc comment). Content
+	// delivery is dispatchQueuedFollowUpsForSession's job now
+	// (assignments_run_session_followups_test.go), triggered once the
+	// winner finishes, not this function's.
 	var task string
 	if err := f.db.QueryRow(`SELECT task FROM assignments WHERE id = ?`, id1).Scan(&task); err != nil {
 		t.Fatalf("read active run's task: %v", err)
 	}
-	if !strings.Contains(task, "second mention, 2s later") {
-		t.Errorf("active run's task does not contain the follow-up brief: %q", task)
+	if strings.Contains(task, "second mention, 2s later") {
+		t.Errorf("active run's task contains the follow-up brief — resolveSessionAndInsertAssignment must not touch it: %q", task)
 	}
 }
 
@@ -367,5 +373,82 @@ func TestDispatchMention_SessionBusyErrorNamesTheRealSession(t *testing.T) {
 	}
 	if strings.Contains(busy.Error(), "session  already") {
 		t.Errorf("error text has a blank session id (double space): %q", busy.Error())
+	}
+}
+
+// TestResolveSessionAndInsertAssignment_SessionResolveFailureFallsBackWithoutBlocking
+// is a regression test for a CRITICAL bug review caught on #2342:
+// resolveSessionAndInsertAssignment's `resolve session` error path used to
+// `return fallback(...)` directly, and fallback's insert runs on the
+// POOLED *sql.DB while `tx` — opened with database.Open's
+// `_txlock=immediate`, so it already holds the write lock — was still
+// open. The deferred `tx.Rollback()` only runs once the enclosing function
+// RETURNS, which is after fallback's own write has already blocked trying
+// to acquire the lock its own still-open transaction is holding — so the
+// call would hang for the full 30s busy_timeout and then fail with
+// "database is locked" instead of completing immediately. A cancelled
+// context mid-transaction (client disconnect, server shutdown) is a real,
+// not just theoretical, way to reach this path.
+//
+// Forces resolveOrCreateIssueAgentSessionTx to fail by naming an agent id
+// that does not exist: issue_agent_sessions' consistency trigger (and its
+// FK) both reject it, which is a real, not synthetic, way this path fails
+// in production (an agent hard-deleted between the caps check and the
+// session resolve, for instance).
+func TestResolveSessionAndInsertAssignment_SessionResolveFailureFallsBackWithoutBlocking(t *testing.T) {
+	f := setupMentionFixture(t)
+	ctx := context.Background()
+	if err := ensureMissionChat(ctx, f.db, f.missionID, f.wsID, f.target, "Test issue"); err != nil {
+		t.Fatalf("ensureMissionChat: %v", err)
+	}
+	caller := sessionExclusivityCaller(f.target)
+	a := cappedAssignment{
+		// TargetID is a REAL agent, so the fallback insert's own FKs are
+		// satisfied — only the SESSION resolve (keyed on the bogus agent
+		// id below) is meant to fail.
+		WorkspaceID: f.wsID, ChatID: f.missionID, TargetID: f.target,
+		Task: "fallback path", GroupID: f.missionID,
+		CreatedAt: "2026-09-04T00:00:00Z", MissionID: f.missionID,
+	}
+
+	type result struct {
+		id        string
+		attached  bool
+		sessionID string
+		err       error
+	}
+	done := make(chan result, 1)
+	go func() {
+		id, attached, sessionID, err := resolveSessionAndInsertAssignment(
+			ctx, f.db, f.assign.logger, f.wsID, f.missionID, "agent-does-not-exist",
+			sessionExclusivityScope, sessionExclusivityLim, caller, a)
+		done <- result{id, attached, sessionID, err}
+	}()
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("resolveSessionAndInsertAssignment: %v", r.err)
+		}
+		if r.attached {
+			t.Fatal("attached=true — nothing was running yet")
+		}
+		if r.sessionID != "" {
+			t.Fatalf("sessionID = %q, want empty — session resolution failed, so the fallback must not report one", r.sessionID)
+		}
+		if r.id == "" {
+			t.Fatal("fallback insert returned an empty id")
+		}
+		var status string
+		if err := f.db.QueryRow(`SELECT status FROM assignments WHERE id = ?`, r.id).Scan(&status); err != nil {
+			t.Fatalf("read fallback assignment: %v", err)
+		}
+		if status != "PENDING" {
+			t.Fatalf("status = %q, want PENDING", status)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("resolveSessionAndInsertAssignment did not return within 3s — the fallback insert is " +
+			"blocked on the write lock its own still-open transaction holds (the bug this test exists to catch); " +
+			"the real failure mode is a ~30s hang against busy_timeout(30000)")
 	}
 }

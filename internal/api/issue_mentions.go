@@ -367,6 +367,27 @@ func (m mentionRecorder) deliverAndDispatch(
 	}
 
 	state, assignmentID, detail = m.dispatchOne(ctx, mc, mention)
+
+	if state == mentionDispatchQueued {
+		// B3 session-busy (§9.4, #2339): assignmentID names a run that is
+		// NOT going to consume this delivery — it is the run already in
+		// flight, and it cannot see a comment that arrived after its own
+		// exec started (see DispatchMention's `if attached` branch for the
+		// full account of why an earlier revision's task-append could not
+		// fix that). Release the claim this call took above back to
+		// 'pending' rather than letting persist (below) claim it under
+		// assignmentID — a delivery consumeDeliveriesForRun could mark
+		// 'consumed' the moment that run finishes, with nobody having read
+		// it, is exactly the lie review caught. dispatchQueuedFollowUpsForSession
+		// (assignments_run.go) picks 'pending' rows for this (mission,
+		// agent) back up once the active run actually finishes and folds
+		// them into a real dispatch.
+		if _, rErr := releaseClaimedDelivery(ctx, m.db, delivery.ID); rErr != nil {
+			m.logf("release delivery back to pending after session-busy", mc, rErr)
+		}
+		return state, assignmentID, detail
+	}
+
 	if assignmentID != "" {
 		// claimed_by_run_id is stamped by persist's own
 		// INSERT ... ON CONFLICT(event_id, agent_id) DO UPDATE, in the same
@@ -563,9 +584,30 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 	if mc.CommentID != "" {
 		commentVal = mc.CommentID
 	}
+	// resolvedState is ONLY used on the fresh-INSERT branch below (no prior
+	// delivery row — the issue_deliveries flag off, or createDelivery
+	// itself failed): the ON CONFLICT branch never touches `state` at all
+	// (claim/consume/release own that column; see the SQL below).
+	//
+	//	dispatched -> consumed  a run really did process this, immediately,
+	//	                        because nothing will ever call
+	//	                        consumeDeliveriesForRun for a row this path
+	//	                        never claimed.
+	//	queued     -> pending   B3 session-busy, with no delivery bookkeeping
+	//	                        active to release a claim from — 'pending'
+	//	                        is the same state deliverAndDispatch's
+	//	                        releaseClaimedDelivery call produces on the
+	//	                        flag-on path, so dispatchQueuedFollowUpsForSession
+	//	                        finds this row exactly the same way either
+	//	                        way, and it is NOT marked seen before
+	//	                        anything has read it.
+	//	else       -> failed   nothing will ever revisit this row.
 	resolvedState := "failed"
-	if state == mentionDispatchDispatched || state == mentionDispatchQueued {
+	switch state {
+	case mentionDispatchDispatched:
 		resolvedState = "consumed"
+	case mentionDispatchQueued:
+		resolvedState = "pending"
 	}
 	_, err := m.db.ExecContext(ctx, `
 		INSERT INTO mission_comment_mentions
@@ -576,7 +618,8 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 		    dispatch_state    = excluded.dispatch_state,
 		    assignment_id     = excluded.assignment_id,
 		    dispatch_detail   = excluded.dispatch_detail,
-		    claimed_by_run_id = excluded.assignment_id`,
+		    claimed_by_run_id = CASE WHEN excluded.dispatch_state = 'queued'
+		                             THEN NULL ELSE excluded.assignment_id END`,
 		generateCUID(), mc.WorkspaceID, mc.MissionID, commentVal, eventVal, mention.AgentID,
 		mention.Position, state, assignmentVal, detailVal, resolvedState,
 		time.Now().UTC().Format(time.RFC3339))
@@ -1078,36 +1121,33 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 
 	if attached {
 		// The turn already running for this session absorbs the follow-up
-		// instead of a second exec starting. Deliberately NOT
-		// chatbridge.Bridge.Steer: Steer queues into the chat's
-		// CONVERSATION HISTORY for the next turn to read, but
-		// buildAssignmentRunRequest sets req.SkipConvHistory = true
-		// unconditionally for every assignment/mention run
-		// (assignments_run.go — F13), so history queued there is never read
-		// back on this run shape, next turn or otherwise. Steering into it
-		// would look like a real queue while silently guaranteeing the text
-		// is never seen — worse than doing nothing.
+		// instead of a second exec starting — but NOT by touching that
+		// run at all. An earlier revision appended this follow-up's brief
+		// onto the active run's own `task` column and had the caller claim
+		// the delivery under it; review on #2342 found that reaches a
+		// RUNNING or freshly-dispatched winner never (runAssignment's
+		// goroutine captures body.Task as a Go value at dispatch time, not
+		// a row id it re-reads), while the delivery still got marked
+		// 'consumed' once that run finished regardless — recording as seen
+		// a comment the agent never read. Deleted; see sessionBusyErrorFor's
+		// doc comment (delegation_limits.go) for the full account.
 		//
-		// What actually happens instead lives in sessionBusyErrorFor
-		// (delegation_limits.go): the brief this follow-up would have used
-		// is appended onto the ACTIVE run's own `task` column, in the same
-		// transaction that discovered the session was busy. That reaches a
-		// run whose exec has not started yet (still PENDING, or QUEUED
-		// behind chatbridge.AgentRunLock and picked up again by
-		// dispatchByID, which reads task fresh from the row) — but not a
-		// run whose exec is already under way, since runAssignment's
-		// goroutine was handed body.Task as a Go value, not a row id it
-		// re-reads. There is no live-injection channel anywhere in this
-		// codebase (non-goal N1); B3 does not add one. That limit is
-		// written up in docs/guides/issue-mentions.mdx.
-		//
-		// Either way the delivery this call is servicing still lands on
-		// assignmentID — dispatchOne (below) records it as queued rather
-		// than dispatched, and persist sets claimed_by_run_id to it, so
-		// consumeDeliveriesForRun marks it consumed the ordinary way when
-		// that run finishes. "one run, two consumed deliveries" (the B3
-		// accept line) holds regardless of whether the append above
-		// reached the model.
+		// What happens instead: this call returns a *sessionBusyError, and
+		// dispatchOne (below) reads it and does NOT let deliverAndDispatch
+		// claim the delivery under assignmentID — it releases the claim
+		// back to 'pending' instead (releaseClaimedDelivery,
+		// issue_deliveries.go). Once the active run actually finishes,
+		// finishAssignment calls dispatchQueuedFollowUpsForSession
+		// (assignments_run.go), which folds every 'pending' delivery still
+		// queued for this session into ONE new, real dispatch — with the
+		// follow-up text in that run's own brief before its exec starts —
+		// and claims them under THAT run, so they are consumed only once
+		// something has actually read them. Chatbridge.Bridge.Steer is
+		// deliberately not used either: it queues into the chat's
+		// CONVERSATION HISTORY for the next turn, but every assignment/
+		// mention run sets req.SkipConvHistory = true unconditionally
+		// (buildAssignmentRunRequest, assignments_run.go — F13), so that
+		// history is never read back on this run shape at all.
 		h.logger.Info("mention queued behind the session's active run",
 			"assignment_id", assignmentID,
 			"mission_id", req.MissionID,

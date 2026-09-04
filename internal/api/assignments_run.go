@@ -1204,6 +1204,16 @@ func (h *AssignmentHandler) finishAssignment(
 		h.logger.Info("deliveries consumed", "assignment_id", assignmentID, "count", n)
 	}
 
+	// B3 (§9.4/§17, #2339): this run's session slot (if it had one) just
+	// freed — idx_assignments_one_active_per_session no longer blocks a
+	// new PENDING row for it. Fold every delivery that was left 'pending'
+	// while this run was live (deliverAndDispatch's releaseClaimedDelivery,
+	// issue_mentions.go) into exactly ONE new dispatch, so a burst of
+	// follow-up comments produces one more run, not one per comment.
+	// Deliberately AFTER consumeDeliveriesForRun and unconditional on
+	// status (COMPLETED/FAILED/CANCELLED all free the slot the same way).
+	h.dispatchQueuedFollowUpsForSession(ctx, assignmentID, workspaceID)
+
 	// Emit the terminal run.* journal entry — the source of truth post
 	// Phase J. trace_id == runID joins it with the run.started entry.
 	if runID != "" {
