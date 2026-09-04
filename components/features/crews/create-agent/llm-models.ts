@@ -1,5 +1,6 @@
 import type { LLMProvider } from "@/lib/entities"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
+import { providerModels } from "@/lib/model-catalog"
 
 /** Curated model lists per LLM provider — what the dropdown offers when the
  *  user toggles between providers. The list is short on purpose; users with
@@ -48,28 +49,10 @@ export const MODELS_BY_PROVIDER: Record<LLMProvider, readonly string[]> = {
   GOOGLE: modelsForProvider("GOOGLE"),
   CURSOR: modelsForProvider("CURSOR"),
   FACTORY: modelsForProvider("FACTORY"),
-  OLLAMA: [
-    // Ollama is served via OpenCode (provider/model paths). Listed here for
-    // the provider chip; the actual API string in Crewship will be sent to
-    // OpenCode prefixed as ollama/<model>. Versions current in
-    // ollama.com/library as of 2026-05.
-    "qwen2.5-coder:32b",
-    "qwen3:32b",
-    "qwen3.5:14b",
-    "deepseek-r1:14b",
-    "deepseek-r1:32b",
-    "deepseek-coder:6.7b",
-    "llama3.3:70b",
-    "gpt-oss:20b",
-    "gpt-oss:120b",
-    "gemma3:12b",
-    "phi4:14b",
-    "phi3:mini",
-    "mistral-nemo:12b",
-    "codellama:13b",
-    "starcoder2:15b",
-    "mixtral:8x7b",
-  ],
+  // Ollama is served via OpenCode (provider/model paths). The tags come from
+  // the catalog's live_only ollama provider; the string Crewship sends to
+  // OpenCode is ollama/<tag>.
+  OLLAMA: providerModels("ollama").map((m) => m.id),
 }
 
 /** Default model for a provider. Used when the user toggles provider — we

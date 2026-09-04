@@ -120,7 +120,10 @@ var unnavigatedPages = map[string]bool{
 	"audit-methodology": true,
 }
 
-var unnavigatedPrefixes = []string{"prd/"}
+// ux/ holds the UI/UX programme's contract, audits and plan — working
+// documents for the people and agents changing the product, not pages for
+// the people using it.
+var unnavigatedPrefixes = []string{"prd/", "ux/"}
 
 func unnavigatedByDesign(page string) bool {
 	if unnavigatedPages[page] {

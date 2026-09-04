@@ -58,6 +58,23 @@ The next control-plane slice is a stored manifest proposal:
 Until that slice exists, no prompt may advertise direct Page or general
 manifest application.
 
+### Reading the workspace: `workspace_overview` (2026-09-02)
+
+The guide also has `workspace_overview`: one read-only call, forwarded by the
+sidecar to `GET /api/v1/internal/workspace/overview` for the sidecar's own
+workspace, that returns every crew with its agents, icons and models, the
+routines, the pages, the count of open issues, and which credential providers
+exist — names and statuses only, never a value. The prompt tells the guide to
+call it before advising about existing state or naming a slug, and never while
+proposing the onboarding crew. This is what "valid access to the Crewship API"
+means for the guide: it reads through the same agent-scoped internal door as
+every other in-container tool, not through a user session.
+
+The onboarding proposal marker may also carry `crew_icon` and `crew_color`
+(lib/crew-icons.ts names and palette ids, mirrored and validated in
+`internal/api/crew_icons.go`); the card and the created crew take that look,
+and an unknown value is dropped rather than stored.
+
 ## Demo patterns used as product knowledge
 
 `cmd/crewship/seeddata/builtin/pages.yaml` is the Pages teaching reference: a

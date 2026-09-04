@@ -43,6 +43,19 @@ describe("OnboardingCreatedPanel", () => {
   // by calling its own tools inside a container, which the browser never
   // hears about. The person was told in prose that both existed and shown an
   // empty panel — the agent's word was the only evidence.
+  it("reports how many real crews exist, so a reloaded wizard can still launch", async () => {
+    routeTo({
+      crews: [
+        { id: "c0", slug: "_crewship-setup", name: "Setup", agent_count: 1 },
+        { id: "c1", slug: "web-watch", name: "Web Watch", agent_count: 2 },
+      ],
+    })
+    const onCrewsFound = vi.fn()
+    render(<OnboardingCreatedPanel workspaceId="ws_1" onCrewsFound={onCrewsFound} />)
+    // The reserved setup crew is not a crew the person built.
+    await waitFor(() => expect(onCrewsFound).toHaveBeenCalledWith(1))
+  })
+
   it("lists routines and pages the agent created, not just crews", async () => {
     routeTo({
       crews: [{ id: "c1", slug: "web-watch", name: "Web Watch", agent_count: 2 }],

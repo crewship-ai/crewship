@@ -29,6 +29,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/llm"
 	"io"
 	"net/http"
 	"strings"
@@ -39,9 +40,12 @@ import (
 // httptest server. Nothing in production reassigns it.
 var anthropicAPIBase = "https://api.anthropic.com"
 
-// anthropicProbeModel is the model used when the caller has no opinion. The
-// cheapest generally-available model: this call is billed to the customer.
-const anthropicProbeModel = "claude-3-5-haiku-latest"
+// anthropicProbeModel is the model used when the caller has no opinion — the
+// catalog's cheapest Anthropic model, because this call is billed to the
+// customer. It used to be a fixed "claude-3-5-haiku-latest", which meant the
+// day Anthropic retired that alias the token check, and with it the whole
+// wizard, would have failed for every new install.
+var anthropicProbeModel = llm.HousekeepingModel("anthropic")
 
 // anthropicProbeResult separates the three answers a probe can give, because
 // collapsing them is what produced "OAuth token accepted" for a token nobody

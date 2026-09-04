@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"github.com/crewship-ai/crewship/internal/llm"
 	"testing"
 )
 
@@ -80,7 +81,9 @@ func TestResolver_FallsBackToPackageDefaults_OnEmptyMapping(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	// Workspace has '{}' → no mapping → defaultTier(moderate).
-	if primary.Adapter != "claude" || primary.Model != "claude-sonnet-4-6" {
+	// The moderate default is the catalog's Anthropic default (config/models.json),
+	// not a literal frozen at the v78 migration.
+	if primary.Adapter != "claude" || primary.Model != llm.DefaultModel("anthropic") {
 		t.Errorf("expected default sonnet, got %+v", primary)
 	}
 }
@@ -121,7 +124,7 @@ func TestResolver_NoComplexityDefaultsToModerate(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	// Step has no complexity, no override → default moderate → sonnet.
-	if primary.Model != "claude-sonnet-4-6" {
+	if primary.Model != llm.DefaultModel("anthropic") {
 		t.Errorf("expected moderate→sonnet, got %+v", primary)
 	}
 }

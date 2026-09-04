@@ -142,10 +142,10 @@ func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) 
 
 	model := body.Model
 	if model == "" {
-		// Sonnet is the v0.1 default — fast enough for an interactive CLI
-		// command, smart enough to write a usable SKILL.md without the
+		// The catalog's Anthropic default — fast enough for an interactive
+		// CLI command, smart enough to write a usable SKILL.md without the
 		// Opus tax.
-		model = "claude-sonnet-4-6"
+		model = llm.DefaultModel("anthropic")
 	}
 
 	rawSkill, ok := h.produceSkillMD(w, r, wsID, body.Slug, body.Prompt, model)

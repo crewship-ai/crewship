@@ -80,6 +80,10 @@ export interface OnboardingProposal {
   id: string
   crewName: string
   crewSlug: string
+  /** The crew's look, as the server stored it — the Guide's validated pick
+   *  or the template's default. Absent for a bespoke crew that named none. */
+  crewIcon?: string
+  crewColor?: string
   templateSlug: string
   agents: ProposalAgent[]
   /** Egress domains the crew would need. Always empty today: Phase 1's
@@ -132,6 +136,8 @@ function proposalFromWire(json: unknown): OnboardingProposal | null {
     id: row.id,
     crewName: typeof payload.crew_name === "string" && payload.crew_name ? payload.crew_name : "New crew",
     crewSlug: typeof payload.crew_slug === "string" ? payload.crew_slug : "",
+    crewIcon: typeof payload.crew_icon === "string" && payload.crew_icon ? payload.crew_icon : undefined,
+    crewColor: typeof payload.crew_color === "string" && payload.crew_color ? payload.crew_color : undefined,
     templateSlug: typeof payload.template_slug === "string" ? payload.template_slug : "",
     agents,
     // Phase 1 has no per-proposal egress data on the wire at all — see the
@@ -181,6 +187,10 @@ export interface ProposalSuggestion {
    *  each onto a closed catalogue and pins the version itself, so nothing
    *  here can describe a container build beyond "install this known tool". */
   tools?: string[]
+  /** The Guide's pick for how the crew looks (lib/crew-icons.ts names; a
+   *  palette id or hex). Validated server-side; unknown values are dropped. */
+  crewIcon?: string
+  crewColor?: string
 }
 
 function proposalSuggestionAgentFromWire(entry: unknown): ProposalSuggestionAgent | null {
@@ -213,6 +223,8 @@ export function parseProposalSuggestion(
     crewName: s.crew_name,
     templateSlug,
     crewSlug: typeof s.crew_slug === "string" && s.crew_slug ? s.crew_slug : undefined,
+    crewIcon: typeof s.crew_icon === "string" && s.crew_icon ? s.crew_icon : undefined,
+    crewColor: typeof s.crew_color === "string" && s.crew_color ? s.crew_color : undefined,
     llmProvider: typeof s.llm_provider === "string" && s.llm_provider ? s.llm_provider : undefined,
     llmModel: typeof s.llm_model === "string" && s.llm_model ? s.llm_model : undefined,
     agents: agents && agents.length > 0 ? agents : undefined,
@@ -265,6 +277,8 @@ export async function createOnboardingProposal(
       crew_name: suggestion.crewName,
       ...(suggestion.templateSlug ? { template_slug: suggestion.templateSlug } : {}),
       ...(suggestion.crewSlug ? { crew_slug: suggestion.crewSlug } : {}),
+      ...(suggestion.crewIcon ? { crew_icon: suggestion.crewIcon } : {}),
+      ...(suggestion.crewColor ? { crew_color: suggestion.crewColor } : {}),
       ...(suggestion.llmProvider ? { llm_provider: suggestion.llmProvider } : {}),
       ...(suggestion.llmModel ? { llm_model: suggestion.llmModel } : {}),
       ...(suggestion.agents && suggestion.agents.length > 0 ? { agents: suggestion.agents } : {}),

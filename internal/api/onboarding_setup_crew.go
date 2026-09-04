@@ -103,7 +103,6 @@ const (
 	// id is a claim this file has no way to keep current, and a wrong guess
 	// there is a model id the CLI rejects at run time rather than a mild
 	// mis-tier.
-	setupAgentModel = "claude-opus-5"
 
 	// crewAgentDefaultModel is what an agent in a NEWLY CREATED crew gets
 	// when nothing more specific is pinned — the ANTHROPIC default behind
@@ -118,8 +117,23 @@ const (
 	// from here on, which is a pricing decision an operator should make
 	// explicitly (per-agent in crew settings, or per-template in the YAML),
 	// not one inherited from a change to how clever the onboarding chat is.
-	crewAgentDefaultModel = "claude-sonnet-5"
 )
+
+// Both come from config/models.json — the Guide runs the Anthropic `top`
+// role, a created crew's agents the provider default — so a re-tier is one
+// edit to the catalog that the wizard, the CLI and the validator all see.
+var (
+	setupAgentModel       = mustRole("anthropic", llm.ModelRoleTop)
+	crewAgentDefaultModel = llm.DefaultModel("anthropic")
+)
+
+func mustRole(provider string, role llm.ModelRole) string {
+	id, ok := llm.CuratedModelForRole(provider, role)
+	if !ok {
+		panic(fmt.Sprintf("config/models.json: provider %q has no model with role %q", provider, role))
+	}
+	return id
+}
 
 type setupAgentRuntime struct {
 	CLIAdapter string
@@ -399,6 +413,8 @@ func renderSetupAgentPrompt(prompt, provider, model string) string {
 	prompt = strings.ReplaceAll(prompt, "{{CREW_MODEL}}", crewDefaultModelForProvider(provider))
 	prompt = strings.ReplaceAll(prompt, "{{CREW_MODEL_MENU}}", crewModelMenu(provider))
 	prompt = strings.ReplaceAll(prompt, "{{RUNTIME_TOOL_MENU}}", runtimeToolMenu())
+	prompt = strings.ReplaceAll(prompt, "{{CREW_ICON_MENU}}", crewIconMenuText())
+	prompt = strings.ReplaceAll(prompt, "{{CREW_COLOR_MENU}}", strings.Join(crewColorPalettes, ", "))
 	return strings.ReplaceAll(prompt, "{{MANIFEST_KINDS}}", strings.Join(manifest.KnownKinds(), ", "))
 }
 
@@ -467,34 +483,27 @@ func crewModelTiers(provider string) []crewModelTier {
 	if len(available) == 0 {
 		return nil
 	}
-	var want []crewModelTier
-	switch strings.ToUpper(strings.TrimSpace(provider)) {
-	case "ANTHROPIC":
-		want = []crewModelTier{
-			{"claude-haiku-4-5", "cheapest — mechanical, well-specified work (HTTP checks, reformatting, fixed-feed panels)"},
-			{"claude-sonnet-5", "the sane default — summarising, triage, drafting, routing, everyday coding"},
-			{"claude-opus-5", "most expensive — only for genuinely hard reasoning; justify it if you pick it"},
-		}
-	case "OPENAI":
-		want = []crewModelTier{
-			{"gpt-4o-mini", "cheapest — mechanical, well-specified work"},
-			{"gpt-4o", "the sane default — everyday judgement work"},
-			{"o3", "most expensive — only for genuinely hard reasoning"},
-		}
-	case "GOOGLE":
-		want = []crewModelTier{
-			{"gemini-1.5-flash", "cheapest — mechanical, well-specified work"},
-			{"gemini-2.0-flash", "the sane default — everyday judgement work"},
-			{"gemini-1.5-pro", "most expensive — only for genuinely hard reasoning"},
-		}
-	default:
-		return nil
+	// The three tiers are the catalog's `role` marks (config/models.json), so
+	// the prompt, the validator and every picker read one file. This used to
+	// be a table of its own, and it named gpt-4o and gemini-1.5 long after the
+	// web offered GPT-5.5 and Gemini 2.5.
+	roles := []struct {
+		role  llm.ModelRole
+		label string
+	}{
+		{llm.ModelRoleCheap, "cheapest — mechanical, well-specified work (HTTP checks, reformatting, fixed-feed panels)"},
+		{llm.ModelRoleDefault, "the sane default — summarising, triage, drafting, routing, everyday coding"},
+		{llm.ModelRoleTop, "most expensive — only for genuinely hard reasoning; justify it if you pick it"},
 	}
-	out := make([]crewModelTier, 0, len(want))
-	for _, t := range want {
-		if available[t.id] {
-			out = append(out, t)
+	out := make([]crewModelTier, 0, len(roles))
+	for _, r := range roles {
+		id, ok := llm.CuratedModelForRole(provider, r.role)
+		if ok && available[id] {
+			out = append(out, crewModelTier{id, r.label})
 		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -718,7 +727,7 @@ it — which is the section further down, not this one.
 
 When — and ONLY when — you make that concrete proposal, finish the response
 with exactly one hidden machine marker on its own line, using valid JSON:
-<!-- crewship:onboarding-proposal {"crew_name":"A short crew name","crew_slug":"lowercase-kebab-case","template_slug":"one-of-the-exact-slugs-below-or-omit-entirely","llm_provider":"{{SETUP_PROVIDER}}","llm_model":"{{CREW_MODEL}}","tools":["only-if-needed"],"agents":[{"name":"Agent name","role":"Short role description"}]} -->
+<!-- crewship:onboarding-proposal {"crew_name":"A short crew name","crew_slug":"lowercase-kebab-case","crew_icon":"one-icon-name-from-the-list-below","crew_color":"one-palette-id-from-the-list-below","template_slug":"one-of-the-exact-slugs-below-or-omit-entirely","llm_provider":"{{SETUP_PROVIDER}}","llm_model":"{{CREW_MODEL}}","tools":["only-if-needed"],"agents":[{"name":"Agent name","role":"Short role description"}]} -->
 The "agents" array is REQUIRED and must list exactly the same agents, in the
 same order, that your prose just proposed — 1 to 6 entries, each with only
 "name" and "role". A "name" is a short label (a few words); a "role" is one
@@ -731,6 +740,14 @@ questions or exploratory replies. Do not wrap it in a code fence and do not
 mention or explain it to the user. The server trusts only "name" and "role"
 from each agent entry and computes the rest (tools, system prompt) itself;
 fields outside this exact object are ignored.
+
+GIVE THE CREW A FACE — "crew_icon" and "crew_color" are how the crew looks
+everywhere in Crewship (the proposal card, the crews list, its chat). Pick
+the icon that best says what the crew does, and a colour that suits it:
+  icons:   {{CREW_ICON_MENU}}
+  colours: {{CREW_COLOR_MENU}}
+Use exact names from those lists. A name outside them is ignored and the
+crew gets a generic look, which is worse than any real choice.
 
 CHOOSE THE MODEL FOR THE CREW YOU ARE PROPOSING — "llm_model" is the one
 operational field you DO decide, and the default in the template above is
@@ -850,6 +867,14 @@ If you have not created a crew yet, you have nothing to name: propose one
 first. Do not offer to build a routine or a page before a crew exists.
 
 REAL TOOL CONTRACT
+- workspace_overview is your READ of the workspace as it actually is: every
+  crew with its agents, icons and models, the routines, the pages, the open
+  issues and which credential providers exist (names only, never values).
+  Call it before advising about existing state, before naming any crew or
+  agent slug, and whenever the person asks "what do I have" — do not answer
+  those from memory or from earlier turns. It is read-only and needs no
+  confirmation. Never call it while proposing the onboarding crew (see
+  above); a fresh workspace has nothing in it yet.
 - You have native Crewship authoring tools. validate_manifest uses the same
   parser as crewship apply for every crewship/v1 kind and never writes state.
   You also have routine tools. Call discover_capabilities FOR THE TARGET CREW
