@@ -252,6 +252,19 @@ func validateSuggestion(s *AISuggestResponse) error {
 		if s.Agents[i].Name == "" || s.Agents[i].SystemPrompt == "" {
 			return fmt.Errorf("agent missing required fields")
 		}
+		// #2204: validateSuggestion gave agent_role a post-condition in
+		// #2200 — every value an accepted suggestion carries is a literal
+		// POST /api/v1/agents will accept — but the same guarantee never
+		// covered name. agents_create.go refuses a name outside
+		// agentNameMinLen-agentNameMaxLen bytes; a model naming an agent
+		// "Q" or "AI" is not exotic, and without this check the wizard's
+		// very next call died with 400 "name must be 2-100 characters".
+		// Bounds are read from the same constants agents_create.go
+		// enforces, never restated, so the two cannot drift.
+		if l := len(s.Agents[i].Name); l < agentNameMinLen || l > agentNameMaxLen {
+			return fmt.Errorf("agent %q has a %d-byte name (want %d-%d bytes)",
+				s.Agents[i].Name, l, agentNameMinLen, agentNameMaxLen)
+		}
 		// The system prompt asks for AGENT/LEAD, and a prompt is not a
 		// validator. Until #2197 this loop only counted LEADs, so a model
 		// answering the retired COORDINATOR for a non-lead agent — a plausible
@@ -286,8 +299,14 @@ func validateSuggestion(s *AISuggestResponse) error {
 		if s.Agents[i].Slug == "" {
 			s.Agents[i].Slug = slugify(s.Agents[i].Name)
 		}
-		if s.Agents[i].Slug == "" {
-			return fmt.Errorf("agent %q has invalid slug", s.Agents[i].Name)
+		// #2204: slugify never caps its output, so a long, space-free name
+		// (plenty of room left under agentNameMaxLen) can still derive a
+		// slug over agentSlugMaxLen — agents_create.go refuses that slug
+		// outright rather than truncating it, so mirror that here instead
+		// of silently shortening what the wizard will show the user.
+		if l := len(s.Agents[i].Slug); l < agentSlugMinLen || l > agentSlugMaxLen {
+			return fmt.Errorf("agent %q derives a %d-byte slug %q (want %d-%d bytes)",
+				s.Agents[i].Name, l, s.Agents[i].Slug, agentSlugMinLen, agentSlugMaxLen)
 		}
 	}
 	if leads != 1 {

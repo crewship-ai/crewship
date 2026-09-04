@@ -193,6 +193,20 @@ var validAgentRoles = map[string]bool{
 	"LEAD":  true,
 }
 
+// Bounds POST /api/v1/agents (agents_create.go) enforces on name and slug,
+// in bytes of UTF-8 — the same unit len(string) counts elsewhere in this
+// package. Named, and shared with agents_create.go, so a caller that must
+// promise a lineup the create endpoint will accept — crew_ai.go's
+// validateSuggestion — derives from the same numbers rather than restating
+// them, the way validAgentRoles above is shared rather than duplicated.
+// #2204, following #2200's role check for the same reason.
+const (
+	agentNameMinLen = 2
+	agentNameMaxLen = 100
+	agentSlugMinLen = 2
+	agentSlugMaxLen = 50
+)
+
 var validLeadModes = map[string]bool{
 	"active":  true,
 	"passive": true,

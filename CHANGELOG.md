@@ -697,6 +697,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **`crew-ai-suggest` no longer hands back agent names or slugs
+  `POST /api/v1/agents` refuses (#2204).** Follow-up to #2197/#2200:
+  `validateSuggestion` gave `agent_role` a post-condition — every value an
+  accepted suggestion carries is a literal the create endpoint accepts —
+  but never extended it to name or slug. A suggestion like
+  `{"name":"Q",…}` passed validation and the wizard's very next call died
+  with `400 name must be 2-100 characters`; `slugify` never capped its
+  output either, so a long, space-free name could derive a slug over the
+  50-byte cap. Both bounds are now checked against the same
+  `agentNameMinLen`/`agentNameMaxLen`/`agentSlugMinLen`/`agentSlugMaxLen`
+  constants `agents_create.go` enforces (agents.go now defines them once,
+  shared by both call sites) rather than restated numbers, so the two
+  cannot drift.
 - **`crewship backup` defaults its bundle directory under the instance's own
   data dir, not a home directory shared by every instance on the host
   (#2262).** `backup create`/`verify`/`inspect`/`restore` resolved their
