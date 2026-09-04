@@ -63,7 +63,18 @@ describe("CrewsExplorer", () => {
     const crews = Array.from({ length: 10 }, (_, i) => crew(`c${i}`, `Crew ${i}`))
     renderExplorer({ crews, agents: [] })
     expect(screen.getAllByRole("button", { name: /^Crew \d$/ })).toHaveLength(6)
-    fireEvent.click(screen.getByRole("button", { name: /4 more crews/ }))
+    fireEvent.click(screen.getByRole("button", { name: /4 more crews · idle/ }))
+    expect(screen.getAllByRole("button", { name: /^Crew \d$/ })).toHaveLength(10)
+  })
+
+  it("folds the attention group too — a host where every crew needs a rebuild is not a wall", () => {
+    const crews = Array.from({ length: 10 }, (_, i) => crew(`c${i}`, `Crew ${i}`))
+    const provisioningByCrew = new Map(crews.map((c) => [c.id, "needs_provision" as const]))
+    renderExplorer({ crews, agents: crews.map((c) => agent(`a-${c.id}`, c.id)), provisioningByCrew })
+    expect(screen.getAllByRole("button", { name: /^Crew \d$/ })).toHaveLength(6)
+    // Only the visible attention crews open by default.
+    expect(screen.getAllByRole("button", { name: /^a-c\d$/ })).toHaveLength(6)
+    fireEvent.click(screen.getByRole("button", { name: /4 more crews · need attention/ }))
     expect(screen.getAllByRole("button", { name: /^Crew \d$/ })).toHaveLength(10)
   })
 

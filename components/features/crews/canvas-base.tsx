@@ -68,7 +68,13 @@ export function useEntityFetch<T>({
   const [error, setError] = useState<string | null>(null)
 
   const wsParam = `workspace_id=${workspaceId}`
-  const listFull = listUrl.includes("?") ? `${listUrl}&${wsParam}` : `${listUrl}?${wsParam}`
+  // Resolve the slug through the server's search rather than scanning the
+  // list's first page: the list is windowed (100 rows by default), so an
+  // agent or crew past the window used to be "not found" on its own deep
+  // link (#2303). `q` narrows the page to rows whose name or slug contains
+  // the slug; the exact match is then picked from that handful.
+  const listParams = `${wsParam}&q=${encodeURIComponent(slug)}&limit=100`
+  const listFull = listUrl.includes("?") ? `${listUrl}&${listParams}` : `${listUrl}?${listParams}`
 
   const refetch = useCallback(async (signal?: AbortSignal) => {
     try {
