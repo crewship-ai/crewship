@@ -180,6 +180,12 @@ var BackupTables = []string{
 	// child-before-its-own-parent-arrives shape #2260's fix (remap.go's
 	// forkRegeneratedColumns doc) exists to prevent.
 	"issue_agent_sessions",
+	// agent_session_checkpoints (§9.5, B5 — #2345) FKs into
+	// issue_agent_sessions (just above) and workspaces; run_id is
+	// deliberately NOT an FK (see the migration's own comment), so its
+	// position relative to "assignments" below is unconstrained — placed
+	// here, immediately after the table it actually depends on.
+	"agent_session_checkpoints",
 	"assignments",
 	"approvals_queue",
 	"pipelines",

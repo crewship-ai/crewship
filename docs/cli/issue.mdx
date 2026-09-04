@@ -319,7 +319,7 @@ SOURCE is why the run is attributed to the issue: `task` (the issue's own missio
 
 ## `crewship issue sessions`
 
-<Note>Early: `issue_agent_sessions` is work package B1 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md`). A mention resolves or creates a session — mentioning the same agent on the same issue twice reuses it rather than creating a second — but nothing yet reads a session back into an agent's context, and every session created today sits in `pending`. That is later work (B2–B5).</Note>
+<Note>Session lifecycle: `issue_agent_sessions` is work package B1 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md`). A mention resolves or creates a session — mentioning the same agent on the same issue twice reuses it rather than creating a second. As of B4 (#2348) the session's `state` moves `pending` → `active` → `idle`/`error` with `active_run_id` set while a run is live; `awaiting_input` and the `idle` → `stale` sweep are not wired yet. As of B5 (#2345), every session-bearing dispatch also reads the session back into the agent's context — see `crewship issue checkpoints` below and `docs/guides/issue-mentions.mdx`.</Note>
 
 List the durable, per-(issue, agent) sessions a mention has opened on an issue. Hits `GET /api/v1/crews/{crewId}/issues/{ident}/sessions` after resolving `<identifier>` to its crew via `fetchIssue`.
 
@@ -329,6 +329,26 @@ crewship issue sessions BE-42 --format json
 ```
 
 **Output columns:** AGENT, STATE, LAST SEQ (`last_consumed_seq`), VERSION (`agent_version`, `-` when the agent has no config history), UPDATED (relative time).
+
+---
+
+## `crewship issue checkpoints`
+
+<Note>Work package B5 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md` §9.5, #2345). A checkpoint is the `done`/`plan`/`facts`/`blockers`/`next_step`/`confidence` block a session-bearing run reports when it finishes; the next run on the same session is handed the latest one as part of its §11.1 context pack, so it does not repeat completed work.</Note>
+
+List a session's checkpoint history. Hits `GET /api/v1/crews/{crewId}/issues/{ident}/sessions/{sessionId}/checkpoints` after resolving `<identifier>` to its crew via `fetchIssue` and the session via `GET .../sessions`.
+
+```bash
+crewship issue checkpoints BE-42                    # only works when the issue has exactly one session
+crewship issue checkpoints BE-42 --agent backend-dev
+crewship issue checkpoints BE-42 --agent backend-dev --format json
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--agent` | `string` | `""` | Agent slug or id whose session to read. Required when the issue has more than one session; a slug/id that resolves to an agent with no session on this issue errors by name. |
+
+**Output columns:** RUN (the run that wrote it, `-` if none), SEQ (`seq_at_write`), DONE (truncated to 40), NEXT STEP (truncated to 40), CONFIDENCE, PARSED (`true`/`false` — `false` means the run ended without a valid `---CHECKPOINT---` block), CREATED (relative time).
 
 ---
 

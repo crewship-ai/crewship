@@ -341,7 +341,31 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// which is exactly the kind of state notification_channels/
 	// user_notification_prefs are IntentInclude to avoid silently losing.
 	"issue_agent_sessions": IntentInclude,
-	"memory_proposals":     IntentInclude,
+	// agent_session_checkpoints (PRD-ISSUES-AND-ROUTINES-2026 §9.5, work
+	// package B5, #2345) is the resumable state a session actually needs to
+	// avoid redoing finished work (§18 scenario 7: "an agent resumes an
+	// issue after 7 simulated days ... no repeated completed work"). F37's
+	// "decide, in writing" question, answered the same way issue_agent_sessions'
+	// own comment above answers it: contrast notification_deliveries
+	// (IntentExcludeOperational) — that table's job is dedup/retry state
+	// where losing it on restore looks like a resent duplicate, self-healing
+	// on the next real event. A checkpoint has no "next real event" that
+	// regenerates it: it is the ONLY record of what an agent had already
+	// finished, and dropping it on restore does not look like anything is
+	// missing — it looks like the agent forgot, which is precisely the
+	// defect B5 exists to close (F14/F15). IntentInclude.
+	//
+	// GDPR (§16.1): checkpoint_json is scrubbed for secrets before persist
+	// (checkpointScrubber, issue_checkpoints.go — the same "scrub before
+	// persist" rule §16 names for mission_activity.payload_json), but it is
+	// NOT added to the data_subject_id/erasure cascade. Same reasoning B1
+	// gave for mission_activity and issue_agent_sessions: the free-text
+	// fields (done/plan/facts/blockers/next_step) are AGENT-authored
+	// derived state keyed to session/run ids, not user-authored text a
+	// person wrote — the same class of content mission_activity.payload_json
+	// already carries without a cascade entry.
+	"agent_session_checkpoints": IntentInclude,
+	"memory_proposals":          IntentInclude,
 	// onboarding_proposals is the crew a setup agent proposed and a human
 	// approved. Included rather than denied because the row IS the audit
 	// record of that decision: the whole design turns on the card the human

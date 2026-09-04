@@ -104,6 +104,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// openapi: query limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/runs", authed(wsCtx(http.HandlerFunc(issues.ListRuns))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/sessions", authed(wsCtx(http.HandlerFunc(issues.ListSessions))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/sessions/{sessionId}/checkpoints", authed(wsCtx(http.HandlerFunc(issues.ListCheckpoints))))
 	// Labels
 	r.mux.Handle("GET /api/v1/labels", authed(wsCtx(http.HandlerFunc(issues.ListLabels))))
 	r.authedMut("POST", "/api/v1/labels", roleCreate, issues.CreateLabel)

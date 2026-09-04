@@ -116,6 +116,8 @@ func allIssueVerbs() []issueVerb {
 			func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleIssuesList }},
 		{"get", http.MethodGet, "/issue/ENG-1", "",
 			func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleIssueGet }},
+		{"comments-list", http.MethodGet, "/issue/ENG-1/comments", "",
+			func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleIssueCommentsList }},
 		{"update", http.MethodPatch, "/issue/ENG-1", `{"status":"IN_PROGRESS"}`,
 			func(s *Server) func(http.ResponseWriter, *http.Request) { return s.handleIssueUpdate }},
 		{"comment", http.MethodPost, "/issue/ENG-1/comment", `{"body":"on it"}`,
@@ -152,6 +154,30 @@ func TestHandleIssueComment_ForwardsActingAgent(t *testing.T) {
 	}
 	if got.body["body"] != "reproduced on staging" {
 		t.Errorf("body = %v", got.body["body"])
+	}
+}
+
+// TestHandleIssueCommentsList_Forwards is the comment-READ verb §11.1 asks
+// for (PRD-ISSUES-AND-ROUTINES-2026, work package B5, #2345): before this,
+// the sidecar could write a comment but not read the thread back.
+func TestHandleIssueCommentsList_Forwards(t *testing.T) {
+	mock, got := mockCrewshipd(t, http.StatusOK, `[{"id":"cmt-1","body":"reproduced on staging"}]`)
+	srv := tokenCrewServer(t, mock.URL)
+
+	w := httptest.NewRecorder()
+	srv.handleIssueCommentsList(w, issueReq(http.MethodGet, "/issue/ENG-7/comments", "", "boot-token"))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if got.method != http.MethodGet || got.path != "/api/v1/internal/issues/ENG-7/comments" {
+		t.Errorf("forwarded %s %s, want GET /api/v1/internal/issues/ENG-7/comments", got.method, got.path)
+	}
+	if got.token != "ipc-token" {
+		t.Errorf("X-Internal-Token = %q", got.token)
+	}
+	if got.queryValue("workspace_id") != "ws-1" {
+		t.Errorf("workspace_id query = %q, want ws-1 (the IPC identity)", got.queryValue("workspace_id"))
 	}
 }
 
@@ -483,6 +509,31 @@ func TestIssueRead_FencesUntrustedText(t *testing.T) {
 		// A JSON null stays null rather than becoming the string "<untrusted…>".
 		if out["description"] != nil {
 			t.Errorf("null description = %v, want null", out["description"])
+		}
+	})
+
+	// A comment's body is exactly the same class of external, lower-trust
+	// content as an issue's title/description — anyone who can comment
+	// (human, agent, webhook) chooses those bytes.
+	t.Run("comments", func(t *testing.T) {
+		mock, _ := mockCrewshipd(t, http.StatusOK,
+			`[{"id":"cmt-1","author_type":"user","body":"`+injection+`"}]`)
+		srv := tokenCrewServer(t, mock.URL)
+
+		w := httptest.NewRecorder()
+		srv.handleIssueCommentsList(w, issueReq(http.MethodGet, "/issue/ENG-1/comments", "", "boot-token"))
+
+		var out []map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v (body %s)", err, w.Body.String())
+		}
+		if len(out) != 1 {
+			t.Fatalf("got %d items", len(out))
+		}
+		body, _ := out[0]["body"].(string)
+		assertFenced(t, body, injection)
+		if out[0]["id"] != "cmt-1" || out[0]["author_type"] != "user" {
+			t.Errorf("non-text fields must pass through, got %v", out[0])
 		}
 	})
 }

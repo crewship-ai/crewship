@@ -596,6 +596,127 @@ var issueSessionsCmd = &cobra.Command{
 	},
 }
 
+// issueCheckpointsCmd lists a session's §9.5 checkpoints. CLI parity for
+// GET .../issues/{identifier}/sessions/{sessionId}/checkpoints
+// (internal/api/issue_checkpoints.go, PRD-ISSUES-AND-ROUTINES-2026 §9.5,
+// work package B5 — #2345).
+//
+// A session is identified by --agent, not by its opaque id (sessions
+// themselves are per (issue, agent), so naming the agent is the natural
+// handle) — resolved via the issue's own session list rather than a
+// separate lookup, matching issueSessionsCmd's own read.
+var issueCheckpointsCmd = &cobra.Command{
+	Use:   "checkpoints <identifier>",
+	Short: "List an issue session's checkpoints",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		agentFlag, err := cmd.Flags().GetString("agent")
+		if err != nil {
+			return err
+		}
+		client := newAPIClient()
+		issue, err := fetchIssue(client, args[0])
+		if err != nil {
+			return err
+		}
+		identifier := derefStr(issue.Identifier, issue.ID)
+
+		var agentID string
+		if agentFlag != "" {
+			agentID, err = resolveAgentID(client, agentFlag)
+			if err != nil {
+				return err
+			}
+		}
+
+		sessResp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/issues/%s/sessions",
+			issue.CrewID, url.PathEscape(identifier)))
+		if err != nil {
+			return err
+		}
+		defer sessResp.Body.Close()
+		if err := cli.CheckError(sessResp); err != nil {
+			return err
+		}
+		var sessions []struct {
+			ID      string `json:"id"`
+			AgentID string `json:"agent_id"`
+		}
+		if err := cli.ReadJSON(sessResp, &sessions); err != nil {
+			return err
+		}
+
+		var sessionID string
+		switch {
+		case agentID != "":
+			for _, s := range sessions {
+				if s.AgentID == agentID {
+					sessionID = s.ID
+					break
+				}
+			}
+			if sessionID == "" {
+				return fmt.Errorf("no session on %s for agent %s", identifier, agentFlag)
+			}
+		case len(sessions) == 1:
+			sessionID = sessions[0].ID
+		case len(sessions) == 0:
+			return fmt.Errorf("issue %s has no agent sessions yet", identifier)
+		default:
+			return fmt.Errorf("issue %s has %d agent sessions — pass --agent to pick one", identifier, len(sessions))
+		}
+
+		resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/issues/%s/sessions/%s/checkpoints",
+			issue.CrewID, url.PathEscape(identifier), url.PathEscape(sessionID)))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var checkpoints []struct {
+			ID         string `json:"id"`
+			RunID      string `json:"run_id"`
+			SeqAtWrite int    `json:"seq_at_write"`
+			Done       string `json:"done"`
+			NextStep   string `json:"next_step"`
+			Confidence string `json:"confidence"`
+			Parsed     bool   `json:"parsed"`
+			CreatedAt  string `json:"created_at"`
+		}
+		if err := cli.ReadJSON(resp, &checkpoints); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"RUN", "SEQ", "DONE", "NEXT STEP", "CONFIDENCE", "PARSED", "CREATED"}
+		rows := make([][]string, 0, len(checkpoints))
+		for _, c := range checkpoints {
+			run := c.RunID
+			if run == "" {
+				run = "-"
+			}
+			rows = append(rows, []string{
+				run,
+				strconv.Itoa(c.SeqAtWrite),
+				truncateStr(c.Done, 40),
+				truncateStr(c.NextStep, 40),
+				orDash(c.Confidence),
+				strconv.FormatBool(c.Parsed),
+				issueRelativeTime(c.CreatedAt),
+			})
+		}
+		return f.Auto(checkpoints, headers, rows)
+	},
+}
+
 // issueChangesCmd shows the base-branch git diff of the crew working an
 // issue. CLI parity for GET /api/v1/crews/{crewId}/git-diff — the data the
 // dashboard's issue "Changes" tab renders.
@@ -810,6 +931,8 @@ func init() {
 	addListPagingFlags(issueRunsCmd.Flags(), 100)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueSessionsCmd)
+	issueCheckpointsCmd.Flags().String("agent", "", "Agent slug or id whose session to read (required when the issue has more than one session)")
+	issueCmd.AddCommand(issueCheckpointsCmd)
 	issueChangesCmd.Flags().Bool("patch", false, "Print the raw unified diff instead of the file summary")
 	issueCmd.AddCommand(issueChangesCmd)
 	issueCmd.AddCommand(issueRelateCmd)

@@ -543,6 +543,16 @@ type cappedAssignment struct {
 	// *sessionBusyError naming the run that already holds it, rather than
 	// letting the raw constraint violation surface as an opaque 500.
 	SessionID string
+	// ContextPackCompaction / ContextPackTokens record what §11.1's
+	// context-pack assembly (issue_context_pack.go) did for THIS
+	// dispatch's brief — assignments.context_pack_compaction/
+	// context_pack_tokens (20260904213701_assignments_context_pack.sql,
+	// work package B5, #2345). Empty/zero when no pack was assembled (the
+	// issue_agent_sessions flag off, or a non-mention dispatch door that
+	// never calls assembleContextPack at all) — stored as NULL, matching
+	// every other optional column on this struct.
+	ContextPackCompaction string
+	ContextPackTokens     int
 }
 
 // insertCappedAssignment writes the PENDING assignment row with the fan-out
@@ -618,15 +628,24 @@ func insertCappedAssignment(
 	if a.SessionID != "" {
 		sessionVal = a.SessionID
 	}
+	var contextPackCompactionVal any
+	if a.ContextPackCompaction != "" {
+		contextPackCompactionVal = a.ContextPackCompaction
+	}
+	var contextPackTokensVal any
+	if a.ContextPackTokens > 0 {
+		contextPackTokensVal = a.ContextPackTokens
+	}
 	guardSQL, guardArgs := fanoutGuard(scope, caller, a.ChatID, lim.MaxFanout)
 	insertArgs := append([]any{
 		assignmentID, a.WorkspaceID, a.ChatID, caller.FanoutSubjectID, a.TargetID,
 		a.Task, a.GroupID, scope.Depth, parentVal, originVal, parentRunVal, a.CreatedAt,
 		missionVal, authorAgentVal, createdByUserVal, sessionVal,
+		contextPackCompactionVal, contextPackTokensVal,
 	}, guardArgs...)
 	res, err := db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at, mission_id, author_agent_id, created_by_user_id, session_id)
-		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at, mission_id, author_agent_id, created_by_user_id, session_id, context_pack_compaction, context_pack_tokens)
+		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		 WHERE `+guardSQL, insertArgs...)
 	if err != nil {
 		// The fan-out guard's WHERE clause fails CLOSED as zero rows

@@ -103,6 +103,11 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 		// B1 (#2332): an issue's agent sessions — one row per (issue, agent),
 		// only 'pending' is ever written until B2/B3 land.
 		"GET /api/v1/crews/{crewId}/issues/{identifier}/sessions": {Response: arr(obj(map[string]any{"id": str(), "mission_id": str(), "agent_id": str(), "agent_name": str(), "state": str(), "last_consumed_seq": integer(), "active_run_id": str(), "agent_version": integer(), "last_activity_at": str(), "created_at": str(), "updated_at": str()}))},
+		// B5 (#2345, §9.5): a session's checkpoint history — NOT the same
+		// table as the `checkpoint` schema above (mission save-points,
+		// /api/v1/missions/{missionId}/checkpoints): agent_session_checkpoints
+		// is the §11.1 "latest checkpoint" a woken agent resumes from.
+		"GET /api/v1/crews/{crewId}/issues/{identifier}/sessions/{sessionId}/checkpoints": {Response: arr(obj(map[string]any{"id": str(), "session_id": str(), "run_id": str(), "seq_at_write": integer(), "done": str(), "plan": str(), "facts": str(), "blockers": str(), "next_step": str(), "confidence": str(), "parsed": boolean(), "created_at": str()}))},
 		"GET /api/v1/runs": {Response: ref("RunList")}, "GET /api/v1/runs/{id}": {Response: ref("Run")}, "GET /api/v1/runs/insights": {Response: runInsights},
 		"GET /api/v1/missions/{missionId}/checkpoints": {Response: obj(map[string]any{"checkpoints": arr(checkpoint), "count": integer(), "mission_id": str()})}, "POST /api/v1/missions/{missionId}/checkpoints": {Response: checkpoint}, "GET /api/v1/checkpoints/{id}": {Response: checkpoint}, "POST /api/v1/checkpoints/{id}/restore": {Response: obj(map[string]any{"checkpoint": checkpoint, "journal_cursor": str(), "warn_divergence": arr(str())})}, "POST /api/v1/checkpoints/{id}/fork": {Response: obj(map[string]any{"new_mission_id": str(), "new_checkpoint_id": str()})},
 		"GET /api/v1/crews/{crewId}/escalations": {Response: arr(escalation)}, // agent_still_waiting / agent_gave_up_at / note: an escalation may be
