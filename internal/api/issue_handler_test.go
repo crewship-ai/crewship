@@ -209,6 +209,80 @@ func TestIssue_List_AllFilters(t *testing.T) {
 	}
 }
 
+// #2286: the board fetched at most 100 rows and exposed no total, so a
+// workspace with 101+ issues silently hid the rest — the response looked
+// identical to "that's everything". List() now reports the true count
+// (ignoring LIMIT/OFFSET, honoring every other filter) and whether more
+// rows exist past this page via response headers, so a client that only
+// looked at the array body before still gets the exact same bytes.
+func TestIssue_List_TotalCountHeader_MorePages(t *testing.T) {
+	h, userID, wsID, crewID, leadID, _ := newTestIssueHandler(t)
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-2", "BACKLOG")
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-3", "BACKLOG")
+
+	req := httptest.NewRequest("GET", "/?limit=2", nil)
+	ctx := withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Total-Count"); got != "3" {
+		t.Errorf("X-Total-Count = %q, want 3", got)
+	}
+	if got := rr.Header().Get("X-Has-More"); got != "true" {
+		t.Errorf("X-Has-More = %q, want true", got)
+	}
+	var got []issueResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("len = %d, want 2 (limit still honored)", len(got))
+	}
+}
+
+func TestIssue_List_TotalCountHeader_LastPage(t *testing.T) {
+	h, userID, wsID, crewID, leadID, _ := newTestIssueHandler(t)
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-2", "BACKLOG")
+
+	req := httptest.NewRequest("GET", "/?limit=10&offset=1", nil)
+	ctx := withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+
+	if got := rr.Header().Get("X-Total-Count"); got != "2" {
+		t.Errorf("X-Total-Count = %q, want 2", got)
+	}
+	if got := rr.Header().Get("X-Has-More"); got != "false" {
+		t.Errorf("X-Has-More = %q, want false", got)
+	}
+}
+
+// The count must respect filters — a workspace-wide total would lie about
+// how many rows a filtered view actually has left to page through.
+func TestIssue_List_TotalCountHeader_RespectsFilters(t *testing.T) {
+	h, userID, wsID, crewID, leadID, _ := newTestIssueHandler(t)
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-2", "IN_PROGRESS")
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-3", "DONE")
+
+	req := httptest.NewRequest("GET", "/?status=BACKLOG,IN_PROGRESS", nil)
+	ctx := withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+
+	if got := rr.Header().Get("X-Total-Count"); got != "2" {
+		t.Errorf("X-Total-Count = %q, want 2 (filtered)", got)
+	}
+}
+
 func TestIssue_Get_Success(t *testing.T) {
 	h, userID, wsID, crewID, leadID, _ := newTestIssueHandler(t)
 	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")

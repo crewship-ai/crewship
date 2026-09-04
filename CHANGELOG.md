@@ -697,6 +697,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **A fetch failure on the issues board now renders as an error, and the
+  board says when it's showing a partial page (#2286).** `fetchIssues` used
+  to be `try { if (res.ok) setIssues(...) } catch {}` — any non-2xx response
+  or thrown fetch left `issues` exactly where it was (`[]` on first load),
+  indistinguishable from a genuinely empty workspace. The fetch now lives in
+  `hooks/use-issues-list.ts`, which always resolves to loading, a typed
+  `error`, or populated `issues`; the board renders a dedicated error panel
+  with a retry action instead of going blank. Separately, the board fetched
+  at most 100 rows with no total exposed anywhere, so a 101st issue was
+  silently invisible — `GET /api/v1/issues` now reports the filtered total
+  and whether the page was partial via `X-Total-Count`/`X-Has-More` response
+  headers (the JSON body is unchanged, so no existing client breaks), and
+  the board shows "Showing N of TOTAL issues" with a "Load more" action.
+  `crewship issue list` prints the same footer and gains `--offset` to page
+  past `--limit`.
+- **A 403 on the issues board's request is now reported as a specific,
+  actionable error instead of a request that took the whole board down
+  looking indistinguishable from empty (#2285).** Observed on dev1: a
+  transient 403 — the shape a scoped agent/CLI token failure takes
+  (`AuthKindCLIToken`, `internal/api/middleware.go`, documented as the
+  credential "an agent, CI job, or script holds") — silently emptied the
+  board. `useIssuesList` classifies a 403 separately from a 401/5xx/network
+  failure and names the likely cause (a scoped token, possibly transient)
+  in the error message, with a retry action, rather than rendering an empty
+  board that looks like a workspace with no issues.
 - **A deploy-window blip no longer wedges the avatar-backfill latch shut for
   the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
   whenever a request 401s and `/api/auth/token/refresh` is itself

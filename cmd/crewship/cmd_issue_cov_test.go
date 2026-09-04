@@ -5,6 +5,8 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +197,96 @@ func TestIssueListRunE_FiltersForwarded(t *testing.T) {
 	// Identifier-less issue falls back to the first 12 chars of its id.
 	if !strings.Contains(out, "ciss00000000") {
 		t.Errorf("id fallback missing: %q", out)
+	}
+}
+
+// #2286: the board (and the CLI mirroring it) fetched at most 100 rows with
+// no total exposed anywhere — a workspace with 101+ issues looked identical
+// to one with exactly 100. GET /api/v1/issues now reports the true total and
+// whether the page was partial via X-Total-Count / X-Has-More response
+// headers (internal/api/issue_handler_crud.go); `issue list` prints a
+// footer from them and gains --offset to page past the cap. Needs response
+// headers clitest.StubServer's Handler type can't set, so this drives a raw
+// httptest.Server directly — same cliCfg wiring covSetupCli6 does, minus the
+// StubServer dependency.
+func TestIssueListRunE_TotalCountFooter_HasMore(t *testing.T) {
+	guardCLIState(t)
+	saveCLIState(t)
+	flagServer = ""
+	flagWorkspace = ""
+	covResetFlagsCli6(t, issueListCmd, "status", "priority", "crew", "assignee", "label", "search", "limit", "offset")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("X-Total-Count", "143")
+		w.Header().Set("X-Has-More", "true")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"ciss1","crew_id":"ccrew1","crew_slug":"eng","identifier":"ENG-1","title":"A","status":"TODO","priority":"low"}]`))
+	}))
+	defer srv.Close()
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: covWorkspaceIDCli6, Server: srv.URL}
+
+	out, err := covCaptureStdoutCli6(t, func() error {
+		return issueListCmd.RunE(issueListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "Showing 1 of 143 issues") || !strings.Contains(out, "--offset 1") {
+		t.Errorf("footer missing/wrong: %q", out)
+	}
+}
+
+func TestIssueListRunE_TotalCountFooter_LastPage(t *testing.T) {
+	guardCLIState(t)
+	saveCLIState(t)
+	flagServer = ""
+	flagWorkspace = ""
+	covResetFlagsCli6(t, issueListCmd, "status", "priority", "crew", "assignee", "label", "search", "limit", "offset")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "1")
+		w.Header().Set("X-Has-More", "false")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"ciss1","crew_id":"ccrew1","crew_slug":"eng","identifier":"ENG-1","title":"A","status":"TODO","priority":"low"}]`))
+	}))
+	defer srv.Close()
+	cliCfg = &cli.CLIConfig{Token: "fake-token", Workspace: covWorkspaceIDCli6, Server: srv.URL}
+
+	out, err := covCaptureStdoutCli6(t, func() error {
+		return issueListCmd.RunE(issueListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "Showing 1 of 1 issue") {
+		t.Errorf("footer missing/wrong: %q", out)
+	}
+	if strings.Contains(out, "--offset") {
+		t.Errorf("last page should not suggest --offset: %q", out)
+	}
+}
+
+func TestIssueListRunE_Offset_Forwarded(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	covSetupCli6(t, stub)
+	covSetFlagCli6(t, issueListCmd, "offset", "50")
+
+	stub.OnGet("/api/v1/issues", clitest.JSONResponse(200, covIssueListPayload()))
+
+	_, err := covCaptureStdoutCli6(t, func() error {
+		return issueListCmd.RunE(issueListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	calls := stub.CallsFor("GET", "/api/v1/issues")
+	if len(calls) != 1 || !strings.Contains(calls[0].Query, "offset=50") {
+		t.Fatalf("expected offset=50 forwarded, got %+v", calls)
 	}
 }
 

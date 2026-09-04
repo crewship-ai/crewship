@@ -71,9 +71,20 @@ crewship issue list --search "auth flow"
 | `--assignee` | `string` | | Filter by assignee ID. |
 | `--label` | `string` | | Filter by label name. |
 | `--search` | `string` | | Search issues by title or description. |
-| `--limit` | `int` | `50` | Maximum number of issues to return. |
+| `--limit` | `int` | `50` | Maximum number of issues to return (max 100). |
+| `--offset` | `int` | `0` | Skip this many issues -- page past `--limit` (#2286). |
 
 **Output columns:** ID, TITLE, STATUS, PRIORITY, ASSIGNEE, CREATOR, CREW, LABELS, UPDATED
+
+When the workspace has more issues than fit on one page, a table/quiet-format
+run prints a footer below the table:
+
+```
+Showing 100 of 143 issues — use --offset 100 to see more.
+```
+
+`--format json`/`yaml`/`ndjson` output is unaffected -- it stays exactly the
+array the API returns, since scripts decode it directly.
 
 ---
 
