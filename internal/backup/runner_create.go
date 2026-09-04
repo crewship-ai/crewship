@@ -24,7 +24,7 @@ type CreateOptions struct {
 	Scope           Scope  // ScopeCrew or ScopeWorkspace (instance is PR 4)
 	WorkspaceID     string // required for Scope=workspace
 	CrewID          string // required for Scope=crew
-	OutputDir       string // defaults to ~/.crewship/backups
+	OutputDir       string // defaults to $CREWSHIP_DATA_DIR/backups, or ~/.crewship/backups if unset
 	CrewshipVersion string // for manifest.CrewshipVersionAtBackup
 	// Level selects which per-crew sections the collector includes.
 	// Empty resolves to DefaultScopeLevel (standard) so existing CLI
@@ -265,7 +265,8 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	}
 
 	// 4. Output directory. Supports --output via opts.OutputDir and
-	// falls back to ~/.crewship/backups. The preflight (disk-space
+	// falls back to defaultBackupsDirFor (#2262: $CREWSHIP_DATA_DIR/backups,
+	// or ~/.crewship/backups if unset). The preflight (disk-space
 	// check, partial-file cleanup) operates on the effective path so
 	// a non-default --output is not left with stale .partial files.
 	outDir := opts.OutputDir
