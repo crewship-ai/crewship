@@ -21,8 +21,9 @@ export type EntityRef =
   | { kind: "page"; slug: string }
   | { kind: "credential"; id: string }
   | { kind: "credentials"; crewSlug?: string }
-  | { kind: "inbox"; itemId?: string; itemKind?: string }
+  | { kind: "inbox"; itemId?: string; itemKind?: string; agentSlug?: string }
   | { kind: "spend"; crewId?: string }
+  | { kind: "integrations"; tab?: "notifications" | "tools"; section?: string; server?: string }
 
 function withQuery(path: string, params: Record<string, string | undefined>): string {
   const qs = Object.entries(params)
@@ -62,8 +63,10 @@ export function entityHref(ref: EntityRef): string {
     case "credentials":
       return withQuery("/credentials", { crew: ref.crewSlug })
     case "inbox":
-      return withQuery("/inbox-v2", { item: ref.itemId, kind: ref.itemKind })
+      return withQuery("/inbox-v2", { item: ref.itemId, kind: ref.itemKind, agent: ref.agentSlug })
     case "spend":
       return withQuery("/paymaster", { crew: ref.crewId })
+    case "integrations":
+      return withQuery("/integrations", { tab: ref.tab, section: ref.section, server: ref.server })
   }
 }

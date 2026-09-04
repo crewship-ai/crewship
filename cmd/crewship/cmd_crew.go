@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -26,8 +27,21 @@ var crewListCmd = &cobra.Command{
 			return err
 		}
 
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		search, _ := cmd.Flags().GetString("q")
+		q := url.Values{}
+		setListPaging(q, limit, offset)
+		if search != "" {
+			q.Set("q", search)
+		}
+		path := "/api/v1/crews"
+		if len(q) > 0 {
+			path += "?" + q.Encode()
+		}
+
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/crews")
+		resp, err := client.Get(path)
 		if err != nil {
 			return err
 		}
@@ -91,6 +105,7 @@ var crewListCmd = &cobra.Command{
 			}
 			rows = append(rows, row)
 		}
+		defer printListFooter(f, readListMeta(resp), len(crews))
 		return f.Auto(crews, headers, rows)
 	},
 }
@@ -453,6 +468,8 @@ func statusColor(status string) string {
 
 func init() {
 	crewListCmd.Flags().Bool("runtime", false, "Include runtime image, cached image, and provisioning status columns")
+	addListPagingFlags(crewListCmd.Flags(), 0)
+	crewListCmd.Flags().String("q", "", "Server-side search on name and slug (case-insensitive substring)")
 
 	crewConnectCmd.Flags().String("direction", "bidirectional", "Connection direction: bidirectional or unidirectional")
 

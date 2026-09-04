@@ -3,6 +3,7 @@
 import { Ghost, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { StatusPill } from "@/components/ui/status-pill"
 import { timeAgo } from "@/lib/time"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -44,15 +45,6 @@ export interface EmptyRosterProps {
   onAgentSelect: (slug: string) => void
 }
 
-const STATUS_COLORS: Record<string, { label: string; dot: string; text: string; pulse?: boolean }> = {
-  RUNNING: { label: "Running", dot: "bg-success", text: "text-success", pulse: true },
-  IDLE: { label: "Idle", dot: "bg-muted-foreground", text: "text-muted-foreground" },
-  ERROR: { label: "Error", dot: "bg-destructive", text: "text-destructive" },
-  STOPPED: { label: "Stopped", dot: "bg-warn", text: "text-warn" },
-  PENDING_REVIEW: { label: "Pending review", dot: "bg-warn", text: "text-warn" },
-  EXPIRED: { label: "Expired", dot: "bg-muted-foreground", text: "text-muted-foreground" },
-}
-
 function timeSince(iso: string | null | undefined): string {
   if (!iso) return "—"
   const ts = new Date(iso).getTime()
@@ -67,10 +59,14 @@ function timeSince(iso: string | null | undefined): string {
   return `${d}d ago`
 }
 
+/** The five columns above `md`; below it every row is a one-column card. */
+const GRID = "md:grid md:grid-cols-[1fr_140px_180px_120px_130px] md:items-center md:gap-3"
+
 /**
- * No-selection state for the canvas: a flat agent roster table. Replaces
- * the previous "All crews & agents" card grid — denser and easier to
- * scan once you have 12+ agents.
+ * No-selection state for the canvas: the agent roster. A dense table on a
+ * desktop; on a phone each row stacks to avatar · name · crew and role ·
+ * status, because the fixed five-column grid clipped the Agent column away at
+ * 390 and 820 (audit-fleet.md §6 P1 5).
  *
  * Click any row to drill into the agent canvas. Ephemeral ("hired") agents
  * carry an EPHEMERAL badge with their TTL / hire reason; once their TTL
@@ -82,9 +78,9 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
   const nameById = new Map(agents.map((a) => [a.id, a.name]))
 
   return (
-    <div className="px-6 md:px-8 lg:px-12 py-12 detail-width">
-      <div className="text-center mb-10">
-        <h1 className="text-3xl font-semibold mb-2">Your fleet</h1>
+    <div className="px-4 md:px-8 lg:px-12 py-8 md:py-12 detail-width">
+      <div className="text-center mb-8 md:mb-10">
+        <h1 className="text-2xl md:text-3xl font-semibold mb-2">Your fleet</h1>
         <p className="text-muted-foreground text-sm">
           Pick a crew or agent on the left, or create something via the toolbar.
         </p>
@@ -100,8 +96,8 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
         </div>
       ) : (
         <TooltipProvider delayDuration={150}>
-          <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
-            <div className="grid grid-cols-[1fr_140px_180px_120px_120px] gap-3 px-4 py-2.5 border-b border-white/8 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <div className="rounded-xl border border-white/8 bg-card overflow-hidden" data-testid="fleet-roster">
+            <div className={cn("hidden px-4 py-2.5 border-b border-white/8 text-[10px] uppercase tracking-wide text-muted-foreground", GRID)}>
               <span>Agent</span>
               <span>Crew</span>
               <span>Role</span>
@@ -112,14 +108,11 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
               {agents.map((a) => {
                 const ghost = isGhost(a)
                 const statusKey = effectiveStatus(a)
-                const status = STATUS_COLORS[statusKey] || STATUS_COLORS.IDLE
                 const crew = a.crew_id ? crewById.get(a.crew_id) : null
                 const ttl = a.ephemeral && !ghost ? ttlRemaining(a.expires_at) : ""
                 const leadName = a.parent_lead_id ? nameById.get(a.parent_lead_id) : null
                 const reason = latestHireReason(a.hire_reason)
-                const statusLabel = ghost && a.expired_at
-                  ? `Expired · ${timeAgo(a.expired_at)}`
-                  : status.label
+                const statusLabel = ghost && a.expired_at ? `Expired · ${timeAgo(a.expired_at)}` : undefined
 
                 return (
                   <div
@@ -134,62 +127,67 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
                     <button
                       type="button"
                       onClick={() => onAgentSelect(a.slug)}
-                      className="w-full grid grid-cols-[1fr_140px_180px_120px_120px] gap-3 px-4 py-2.5 hover:bg-white/[0.03] text-left items-center"
+                      className={cn(
+                        "w-full min-h-11 px-4 py-2.5 hover:bg-white/[0.03] text-left",
+                        "flex items-center gap-3",
+                        GRID,
+                      )}
                     >
-                      <span className="flex items-center gap-2.5 min-w-0">
+                      <span className="flex items-center gap-2.5 min-w-0 flex-1 md:flex-none">
                         <AgentAvatar
                           seed={a.avatar_seed || a.name}
                           style={a.avatar_style || a.crew?.avatar_style}
                           agentId={a.id}
                           avatarUrl={a.avatar_url}
-                          className="h-6 w-6 rounded-full shrink-0"
+                          className="h-8 w-8 md:h-6 md:w-6 rounded-lg md:rounded-full shrink-0"
                         />
-                        <span className="truncate">{a.name}</span>
-                        {/* Only a lead earns a badge, and the badge says LEAD
-                          * rather than whatever token the row carries. This
-                          * printed the raw value, so COORDINATOR — retired in
-                          * v0.1, creatable by no path since — labelled itself
-                          * on the roster and sent the reader looking for a
-                          * role that no longer exists (#2197). Anything
-                          * unrecognised now reads as an ordinary agent. */}
-                        {isLeadRole(a.agent_role) && (
-                          <span className="text-[8px] px-1 rounded bg-purple/20 text-purple-hover shrink-0">
-                            LEAD
-                          </span>
-                        )}
-                        {a.ephemeral && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="text-[8px] px-1 rounded bg-notice/15 text-notice shrink-0 inline-flex items-center gap-0.5">
-                                {ghost && <Ghost className="h-2.5 w-2.5" />}
-                                EPHEMERAL
+                        <span className="min-w-0">
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            <span className="truncate font-medium md:font-normal">{a.name}</span>
+                            {/* Only a lead earns a badge, and it says LEAD rather
+                              * than whatever token the row carries (#2197). */}
+                            {isLeadRole(a.agent_role) && (
+                              <span className="text-[8px] px-1 rounded bg-purple/20 text-purple-hover shrink-0">
+                                LEAD
                               </span>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-xs text-xs">
-                              <div className="font-medium">Ephemeral hire{leadName ? ` · by ${leadName}` : ""}</div>
-                              {ttl && <div className="text-muted-foreground">TTL {ttl}</div>}
-                              {ghost && a.expired_at && (
-                                <div className="text-muted-foreground">Expired {timeAgo(a.expired_at)}</div>
-                              )}
-                              {reason && <div className="mt-0.5 text-muted-foreground">Reason: {reason}</div>}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
+                            )}
+                            {a.ephemeral && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="text-[8px] px-1 rounded bg-notice/15 text-notice shrink-0 inline-flex items-center gap-0.5">
+                                    {ghost && <Ghost className="h-2.5 w-2.5" />}
+                                    EPHEMERAL
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-xs text-xs">
+                                  <div className="font-medium">Ephemeral hire{leadName ? ` · by ${leadName}` : ""}</div>
+                                  {ttl && <div className="text-muted-foreground">TTL {ttl}</div>}
+                                  {ghost && a.expired_at && (
+                                    <div className="text-muted-foreground">Expired {timeAgo(a.expired_at)}</div>
+                                  )}
+                                  {reason && <div className="mt-0.5 text-muted-foreground">Reason: {reason}</div>}
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                          </span>
+                          {/* Phone: crew and role on one line under the name. */}
+                          <span className="md:hidden block truncate text-[11px] text-muted-foreground">
+                            {[crew?.name, a.role_title].filter(Boolean).join(" · ") || "—"}
+                          </span>
+                        </span>
                       </span>
-                      <span className="text-muted-foreground truncate">{crew?.name ?? "—"}</span>
-                      <span className="text-muted-foreground truncate">{a.role_title || "—"}</span>
-                      <span className="text-muted-foreground text-xs">{timeSince(a.last_active_at)}</span>
-                      <span className={cn("text-[10px] flex items-center gap-1.5", status.text)}>
-                        <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", status.dot)} />
-                        <span className="truncate">{statusLabel}</span>
+                      <span className="hidden md:block text-muted-foreground truncate">{crew?.name ?? "—"}</span>
+                      <span className="hidden md:block text-muted-foreground truncate">{a.role_title || "—"}</span>
+                      <span className="hidden md:block text-muted-foreground text-xs">{timeSince(a.last_active_at)}</span>
+                      <span className="shrink-0">
+                        <StatusPill status={statusKey} label={statusLabel} live={a.status === "RUNNING" && !ghost} />
                       </span>
                     </button>
 
                     {ghost && (
                       // Sibling of the selection button (not nested) so we
                       // don't put a button inside a button. Reveals on hover
-                      // or keyboard focus (focus-visible keeps it reachable
-                      // when tabbed to, matching the agent-card Rehire).
+                      // or keyboard focus.
                       <Button
                         size="sm"
                         variant="outline"

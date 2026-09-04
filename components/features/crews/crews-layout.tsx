@@ -11,6 +11,8 @@ import { EmptyRoster } from "@/components/features/crews/empty-roster"
 import { BottomPanel, type BottomTab } from "@/components/features/crews/bottom-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
+import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
+import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 
 interface CrewData {
   id: string
@@ -67,6 +69,12 @@ export interface CrewsLayoutProps {
    *  flag — a legitimately empty workspace would otherwise never get
    *  its stale `?agent=` / `?crew=` param cleared. */
   loaded?: boolean
+  /** Server totals and paging for the explorer (usePagedList in the page). */
+  crewsTotal?: number | null
+  agentsTotal?: number | null
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
   onRefresh: () => void
 }
 
@@ -111,9 +119,32 @@ export function CrewsLayout({
   missions,
   workspaceId,
   loaded = false,
+  crewsTotal = null,
+  agentsTotal = null,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   onRefresh,
 }: CrewsLayoutProps) {
   const isMobile = useIsMobile()
+  // One provisioning read for the whole explorer: a crew whose image needs a
+  // rebuild or whose last build failed sorts into "Needs attention".
+  const provisioning = useProvisioningStatus(workspaceId)
+  const provisioningByCrew = useMemo(
+    () => new Map(provisioning.detail.map((d) => [d.id, d.status] as const)),
+    [provisioning.detail],
+  )
+  // Credential tool gaps per crew, the same probe the dashboard and the
+  // vault use (capped at its MAX_CREWS); a crew missing a CLI sorts into
+  // "Needs attention" with an "N gaps" pill.
+  const readiness = useCredentialReadiness(workspaceId)
+  const gapsByCrew = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const gaps of readiness.gapsByCredential.values()) {
+      for (const g of gaps) out.set(g.crewId, (out.get(g.crewId) ?? 0) + 1)
+    }
+    return out
+  }, [readiness.gapsByCredential])
   const {
     selectedAgentSlug,
     selectedCrewSlug,
@@ -242,6 +273,8 @@ export function CrewsLayout({
         }}
         onOpenExplorer={() => setExplorerOverlayOpen(true)}
         crews={crews}
+        crewsTotal={crewsTotal}
+        agentsTotal={agentsTotal ?? agents.length}
       />
 
       {/* Main grid: explorer | canvas */}
@@ -281,6 +314,13 @@ export function CrewsLayout({
                     onToggleCollapse={() => setExplorerOverlayOpen(false)}
                     onCrewSelect={(id) => { handleCrewSelect(id); setExplorerOverlayOpen(false) }}
                     onAgentSelect={(id) => { handleAgentSelect(id); setExplorerOverlayOpen(false) }}
+                    crewsTotal={crewsTotal}
+                    agentsTotal={agentsTotal}
+                    hasMore={hasMore}
+                    loadingMore={loadingMore}
+                    onLoadMore={onLoadMore}
+                    provisioningByCrew={provisioningByCrew}
+                    gapsByCrew={gapsByCrew}
                   />
                 </motion.div>
               </>
@@ -297,6 +337,13 @@ export function CrewsLayout({
               onToggleCollapse={() => setExplorerCollapsed(!explorerCollapsed)}
               onCrewSelect={handleCrewSelect}
               onAgentSelect={handleAgentSelect}
+              crewsTotal={crewsTotal}
+              agentsTotal={agentsTotal}
+              hasMore={hasMore}
+              loadingMore={loadingMore}
+              onLoadMore={onLoadMore}
+              provisioningByCrew={provisioningByCrew}
+                    gapsByCrew={gapsByCrew}
             />
           </div>
         )}
@@ -332,6 +379,7 @@ export function CrewsLayout({
                   onCrewChanged={onRefresh}
                   onSelectAgent={handleAgentSelectBySlug}
                   onOpenFiles={handleOpenFiles}
+                  provisioning={provisioning}
                 />
               ) : (
                 <EmptyRoster

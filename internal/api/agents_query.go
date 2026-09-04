@@ -18,7 +18,21 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	crewID := r.URL.Query().Get("crew_id")
-	limit, offset := parseListPagination(r, 100, 500)
+	limit, offset := parsePagination(r, 100, 500)
+
+	// Total before the window, same predicate as the page.
+	searchSQL, searchArgs := listSearchClause(r, "a.name", "a.slug", "a.role_title")
+	countQuery := `SELECT COUNT(*) FROM agents a WHERE a.workspace_id = ? AND a.deleted_at IS NULL` + searchSQL
+	countArgs := append([]any{workspaceID}, searchArgs...)
+	if crewID != "" {
+		countQuery += " AND a.crew_id = ?"
+		countArgs = append(countArgs, crewID)
+	}
+	total, err := countListRows(r.Context(), h.db, countQuery, countArgs...)
+	if err != nil {
+		replyInternalError(w, h.logger, "count agents", err)
+		return
+	}
 
 	// Main query: no more per-row scalar COUNT subqueries. Those are batched
 	// below in three GROUP BY queries keyed by agent_id so the cost is O(1)
@@ -42,7 +56,6 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	`
 
 	var rows *sql.Rows
-	var err error
 
 	// PR-D F5 order: live agents (expired_at IS NULL) come first;
 	// ghosts (expired_at IS NOT NULL) fall to the end of the list.
@@ -64,14 +77,15 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		COALESCE(a.expired_at, a.created_at) DESC,
 		a.id DESC
 		LIMIT ? OFFSET ?`
+	pageArgs := append([]any{workspaceID}, searchArgs...)
 	if crewID != "" {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+" AND a.crew_id = ?"+orderBy,
-			workspaceID, crewID, limit, offset)
+			listQuery+searchSQL+" AND a.crew_id = ?"+orderBy,
+			append(pageArgs, crewID, limit, offset)...)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+orderBy,
-			workspaceID, limit, offset)
+			listQuery+searchSQL+orderBy,
+			append(pageArgs, limit, offset)...)
 	}
 
 	if err != nil {
@@ -174,15 +188,12 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	writeListMeta(w, total, limit, offset)
 	writeJSON(w, http.StatusOK, result)
 }
 
 // batchCountByAgentID lives in agents_loaders.go — agent-specific
 // batch helper kept out of the handler file.
-
-// parseListPagination pulls standard ?limit=&offset= params, clamping to sane
-// bounds. defaultLimit is used when unspecified; maxLimit caps what clients
-// can request. Shared helper for list endpoints.
 
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")

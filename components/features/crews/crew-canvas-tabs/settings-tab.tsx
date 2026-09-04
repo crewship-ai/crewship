@@ -1,6 +1,8 @@
 "use client"
 
 import Link from "next/link"
+import { StatusPill } from "@/components/ui/status-pill"
+import { entityHref } from "@/lib/entity-links"
 import { Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
@@ -14,7 +16,6 @@ import { CrewMCPConfig } from "@/components/features/crews/crew-mcp-config"
 import { CrewEscalations } from "@/components/features/crews/crew-escalations"
 import { CrewPolicyControls } from "@/components/features/crews/crew-policy-controls"
 import { AVATAR_STYLES } from "@/lib/agent-avatar"
-import { cn } from "@/lib/utils"
 
 import { Collapsible } from "../crew-canvas-banner"
 import { CanvasRow as Row } from "../canvas-base"
@@ -265,7 +266,7 @@ export function SettingsTab({
             Integrations
             <span className="text-muted-foreground text-sm font-normal ml-1">{integrations?.length ?? 0}</span>
           </h2>
-          <Link href="/integrations" className="text-xs text-primary hover:underline">
+          <Link href={entityHref({ kind: "integrations", tab: "tools", section: "crew-tools" })} className="text-xs text-primary hover:underline">
             Manage workspace integrations →
           </Link>
         </div>
@@ -275,23 +276,35 @@ export function SettingsTab({
           </div>
         ) : (
           <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
-            {integrations.map((i) => (
-              <div key={i.id} className="px-4 py-2.5 flex items-center gap-3">
-                <div className="w-7 h-7 rounded bg-purple/20 text-purple grid place-items-center text-xs font-semibold">
-                  {i.name.charAt(0).toUpperCase()}
+            {integrations.map((i) => {
+              const gap = i.auth_status === "missing" || i.auth_status === "expired"
+              return (
+                <div key={i.id} className="px-4 py-2.5 flex items-center gap-3">
+                  <div className="w-7 h-7 rounded bg-purple/20 text-purple grid place-items-center text-xs font-semibold">
+                    {(i.display_name || i.name).charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm truncate">{i.display_name || i.name}</div>
+                    <div className="text-[11px] text-muted-foreground truncate">
+                      {i.transport} · {i.agent_binding_count} {i.agent_binding_count === 1 ? "agent" : "agents"}{i.enabled ? "" : " · disabled"}
+                    </div>
+                  </div>
+                  <StatusPill
+                    status={i.auth_status === "none" ? "no_auth" : i.auth_status}
+                    label={i.auth_status === "missing" ? "No credential" : i.auth_status === "none" ? "No auth needed" : undefined}
+                    tone={i.auth_status === "none" ? "muted" : undefined}
+                  />
+                  {gap && (
+                    <Link
+                      href={entityHref({ kind: "integrations", tab: "tools", section: "crew-tools", server: i.id })}
+                      className="text-xs text-primary-hover hover:underline shrink-0"
+                    >
+                      {i.auth_status === "expired" ? "Reconnect" : "Connect"}
+                    </Link>
+                  )}
                 </div>
-                <div className="flex-1">
-                  <div className="text-sm">{i.name}</div>
-                  <div className="text-[11px] text-muted-foreground">{i.type}</div>
-                </div>
-                <span className={cn(
-                  "text-[10px]",
-                  i.status === "connected" ? "text-success" : "text-muted-foreground",
-                )}>
-                  {i.status}
-                </span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>

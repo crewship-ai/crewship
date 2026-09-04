@@ -211,6 +211,22 @@ GET /api/v1/agents?workspace_id={workspaceId}
 |---|---|---|
 | `workspace_id` | string | Required. Workspace ID |
 | `crew_id` | string | Optional. Filter by crew |
+| `limit` | integer | Optional. Page size, default `100`, maximum `500` |
+| `offset` | integer | Optional. Rows to skip |
+| `q` | string | Optional. Server-side search on name, slug and role title |
+
+**Paging (every windowed list on this API):** the body stays a bare array; the
+window is described in three response headers so no consumer breaks:
+
+| Header | Meaning |
+|---|---|
+| `X-Total-Count` | rows matching the filter, before `limit`/`offset` |
+| `X-Limit` | the limit actually applied (after clamping) |
+| `X-Offset` | the offset actually applied |
+
+`q` is a case-insensitive substring search on the server (name and slug and role title);
+it narrows the total as well as the page. The web app and the CLI read the
+headers to say "showing 1–100 of 103" instead of calling a page the whole.
 
 **Response:** `200 OK`
 

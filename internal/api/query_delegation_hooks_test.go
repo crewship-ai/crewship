@@ -123,6 +123,13 @@ func TestFinishQuery_PersistsTerminalStateBeforePostHook(t *testing.T) {
 		(id, workspace_id, event, matcher, handler_kind, handler_config, blocking, enabled)
 		VALUES ('legacy-post-peer', ?, 'post_peer_conversation', '{}', 'http', ?, 1, 1)`,
 		wsID, `{"url":"`+ts.URL+`"}`)
+	// The raw INSERT bypasses hooks.Register, so it also bypasses the
+	// negative dispatch cache's invalidation (#2154). Every rig in this
+	// package shares the same workspace id, so an earlier test that
+	// dispatched post_peer_conversation with no hooks has cached "nothing
+	// registered here" — and under -shuffle that test can run first, which
+	// left this hook silently never firing.
+	hooks.InvalidateCache(wsID)
 
 	done := make(chan struct{})
 	go func() {

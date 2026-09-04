@@ -1,11 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { usePagedList } from "@/hooks/use-paged-list"
 import { CrewsLayout } from "@/components/features/crews/crews-layout"
 import { apiFetch } from "@/lib/api-fetch"
+import { visibleFleetAgents } from "@/lib/fleet-visibility"
 
 interface CrewData {
   id: string
@@ -52,110 +54,20 @@ interface MissionData {
   created_at: string
 }
 
+/** One page is the whole fleet for every workspace this product has met;
+ *  past it the explorer says how many more there are and loads them on ask,
+ *  instead of silently stopping at the server's default of 100. */
+const PAGE = 500
+
 export default function CrewsPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
-  const [crews, setCrews] = useState<CrewData[]>([])
-  const [agents, setAgents] = useState<AgentData[]>([])
-  const [missions, setMissions] = useState<MissionData[]>([])
-  const [loading, setLoading] = useState(true)
-
-  // Cancel in-flight fetch when workspace changes so a late response from
-  // workspace A can't repopulate crews/agents/missions after the user has
-  // switched to workspace B.
-  const abortRef = useRef<AbortController | null>(null)
-
-  const fetchData = useCallback(async (silent = false) => {
-    if (!workspaceId) {
-      setCrews([])
-      setAgents([])
-      setMissions([])
-      if (!silent) setLoading(false)
-      return
-    }
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-    if (!silent) {
-      // On a user-visible reload (workspace switch / manual refresh) we
-      // must drop the previous workspace's data before firing the new
-      // requests — otherwise a failing fetch would render the old
-      // workspace's crews/agents/missions under the new header.
-      setCrews([])
-      setAgents([])
-      setMissions([])
-      setLoading(true)
-    }
-    try {
-      const [crewsRes, agentsRes, missionsRes] = await Promise.all([
-        apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`, { signal: controller.signal }),
-        apiFetch(`/api/v1/agents?workspace_id=${workspaceId}`, { signal: controller.signal }),
-        apiFetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=20&include_tasks=true`, { signal: controller.signal }),
-      ])
-      if (controller.signal.aborted) return
-      if (crewsRes.ok) setCrews(await crewsRes.json())
-      if (controller.signal.aborted) return
-      if (agentsRes.ok) setAgents(await agentsRes.json())
-      if (controller.signal.aborted) return
-      if (missionsRes.ok) setMissions(await missionsRes.json())
-    } catch (err) {
-      if ((err as { name?: string })?.name === "AbortError") return
-      // other errors: leave state as-is (previous data survives a transient network blip)
-    } finally {
-      // Only the currently-owned controller is allowed to flip loading
-      // back off. Without this, a silent refetch that aborted the
-      // original visible request would never clear the skeleton.
-      if (abortRef.current === controller && !controller.signal.aborted) {
-        setLoading(false)
-      }
-    }
-  }, [workspaceId])
-
-  useEffect(() => {
-    fetchData()
-    return () => {
-      abortRef.current?.abort()
-    }
-  }, [fetchData])
-
-  // Real-time: debounced refetch (prevents burst of 8×3 concurrent fetches)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const debouncedRefetch = useCallback(() => {
-    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      debounceRef.current = null
-      void fetchData(true)
-    }, 200)
-  }, [fetchData])
-
-  // Clear any pending timer on unmount or when workspace changes,
-  // otherwise a late-firing timeout can overwrite state with data from
-  // the previous workspace.
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current !== null) {
-        clearTimeout(debounceRef.current)
-        debounceRef.current = null
-      }
-    }
-  }, [workspaceId])
-
-  useRealtimeEvent("agent.status", debouncedRefetch)
-  useRealtimeEvent("agent.created", debouncedRefetch)
-  useRealtimeEvent("agent.updated", debouncedRefetch)
-  useRealtimeEvent("agent.deleted", debouncedRefetch)
-  useRealtimeEvent("crew.created", debouncedRefetch)
-  useRealtimeEvent("crew.updated", debouncedRefetch)
-  useRealtimeEvent("crew.deleted", debouncedRefetch)
-  useRealtimeEvent("mission.updated", debouncedRefetch)
-
-  if (loading || wsLoading) {
+  if (wsLoading) {
     return (
       <div className="h-full flex items-center justify-center">
         <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
       </div>
     )
   }
-
   if (!workspaceId) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-2 p-6 text-center">
@@ -166,24 +78,115 @@ export default function CrewsPage() {
       </div>
     )
   }
+  // Keyed by workspace so a switch starts from empty lists instead of
+  // showing workspace A's crews under workspace B's header until B answers.
+  return <CrewsPageBody key={workspaceId} workspaceId={workspaceId} />
+}
 
-  // CrewsLayout only mounts once the initial fetch has resolved (guarded by
-  // the `loading || wsLoading` skeleton above), so we can promise it the
-  // data is loaded. This is what drives its stale-slug watcher — using the
-  // array lengths as a loaded proxy would mis-treat legitimately empty
-  // workspaces as "still loading" and silently pin invalid ?agent= slugs.
+function CrewsPageBody({ workspaceId }: { workspaceId: string }) {
+  const [missions, setMissions] = useState<MissionData[]>([])
+  // Grows with "Load more" so a realtime refetch re-reads every page that
+  // is on screen instead of dropping back to the first one.
+  const [pageSize, setPageSize] = useState(PAGE)
+  // Bumped by realtime events and by saves; both lists and the missions
+  // re-read on it. usePagedList owns the request race (a late answer from
+  // a superseded fetch is dropped), so a workspace switch cannot repaint
+  // the new workspace with the old one's rows.
+  const [tick, setTick] = useState(0)
+
+  const crewsList = usePagedList<CrewData>({
+    url: `/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`,
+    limit: pageSize,
+    reloadKey: tick,
+  })
+  const agentsList = usePagedList<AgentData>({
+    url: `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`,
+    limit: pageSize,
+    reloadKey: tick,
+  })
+
+  const crews = crewsList.items
+  const crewsComplete = crewsList.total === null || crews.length >= crewsList.total
+  // The onboarding guide lives in a crew the crews list never returns; it
+  // must not be the first row of the client's fleet (lib/fleet-visibility).
+  const agents = useMemo(() => visibleFleetAgents(agentsList.items, crews, crewsComplete), [agentsList.items, crews, crewsComplete])
+  // The server's total counts the hidden guide too; say what the roster shows.
+  const hiddenAgents = agentsList.items.length - agents.length
+  const agentsTotal = agentsList.total === null ? null : Math.max(0, agentsList.total - hiddenAgents)
+
+  const missionsAbort = useRef<AbortController | null>(null)
+  useEffect(() => {
+    missionsAbort.current?.abort()
+    const controller = new AbortController()
+    missionsAbort.current = controller
+    apiFetch(`/api/v1/missions?workspace_id=${encodeURIComponent(workspaceId)}&limit=20&include_tasks=true`, { signal: controller.signal })
+      // A non-OK answer keeps the last good list rather than blanking it.
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (!controller.signal.aborted && Array.isArray(data)) setMissions(data) })
+      .catch(() => { /* a transient failure keeps the previous missions */ })
+    return () => controller.abort()
+  }, [workspaceId, tick])
+
+  const refresh = useCallback(() => setTick((t) => t + 1), [])
+
+  // Real-time: debounced refetch (prevents a burst of concurrent fetches)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debouncedRefetch = useCallback(() => {
+    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      refresh()
+    }, 200)
+  }, [refresh])
+  useEffect(() => () => { if (debounceRef.current !== null) clearTimeout(debounceRef.current) }, [workspaceId])
+
+  useRealtimeEvent("agent.status", debouncedRefetch)
+  useRealtimeEvent("agent.created", debouncedRefetch)
+  useRealtimeEvent("agent.updated", debouncedRefetch)
+  useRealtimeEvent("agent.deleted", debouncedRefetch)
+  useRealtimeEvent("crew.created", debouncedRefetch)
+  useRealtimeEvent("crew.updated", debouncedRefetch)
+  useRealtimeEvent("crew.deleted", debouncedRefetch)
+  useRealtimeEvent("mission.updated", debouncedRefetch)
+
+  // First paint only: a silent refetch after a save keeps the canvas up,
+  // otherwise the list the open canvas resolved from would blank for a beat.
+  // The lists report "not loading" for the one render before their first
+  // effect fires, which painted an empty roster for a frame; until a load has
+  // been seen, an empty workspace is "not fetched yet", not "empty".
+  const loadSeen = useRef(false)
+  if (crewsList.loading || agentsList.loading) loadSeen.current = true
+  const beforeFirstResponse = !loadSeen.current && !crewsList.error && !agentsList.error
+  const firstLoad = beforeFirstResponse || (crewsList.loading && crewsList.total === null) || (agentsList.loading && agentsList.total === null)
+  if (firstLoad && crews.length === 0 && agents.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
+      </div>
+    )
+  }
+
+  const loadMore = () => {
+    if (crewsList.hasMore) void crewsList.loadMore()
+    if (agentsList.hasMore) void agentsList.loadMore()
+    setPageSize((n) => n + PAGE)
+  }
+
   return (
     <CrewsLayout
       crews={crews}
       agents={agents}
       missions={missions}
       workspaceId={workspaceId}
-      loaded
-      // Silent: this fires after a save, not on a workspace switch. The loud
-      // path clears crews/agents/missions before refetching, which is right
-      // when the whole workspace changed and wrong here — it blanked the list
-      // the open canvas was resolved from.
-      onRefresh={() => fetchData(true)}
+      // The stale-slug watcher needs a real "loaded" signal; array lengths
+      // would mis-treat a legitimately empty workspace as still loading.
+      loaded={!crewsList.loading && !agentsList.loading}
+      crewsTotal={crewsList.total}
+      agentsTotal={agentsTotal}
+      hasMore={crewsList.hasMore || agentsList.hasMore}
+      loadingMore={crewsList.loadingMore || agentsList.loadingMore}
+      onLoadMore={loadMore}
+      onRefresh={refresh}
     />
   )
 }

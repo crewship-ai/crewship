@@ -255,7 +255,9 @@ export function useProvisioningStatus(
       return
     }
     try {
-      const listRes = await apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      // The list is windowed at 100 by default; a failed build on crew #140
+      // must still reach the badge and the explorer.
+      const listRes = await apiFetch(`/api/v1/crews?workspace_id=${workspaceId}&limit=500`)
       if (!listRes.ok) return
       const listed: CrewListEntry[] = await listRes.json()
       if (!Array.isArray(listed)) return
