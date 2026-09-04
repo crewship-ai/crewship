@@ -83,7 +83,7 @@ crewship-<scope>-<slug>-<iso-ts>.tar.zst
 
 - **Scope:** `workspace` (workspace row + all its crews) or `crew` (single crew + its agents).
 - **Encryption:** AGE passphrase (default) or AGE X25519 recipient. `--no-encrypt` produces a plaintext payload for test / CI use.
-- **Default location:** `~/.crewship/backups/` on the server, mode `0700`.
+- **Default location:** `$CREWSHIP_DATA_DIR/backups/` on the server (mode `0700`), or `~/.crewship/backups/` when `CREWSHIP_DATA_DIR` is unset — the same root every other piece of per-instance state resolves against, so isolated instances on one host never share a bundle directory. `--output`/`output_dir` overrides it explicitly.
 - **Naming:** `crewship-<scope>-<slug>-<iso-ts>.tar.zst`. Collisions append `-<hash8>`.
 
 Inside `payload.age`, bundles carry three distinct notions of "memory" — don't confuse them:

@@ -27,7 +27,7 @@ crewship backup <subcommand> [flags]
 | Command | Description |
 |---------|-------------|
 | `create` | Create a new backup bundle. |
-| `list` | List bundles in `~/.crewship/backups`. |
+| `list` | List bundles in the server's default backups directory (`$CREWSHIP_DATA_DIR/backups`, or `~/.crewship/backups` if unset). |
 | `download` | Stream a backup bundle from the server to disk. |
 | `inspect` | Show the manifest of a bundle without decrypting the payload. |
 | `verify` | Recompute and check the bundle SHA-256 without restoring. |
@@ -60,7 +60,7 @@ crewship backup create --scope=workspace --use-keyring
 | `--passphrase-file` | `string` | | Read the passphrase from a file instead of prompting. |
 | `--use-keyring` | `bool` | `false` | Cache and reuse the passphrase via `~/.crewship/backup-keyring.enc`. |
 | `--recipient` | `string` | | AGE X25519 public key (`age1…`) for asymmetric encryption. |
-| `--output` | `string` | `~/.crewship/backups` | Override the output directory on the server. |
+| `--output` | `string` | `<data dir>/backups` | Override the output directory on the server. |
 
 `--recipient` is mutually exclusive with both `--passphrase-file` and
 `--no-encrypt` (each combination is rejected). `--no-encrypt` also wins

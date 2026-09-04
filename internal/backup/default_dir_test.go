@@ -65,8 +65,21 @@ func (stubStorageOpsForDefaultDir) Stat(context.Context, string) (os.FileInfo, e
 var _ StorageOps = stubStorageOpsForDefaultDir{}
 
 // ---- defaultBackupsDirFor ----
+//
+// #2262: an instance started with its own CREWSHIP_DATA_DIR must default
+// its bundle directory under that root, not under the operating user's
+// shared ~/.crewship — otherwise every isolated instance on one host
+// (three dev clones plus any number of ephemeral test instances, all
+// running as the same unix user) shares one bundle directory, and a
+// restore that picks a bundle by name can land foreign data into a live
+// database. CREWSHIP_DATA_DIR wins when set (mirroring
+// database.defaultDataDirRoot's own env resolution and its
+// filepath.Abs + fmt.Errorf("resolve CREWSHIP_DATA_DIR: %w") wrapping);
+// the Home()-based ~/.crewship/backups default is the fallback for when
+// neither is set, kept for the un-isolated single-instance case.
 
 func TestDefaultBackupsDirFor_JoinsHomeWithDotCrewshipBackups(t *testing.T) {
+	t.Setenv("CREWSHIP_DATA_DIR", "") // legacy path only applies when unset
 	st := stubStorageOpsForDefaultDir{homePath: "/users/alice"}
 	got, err := defaultBackupsDirFor(st)
 	if err != nil {
@@ -82,6 +95,7 @@ func TestDefaultBackupsDirFor_PropagatesHomeError_Wrapped(t *testing.T) {
 	// Home error must surface as "backup: resolve home dir: %w" so an
 	// operator can find both the layer (backup) AND the underlying
 	// failure (e.g. "permission denied", "no such user").
+	t.Setenv("CREWSHIP_DATA_DIR", "")
 	homeErr := errors.New("getpwuid_r failed: no entry")
 	st := stubStorageOpsForDefaultDir{homeErr: homeErr}
 	_, err := defaultBackupsDirFor(st)
@@ -101,6 +115,7 @@ func TestDefaultBackupsDirFor_EmptyHomeStillJoins(t *testing.T) {
 	// nil) the join still produces ".crewship/backups" relative to
 	// cwd. Pin the current behavior so a future "reject empty home"
 	// refactor surfaces explicitly.
+	t.Setenv("CREWSHIP_DATA_DIR", "")
 	st := stubStorageOpsForDefaultDir{homePath: ""}
 	got, err := defaultBackupsDirFor(st)
 	if err != nil {
@@ -112,6 +127,57 @@ func TestDefaultBackupsDirFor_EmptyHomeStillJoins(t *testing.T) {
 	}
 }
 
+func TestDefaultBackupsDirFor_DataDirEnvSet_WinsOverHome(t *testing.T) {
+	// The bug: CREWSHIP_DATA_DIR was ignored entirely, so this used to
+	// resolve to Home()+".crewship/backups" no matter what. It must
+	// resolve under the data dir instead, and never call Home() (Home
+	// on the stub panics — if this test doesn't panic, Home was never
+	// reached, proving the env short-circuits it).
+	dataDir := "/srv/crewship/instance-a/data"
+	t.Setenv("CREWSHIP_DATA_DIR", dataDir)
+	st := stubStorageOpsForDefaultDir{homeErr: errors.New("Home must not be called when CREWSHIP_DATA_DIR is set")}
+
+	got, err := defaultBackupsDirFor(st)
+	if err != nil {
+		t.Fatalf("defaultBackupsDirFor: %v", err)
+	}
+	want := filepath.Join(dataDir, "backups")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestDefaultBackupsDirFor_DataDirEnvRelative_MadeAbsolute(t *testing.T) {
+	// database.defaultDataDirRoot makes a relative CREWSHIP_DATA_DIR
+	// absolute (relative to cwd) before using it; mirror that so the
+	// two readers of the env var can never disagree about where an
+	// instance's root is.
+	tmp := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	t.Setenv("CREWSHIP_DATA_DIR", "relative-data-dir")
+	st := stubStorageOpsForDefaultDir{homeErr: errors.New("Home must not be called when CREWSHIP_DATA_DIR is set")}
+
+	got, err := defaultBackupsDirFor(st)
+	if err != nil {
+		t.Fatalf("defaultBackupsDirFor: %v", err)
+	}
+	want := filepath.Join(tmp, "relative-data-dir", "backups")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("got %q, want an absolute path", got)
+	}
+}
+
 // ---- DefaultBackupsDir ----
 
 func TestDefaultBackupsDir_UsesPackageDefaultStorage(t *testing.T) {
@@ -120,6 +186,7 @@ func TestDefaultBackupsDir_UsesPackageDefaultStorage(t *testing.T) {
 	// reads $HOME. We use t.Setenv to point it at a temp dir so the
 	// test doesn't leak the developer's real path AND isolates the
 	// assertion to a known prefix.
+	t.Setenv("CREWSHIP_DATA_DIR", "") // exercise the legacy Home() fallback
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
@@ -130,6 +197,71 @@ func TestDefaultBackupsDir_UsesPackageDefaultStorage(t *testing.T) {
 	want := filepath.Join(tmp, ".crewship", "backups")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestDefaultBackupsDir_DataDirEnvSet_WinsOverHome(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp) // present but must lose to CREWSHIP_DATA_DIR
+	dataDir := filepath.Join(tmp, "isolated-instance")
+	t.Setenv("CREWSHIP_DATA_DIR", dataDir)
+
+	got, err := DefaultBackupsDir()
+	if err != nil {
+		t.Fatalf("DefaultBackupsDir: %v", err)
+	}
+	want := filepath.Join(dataDir, "backups")
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestDefaultBackupsDir_TwoDataDirs_NeitherSeesTheOthersBundleByName(t *testing.T) {
+	// The scenario from the issue: two instances on one host, each with
+	// its own CREWSHIP_DATA_DIR. A bundle created under instance A's
+	// resolved dir must not be visible when B resolves its own default
+	// and looks for a file of the same name.
+	root := t.TempDir()
+	dataDirA := filepath.Join(root, "instance-a")
+	dataDirB := filepath.Join(root, "instance-b")
+
+	t.Setenv("CREWSHIP_DATA_DIR", dataDirA)
+	dirA, err := DefaultBackupsDir()
+	if err != nil {
+		t.Fatalf("DefaultBackupsDir (A): %v", err)
+	}
+
+	t.Setenv("CREWSHIP_DATA_DIR", dataDirB)
+	dirB, err := DefaultBackupsDir()
+	if err != nil {
+		t.Fatalf("DefaultBackupsDir (B): %v", err)
+	}
+
+	if dirA == dirB {
+		t.Fatalf("instance A and B resolved to the same backups dir %q; env-based isolation did not work", dirA)
+	}
+
+	const bundleName = "crewship-workspace-acme-20240101T000000Z.tar.zst"
+	if err := os.MkdirAll(dirA, 0o755); err != nil {
+		t.Fatalf("MkdirAll dirA: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dirA, bundleName), []byte("bundle contents"), 0o644); err != nil {
+		t.Fatalf("write bundle in dirA: %v", err)
+	}
+
+	// B's resolved default dir must not contain A's bundle by name.
+	if _, err := os.Stat(filepath.Join(dirB, bundleName)); err == nil {
+		t.Fatalf("instance B can see instance A's bundle %q at %q", bundleName, dirB)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("Stat dirB/%s: %v", bundleName, err)
+	}
+
+	ctx := context.Background()
+	if _, err := Exists(ctx, filepath.Join(dirB, bundleName)); !errors.Is(err, ErrBundleNotFound) {
+		t.Errorf("Exists(dirB/%s) = %v, want %v", bundleName, err, ErrBundleNotFound)
+	}
+	if ok, err := Exists(ctx, filepath.Join(dirA, bundleName)); err != nil || !ok {
+		t.Errorf("Exists(dirA/%s) = (%v, %v), want (true, nil)", bundleName, ok, err)
 	}
 }
 

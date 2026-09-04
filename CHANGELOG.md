@@ -697,6 +697,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **`crewship backup` defaults its bundle directory under the instance's own
+  data dir, not a home directory shared by every instance on the host
+  (#2262).** `backup create`/`verify`/`inspect`/`restore` resolved their
+  default location as `Home()+".crewship/backups"` regardless of
+  `CREWSHIP_DATA_DIR`, the env var every other piece of per-instance state
+  (`DATABASE_URL`, `CREWSHIP_BOLT_PATH`, `CREWSHIP_SOCKET_PATH`, storage)
+  already honours. Several isolated instances run by the same user on one
+  host — three dev clones, any number of ephemeral test instances — shared
+  one bundle directory, and a `restore` that picked up another instance's
+  bundle by name landed foreign data into a live database. The default now
+  resolves under `$CREWSHIP_DATA_DIR/backups` when the env var is set,
+  falling back to `~/.crewship/backups` only when it is not; `--output` /
+  `output_dir` still override it explicitly.
 - **A deploy-window blip no longer wedges the avatar-backfill latch shut for
   the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
   whenever a request 401s and `/api/auth/token/refresh` is itself

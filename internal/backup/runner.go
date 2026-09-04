@@ -39,7 +39,23 @@ func DefaultBackupsDir() (string, error) {
 	return defaultBackupsDirFor(getDefaultStorage())
 }
 
+// defaultBackupsDirFor resolves the same way database.defaultDataDirRoot
+// does: CREWSHIP_DATA_DIR, made absolute, wins when set — every other
+// piece of per-instance state (DATABASE_URL, CREWSHIP_BOLT_PATH,
+// CREWSHIP_SOCKET_PATH, storage) already honours it, and bundles are the
+// one place cross-contamination is least reversible (a restore that
+// picks up another instance's bundle by name lands foreign data into a
+// live database, #2262). The Home()-based ~/.crewship/backups default
+// is kept as the fallback for the single, un-isolated instance case
+// where CREWSHIP_DATA_DIR was never set.
 func defaultBackupsDirFor(st StorageOps) (string, error) {
+	if dataDir := strings.TrimSpace(os.Getenv("CREWSHIP_DATA_DIR")); dataDir != "" {
+		abs, err := filepath.Abs(dataDir)
+		if err != nil {
+			return "", fmt.Errorf("backup: resolve CREWSHIP_DATA_DIR: %w", err)
+		}
+		return filepath.Join(abs, "backups"), nil
+	}
 	home, err := st.Home()
 	if err != nil {
 		return "", fmt.Errorf("backup: resolve home dir: %w", err)

@@ -25,8 +25,9 @@ var backupCmd = &cobra.Command{
 	Long: `Manage workspace and crew backups. All subcommands require OWNER or
 ADMIN role on the workspace; MEMBER and VIEWER roles are refused.
 
-Bundles live at ~/.crewship/backups by default and are AGE-encrypted
-with a passphrase unless --no-encrypt is supplied.
+Bundles live under the server's data dir (CREWSHIP_DATA_DIR/backups, or
+~/.crewship/backups when that env var is unset) by default and are
+AGE-encrypted with a passphrase unless --no-encrypt is supplied.
 
 Examples:
   crewship backup create --scope=workspace
@@ -39,7 +40,7 @@ Examples:
 
 var backupListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List backup bundles in ~/.crewship/backups",
+	Short: "List backup bundles in the server's default backups directory",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -263,7 +264,7 @@ func init() {
 	backupCreateCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
 	backupCreateCmd.Flags().Bool("use-keyring", false, "Store and reuse the passphrase via the local backup keyring (~/.crewship/backup-keyring.enc)")
 	backupCreateCmd.Flags().String("recipient", "", "AGE X25519 public key (age1…) for asymmetric encryption")
-	backupCreateCmd.Flags().String("output", "", "Override output directory (default: ~/.crewship/backups on the server)")
+	backupCreateCmd.Flags().String("output", "", "Override output directory (default: CREWSHIP_DATA_DIR/backups on the server, or ~/.crewship/backups if unset)")
 
 	backupRestoreCmd.Flags().String("as-workspace", "", "Restore the workspace under a new slug")
 	backupRestoreCmd.Flags().String("as-crew", "", "Restore the crew under a new slug (scope=crew only)")
