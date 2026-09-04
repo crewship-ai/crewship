@@ -51,6 +51,8 @@ interface UnifiedExplorerProps {
   onStatusFilter?: (statuses: MissionStatus[]) => void
   /** Collapse toggle — rendered in the toolbar next to search. */
   onToggleCollapse?: () => void
+  /** The server's total; the section header says "100 of 1 015" when the page is shorter. */
+  total?: number | null
 }
 
 const EMPTY_STATUSES: MissionStatus[] = []
@@ -63,6 +65,7 @@ export function UnifiedExplorer({
   filterPriority = null, onPriorityFilter,
   filterStatuses = EMPTY_STATUSES, onStatusFilter,
   onToggleCollapse,
+  total = null,
 }: UnifiedExplorerProps) {
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
@@ -270,7 +273,18 @@ export function UnifiedExplorer({
 
       {/* ── Issues ── */}
       <div className="flex-1 min-h-0 flex flex-col border-b border-white/[0.06]">
-        <SidebarSection label="Issues" count={displayed.length} />
+        <SidebarSection
+          label="Issues"
+          count={
+            total != null && total > issues.length ? (
+              <span className="font-mono normal-case tracking-normal" title="Loaded of the workspace's total">
+                {displayed.length} of {total.toLocaleString()}
+              </span>
+            ) : (
+              displayed.length
+            )
+          }
+        />
         <div className="flex-1 min-h-0 overflow-y-auto px-1 pb-1">
           {displayed.map((issue) => (
             <SidebarRow
