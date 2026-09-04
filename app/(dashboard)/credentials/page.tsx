@@ -589,6 +589,7 @@ export default function CredentialsPage() {
           credentials={credentials}
           missingToolIds={readiness.missingToolIds}
           crewsChecked={readiness.crewsChecked}
+          crewsTotal={readiness.crewsTotal}
           readinessLoading={readiness.loading}
           onSelect={(id) => {
             const cred = credentials.find((c) => c.id === id)

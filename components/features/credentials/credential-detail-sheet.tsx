@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+
 import * as React from "react"
 import { motion } from "motion/react"
 import {
@@ -58,6 +60,7 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
+import { entityHref } from "@/lib/entity-links"
 import { apiFetch } from "@/lib/api-fetch"
 import { RevealDialog } from "./reveal-dialog"
 
@@ -169,6 +172,8 @@ interface BindingRow {
 /** One row of GET /api/v1/agents/{id}/credentials, narrowed to this credential. */
 interface AssignmentRow {
   agentName: string
+  /** For the link to the agent's canvas; null on a row the list did not carry. */
+  agentSlug: string | null
   envVarName: string
   /** "explicit" (an agent_credentials row) or "crew" (inherited via the crew). */
   grantSource: string
@@ -409,6 +414,10 @@ export function CredentialDetailSheet({
   const agentNameById = new Map<string, string>(
     (credential.agent_ids ?? []).map((id, i) => [id, credential.agent_names[i] ?? id]),
   )
+
+  // Assignments carry the slug the binding rows lack; a slot that names an
+  // agent links through it when the same agent is on both lists.
+  const agentSlugByName = new Map<string, string | null>(assignments.map((a) => [a.agentName, a.agentSlug]))
 
   const shownAudit = auditExpanded ? audit : audit.slice(0, AUDIT_PREVIEW)
 
@@ -939,7 +948,7 @@ export function CredentialDetailSheet({
                                     cuid in this column made the one row that
                                     answers "who can read this?" unreadable. */}
                                 {b.crew_id && (
-                                  <span className="ml-auto inline-flex min-w-0 items-center gap-1.5">
+                                  <UsedByTarget href={crew?.slug ? entityHref({ kind: "crew", slug: crew.slug }) : undefined}>
                                     <CrewIcon
                                       icon={crew?.icon ?? ""}
                                       color={crew?.color ?? undefined}
@@ -949,13 +958,13 @@ export function CredentialDetailSheet({
                                     <span className="truncate">
                                       {crew?.name ?? b.crew_id}
                                     </span>
-                                  </span>
+                                  </UsedByTarget>
                                 )}
                                 {!b.crew_id && b.agent_id && (
-                                  <span className="ml-auto inline-flex min-w-0 items-center gap-1.5">
+                                  <UsedByTarget href={agentName && agentSlugByName.get(agentName) ? entityHref({ kind: "agent", slug: agentSlugByName.get(agentName)! }) : undefined}>
                                     <AgentAvatar seed={b.agent_id} className="h-4 w-4 shrink-0" alt="" />
                                     <span className="truncate">{agentName ?? b.agent_id}</span>
-                                  </span>
+                                  </UsedByTarget>
                                 )}
                               </li>
                             )
@@ -972,7 +981,11 @@ export function CredentialDetailSheet({
                             className="flex items-center gap-2 rounded-md border border-white/10 bg-background px-3 py-2 text-[13px]"
                           >
                             <AgentAvatar seed={a.agentName} className="h-4 w-4 shrink-0" alt="" />
-                            <span className="truncate">{a.agentName}</span>
+                            {a.agentSlug ? (
+                              <Link href={entityHref({ kind: "agent", slug: a.agentSlug })} className="truncate hover:underline">{a.agentName}</Link>
+                            ) : (
+                              <span className="truncate">{a.agentName}</span>
+                            )}
                             <span className="truncate font-mono text-[10px] text-muted-foreground">
                               {a.envVarName}
                             </span>
@@ -1033,8 +1046,11 @@ export function CredentialDetailSheet({
                     )}
 
                     {credential.mcp_used && (
-                      <p className="mt-3 rounded-md border border-info/25 bg-info/[0.05] px-3 py-2 text-[11px]">
-                        Also referenced by one or more MCP server integrations.
+                      <p className="mt-3 flex items-center gap-2 rounded-md border border-info/25 bg-info/[0.05] px-3 py-2 text-[11px]">
+                        <span className="min-w-0 flex-1">Also referenced by one or more MCP server integrations.</span>
+                        <Link href={entityHref({ kind: "integrations", tab: "tools", section: "crew-tools" })} className="shrink-0 text-primary-hover hover:underline">
+                          Crew tools →
+                        </Link>
                       </p>
                     )}
                   </DetailCard>
@@ -1483,7 +1499,7 @@ async function loadAssignments(
 
   const crewIds = new Set(credential.crew_ids ?? [])
   const names = new Set(credential.agent_names ?? [])
-  const candidates = (agents as { id?: string; name?: string; crew_id?: string | null }[])
+  const candidates = (agents as { id?: string; name?: string; slug?: string; crew_id?: string | null }[])
     .filter((a) => typeof a?.id === "string")
     .filter((a) => names.has(a.name ?? "") || (a.crew_id ? crewIds.has(a.crew_id) : false))
     .slice(0, MAX_ASSIGNMENT_LOOKUPS)
@@ -1509,6 +1525,7 @@ async function loadAssignments(
           if (row?.credential_id !== credential.id) continue
           rows.push({
             agentName: agent.name ?? agent.id!,
+            agentSlug: agent.slug ?? null,
             envVarName: row.env_var_name ?? "",
             grantSource: row.grant_source ?? "explicit",
             expiresAt: row.expires_at,
@@ -1619,6 +1636,14 @@ function Row({
 
 
 // Inline alias so we don't have to import AlertDialogCancel everywhere — saves a line.
+/** The crew or agent a slot reaches — a link when its slug is known, so
+ *  "who can read this?" is one click from the answer (README §5). */
+function UsedByTarget({ href, children }: { href?: string; children: React.ReactNode }) {
+  const cls = "ml-auto inline-flex min-w-0 items-center gap-1.5"
+  if (!href) return <span className={cls}>{children}</span>
+  return <Link href={href} className={cn(cls, "hover:underline")}>{children}</Link>
+}
+
 function Cancel({ children }: { children: React.ReactNode }) {
   return <AlertDialogCancel>{children}</AlertDialogCancel>
 }

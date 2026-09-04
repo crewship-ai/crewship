@@ -69,6 +69,7 @@ export interface CredentialsOverviewProps {
   missingToolIds: ReadonlySet<string>
   /** How many crews answered the readiness endpoint — 0 means "nobody asked yet". */
   crewsChecked: number
+  crewsTotal?: number
   readinessLoading: boolean
   onSelect: (id: string) => void
   /** Sets the rail's tier facet — the donut's click-through. */
@@ -81,6 +82,7 @@ export function CredentialsOverview({
   credentials,
   missingToolIds,
   crewsChecked,
+  crewsTotal = 0,
   readinessLoading,
   onSelect,
   onSelectTier,
@@ -149,13 +151,7 @@ export function CredentialsOverview({
             label="Tools missing"
             value={missingToolCount}
             valueColor={missingToolCount > 0 ? "rgb(248, 113, 113)" : undefined}
-            subtitle={
-              readinessLoading
-                ? "checking crews…"
-                : crewsChecked === 0
-                  ? "no crew reported"
-                  : `across ${crewsChecked} crew${crewsChecked === 1 ? "" : "s"}`
-            }
+            subtitle={readinessScopeLabel({ loading: readinessLoading, checked: crewsChecked, total: crewsTotal })}
             onClick={missingToolCount > 0 ? () => onSelectStatus("missing-tool") : undefined}
           />
           <KpiCard
@@ -418,4 +414,13 @@ export function CredentialsOverviewSkeleton() {
       </div>
     </div>
   )
+}
+
+/** "across 3 crews", or "checked 24 of 103 crews" when the per-crew probe
+ *  stopped short — a partial count must never read as the whole fleet. */
+export function readinessScopeLabel({ loading, checked, total }: { loading: boolean; checked: number; total: number }): string {
+  if (loading) return "checking crews…"
+  if (checked === 0) return "no crew reported"
+  if (total > checked) return `checked ${checked} of ${total} crews`
+  return `across ${checked} crew${checked === 1 ? "" : "s"}`
 }

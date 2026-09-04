@@ -56,6 +56,9 @@ export interface CredentialReadiness {
    * green tick we did not earn is the exact failure this endpoint removes.
    */
   crewsChecked: number
+  /** How many crews the workspace has — so "checked 24 of 103" can be said
+   *  when the per-crew probe stops at MAX_CREWS. */
+  crewsTotal: number
   loading: boolean
 }
 
@@ -65,12 +68,14 @@ const EMPTY: CredentialReadiness = {
   gapsByCredential: new Map(),
   missingToolIds: new Set(),
   crewsChecked: 0,
+  crewsTotal: 0,
   loading: false,
 }
 
 interface CrewRow {
   id?: string
   name?: string
+  slug?: string
   icon?: string | null
   color?: string | null
 }
@@ -82,6 +87,7 @@ interface CrewRow {
 export interface CredentialCrewRef {
   id: string
   name: string
+  slug: string | null
   icon: string | null
   color: string | null
 }
@@ -131,6 +137,7 @@ export function useCredentialReadiness(workspaceId: string | null): CredentialRe
         crewsById[c.id] = {
           id: c.id,
           name: c.name ?? c.id,
+          slug: c.slug ?? null,
           icon: c.icon ?? null,
           color: c.color ?? null,
         }
@@ -176,7 +183,7 @@ export function useCredentialReadiness(workspaceId: string | null): CredentialRe
         }
       }
 
-      setState({ crewNames, crewsById, gapsByCredential, missingToolIds, crewsChecked, loading: false })
+      setState({ crewNames, crewsById, gapsByCredential, missingToolIds, crewsChecked, crewsTotal: named.length, loading: false })
     })()
 
     return () => {
