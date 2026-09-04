@@ -198,6 +198,113 @@ func TestDispatchQueuedFollowUps_FailedDispatchLeavesDeliveriesPending(t *testin
 	}
 }
 
+// TestDispatchQueuedFollowUps_OversizedDigestLeavesTheOverflowPending is a
+// regression test for a review finding on #2342: an earlier revision
+// claimed and later marked 'consumed' EVERY pending delivery regardless of
+// whether its comment text actually fit in the follow-up run's brief.
+// mentionTaskBrief clips CommentBody to mentionTaskMaxBody (4000 runes) as
+// ONE unit, so a big enough burst of queued comments silently lost its
+// tail to that clip while dispatchQueuedFollowUpsForSession still recorded
+// every one of them as read.
+//
+// Three comments at ~1800 runes each (~5400 total, comfortably over the
+// 4000 budget once the header is subtracted) force an overflow: the first
+// two fit, the third does not — on the FIRST fold. This fixture's
+// no-resolver run fails near-instantly, so the follow-up run this test
+// dispatches itself finishes fast enough to trigger its OWN
+// dispatchQueuedFollowUpsForSession call before this test's single
+// WaitDispatches returns — the overflow comment left behind by the first
+// fold is picked up automatically by that second, chained fold, not by a
+// second call this test has to make itself. That self-draining chain is
+// exactly the point: nothing here manufactures a "next round" by hand.
+func TestDispatchQueuedFollowUps_OversizedDigestLeavesTheOverflowPending(t *testing.T) {
+	f := setupMentionFixture(t)
+	ctx := context.Background()
+	if err := ensureMissionChat(ctx, f.db, f.missionID, f.wsID, f.target, "Test issue"); err != nil {
+		t.Fatalf("ensureMissionChat: %v", err)
+	}
+
+	const sessionID = "sess_fu_overflow"
+	const winnerID = "asg_fu_overflow_winner"
+	execOrFatal(t, f.db, `
+		INSERT INTO issue_agent_sessions (id, workspace_id, mission_id, agent_id, state, last_consumed_seq, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'pending', 0, datetime('now'), datetime('now'))`,
+		sessionID, f.wsID, f.missionID, f.target)
+	execOrFatal(t, f.db, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, created_at, mission_id, session_id)
+		VALUES (?, ?, ?, ?, ?, 'winning run', 'COMPLETED', 1, datetime('now'), ?, ?)`,
+		winnerID, f.wsID, f.missionID, f.target, f.target, f.missionID, sessionID)
+
+	const n = 3
+	bigBody := strings.Repeat("x", 1800)
+	deliveryIDs := make([]string, n)
+	for i := 0; i < n; i++ {
+		commentID := fmt.Sprintf("cmt_fu_overflow_%d", i)
+		deliveryID := fmt.Sprintf("mcm_fu_overflow_%d", i)
+		execOrFatal(t, f.db, `
+			INSERT INTO mission_comments (id, mission_id, author_type, author_id, body)
+			VALUES (?, ?, 'user', ?, ?)`,
+			commentID, f.missionID, f.userID, fmt.Sprintf("%s (comment %d)", bigBody, i))
+		execOrFatal(t, f.db, `
+			INSERT INTO mission_comment_mentions
+			    (id, workspace_id, mission_id, comment_id, agent_id, position, state, dispatch_state, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, 'pending', 'queued', datetime('now'))`,
+			deliveryID, f.wsID, f.missionID, commentID, f.target, i)
+		deliveryIDs[i] = deliveryID
+	}
+
+	f.assign.dispatchQueuedFollowUpsForSession(ctx, winnerID, f.wsID)
+	f.assign.WaitDispatches()
+
+	// The overflow forced at least a SECOND follow-up run to exist for the
+	// session — one digest could not carry all three comments — proving
+	// the bound actually bit rather than silently widening to fit
+	// everything.
+	rows, err := f.db.Query(`SELECT id, task FROM assignments WHERE session_id = ? AND id != ?`, sessionID, winnerID)
+	if err != nil {
+		t.Fatalf("query follow-up runs: %v", err)
+	}
+	defer rows.Close()
+	var tasks []string
+	for rows.Next() {
+		var id, task string
+		if err := rows.Scan(&id, &task); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	if len(tasks) < 2 {
+		t.Fatalf("follow-up runs for the session = %d, want at least 2 — one digest cannot fit all three "+
+			"~1800-rune comments under mentionTaskMaxBody, so the overflow must have forced a second run", len(tasks))
+	}
+	allTasks := strings.Join(tasks, "\n---\n")
+	if !strings.Contains(allTasks, "(comment 0)") {
+		t.Error("no follow-up run's task contains the first queued comment")
+	}
+	if !strings.Contains(allTasks, "(comment 2)") {
+		t.Error("no follow-up run's task contains the last queued comment — the self-draining chain should " +
+			"have picked it up in a later fold")
+	}
+
+	// Every delivery ends up 'consumed' — the self-draining chain (each
+	// follow-up run's own completion re-triggers dispatchQueuedFollowUpsForSession)
+	// keeps folding the backlog in until nothing is left pending, all within
+	// the ONE WaitDispatches call above.
+	for _, id := range deliveryIDs {
+		var state string
+		if err := f.db.QueryRow(`SELECT state FROM mission_comment_mentions WHERE id = ?`, id).Scan(&state); err != nil {
+			t.Fatalf("read delivery %s: %v", id, err)
+		}
+		if state != "consumed" {
+			t.Errorf("delivery %s state = %q, want consumed (the self-draining chain should have folded it "+
+				"into one of the follow-up runs above)", id, state)
+		}
+	}
+}
+
 // onlyNewRunForSession asserts exactly one assignment exists for sessionID
 // besides excludeID (the seeded "winner") and returns its id.
 func onlyNewRunForSession(t *testing.T, f *mentionFixture, sessionID, excludeID string) string {

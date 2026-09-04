@@ -693,7 +693,18 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 // Best-effort, like every other write in this file: the comment is already
 // committed and answered, and inbox.Insert logs its own failures.
 func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentionContext, mention resolvedMention, state, detail string) {
-	if state != mentionDispatchRefused && state != mentionDispatchFailed {
+	// mentionDispatchQueued (B3, §9.4/§17, #2339) added here on review: with
+	// the issue_deliveries flag OFF (issueAgentSessionsFlagKey still on),
+	// deliverAndDispatch skips createDelivery/the issue.delivery.acked
+	// broadcast entirely and calls dispatchOne directly — so a mention that
+	// lands on a busy session got NO signal to its author at all, the exact
+	// silence this function exists to close. With the flag ON (the default)
+	// the ack broadcast already told a watching client "received"; this is
+	// the durable record for whoever checks later instead of watching live.
+	// Framed distinctly below — a queued mention is expected behaviour, not
+	// a failure, and the refused/failed copy ("did not start a run") would
+	// misreport it as one.
+	if state != mentionDispatchRefused && state != mentionDispatchFailed && state != mentionDispatchQueued {
 		return
 	}
 	if m.db == nil || mc.WorkspaceID == "" {
@@ -722,6 +733,10 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 			"decision about the mention; the details are on the issue's mention record and in " +
 			"the server log, against this comment's id."
 	}
+	if state == mentionDispatchQueued {
+		reason = "This agent already has a run in progress on this issue. Your comment is queued and will " +
+			"be included automatically once that run finishes."
+	}
 	if reason == "" {
 		reason = "The dispatch did not go through."
 	}
@@ -732,6 +747,23 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 	}
 	issueLabel := mentionNoticeValue(issue, mentionNoticeMaxField)
 
+	// mentionDispatchQueued gets its own title/body: it is expected
+	// behaviour (the run really will happen), and the refused/failed copy
+	// ("did not start a run… nothing is queued and nothing will run on its
+	// own") would flatly contradict what actually happens next — see
+	// dispatchQueuedFollowUpsForSession (issue_session_followups.go).
+	title := "Your mention of " + name + " on " + issueLabel + " did not start a run"
+	body := "Your comment on " + issueLabel + " mentioned " + name + ", but no run was started.\n\n" +
+		mentionNoticeQuote(reason) + "\n\n" +
+		"The mention is recorded on the issue either way; nothing is queued and nothing will " +
+		"run on its own. Re-mention when the reason above no longer holds."
+	if state == mentionDispatchQueued {
+		title = "Your mention of " + name + " on " + issueLabel + " is queued"
+		body = "Your comment on " + issueLabel + " mentioned " + name + ".\n\n" +
+			mentionNoticeQuote(reason) + "\n\n" +
+			"No action needed — it will run automatically."
+	}
+
 	_ = inbox.Insert(ctx, m.db, m.logger, inbox.Item{
 		WorkspaceID: mc.WorkspaceID,
 		Kind:        inbox.KindMessage,
@@ -739,15 +771,12 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 		// identity, so a retried write dedups instead of piling up.
 		SourceID:     "mention_" + mc.CommentID + "_" + mention.AgentID,
 		TargetUserID: targetUser,
-		Title:        "Your mention of " + name + " on " + issueLabel + " did not start a run",
-		BodyMD: "Your comment on " + issueLabel + " mentioned " + name + ", but no run was started.\n\n" +
-			mentionNoticeQuote(reason) + "\n\n" +
-			"The mention is recorded on the issue either way; nothing is queued and nothing will " +
-			"run on its own. Re-mention when the reason above no longer holds.",
-		SenderType: "system",
-		SenderName: "Crewship",
-		Priority:   "low",
-		Category:   notify.CategoryIssuesComment,
+		Title:        title,
+		BodyMD:       body,
+		SenderType:   "system",
+		SenderName:   "Crewship",
+		Priority:     "low",
+		Category:     notify.CategoryIssuesComment,
 		Payload: map[string]interface{}{
 			"mission_id":     mc.MissionID,
 			"comment_id":     mc.CommentID,

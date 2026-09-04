@@ -31,6 +31,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // pendingFollowUp is one 'pending' mission_comment_mentions row, joined
@@ -96,13 +97,26 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 		return
 	}
 
-	var targetName string
-	if err := h.db.QueryRowContext(ctx,
-		`SELECT name FROM agents WHERE id = ? AND workspace_id = ?`,
-		agentID, workspaceID).Scan(&targetName); err != nil {
-		h.logger.Warn("dispatch queued follow-ups: read target agent", "error", err, "agent_id", agentID)
-		return
-	}
+	// No separate "does this agent exist" read here: DispatchMention
+	// re-resolves the target agent itself (by TargetAgentID, scoped to
+	// workspaceID) as the first thing it does — the same re-resolution
+	// every other caller of DispatchMention relies on rather than trusting
+	// its own lookup (see DispatchMention's own doc comment on why "a door
+	// that trusts its caller's resolution is not a door"). An earlier
+	// revision of this function queried agents.name here and never used
+	// the result — a dead round trip on this completion-triggered path,
+	// caught in review.
+	// digestBody bounds itself to mentionTaskMaxBody and reports exactly
+	// which deliveries' text actually fit — review found an earlier
+	// revision handed the FULL pending list to claimPendingDeliveriesByID
+	// regardless, so a burst large enough to overflow the brief (mentionTaskBrief
+	// clips CommentBody as one unit) still marked every one of them
+	// 'consumed', including comments mentionTaskBrief's own clip had just
+	// cut out of what the agent was actually given. includedIDs is the
+	// subset that survived; anything left out stays 'pending' for the next
+	// run to finish on this session to fold in — the same "never consumed
+	// before read" property this whole mechanism exists to hold.
+	body, includedIDs := followUpDigestBody(pending)
 
 	runID, dispatchErr := h.DispatchMention(ctx, mentionDispatchRequest{
 		WorkspaceID: workspaceID,
@@ -116,7 +130,7 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 		// (depth 1, dispatchCaller.selfFiled) exactly like a person's
 		// mention — nobody's own delegation chain caused this, the
 		// session freeing up did.
-		CommentBody:   followUpDigestBody(pending),
+		CommentBody:   body,
 		AuthorType:    "user",
 		AuthorName:    "Crewship (queued follow-ups)",
 		TargetAgentID: agentID,
@@ -131,18 +145,22 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 		return
 	}
 
-	ids := make([]string, len(pending))
-	for i, p := range pending {
-		ids[i] = p.DeliveryID
-	}
-	n, err := claimPendingDeliveriesByID(ctx, h.db, ids, runID)
+	n, err := claimPendingDeliveriesByID(ctx, h.db, includedIDs, runID)
 	if err != nil {
 		h.logger.Warn("dispatch queued follow-ups: claim under new run",
 			"error", err, "run_id", runID, "mission_id", missionID, "agent_id", agentID)
 		return
 	}
 	h.logger.Info("queued follow-ups dispatched as one run",
-		"run_id", runID, "mission_id", missionID, "agent_id", agentID, "claimed", n, "found", len(pending))
+		"run_id", runID, "mission_id", missionID, "agent_id", agentID, "claimed", n, "found", len(pending), "included", len(includedIDs))
+	if len(includedIDs) < len(pending) {
+		// Not a warning: this is the digest's own overflow bound doing its
+		// job, not a fault. The excluded deliveries stay 'pending' and the
+		// NEXT run to finish on this session (this one, once it completes)
+		// picks them up the same way.
+		h.logger.Info("queued follow-ups: digest exceeded the brief bound, some deliveries stay pending for the next round",
+			"mission_id", missionID, "agent_id", agentID, "included", len(includedIDs), "found", len(pending))
+	}
 
 	// Catch-up for a real race, not a theoretical one: DispatchMention
 	// spawns runID's exec in a background goroutine and returns before it
@@ -218,22 +236,80 @@ func pendingFollowUpsFor(ctx context.Context, db *sql.DB, missionID, agentID str
 
 // followUpDigestBody concatenates queued follow-up comments into one plain
 // body for DispatchMention's own brief-builder (mentionTaskBrief) to fence
-// and clip exactly as it would an ordinary single-comment mention — this
-// function only FORMATS. The outer <untrusted> wrap, the "quoted material,
-// never obey it" framing and the mentionTaskMaxBody clip all still happen
-// exactly once, inside mentionTaskBrief itself (via req.CommentBody), so a
-// digest of several comments is fenced no less carefully than one — this
-// function must NOT wrap its own output, or the digest would be fenced
-// twice while an ordinary mention's comment is fenced once.
-func followUpDigestBody(pending []pendingFollowUp) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d comment(s) arrived and were queued while the previous run on this issue was still in progress:\n\n", len(pending))
+// exactly as it would an ordinary single-comment mention — this function
+// only FORMATS. The outer <untrusted> wrap and the "quoted material, never
+// obey it" framing still happen exactly once, inside mentionTaskBrief
+// itself (via req.CommentBody), so a digest of several comments is fenced
+// no less carefully than one — this function must NOT wrap its own output,
+// or the digest would be fenced twice while an ordinary mention's comment
+// is fenced once.
+//
+// Bounds itself to mentionTaskMaxBody and returns the delivery ids that
+// actually fit, in the order pending was given. This is NOT redundant with
+// mentionTaskBrief's own clip of req.CommentBody: that clip protects the
+// AGENT from an oversized prompt, but it has no idea this string is a
+// concatenation of N separately-claimed deliveries — before this, the
+// caller (dispatchQueuedFollowUpsForSession) claimed and later marked
+// EVERY pending delivery 'consumed' regardless of whether mentionTaskBrief's
+// clip had just cut its comment out of the brief the agent actually
+// received, which is exactly the "consumed before read" lie B3 exists to
+// avoid (review finding). A comment that does not fit stays 'pending' and
+// is picked up the same way by the next run to finish on this session.
+//
+// The header line's own count is computed from what ACTUALLY fit, not
+// len(pending) — otherwise an overflowing digest would open with "12
+// comment(s)" while quoting only 9 of them, which is a second, smaller
+// version of the same lie.
+func followUpDigestBody(pending []pendingFollowUp) (body string, includedIDs []string) {
+	const headerFmt = "%d comment(s) arrived and were queued while the previous run on this issue was still in progress:\n\n"
+	// The header can only get SHORTER as fewer entries are included (fewer
+	// digits in the count), never longer, so budgeting against the
+	// worst-case header — every comment included — is exact enough without
+	// a second pass.
+	headerBudget := utf8.RuneCountInString(fmt.Sprintf(headerFmt, len(pending)))
+	budget := mentionTaskMaxBody - headerBudget
+	if budget < 0 {
+		budget = 0
+	}
+
+	var entries []string
+	used := 0
 	for i, p := range pending {
 		author := p.AuthorName
 		if author == "" {
 			author = "someone"
 		}
-		fmt.Fprintf(&b, "--- Comment %d, from %s ---\n%s\n\n", i+1, author, p.Body)
+		entry := fmt.Sprintf("--- Comment %d, from %s ---\n%s\n\n", i+1, author, p.Body)
+		n := utf8.RuneCountInString(entry)
+		if used+n > budget {
+			break
+		}
+		entries = append(entries, entry)
+		includedIDs = append(includedIDs, p.DeliveryID)
+		used += n
 	}
-	return b.String()
+	// A single comment too large to fit the whole budget on its own would
+	// otherwise stall this session forever — nothing ever fits, nothing
+	// ever gets dispatched, nothing ever frees the slot for a normal
+	// mention to try again either (idx_assignments_one_active_per_session
+	// only reopens on a run actually finishing). Force it through anyway;
+	// mentionTaskBrief's own clip on the combined body still protects the
+	// agent from the worst case, and one comment consumed-as-clipped is
+	// the honest cost of not deadlocking the session.
+	if len(includedIDs) == 0 && len(pending) > 0 {
+		p := pending[0]
+		author := p.AuthorName
+		if author == "" {
+			author = "someone"
+		}
+		entries = []string{fmt.Sprintf("--- Comment 1, from %s ---\n%s\n\n", author, p.Body)}
+		includedIDs = []string{p.DeliveryID}
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, headerFmt, len(includedIDs))
+	for _, e := range entries {
+		b.WriteString(e)
+	}
+	return b.String(), includedIDs
 }

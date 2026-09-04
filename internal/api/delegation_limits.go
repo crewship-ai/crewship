@@ -710,10 +710,16 @@ func (e *sessionBusyError) Error() string {
 // unique to this one index on this table (idx_assignments_session, B1, is a
 // plain non-unique index and cannot produce this error text), so matching
 // the column name is unambiguous.
+//
+// isUniqueViolation (feature_flags_handler.go) already owns "is this ANY
+// UNIQUE constraint failure" — including a second wrapper spelling
+// ("constraint failed: UNIQUE") this file's own detector used to miss —
+// so this narrows that answer to the specific column rather than
+// re-deriving the base check (review finding: two copies of the same
+// nil-check-plus-substring-match drift apart the next time either wording
+// changes).
 func isSessionExclusivityErr(err error) bool {
-	return err != nil &&
-		strings.Contains(err.Error(), "UNIQUE constraint failed") &&
-		strings.Contains(err.Error(), "assignments.session_id")
+	return isUniqueViolation(err) && strings.Contains(err.Error(), "assignments.session_id")
 }
 
 // sessionBusyErrorFor resolves which run currently holds sessionID's

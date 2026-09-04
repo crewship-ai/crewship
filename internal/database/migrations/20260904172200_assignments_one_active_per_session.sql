@@ -40,6 +40,18 @@
 -- not a silent loss: A1's terminal-state guards refuse any further write to
 -- a CANCELLED row, and the run's own completion path (finishAssignment)
 -- already handles a late callback on an already-terminal row as a no-op.
+--
+-- One thing this raw UPDATE does NOT do, named rather than hidden (review
+-- finding on #2342): it bypasses finishAssignment, so any
+-- mission_comment_mentions row that was state='claimed' under a demoted
+-- assignment's id stays 'claimed' forever — only finishAssignment's own
+-- consumeDeliveriesForRun resolves that state, and no sweeper exists yet
+-- (B4). Same population as the remediation itself: expected to be ~0 rows,
+-- since B1/B2 shipped days before this migration and issue_deliveries has
+-- always been the only writer of 'claimed'. Not fixed here because a
+-- migration has no access to the Go-level consumption logic and
+-- reimplementing it in SQL would be a second, divergent copy of a rule
+-- that already lives in one place.
 UPDATE assignments SET status = 'CANCELLED'
 WHERE session_id IS NOT NULL
   AND status IN ('PENDING','QUEUED','RUNNING')
