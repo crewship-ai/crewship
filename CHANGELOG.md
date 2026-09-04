@@ -47,6 +47,34 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   every non-terminal assignment, and the queued row is recorded `CANCELLED`
   without ever starting its exec.
 
+- **Erasing a user left them named on four Pages tables (#1976).** The
+  Article 17 cascade transferred the subject's pages and stopped, so
+  `page_versions.author_user_id`, `page_grants.granted_by_user_id`,
+  `page_public_tokens.created_by_user_id` and
+  `page_webhooks.created_by_user_id` still carried the name of a person whose
+  SAR ticket had been closed as "erased" — and the public links and inbound
+  webhook tokens they had issued were still live. Every one of those columns
+  already declares what should become of it when the human goes away (three
+  `ON DELETE CASCADE`, one `SET NULL`), and none of them ever fired, because a
+  workspace-scoped erasure deliberately never deletes the `users` row. The
+  cascade now runs those declared actions itself, inside the erased workspace
+  only: the page version keeps its history and loses its author, while the
+  grants (including grants naming the subject), public `/p/{token}` links and
+  webhook tokens are revoked by removal and stop working at once. The receipt
+  and the `gdpr_actions` audit row gained a count per table with the verb in
+  the key (`page_versions_anonymised`, `page_grants_removed`,
+  `page_public_tokens_revoked`, `page_webhooks_revoked`); an anonymised row is
+  not counted in `rows_deleted`, because nothing was deleted. Each revocation
+  also writes the same journal entry the ordinary revoke path writes, so the
+  operator can still see *which* page a crew lost access to and *which*
+  integration the erasure just broke — carrying `fire_count` and
+  `last_seen_at` with it, since the row that held them is gone, and
+  deliberately never writing the subject's own id into a table the erasure
+  cannot reach. `docs/security/gdpr.mdx` now states the contract the erasure
+  keeps, and — equally important for anyone answering a strict RTBF request —
+  the three kinds of row that still name the subject afterwards, plus the
+  longer tail tracked in #2308.
+
 - **The 1.0 known limits are written down where users read (#2299).** The
   issue-mentions, routines and issue-detail guides now say plainly what Track
   A deliberately left for 1.1: a busy agent is woken after its live run rather
@@ -746,6 +774,104 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **Two GET routes were invisible to the read-scope invariant, the same
+  "assumed out of scope by registration helper" blind spot the invariant
+  exists to catch (#2144).** `route_read_scope_invariant_test.go` scanned
+  `r.mux.Handle("GET …")` and `r.authedAdmin("GET", …)` but not
+  `r.authedMut(` — recorded as "246 uses, zero reads" — which was wrong:
+  `GET /api/v1/admin/keeper/judge/models`, `GET /api/v1/memory/export`, and
+  `GET /api/v1/approvals{,/{id}}` all register that way and were absent from
+  `scanReadRoutes()` entirely, not merely unclassified. Proved by a
+  throwaway test asserting `scanReadRoutes()` returns those two keys — it
+  failed on main. The scan now keys on the verb (`authedMutReadLine`,
+  `authedSelfMutReadLine`) rather than trusting a helper's name, mirroring
+  the mutation invariant's `wrapperMutationLine`. All four routes were
+  checked by hand: `authedMut` always composes
+  `RequireAuth(RequireWorkspace(...))` regardless of the declared role, so
+  they are scoped by the identical chokepoint as `wsCtx` — `judge/models`
+  reads no workspace-scoped rows at all, `memory/export` additionally fences
+  its `crew_id` inside the handler (`TestMemoryExport_CrossWorkspaceCrewIs404`),
+  and the two `approvals` routes read `workspaceID` from the same
+  `RequireWorkspace`-populated context. `TestReadRouteScanFindsTheRealSurface`
+  now also floors the `authedMut`-scanned count so the regex going blind
+  again fails the build.
+- **`review-status.sh` reported `reviewed` when CodeRabbit's only activity on
+  the head commit was a bodyless reply inside an existing thread, not a read
+  of the diff (#2145).** A `COMMENTED` review with an empty body was promoted
+  to `reviewed` whenever its inline comments fell inside the review's own
+  time window — but that window doesn't distinguish a NEW thread (a real
+  finding) from a REPLY inside a thread a human already started. Seen on
+  #2128: a real `CHANGES_REQUESTED` review landed on an old head, two later
+  re-review requests came back rate-limited, and CodeRabbit's only reply on
+  the new head was a reply-wrapper — yet its `commit_id` named the head, so
+  it outranked the throttle. The classifier now reads GitHub's
+  `in_reply_to_id` on each inline comment and only counts one with none set
+  — a genuinely new thread — as evidence of a read; a bodyless review whose
+  comments are all replies now classifies as `empty-review`, same as one
+  with no comments at all. A fixture reproducing #2128's exact shape
+  (`CHANGES_REQUESTED` on an old head → bodyless reply-wrapper `COMMENTED`
+  on the new head → rate-limit notices) failed on main (`reviewed`) and now
+  reports `throttled`; the #2038/#1729 fixtures this shares logic with are
+  untouched and stay green.
+- **A recent-order sort could put the earlier of two invocations first, in
+  the same second, for pipelines that had never raced a clock before
+  (#2294).** `internal/pipeline/store.go` wrote `created_at` / `updated_at` /
+  `last_invoked_at` with `time.RFC3339Nano`, which trims trailing zero
+  fractional digits — two instants in the same wall-clock second can then
+  serialise to strings of different width, and `List`'s
+  `ORDER BY COALESCE(last_invoked_at, created_at) DESC` compares them as
+  TEXT: `Z` (0x5A) sorts after `0` (0x30), so a shorter, more-trimmed string
+  can sort AFTER a longer one even though it encodes an earlier instant.
+  Pinned with a deterministic (clock-injected, not raced) test reproducing
+  the issue's own collision — `…18.1Z` (05:38:18.100000000) versus
+  `…18.10001Z` (05:38:18.100010000, 10µs later) — which failed on main for
+  both the `created_at` and `last_invoked_at` write paths.
+  `internal/pipeline` now writes every timestamp through the existing
+  `internal/tsformat` package (fixed 9-digit fraction, #990) instead of
+  `time.RFC3339Nano` directly, and a new migration
+  (`20260903190851_pipelines_timestamp_fixed_width`) pads every existing
+  `pipelines` and `pipeline_versions` row to match, so an old (trimmed) row
+  and a new (fixed-width) row compare correctly against each other.
+  `internal/pipeline/waitpoints.go` and `idempotency.go` carry the same
+  `time.RFC3339Nano` pattern under an explicit `tsformat:allow` and are left
+  alone here — see the PR for why each is judged safe on its own terms.
+- **`GET /api/v1/oauth/callback` answers its error branches with
+  `application/json`, matching what the spec has always declared (#2102).**
+  Every error branch used raw `http.Error`, which writes
+  `text/plain; charset=utf-8`; the generated OpenAPI document declares
+  `application/json` for every non-2xx response on every route (#1919), on
+  the grounds that both error helpers route through `writeJSON` — `Callback`
+  reached for neither, so it was the API contract gate's one remaining
+  "Undocumented Content-Type" finding. All nine error branches now go
+  through `replyError`, the same helper the sibling `Initiate`/`Exchange`
+  handlers in the file already use; the success branch's deliberate
+  `text/html` (a browser following the OAuth redirect) is untouched.
+- **`crew-ai-suggest` no longer hands back agent names or slugs
+  `POST /api/v1/agents` refuses (#2204).** Follow-up to #2197/#2200:
+  `validateSuggestion` gave `agent_role` a post-condition — every value an
+  accepted suggestion carries is a literal the create endpoint accepts —
+  but never extended it to name or slug. A suggestion like
+  `{"name":"Q",…}` passed validation and the wizard's very next call died
+  with `400 name must be 2-100 characters`; `slugify` never capped its
+  output either, so a long, space-free name could derive a slug over the
+  50-byte cap. Both bounds are now checked against the same
+  `agentNameMinLen`/`agentNameMaxLen`/`agentSlugMinLen`/`agentSlugMaxLen`
+  constants `agents_create.go` enforces (agents.go now defines them once,
+  shared by both call sites) rather than restated numbers, so the two
+  cannot drift.
+- **`crewship backup` defaults its bundle directory under the instance's own
+  data dir, not a home directory shared by every instance on the host
+  (#2262).** `backup create`/`verify`/`inspect`/`restore` resolved their
+  default location as `Home()+".crewship/backups"` regardless of
+  `CREWSHIP_DATA_DIR`, the env var every other piece of per-instance state
+  (`DATABASE_URL`, `CREWSHIP_BOLT_PATH`, `CREWSHIP_SOCKET_PATH`, storage)
+  already honours. Several isolated instances run by the same user on one
+  host — three dev clones, any number of ephemeral test instances — shared
+  one bundle directory, and a `restore` that picked up another instance's
+  bundle by name landed foreign data into a live database. The default now
+  resolves under `$CREWSHIP_DATA_DIR/backups` when the env var is set,
+  falling back to `~/.crewship/backups` only when it is not; `--output` /
+  `output_dir` still override it explicitly.
 - **A fetch failure on the issues board now renders as an error, and the
   board says when it's showing a partial page (#2286).** `fetchIssues` used
   to be `try { if (res.ok) setIssues(...) } catch {}` — any non-2xx response
@@ -845,6 +971,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `console.warn` once per type (not per frame) instead of vanishing. No new
   subscribers were added for the 40 types — registering them is the durable
   half of the fix; wiring a consumer per surface is separate, future work.
+- **Routine runs now reach `GET /api/v1/runs` and the Runs view (#2284).**
+  The endpoint aggregated `journal_entries` under `trace_id IS NOT NULL AND
+  entry_type LIKE 'run.%'` — a filter a routine run's `pipeline.run.*`
+  entries structurally could never match, since `internal/pipeline/journal.go`
+  stamps `actor_id` to the run's own id and never sets `trace_id` at all
+  (#2291 made the Runs view's header stop overclaiming this; this is the read
+  fix behind it). `journal.ListRuns` and `journal.GetRunByID` now group on
+  `COALESCE(trace_id, actor_id)`, admitting `pipeline.run.*` rows alongside
+  `run.*` ones, and tag every row `kind: "agent" | "pipeline"` so a caller
+  can tell the two apart — `crewship run list` shows a KIND column. A
+  cancelled routine run (which reuses `pipeline.run.failed` — there is no
+  dedicated `pipeline.run.cancelled` entry type) reports `CANCELLED`, not
+  `FAILED`. Deliberately not widened: `GET /api/v1/runs/insights` and the
+  `stats` tile embedded in `GET /api/v1/runs` itself still aggregate ad-hoc
+  runs only — unifying cost roll-ups and correlation across the two engines
+  is a separate decision this PR did not make.
 - **A run is now attributable to the issue that caused it, including
   delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither
