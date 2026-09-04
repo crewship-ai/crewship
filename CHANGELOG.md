@@ -739,6 +739,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **The Docker image builds again (#2328).** The backend stage did not copy the `config/` package that #2305 introduced for the model catalog, so `go build` inside the image failed on every branch since. `config/` is copied now, and a test (`scripts/dockerfile-sources`) fails whenever a root-level package the binaries import is missing from that stage.
 - **A deploy-window blip no longer wedges the avatar-backfill latch shut for
   the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
   whenever a request 401s and `/api/auth/token/refresh` is itself
