@@ -206,7 +206,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   (`crewship chat list --limit/--offset`). `GET /agents` hides the setup
   crew's agent unless `include_setup=1` (`crewship agent list --include-setup`).
 - **Duplicate deliveries collapse to one run, and a mention is acknowledged
-  before any model call (#2337, #TBD).** `mission_comment_mentions` is now
+  before any model call (#2337, #2338).** `mission_comment_mentions` is now
   also the delivery table (PRD-ISSUES-AND-ROUTINES-2026 §9.3, work package
   B2): `comment_id` is nullable, `event_id` links a delivery to the
   `mission_activity` row that raised it, and a new `state` column
