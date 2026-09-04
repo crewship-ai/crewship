@@ -638,7 +638,13 @@ export function ChatClient() {
         const found = (rows as ChatTreeThread[]).find((t) => t.id === sessionId)
         if (!found) return
         const next = scopeForKind(classifyThread(found))
-        if (next) setScope(next)
+        if (!next) return
+        // The session IS of this scope, just older than the page the fan-out
+        // asked for (ten per agent, now honoured by the server): bring the
+        // agent's whole page so the column, the origin chip and the kind can
+        // name it. A different scope moves the strip, which refetches.
+        if (next === scope) void tree.loadAllFor(agent.id).catch(() => {})
+        else setScope(next)
       } catch {
         /* the column stays where it is, which is the honest answer */
       }
@@ -646,7 +652,7 @@ export function ChatClient() {
     return () => {
       cancelled = true
     }
-  }, [sessionId, agent, workspaceId, tree.threadsLoaded, tree.threadErrors, threadsByAgent])
+  }, [sessionId, agent, workspaceId, tree, scope, threadsByAgent])
 
   const chatAgent: ChatAgent | null = useMemo(
     () =>

@@ -31,6 +31,9 @@ type chatListStub struct {
 	body    string
 	// total, when set, is published as X-Total-Count the way the server does.
 	total int
+	// agentQueries records how the roster was asked for — the resolver must
+	// ask with include_setup=1 or the Guide's chats are unaddressable.
+	agentQueries []string
 }
 
 func (s *chatListStub) start(t *testing.T) *httptest.Server {
@@ -39,6 +42,9 @@ func (s *chatListStub) start(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/v1/agents":
+			s.mu.Lock()
+			s.agentQueries = append(s.agentQueries, r.URL.RawQuery)
+			s.mu.Unlock()
 			_, _ = w.Write([]byte(`[{"id":"ag_1","name":"Casey","slug":"casey"}]`))
 		case strings.HasPrefix(r.URL.Path, "/api/v1/agents/ag_1/chats"):
 			s.mu.Lock()

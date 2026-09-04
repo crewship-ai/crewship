@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 const apiFetch = vi.fn()
+// The pane names crews and agents through this lookup; the network it
+// would use is not this suite's concern.
+vi.mock("../use-inbox-lookup", () => ({
+  useInboxLookup: () => ({ crewById: new Map(), agentBySlug: new Map(), agentById: new Map(), ready: true }),
+}))
 vi.mock("@/lib/api-fetch", async (importActual) => ({
   ...(await importActual<Record<string, unknown>>()),
   apiFetch: (...args: unknown[]) => apiFetch(...args),

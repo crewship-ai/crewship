@@ -18,7 +18,15 @@ export interface BreadcrumbAgent {
 export function chatBreadcrumbs(agent: BreadcrumbAgent | null): BreadcrumbItem[] {
   if (!agent) return []
   const out: BreadcrumbItem[] = [{ label: "Crews", href: "/crews" }]
-  if (agent.crew) out.push({ label: agent.crew.name, href: entityHref({ kind: "crew", slug: agent.crew.slug }) })
-  out.push({ label: agent.name, href: entityHref({ kind: "agent", slug: agent.slug }) })
+  // The onboarding Guide's crew and agent are hidden from /crews on purpose,
+  // so a crumb pointing there would land on nothing. Its crumbs are labels.
+  const hidden = isSetupSlug(agent.slug)
+  if (agent.crew) out.push(hidden ? { label: agent.crew.name } : { label: agent.crew.name, href: entityHref({ kind: "crew", slug: agent.crew.slug }) })
+  out.push(hidden ? { label: agent.name } : { label: agent.name, href: entityHref({ kind: "agent", slug: agent.slug }) })
   return out
+}
+
+/** The setup crew and its Guide use underscore-prefixed slugs (`_crewship-setup`). */
+export function isSetupSlug(slug: string): boolean {
+  return slug.startsWith("_")
 }

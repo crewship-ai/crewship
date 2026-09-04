@@ -128,8 +128,41 @@ describe("entryCrewId / entryAgentRef", () => {
   })
 
   it("keys the agent by the slug the roster uses", () => {
-    expect(entryAgentRef(inboxEntry(item()))).toEqual({ slug: "riley", label: "riley" })
+    expect(entryAgentRef(inboxEntry(item()))).toEqual({ slug: "riley", id: null, label: "riley" })
     expect(entryAgentRef(inboxEntry(item({ sender_type: "system", sender_name: "Keeper" }))).slug).toBeNull()
     expect(entryAgentRef(inboxEntry(item({ payload: { agent_slug: "morgan", agent_name: "Morgan" } }))).slug).toBe("morgan")
+  })
+})
+
+describe("outcomeStatus", () => {
+  it("maps both sources' spellings onto the shared status words", async () => {
+    const { outcomeStatus } = await import("../inbox-v2-derive")
+    expect(outcomeStatus("approve")).toBe("APPROVED")
+    expect(outcomeStatus("approved")).toBe("APPROVED")
+    expect(outcomeStatus("reject")).toBe("REJECTED")
+    expect(outcomeStatus("denied")).toBe("DENIED")
+    expect(outcomeStatus("timeout")).toBe("EXPIRED")
+    expect(outcomeStatus("timed_out")).toBe("EXPIRED")
+    expect(outcomeStatus(null)).toBeNull()
+  })
+})
+
+describe("the crew facet", () => {
+  it("narrows by the row's crew id, whichever source carries it", async () => {
+    const { filterEntries, EMPTY_INBOX_V2_FILTERS } = await import("../inbox-v2-derive")
+    const rows = [
+      inboxEntry(item({ id: "a", payload: { crew_id: "crew-ops", escalation_type: "TEXT" } })),
+      inboxEntry(item({ id: "b", payload: { crew_id: "crew-eng", escalation_type: "TEXT" } })),
+      approvalEntry(approval({ id: "ap", crew_id: "crew-ops" })),
+    ]
+    expect(filterEntries(rows, { ...EMPTY_INBOX_V2_FILTERS, crew: "crew-ops" }).map((e) => e.key)).toEqual(["inbox:a", "approval:ap"])
+    expect(filterEntries(rows, EMPTY_INBOX_V2_FILTERS)).toHaveLength(3)
+  })
+})
+
+describe("entryAgentRef for a queue row", () => {
+  it("keys the agent by id and never prints a cuid as a name", () => {
+    const ref = entryAgentRef(approvalEntry(approval({ agent_id: "clx0agent0000000000000", requested_by: "clx0user00000000000000" })))
+    expect(ref).toEqual({ slug: null, id: "clx0agent0000000000000", label: "Agent" })
   })
 })

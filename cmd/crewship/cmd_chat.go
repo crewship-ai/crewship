@@ -946,7 +946,10 @@ const agentChatListLimit = 100
 //     as "chat not found" points the user at their chat id instead of at
 //     their permissions.
 func lookupChatAgent(client *cli.Client, chatID string) (agentID, agentSlug string, err error) {
-	resp, err := client.Get("/api/v1/agents")
+	// include_setup=1: a chat can belong to the onboarding Guide, whose crew
+	// the default roster hides; a walk that cannot see the owner answers "not
+	// found" for a chat that exists.
+	resp, err := client.Get("/api/v1/agents?include_setup=1")
 	if err != nil {
 		return "", "", err
 	}

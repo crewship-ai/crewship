@@ -48,6 +48,8 @@ describe("agentStatusPill", () => {
     expect(agentStatusPill("RUNNING")).toMatchObject({ label: "Running", tone: "blue", live: true })
     expect(agentStatusPill("IDLE")).toMatchObject({ label: "Idle", tone: "success", live: false })
     expect(agentStatusPill("ERROR")).toMatchObject({ label: "Error", tone: "danger" })
+    expect(agentStatusPill("PENDING_REVIEW")).toMatchObject({ label: "Pending review", tone: "warn", live: false })
+    expect(agentStatusPill("PAUSED")).toMatchObject({ label: "Paused", tone: "warn" })
     expect(agentStatusPill(undefined)).toMatchObject({ label: "Idle" })
   })
 })

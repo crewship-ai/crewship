@@ -27,7 +27,7 @@ import {
   facetCounts, INBOX_V2_TYPES, isArchivedNotDecided, outcomeStatus,
   type InboxV2DeadlineKey, type InboxV2Filters, type InboxV2TypeKey,
 } from "./inbox-v2-derive"
-import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Entry, type InboxV2View } from "./inbox-v2-types"
+import { EMPTY_INBOX_LOOKUP, resolveAgent, type InboxLookup, type InboxV2Entry, type InboxV2View } from "./inbox-v2-types"
 
 /**
  * The inbox column, built on the shared sidebar-kit — the same explorer
@@ -103,7 +103,8 @@ export function InboxV2Explorer({
   // With loadAll the feed is the whole history, so this was an O(n) sweep per
   // character typed.
   const counts = useMemo(() => facetCounts(entries), [entries])
-  const activeCount = (filters.type ? 1 : 0) + (filters.deadline ? 1 : 0) + (filters.unreadOnly ? 1 : 0)
+  const activeCount = (filters.type ? 1 : 0) + (filters.deadline ? 1 : 0) + (filters.unreadOnly ? 1 : 0) + (filters.crew ? 1 : 0)
+  const crewChip = filters.crew ? lookup.crewById.get(filters.crew)?.name ?? "Crew" : null
   const narrowed = activeCount > 0 || filters.search.trim() !== ""
   const set = (patch: Partial<InboxV2Filters>) => onFilters({ ...filters, ...patch })
 
@@ -132,7 +133,7 @@ export function InboxV2Explorer({
         <SidebarFilterPopover
           label="Filter inbox"
           activeCount={activeCount}
-          onClear={() => set({ type: null, deadline: null, unreadOnly: false })}
+          onClear={() => set({ type: null, deadline: null, unreadOnly: false, crew: null })}
         >
           <SidebarFacet
             label="Type"
@@ -207,6 +208,9 @@ export function InboxV2Explorer({
         {filters.unreadOnly && (
           <SidebarActiveChip onRemove={() => set({ unreadOnly: false })}>Unread only</SidebarActiveChip>
         )}
+        {crewChip && (
+          <SidebarActiveChip onRemove={() => set({ crew: null })}>{crewChip}</SidebarActiveChip>
+        )}
       </SidebarActiveChips>
 
       <SidebarSection label="View" count={VIEWS.length} className="border-b border-white/[0.06]">
@@ -268,7 +272,7 @@ export function InboxV2Explorer({
               <ExplorerEmpty
                 view={view}
                 narrowed={narrowed}
-                onClear={() => onFilters({ search: "", type: null, deadline: null, unreadOnly: false })}
+                onClear={() => onFilters({ search: "", type: null, deadline: null, unreadOnly: false, crew: null })}
               />
             </div>
           )}
@@ -335,7 +339,7 @@ function EntryRow({
   const crewId = entryCrewId(entry)
   const crew = crewId ? lookup.crewById.get(crewId) ?? null : null
   const ref = entryAgentRef(entry)
-  const agent = ref.slug ? lookup.agentBySlug.get(ref.slug) ?? null : null
+  const agent = resolveAgent(lookup, ref)
   const crewName = crew?.name ?? agent?.crew?.name ?? null
   const crewTint = crewColor(crew?.color ?? agent?.crew?.color ?? null)
   const agentLabel = agent?.name ?? ref.label

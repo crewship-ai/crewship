@@ -16,6 +16,11 @@ const waitpointDecide = vi.fn()
 const escalationResolve = vi.fn()
 const inboxBulk = vi.fn()
 
+// The pane names crews and agents through this lookup; the network it
+// would use is not this suite's concern.
+vi.mock("../use-inbox-lookup", () => ({
+  useInboxLookup: () => ({ crewById: new Map(), agentBySlug: new Map(), agentById: new Map(), ready: true }),
+}))
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", role: "OWNER" }),
   useCurrentWorkspaceId: () => "ws-test",
