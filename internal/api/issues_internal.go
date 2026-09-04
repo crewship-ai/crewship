@@ -995,3 +995,65 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		UpdatedAt:  now,
 	})
 }
+
+// ListComments handles GET /api/v1/internal/issues/{identifier}/comments —
+// the sidecar comment-READ verb §11.1 names (work package B5, #2345):
+// "today the sidecar can write a comment but cannot read the thread ...
+// which is why an agent that wants history has no option but to be handed
+// all of it." Mirrors Get's own scoping exactly (workspace_id query param,
+// no crew filter on this single-issue-by-identifier read — the same
+// precedent Get itself sets), and CreateComment's row shape (mission_comments
+// joined to the author's display name).
+func (h *InternalIssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
+	ident := r.PathValue("identifier")
+	wsID := r.URL.Query().Get("workspace_id")
+	if wsID == "" {
+		writeProblem(w, r, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	var missionID string
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT id FROM missions WHERE identifier = ? AND workspace_id = ?`,
+		ident, wsID).Scan(&missionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Issue not found")
+			return
+		}
+		internalError(w, r, h.logger, "internal list comments: resolve issue", err)
+		return
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT mc.id, mc.mission_id, mc.author_type, mc.author_id,
+		       CASE
+		         WHEN mc.author_type = 'user' THEN (SELECT full_name FROM users WHERE id = mc.author_id)
+		         WHEN mc.author_type = 'agent' THEN (SELECT name FROM agents WHERE id = mc.author_id)
+		         ELSE ''
+		       END,
+		       mc.body, mc.created_at, mc.updated_at
+		FROM mission_comments mc
+		WHERE mc.mission_id = ?
+		ORDER BY mc.created_at ASC`, missionID)
+	if err != nil {
+		internalError(w, r, h.logger, "internal list comments: query", err)
+		return
+	}
+	defer rows.Close()
+
+	result := []commentResponse{}
+	for rows.Next() {
+		var c commentResponse
+		if err := rows.Scan(&c.ID, &c.MissionID, &c.AuthorType, &c.AuthorID,
+			&c.AuthorName, &c.Body, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			internalError(w, r, h.logger, "internal list comments: scan", err)
+			return
+		}
+		result = append(result, c)
+	}
+	if err := rows.Err(); err != nil {
+		internalError(w, r, h.logger, "internal list comments: rows", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}

@@ -664,6 +664,14 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/attachments"):
 				s.handleIssueAttachmentsList(w, r)
 				return
+			// The comment-READ verb (§11.1, work package B5, #2345) — MUST
+			// come before the generic GET /issue/ prefix arm below, the same
+			// reason the attachments list arm precedes it: "/issue/ENG-4/comments"
+			// also matches that prefix, and without this arm first it would
+			// be swallowed as a plain issue-by-identifier read.
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/comments"):
+				s.handleIssueCommentsList(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/attachments"):
 				s.handleIssueAttach(w, r)
 				return

@@ -99,6 +99,24 @@ const (
 // is measured in characters, not in how expensive the author's alphabet is.
 const mentionTaskMaxBody = 4000
 
+// sessionCheckpointOutputFormatInstruction is §11.3's enforcement of a
+// checkpoint on every session-bearing run — the same "instructed at
+// dispatch, parsed at completion" shape mission_tasks.go:321-329 uses for
+// HANDOFF, applied to the §9.5 checkpoint document instead. Unfenced,
+// exactly like HANDOFF's own instruction block: this is a structural
+// directive from Crewship, not quoted material from an untrusted source.
+const sessionCheckpointOutputFormatInstruction = `[OUTPUT FORMAT]
+When you finish this run (or reach a natural stopping point), end your response with a structured checkpoint block so the next run on this issue can resume without rediscovering your state:
+---CHECKPOINT---
+done: <what you have actually finished, so it is not repeated>
+plan: <your current plan to reach the goal>
+facts: <identifiers, decisions and constraints worth carrying forward, or "none">
+blockers: <anything stopping progress, or "none">
+next_step: <the single next action to take>
+confidence: <low|medium|high>
+---END CHECKPOINT---
+This block is REQUIRED on every run.`
+
 // mentionTaskMaxField bounds each single-line field copied into the brief (the
 // names, the issue title, the identifier). None of the four columns behind them
 // is length-validated at its own door, and a brief is a brief.
@@ -1099,10 +1117,49 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// §11.1 context-pack assembly (work package B5, #2345): a read-only
+	// peek at whatever session already exists for (mission, target agent)
+	// — never resolveOrCreate, which is resolveSessionAndInsertAssignment's
+	// job below, inside the fan-out transaction. peekIssueAgentSession
+	// naturally returns found=false when the issue_agent_sessions flag is
+	// off (no session row was ever created to find), so this needs no
+	// second flag check of its own. A brand-new (mission, agent) pair also
+	// returns found=false and gets a snapshot-only pack — see
+	// assembleContextPack's doc comment.
+	var pack contextPack
+	if existingSessionID, lastSeq, found, peekErr := peekIssueAgentSession(ctx, h.db, req.MissionID, target.ID); peekErr != nil {
+		h.logger.Warn("dispatch mention: peek issue agent session for context pack",
+			"error", peekErr, "mission_id", req.MissionID, "agent_id", target.ID)
+	} else {
+		sid := ""
+		if found {
+			sid = existingSessionID
+		}
+		if p, packErr := assembleContextPack(ctx, h.db, req.WorkspaceID, req.MissionID, sid, lastSeq); packErr != nil {
+			h.logger.Warn("dispatch mention: assemble context pack",
+				"error", packErr, "mission_id", req.MissionID, "agent_id", target.ID)
+		} else {
+			pack = p
+		}
+	}
+
 	// One brief, built once: every call wraps the fence in a FRESH nonce, so
 	// building it twice stored one text on the assignment row and handed the
 	// agent a different one. The row is the audit trail for what was asked.
 	brief := mentionTaskBrief(req, target.Name)
+	if pack.Text != "" {
+		brief = brief + "\n\n" + pack.Text
+	}
+	if pack.Compaction != "" {
+		// §11.3: enforce a checkpoint on session-bearing runs the way
+		// HANDOFF is enforced on mission tasks — instructed here,
+		// parsed/recorded at finishAssignment (writeSessionCheckpoint,
+		// issue_checkpoints.go). Only appended when a pack was actually
+		// assembled (i.e. sessions are enabled) — a session-less dispatch
+		// has nowhere to store a checkpoint anyway.
+		brief = brief + "\n\n" + sessionCheckpointOutputFormatInstruction
+	}
 	// Creator attribution, the same pairing missions v129 uses: exactly one of
 	// the two is set, so a run started by a person's mention is not filed under
 	// an agent that had nothing to do with it. Computed BEFORE the insert (not
@@ -1134,18 +1191,33 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 	assignmentID, attached, sessionID, err := resolveSessionAndInsertAssignment(
 		ctx, h.db, h.logger, req.WorkspaceID, req.MissionID, target.ID,
 		scope, lim, caller, cappedAssignment{
-			WorkspaceID:     req.WorkspaceID,
-			ChatID:          req.MissionID,
-			TargetID:        target.ID,
-			Task:            brief,
-			GroupID:         req.MissionID,
-			CreatedAt:       now,
-			MissionID:       req.MissionID,
-			AuthorAgentID:   authorAgentID,
-			CreatedByUserID: createdByUserID,
+			WorkspaceID:           req.WorkspaceID,
+			ChatID:                req.MissionID,
+			TargetID:              target.ID,
+			Task:                  brief,
+			GroupID:               req.MissionID,
+			CreatedAt:             now,
+			MissionID:             req.MissionID,
+			AuthorAgentID:         authorAgentID,
+			CreatedByUserID:       createdByUserID,
+			ContextPackCompaction: pack.Compaction,
+			ContextPackTokens:     pack.TokensEstimate,
 		})
 	if err != nil {
 		return "", err
+	}
+
+	if !attached && pack.UpToSeq > 0 && sessionID != "" {
+		// The pack built above is what THIS run's brief actually carries —
+		// advance the cursor now, at hand-off, not later: §11.1 hands the
+		// pack to the agent at wake, and wake is this dispatch succeeding.
+		// Skipped entirely on the `attached` (session-busy) branch below:
+		// that path folds into a run that already started with a DIFFERENT
+		// pack, so nothing new was actually handed to anyone here.
+		if advErr := advanceLastConsumedSeq(ctx, h.db, sessionID, pack.UpToSeq); advErr != nil {
+			h.logger.Warn("dispatch mention: advance last_consumed_seq",
+				"error", advErr, "session_id", sessionID, "up_to_seq", pack.UpToSeq)
+		}
 	}
 
 	if attached {

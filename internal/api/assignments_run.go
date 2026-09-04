@@ -1251,6 +1251,14 @@ func (h *AssignmentHandler) finishAssignment(
 		h.logger.Info("deliveries consumed", "assignment_id", assignmentID, "count", n)
 	}
 
+	// §11.3 (work package B5, #2345): a checkpoint at the end of EVERY
+	// session-bearing run, regardless of terminal status — same reasoning
+	// as consumeDeliveriesForRun just above (COMPLETED/FAILED/CANCELLED
+	// all end the run's turn the same way). No-op for a run with no
+	// session_id (a mission task, a root /assign, or a dispatch that
+	// predates B1/B5).
+	h.recordSessionCheckpoint(ctx, assignmentID, workspaceID, result)
+
 	// B3 (§9.4/§17, #2339): this run's session slot (if it had one) just
 	// freed — idx_assignments_one_active_per_session no longer blocks a
 	// new PENDING row for it. Fold every delivery that was left 'pending'

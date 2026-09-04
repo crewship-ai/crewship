@@ -170,6 +170,27 @@ func (s *Server) handleIssueComment(w http.ResponseWriter, r *http.Request) {
 		"/api/v1/internal/issues/"+url.PathEscape(ident)+"/comments", "issue comment", payload)
 }
 
+// handleIssueCommentsList handles GET /issue/{identifier}/comments — the
+// sidecar comment-READ verb §11.1 asks for (PRD-ISSUES-AND-ROUTINES-2026,
+// work package B5, #2345): "today the sidecar can write a comment but
+// cannot read the thread ... which is why an agent that wants history has
+// no option but to be handed all of it." Before this an agent that wanted
+// the comment thread had exactly one option: the full board dump the §11.1
+// context-pack assembly deliberately does NOT auto-inject (mission_activity
+// has no `commented` writer today — see issue_context_pack.go's own header
+// comment). This is the tool call that fills that gap.
+func (s *Server) handleIssueCommentsList(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.issueActor(w, r); !ok {
+		return
+	}
+	ident, ok := issueIdentFromPath(w, r.URL.Path, "/comments")
+	if !ok {
+		return
+	}
+	s.proxyToAPIFiltered(w, r, http.MethodGet,
+		"/api/v1/internal/issues/"+url.PathEscape(ident)+"/comments"+s.issueScopeQuery(), fenceCommentText)
+}
+
 // handleIssueUpdate handles PATCH /issue/{identifier}.
 //
 // Fields are forwarded only when present, so a PATCH that carries just a status
@@ -350,10 +371,49 @@ func fenceIssueText(raw json.RawMessage) json.RawMessage {
 	}
 }
 
+// fencedCommentFields is fencedIssueFields' sibling for one comment row —
+// "body" is the free-text field an issue comment's author (human, agent, or
+// a webhook-authored bot) wrote.
+var fencedCommentFields = []string{"body"}
+
+// fenceCommentText is fenceIssueText's sibling for GET /issue/{id}/comments
+// (the sidecar comment-READ verb, PRD-ISSUES-AND-ROUTINES-2026 §11.1, work
+// package B5, #2345): the internal API's ListComments always returns a JSON
+// array, never a bare object, so this only needs that one shape — but still
+// falls through to the raw payload on anything that doesn't parse as one,
+// the same defence-in-depth fenceIssueText applies to an unexpected upstream
+// response.
+func fenceCommentText(raw json.RawMessage) json.RawMessage {
+	trimmed := strings.TrimLeft(string(raw), " \t\r\n")
+	if !strings.HasPrefix(trimmed, "[") {
+		return raw
+	}
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return raw
+	}
+	for i := range items {
+		fenceObjectFields(items[i], fencedCommentFields)
+	}
+	out, err := json.Marshal(items)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
 // fenceIssueObject rewrites the free-text fields of one issue object in place.
 // Non-string values (a JSON null description, say) are left alone.
 func fenceIssueObject(obj map[string]json.RawMessage) {
-	for _, field := range fencedIssueFields {
+	fenceObjectFields(obj, fencedIssueFields)
+}
+
+// fenceObjectFields is fenceIssueObject generalized to an arbitrary field
+// list, shared with fenceCommentText — same nonce-fence, same "issue"
+// source label (a comment IS content read off the issue board, the same
+// ingress class fenceIssueText already names).
+func fenceObjectFields(obj map[string]json.RawMessage, fields []string) {
+	for _, field := range fields {
 		raw, present := obj[field]
 		if !present {
 			continue

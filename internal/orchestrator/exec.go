@@ -136,6 +136,11 @@ ISSUE TRACKER (the crew's board — you are a participant on it, not just a repo
 - Search / list:  GET   http://localhost:9119/issues?q=<text>&status=TODO,IN_PROGRESS&assignee_id=<id>
 - Read one:       GET   http://localhost:9119/issue/<IDENTIFIER>          (identifiers look like ENG-42)
 - Comment:        POST  http://localhost:9119/issue/<IDENTIFIER>/comment  {"body":"..."}
+- Read comments:  GET   http://localhost:9119/issue/<IDENTIFIER>/comments
+    The full comment thread, oldest first. The context you are handed on wake only covers
+    board-structural events (status/assignee/priority changes, task results) since you last
+    looked — it does NOT include comment text. Fetch this when you need what was actually
+    SAID, not just what happened.
 - Update:         PATCH http://localhost:9119/issue/<IDENTIFIER>
     {"status":"IN_PROGRESS","priority":"high","assignee_id":"<agent-or-user-id>",
      "assignee_type":"agent","labels":["<label-id>"],"estimate":3,"due_date":"2026-09-01"}
