@@ -308,15 +308,24 @@ var runAggregateProjections = []struct {
 // raw WHERE text applied during grouping (filters on indexed columns, so
 // SQLite can prune before the GROUP BY).
 //
-// The grouping key is COALESCE(trace_id, actor_id), aliased "trace_id" so
-// every downstream SELECT/GROUP BY/ORDER BY reference below stays unchanged:
-// an ad-hoc run's rows always carry a non-NULL trace_id (COALESCE picks it,
-// actor_id — the triggering actor, not the run — is never consulted); a
-// pipeline/routine run's rows never set trace_id (#2284), so COALESCE falls
-// back to actor_id, which internal/pipeline/journal.go stamps to the run's
-// own id on every emit. The two never collide within one query: innerWhere
-// only admits pipeline.run.* rows when they lack a trace_id and run.* rows
-// when they have one (see ListRuns/GetRunByID).
+// The grouping key is COALESCE(trace_id, actor_id): an ad-hoc run's rows
+// always carry a non-NULL trace_id (COALESCE picks it, actor_id — the
+// triggering actor, not the run — is never consulted); a pipeline/routine
+// run's rows never set trace_id (#2284), so COALESCE falls back to
+// actor_id, which internal/pipeline/journal.go stamps to the run's own id
+// on every emit. The two never collide within one query: innerWhere only
+// admits pipeline.run.* rows when they lack a trace_id and run.* rows when
+// they have one (see ListRuns/GetRunByID).
+//
+// The SELECT list aliases this expression AS "trace_id" so every downstream
+// column-name reference (SELECT/ORDER BY) stays unchanged — but GROUP BY is
+// the one place that alias CANNOT be trusted: SQLite resolves a GROUP BY
+// bareword against a same-named FROM-clause column when one exists, not the
+// SELECT list's alias, so `GROUP BY trace_id` silently grouped on the raw
+// journal_entries.trace_id column — NULL for every pipeline/routine row —
+// merging every routine run in a workspace into one bucket. GROUP BY below
+// repeats the full COALESCE(...) expression for that reason; see its own
+// comment.
 //
 // Index note: idx_journal_ws_trace (workspace_id, trace_id) WHERE trace_id
 // IS NOT NULL covers the ad-hoc branch only — a pipeline/routine run's rows
@@ -355,7 +364,21 @@ func runAggregatesCTE(cols []string, innerWhere string) (string, []any) {
 		strings.Join(lines, ",\n") + "\n" +
 		"    FROM journal_entries\n" +
 		"    WHERE " + innerWhere + "\n" +
-		"    GROUP BY trace_id\n)"
+		// GROUP BY must repeat the COALESCE expression, not the bareword
+		// "trace_id" — SQLite resolves a GROUP BY bareword against the
+		// FROM-clause column of that name (journal_entries.trace_id),
+		// NOT the SELECT list's "AS trace_id" alias, even though the
+		// alias shadows the same name. `GROUP BY trace_id` therefore
+		// grouped every pipeline/routine row — trace_id is NULL for all
+		// of them by construction — into ONE bucket keyed on NULL,
+		// silently merging every routine run in a workspace into a
+		// single aggregate row instead of the COALESCE(trace_id,
+		// actor_id) row-per-run the SELECT computes. Confirmed against
+		// modernc.org/sqlite (the driver this package uses): `SELECT
+		// COALESCE(a,b) AS x ... GROUP BY x` groups on the source column
+		// x if one exists, not the alias; `GROUP BY COALESCE(a,b)` groups
+		// on the computed value, which is what every caller here needs.
+		"    GROUP BY COALESCE(trace_id, actor_id)\n)"
 	return cte, args
 }
 

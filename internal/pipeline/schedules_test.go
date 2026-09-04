@@ -465,7 +465,7 @@ VALUES ('psched_due', 'ws_test', 'due', 'pipe_1', '0 8 * * *', 'UTC', '{}', 1, ?
 		t.Fatalf("schedule row has no last_run_id to check pipeline_runs against")
 	}
 	var runCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pipeline_runs WHERE id = ?`, got.LastRunID).Scan(&runCount); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipeline_runs WHERE id = ?`, got.LastRunID).Scan(&runCount); err != nil {
 		t.Fatalf("count pipeline_runs for %s: %v", got.LastRunID, err)
 	}
 	if runCount != 1 {

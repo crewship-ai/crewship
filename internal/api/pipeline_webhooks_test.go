@@ -625,7 +625,7 @@ func TestPipelineWebhooks_Fire_ValidSignature_Accepts202(t *testing.T) {
 	// the real table, not just the mock runner's having been called.
 	h.WaitWebhookDispatches()
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pipeline_runs WHERE id = ?`, runID).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipeline_runs WHERE id = ?`, runID).Scan(&n); err != nil {
 		t.Fatalf("count pipeline_runs for %v: %v", runID, err)
 	}
 	if n != 1 {
