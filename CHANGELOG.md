@@ -32,22 +32,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Security
 
 - **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
-- **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
-  Three CLI gaps found in live validation, all against features that had
-  already shipped server-side: `crewship issue comment "@riley …"` recorded a
-  comment and mentioned nobody, silently, because the server only recognises
-  the Markdown link form `[@slug](crewship:agent/<agentId>)`
-  (`internal/mentions`) and a bare `@slug` is just text; `issue get` (table
-  and `-f json`) stopped at `assignee_*` and never showed the `owner`/
-  `delegate` fields #2297 added to the API; and `issue runs` never showed
-  `mission_id` or which of task/mention/delegation attributed a run to its
-  issue, because neither the DTO nor the CLI carried it. Fixed all three:
-  `issue comment` gets a repeatable `--mention <slug>` flag that resolves
-  against the workspace agent roster and prepends the real link form (fails
-  loudly, naming the slug and the real agents, on an unknown one); `issue
-  get` prints `Owner`/`Delegate` rows and JSON fields; the runs DTO
-  (`internal/api/issue_handler_runs.go`) now carries `mission_id` and
-  `source`, mirrored in the CLI's JSON output and a new SOURCE table column.
 
 - **Stop now reaches a run that is still queued (#2317).** `issue stop`
   stamped only `PENDING`/`RUNNING` assignments, so a run parked as `QUEUED`
