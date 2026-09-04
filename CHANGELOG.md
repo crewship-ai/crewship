@@ -33,6 +33,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
 - **The Track A live validation is on record, and the PRD says what it found (#TBD).**
+- **The Track A live validation is on record, and the PRD says what it found (#2331).**
   `docs/prd/reports/track-a-live-validation-2026-09-03.md` lists, package by
   package, what each Track A change did on a factory-reset dev1 — including
   the two Stop defects (#2312, #2315) and the CLI gaps (#2313) that ten green
