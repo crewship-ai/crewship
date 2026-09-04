@@ -327,7 +327,21 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// classification and the actual dump both key off those two.
 	"inbox_item_reads": IntentInclude,
 	"issue_counters":   IntentInclude,
-	"memory_proposals": IntentInclude,
+	// issue_agent_sessions (PRD-ISSUES-AND-ROUTINES-2026 §9.2, work package
+	// B1, #2332) is the durable cursor an agent holds on one issue —
+	// last_consumed_seq, state, agent_version. IntentInclude, the same
+	// classification as assignments (its nearest analogue: run-state that a
+	// user would notice missing): losing it on restore does not just drop
+	// bookkeeping, it makes a restored instance re-open a session an agent
+	// had already been working in and lose the cursor into what it had and
+	// had not read. Contrast notification_deliveries
+	// (IntentExcludeOperational) — that table's whole job is dedup/retry
+	// state where surviving a restore would look like a resent duplicate;
+	// this table's job is closer to "which comments has this agent seen",
+	// which is exactly the kind of state notification_channels/
+	// user_notification_prefs are IntentInclude to avoid silently losing.
+	"issue_agent_sessions": IntentInclude,
+	"memory_proposals":     IntentInclude,
 	// onboarding_proposals is the crew a setup agent proposed and a human
 	// approved. Included rather than denied because the row IS the audit
 	// record of that decision: the whole design turns on the card the human

@@ -33,6 +33,7 @@ crewship issue <subcommand> [flags]
 | `review` | Review an issue (approve or request changes) |
 | `activity` | Show the activity timeline for an issue |
 | `runs` | List runs triggered by an issue |
+| `sessions` | List an issue's agent sessions |
 | `changes` | Show the git diff produced by work on an issue |
 | `subtasks` | List sub-issues of an issue (aliases: `subissues`, `sub-issues`) |
 | `relate` | Create a relation between two issues |
@@ -311,6 +312,21 @@ crewship issue runs BE-42 --format json | jq '.[] | select(.source=="mention")'
 **Output columns:** AGENT, TASK (truncated to 28), STATUS, STARTED (relative time), DURATION, SOURCE, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
 
 SOURCE is why the run is attributed to the issue: `task` (the issue's own mission-task plan), `mention` (an `@mention` dispatch), or `delegation` (a sub-agent's own further `/assign` call mid-mission). In `--format json`, the same run also carries `mission_id` (the issue's mission ID; omitted on a legacy row that predates `assignments.mission_id`).
+
+---
+
+## `crewship issue sessions`
+
+<Note>Early: `issue_agent_sessions` is work package B1 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md`). A mention resolves or creates a session — mentioning the same agent on the same issue twice reuses it rather than creating a second — but nothing yet reads a session back into an agent's context, and every session created today sits in `pending`. That is later work (B2–B5).</Note>
+
+List the durable, per-(issue, agent) sessions a mention has opened on an issue. Hits `GET /api/v1/crews/{crewId}/issues/{ident}/sessions` after resolving `<identifier>` to its crew via `fetchIssue`.
+
+```bash
+crewship issue sessions BE-42
+crewship issue sessions BE-42 --format json
+```
+
+**Output columns:** AGENT, STATE, LAST SEQ (`last_consumed_seq`), VERSION (`agent_version`, `-` when the agent has no config history), UPDATED (relative time).
 
 ---
 

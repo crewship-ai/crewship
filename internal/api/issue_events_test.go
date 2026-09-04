@@ -162,6 +162,7 @@ func TestJournalTypeForIssueAction(t *testing.T) {
 		actionReviewChangesRequested: journal.EntryMissionStatus,
 		actionTaskCompleted:          journal.EntryMissionStatus,
 		actionTaskFailed:             journal.EntryMissionStatus,
+		actionTaskCancelled:          journal.EntryMissionStatus,
 		actionDescriptionChanged:     journal.EntryMissionStatus,
 		actionAttachmentAdded:        journal.EntryMissionStatus,
 		actionAttachmentRemoved:      journal.EntryMissionStatus,

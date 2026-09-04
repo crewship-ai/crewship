@@ -15,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/missionactivity"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -144,15 +145,30 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 			_, _ = e.db.ExecContext(ctx,
 				`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
 				commentID, missionID, assignedAgentID.String, commentBody, now, now)
-			// Activity log
-			activityID := generateID()
+			// Activity log — through missionactivity.Emit, the one
+			// seq-allocating helper every mission_activity writer now goes
+			// through (PRD-ISSUES-AND-ROUTINES-2026 §9.1, #2332/B1), rather
+			// than a bare INSERT. This package cannot call the internal/api
+			// emitter directly (internal/api already imports
+			// internal/orchestrator, so the reverse import would cycle), so
+			// — unlike assignments_run.go's two sites, which moved onto that
+			// emitter — this one keeps writing the row itself and does not
+			// gain a journal entry or hub nudge; it only gains a race-free
+			// seq.
 			action := "task_completed"
 			if taskStatus == "FAILED" {
 				action = "task_failed"
 			}
-			_, _ = e.db.ExecContext(ctx,
-				`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				activityID, missionID, assignedAgentID.String, action, commentBody, now)
+			if _, err := missionactivity.Emit(ctx, e.db, missionactivity.Entry{
+				ID:        generateID(),
+				MissionID: missionID,
+				ActorType: "agent",
+				ActorID:   assignedAgentID.String,
+				Action:    action,
+				Details:   commentBody,
+			}); err != nil {
+				e.logger.Error("emit mission activity", "error", err, "mission_id", missionID)
+			}
 		}
 	}
 

@@ -29,6 +29,7 @@ Issues are crew-scoped tracker items: each carries a human-readable identifier (
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/subtasks`](#list-sub-issues) | List an issue's sub-issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/activity`](#list-activity) | List an issue's activity log |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/runs`](#list-runs) | List an issue's agent task-runs |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/sessions`](#list-sessions) | List an issue's agent sessions |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/comments`](#list-comments) | List comments on an issue |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/comments`](#create-comment) | Add a comment |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/relations`](#list-relations) | List relations |
@@ -687,6 +688,64 @@ Lists every run attributed to an issue — not just mission tasks joined to thei
 | `error_message` | string? | Failure detail, truncated for the list (omitted when empty) |
 | `mission_id` | string? | The issue this run is attributed to (`assignments.mission_id`, #2256). Nil on a legacy row written before that column existed, never touched by the backfill, and found here only via the `mission_tasks` join |
 | `source` | string | Why this run is attributed to the issue: `task` (the issue's own `mission_tasks` plan), `mention` (an `@mention` dispatch, via `mission_comment_mentions`), or `delegation` (a sub-agent's own further `/assign` call mid-mission, found only via `mission_id`) |
+
+| Status | Condition |
+|---|---|
+| `404` | Issue not found in the supplied crew + workspace |
+
+---
+
+## Sessions
+
+<Note>Early: `issue_agent_sessions` is work package B1 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md`) — the event-log and session foundations. A mention resolves or creates a session; nothing yet reads it back into an agent's context, and the state machine (`pending` → `active` → …) has only its `pending` starting state wired. That is later work (B2–B5), not a gap in this endpoint.</Note>
+
+The durable, per-(issue, agent) cursor a mention resolves or creates. `UNIQUE(mission_id, agent_id)` on the underlying table means mentioning the same agent on the same issue twice never creates a second session — the second mention finds and reuses the first's row.
+
+### List Sessions
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/sessions?workspace_id={workspaceId}
+```
+
+Lists every `issue_agent_sessions` row for this issue, newest-updated first.
+
+**Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
+
+**Auth:** any authenticated workspace member (`read`).
+
+**Response:** `200 OK` — a JSON **array** (never `null`).
+
+```json
+[
+  {
+    "id": "sess_abc",
+    "mission_id": "issue_123",
+    "agent_id": "agent_456",
+    "agent_name": "Backend Dev",
+    "state": "pending",
+    "last_consumed_seq": 0,
+    "active_run_id": "",
+    "agent_version": 3,
+    "last_activity_at": "2026-09-04T10:00:00Z",
+    "created_at": "2026-09-04T10:00:00Z",
+    "updated_at": "2026-09-04T10:00:00Z"
+  }
+]
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Session ID |
+| `mission_id` | string | The issue this session belongs to |
+| `agent_id` | string | The agent this session belongs to |
+| `agent_name` | string? | Resolved name of the agent (omitted when empty) |
+| `state` | string | One of `pending`, `active`, `awaiting_input`, `idle`, `error`, `stale`, `closed`. Every session created today is `pending` — the transitions between the other states are later work (B2/B4) |
+| `last_consumed_seq` | integer | The cursor into `mission_activity.seq` — everything above it is unread for this session. `0` for a session that has read nothing |
+| `active_run_id` | string? | The live run this session is waiting on, when one exists (omitted when empty) |
+| `agent_version` | integer? | The `agent_config_history.version` this session was opened under, stamped once at creation (omitted when the agent has no config history) |
+| `last_activity_at` | string? | Last time this session saw activity (omitted when empty) |
+| `created_at` | string | Session creation timestamp |
+| `updated_at` | string | Last update timestamp |
 
 | Status | Condition |
 |---|---|

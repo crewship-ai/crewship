@@ -120,6 +120,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **One event log per issue, and a durable session per (issue, agent) (#2336).**
+  `mission_activity` was a status-change audit table with no CHECK on
+  `action`, no `workspace_id`, and two writers (`assignments_run.go`,
+  `orchestrator/mission_tasks_completion.go`) that INSERTed straight into it,
+  bypassing the shared emitter. It now carries `seq` (`UNIQUE(mission_id,
+  seq)`, allocated by one race-free helper — `internal/missionactivity` —
+  every writer goes through), a backfilled `workspace_id`, `payload_json`,
+  `source_kind`/`source_id`, and a CHECK on `action`. A new
+  `issue_agent_sessions` table (`UNIQUE(mission_id, agent_id)`) gives every
+  (issue, agent) pair a durable cursor: a mention resolves or creates one
+  rather than ever minting a second, pinned to the agent's config version at
+  creation. `GET /api/v1/crews/{crewId}/issues/{identifier}/sessions` and
+  `crewship issue sessions <identifier>` expose it. Foundations only
+  (PRD-ISSUES-AND-ROUTINES-2026 §9.1/§9.2, work package B1) — no delivery/
+  wake loop and no session-exclusivity index yet; that is B2/B3.
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,

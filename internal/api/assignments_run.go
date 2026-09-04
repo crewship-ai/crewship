@@ -479,12 +479,21 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', delegate_agent_id = ?, updated_at = ? WHERE id = ?`,
 			target.ID, target.ID, now, body.ChatID)
 
-		// Activity
-		activityID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-			activityID, body.ChatID, assignedByID, "assignee_changed",
-			fmt.Sprintf("%s assigned to %s (@%s)", assignerName, target.Name, target.Slug), now)
+		// Activity — through the shared emitter (issue_events.go), not a bare
+		// INSERT: this was one of the two writers §9.1 (PRD-ISSUES-AND-
+		// ROUTINES-2026, #2332/B1) named as bypassing seq allocation and the
+		// journal. body.ChatID is a real missions.id here (see the comment
+		// above the mission-comment journal emit a few lines up), so the
+		// emitter resolves workspace/crew and this now also produces a
+		// journal entry — previously this delegation path was audited but
+		// never notified.
+		h.events().log(r.Context(), issueEvent{
+			MissionID: body.ChatID,
+			ActorType: "agent",
+			ActorID:   assignedByID,
+			Action:    actionAssigneeChanged,
+			Details:   fmt.Sprintf("%s assigned to %s (@%s)", assignerName, target.Name, target.Slug),
+		})
 
 		// Broadcast update
 		if h.hub != nil {
@@ -1366,17 +1375,26 @@ func (h *AssignmentHandler) finishAssignment(
 					_, _ = h.db.ExecContext(ctx,
 						`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
 						cid, groupID.String, agentID, commentBody, now, now)
-					aid := generateCUID()
-					action := "task_completed"
+					action := actionTaskCompleted
 					switch {
 					case status == "CANCELLED":
-						action = "task_cancelled"
+						action = actionTaskCancelled
 					case errMsg != "":
-						action = "task_failed"
+						action = actionTaskFailed
 					}
-					_, _ = h.db.ExecContext(ctx,
-						`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-						aid, groupID.String, agentID, action, fmt.Sprintf("%s finished work", agentName), now)
+					// Through the shared emitter, not a bare INSERT — the
+					// second of the two writers §9.1 (#2332/B1) named as
+					// bypassing seq allocation and the journal. groupID.String
+					// is a confirmed missions.id here (missionExists == 1,
+					// checked above), so this now also produces a journal
+					// entry for a completion that used to be audited only.
+					h.events().log(ctx, issueEvent{
+						MissionID: groupID.String,
+						ActorType: "agent",
+						ActorID:   agentID,
+						Action:    action,
+						Details:   fmt.Sprintf("%s finished work", agentName),
+					})
 				}
 			}
 		}

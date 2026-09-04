@@ -3,11 +3,12 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/missionactivity"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -30,13 +31,15 @@ import (
 
 // issueAction is the closed vocabulary of mission_activity.action values.
 //
-// The column is TEXT NOT NULL with no CHECK constraint
-// (internal/database/migrate_consts_v33_v41.go), so nothing in the schema
-// keeps writers honest — a typo'd action is a silently unroutable, unlabelled
-// timeline row. Naming the set in one place is the substitute for the
-// constraint the table does not have: journalTypeForIssueAction switches on
+// The column was TEXT NOT NULL with no CHECK constraint until
+// 20260904095700_mission_activity_widen.sql (§9.1, B1 — #2332) added one
+// naming exactly this list (plus 'task_cancelled', a live value that was
+// never enumerated here — see that migration's comment). Before the CHECK,
+// nothing in the schema kept writers honest; naming the set in one place was
+// the substitute. The CHECK is now the schema-level backstop and this
+// enumeration is what keeps IT honest: journalTypeForIssueAction switches on
 // these, the frontend's actionLabel switches on the same strings, and
-// knownIssueActions lets a test assert the two stay in step.
+// knownIssueActions lets a test assert the three stay in step.
 type issueAction string
 
 const (
@@ -55,13 +58,23 @@ const (
 	// Written by the review workflow (issue_handler_workflow.go).
 	actionReviewApproved         issueAction = "review_approved"
 	actionReviewChangesRequested issueAction = "review_changes_requested"
-	// Written by the run/orchestration paths (assignments_run.go,
-	// orchestrator/mission_tasks_completion.go). Those two still INSERT into
-	// mission_activity directly rather than coming through this emitter —
-	// they are named here because they are part of the vocabulary the UI and
-	// the journal mapping have to cover, not because this file writes them.
+	// Written by the run/orchestration paths. assignments_run.go's two run-
+	// completion sites now call this emitter directly (§9.1, B1 — #2332);
+	// orchestrator/mission_tasks_completion.go cannot (internal/orchestrator
+	// would have to import internal/api, which already imports it the other
+	// way) and instead calls missionactivity.Emit — the same seq-allocating
+	// helper this emitter's log() calls internally — without the journal/hub
+	// fan-out only this package can provide. Named here regardless because
+	// they are part of the vocabulary the UI and the journal mapping have to
+	// cover.
 	actionTaskCompleted issueAction = "task_completed"
 	actionTaskFailed    issueAction = "task_failed"
+	// actionTaskCancelled: the CANCELLED branch of assignments_run.go's
+	// run-completion handler has written the bare string "task_cancelled"
+	// since before this enumeration existed; naming it here is what let
+	// 20260904095700_mission_activity_widen.sql's CHECK include it instead
+	// of silently breaking that write path.
+	actionTaskCancelled issueAction = "task_cancelled"
 	// Reserved by journalTypeForIssueAction since #1519 but never written by
 	// anything: comments go through mission_comments, not mission_activity.
 	actionCommented issueAction = "commented"
@@ -108,6 +121,7 @@ var knownIssueActions = []issueAction{
 	actionReviewChangesRequested,
 	actionTaskCompleted,
 	actionTaskFailed,
+	actionTaskCancelled,
 	actionCommented,
 	actionDescriptionChanged,
 	actionMentioned,
@@ -187,12 +201,31 @@ type issueEvents struct {
 // NOT broadcast — call sites that batch several field changes into one
 // mutation want one "the issue changed" nudge, not one per field; see
 // record.
+//
+// The row itself is written through missionactivity.Emit — the one seq-
+// allocating helper every mission_activity writer in the codebase now goes
+// through (PRD-ISSUES-AND-ROUTINES-2026 §9.1, B1) — rather than a bare
+// INSERT here. payload_json carries the same from/to/action/details shape
+// issueEventPayload already builds for the journal entry below, so a reader
+// of the row (the future context-assembly delta, §11.1; an automation
+// matcher) does not have to parse `details` prose to recover them.
 func (e issueEvents) log(ctx context.Context, ev issueEvent) {
 	actID := generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := e.db.ExecContext(ctx,
-		`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		actID, ev.MissionID, ev.ActorType, ev.ActorID, string(ev.Action), ev.Details, now); err != nil {
+	payload, err := json.Marshal(issueEventPayload(ev))
+	if err != nil {
+		e.logf("marshal mission activity payload", ev, err)
+		payload = nil
+	}
+	written, err := missionactivity.Emit(ctx, e.db, missionactivity.Entry{
+		ID:          actID,
+		MissionID:   ev.MissionID,
+		ActorType:   ev.ActorType,
+		ActorID:     ev.ActorID,
+		Action:      string(ev.Action),
+		Details:     ev.Details,
+		PayloadJSON: string(payload),
+	})
+	if err != nil {
 		e.logf("insert mission activity", ev, err)
 	}
 
@@ -200,13 +233,7 @@ func (e issueEvents) log(ctx context.Context, ev issueEvent) {
 		return
 	}
 
-	// The mission row carries workspace_id and crew_id; we grab them here
-	// rather than threading them through every call site. One extra light
-	// query per event is cheap next to a single-shape signature everywhere.
-	var workspaceID, crewID string
-	_ = e.db.QueryRowContext(ctx,
-		`SELECT workspace_id, crew_id FROM missions WHERE id = ?`, ev.MissionID).
-		Scan(&workspaceID, &crewID)
+	workspaceID, crewID := written.WorkspaceID, written.CrewID
 	if workspaceID == "" {
 		// Some legacy callers pass a chat id as the mission id, and the
 		// journal write needs a workspace to be tenant-scoped at all. Skip
@@ -232,7 +259,7 @@ func (e issueEvents) log(ctx context.Context, ev issueEvent) {
 		// automation.Registry.Flush resolves to price a composed hop.
 		TraceID: ev.RunID,
 		Payload: issueEventPayload(ev),
-		Refs:    map[string]any{"mission_id": ev.MissionID, "activity_id": actID},
+		Refs:    map[string]any{"mission_id": ev.MissionID, "activity_id": actID, "seq": written.Seq},
 	})
 }
 

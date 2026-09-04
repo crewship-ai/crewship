@@ -1072,7 +1072,12 @@ func TestIssue_Review_BadStatus(t *testing.T) {
 func TestIssue_ListActivity(t *testing.T) {
 	h, userID, wsID, crewID, leadID, _ := newTestIssueHandler(t)
 	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
-	h.logActivity(context.Background(), id, "user", userID, "test_action", "details")
+	// "test_action" used to be legal here because mission_activity.action
+	// carried no CHECK constraint; #2332/B1 constrained it to the closed
+	// issueAction vocabulary (20260904095700_mission_activity_widen.sql), so
+	// this now has to be a real one — the test only cares that SOME activity
+	// row round-trips through ListActivity, not which action it names.
+	h.logActivity(context.Background(), id, "user", userID, "status_changed", "details")
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.SetPathValue("crewId", crewID)

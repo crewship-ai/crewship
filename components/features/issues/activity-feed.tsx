@@ -21,6 +21,7 @@ export function ActivityIcon({ action }: { action: string }) {
     case "review_approved":
       return <Star className={cn(size, "text-success")} />
     case "task_failed":
+    case "task_cancelled":
       return <CircleX className={cn(size, "text-destructive")} />
     case "status_changed":
       return <PieChart className={cn(size, "text-warn")} />
@@ -40,6 +41,7 @@ export function actionLabel(action: string): string {
   switch (action) {
     case "task_completed": return "completed a task"
     case "task_failed": return "task failed"
+    case "task_cancelled": return "task cancelled"
     case "status_changed": return "changed status"
     case "assignee_changed": return "changed assignee"
     case "priority_changed": return "changed priority"

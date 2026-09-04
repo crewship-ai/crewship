@@ -94,6 +94,18 @@ func (h *AssignmentHandler) WaitDispatches() {
 	h.dispatchWG.Wait()
 }
 
+// events builds the shared issue-event emitter (issue_events.go) from the
+// fields this handler already holds — same shape as IssueHandler.events()
+// and InternalIssueHandler.events(). Built per call so a journal wired after
+// construction via SetJournal is picked up.
+//
+// Added for #2332 (B1): the run-completion mission_activity writes below
+// used to INSERT directly, bypassing the emitter's seq allocation, journal
+// entry and hub nudge — the two "bypassing writers" §9.1 names.
+func (h *AssignmentHandler) events() issueEvents {
+	return issueEvents{db: h.db, hub: h.hub, logger: h.logger, journal: h.journal}
+}
+
 // NewAssignmentHandler creates an AssignmentHandler with the given orchestrator, WebSocket hub, and internal token.
 
 func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *AssignmentHandler {
