@@ -32,6 +32,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Security
 
 - **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
+- **The Track A live validation is on record, and the PRD says what it found (#TBD).**
+  `docs/prd/reports/track-a-live-validation-2026-09-03.md` lists, package by
+  package, what each Track A change did on a factory-reset dev1 — including
+  the two Stop defects (#2312, #2315) and the CLI gaps (#2313) that ten green
+  test suites had not seen — and the PRD's A1 row, A1 status and §24.1
+  coverage-trap section now cite them.
 
 - **Stop now reaches a run that is still queued (#2317).** `issue stop`
   stamped only `PENDING`/`RUNNING` assignments, so a run parked as `QUEUED`
