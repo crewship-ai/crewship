@@ -30,6 +30,7 @@ import (
 
 	"context"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
@@ -39,6 +40,7 @@ import (
 type pagesIdentityRig struct {
 	h       *AdminGDPRHandler
 	db      *sql.DB
+	spy     *pagesJournalSpy
 	adminID string
 	userID  string
 	other   string // a second user, whose rows must survive untouched
@@ -65,8 +67,9 @@ func pagesIdentitySetup(t *testing.T) *pagesIdentityRig {
 		('pid-m4',?, 'pid-subject','MEMBER')`, pidWSA, pidWSA, pidWSB, pidWSB)
 
 	h := NewAdminGDPRHandler(dbh.DB, silent, t.TempDir())
-	h.SetJournal(&pagesJournalSpy{})
-	r := &pagesIdentityRig{h: h, db: dbh.DB, adminID: "pid-admin", userID: "pid-subject", other: "pid-other"}
+	spy := &pagesJournalSpy{}
+	h.SetJournal(spy)
+	r := &pagesIdentityRig{h: h, db: dbh.DB, spy: spy, adminID: "pid-admin", userID: "pid-subject", other: "pid-other"}
 	r.seedWorkspaceShapes(t, pidWSA, "a")
 	r.seedWorkspaceShapes(t, pidWSB, "b")
 	return r
@@ -139,11 +142,22 @@ func (r *pagesIdentityRig) erase(t *testing.T, wsID string) map[string]any {
 // way.
 func (r *pagesIdentityRig) countIn(t *testing.T, wsID, what string) int {
 	t.Helper()
+	// The count of subject mentions this workspace still holds, per shape.
+	// "page_versions_total" is the odd one out — it counts rows regardless of
+	// author, to prove anonymising did not turn into deleting — so it takes
+	// the workspace alone and is handled separately below rather than being
+	// padded with a dummy predicate to fit one binding convention.
+	if what == "page_versions_total" {
+		var n int
+		if err := r.db.QueryRow(`SELECT COUNT(*) FROM page_versions v JOIN pages p ON p.id = v.page_id
+			WHERE p.workspace_id = ?`, wsID).Scan(&n); err != nil {
+			t.Fatalf("count page_versions rows in %s: %v", wsID, err)
+		}
+		return n
+	}
 	queries := map[string]string{
 		"page_versions": `SELECT COUNT(*) FROM page_versions v JOIN pages p ON p.id = v.page_id
 			WHERE p.workspace_id = ? AND v.author_user_id = ?`,
-		"page_versions_total": `SELECT COUNT(*) FROM page_versions v JOIN pages p ON p.id = v.page_id
-			WHERE p.workspace_id = ? AND ? IS NOT NULL`,
 		"page_grants": `SELECT COUNT(*) FROM page_grants g JOIN pages p ON p.id = g.page_id
 			WHERE p.workspace_id = ? AND (g.granted_by_user_id = ? OR (g.subject_type = 'user' AND g.subject_id = ?))`,
 		"page_public_tokens": `SELECT COUNT(*) FROM page_public_tokens tk JOIN pages p ON p.id = tk.page_id
@@ -224,6 +238,11 @@ func TestGDPRErasure_PageTablesNoLongerNameSubject(t *testing.T) {
 	}
 }
 
+// Unlike the three tests around it, this one passes on unfixed code too — an
+// erasure that deletes nothing anywhere trivially deletes nothing in workspace
+// B. That is what a blast-radius guard looks like: it is not the regression
+// test for #1976 (its neighbours are), it is the test that stops the fix for
+// #1976 from becoming a bigger bug than the defect.
 func TestGDPRErasure_PageTablesInOtherWorkspacesSurvive(t *testing.T) {
 	r := pagesIdentitySetup(t)
 	r.erase(t, pidWSA)
@@ -368,6 +387,11 @@ func subjectSightings(t *testing.T, db *sql.DB, wsID, userID string) map[string]
 		}
 		where := "(" + strings.Join(preds, " OR ") + ")"
 		label := table
+		// The page_id / panel_id arms assume those columns mean the Pages
+		// chain, which is true of every table in the schema today. A future
+		// unrelated `page_id` would be scoped against the wrong parent and
+		// silently under-count — i.e. this sweep fails OPEN, which is the
+		// wrong direction. If that day comes, key the arms on the table name.
 		switch {
 		case hasWS:
 			where += " AND tbl.workspace_id = ?"
@@ -398,7 +422,14 @@ func subjectSightings(t *testing.T, db *sql.DB, wsID, userID string) map[string]
 // columnCanNameAUser is the pattern half of the sweep: which column names
 // plausibly hold a user id. Deliberately generous — a false positive costs a
 // line in an allow-list with a reason next to it, a false negative is another
-// #1976.
+// #1976. The suffix rules carry most of the weight (`_by` alone subsumes
+// created_by, decided_by, invited_by and every sibling that has not been
+// invented yet); the explicit names are the ones no suffix reaches.
+//
+// KNOWN LIMIT, so nobody reads a green sweep as more than it is: this matches
+// on the user's ID. A table that names the subject by slug or email —
+// peer_cards.user_slug and user_models.user_slug are live examples, both
+// erased today by other means — is invisible to it.
 func columnCanNameAUser(col string) bool {
 	switch col {
 	// "userId" is not a typo: the NextAuth-era tables (accounts, sessions)
@@ -407,12 +438,12 @@ func columnCanNameAUser(col string) bool {
 	case "userId":
 		return true
 	case "subject_id", "actor_id", "author_id", "user_id", "data_subject_id",
-		"requested_by", "decided_by", "created_by", "updated_by", "granted_by",
-		"changed_by", "invited_by", "resolved_by", "approved_by", "set_by",
-		"acquired_by", "restored_by", "rotated_by", "reviewed_by", "triggered_by", "author":
+		"owner_id", "member_id", "sender_id", "recipient_id",
+		"assigned_to", "author":
 		return true
 	}
-	return strings.HasSuffix(col, "_user_id") ||
+	return strings.HasSuffix(col, "_by") ||
+		strings.HasSuffix(col, "_user_id") ||
 		strings.HasSuffix(col, "_by_id") ||
 		strings.HasSuffix(col, "_by_user_id")
 }
@@ -427,15 +458,23 @@ func TestGDPRErasure_NoPageTableStillNamesTheSubject(t *testing.T) {
 
 	// Deliberate survivors, each for a reason the file header of
 	// admin_gdpr.go argues at length:
-	//   gdpr_actions   — the erasure's own accountability record. "A SAR does
-	//                    not erase the SAR itself."
+	//   gdpr_actions / journal_entries / journal_entries_archived / audit_logs
+	//                  — append-only accountability records. "A SAR does not
+	//                    erase the SAR itself." Listed even though this rig's
+	//                    journal is a spy that writes no rows: the day someone
+	//                    wires a real emitter in, the test should keep testing
+	//                    what it means to test rather than fail on a survivor
+	//                    the docs already promise.
 	//   workspace_members — membership is removed by RemoveMember, not by an
 	//                    Art. 17 erasure; the two are separate operations and
 	//                    an erasure that silently evicted the subject would be
 	//                    doing something the operator did not ask for.
 	allowed := map[string]bool{
-		"gdpr_actions":      true,
-		"workspace_members": true,
+		"gdpr_actions":             true,
+		"journal_entries":          true,
+		"journal_entries_archived": true,
+		"audit_logs":               true,
+		"workspace_members":        true,
 	}
 
 	sightings := subjectSightings(t, r.db, pidWSA, r.userID)
@@ -452,9 +491,109 @@ func TestGDPRErasure_NoPageTableStillNamesTheSubject(t *testing.T) {
 			pidWSA, strings.Join(offenders, ", "))
 	}
 
-	// And the same sweep in the untouched workspace must still find them —
-	// otherwise the sweep above is passing because the seed never landed.
-	if got := subjectSightings(t, r.db, pidWSB, r.userID); len(got) < 4 {
-		t.Errorf("sweep of the untouched workspace found %d naming tables, want the seeded shapes intact: %v", len(got), got)
+	// And the same sweep in the untouched workspace must still find every one
+	// of the four by name — otherwise the sweep above is passing because the
+	// seed never landed, or because a statement reached across the workspace
+	// boundary. A count threshold would tolerate exactly one table going
+	// missing, which is the failure most worth catching.
+	elsewhere := subjectSightings(t, r.db, pidWSB, r.userID)
+	for _, table := range []string{"page_versions", "page_grants", "page_public_tokens", "page_webhooks"} {
+		if elsewhere[table] == 0 {
+			t.Errorf("sweep of the untouched workspace no longer finds %s — the seed did not land, or workspace A's erasure reached into B: %v",
+				table, elsewhere)
+		}
+	}
+}
+
+// ── Every revoked capability is journalled, and none of them names the
+//    subject in a table the erasure cannot reach ──────────────────────────
+
+// The rule these entries exist under is pages_grants.go's: "an ACL nobody can
+// audit is not a security control." The ordinary revoke path writes one entry
+// per row on all three tables; an erasure that removed the same rows behind an
+// aggregate count would leave nobody able to say which page a crew lost access
+// to, or which integration the SAR just broke.
+//
+// The second half of the test is the subtler one. journal_entries is on the
+// deliberately-excluded list, so an entry carrying the erased user's id would
+// have the erasure itself write the subject into a table nothing will ever
+// clean — an erasure that creates the defect it was run to fix.
+func TestGDPRErasure_RevocationsAreJournalled(t *testing.T) {
+	r := pagesIdentitySetup(t)
+	r.erase(t, pidWSA)
+
+	counts := map[journal.EntryType]int{}
+	for _, e := range r.spy.entries {
+		counts[e.Type]++
+	}
+	for _, want := range []struct {
+		typ journal.EntryType
+		n   int
+	}{
+		{journal.EntryPageGrantRemoved, 2},
+		{journalPageLinkRevoked, 1},
+		{journalPageWebhookRevoked, 1},
+	} {
+		if counts[want.typ] != want.n {
+			t.Errorf("journal entries of type %s = %d, want %d (all entries: %v)",
+				want.typ, counts[want.typ], want.n, counts)
+		}
+	}
+
+	// Nothing the erasure wrote may name the subject — not in a payload value,
+	// not as the entry's actor. The actor is the admin who ran it.
+	for _, e := range r.spy.entries {
+		if e.ActorID == r.userID {
+			t.Errorf("journal entry %s names the erased subject as its actor", e.Type)
+		}
+		blob, err := json.Marshal(e.Payload)
+		if err != nil {
+			t.Fatalf("marshal payload of %s: %v", e.Type, err)
+		}
+		if strings.Contains(string(blob), r.userID) {
+			t.Errorf("journal entry %s writes the erased subject's id into an append-only table: %s",
+				e.Type, blob)
+		}
+		if got, _ := e.Payload["gdpr_action_id"].(string); got == "" {
+			t.Errorf("journal entry %s carries no gdpr_action_id — nothing links it back to the erasure that caused it", e.Type)
+		}
+	}
+
+	// The grant that named the subject as its GRANTEE records the fact without
+	// the id; the one they issued names its (unrelated) grantee normally.
+	var sawErasedSubject, sawNamedGrantee bool
+	for _, e := range r.spy.entries {
+		if e.Type != journal.EntryPageGrantRemoved {
+			continue
+		}
+		if erased, _ := e.Payload["subject_erased"].(bool); erased {
+			sawErasedSubject = true
+			if _, present := e.Payload["subject_id"]; present {
+				t.Errorf("grant entry for the erased subject still carries a subject_id: %v", e.Payload)
+			}
+			continue
+		}
+		if id, _ := e.Payload["subject_id"].(string); id != "" {
+			sawNamedGrantee = true
+		}
+	}
+	if !sawErasedSubject {
+		t.Error("no grant entry recorded that its grantee was the erased subject")
+	}
+	if !sawNamedGrantee {
+		t.Error("the grant the subject issued to a crew lost its grantee — the entry cannot say who lost access")
+	}
+
+	// The forensic fields the capability migrations exist for travel with the
+	// entry, because the row that held them is gone.
+	hook := r.spy.firstOfType(journalPageWebhookRevoked)
+	if hook == nil {
+		t.Fatal("no webhook revocation entry")
+	}
+	if _, ok := hook.Payload["fire_count"]; !ok {
+		t.Errorf("webhook entry drops fire_count — 'was it used after we pulled it' has no answer once the row is deleted: %v", hook.Payload)
+	}
+	if live, _ := hook.Payload["was_live"].(bool); !live {
+		t.Errorf("webhook entry reports a live token as already revoked: %v", hook.Payload)
 	}
 }

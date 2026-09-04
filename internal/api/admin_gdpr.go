@@ -135,14 +135,24 @@ import (
 // declared actions inside this one workspace, which is what makes the
 // contract below true.
 //
-// # The contract: unnamed IN THIS WORKSPACE
+// # The contract: unnamed IN THIS WORKSPACE, on the tables enumerated here
 //
-// A workspace-scoped erasure promises that the subject is not named by this
-// workspace's rows — not that the person is gone from the instance. The same
-// human in another workspace is a separate SAR ticket answered by a separate
-// call, and every statement here is therefore scoped through workspace_id (or,
-// for tables that have none, through a join that reaches one). The one
-// deliberate exception is the excluded list below.
+// The promise is that no row of an ENUMERATED table still names the subject in
+// THIS workspace — not that the person is gone from the instance. Two limits
+// on that sentence, both deliberate, both load-bearing:
+//
+//   - Workspace, not instance. The same human in another workspace is a
+//     separate SAR ticket answered by a separate call, so every statement here
+//     is scoped through workspace_id (or, for tables that have none, through a
+//     join that reaches one).
+//   - Enumerated, not exhaustive. The excluded list below is the principled
+//     part of the gap; the rest is simply unfinished — a schema sweep
+//     (subjectSightings, in admin_gdpr_pages_identity_test.go) walks every
+//     table and finds columns this cascade never reaches: credentials and
+//     notification channels the subject created, pipelines and missions they
+//     authored, their own saved_views. Tracked in #2308. Do not restate the
+//     contract as "every row" until that lands; docs/security/gdpr.mdx says
+//     the same thing to the operator, in the same words.
 //
 // # Idempotency
 //
@@ -234,17 +244,25 @@ type gdprActionScope struct {
 	ApprovalsQueue int `json:"approvals_queue,omitempty"`
 	// PagesTransferred counts pages handed to a crew because the subject
 	// owned them (§7.1 rule 1b). Never a delete count — a page is never
-	// deleted by this cascade, only reassigned.
-	PagesTransferred int `json:"pages_transferred,omitempty"`
+	// deleted by this cascade, only reassigned. NOT omitempty, so the
+	// zero-pages case is recorded rather than being indistinguishable from a
+	// step that never ran.
+	PagesTransferred int `json:"pages_transferred"`
 	// The four Pages tables that named the subject and had nothing removing
 	// them (#1976) — see pages_erase_identity.go. The keys carry the VERB,
 	// not just the table, because the two outcomes are different promises to
 	// the operator: an anonymised version still exists, a revoked capability
 	// does not. `crewship admin gdpr delete` prints these keys verbatim.
-	PageVersionsAnonymised  int `json:"page_versions_anonymised,omitempty"`
-	PageGrantsRemoved       int `json:"page_grants_removed,omitempty"`
-	PagePublicTokensRevoked int `json:"page_public_tokens_revoked,omitempty"`
-	PageWebhooksRevoked     int `json:"page_webhooks_revoked,omitempty"`
+	//
+	// Also not omitempty, and for a sharper reason than the others: these
+	// four steps run in one transaction that ROLLS BACK on failure, and the
+	// receipt then reports zero. If a zero were omitted, "the rollback undid
+	// it" and "there was nothing to do" would look identical on the audit row
+	// that docs/security/gdpr.mdx now calls the evidence for these tables.
+	PageVersionsAnonymised  int `json:"page_versions_anonymised"`
+	PageGrantsRemoved       int `json:"page_grants_removed"`
+	PagePublicTokensRevoked int `json:"page_public_tokens_revoked"`
+	PageWebhooksRevoked     int `json:"page_webhooks_revoked"`
 }
 
 // newGDPRActionID returns a short hex id for a gdpr_actions row.
@@ -284,6 +302,13 @@ func (h *AdminGDPRHandler) insertGDPRAction(ctx context.Context, wsID, subjectID
 // will stay at status='in_progress' and a future reconcile job
 // can sweep it.
 func (h *AdminGDPRHandler) finalizeGDPRAction(ctx context.Context, id string, scope gdprActionScope, finalErr error) {
+	// Detached from the request's cancellation on purpose. The cascade's
+	// deletes have already committed by the time this runs, so a client that
+	// walked away (the CLI's own 30s timeout is the realistic trigger) would
+	// otherwise leave the row at status='in_progress' with scope_json NULL —
+	// an erasure that happened with no record of what it touched, which is
+	// exactly the artefact this table exists to produce.
+	ctx = context.WithoutCancel(ctx)
 	scopeJSON, _ := json.Marshal(scope)
 	status := "completed"
 	var errMsg any
@@ -667,7 +692,7 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 	// an ordinary cascade step and behaves like the others — a failure is
 	// recorded in firstErr and answered with a 207, not a refusal, because
 	// by now rows have already gone.
-	pagesIdentity, err := erasePagesIdentity(r.Context(), h.db, wsID, targetID)
+	pagesIdentity, err := h.erasePagesIdentity(r.Context(), actionID, actorID, wsID, targetID)
 	if err != nil {
 		h.logger.Warn("gdpr delete: pages identity erasure failed",
 			"action_id", actionID, "workspace_id", wsID, "target", targetID, "err", err)

@@ -56,10 +56,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   and the `gdpr_actions` audit row gained a count per table with the verb in
   the key (`page_versions_anonymised`, `page_grants_removed`,
   `page_public_tokens_revoked`, `page_webhooks_revoked`); an anonymised row is
-  not counted in `rows_deleted`, because nothing was deleted. The contract the
-  erasure now keeps — *the subject is unnamed in that workspace*, with the
-  append-only accountability tables the one deliberate exception — is written
-  down in `docs/security/gdpr.mdx` where the operator running it reads.
+  not counted in `rows_deleted`, because nothing was deleted. Each revocation
+  also writes the same journal entry the ordinary revoke path writes, so the
+  operator can still see *which* page a crew lost access to and *which*
+  integration the erasure just broke — carrying `fire_count` and
+  `last_seen_at` with it, since the row that held them is gone, and
+  deliberately never writing the subject's own id into a table the erasure
+  cannot reach. `docs/security/gdpr.mdx` now states the contract the erasure
+  keeps, and — equally important for anyone answering a strict RTBF request —
+  the three kinds of row that still name the subject afterwards, plus the
+  longer tail tracked in #2308.
 
 - **The 1.0 known limits are written down where users read (#2299).** The
   issue-mentions, routines and issue-detail guides now say plainly what Track

@@ -101,13 +101,36 @@ curl -X DELETE \
 
 The erasure is workspace-scoped, and the promise it makes is precise:
 
-> After the cascade completes, no row belonging to **this** workspace names the
-> subject — except the accountability records listed as excluded below.
+> Of the tables the cascade enumerates below, no row belonging to **this**
+> workspace still names the subject once the cascade completes.
 
 It does **not** delete the `users` row, and it does not touch another
 workspace's rows. The same person in a second workspace is a second SAR ticket
 answered by a second call with that workspace's id; `page_grants` a subject
 issued in workspace B survive an erasure run against workspace A, by design.
+
+<Warning>
+**Read "of the tables below" literally — it is not yet "every table".** Three
+kinds of row deliberately keep naming the subject after a successful cascade,
+and only the first is an accountability record:
+
+1. `journal_entries`, `audit_logs` and `gdpr_actions` — permanent by design,
+   listed in the table below.
+2. `workspace_members` — the subject stays a member of the workspace. Erasure
+   and removal are separate operations (`crewship workspace member remove`);
+   an erasure that also evicted would be doing something the operator did not
+   ask for.
+3. `chats` and `lessons.md` — flagged as operator-handled in the table below,
+   and still manual.
+
+Beyond those three, the sweep in `internal/api/admin_gdpr_pages_identity_test.go`
+found a longer tail of columns the cascade does not reach — credentials and
+notification channels the subject created, pipelines and missions they
+authored, their own `saved_views` and notification preferences. That work is
+tracked in **#2308**, and until it lands, an operator answering a strict RTBF
+request should treat this page's table as the definitive scope rather than
+assuming the cascade is exhaustive.
+</Warning>
 
 Two consequences an operator should expect on the receipt:
 
