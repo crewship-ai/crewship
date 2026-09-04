@@ -71,6 +71,7 @@ crewship crew list --runtime
 | `--runtime` | `bool` | `false` | Append runtime image, cached image, and provisioning-status columns. |
 | `--limit` | `int` | server default (100) | Rows per page; the server caps it at 500. |
 | `--offset` | `int` | `0` | Rows to skip — page with `--offset 100`, `200`, … |
+| `--q` | `string` | | Server-side search on name and slug (case-insensitive substring); the total narrows with it. |
 
 When the table is a window on a longer list, the human formats end with
 `showing 1–100 of 103 · next page: --offset 100`; `json`, `yaml`, `ndjson`
