@@ -746,6 +746,27 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **Two GET routes were invisible to the read-scope invariant, the same
+  "assumed out of scope by registration helper" blind spot the invariant
+  exists to catch (#2144).** `route_read_scope_invariant_test.go` scanned
+  `r.mux.Handle("GET …")` and `r.authedAdmin("GET", …)` but not
+  `r.authedMut(` — recorded as "246 uses, zero reads" — which was wrong:
+  `GET /api/v1/admin/keeper/judge/models`, `GET /api/v1/memory/export`, and
+  `GET /api/v1/approvals{,/{id}}` all register that way and were absent from
+  `scanReadRoutes()` entirely, not merely unclassified. Proved by a
+  throwaway test asserting `scanReadRoutes()` returns those two keys — it
+  failed on main. The scan now keys on the verb (`authedMutReadLine`,
+  `authedSelfMutReadLine`) rather than trusting a helper's name, mirroring
+  the mutation invariant's `wrapperMutationLine`. All four routes were
+  checked by hand: `authedMut` always composes
+  `RequireAuth(RequireWorkspace(...))` regardless of the declared role, so
+  they are scoped by the identical chokepoint as `wsCtx` — `judge/models`
+  reads no workspace-scoped rows at all, `memory/export` additionally fences
+  its `crew_id` inside the handler (`TestMemoryExport_CrossWorkspaceCrewIs404`),
+  and the two `approvals` routes read `workspaceID` from the same
+  `RequireWorkspace`-populated context. `TestReadRouteScanFindsTheRealSurface`
+  now also floors the `authedMut`-scanned count so the regex going blind
+  again fails the build.
 - **A deploy-window blip no longer wedges the avatar-backfill latch shut for
   the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
   whenever a request 401s and `/api/auth/token/refresh` is itself
