@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState } from "./shared"
+import { EmptyState, useRetry } from "./shared"
 
 // Mirror of internal/api diffResponse (changes endpoint).
 interface ChangedFile {
@@ -41,6 +41,7 @@ function lineClass(line: string): string {
  */
 export function ChangesTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [data, setData] = useState<DiffResponse | null>(null)
+  const [attempt, retry] = useRetry()
   const [error, setError] = useState<string | null>(null)
   // The diff endpoint is gated on a product decision (working-tree vs
   // base-branch diff). Until it lands the handler returns 501; we render a
@@ -72,14 +73,14 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
       .then((d) => { if (!cancelled && d) setData(d) })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
-  }, [url])
+  }, [url, attempt])
 
   if (!context) return <EmptyState>Select an issue or run to see its changes.</EmptyState>
   if (context.kind !== "mission" && context.kind !== "run") {
     return <EmptyState>Changes are shown per issue or run.</EmptyState>
   }
   if (unavailable) return <EmptyState>Change diffs aren&apos;t wired up for this workspace yet.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (data === null) return <EmptyState>Computing diff…</EmptyState>
   if (!data.is_repo) return <EmptyState>This workspace isn&apos;t a git repository — no tracked changes.</EmptyState>
   const files = data.files ?? []

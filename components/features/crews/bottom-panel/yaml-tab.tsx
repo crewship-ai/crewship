@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 
 import { apiFetch } from "@/lib/api-fetch"
 import type { BottomPanelContext } from "./types"
-import { EmptyState } from "./shared"
+import { EmptyState, useRetry } from "./shared"
 
 const NOISE_KEYS = new Set([
   "_count", "config_hash", "cached_image", "cached_requirements",
@@ -59,6 +59,7 @@ function toYaml(rec: Record<string, unknown>, indent = 0): string {
  */
 export function YamlTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [data, setData] = useState<Record<string, unknown> | null>(null)
+  const [attempt, retry] = useRetry()
   const [error, setError] = useState<string | null>(null)
 
   // Resolve the fetch URL from the context up front so the effect can depend
@@ -83,10 +84,10 @@ export function YamlTab({ workspaceId, context }: { workspaceId: string; context
       .then((rec) => { if (!cancelled) setData(rec) })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
-  }, [url])
+  }, [url, attempt])
 
   if (!context || context.kind === "run") return <EmptyState>Select an entity to see its spec.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (data === null) return <EmptyState>Loading…</EmptyState>
 
   const yaml = toYaml(filterNoise(data))

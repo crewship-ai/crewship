@@ -40,6 +40,8 @@ interface ConnectionsViewProps {
   search: string
   /** Opens the Add-integration flow — there is no catalog tab to send them to. */
   onOpenAdd: () => void
+  /** Re-reads the channels; the error band used to offer nothing. */
+  onRetry?: () => void
   onToggleEnabled: (row: ConnectionRow, next: boolean) => Promise<void>
   onTest: (row: ConnectionRow) => Promise<void>
   onDelete: (row: ConnectionRow) => Promise<void>
@@ -58,6 +60,7 @@ export function ConnectionsView({
   canManageWorkspace,
   search,
   onOpenAdd,
+  onRetry,
   onToggleEnabled,
   onTest,
   onDelete,
@@ -99,8 +102,13 @@ export function ConnectionsView({
   return (
     <div className="space-y-4 p-4 md:p-6">
       {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/[0.06] px-3 py-2 text-xs text-destructive">
-          {error}
+        <div role="alert" className="flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/[0.06] px-3 py-2 text-xs text-destructive">
+          <span className="min-w-0 flex-1">{error}</span>
+          {onRetry && (
+            <button type="button" onClick={onRetry} className="shrink-0 rounded-md border border-destructive/40 px-2 py-0.5 text-xs hover:bg-destructive/10">
+              Retry
+            </button>
+          )}
         </div>
       )}
 

@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState, formatRelative, statusColor } from "./shared"
+import { EmptyState, formatRelative, statusColor, useRetry } from "./shared"
 import { describeCron } from "@/lib/cron-describe"
 
 // Subset of internal/api scheduleResponse we render.
@@ -31,6 +31,7 @@ interface Schedule {
  */
 export function ScheduleTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [schedule, setSchedule] = useState<Schedule | null>(null)
+  const [attempt, retry] = useRetry()
   const [error, setError] = useState<string | null>(null)
   // A failed "Run now" must not wipe the loaded schedule — keep it separate
   // from the load error and surface it inline.
@@ -66,7 +67,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [isRoutine, slug, scheduleId, workspaceId])
+  }, [isRoutine, slug, scheduleId, workspaceId, attempt])
 
   const runNow = async () => {
     if (!schedule || running) return
@@ -86,7 +87,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
 
   if (!context) return <EmptyState>Select a routine to see its schedule.</EmptyState>
   if (context.kind !== "routine") return <EmptyState>Schedule is shown per routine.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (loading) return <EmptyState>Loading…</EmptyState>
   if (!schedule) return <EmptyState>This routine has no schedule — it runs only when triggered manually.</EmptyState>
 

@@ -291,6 +291,7 @@ export function AgentCanvas({
         loading={loading}
         error={loading ? null : (error ?? "agent not found")}
         notLoadedLabel="Could not load agent"
+        onRetry={() => void fetchAgent()}
       >
         {null}
       </CanvasShell>

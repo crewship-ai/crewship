@@ -689,9 +689,16 @@ export function SkillsBrowser() {
                 Loading skills…
               </div>
             ) : error ? (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-destructive text-sm">
+              <div role="alert" className="flex h-full flex-col items-center justify-center gap-2 text-destructive text-sm">
                 <AlertTriangle className="h-5 w-5" />
                 {error}
+                <button
+                  type="button"
+                  onClick={reload}
+                  className="mt-1 rounded-md border border-border px-3 py-1.5 text-sm text-foreground/85 hover:bg-foreground/[0.04]"
+                >
+                  Retry
+                </button>
               </div>
             ) : filtered.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 text-white/45 text-sm">

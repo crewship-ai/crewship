@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState, formatRelative } from "./shared"
+import { EmptyState, formatRelative, useRetry } from "./shared"
 
 // Mirror of internal/api/issue_handler.go activityResponse.
 interface ActivityEntry {
@@ -37,6 +37,7 @@ function actorDot(actorType: string): string {
  */
 export function ActivityTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [entries, setEntries] = useState<ActivityEntry[] | null>(null)
+  const [attempt, retry] = useRetry()
   const [error, setError] = useState<string | null>(null)
 
   const isMission = context?.kind === "mission"
@@ -58,11 +59,11 @@ export function ActivityTab({ workspaceId, context }: { workspaceId: string; con
       })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
-  }, [isMission, crewId, identifier, workspaceId])
+  }, [isMission, crewId, identifier, workspaceId, attempt])
 
   if (!context) return <EmptyState>Select an issue to see its activity.</EmptyState>
   if (context.kind !== "mission") return <EmptyState>Activity is per-issue — select one.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (entries === null) return <EmptyState>Loading…</EmptyState>
   if (entries.length === 0) return <EmptyState>No activity recorded yet for {context.identifier}.</EmptyState>
 

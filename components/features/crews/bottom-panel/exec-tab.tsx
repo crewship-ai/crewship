@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, LogEntry } from "./types"
-import { EmptyState, formatTime } from "./shared"
+import { EmptyState, formatTime, useRetry } from "./shared"
 
 /**
  * Exec Log — proxy returns a JSON ARRAY of log entries (verified
@@ -15,6 +15,7 @@ import { EmptyState, formatTime } from "./shared"
  */
 export function ExecTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [logs, setLogs] = useState<LogEntry[] | null>(null)
+  const [attempt, retry] = useRetry()
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -30,11 +31,11 @@ export function ExecTab({ workspaceId, context }: { workspaceId: string; context
       })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
-  }, [context, workspaceId])
+  }, [context, workspaceId, attempt])
 
   if (!context) return <EmptyState>Select an agent to see its exec log.</EmptyState>
   if (context.kind !== "agent") return <EmptyState>Exec logs are per-agent — select one in the explorer.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (logs === null) return <EmptyState>Loading…</EmptyState>
   if (logs.length === 0) return <EmptyState>No log output yet for {context.agentName}.</EmptyState>
 

@@ -1,13 +1,30 @@
 "use client"
 
+import * as React from "react"
+
 // Tiny presentational + formatting helpers shared by every tab.
 
-export function EmptyState({ children }: { children: React.ReactNode }) {
+export function EmptyState({ children, onRetry }: { children: React.ReactNode; onRetry?: () => void }) {
   return (
-    <div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
-      {children}
+    <div className="h-full flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground p-4 text-center">
+      <span>{children}</span>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-md border border-border px-2.5 py-1 text-xs text-foreground/85 hover:bg-foreground/[0.04]"
+        >
+          Retry
+        </button>
+      )}
     </div>
   )
+}
+
+/** A counter a tab bumps to run its fetch effect again — the Retry behind
+ *  every "Failed to load" in the dock (README §6: every error offers one). */
+export function useRetry(): [number, () => void] {
+  return React.useReducer((n: number) => n + 1, 0)
 }
 
 export function formatTime(iso: string): string {

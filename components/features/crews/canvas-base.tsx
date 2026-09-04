@@ -184,6 +184,8 @@ export function useResetTabOnSlugChange<TTab extends string>(
  * branch can't accidentally drift between crews and agents.
  */
 export interface CanvasShellProps {
+  /** Re-runs the fetch behind the error; the canvas used to strand the pane until reselected. */
+  onRetry?: () => void
   loading: boolean
   error: string | null
   notLoadedLabel: string
@@ -221,14 +223,23 @@ function CanvasSkeleton() {
   )
 }
 
-export function CanvasShell({ loading, error, notLoadedLabel, children }: CanvasShellProps) {
+export function CanvasShell({ loading, error, notLoadedLabel, onRetry, children }: CanvasShellProps) {
   if (loading) return <CanvasSkeleton />
 
   if (error) {
     return (
-      <div className={`${SHELL} py-12 text-center`}>
+      <div className={`${SHELL} py-12 text-center`} role="alert">
         <p className="type-row mb-2 text-destructive">{notLoadedLabel}</p>
         <p className="type-meta text-muted-foreground">{error}</p>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-4 rounded-md border border-border px-3 py-1.5 text-sm text-foreground/85 hover:bg-foreground/[0.04]"
+          >
+            Retry
+          </button>
+        )}
       </div>
     )
   }

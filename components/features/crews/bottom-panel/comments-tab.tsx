@@ -7,7 +7,7 @@ import { seedColor } from "@/lib/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState, formatRelative } from "./shared"
+import { EmptyState, formatRelative, useRetry } from "./shared"
 
 // Mirror of internal/api/issue_handler.go commentResponse.
 interface Comment {
@@ -28,6 +28,7 @@ interface Comment {
  */
 export function CommentsTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [comments, setComments] = useState<Comment[] | null>(null)
+  const [attempt, retry] = useRetry()
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
@@ -52,7 +53,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
     // Ignore a slow response after the user switches issues — otherwise the
     // previous thread's comments can overwrite the current one.
     return () => { cancelled = true }
-  }, [isMission, base])
+  }, [isMission, base, attempt])
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }) }, [comments?.length])
 
@@ -80,7 +81,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
 
   if (!context) return <EmptyState>Select an issue to see its comments.</EmptyState>
   if (context.kind !== "mission") return <EmptyState>Comments are per-issue — select one.</EmptyState>
-  if (error && comments === null) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error && comments === null) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (comments === null) return <EmptyState>Loading…</EmptyState>
 
   return (

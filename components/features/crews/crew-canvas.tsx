@@ -89,6 +89,7 @@ export function CrewCanvas({
     setEntity: setCrew,
     loading,
     error,
+    refetch,
   } = useEntityFetch<CrewRecord>({
     workspaceId,
     slug: crewSlug,
@@ -296,6 +297,7 @@ export function CrewCanvas({
         loading={loading}
         error={loading ? null : (error ?? "crew not found")}
         notLoadedLabel="Could not load crew"
+        onRetry={() => void refetch()}
       >
         {null}
       </CanvasShell>

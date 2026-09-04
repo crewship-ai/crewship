@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState, statusColor } from "./shared"
+import { EmptyState, statusColor, useRetry } from "./shared"
 
 // Subset of GetRun (pipeline_runs.go) we render.
 interface RunDetail {
@@ -33,6 +33,7 @@ function preview(val: unknown): string {
  */
 export function TraceTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [run, setRun] = useState<RunDetail | null>(null)
+  const [attempt, retry] = useRetry()
   const [error, setError] = useState<string | null>(null)
 
   const isRun = context?.kind === "run"
@@ -48,11 +49,11 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
       .then((d) => { if (!cancelled) setRun(d) })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
-  }, [runId, workspaceId])
+  }, [runId, workspaceId, attempt])
 
   if (!context) return <EmptyState>Select a run to see its trace.</EmptyState>
   if (context.kind !== "run") return <EmptyState>Trace is shown per run.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (run === null) return <EmptyState>Loading…</EmptyState>
 
   const steps = Object.entries(run.step_outputs ?? {})

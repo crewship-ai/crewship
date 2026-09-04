@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, PeerMessage } from "./types"
-import { EmptyState, formatTime } from "./shared"
+import { EmptyState, formatTime, useRetry } from "./shared"
 
 /**
  * Messages — pulls peer messages from the agent inbox. The inbox response
@@ -14,6 +14,7 @@ import { EmptyState, formatTime } from "./shared"
  */
 export function MessagesTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [messages, setMessages] = useState<PeerMessage[] | null>(null)
+  const [attempt, retry] = useRetry()
   const [counters, setCounters] = useState<{ escalations: number; assignments: number; approvals: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,11 +37,11 @@ export function MessagesTab({ workspaceId, context }: { workspaceId: string; con
       })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
-  }, [context, workspaceId])
+  }, [context, workspaceId, attempt])
 
   if (!context) return <EmptyState>Select an agent to see its inbox messages.</EmptyState>
   if (context.kind !== "agent") return <EmptyState>Messages are per-agent — select one in the explorer.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (messages === null || counters === null) return <EmptyState>Loading…</EmptyState>
 
   const totalCounters = counters.escalations + counters.assignments + counters.approvals

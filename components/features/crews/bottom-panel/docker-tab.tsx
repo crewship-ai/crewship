@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, ContainerStatus } from "./types"
-import { EmptyState } from "./shared"
+import { EmptyState, useRetry } from "./shared"
 
 /**
  * Reads the `containers` envelope, and THROWS when it isn't there.
@@ -70,6 +70,7 @@ export function DockerTab({
   context: BottomPanelContext
 }) {
   const [containers, setContainers] = useState<ContainerStatus[] | null>(null)
+  const [attempt, retry] = useRetry()
   const [error, setError] = useState<string | null>(null)
   const crewId = crewIdFor(context)
 
@@ -93,10 +94,10 @@ export function DockerTab({
         setContainers([])
       })
     return () => { cancelled = true }
-  }, [crewId, workspaceId])
+  }, [crewId, workspaceId, attempt])
 
   if (!crewId) return <EmptyState>Select a crew to see its containers.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (containers === null) return <EmptyState>Loading container status…</EmptyState>
   if (containers.length === 0) return <EmptyState>No containers running.</EmptyState>
 

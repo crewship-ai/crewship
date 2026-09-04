@@ -807,6 +807,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                   search={search}
                   catalogMatches={catalogMatches}
                   onOpenAdd={() => setAddOpen(true)}
+                  onRetry={() => void refreshChannels()}
                   onToggleEnabled={handleToggle}
                   onTest={handleTest}
                   onDelete={async (row) => { await handleDelete(row) }}

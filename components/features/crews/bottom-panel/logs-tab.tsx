@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, LogEntry } from "./types"
-import { EmptyState, formatTime } from "./shared"
+import { EmptyState, formatTime, useRetry } from "./shared"
 
 /**
  * Logs — the exec log of a single run.
@@ -15,6 +15,7 @@ import { EmptyState, formatTime } from "./shared"
  */
 export function LogsTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelContext }) {
   const [runId, setRunId] = useState<string | null>(null)
+  const [attempt, retry] = useRetry()
   const [logs, setLogs] = useState<LogEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -50,7 +51,7 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
         .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     }
     return () => { cancelled = true }
-  }, [ctxRunId, ctxSlug, workspaceId])
+  }, [ctxRunId, ctxSlug, workspaceId, attempt])
 
   // Fetch the resolved run's logs.
   useEffect(() => {
@@ -66,11 +67,11 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
       })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
-  }, [runId, workspaceId])
+  }, [runId, workspaceId, attempt])
 
   if (!context) return <EmptyState>Select a run or routine to see its logs.</EmptyState>
   if (!isRun && !isRoutine) return <EmptyState>Logs are shown per run or routine.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState onRetry={retry}><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (runId === "") return <EmptyState>No runs yet to show logs for.</EmptyState>
   if (logs === null) return <EmptyState>Loading…</EmptyState>
   if (logs.length === 0) return <EmptyState>No log output for this run.</EmptyState>
