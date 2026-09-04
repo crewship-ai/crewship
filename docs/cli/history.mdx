@@ -23,6 +23,7 @@ Different from [`crewship run list`](/cli/run):
 | `--since <window>` | string | `24h` | Time window — `1h`, `24h`, `7d`, or RFC3339. Applied client-side (the runs API has no `since=`). Inclusive on the boundary. |
 | `--status <state>` | string | (unset) | Filter by status: `running`, `completed`, `failed`. Server-side `?status=`. |
 | `--agent <slug-or-id>` | string | (unset) | Filter by agent. Resolved to ID before the request. |
+| `--issue <identifier-or-id>` | string | (unset) | Only runs that worked on this issue, e.g. `ENG-4`. Sent as `mission_id`; the server resolves the identifier. Rows show the issue they worked on in the ISSUE column. |
 | `--prompts` | bool | `false` | Also fetch the first user message per run. 4-way concurrent; failures degrade silently. |
 | `--watch <duration>` | string | `""` (off) | Auto-refresh on an interval, e.g. `5s`, `1m` (min 1s). Shared `addWatchFlag` helper. |
 
