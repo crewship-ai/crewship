@@ -14,33 +14,25 @@ import (
 func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	// Pagination
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	// Pagination — the S1 convention: `?limit=&offset=`, clamped, with the
+	// total published in X-Total-Count so a client never has to count what
+	// it received (the board used to say "100 issues" at 1 015).
+	limit, offset := parsePagination(r, 50, 500)
 
-	// whereClause + whereArgs are built once and reused for two queries: the
-	// COUNT that answers "how many rows does this filtered view have in
-	// total" (#2286 — the board fetched at most 100 rows and exposed no
-	// total or pagination, so a 101st issue was silently invisible) and the
-	// SELECT that fetches this page. Building them separately from the
-	// ORDER BY / LIMIT / OFFSET appended below means the count can never
-	// drift out of sync with the filters actually applied to the page.
-	whereClause := " WHERE m.workspace_id = ?"
-	whereArgs := []interface{}{wsID}
+	// The WHERE clause is built once and used twice: for the page and for
+	// the COUNT(*) that feeds X-Total-Count. Keeping them apart is how the
+	// two drift — a filter that only reaches one of them makes the count
+	// lie about the list.
+	where := ` WHERE m.workspace_id = ?`
+	args := []interface{}{wsID}
 
 	// Default filter: only issues unless explicitly overridden
 	missionType := r.URL.Query().Get("mission_type")
 	if missionType == "" {
 		missionType = "issue"
 	}
-	whereClause += " AND COALESCE(m.mission_type, 'mission') = ?"
-	whereArgs = append(whereArgs, missionType)
+	where += " AND COALESCE(m.mission_type, 'mission') = ?"
+	args = append(args, missionType)
 
 	// Status filter (comma-separated)
 	if statusParam := r.URL.Query().Get("status"); statusParam != "" {
@@ -48,9 +40,9 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		placeholders := make([]string, len(statuses))
 		for i, s := range statuses {
 			placeholders[i] = "?"
-			whereArgs = append(whereArgs, strings.TrimSpace(s))
+			args = append(args, strings.TrimSpace(s))
 		}
-		whereClause += " AND m.status IN (" + strings.Join(placeholders, ",") + ")"
+		where += " AND m.status IN (" + strings.Join(placeholders, ",") + ")"
 	}
 
 	// Priority filter (comma-separated)
@@ -59,52 +51,47 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		placeholders := make([]string, len(priorities))
 		for i, p := range priorities {
 			placeholders[i] = "?"
-			whereArgs = append(whereArgs, strings.TrimSpace(p))
+			args = append(args, strings.TrimSpace(p))
 		}
-		whereClause += " AND m.priority IN (" + strings.Join(placeholders, ",") + ")"
+		where += " AND m.priority IN (" + strings.Join(placeholders, ",") + ")"
 	}
 
 	// Project filter
 	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
-		whereClause += " AND m.project_id = ?"
-		whereArgs = append(whereArgs, projectID)
+		where += " AND m.project_id = ?"
+		args = append(args, projectID)
 	}
 
 	// Crew filter
 	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
-		whereClause += " AND m.crew_id = ?"
-		whereArgs = append(whereArgs, crewID)
+		where += " AND m.crew_id = ?"
+		args = append(args, crewID)
 	}
 
 	// Assignee filter
 	if assigneeID := r.URL.Query().Get("assignee_id"); assigneeID != "" {
-		whereClause += " AND m.assignee_id = ?"
-		whereArgs = append(whereArgs, assigneeID)
+		where += " AND m.assignee_id = ?"
+		args = append(args, assigneeID)
 	}
 
 	// Label filter
 	if labelName := r.URL.Query().Get("label"); labelName != "" {
-		whereClause += " AND m.id IN (SELECT ml.mission_id FROM mission_labels ml JOIN labels l ON ml.label_id = l.id WHERE l.name = ?)"
-		whereArgs = append(whereArgs, labelName)
+		where += " AND m.id IN (SELECT ml.mission_id FROM mission_labels ml JOIN labels l ON ml.label_id = l.id WHERE l.name = ?)"
+		args = append(args, labelName)
 	}
 
-	// Search (LIKE on title)
-	if search := r.URL.Query().Get("search"); search != "" {
-		whereClause += " AND m.title LIKE ?"
-		whereArgs = append(whereArgs, "%"+search+"%")
+	// Search. `q` is the S1 spelling shared by every list; `search` stays
+	// as the older alias. It matches the title and the identifier, so a
+	// person who types "ENG-4" or "launch" finds the issue either way —
+	// the board's search box used to filter only the 100 rows it had loaded.
+	if search := issueSearchTerm(r); search != "" {
+		where += " AND (m.title LIKE ? OR m.identifier LIKE ?)"
+		args = append(args, "%"+search+"%", "%"+search+"%")
 	}
 
-	// Total count for this filtered view, LIMIT/OFFSET aside — #2286. Run
-	// before the page query so a client always gets a total that is
-	// consistent with the page it's about to receive (no window where one
-	// query saw a row the other didn't because a write landed between them
-	// — SQLite's WAL readers each get a single consistent snapshot, but
-	// only across writes committed before their own connection acquired
-	// it, which is why this runs first: any race lands as "total grew
-	// after this response", never "total is short by the rows returned").
 	var total int
-	countQuery := "SELECT COUNT(*) FROM missions m" + whereClause
-	if err := h.db.QueryRowContext(r.Context(), countQuery, whereArgs...).Scan(&total); err != nil {
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM missions m"+where, args...).Scan(&total); err != nil {
 		internalError(w, r, h.logger, "count issues", err)
 		return
 	}
@@ -119,8 +106,8 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	case "sort_order":
 		sortCol = "COALESCE(m.sort_order, 0)"
 	}
-	query := issueSelectQuery() + whereClause + " ORDER BY " + sortCol + " DESC LIMIT ? OFFSET ?"
-	args := append(append([]interface{}{}, whereArgs...), limit, offset)
+	query := issueSelectQuery() + where + " ORDER BY " + sortCol + " DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -214,17 +201,20 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []issueResponse{}
 	}
-	// #2286: headers, not body fields — GET /api/v1/issues has returned a
-	// bare JSON array since before this endpoint had a CLI, an OpenAPI
-	// consumer, and a frontend hook all decoding it as `[]issueResponse`
-	// directly (docs/api-reference/issues.mdx's example, cmd/crewship's
-	// `issue list`, and the issues board). Wrapping the body in an envelope
-	// would be a breaking change for all three at once for the sake of two
-	// integers; headers carry the same information without moving anyone's
-	// cheese. Mirrors the existing X-RateLimit-* convention (ratelimit.go).
-	w.Header().Set("X-Total-Count", strconv.Itoa(total))
+	writeListMeta(w, total, limit, offset)
+	// #2286 shipped X-Has-More next to X-Total-Count before the S1 headers
+	// existed; it stays, so a client that only reads that boolean keeps working.
 	w.Header().Set("X-Has-More", strconv.FormatBool(offset+len(result) < total))
 	writeJSON(w, http.StatusOK, result)
+}
+
+// issueSearchTerm reads the free-text search of an issue list: `q` first,
+// then the older `search`, trimmed. Empty means no search.
+func issueSearchTerm(r *http.Request) string {
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		return q
+	}
+	return strings.TrimSpace(r.URL.Query().Get("search"))
 }
 
 // ── 2. Create — POST /api/v1/crews/{crewId}/issues ─────────────────────────

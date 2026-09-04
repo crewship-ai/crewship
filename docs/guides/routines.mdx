@@ -31,6 +31,8 @@ Compared to other layers in Crewship:
 
 Two states, no tabs: the **overview**, or the routine you picked in the sidebar.
 
+The routine you picked is in the URL as `?slug=`: a pick is a history entry, so **Back** closes the detail, a reload resumes it, and `/routines?slug=page-watch` is a link you can send. Every routine link in the product is built through `entityHref`, which writes `?slug=`; the older `?routine=` spelling is still read and rewritten on the first pick.
+
 The overview answers, in the order you ask on arrival — did anything run today, is the catalog healthy, what fires next, what ran, what did it cost, what is broken:
 
 | Card | What it answers |

@@ -73,7 +73,7 @@ import {
 } from "./activity-sidebar"
 import { useChains } from "@/hooks/use-chains"
 import { narrowChains, type LensKey } from "@/lib/activity-lenses"
-import { activityDeepLink } from "@/lib/activity-deeplink"
+import { activityUrl, parseActivityUrl, type ActivityUrlState } from "@/lib/activity-url"
 import { ActivityOverview, iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
 import { WorkflowPage } from "./workflow-page"
@@ -142,25 +142,27 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const isMobile = useIsMobile()
   const lookup = useJournalLookup()
 
-  // What the URL asked for, read ONCE at mount.
+  // The URL is the state: the walk, the lens, the status bucket and the
+  // opened record are read from the query string at mount and written back
+  // on every change (lib/activity-url). It used to be read once and never
+  // written, so a reload lost the walk, Back left the page, and no
+  // drill-down had a URL a person could send. Every legacy inbound link
+  // (?run, ?pipeline, ?mission, ?status — see lib/activity-deeplink) still
+  // lands, and a single run or issue is written back in that same spelling.
   //
-  // /activity carried a query string long before this view existed — the
-  // trace canvas defined ?run / ?pipeline / ?mission / ?status, and fourteen
-  // places across the product still link that way. Those links survive the
-  // page they were written against; see lib/activity-deeplink for the mapping
-  // and for what `?step` cannot mean here.
-  //
-  // Read once rather than subscribed to, because after mount this view owns
-  // the selection: the path changes on every rail pick and drill-down, and a
-  // component that kept re-deriving state from a URL it does not write would
-  // snap the reader back to where they arrived every time the params object
-  // changed identity.
+  // Read once at mount rather than subscribed to: after that this view owns
+  // the selection and mirrors it out; the only way the URL changes without
+  // the view is the browser's Back/Forward, which the popstate listener
+  // below reads back in.
   const searchParams = useSearchParams()
-  const deepLink = React.useMemo(() => activityDeepLink(searchParams), [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- read once at mount by design; see above
+  const initialUrl = React.useMemo(() => parseActivityUrl(searchParams), [])
 
   const [facets, setFacets] = React.useState<FacetState>(() =>
-    deepLink?.scope ? { ...EMPTY_FACETS, scope: deepLink.scope as FacetState["scope"] } : EMPTY_FACETS,
+    initialUrl.scope ? { ...EMPTY_FACETS, scope: initialUrl.scope as FacetState["scope"] } : EMPTY_FACETS,
   )
+  // The record the URL named, until the window that holds it has loaded.
+  const [pendingEntryId, setPendingEntryId] = React.useState<string | undefined>(initialUrl.entryId)
   const [search, setSearch] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [pinned, setPinned] = React.useState<SpineLink | null>(null)
@@ -170,7 +172,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // it survives a drill-down: walking into an agent out of a chain graph and
   // pressing back must land the reader on the list they left, not reset them to
   // Workflows.
-  const [lens, setLens] = React.useState<LensKey>("workflows")
+  const [lens, setLens] = React.useState<LensKey>(initialUrl.lens)
 
   // Where the reader is — ONE value, whether they picked a workflow out of the
   // rail, focused an issue, or walked down into a node of a chain.
@@ -186,7 +188,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   //
   // The path is that same one value grown a memory: its LAST stop is the
   // selection, the ones before it are only there so back has somewhere to go.
-  const [path, setPath] = React.useState<ActivityPath>(deepLink?.path ?? ACTIVITY_HOME)
+  const [path, setPath] = React.useState<ActivityPath>(initialUrl.path)
   const stop = React.useMemo(() => currentStop(path), [path])
   const surface = React.useMemo(() => activitySurface(stop), [stop])
   const focus = surface.focus
@@ -294,6 +296,8 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     chains,
     hasUnrecordedRuns: chainsHaveUnrecorded,
     hasMore: chainsHaveMore,
+    error: chainsError,
+    refresh: refreshChains,
   } = useChains(workspaceId)
 
   // Picking a workflow is a selection like any other, so it goes through the
@@ -521,6 +525,77 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     (kind: string, ref: string) => setPath((p) => openStop(p, resolveStop(kind, ref))),
     [resolveStop],
   )
+
+  // Mirror the state out to the URL. A change of POSITION — the walk or the
+  // opened record — is a history entry, so Back closes what was just opened;
+  // a change of lens or bucket replaces, so Back does not step through every
+  // tab the reader tried. Writes go through the History API, not the router:
+  // a same-path router.push re-evaluates the dashboard layout and flashes
+  // the auth spinner (see hooks/use-shallow-search-param).
+  const urlState = React.useMemo<ActivityUrlState>(
+    () => ({ path, lens, scope: facets.scope, entryId: selected?.id ?? pendingEntryId }),
+    [path, lens, facets.scope, selected?.id, pendingEntryId],
+  )
+  const lastPosition = React.useRef<{ path: ActivityPath; entryId?: string }>({ path, entryId: selected?.id })
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const url = activityUrl(window.location.pathname, urlState)
+    const positionChanged =
+      lastPosition.current.path !== urlState.path || lastPosition.current.entryId !== urlState.entryId
+    lastPosition.current = { path: urlState.path, entryId: urlState.entryId }
+    if (window.location.pathname + window.location.search === url) return
+    if (positionChanged) window.history.pushState(null, "", url)
+    else window.history.replaceState(null, "", url)
+  }, [urlState])
+
+  // Back and Forward read the URL back in. The mirror above then finds the
+  // address already matches and writes nothing, so the two never chase each
+  // other.
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const onPop = () => {
+      const next = parseActivityUrl(new URLSearchParams(window.location.search))
+      lastPosition.current = { path: next.path, entryId: next.entryId }
+      setPath(next.path)
+      setLens(next.lens)
+      setFacets((f) => ({ ...f, scope: (next.scope ?? "all") as FacetState["scope"] }))
+      setSelected(null)
+      setPendingEntryId(next.entryId)
+    }
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
+  }, [])
+
+  // The record a link named opens once the window holding it has loaded. A
+  // record outside the window is forgotten rather than waited for forever:
+  // the URL then reads as the walk alone, which is what is on screen.
+  React.useEffect(() => {
+    if (!pendingEntryId || loading) return
+    const hit = entries.find((e) => e.id === pendingEntryId)
+    if (hit) setSelected(hit)
+    setPendingEntryId(undefined)
+  }, [pendingEntryId, loading, entries])
+
+  // A stop read from the URL carries its id as its label until the entity it
+  // names has loaded; re-label it then, once, so the trail and the header say
+  // "Page watch" rather than the slug. Only stops still wearing their id are
+  // touched, so a label the reader clicked through is never overwritten.
+  React.useEffect(() => {
+    setPath((p) => {
+      let changed = false
+      const stops = p.stops.map((s) => {
+        if (s.label !== s.id) return s
+        const resolved =
+          s.kind === "workflow"
+            ? { ...s, label: workflowLabel(chains.find((c) => c.origin === s.id)) }
+            : resolveStop(s.kind, s.id)
+        if (resolved.label === s.label || resolved.label === shortId(s.id)) return s
+        changed = true
+        return { ...s, label: resolved.label }
+      })
+      return changed ? { stops, dropped: p.dropped } : p
+    })
+  }, [resolveStop, chains])
 
   // Keyboard: a surface you can only drive with a mouse is one you abandon
   // on the second screenful.
@@ -771,6 +846,8 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               loadedChainCount={chains.length}
               chainsHaveMore={chainsHaveMore}
               chainsHaveUnrecorded={chainsHaveUnrecorded}
+              chainsError={chainsError}
+              onRetryChains={() => void refreshChains()}
               routineBySlug={routineBySlug}
               selectedChain={railChain}
               onSelectChain={selectChain}
@@ -903,6 +980,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                 <AgentDrillDown
                   workspaceId={workspaceId}
                   agentID={openAgent.id}
+                  agentSlug={lookup.agents.get(openAgent.id)?.slug}
                   name={openAgent.label}
                   chains={visibleChains}
                   onOpenWorkflow={selectChain}

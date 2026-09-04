@@ -39,11 +39,15 @@ List all missions, optionally filtered by crew.
 ```bash
 crewship mission list
 crewship mission list --crew backend-team
+crewship mission list --search Harborlight --limit 20 --offset 20
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--crew` | `string` | | Filter by crew slug or ID. |
+| `--search` | `string` | | Search missions by title or identifier, on the server (sent as `q`). |
+| `--limit` | `int` | `20` | Rows per page (the server caps it at 200). |
+| `--offset` | `int` | `0` | Skip this many rows. A human table ends with a footer such as `showing 21–40 of N · next page: --offset 40` (that one for `--offset 20`); JSON and quiet output carry no footer. |
 
 **Output columns:** ID, TITLE, STATUS, LEAD, TASKS, CREATED
 

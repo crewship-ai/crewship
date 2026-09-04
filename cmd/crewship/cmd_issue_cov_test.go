@@ -184,7 +184,7 @@ func TestIssueListRunE_FiltersForwarded(t *testing.T) {
 	q := calls[0].Query
 	for _, want := range []string{
 		"status=TODO", "priority=high", "crew_id=" + covCrewIDCli6,
-		"assignee_id=agent-1", "label=bug", "search=panic", "limit=5",
+		"assignee_id=agent-1", "label=bug", "q=panic", "limit=5",
 	} {
 		if !strings.Contains(q, want) {
 			t.Errorf("query missing %q: %q", want, q)
@@ -235,7 +235,9 @@ func TestIssueListRunE_TotalCountFooter_HasMore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "Showing 1 of 143 issues") || !strings.Contains(out, "--offset 1") {
+	// The S1 footer (list_paging.go): the range shown, the total, the next
+	// offset. X-Limit/X-Offset are absent here, so the range starts at 1.
+	if !strings.Contains(out, "showing 1–1 of 143") || !strings.Contains(out, "--offset 1") {
 		t.Errorf("footer missing/wrong: %q", out)
 	}
 }
@@ -262,8 +264,10 @@ func TestIssueListRunE_TotalCountFooter_LastPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "Showing 1 of 1 issue") {
-		t.Errorf("footer missing/wrong: %q", out)
+	// Everything is on screen: the S1 footer says nothing rather than
+	// "showing 1–1 of 1", and above all does not offer a next page.
+	if strings.Contains(out, "showing") {
+		t.Errorf("a complete list must not print a paging footer: %q", out)
 	}
 	if strings.Contains(out, "--offset") {
 		t.Errorf("last page should not suggest --offset: %q", out)

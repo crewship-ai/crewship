@@ -26,12 +26,17 @@ func NewRunHandler(db *sql.DB, logger *slog.Logger) *RunHandler {
 }
 
 type runResponse struct {
-	ID          string  `json:"id"`
-	AgentID     string  `json:"agent_id"`
-	ChatID      *string `json:"chat_id"`
-	WorkspaceID string  `json:"workspace_id"`
-	TriggeredBy *string `json:"triggered_by"`
-	TriggerType string  `json:"trigger_type"`
+	ID      string  `json:"id"`
+	AgentID string  `json:"agent_id"`
+	ChatID  *string `json:"chat_id"`
+	// MissionID and MissionIdentifier name the issue the run worked on —
+	// the id for filtering, the identifier (ENG-4) for a link a person can
+	// read. Both omitted for chat-only runs, which have no issue.
+	MissionID         *string `json:"mission_id,omitempty"`
+	MissionIdentifier *string `json:"mission_identifier,omitempty"`
+	WorkspaceID       string  `json:"workspace_id"`
+	TriggeredBy       *string `json:"triggered_by"`
+	TriggerType       string  `json:"trigger_type"`
 	// Kind discriminates which engine produced this run: "agent" for an
 	// ad-hoc agent/chat execution, "pipeline" for a routine run. Added for
 	// #2284 — before this, a routine run couldn't reach this endpoint at
@@ -101,6 +106,7 @@ type runResponse struct {
 	AgentName                  *string              `json:"agent_name,omitempty"`
 	AgentSlug                  *string              `json:"agent_slug,omitempty"`
 	CrewName                   *string              `json:"crew_name,omitempty"`
+	CrewSlug                   *string              `json:"crew_slug,omitempty"`
 }
 
 type runListResponse struct {
@@ -211,6 +217,9 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: workspaceID,
 		Status:      journal.RunStatus(statusRaw),
 		AgentID:     r.URL.Query().Get("agent_id"),
+		// ?mission_id= takes the id or the identifier (ENG-4): the issue
+		// page links here with what it has on screen.
+		MissionID:   resolveMissionRef(r.Context(), h.db, workspaceID, r.URL.Query().Get("mission_id")),
 		TriggerType: r.URL.Query().Get("trigger"),
 		Tag:         r.URL.Query().Get("tag"),
 		Limit:       limit,
@@ -496,7 +505,7 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 	}
 
 	type lookup struct {
-		name, slug, crewName sql.NullString
+		name, slug, crewName, crewSlug sql.NullString
 	}
 	enriched := make(map[string]lookup, len(agentIDs))
 	if len(agentIDs) > 0 {
@@ -505,7 +514,7 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 		for i := 1; i < len(agentIDs); i++ {
 			ph += ",?"
 		}
-		query := `SELECT a.id, a.name, a.slug, c.name
+		query := `SELECT a.id, a.name, a.slug, c.name, c.slug
 			FROM agents a
 			LEFT JOIN crews c ON c.id = a.crew_id
 			WHERE a.workspace_id = ? AND a.id IN (` + ph + `)`
@@ -517,13 +526,53 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			for rows.Next() {
 				var id string
 				var l lookup
-				if err := rows.Scan(&id, &l.name, &l.slug, &l.crewName); err == nil {
+				if err := rows.Scan(&id, &l.name, &l.slug, &l.crewName, &l.crewSlug); err == nil {
 					enriched[id] = l
 				}
 			}
 			_ = rows.Close()
 		} else {
 			h.logger.Warn("enrich runs lookup failed", "error", err)
+		}
+	}
+
+	// Same bounded lookup for the issues the page's runs belong to, so a
+	// row can say "ENG-4" instead of a cuid nothing links.
+	identifiers := map[string]string{}
+	{
+		missionIDs := make([]any, 0, len(aggregated))
+		seenM := map[string]struct{}{}
+		for _, r := range aggregated {
+			if r.MissionID == "" {
+				continue
+			}
+			if _, ok := seenM[r.MissionID]; ok {
+				continue
+			}
+			seenM[r.MissionID] = struct{}{}
+			missionIDs = append(missionIDs, r.MissionID)
+		}
+		if len(missionIDs) > 0 {
+			ph := "?"
+			for i := 1; i < len(missionIDs); i++ {
+				ph += ",?"
+			}
+			args := make([]any, 0, len(missionIDs)+1)
+			args = append(args, workspaceID)
+			args = append(args, missionIDs...)
+			rows, err := h.db.QueryContext(ctx,
+				`SELECT id, COALESCE(identifier, '') FROM missions WHERE workspace_id = ? AND id IN (`+ph+`)`, args...)
+			if err == nil {
+				for rows.Next() {
+					var id, ident string
+					if err := rows.Scan(&id, &ident); err == nil {
+						identifiers[id] = ident
+					}
+				}
+				_ = rows.Close()
+			} else {
+				h.logger.Warn("enrich runs mission lookup failed", "error", err)
+			}
 		}
 	}
 
@@ -559,6 +608,13 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			c := r.ChatID
 			resp.ChatID = &c
 		}
+		if r.MissionID != "" {
+			m := r.MissionID
+			resp.MissionID = &m
+			if ident := identifiers[r.MissionID]; ident != "" {
+				resp.MissionIdentifier = &ident
+			}
+		}
 		if r.TriggeredBy != "" {
 			t := r.TriggeredBy
 			resp.TriggeredBy = &t
@@ -588,6 +644,10 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			if l.crewName.Valid {
 				c := l.crewName.String
 				resp.CrewName = &c
+			}
+			if l.crewSlug.Valid && l.crewSlug.String != "" {
+				c := l.crewSlug.String
+				resp.CrewSlug = &c
 			}
 		}
 		out = append(out, resp)

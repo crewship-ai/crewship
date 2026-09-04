@@ -2,14 +2,11 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
@@ -263,14 +260,11 @@ var issueListCmd = &cobra.Command{
 			params.Set("label", v)
 		}
 		if v, _ := flags.GetString("search"); v != "" {
-			params.Set("search", v)
+			params.Set("q", v)
 		}
-		if v, _ := flags.GetInt("limit"); v > 0 {
-			params.Set("limit", fmt.Sprintf("%d", v))
-		}
-		if v, _ := flags.GetInt("offset"); v > 0 {
-			params.Set("offset", fmt.Sprintf("%d", v))
-		}
+		limit, _ := flags.GetInt("limit")
+		offset, _ := flags.GetInt("offset")
+		setListPaging(params, limit, offset)
 
 		path := "/api/v1/issues"
 		if q := params.Encode(); q != "" {
@@ -285,12 +279,14 @@ var issueListCmd = &cobra.Command{
 			return err
 		}
 
+		meta := readListMeta(resp)
 		var issues []issueItem
 		if err := cli.ReadJSON(resp, &issues); err != nil {
 			return err
 		}
 
 		f := newFormatter()
+		defer printListFooter(f, meta, len(issues))
 		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "CREATOR", "CREW", "LABELS", "UPDATED"}
 		var rows [][]string
 		for _, iss := range issues {
@@ -321,46 +317,8 @@ var issueListCmd = &cobra.Command{
 			return err
 		}
 
-		// #2286: the list was capped at 100 rows with nothing telling the
-		// caller more existed. GET /api/v1/issues now reports the true
-		// total and whether this page was partial via X-Total-Count /
-		// X-Has-More response headers (internal/api/issue_handler_crud.go).
-		// Only the human-facing table/quiet renderers get this extra line —
-		// json/yaml/ndjson output is the array itself and must stay exactly
-		// that for scripts already decoding it.
-		if f.RoutesToHuman() {
-			printIssueListPageFooter(f, resp, len(issues), offsetFlag(flags))
-		}
 		return nil
 	},
-}
-
-// printIssueListPageFooter prints "Showing N of TOTAL issues" plus a hint to
-// page further, when the server reported a total larger than what this page
-// returned. Silent when the headers are absent (an older server, or a proxy
-// that strips them) — absence means "unknown", not "that's everything".
-func printIssueListPageFooter(f *cli.Formatter, resp *http.Response, pageLen, offset int) {
-	totalStr := resp.Header.Get("X-Total-Count")
-	if totalStr == "" {
-		return
-	}
-	total, err := strconv.Atoi(totalStr)
-	if err != nil {
-		return
-	}
-	hasMore := resp.Header.Get("X-Has-More") == "true"
-	fmt.Fprintln(f.Writer)
-	if hasMore {
-		fmt.Fprintf(f.Writer, "Showing %d of %d issues — use --offset %d to see more.\n",
-			pageLen, total, offset+pageLen)
-	} else if total > 0 {
-		fmt.Fprintf(f.Writer, "Showing %d of %d issues.\n", pageLen, total)
-	}
-}
-
-func offsetFlag(flags *pflag.FlagSet) int {
-	v, _ := flags.GetInt("offset")
-	return v
 }
 
 var issueGetCmd = &cobra.Command{
@@ -466,9 +424,8 @@ func init() {
 	issueListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee ID")
 	issueListCmd.Flags().String("label", "", "Filter by label name")
-	issueListCmd.Flags().String("search", "", "Search issues by title or description")
-	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
-	issueListCmd.Flags().Int("offset", 0, "Skip this many issues (paginate past --limit)")
+	issueListCmd.Flags().String("search", "", "Search issues by title or identifier (server-side)")
+	addListPagingFlags(issueListCmd.Flags(), 50)
 
 	// issue create flags
 	issueCreateCmd.Flags().String("crew", "", "Crew slug or ID (required)")

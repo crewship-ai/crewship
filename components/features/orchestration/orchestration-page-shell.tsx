@@ -24,6 +24,9 @@ export function OrchestrationPageShell({ mode }: { mode: OrchestrationMode }) {
   const [agents, setAgents] = useState<AgentSummary[]>([])
   const [connections, setConnections] = useState<CrewConnection[]>([])
   const [loading, setLoading] = useState(true)
+  // A failed fetch is not an empty workspace. It used to be swallowed into
+  // the loading fallback, and the board then said "No issues yet" (S6).
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedMissionId, setSelectedMissionId] = useState<string>("all")
 
   const fetchData = useCallback(async () => {
@@ -39,8 +42,15 @@ export function OrchestrationPageShell({ mode }: { mode: OrchestrationMode }) {
       if (crewsRes.ok) setCrews(await crewsRes.json())
       if (agentsRes.ok) setAgents(await agentsRes.json())
       if (connsRes.ok) setConnections(await connsRes.json())
-    } catch {
-      // ignore — empty data is the loading-state fallback
+      const failed = [
+        !missionsRes.ok && `issues (HTTP ${missionsRes.status})`,
+        !crewsRes.ok && `crews (HTTP ${crewsRes.status})`,
+        !agentsRes.ok && `agents (HTTP ${agentsRes.status})`,
+        !connsRes.ok && `crew connections (HTTP ${connsRes.status})`,
+      ].filter((x): x is string => Boolean(x))
+      setLoadError(failed.length > 0 ? `Could not load ${failed.join(", ")}` : null)
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Could not reach the server")
     } finally {
       setLoading(false)
     }
@@ -112,6 +122,7 @@ export function OrchestrationPageShell({ mode }: { mode: OrchestrationMode }) {
       onRefresh={fetchData}
       onMissionCreated={fetchData}
       mode={mode}
+      loadError={loadError}
     />
   )
 }

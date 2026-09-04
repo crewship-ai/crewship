@@ -101,6 +101,8 @@ export interface OrchestrationLayoutProps {
   onRefresh: () => void
   onMissionCreated: () => void
   mode?: OrchestrationMode
+  /** The shell's fetch failed; rendered in place of the board with a retry, never as "no issues". */
+  loadError?: string | null
 }
 
 const ORCH_DRAWER_TABS = [
@@ -149,6 +151,7 @@ export function OrchestrationLayout({
   onRefresh,
   onMissionCreated: _onMissionCreated,
   mode = "default",
+  loadError = null,
 }: OrchestrationLayoutProps) {
   const isMobile = useIsMobile()
 
@@ -191,6 +194,9 @@ export function OrchestrationLayout({
   // useIssuesList (hooks/use-issues-list.ts) so it's unit-testable without
   // mounting this ~1200-line component. See that file's doc comment for
   // the degradation contract.
+  // The search box commits to the server (`?q=`, title and identifier), so a
+  // match outside the loaded page is found — S1 on docs/ux/audit-work.md.
+  const [committedSearch, setCommittedSearch] = useState("")
   const {
     issues,
     loading: issuesLoading,
@@ -200,7 +206,7 @@ export function OrchestrationLayout({
     loadingMore: issuesLoadingMore,
     refetch: fetchIssues,
     loadMore: loadMoreIssues,
-  } = useIssuesList(workspaceId)
+  } = useIssuesList(workspaceId, { search: committedSearch })
   const [issueLabels, setIssueLabels] = useState<IssueLabel[]>([])
   // Persisted per-user — most teams stick with one of board/list and a
   // refresh shouldn't bounce them back to board if they prefer list.
@@ -209,6 +215,13 @@ export function OrchestrationLayout({
     "board",
   )
   const [issueSearch, setIssueSearch] = useState("")
+  // The search the SERVER runs (`?q=`), committed after a pause. The box
+  // filters the loaded page instantly; the server filters the workspace,
+  // so an issue outside the page can still be found.
+  useEffect(() => {
+    const t = setTimeout(() => setCommittedSearch(issueSearch.trim()), 300)
+    return () => clearTimeout(t)
+  }, [issueSearch])
   const [projects, setProjects] = useState<Project[]>([])
   // Project filter applied via saved views — does NOT open the detail panel.
   // `selectedProjectId` is the authoritative "user navigated to this project"
@@ -588,7 +601,11 @@ export function OrchestrationLayout({
         <SubBar
           icon={mode === "issues" ? CircleDot : undefined}
           title={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
-          description={`${missions.length} ${missions.length === 1 ? "issue" : "issues"}`}
+          description={
+            mode === "issues"
+              ? `${(issuesTotal ?? issues.length).toLocaleString()} ${(issuesTotal ?? issues.length) === 1 ? "issue" : "issues"}`
+              : `${missions.length} ${missions.length === 1 ? "issue" : "issues"}`
+          }
           ariaLabel={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
           tabs={visibleTabs.map(({ id, label, icon }) => ({ id, label, icon }))}
           activeTab={activeTab}
@@ -681,6 +698,7 @@ export function OrchestrationLayout({
                         onPriorityFilter={setFilterPriority}
                         filterStatuses={filterStatuses}
                         onStatusFilter={setFilterStatuses}
+                        total={issuesTotal}
                       />
                     </div>
                   </motion.div>
@@ -739,6 +757,7 @@ export function OrchestrationLayout({
                     filterStatuses={filterStatuses}
                     onStatusFilter={setFilterStatuses}
                     onToggleCollapse={() => setLeftCollapsed(true)}
+                    total={issuesTotal}
                   />
                 </motion.div>
               </AnimatePresence>
@@ -841,6 +860,11 @@ export function OrchestrationLayout({
           {activeTab === "issues" && !issueDetailFullWidth && !projectDetailFullWidth && (
             <div className="h-full overflow-auto">
               <IssuesToolbarStrip
+                loaded={issues.length}
+                total={issuesTotal}
+                hasMore={issuesHasMore}
+                loadingMore={issuesLoadingMore}
+                onLoadMore={() => void loadMoreIssues()}
                 issueViewMode={issueViewMode}
                 onViewModeChange={setIssueViewMode}
                 savedViews={savedViews}
@@ -894,6 +918,7 @@ export function OrchestrationLayout({
                   losing the current crew/agent/project filter context. */}
               <IssuesStatusChips
                 issues={statusChipIssues}
+                total={issuesTotal}
                 selected={filterStatuses}
                 onToggle={(s) =>
                   setFilterStatuses((prev) =>
@@ -902,6 +927,21 @@ export function OrchestrationLayout({
                 }
                 onClear={() => setFilterStatuses([])}
               />
+              {/* The shell's own fetches (missions, crews, agents, connections)
+                  failing is not an empty board either (S6): name it, keep the
+                  filters, offer a retry. The issue list's own failure is the
+                  panel or banner below. */}
+              {loadError && !issuesError && (
+                <div
+                  role="alert"
+                  className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-label text-destructive"
+                >
+                  <span className="min-w-0 flex-1">{loadError}</span>
+                  <Button size="sm" variant="outline" className="h-7" onClick={() => { void fetchIssues(); onRefresh() }}>
+                    Try again
+                  </Button>
+                </div>
+              )}
               {/* #2286: a fetch error must render as an error, never as an
                   empty board — an empty board and a broken fetch used to be
                   indistinguishable. With nothing loaded at all, the error
@@ -962,27 +1002,6 @@ export function OrchestrationLayout({
                       </motion.div>
                     </AnimatePresence>
                   </div>
-                  {/* #2286: the board fetched at most 100 rows with no way
-                      to say more existed. issuesTotal is only known once the
-                      first response lands (X-Total-Count header) — until
-                      then this stays silent rather than guessing. */}
-                  {issuesTotal !== null && (issuesHasMore || issues.length > 0) && (
-                    <div className="flex items-center justify-center gap-3 px-4 pb-3 text-xs text-muted-foreground">
-                      <span>
-                        Showing {issues.length} of {issuesTotal} issue{issuesTotal === 1 ? "" : "s"}
-                      </span>
-                      {issuesHasMore && (
-                        <Button
-                          variant="outline"
-                          size="xs"
-                          onClick={() => loadMoreIssues()}
-                          disabled={issuesLoadingMore}
-                        >
-                          {issuesLoadingMore ? "Loading…" : "Load more"}
-                        </Button>
-                      )}
-                    </div>
-                  )}
                 </>
               )}
             </div>

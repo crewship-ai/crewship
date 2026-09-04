@@ -57,6 +57,8 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	}
 	missions := NewMissionHandler(r.db, r.hub, missionEngineForPublic, r.logger)
 	missions.SetStoragePath(r.storagePath)
+	// Paging goes through parsePagination, which the body scan cannot see.
+	// openapi: query include_tasks:string limit:integer offset:integer q:string status:string
 	r.mux.Handle("GET /api/v1/missions", authed(wsCtx(http.HandlerFunc(missions.ListAll))))
 	r.mux.Handle("GET /api/v1/mission-metrics", authed(wsCtx(http.HandlerFunc(missions.Metrics))))
 	metricsH := NewMetricsHandler(r.db, r.logger)
@@ -66,6 +68,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// bucket and group_by each default, so only metric carries the `!`.
 	// openapi: query metric:string! window:string bucket:string group_by:string
 	r.mux.Handle("GET /api/v1/metrics/timeseries", authed(wsCtx(http.HandlerFunc(metricsH.Timeseries))))
+	// openapi: query limit:integer offset:integer q:string status:string
 	r.mux.Handle("GET /api/v1/crews/{crewId}/missions", authed(wsCtx(http.HandlerFunc(missions.List))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/missions", roleCreate, missions.Create)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/missions/{missionId}", authed(wsCtx(http.HandlerFunc(missions.Get))))
@@ -86,6 +89,8 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
 	issues.SetJournal(r.Journal())
 	issues.SetStoragePath(r.storagePath)
+	// Paging and the search alias go through helpers the body scan cannot see.
+	// openapi: query assignee_id:string crew_id:string label:string limit:integer mission_type:string offset:integer priority:string project_id:string q:string search:string sort:string status:string
 	r.mux.Handle("GET /api/v1/issues", authed(wsCtx(http.HandlerFunc(issues.List))))
 	r.mux.Handle("GET /api/v1/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.GetByIdentifier))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues", roleInline, issues.Create)
@@ -96,6 +101,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/stop", roleCreate, issues.Stop)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/review", roleCreate, issues.Review)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/activity", authed(wsCtx(http.HandlerFunc(issues.ListActivity))))
+	// openapi: query limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/runs", authed(wsCtx(http.HandlerFunc(issues.ListRuns))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/sessions", authed(wsCtx(http.HandlerFunc(issues.ListSessions))))
 	// Labels

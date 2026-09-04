@@ -104,7 +104,16 @@ export interface UseIssuesListResult {
   loadMore: () => Promise<void>
 }
 
-export function useIssuesList(workspaceId: string | null | undefined): UseIssuesListResult {
+export interface UseIssuesListOptions {
+  /** Server-side search (`?q=`, title and identifier). A change re-fetches
+   *  page 1 — the board's search box used to filter only the rows it had. */
+  search?: string
+}
+
+export function useIssuesList(
+  workspaceId: string | null | undefined,
+  { search = "" }: UseIssuesListOptions = {},
+): UseIssuesListResult {
   const [issues, setIssues] = useState<Mission[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -135,7 +144,9 @@ export function useIssuesList(workspaceId: string | null | undefined): UseIssues
       else setLoading(true)
       try {
         const res = await apiFetch(
-          `/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=${ISSUES_PAGE_LIMIT}&offset=${nextOffset}`,
+          `/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=${ISSUES_PAGE_LIMIT}&offset=${nextOffset}${
+            search ? `&q=${encodeURIComponent(search)}` : ""
+          }`,
         )
         if (seq !== requestSeq.current) return false
         if (!res.ok) {
@@ -173,7 +184,7 @@ export function useIssuesList(workspaceId: string | null | undefined): UseIssues
         }
       }
     },
-    [workspaceId],
+    [workspaceId, search],
   )
 
   const refetch = useCallback(async () => {
@@ -204,10 +215,10 @@ export function useIssuesList(workspaceId: string | null | undefined): UseIssues
     fetchPage(0, false)
     // Re-running on every fetchPage identity change would refetch on every
     // render (fetchPage closes over workspaceId, so its identity already
-    // changes exactly when workspaceId does) — workspaceId is the real
-    // dependency.
+    // changes exactly when workspaceId or search does) — those two are the
+    // real dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId])
+  }, [workspaceId, search])
 
   const hasMore = total !== null && issues.length < total
 

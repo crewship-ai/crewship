@@ -216,6 +216,21 @@ describe("useIssuesList", () => {
     expect(apiFetch).toHaveBeenCalledTimes(1)
   })
 
+  it("a committed search reaches the server as ?q= and re-fetches page 1 when it changes", async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      jsonResponse(200, [issue("i1")], { "X-Total-Count": "1", "X-Has-More": "false" }),
+    )
+    const { result, rerender } = renderHook(({ q }: { q: string }) => useIssuesList("ws-1", { search: q }), {
+      initialProps: { q: "" },
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(String(vi.mocked(apiFetch).mock.calls[0][0])).not.toContain("q=")
+
+    rerender({ q: "ENG-4 launch" })
+    await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.length).toBe(2))
+    expect(String(vi.mocked(apiFetch).mock.calls[1][0])).toContain("offset=0&q=ENG-4%20launch")
+  })
+
   it("does not fetch without a workspace id", () => {
     renderHook(() => useIssuesList(null))
     expect(apiFetch).not.toHaveBeenCalled()

@@ -271,7 +271,7 @@ func init() {
 	journalCmd.Flags().Int("lines", 50, "Max entries to fetch (1-500)")
 	journalCmd.Flags().String("crew", "", "Filter by crew name, slug or ID")
 	journalCmd.Flags().String("agent", "", "Filter by agent name, slug or ID")
-	journalCmd.Flags().String("mission", "", "Filter by mission ID")
+	journalCmd.Flags().String("mission", "", "Only entries of one issue (identifier such as ENG-4, or mission ID)")
 	journalCmd.Flags().String("trace-id", "", "Filter by run/trace ID — narrows to one run's spans")
 	// --trace-id only reaches ad-hoc AGENT runs: routine runs never set
 	// trace_id, they stamp actor_id and payload.run_id instead. --run-id
@@ -293,7 +293,7 @@ func init() {
 	// view's --lines/--follow from polluting `journal count --help`.
 	journalCountCmd.Flags().String("crew", "", "Filter by crew name, slug or ID")
 	journalCountCmd.Flags().String("agent", "", "Filter by agent name, slug or ID")
-	journalCountCmd.Flags().String("mission", "", "Filter by mission ID")
+	journalCountCmd.Flags().String("mission", "", "Only entries of one issue (identifier such as ENG-4, or mission ID)")
 	journalCountCmd.Flags().String("trace-id", "", "Filter by run/trace ID")
 	journalCountCmd.Flags().String("run-id", "", "Filter to one run, whichever engine ran it (agent or routine)")
 	journalCountCmd.Flags().String("type", "", "Comma-separated entry types")

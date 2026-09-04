@@ -1,5 +1,8 @@
 "use client"
 
+import Link from "next/link"
+import { entityHref } from "@/lib/entity-links"
+
 import Image from "next/image"
 import { AnimatePresence, motion } from "motion/react"
 import { Search, Pause, Play, WrapText, ArrowDownUp, Filter, Download, RefreshCw, Users, User } from "lucide-react"
@@ -105,6 +108,9 @@ interface LogsToolbarProps {
    */
   traceId?: string
   onClearTraceId?: () => void
+  /** Issue focus — a mission id or identifier; the pill links the issue when it can. */
+  missionId?: string
+  onClearMissionId?: () => void
 }
 
 const SEV_ORDER: SeverityFilter[] = ["all", "info", "notice", "warn", "error"]
@@ -141,6 +147,8 @@ export function LogsToolbar({
   onRefreshRateChange,
   traceId,
   onClearTraceId,
+  missionId,
+  onClearMissionId,
 }: LogsToolbarProps) {
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
   useAvatarStylesVersion()
@@ -280,6 +288,30 @@ export function LogsToolbar({
             trace {traceId.slice(0, 8)}
             <span className="text-base leading-none">×</span>
           </motion.button>
+        )}
+        {missionId && onClearMissionId && (
+          <motion.span
+            key="mission-pill"
+            initial={{ opacity: 0, scale: 0.85, y: -2 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.85, y: -2 }}
+            transition={{ type: "spring", damping: 18, stiffness: 320 }}
+            className="inline-flex items-center gap-1 h-6 px-2 rounded border border-primary/40 bg-primary/10 text-[10px] font-mono text-primary"
+            data-testid="journal-mission-pill"
+          >
+            <Filter className="h-3 w-3" />
+            {/* An identifier links back to the issue page; a bare id has no page to go to. */}
+            {/^[A-Z][A-Z0-9]*-\d+$/.test(missionId) ? (
+              <Link href={entityHref({ kind: "issue", identifier: missionId })} className="hover:underline">
+                issue {missionId}
+              </Link>
+            ) : (
+              <span>issue {missionId.slice(0, 8)}</span>
+            )}
+            <button type="button" onClick={onClearMissionId} className="text-base leading-none hover:text-foreground" title="Clear issue focus" aria-label="Clear issue focus">
+              ×
+            </button>
+          </motion.span>
         )}
         {bucketFilter && onClearBucketFilter && (
           <motion.button

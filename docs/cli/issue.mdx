@@ -71,21 +71,16 @@ crewship issue list --search "auth flow"
 | `--crew` | `string` | | Filter by crew slug or ID. |
 | `--assignee` | `string` | | Filter by assignee ID. |
 | `--label` | `string` | | Filter by label name. |
-| `--search` | `string` | | Search issues by title or description. |
-| `--limit` | `int` | `50` | Maximum number of issues to return (max 100). |
-| `--offset` | `int` | `0` | Skip this many issues -- page past `--limit` (#2286). |
+| `--search` | `string` | | Search issues by title or identifier, on the server (sent as `q`). |
+| `--limit` | `int` | `50` | Rows per page (the server caps it at 500). |
+| `--offset` | `int` | `0` | Skip this many rows. Page with `--offset 50`, `--offset 100`, … |
 
 **Output columns:** ID, TITLE, STATUS, PRIORITY, ASSIGNEE, CREATOR, CREW, LABELS, UPDATED
 
-When the workspace has more issues than fit on one page, a table/quiet-format
-run prints a footer below the table:
-
-```
-Showing 100 of 143 issues — use --offset 100 to see more.
-```
-
-`--format json`/`yaml`/`ndjson` output is unaffected -- it stays exactly the
-array the API returns, since scripts decode it directly.
+A human table ends with `showing 1–50 of 1 015 · next page: --offset 50`, read from the
+`X-Total-Count` / `X-Limit` / `X-Offset` headers every paged list sends. Machine formats
+(`json`, `yaml`, `ndjson`) stay a bare array, since scripts decode it directly; `quiet` stays one id per line.
+The response also carries `X-Has-More` (#2286) for clients that only read that boolean.
 
 ---
 
@@ -307,11 +302,18 @@ List every run attributed to an issue — mission tasks, mention-dispatched runs
 ```bash
 crewship issue runs BE-42
 crewship issue runs BE-42 --format json | jq '.[] | select(.source=="mention")'
+crewship issue runs BE-42 --limit 20 --offset 20
 ```
 
-**Output columns:** AGENT, TASK (truncated to 28), STATUS, STARTED (relative time), DURATION, SOURCE, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | `int` | `100` | Runs per page (the server caps it at 500). |
+| `--offset` | `int` | `0` | Skip this many runs; the footer names the next page. |
 
-SOURCE is why the run is attributed to the issue: `task` (the issue's own mission-task plan), `mention` (an `@mention` dispatch), or `delegation` (a sub-agent's own further `/assign` call mid-mission). In `--format json`, the same run also carries `mission_id` (the issue's mission ID; omitted on a legacy row that predates `assignments.mission_id`).
+**Output columns:** RUN (the journal run id — what `crewship journal --run-id` and the Activity page take; `—` when the assignment never reached a run), AGENT (slug), TASK (truncated to 28), STATUS, STARTED (relative time), DURATION, SOURCE, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
+
+SOURCE is why the run is attributed to the issue: `task` (the issue's own mission-task plan), `mention` (an `@mention` dispatch), or `delegation` (a sub-agent's own further `/assign` call mid-mission). In `--format json`, the same run also carries `mission_id` (the issue's mission ID; omitted on a legacy row that predates `assignments.mission_id`), `run_id` / `trace_id`, `agent_id` and `agent_slug`.
+
 
 ---
 

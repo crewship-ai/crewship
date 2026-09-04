@@ -61,6 +61,7 @@ export const JOURNAL_URL_KEYS = [
   "crew_id",
   "agent_id",
   "trace_id",
+  "mission_id",
   "severity",
   "mute",
   "q",
@@ -100,6 +101,8 @@ export interface JournalUrlState {
   crewId: string
   agentId: string
   traceId: string
+  /** One issue — the mission id, or its identifier (ENG-4); the server resolves both. */
+  missionId: string
   severity: SeverityFilter
   muted: Set<EntryGroup>
   /** The committed search query — what the backend is actually filtering on. */
@@ -164,9 +167,13 @@ export function parseJournalUrl(sp: ParamReader): JournalUrlState {
     tab,
     timeRange,
     customRange,
-    crewId: sp.get("crew_id") ?? "",
-    agentId: sp.get("agent_id") ?? "",
+    // `crew` / `agent` are what entityHref writes (slugs); the server resolves
+    // a slug as readily as an id, and the page normalises the select once the
+    // crew list is in hand.
+    crewId: sp.get("crew_id") ?? sp.get("crew") ?? "",
+    agentId: sp.get("agent_id") ?? sp.get("agent") ?? "",
     traceId: sp.get("trace_id") ?? "",
+    missionId: sp.get("mission_id") ?? "",
     severity,
     muted,
     q: sp.get("q") ?? "",
