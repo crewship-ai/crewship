@@ -697,6 +697,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **`GET /api/v1/oauth/callback` answers its error branches with
+  `application/json`, matching what the spec has always declared (#2102).**
+  Every error branch used raw `http.Error`, which writes
+  `text/plain; charset=utf-8`; the generated OpenAPI document declares
+  `application/json` for every non-2xx response on every route (#1919), on
+  the grounds that both error helpers route through `writeJSON` — `Callback`
+  reached for neither, so it was the API contract gate's one remaining
+  "Undocumented Content-Type" finding. All nine error branches now go
+  through `replyError`, the same helper the sibling `Initiate`/`Exchange`
+  handlers in the file already use; the success branch's deliberate
+  `text/html` (a browser following the OAuth redirect) is untouched.
 - **`crew-ai-suggest` no longer hands back agent names or slugs
   `POST /api/v1/agents` refuses (#2204).** Follow-up to #2197/#2200:
   `validateSuggestion` gave `agent_role` a post-condition — every value an
