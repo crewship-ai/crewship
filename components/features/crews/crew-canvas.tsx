@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBanner } from "./crew-canvas-banner"
 import { CrewNeedsYou } from "./crew-needs-you"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { deriveCrewNeeds, withDevcontainerFeature, type CrewNeed, type NeedGap } from "./crew-needs"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { entityHref } from "@/lib/entity-links"
@@ -100,6 +101,7 @@ export function CrewCanvas({
   const [integrations, setIntegrations] = useState<CrewIntegration[] | null>(null)
   const [gaps, setGaps] = useState<NeedGap[]>([])
   const [needBusy, setNeedBusy] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const provisioning = useProvisioningStatus(workspaceId)
   const provisioningCrew = provisioning.detail.find((d) => d.id === crew?.id)
   const [members, setMembers] = useState<CrewMemberRow[] | null>(null)
@@ -246,9 +248,10 @@ export function CrewCanvas({
     }
   }, [crew, patch, workspaceId])
 
+  // The dialog says what is lost and where to recover (README §2); a crew
+  // takes its container with it, so its slug is typed back first.
   const handleDelete = useCallback(async () => {
     if (!crew) return
-    if (!confirm(`Delete crew "${crew.name}"? All ${agentsForCrew.length} agents will be detached. Container will be torn down. Journal kept 30 days.`)) return
     try {
       const res = await apiFetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -256,8 +259,9 @@ export function CrewCanvas({
       onCrewChanged()
     } catch (err) {
       toast.error(`Delete failed: ${err instanceof Error ? err.message : err}`)
+      throw err
     }
-  }, [crew, agentsForCrew.length, onCrewChanged, workspaceId])
+  }, [crew, onCrewChanged, workspaceId])
 
   const recentMissions = useMemo(() => {
     if (!crew) return []
@@ -420,10 +424,26 @@ export function CrewCanvas({
           integrations={integrations}
           patch={patch}
           applyAvatarStyle={applyAvatarStyle}
-          onDelete={handleDelete}
+          onDelete={() => setConfirmDelete(true)}
         />
       )}
       </CanvasTabPanel>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete crew ${crew.name}?`}
+        description="This tears down the crew container and detaches its agents. It cannot be undone."
+        consequences={[
+          { tone: "lost", text: `${agentsForCrew.length === 1 ? "1 agent becomes" : `${agentsForCrew.length} agents become`} unassigned — they keep their skills and chats` },
+          { tone: "lost", text: "The container image and its files are removed" },
+          { tone: "kept", text: "Issues and routines stay in the workspace, unowned" },
+          { tone: "kept", text: "The journal is kept 30 days; a workspace backup restores the crew" },
+        ]}
+        confirmLabel="Delete crew"
+        destructive
+        typeToConfirm={crew.slug}
+        onConfirm={handleDelete}
+      />
     </CanvasShell>
   )
 }

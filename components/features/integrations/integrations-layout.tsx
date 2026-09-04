@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils"
 import { invalidate } from "@/lib/stale-cache"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { useSession } from "@/hooks/use-auth"
 import { useNotificationChannels } from "@/hooks/use-notification-channels"
 import { useNotificationProviders } from "@/hooks/use-notification-providers"
@@ -431,13 +432,17 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     }
   }
 
+  const [pendingDelete, setPendingDelete] = React.useState<ConnectionRow | null>(null)
   const handleDelete = async (row: ConnectionRow) => {
-    if (!window.confirm(`Delete the connection to ${row.name}?`)) return
+    setPendingDelete(row)
+  }
+  const deleteConnection = async (row: ConnectionRow) => {
     try {
       await remove(row.id)
       toast.success("Connection deleted")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to delete the connection")
+      throw e
     }
   }
 
@@ -895,6 +900,19 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         </div>
       </div>
 
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => { if (!open) setPendingDelete(null) }}
+        title={pendingDelete ? `Delete the connection to ${pendingDelete.name}?` : ""}
+        consequences={[
+          { tone: "lost", text: "Nothing is delivered there any more; routines that notify through it report a delivery failure" },
+          { tone: "kept", text: "The delivery log keeps what was already sent" },
+          { tone: "kept", text: "Add integration recreates it" },
+        ]}
+        confirmLabel="Delete connection"
+        destructive
+        onConfirm={async () => { if (pendingDelete) await deleteConnection(pendingDelete) }}
+      />
       <AddIntegrationDialog
         open={addOpen}
         onOpenChange={setAddOpen}

@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Users } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -30,6 +32,7 @@ export function ConnectedAccountsTab({
   const [busy, setBusy] = React.useState<Record<string, AccountAction>>({})
   const [err, setErr] = React.useState<string | null>(null)
 
+  const [pendingAct, setPendingAct] = React.useState<{ accountId: string; action: "revoke" | "remove"; label: string } | null>(null)
   const act = React.useCallback(
     async (accountId: string, action: AccountAction) => {
       setBusy((b) => ({ ...b, [accountId]: action }))
@@ -122,14 +125,14 @@ export function ConnectedAccountsTab({
                         />
                         <AccountAction
                           label="Revoke"
-                          onClick={() => act(a.id, "revoke")}
+                          onClick={() => setPendingAct({ accountId: a.id, action: "revoke", label: toolkitLabel(a.toolkit.slug) })}
                           pending={pending === "revoke"}
                           disabled={!!pending}
                         />
                         <AccountAction
                           label="Remove"
                           danger
-                          onClick={() => act(a.id, "remove")}
+                          onClick={() => setPendingAct({ accountId: a.id, action: "remove", label: toolkitLabel(a.toolkit.slug) })}
                           pending={pending === "remove"}
                           disabled={!!pending}
                         />
@@ -142,6 +145,25 @@ export function ConnectedAccountsTab({
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={pendingAct !== null}
+        onOpenChange={(open) => { if (!open) setPendingAct(null) }}
+        title={pendingAct ? (pendingAct.action === "remove" ? `Remove the ${pendingAct.label} account?` : `Revoke the ${pendingAct.label} account?`) : ""}
+        consequences={
+          pendingAct?.action === "remove"
+            ? [
+                { tone: "lost", text: "Agents granted this account lose the tools on their next run" },
+                { tone: "lost", text: "The connection is removed from Composio; connecting again starts a new OAuth flow" },
+              ]
+            : [
+                { tone: "lost", text: "The token is revoked; agents lose the tools on their next run" },
+                { tone: "kept", text: "The account stays listed; Refresh or reconnect restores it" },
+              ]
+        }
+        confirmLabel={pendingAct?.action === "remove" ? "Remove account" : "Revoke"}
+        destructive
+        onConfirm={async () => { if (pendingAct) await act(pendingAct.accountId, pendingAct.action) }}
+      />
     </section>
   )
 }
