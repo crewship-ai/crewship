@@ -113,3 +113,36 @@ func TestDispatchMention_SecondWake_ReceivesCheckpointAndDelta(t *testing.T) {
 		t.Fatalf("last_consumed_seq did not advance: before=%d after=%d", lastConsumedBefore, lastConsumedAfter)
 	}
 }
+
+// TestDispatchMention_FirstMention_GetsCheckpointInstructionToo pins a
+// review-caught bug: the §11.3 checkpoint instruction used to be gated on
+// pack.Compaction, which stays "" for a brand-new (mission, agent) pair
+// (peekIssueAgentSession finds nothing to peek) even though this exact
+// dispatch is the one that CREATES the session moments later — so a
+// session's founding run was never told to checkpoint at all.
+func TestDispatchMention_FirstMention_GetsCheckpointInstructionToo(t *testing.T) {
+	f := setupMentionFixture(t)
+
+	f.comment(t, "please take a look "+mentionToken("lead", f.target))
+	if n := f.assignments(t); n != 1 {
+		t.Fatalf("assignments = %d, want 1", n)
+	}
+
+	var task string
+	if err := f.db.QueryRow(`SELECT task FROM assignments WHERE mission_id = ? ORDER BY created_at LIMIT 1`, f.missionID).Scan(&task); err != nil {
+		t.Fatalf("read first assignment: %v", err)
+	}
+	if !strings.Contains(task, "---CHECKPOINT---") {
+		t.Fatalf("the FIRST run on a brand-new session must also be instructed to checkpoint:\n%s", task)
+	}
+
+	// And the session really was created by this same dispatch.
+	var n int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM issue_agent_sessions WHERE mission_id = ? AND agent_id = ?`,
+		f.missionID, f.target).Scan(&n); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("sessions = %d, want 1", n)
+	}
+}

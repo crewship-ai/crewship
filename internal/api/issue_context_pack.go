@@ -206,9 +206,10 @@ func assembleContextPack(ctx context.Context, db *sql.DB, workspaceID, missionID
 	b.WriteString(untrusted.Wrap("context_pack", inner))
 	pack.Text = b.String()
 	pack.TokensEstimate = tokenutil.EstimateTokens(pack.Text)
-	if pack.Compaction == "" && sessionID != "" {
-		pack.Compaction = "fit"
-	}
+	// Invariant, not defended here: renderUnreadDelta is the ONLY writer of
+	// pack.Compaction and always returns a non-empty value ("fit" included,
+	// for zero unread events) whenever sessionID != "" — so Compaction is
+	// empty if and only if sessionID was empty (no session existed yet).
 	return pack, nil
 }
 
@@ -314,6 +315,16 @@ func renderUnreadDelta(ctx context.Context, db *sql.DB, missionID string, lastCo
 		if err := rows.Scan(&e.Seq, &e.Actor, &e.Action, &e.Detail); err != nil {
 			return "", "", 0, 0, lastConsumedSeq, err
 		}
+		// §16.1 "scrub before persist" is about the WRITE side
+		// (mission_activity.payload_json); this is the read side of the
+		// SAME rule applied to a REPLAY: a prior run's result/error text
+		// can end up in `details` (mission_tasks_completion.go) without
+		// ever having been scrubbed at write time, and this pack is the
+		// first place that text is fed into a FRESH agent context rather
+		// than just displayed to a human on the board. Reusing
+		// checkpointScrubber (issue_checkpoints.go) rather than a second
+		// instance — the pattern set is identical.
+		e.Detail = checkpointScrubber.Scrub(e.Detail)
 		events = append(events, e)
 	}
 	if err := rows.Err(); err != nil {

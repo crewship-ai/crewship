@@ -302,3 +302,36 @@ func TestAssembleContextPack_LookoutScansReplayedContent(t *testing.T) {
 		t.Fatalf("expected the injection phrase to raise the fence's suspicion level, got suspicion=\"none\": %s", pack.Text)
 	}
 }
+
+// TestAssembleContextPack_ScrubsSecretsFromReplayedDetails pins a
+// review-caught gap: mission_activity.details can carry a prior run's raw
+// result/error text (mission_tasks_completion.go), never scrubbed at write
+// time — this pack is the first place that text is REPLAYED into a fresh
+// agent context (as opposed to just displayed to a human on the board), so
+// it must be scrubbed on the way out the same way checkpoint bodies are
+// scrubbed on the way in.
+func TestAssembleContextPack_ScrubsSecretsFromReplayedDetails(t *testing.T) {
+	db := setupTestDB(t)
+	_, wsID, crewID, leadID, _ := seedIssueFixtures(t, db)
+	missionID := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "TODO")
+	sessionID, err := resolveOrCreateIssueAgentSessionTx(context.Background(), db, wsID, missionID, leadID)
+	if err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	const secret = "ghp_16C7e42F292c6912E7710c838347Ae178B4a" //gitleaks:allow — fabricated, shaped like the real thing so the scrubber engages
+	if _, err := missionactivity.Emit(context.Background(), db, missionactivity.Entry{
+		ID: "evt_secret", MissionID: missionID, ActorType: "system", ActorID: "sys",
+		Action: "task_failed", Details: "the run failed while using token " + secret,
+	}); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+
+	pack, err := assembleContextPack(context.Background(), db, wsID, missionID, sessionID, 0)
+	if err != nil {
+		t.Fatalf("assembleContextPack: %v", err)
+	}
+	if strings.Contains(pack.Text, secret) {
+		t.Fatalf("pack still contains the raw secret from a replayed event: %s", pack.Text)
+	}
+}

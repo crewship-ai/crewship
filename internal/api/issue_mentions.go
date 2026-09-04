@@ -1118,29 +1118,48 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// §11.1 context-pack assembly (work package B5, #2345): a read-only
-	// peek at whatever session already exists for (mission, target agent)
-	// — never resolveOrCreate, which is resolveSessionAndInsertAssignment's
-	// job below, inside the fan-out transaction. peekIssueAgentSession
-	// naturally returns found=false when the issue_agent_sessions flag is
-	// off (no session row was ever created to find), so this needs no
-	// second flag check of its own. A brand-new (mission, agent) pair also
-	// returns found=false and gets a snapshot-only pack — see
-	// assembleContextPack's doc comment.
+	// §11.1 context-pack assembly (work package B5, #2345). sessionsEnabled
+	// is read ONCE, directly off the flag resolveSessionAndInsertAssignment
+	// itself gates on — not derived from whether a pack happened to
+	// assemble something, which review caught getting wrong twice: (1) a
+	// brand-new (mission, agent) pair has no existing session to peek
+	// (found=false), so a derived flag stayed "off" for the very dispatch
+	// that is ABOUT to create one, silently skipping the §11.3 checkpoint
+	// instruction on every session's founding run; (2) a transient error
+	// from assembleContextPack left the pack at its zero value even when a
+	// real session existed, again dropping the instruction. Reading the
+	// flag directly makes "should this run be asked to checkpoint" answer
+	// the same question resolveSessionAndInsertAssignment answers for
+	// "will this run get a session_id at all" — independent of whether the
+	// pack text itself happened to build successfully.
+	sessionsEnabled, ffErr := featureflags.IsEnabled(ctx, h.db, req.WorkspaceID, issueAgentSessionsFlagKey)
+	if ffErr != nil {
+		h.logger.Warn("dispatch mention: check issue_agent_sessions flag for context pack",
+			"error", ffErr, "mission_id", req.MissionID, "agent_id", target.ID)
+		sessionsEnabled = false
+	}
+
+	// A read-only peek at whatever session already exists for (mission,
+	// target agent) — never resolveOrCreate, which is
+	// resolveSessionAndInsertAssignment's job below, inside the fan-out
+	// transaction. A brand-new (mission, agent) pair returns found=false
+	// and gets a snapshot-only pack — see assembleContextPack's doc comment.
 	var pack contextPack
-	if existingSessionID, lastSeq, found, peekErr := peekIssueAgentSession(ctx, h.db, req.MissionID, target.ID); peekErr != nil {
-		h.logger.Warn("dispatch mention: peek issue agent session for context pack",
-			"error", peekErr, "mission_id", req.MissionID, "agent_id", target.ID)
-	} else {
-		sid := ""
-		if found {
-			sid = existingSessionID
-		}
-		if p, packErr := assembleContextPack(ctx, h.db, req.WorkspaceID, req.MissionID, sid, lastSeq); packErr != nil {
-			h.logger.Warn("dispatch mention: assemble context pack",
-				"error", packErr, "mission_id", req.MissionID, "agent_id", target.ID)
+	if sessionsEnabled {
+		if existingSessionID, lastSeq, found, peekErr := peekIssueAgentSession(ctx, h.db, req.MissionID, target.ID); peekErr != nil {
+			h.logger.Warn("dispatch mention: peek issue agent session for context pack",
+				"error", peekErr, "mission_id", req.MissionID, "agent_id", target.ID)
 		} else {
-			pack = p
+			sid := ""
+			if found {
+				sid = existingSessionID
+			}
+			if p, packErr := assembleContextPack(ctx, h.db, req.WorkspaceID, req.MissionID, sid, lastSeq); packErr != nil {
+				h.logger.Warn("dispatch mention: assemble context pack",
+					"error", packErr, "mission_id", req.MissionID, "agent_id", target.ID)
+			} else {
+				pack = p
+			}
 		}
 	}
 
@@ -1151,13 +1170,15 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 	if pack.Text != "" {
 		brief = brief + "\n\n" + pack.Text
 	}
-	if pack.Compaction != "" {
+	if sessionsEnabled {
 		// §11.3: enforce a checkpoint on session-bearing runs the way
 		// HANDOFF is enforced on mission tasks — instructed here,
 		// parsed/recorded at finishAssignment (writeSessionCheckpoint,
-		// issue_checkpoints.go). Only appended when a pack was actually
-		// assembled (i.e. sessions are enabled) — a session-less dispatch
-		// has nowhere to store a checkpoint anyway.
+		// issue_checkpoints.go). Gated on the FLAG, not on whether the pack
+		// text itself built successfully (see sessionsEnabled's own
+		// comment) — a session-less dispatch has nowhere to store a
+		// checkpoint, but every session-bearing one, including its
+		// founding run, does.
 		brief = brief + "\n\n" + sessionCheckpointOutputFormatInstruction
 	}
 	// Creator attribution, the same pairing missions v129 uses: exactly one of
