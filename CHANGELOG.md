@@ -285,7 +285,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   B3 follow-up run `delegation` instead of `mention` — it only ever
   touched `mission_comment_mentions.claimed_by_run_id`, never
   `.assignment_id` (#2344).
-- **An agent that wakes on an issue gets a bounded context pack instead of nothing, and can finally read the comment thread it was woken for (#TBD).**
+- **An agent that wakes on an issue gets a bounded context pack instead of nothing, and can finally read the comment thread it was woken for (#2353).**
   `agent_session_checkpoints` (PRD-ISSUES-AND-ROUTINES-2026 §9.5, work
   package B5) is the structured `done`/`plan`/`facts`/`blockers`/`next_step`/
   `confidence` state a session-bearing run reports at the end of every run
