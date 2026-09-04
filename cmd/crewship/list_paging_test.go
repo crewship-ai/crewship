@@ -62,6 +62,7 @@ func TestPrintListFooter(t *testing.T) {
 		{"an offset past the end says so", "table", listMeta{Total: 3, Limit: 50, Offset: 500, Known: true}, 0, "no rows at offset 500 · the list has 3\n"},
 		{"everything shown says nothing", "table", listMeta{Total: 3, Limit: 50, Offset: 0, Known: true}, 3, ""},
 		{"unknown total says nothing", "table", listMeta{}, 50, ""},
+		{"a total without X-Limit still offers the next page", "table", listMeta{Total: 143, Known: true}, 1, "showing 1–1 of 143 · next page: --offset 1\n"},
 		{"json stays clean", "json", full, 50, ""},
 		{"ndjson stays clean", "ndjson", full, 50, ""},
 		{"quiet is for scripts", "quiet", full, 50, ""},

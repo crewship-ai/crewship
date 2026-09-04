@@ -78,8 +78,10 @@ func printListFooter(f *cli.Formatter, meta listMeta, shown int) {
 		fmt.Fprintf(f.Writer, "no rows at offset %d · the list has %d\n", meta.Offset, meta.Total)
 		return
 	}
+	// X-Limit may be absent (a server that only sends X-Total-Count, as
+	// #2286's first shape did); rows past `next` are evidence enough.
 	next := meta.Offset + shown
-	if next < meta.Total && meta.Limit > 0 {
+	if next < meta.Total {
 		fmt.Fprintf(f.Writer, "showing %d–%d of %d · next page: --offset %d\n",
 			meta.Offset+1, next, meta.Total, next)
 		return
