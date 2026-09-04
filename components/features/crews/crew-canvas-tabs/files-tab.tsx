@@ -1,5 +1,7 @@
 "use client"
 
+import { Button } from "@/components/ui/button"
+
 export interface FilesTabProps {
   onOpenFiles: () => void
 }
@@ -19,13 +21,9 @@ export function FilesTab({ onOpenFiles }: FilesTabProps) {
             use it for runbooks, policies, and templates that should be visible to every agent.
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onOpenFiles}
-          className="text-sm px-3 py-2 rounded-lg bg-primary hover:bg-primary text-white"
-        >
+        <Button variant="soft" size="sm" onClick={onOpenFiles}>
           Open Files panel
-        </button>
+        </Button>
       </div>
     </div>
   )

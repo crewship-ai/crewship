@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Button } from "@/components/ui/button"
 import { Search } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
@@ -21,6 +22,7 @@ export function CatalogTab({
   configuredSlugs,
   onConnect,
   hideSearch = false,
+  onShowMore,
 }: {
   toolkits: ToolkitInfo[]
   total: number
@@ -35,7 +37,25 @@ export function CatalogTab({
    * does anything.
    */
   hideSearch?: boolean
+  /** Widens the page to the gateway's cap; absent once it is at the cap. */
+  onShowMore?: () => void
 }) {
+  const hidden = Math.max(0, total - toolkits.length)
+  const footer =
+    !loading && toolkits.length > 0 && hidden > 0 ? (
+      <p className="text-xs text-muted-foreground flex items-center gap-2 flex-wrap" data-testid="catalog-scope">
+        <span>
+          Showing {toolkits.length} of {total} apps.
+        </span>
+        {onShowMore ? (
+          <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={onShowMore}>
+            Show more
+          </Button>
+        ) : (
+          <span>Search to narrow the rest.</span>
+        )}
+      </p>
+    ) : null
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -95,6 +115,7 @@ export function CatalogTab({
           })}
         </div>
       )}
+      {footer}
     </section>
   )
 }

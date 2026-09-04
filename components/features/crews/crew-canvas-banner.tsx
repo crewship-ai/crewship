@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react"
 import { AlertTriangle, Check, ChevronDown, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { useProvisioningStatus, type ProvisioningStatus } from "@/hooks/use-provisioning-status"
@@ -103,21 +104,12 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId, needsOwnedByStrip =
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={trigger}
-            disabled={triggering}
-            className="text-xs px-2.5 py-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive border border-destructive/40"
-          >
+          <Button variant="destructive" size="sm" onClick={trigger} disabled={triggering}>
             {triggering ? "Starting…" : "Retry"}
-          </button>
-          <button
-            type="button"
-            onClick={() => acknowledge(crew.id)}
-            className="text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-          >
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => acknowledge(crew.id)}>
             <X className="h-3 w-3" /> Dismiss
-          </button>
+          </Button>
         </div>
       </div>
     )
@@ -133,15 +125,9 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId, needsOwnedByStrip =
           </div>
           <RecentBuildSummary recent={crew.recent} />
         </div>
-        <button
-          type="button"
-          onClick={() => acknowledge(crew.id)}
-          aria-label="Dismiss"
-          title="Dismiss"
-          className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-        >
+        <Button variant="ghost" size="icon-sm" onClick={() => acknowledge(crew.id)} aria-label="Dismiss" title="Dismiss" className="shrink-0">
           <X className="h-3.5 w-3.5" />
-        </button>
+        </Button>
       </div>
     )
   }
@@ -156,14 +142,9 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId, needsOwnedByStrip =
           Runtime config changed — agents in this crew can&apos;t start until the image is rebuilt. Use the toolbar Build button or rebuild here.
         </div>
       </div>
-      <button
-        type="button"
-        onClick={trigger}
-        disabled={triggering}
-        className="text-xs px-2.5 py-1.5 rounded bg-warn/25 hover:bg-warn/35 text-warn border border-warn/40 shrink-0"
-      >
+      <Button variant="soft" size="sm" onClick={trigger} disabled={triggering} className="shrink-0">
         {triggering ? "Starting…" : "Build now"}
-      </button>
+      </Button>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { Files } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
+import { Button } from "@/components/ui/button"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
 import { apiFetch } from "@/lib/api-fetch"
@@ -395,15 +396,10 @@ export function CrewCanvas({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={onOpenFiles}
-            className="px-3 py-2 text-sm rounded-lg border border-white/10 hover:bg-white/5 flex items-center gap-2"
-            title="Open files in bottom panel"
-          >
+          <Button variant="outline" size="sm" onClick={onOpenFiles} title="Open files in bottom panel">
             <Files className="h-3.5 w-3.5" />
             Files
-          </button>
+          </Button>
         </div>
       </header>
 

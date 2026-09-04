@@ -33,6 +33,7 @@ import {
   Workflow,
   HandCoins,
   Box,
+  Menu,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
@@ -467,6 +468,18 @@ export function SkillsBrowser() {
       <SubBar
         icon={Library}
         title="Skills"
+        leading={
+          isMobile ? (
+            <button
+              type="button"
+              className="p-1 rounded hover:bg-white/5 text-foreground/80 kit-tap"
+              onClick={() => setRailCollapsed((c) => !c)}
+              aria-label={railCollapsed ? "Open filters" : "Close filters"}
+            >
+              <Menu className="h-3.5 w-3.5" />
+            </button>
+          ) : undefined
+        }
         description={loading ? "Loading…" : `${skills.length} skills · ${bundledCount} bundled`}
         ariaLabel="Skills"
         tabs={SKILLS_TABS.map((t) => ({ id: t.id, label: t.label, icon: t.icon }))}
@@ -507,9 +520,21 @@ export function SkillsBrowser() {
             : `${railCollapsed ? `${RAIL_COLLAPSED_PX}px` : `${RAIL_OPEN_PX}px`} 1fr ${selected ? `${detailWidthRendered}px` : "0px"}`,
         }}
       >
+        {/* Phone: the rail is an overlay over a scrim, opened from the sub-bar's
+            menu button — the collapsed rail used to be `hidden` with its own
+            expand button inside it, so facets and search were unreachable. */}
+        {isMobile && !railCollapsed && (
+          <button
+            type="button"
+            aria-label="Close filters"
+            onClick={() => setRailCollapsed(true)}
+            className="absolute inset-0 z-20 bg-black/50"
+          />
+        )}
         <aside data-panel-id="skills-rail" className={cn(
           "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 overflow-hidden",
           isMobile && railCollapsed && "hidden",
+          isMobile && !railCollapsed && "absolute inset-y-0 left-0 z-30 w-[280px] shadow-2xl",
         )}>
           {railCollapsed ? (
             <div className="flex items-center justify-center px-2 py-2 shrink-0">

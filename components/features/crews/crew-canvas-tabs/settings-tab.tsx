@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
 import { entityHref } from "@/lib/entity-links"
 import { Trash2 } from "lucide-react"
@@ -319,14 +320,10 @@ export function SettingsTab({
               All {agentsForCrew.length} agent{agentsForCrew.length === 1 ? "" : "s"} will be detached. Container torn down. Journal kept 30 days.
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onDelete}
-            className="text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive border border-destructive/40 hover:bg-destructive/30 flex items-center gap-1.5"
-          >
+          <Button variant="destructive" size="sm" onClick={onDelete}>
             <Trash2 className="h-3 w-3" />
             Delete {crew.name}
-          </button>
+          </Button>
         </div>
       </section>
     </div>

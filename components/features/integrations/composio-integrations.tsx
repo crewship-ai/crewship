@@ -35,6 +35,10 @@ import { ToolsTab } from "./composio/tools-tab"
 import { TriggersTab } from "./composio/triggers-tab"
 import { McpEndpointsTab } from "./composio/mcp-endpoints-tab"
 
+/** The gateway's default page and its hard cap (`internal/api/composio_handler.go`). */
+const CATALOG_PAGE = 40
+const CATALOG_MAX = 100
+
 // Managed-integration (Composio) admin surface rendered at /integrations.
 // Restructured to the approved wireframe: a KPI row + tabbed sections
 // (Catalog · Connected accounts · Agent access · Tools · Triggers · MCP
@@ -168,13 +172,17 @@ export function ComposioIntegrations({
   // stand-alone rendering the feature flag can still fall back to.
   const search = searchProp ?? searchState
   const [tkLoading, setTkLoading] = React.useState(true)
+  // The gateway pages the catalog at 40 and caps a page at 100 (P2.21):
+  // the first page is enough to find the common apps, and "Show more"
+  // widens it once; past 100 the honest answer is "search to narrow".
+  const [catalogLimit, setCatalogLimit] = React.useState<number>(CATALOG_PAGE)
 
-  const loadToolkits = React.useCallback(async (wid: string, q: string) => {
+  const loadToolkits = React.useCallback(async (wid: string, q: string, limit: number) => {
     // Cached per query, so going back to the unfiltered catalog after a search
     // is instant — this is the slowest of the four calls, since it reaches
     // Composio's own API.
-    const { value, fresh } = readThrough(`composio:${wid}:toolkits:${q}`, async () => {
-      const params = new URLSearchParams({ workspace_id: wid })
+    const { value, fresh } = readThrough(`composio:${wid}:toolkits:${q}:${limit}`, async () => {
+      const params = new URLSearchParams({ workspace_id: wid, limit: String(limit) })
       if (q) params.set("search", q)
       const r = await apiFetch(`/api/v1/integrations/composio/toolkits?${params}`)
       if (!r.ok) throw new Error(String(r.status))
@@ -203,9 +211,9 @@ export function ComposioIntegrations({
   // Debounce the catalog search so each keystroke doesn't hammer Composio.
   React.useEffect(() => {
     if (!workspaceId) return
-    const t = setTimeout(() => void loadToolkits(workspaceId, search), 300)
+    const t = setTimeout(() => void loadToolkits(workspaceId, search, catalogLimit), 300)
     return () => clearTimeout(t)
-  }, [workspaceId, search, loadToolkits])
+  }, [workspaceId, search, catalogLimit, loadToolkits])
 
   // ── Agents + their Composio bindings (agent-access + MCP + KPI) ──
   const [agents, setAgents] = React.useState<AgentLite[]>([])
@@ -317,11 +325,11 @@ export function ComposioIntegrations({
       // button would re-render the same values it was pressed to replace.
       invalidate(`composio:${wid}:`)
       void load(wid)
-      void loadToolkits(wid, search)
+      void loadToolkits(wid, search, catalogLimit)
       void loadSettings(wid)
       void loadAgents(wid)
     },
-    [load, loadToolkits, search, loadSettings, loadAgents],
+    [load, loadToolkits, search, catalogLimit, loadSettings, loadAgents],
   )
 
   const [tabState, setTab] = React.useState<TabKey>("catalog")
@@ -560,6 +568,7 @@ export function ComposioIntegrations({
               search={search}
               onSearch={setSearch}
               hideSearch={searchProp !== undefined}
+              onShowMore={catalogLimit < CATALOG_MAX ? () => setCatalogLimit(CATALOG_MAX) : undefined}
               loading={tkLoading}
               configuredSlugs={configuredSlugs}
               onConnect={(toolkit) => setConnect({ toolkit })}
