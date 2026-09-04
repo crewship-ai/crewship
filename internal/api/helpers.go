@@ -103,12 +103,12 @@ func isSafeRedirect(target string) bool {
 }
 
 // maxListCapacity is the upper bound on any per-request slice/map
-// pre-allocation derived from a ?limit= query param. parseListPagination
+// pre-allocation derived from a ?limit= query param. parsePagination
 // already clamps to a per-endpoint max, but CodeQL's
 // go/uncontrolled-allocation-size rule can only see proximate bounds —
 // applying capacityHint at every make(...) call gives the analyser the
 // local evidence and protects against future code paths that bypass
-// parseListPagination.
+// parsePagination.
 const maxListCapacity = 1000
 
 // capacityHint returns a safe cap-hint for a user-derived list size,
