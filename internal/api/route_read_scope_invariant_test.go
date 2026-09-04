@@ -56,11 +56,40 @@ import (
 // and `wsCtx` is a local alias for that same r.authMw.RequireWorkspace. Same
 // chokepoint, plus a role floor.
 //
-// Verified for completeness rather than assumed: of the five registration forms
-// in router_*.go, `r.authedMut(` (246 uses) and `r.authedSelfMut(` (22) carry
-// only POST/PUT/PATCH/DELETE — zero reads — so they are genuinely irrelevant
-// here rather than a fifth gap. Re-check that if a read ever registers through
-// them.
+// #2144. "Verified for completeness" above was wrong: `r.authedMut(` carries
+// four GET routes despite its name (GET /api/v1/admin/keeper/judge/models,
+// GET /api/v1/approvals, GET /api/v1/approvals/{id}, GET /api/v1/memory/export)
+// and none of them were reachable by this scan — the comment asserted "zero
+// reads" and nothing checked it, which is the exact shape of defect this file
+// exists to catch (see the authedAdmin story above). `r.authedSelfMut(` still
+// carries zero reads on this tree, but is now scanned by verb rather than
+// trusted by name, so the next one does not repeat the mistake.
+//
+// The two routes named in #2144 were checked by hand, not assumed clean:
+//   - GET /api/v1/admin/keeper/judge/models (AdminKeeperJudgeHandler.Models)
+//     reads no DB rows at all — it dials an operator-supplied or
+//     instance-configured Ollama endpoint and lists what it serves. Scoped by
+//     the chokepoint (RequireWorkspace, always composed by authedMut
+//     regardless of the declared role) plus its own roleManage floor; there is
+//     no workspace-scoped row to leak.
+//   - GET /api/v1/memory/export (MemoryPortabilityHandler.Export) DOES read
+//     tenant rows (a crew's memory tree) and is scoped twice: RequireWorkspace
+//     at the chokepoint, then resolveMemoryScope fences the requested crew_id
+//     to that workspace inside the handler — covered by
+//     TestMemoryExport_CrossWorkspaceCrewIs404.
+//
+// The other two authedMut reads (GET /api/v1/approvals{,/{id}}) were checked
+// too: ApprovalsHandler.List/Get both read workspaceID from
+// WorkspaceIDFromContext (set by the same RequireWorkspace) and pass it into
+// every harbormaster query — no unscoped path.
+//
+// authedMut always composes RequireAuth(RequireWorkspace(requireRoleScopeMW(
+// role, scope, h))) regardless of the declared role (see authedMut's own doc
+// comment) — a GET/HEAD through it is scoped by the identical chokepoint as
+// wsCtx, so it needs neither a wsCtx match nor an allowlist entry.
+// authedSelfMut composes RequireAuth only, with no RequireWorkspace anywhere
+// in the chain, so a future GET/HEAD through it would need an allowlist entry
+// like any other self-scoped route.
 
 // readVerbLine matches a read-verb registration under /api/v1/. Multi-line
 // registrations put the verb and pattern on the first line, which is what this
@@ -71,6 +100,16 @@ var readVerbLine = regexp.MustCompile(`r\.mux\.(?:Handle|HandleFunc)\("(GET|HEAD
 // go through r.authedAdmin("GET", "/api/v1/…", h), verb as an argument. Missing
 // this shape is what hid 26 routes from the first version of this test.
 var adminReadLine = regexp.MustCompile(`r\.authedAdmin\("(GET|HEAD)",\s*"(/api/v1/[^"]*)"`)
+
+// authedMutReadLine and authedSelfMutReadLine match GET/HEAD registered
+// through the MUTATION chokepoints — #2144. The names promise mutations, and a
+// prior version of this file believed them (see the "Verified for
+// completeness" comment above, corrected), so a read registered through
+// either helper was invisible to the scan: not unclassified, just absent. This
+// keys off the verb captured in the call, not the helper's name, which is the
+// fix the issue asked for — "regardless of the registration helper".
+var authedMutReadLine = regexp.MustCompile(`r\.authedMut\("(GET|HEAD)",\s*"(/api/v1/[^"]*)"`)
+var authedSelfMutReadLine = regexp.MustCompile(`r\.authedSelfMut\("(GET|HEAD)",\s*"(/api/v1/[^"]*)"`)
 
 // readRouteWrapperLookahead caps how many lines after a registration are joined
 // before looking for the wrapper. A registration whose handler argument wraps
@@ -198,6 +237,8 @@ func TestEveryReadRouteDeclaresItsWorkspaceScope(t *testing.T) {
 		switch {
 		case rt.adminWrapped:
 			continue // RequireWorkspace + ADMIN+ floor, composed by the wrapper
+		case rt.mutWrapped:
+			continue // RequireWorkspace, composed by authedMut regardless of role — see #2144 above
 		case strings.Contains(rt.tail, "internalAuth("):
 			continue // sidecar boundary — different fence
 		case strings.Contains(rt.tail, "wsCtx("):
@@ -229,13 +270,16 @@ Do not add it to the map to make this test pass — the map is a review record.`
 func TestReadRouteScanFindsTheRealSurface(t *testing.T) {
 	routes := scanReadRoutes(t)
 
-	// 245 read routes on the tree this landed against: 219 through
-	// r.mux.Handle("GET …") and 26 through r.authedAdmin("GET", …). A floor well
-	// under that catches regex rot without tripping on ordinary growth.
+	// 275 read routes on the tree this landed against: 242 through
+	// r.mux.Handle("GET …"), 29 through r.authedAdmin("GET", …), and 4 through
+	// r.authedMut("GET", …) (#2144, the four this issue added to the scan). A
+	// floor well under that catches regex rot without tripping on ordinary
+	// growth.
 	//
-	// Both forms are counted separately below, because a single total would hide
-	// one regex rotting while the other still matched — which is how the admin
-	// surface went unnoticed in the first place.
+	// All three forms are counted separately below, because a single total
+	// would hide one regex rotting while the others still matched — which is
+	// how the admin surface went unnoticed the first time, and the authedMut
+	// surface the second (#2144).
 	const minRoutes = 200
 	if len(routes) < minRoutes {
 		t.Fatalf("scanned only %d read routes, expected at least %d — a registration regex has likely stopped matching, which would make TestEveryReadRouteDeclaresItsWorkspaceScope pass vacuously",
@@ -254,13 +298,31 @@ func TestReadRouteScanFindsTheRealSurface(t *testing.T) {
 			admin, minAdminRoutes)
 	}
 
+	// #2144: authedMut's own doc comment used to claim "zero reads", and
+	// nothing checked it. Four GET routes ride it on this tree (admin/keeper/
+	// judge/models, approvals, approvals/{id}, memory/export) — a floor of 1
+	// is enough to catch authedMutReadLine going blind again without pinning
+	// to the exact count.
+	mut := 0
+	for _, rt := range routes {
+		if rt.mutWrapped {
+			mut++
+		}
+	}
+	const minMutReadRoutes = 1
+	if mut < minMutReadRoutes {
+		t.Errorf("scanned only %d authedMut-registered read routes, expected at least %d — authedMutReadLine has likely stopped matching, which would silently drop these routes back out of the invariant (#2144)",
+			mut, minMutReadRoutes)
+	}
+
 	// The overwhelming majority must be chokepoint-scoped. If this ratio ever
 	// inverts, the codebase has drifted to hand-rolled scoping and the
-	// allowlist has become the norm instead of the exception. authedAdmin counts
-	// as scoped — it composes the same RequireWorkspace, plus a role floor.
+	// allowlist has become the norm instead of the exception. authedAdmin and
+	// authedMut both count as scoped — they compose the same RequireWorkspace
+	// (authedMut plus a declared role, authedAdmin plus an ADMIN+ floor).
 	scoped := 0
 	for _, rt := range routes {
-		if rt.adminWrapped || strings.Contains(rt.tail, "wsCtx(") {
+		if rt.adminWrapped || rt.mutWrapped || strings.Contains(rt.tail, "wsCtx(") {
 			scoped++
 		}
 	}
@@ -300,6 +362,12 @@ type readRoute struct {
 	// RequireWorkspace + an ADMIN+ floor — scoped by the chokepoint, so it needs
 	// neither a wsCtx match nor an allowlist entry.
 	adminWrapped bool
+	// mutWrapped means it registered through r.authedMut — the MUTATION
+	// chokepoint, which a handful of GET routes ride too (#2144). authedMut
+	// always composes RequireAuth(RequireWorkspace(...)) regardless of the
+	// declared role, so this is scoped by the identical chokepoint as wsCtx and
+	// needs neither a wsCtx match nor an allowlist entry.
+	mutWrapped bool
 }
 
 func (r readRoute) key() string { return r.verb + " " + r.path }
@@ -338,6 +406,25 @@ func scanReadRoutes(t *testing.T) []readRoute {
 				routes = append(routes, readRoute{
 					file: f, line: i + 1, verb: m[1], path: m[2],
 					tail: line, adminWrapped: true,
+				})
+				continue
+			}
+			// authedMut composes RequireWorkspace itself too (see #2144 above)
+			// — same reasoning, no lookahead needed.
+			if m := authedMutReadLine.FindStringSubmatch(line); m != nil {
+				routes = append(routes, readRoute{
+					file: f, line: i + 1, verb: m[1], path: m[2],
+					tail: line, mutWrapped: true,
+				})
+				continue
+			}
+			// authedSelfMut composes no RequireWorkspace, so a GET/HEAD
+			// through it is a normal candidate for the allowlist below — it is
+			// scanned so it cannot go unclassified, not because it is scoped.
+			if m := authedSelfMutReadLine.FindStringSubmatch(line); m != nil {
+				routes = append(routes, readRoute{
+					file: f, line: i + 1, verb: m[1], path: m[2],
+					tail: line,
 				})
 				continue
 			}

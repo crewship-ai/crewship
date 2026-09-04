@@ -225,14 +225,24 @@ CLASSIFY_JQ="$WAIT_JQ"'
           # nothing posts the same empty approval. So a third way to earn
           # `review` — a completed walkthrough naming this exact commit. The
           # evidence is the range, never the emptiness.
+          # #2145: a NEW thread is evidence of a read; a REPLY inside a thread
+          # a human already started is not. The reply-wrapper COMMENTED
+          # reviews CodeRabbit posts (bodyless, commit_id set, inline comments
+          # that are all in_reply_to_id-bearing replies) satisfied this check
+          # before the inReplyTo filter, and outranked the throttle that
+          # followed because their commit_id named the head. See #2128.
           kind: (if ((.body // "") | length) > 0
-                    or ([ $in.reviewComments[]? | select((((.createdAt // "") | secs) // 0) >= $since) ] | length) > 0
+                    or ([ $in.reviewComments[]?
+                          | select((((.createdAt // "") | secs) // 0) >= $since)
+                          | select((.inReplyTo // null) == null) ] | length) > 0
                     or ($cw != null)
                  then "review" else "empty-review" end),
           # True only when the walkthrough is what carried it, so the
           # headline can say where the verdict came from.
           promoted: (((.body // "") | length) == 0
-                     and ([ $in.reviewComments[]? | select((((.createdAt // "") | secs) // 0) >= $since) ] | length) == 0
+                     and ([ $in.reviewComments[]?
+                            | select((((.createdAt // "") | secs) // 0) >= $since)
+                            | select((.inReplyTo // null) == null) ] | length) == 0
                      and ($cw != null)),
           rstate: (.state // "?"),
           commitId: (.commitId // ""),
@@ -413,8 +423,13 @@ assemble_input() {
         statusState: (($s.state) // ""), statusDesc: (($s.description) // ""),
         comments: [ $comments[] | select(.user.login == $bot)
                     | {createdAt: .created_at, body: (.body // "")} ],
+        # inReplyTo carries the GitHub in_reply_to_id field: set when the
+        # comment replies inside an existing review thread rather than
+        # opening a new one. #2145 — a reply is not evidence CodeRabbit read
+        # the diff, only that it answered a human in a thread the human
+        # started.
         reviewComments: [ $revcomments[] | select(.user.login == $bot)
-                    | {createdAt: .created_at} ],
+                    | {createdAt: .created_at, inReplyTo: (.in_reply_to_id // null)} ],
         reviews:  [ $reviews[]  | select(.user.login == $bot)
                     | select((.state // "") != "PENDING")
                     | {submittedAt: .submitted_at, state: .state,

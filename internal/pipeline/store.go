@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Sentinel errors returned by Store. Wrap with %w if you need to add
@@ -43,12 +44,16 @@ const testRunFreshness = 5 * time.Minute
 // can be cancelled when the request is.
 type Store struct {
 	db *sql.DB
+	// now is injectable so timestamp-ordering tests (#2294) can drive two
+	// writes at exact, colliding instants instead of racing a real clock —
+	// same pattern as TrustGrantStore.now in trust_grants.go.
+	now func() time.Time
 }
 
 // NewStore returns a Store backed by the given DB handle. The handle
 // must already be open and migrated to v78 or later.
 func NewStore(db *sql.DB) *Store {
-	return &Store{db: db}
+	return &Store{db: db, now: time.Now}
 }
 
 // purgeJournalForPipeline deletes every journal entry carrying the given
@@ -146,7 +151,7 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 	}
 
 	hash := definitionHash(in.DefinitionJSON)
-	now := time.Now().UTC()
+	now := s.now().UTC()
 
 	// Look up existing row by (workspace_id, slug). If present,
 	// update in place (preserving id, created_at, invocation_count
@@ -229,10 +234,10 @@ WHERE id = ?`,
 			nullStr(in.Author.CrewID), nullStr(in.Author.AgentID), nullStr(in.Author.UserID),
 			nullStr(in.Author.ChatID), nullStr(in.Author.RunID),
 			string(in.Author.Via), nullStr(in.Author.ImportedURL),
-			in.LastTestRunAt.UTC().Format(time.RFC3339Nano), // tsformat:allow: last_test_run_at freshness is checked in Go via time.Since, never SQL-compared
+			tsformat.Format(*in.LastTestRunAt),
 			nullStr(in.ExecutionTierJSON),
 			status,
-			now.Format(time.RFC3339Nano), // tsformat:allow: updated_at is not currently ordered/compared in SQL anywhere
+			tsformat.Format(now),
 			existingID,
 		)
 		if err != nil {
@@ -295,10 +300,10 @@ INSERT INTO pipelines (
 		nullStr(in.Author.CrewID), nullStr(in.Author.AgentID), nullStr(in.Author.UserID),
 		nullStr(in.Author.ChatID), nullStr(in.Author.RunID),
 		string(in.Author.Via), nullStr(in.Author.ImportedURL),
-		in.LastTestRunAt.UTC().Format(time.RFC3339Nano),
+		tsformat.Format(*in.LastTestRunAt),
 		nullStr(in.ExecutionTierJSON),
 		status,
-		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
+		tsformat.Format(now), tsformat.Format(now),
 	)
 	if err != nil {
 		// SQLite UNIQUE constraint surfaces as a "constraint failed"
@@ -400,7 +405,7 @@ INSERT INTO pipeline_versions (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		generateVersionID(), pipelineID, newVersion, in.DefinitionJSON, hash,
 		authorType, authorID, parentVal, changeSummary,
-		now.Format(time.RFC3339Nano),
+		tsformat.Format(now),
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") {
@@ -503,7 +508,7 @@ LIMIT %d`, pipelineColumns, strings.Join(conds, " AND "), orderBy, limit)
 // reference id), and the row is excluded from List / GetBySlug /
 // GetByID via the deleted_at IS NULL guard.
 func (s *Store) SoftDelete(ctx context.Context, id string) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(s.now())
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE pipelines SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
 		now, now, id)
@@ -521,7 +526,7 @@ func (s *Store) SoftDelete(ctx context.Context, id string) error {
 // via SoftDelete), and disable (→disabled) governance endpoints. Returns
 // ErrNotFound when no live row matches so callers can map to 404.
 func (s *Store) SetStatus(ctx context.Context, id, status string) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(s.now())
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE pipelines SET status = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
 		status, now, id)
@@ -542,7 +547,7 @@ func (s *Store) SetMonthlyBudget(ctx context.Context, id string, amountUSD float
 	if amountUSD < 0 {
 		return fmt.Errorf("pipeline: monthly budget cannot be negative")
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: pipelines.updated_at is not ordered/compared in SQL; the whole pipelines table writes RFC3339Nano consistently
+	now := tsformat.Format(s.now())
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE pipelines SET monthly_budget_usd = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
 		amountUSD, now, id)
@@ -561,7 +566,10 @@ func (s *Store) SetMonthlyBudget(ctx context.Context, id string, amountUSD float
 // row is soft-deleted mid-run, we silently no-op — the run already
 // happened and journal_entries hold the truth.
 func (s *Store) RecordInvocation(ctx context.Context, id string, status string) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: last_invoked_at IS ordered at :455 but every pipelines timestamp (created_at/updated_at/last_invoked_at) is written RFC3339Nano, so the COALESCE(last_invoked_at, created_at) sort compares like-for-like
+	// #2294: fixed-width so COALESCE(last_invoked_at, created_at) DESC (List's
+	// OrderByRecent, :455) compares like-for-like — see tsformat's own doc
+	// comment for why the old trimmed-fraction format broke that sort.
+	now := tsformat.Format(s.now())
 	_, err := s.db.ExecContext(ctx, `
 UPDATE pipelines
 SET invocation_count = invocation_count + 1,
@@ -722,7 +730,7 @@ func scanPipeline(rs rowScanner) (*Pipeline, error) {
 func (s *Store) SetAppearance(ctx context.Context, workspaceID, slug, icon, color string) error {
 	iconVal := sql.NullString{String: icon, Valid: icon != ""}
 	colorVal := sql.NullString{String: color, Valid: color != ""}
-	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: pipelines.updated_at is not ordered/compared in SQL; the whole pipelines table writes RFC3339Nano consistently
+	now := tsformat.Format(s.now())
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE pipelines SET icon = ?, color = ?, updated_at = ?
          WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`,
