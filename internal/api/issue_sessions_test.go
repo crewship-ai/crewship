@@ -25,6 +25,12 @@ func TestMentions_SecondMentionReusesTheSameSession(t *testing.T) {
 
 	f.comment(t, "first "+mentionToken("lead", f.target))
 	f.comment(t, "second "+mentionToken("lead", f.target))
+	// B4 (§10.1, #2343): the session's state now genuinely moves as its
+	// runs claim and finish, so — unlike before B4, when 'pending' was a
+	// static value nothing ever touched — the assertions below must wait
+	// for both dispatched runs to actually settle rather than racing their
+	// background goroutines.
+	f.assign.WaitDispatches()
 
 	if n := f.assignments(t); n != 2 {
 		t.Fatalf("assignments = %d, want 2 — two separate mentions, two runs", n)
@@ -96,8 +102,17 @@ func TestMentions_SecondMentionReusesTheSameSession(t *testing.T) {
 	if got2[0].ID != sessionID {
 		t.Errorf("ListSessions id = %q, want %q", got2[0].ID, sessionID)
 	}
-	if got2[0].State != "pending" {
-		t.Errorf("state = %q, want pending", got2[0].State)
+	// B4 (§10.1, #2343): this fixture's AssignmentHandler has no
+	// orchestrator wired (setupMentionFixture passes nil), so every
+	// dispatched run fails immediately with "orchestrator not available"
+	// — status=FAILED — and settleSessionForAssignment moves the session
+	// 'active' -> 'error' once the SECOND run (the one that actually holds
+	// active_run_id last) finishes. Before B4 this column was written once,
+	// at creation, and never touched again; asserting 'error' here pins
+	// that the claim/settle transitions this file adds actually fire on
+	// the ordinary mention path, not just in an isolated unit test.
+	if got2[0].State != "error" {
+		t.Errorf("state = %q, want error (both runs failed — no orchestrator wired in this fixture)", got2[0].State)
 	}
 }
 
