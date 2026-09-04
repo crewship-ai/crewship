@@ -48698,7 +48698,14 @@
                       "id": {
                         "type": "string"
                       },
+                      "mission_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
                       "result_summary": {
+                        "type": "string"
+                      },
+                      "source": {
                         "type": "string"
                       },
                       "started_at": {
