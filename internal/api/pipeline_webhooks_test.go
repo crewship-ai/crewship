@@ -26,6 +26,18 @@ import (
 // the FireWebhook path also needs SetRunner to advance past the
 // service-unavailable guard, so callers that exercise dispatch should
 // wire one explicitly.
+//
+// SetRunStore is wired here too (#2283) — pipeline_runs persistence is an
+// opt-in dependency (PipelineHandler.runStore, pipelines.go, "optional; nil
+// → ... no persistence"), and every pre-existing FireWebhook test built its
+// handler without it, so none of them could ever have caught a regression
+// that broke run persistence for a webhook-triggered run; they only ever
+// asserted the HTTP response body or the mock runner's call count. db is
+// always testutil.MigratedSQLDB here, so the pipeline_runs table this needs
+// is already in place — there is no reason for a caller to build this rig
+// without a store, which is exactly what TestNewExecutorTripsRunStoreGuard
+// (executor_runstore_guard_test.go) checks for the *pipeline.Executor side
+// of this same gap.
 func webhookHandlerRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string) {
 	t.Helper()
 	db := setupTestDB(t)
@@ -34,6 +46,7 @@ func webhookHandlerRig(t *testing.T) (*PipelineHandler, *sql.DB, string, string)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	h := NewPipelineHandler(db, logger, nil, nil)
 	h.SetWebhookStore(pipeline.NewWebhookStore(db))
+	h.SetRunStore(pipeline.NewRunStore(db))
 	// Drain async FireWebhook run goroutines before the test DB closes
 	// (registered after setupTestDB's cleanup, so it runs first).
 	t.Cleanup(h.WaitWebhookDispatches)
@@ -599,8 +612,24 @@ func TestPipelineWebhooks_Fire_ValidSignature_Accepts202(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if _, ok := resp["run_id"]; !ok {
+	runID, ok := resp["run_id"]
+	if !ok {
 		t.Errorf("response missing run_id: %v", resp)
+	}
+
+	// #2283: the response carrying a run_id is not proof a run actually
+	// persisted — that is exactly the gap this rig used to have (no
+	// RunStore wired at all, so a broken FireWebhook could still have
+	// answered 202+run_id while writing nothing to pipeline_runs). Wait
+	// for the async dispatch goroutine FireWebhook kicked off, then check
+	// the real table, not just the mock runner's having been called.
+	h.WaitWebhookDispatches()
+	var n int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipeline_runs WHERE id = ?`, runID).Scan(&n); err != nil {
+		t.Fatalf("count pipeline_runs for %v: %v", runID, err)
+	}
+	if n != 1 {
+		t.Errorf("pipeline_runs row for run_id %v: got %d rows, want 1 — the run_id the response promised was never persisted", runID, n)
 	}
 }
 

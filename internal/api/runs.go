@@ -26,12 +26,17 @@ func NewRunHandler(db *sql.DB, logger *slog.Logger) *RunHandler {
 }
 
 type runResponse struct {
-	ID           string          `json:"id"`
-	AgentID      string          `json:"agent_id"`
-	ChatID       *string         `json:"chat_id"`
-	WorkspaceID  string          `json:"workspace_id"`
-	TriggeredBy  *string         `json:"triggered_by"`
-	TriggerType  string          `json:"trigger_type"`
+	ID          string  `json:"id"`
+	AgentID     string  `json:"agent_id"`
+	ChatID      *string `json:"chat_id"`
+	WorkspaceID string  `json:"workspace_id"`
+	TriggeredBy *string `json:"triggered_by"`
+	TriggerType string  `json:"trigger_type"`
+	// Kind discriminates which engine produced this run: "agent" for an
+	// ad-hoc agent/chat execution, "pipeline" for a routine run. Added for
+	// #2284 — before this, a routine run couldn't reach this endpoint at
+	// all, so there was nothing to discriminate.
+	Kind         string          `json:"kind"`
 	Status       string          `json:"status"`
 	StartedAt    *string         `json:"started_at"`
 	FinishedAt   *string         `json:"finished_at"`
@@ -529,6 +534,7 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			AgentID:      r.AgentID,
 			WorkspaceID:  r.WorkspaceID,
 			TriggerType:  r.TriggerType,
+			Kind:         string(r.Kind),
 			Status:       string(r.Status),
 			ErrorMessage: stringPtrOrNil(r.ErrorMessage),
 			ExitCode:     r.ExitCode,

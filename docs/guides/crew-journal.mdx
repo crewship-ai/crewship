@@ -496,6 +496,8 @@ The Runs tab has four sections. The KPI row and breakdowns (2-3) are scoped by a
 3. **Breakdowns** — by **trigger** (schedule / agent / user / webhook / system), **top crews** (volume + fail rate), and by **model** (e.g. Opus vs Sonnet — the resolved model recorded on each run).
 4. **Recent runs table** — a filterable list (status + trigger); each row deep-links to that run's trace in the Timeline. Includes the resolved **Model** column.
 
+Sections 1 and 4 both read `GET /api/v1/runs`, which since #2284 includes routine/pipeline runs alongside ad-hoc ones (each row tagged `kind: "agent" | "pipeline"` — see [`/api-reference/runs`](/api-reference/runs)). Sections 2 and 3 (the KPI row and breakdowns, backed by `/api/v1/runs/insights` below) still aggregate ad-hoc runs only — #2284 deliberately didn't widen that endpoint. A routine run's row in section 4 currently deep-links the same way an ad-hoc row's does (`trace_id`), which a routine run doesn't have — that link is a known gap, not something #2284 addressed; use the routine's own run history (`crewship routine runs-all` / `routine records <slug>`) to open one until it's wired up.
+
 Sections 2 and 3 are backed by a dedicated aggregate:
 
 ```

@@ -49,13 +49,94 @@ CREATE TABLE IF NOT EXISTS pipeline_schedules (
 );
 `
 
+// pipelineRunsTestSchemaSQL adds the pipeline_runs table (+ the two
+// satellite tables RunStore writes to mid-run) on top of scheduleSchemaSQL's
+// workspaces/pipelines. It is the same minimal v83 shape openRunsTestDB
+// (runs_test.go) uses, factored out so any rig in this package can opt an
+// executor into real persistence without hand-rolling the schema — see
+// openScheduleTestDBWithRunStore below, #2283.
+const pipelineRunsTestSchemaSQL = `
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id                  TEXT PRIMARY KEY,
+    workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    pipeline_id         TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+    pipeline_slug       TEXT NOT NULL,
+    pipeline_version    INTEGER,
+    definition_hash     TEXT,
+    status              TEXT NOT NULL,
+    mode                TEXT NOT NULL DEFAULT 'run',
+    started_at          TEXT NOT NULL,
+    ended_at            TEXT,
+    current_step_id     TEXT,
+    step_outputs_json   TEXT NOT NULL DEFAULT '{}',
+    output              TEXT,
+    cost_usd            REAL NOT NULL DEFAULT 0,
+    duration_ms         INTEGER NOT NULL DEFAULT 0,
+    error_message       TEXT,
+    failed_at_step      TEXT,
+    error_fingerprint   TEXT,
+    invoking_crew_id    TEXT,
+    invoking_agent_id   TEXT,
+    invoking_user_id    TEXT,
+    triggered_via       TEXT NOT NULL DEFAULT 'manual',
+    triggered_by_id     TEXT,
+    idempotency_key     TEXT,
+    inputs_json         TEXT NOT NULL DEFAULT '{}',
+    concurrency_key     TEXT,
+    metadata_json       TEXT NOT NULL DEFAULT '{}',
+    is_replay           INTEGER NOT NULL DEFAULT 0,
+    replay_of           TEXT,
+    warnings_json       TEXT NOT NULL DEFAULT '[]',
+    chain_depth         INTEGER NOT NULL DEFAULT 0,
+    chain_origin        TEXT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
+);
+CREATE TABLE IF NOT EXISTS pipeline_run_step_outputs (
+    run_id     TEXT NOT NULL,
+    step_id    TEXT NOT NULL,
+    output     TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, step_id)
+);
+CREATE TABLE IF NOT EXISTS run_tags (
+    run_id       TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    tag          TEXT NOT NULL,
+    PRIMARY KEY (run_id, tag)
+);
+`
+
 func openScheduleTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openStoreTestDB(t)
 	if _, err := db.ExecContext(context.Background(), scheduleSchemaSQL); err != nil {
 		t.Fatalf("schedule schema: %v", err)
 	}
+	// pipeline_runs (+ satellites) is included unconditionally, not behind a
+	// separate opt-in opener, so every rig built on this function CAN wire a
+	// RunStore — see newScheduleExecutor below (#2283). A rig that never
+	// calls WithRunStore just leaves the table empty; carrying the schema
+	// costs nothing and removes the "which DB opener has the table" question
+	// a second variant would have created.
+	if _, err := db.ExecContext(context.Background(), pipelineRunsTestSchemaSQL); err != nil {
+		t.Fatalf("pipeline_runs schema: %v", err)
+	}
 	return db
+}
+
+// newScheduleExecutor builds an Executor wired with a RunStore against db —
+// the shape every production schedule/webhook trigger path actually runs
+// with (cmd/crewship/cmd_start.go's NewWiredExecutor call always sets
+// RunStore; internal/api/pipelines.go's newExecutor does too whenever the
+// handler's runStore is set). Every rig in this package that builds an
+// executor for a real fire (not just a pure-function unit like
+// evalWakeProbe) should go through this rather than a bare unwired call
+// — TestNewExecutorTripsRunStoreGuard (executor_runstore_guard_test.go)
+// enforces that for schedules_test.go, schedules_catchup_test.go and
+// schedules_wake*_test.go, the three files #2283 found never wired one.
+func newScheduleExecutor(pipelines *Store, resolver *Resolver, runner AgentRunner, db *sql.DB) *Executor {
+	return NewExecutor(pipelines, resolver, runner, nil).WithRunStore(NewRunStore(db))
 }
 
 // seedPipeline inserts a pipeline row directly so schedule tests
@@ -342,7 +423,7 @@ func TestPipelineScheduler_Tick_FiresDueSchedule(t *testing.T) {
 	pipelineStore := NewStore(db)
 	resolver := NewResolver(db)
 	runner := &stubAgentRunner{}
-	exec := NewExecutor(pipelineStore, resolver, runner, nil)
+	exec := newScheduleExecutor(pipelineStore, resolver, runner, db)
 
 	// Seed a past-due schedule
 	pastTime := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
@@ -374,6 +455,22 @@ VALUES ('psched_due', 'ws_test', 'due', 'pipe_1', '0 8 * * *', 'UTC', '{}', 1, ?
 	if got.LastStatus != "COMPLETED" {
 		t.Errorf("expected last_status COMPLETED, got %q", got.LastStatus)
 	}
+
+	// #2283: the mock runner's call count and the schedule row's own
+	// last_status/last_run_id are not proof a pipeline_runs row exists —
+	// they are exactly what the pre-existing suite checked while this rig
+	// built its executor with no RunStore wired at all. Check the ground
+	// truth table an operator/CLI would actually query.
+	if got.LastRunID == "" {
+		t.Fatalf("schedule row has no last_run_id to check pipeline_runs against")
+	}
+	var runCount int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipeline_runs WHERE id = ?`, got.LastRunID).Scan(&runCount); err != nil {
+		t.Fatalf("count pipeline_runs for %s: %v", got.LastRunID, err)
+	}
+	if runCount != 1 {
+		t.Errorf("pipeline_runs row for %s: got %d rows, want 1 — a due schedule fired but left no persisted run", got.LastRunID, runCount)
+	}
 }
 
 func TestPipelineScheduler_Tick_DisablesScheduleOnBadCron(t *testing.T) {
@@ -382,7 +479,7 @@ func TestPipelineScheduler_Tick_DisablesScheduleOnBadCron(t *testing.T) {
 	seedPipeline(t, db, "pipe_1", "x")
 	scheduleStore := NewScheduleStore(db)
 	pipelineStore := NewStore(db)
-	exec := NewExecutor(pipelineStore, NewResolver(db), &stubAgentRunner{}, nil)
+	exec := newScheduleExecutor(pipelineStore, NewResolver(db), &stubAgentRunner{}, db)
 
 	// Bypass Save's validation by inserting a bad cron directly —
 	// simulates a row whose cron expr was once valid but the parser

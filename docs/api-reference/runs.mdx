@@ -6,12 +6,19 @@ stability: experimental
 tag: Experimental
 ---
 
-A "run" is one agent execution — orchestrator picks up an assignment, exec's the CLI, the run ends with one of `COMPLETED` / `FAILED` / `CANCELLED` / `TIMEOUT`. Since PR #234 the legacy `agent_runs` table is gone; runs are reconstructed from the [Crew Journal](/guides/crew-journal) by grouping `journal_entries` on `trace_id` (which equals the run id). The HTTP shape is preserved — frontend consumers don't see a contract change.
+A "run" is one execution — either an ad-hoc agent/chat run (orchestrator picks up an assignment, exec's the CLI) or a routine/pipeline run — and ends with one of `COMPLETED` / `FAILED` / `CANCELLED` / `TIMEOUT`. Since PR #234 the legacy `agent_runs` table is gone; runs are reconstructed from the [Crew Journal](/guides/crew-journal). The two engines key their journal entries differently, and `GET /api/v1/runs` and `GET /api/v1/runs/{id}` read both (#2284):
+
+- An **ad-hoc** run's entries (`run.started` + one terminal `run.{completed|failed|cancelled|timeout}`) are grouped on `trace_id`, which equals the run id.
+- A **routine/pipeline** run's entries (`pipeline.run.started` + one terminal `pipeline.run.{completed|failed}`) never set `trace_id`; they're grouped on `actor_id` instead, which the pipeline engine stamps to the run's own id. There is no dedicated `pipeline.run.cancelled` — a run cancelled mid-flight is still `pipeline.run.failed`, with the real outcome on `payload.status`.
+
+Every row carries `kind: "agent" | "pipeline"` so a caller can tell which engine produced it. The HTTP shape otherwise stays the one frontend consumers already know — this widened what rows can appear, not the shape of a row.
+
+`GET /api/v1/runs/insights` and the `stats` object embedded in `GET /api/v1/runs` are **not** widened by #2284 — both still aggregate ad-hoc runs only (`journal.RunInsights` / `journal.RunStats`). That was a deliberate scope limit: unifying cost roll-ups and correlation across the two engines is a separate decision with its own consequences.
 
 Every endpoint is workspace-scoped via the session context.
 
 <Note>
-  Runs are **read-only** — there is no write endpoint. A run comes into existence when the orchestrator emits `run.started` and concludes when a terminal `run.{completed|failed|cancelled|timeout}` lands on the same `trace_id`.
+  Runs are **read-only** — there is no write endpoint. An ad-hoc run comes into existence when the orchestrator emits `run.started` and concludes when a terminal `run.{completed|failed|cancelled|timeout}` lands on the same `trace_id`. A routine run comes into existence when the pipeline engine emits `pipeline.run.started` and concludes when `pipeline.run.{completed|failed}` lands on the same `actor_id`.
 </Note>
 
 ## Endpoints
@@ -30,15 +37,15 @@ Every endpoint is workspace-scoped via the session context.
 GET /api/v1/runs
 ```
 
-Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadata. Backed by `journal.ListRuns` (CTE-grouped over `journal_entries` keyed on `trace_id`) plus `journal.RunStats` for the tiles.
+Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadata. Backed by `journal.ListRuns` — a CTE-grouped read over `journal_entries`, keyed on `trace_id` for an ad-hoc run and `actor_id` for a routine/pipeline run (`COALESCE(trace_id, actor_id)`, #2284) — plus `journal.RunStats` for the tiles (ad-hoc runs only; see the note above).
 
 **Query parameters:**
 
 | Param | Type | Description |
 |---|---|---|
-| `status` | string | Filter to one of `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT`. Invalid values → `400`. |
-| `agent_id` | string | Filter by agent. |
-| `trigger` | string | Filter by `payload.trigger_type` on the `run.started` entry (e.g. `USER`, `WEBHOOK`, `CRON`). |
+| `status` | string | Filter to one of `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT`. Invalid values → `400`. For a routine run, `FAILED`/`CANCELLED` are resolved from `payload.status` on its `pipeline.run.failed` terminal, since that entry type covers both outcomes. |
+| `agent_id` | string | Filter by agent. For a routine run this is the *invoking* agent (empty for a schedule/webhook-triggered run with no invoking agent), not necessarily who executed each step. |
+| `trigger` | string | Filter by `payload.trigger_type` on the `run.started` entry (e.g. `USER`, `WEBHOOK`, `CRON`). Routine runs don't currently populate `trigger_type` and are excluded by this filter — use `kind` client-side to find them instead. |
 | `tag` | string | Match a single tag inside `payload.metadata.tags` array on the `run.started` entry. |
 | `page` | integer | 1-based page index, default `1`. Values below `1` become `1`; values above the server's maximum page are capped. |
 | `limit` | integer | Page size, 1-100, default `50`. Out-of-range values fall back to the default. |
@@ -58,6 +65,7 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
       "chat_id": "chat_xyz",
       "triggered_by": "user_42",
       "trigger_type": "USER",
+      "kind": "agent",
       "status": "COMPLETED",
       "started_at": "2026-04-30T10:00:00Z",
       "finished_at": "2026-04-30T10:02:00Z",
@@ -66,6 +74,25 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
       "metadata": {"tags": ["urgent", "compliance"]},
       "model": "claude-opus-4-6",
       "created_at": "2026-04-30T10:00:00Z"
+    },
+    {
+      "id": "run_p7q8r9",
+      "workspace_id": "ws_123",
+      "agent_id": "agt_viktor",
+      "agent_name": "Viktor",
+      "agent_slug": "viktor",
+      "crew_name": "Backend",
+      "chat_id": null,
+      "triggered_by": null,
+      "trigger_type": "",
+      "kind": "pipeline",
+      "status": "COMPLETED",
+      "started_at": "2026-04-30T09:00:00Z",
+      "finished_at": "2026-04-30T09:01:12Z",
+      "error_message": null,
+      "exit_code": null,
+      "metadata": null,
+      "created_at": "2026-04-30T09:00:00Z"
     }
   ],
   "stats": {
@@ -84,19 +111,20 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 
 | Field | Type | Description |
 |---|---|---|
-| `data[].id` | string | The run's `trace_id`. |
-| `data[].status` | string | Computed from the terminal entry's type. `RUNNING` when no terminal has landed. |
-| `data[].started_at` | string? | RFC3339 from `run.started`. Null only on a corrupt row that lost its starter. |
+| `data[].id` | string | The run's `trace_id` (ad-hoc) or `actor_id` (routine/pipeline, #2284) — see `kind`. |
+| `data[].kind` | string | `"agent"` for an ad-hoc agent/chat execution, `"pipeline"` for a routine run. Added in #2284. |
+| `data[].status` | string | Computed from the terminal entry's type. `RUNNING` when no terminal has landed. A routine run's `pipeline.run.failed` terminal resolves to `CANCELLED` when `payload.status` says so, else `FAILED` — there is no dedicated `pipeline.run.cancelled` entry type. |
+| `data[].started_at` | string? | RFC3339 from `run.started` / `pipeline.run.started`. Null only on a corrupt row that lost its starter. |
 | `data[].finished_at` | string? | RFC3339 from the terminal entry. Null while still running. |
 | `data[].error_message` | string? | Pulled from `terminal.payload.error_message`. Null on success. |
-| `data[].exit_code` | integer? | Pulled from `terminal.payload.exit_code`. Null while running. |
-| `data[].metadata` | object? | Pulled from `started.payload.metadata`. Free-shape per orchestrator. |
-| `data[].model` | string? | The model the run actually resolved to (session-init ground truth). Omitted (`omitempty`) when unknown — older runs, non-Claude adapters. |
+| `data[].exit_code` | integer? | Pulled from `terminal.payload.exit_code`. Ad-hoc runs only — a routine run's terminal payload has no exit code, so this is always null for `kind: "pipeline"`. |
+| `data[].metadata` | object? | Pulled from `started.payload.metadata`. Free-shape per orchestrator. Always null for a routine run — its `pipeline.run.started` payload doesn't carry a `metadata` key. |
+| `data[].model` | string? | The model the run actually resolved to (session-init ground truth). Omitted (`omitempty`) when unknown — older runs, non-Claude adapters, and every routine run (the pipeline engine doesn't stamp this yet). |
 | `data[].agent_name` / `agent_slug` | string? | Enriched from the `agents` table by the handler (one extra workspace-scoped SELECT per page). |
 | `data[].crew_name` | string? | Enriched via the `agents.crew_id` → `crews.name` join. |
-| `stats.running` | integer | Distinct trace_ids with `run.started` and no terminal in the workspace. |
-| `stats.today` | integer | Distinct trace_ids with `run.started` `ts >= start-of-today UTC`. |
-| `stats.failed` | integer | Distinct trace_ids with `run.failed` or `run.timeout` today. |
+| `stats.running` | integer | Distinct trace_ids with `run.started` and no terminal in the workspace. **Ad-hoc runs only** — not widened by #2284. |
+| `stats.today` | integer | Distinct trace_ids with `run.started` `ts >= start-of-today UTC`. **Ad-hoc runs only.** |
+| `stats.failed` | integer | Distinct trace_ids with `run.failed` or `run.timeout` today. **Ad-hoc runs only.** |
 
 **Errors:**
 
@@ -170,13 +198,13 @@ crew rollup and a display-named top-agents leaderboard (one workspace-scoped
 GET /api/v1/runs/{id}
 ```
 
-Returns a single run by trace id. The response shape is identical to one element of the `data[]` array from `GET /api/v1/runs` -- the handler reuses the same enrichment so dashboard detail views can share the row renderer.
+Returns a single run by id. The response shape is identical to one element of the `data[]` array from `GET /api/v1/runs` -- the handler reuses the same enrichment so dashboard detail views can share the row renderer.
 
 **Path parameters:**
 
 | Param | Description |
 |---|---|
-| `id` | The run's `trace_id`. |
+| `id` | The run's `trace_id` (ad-hoc) or `actor_id` (routine/pipeline). The caller doesn't need to know which — `journal.GetRunByID` tries both (#2284). |
 
 **Response:** `200 OK`
 
