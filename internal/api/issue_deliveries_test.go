@@ -241,6 +241,103 @@ func TestDeliveries_ConsumeRequiresClaimedState(t *testing.T) {
 	}
 }
 
+// TestDeliveries_FailClaimedDelivery_RequiresClaimedState mirrors
+// TestDeliveries_ConsumeRequiresClaimedState for the OTHER terminal
+// transition out of 'claimed' — a claim that will never get a run
+// (deliverAndDispatch's self-mention/refused/skipped branch) resolves via
+// this CAS instead of consumeDelivery's, and must require the same
+// state='claimed' precondition.
+func TestDeliveries_FailClaimedDelivery_RequiresClaimedState(t *testing.T) {
+	db := setupTestDB(t)
+	_, missionID, agentID := seedDeliveryFixture(t, db)
+	seedDeliveryEvent(t, db, missionID, "evt_fail_claimed")
+
+	delivery, err := createDelivery(context.Background(), db, deliveryParams{
+		WorkspaceID: "ws_dlv", MissionID: missionID, EventID: "evt_fail_claimed", AgentID: agentID,
+	})
+	if err != nil {
+		t.Fatalf("createDelivery: %v", err)
+	}
+
+	failed, err := failClaimedDelivery(context.Background(), db, delivery.ID)
+	if err != nil {
+		t.Fatalf("failClaimedDelivery on a pending row: %v", err)
+	}
+	if failed {
+		t.Fatal("failClaimedDelivery succeeded on a still-pending row — it must require state='claimed'")
+	}
+
+	if _, err := claimDelivery(context.Background(), db, delivery.ID); err != nil {
+		t.Fatalf("claimDelivery: %v", err)
+	}
+	failed, err = failClaimedDelivery(context.Background(), db, delivery.ID)
+	if err != nil {
+		t.Fatalf("failClaimedDelivery on a claimed row: %v", err)
+	}
+	if !failed {
+		t.Fatal("failClaimedDelivery failed on a claimed row")
+	}
+
+	var state string
+	if err := db.QueryRow(`SELECT state FROM mission_comment_mentions WHERE id = ?`, delivery.ID).Scan(&state); err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state != "failed" {
+		t.Errorf("state = %q, want %q", state, "failed")
+	}
+}
+
+// TestDeliveries_AbandonPendingDelivery_RequiresPendingState covers the
+// third terminal transition: a claim CAS that itself errored (never won,
+// never lost cleanly) resolves a still-pending row via this CAS. It must
+// require state='pending' and must be a no-op once the row has moved on
+// (claimed by a normal, successful claimDelivery call).
+func TestDeliveries_AbandonPendingDelivery_RequiresPendingState(t *testing.T) {
+	db := setupTestDB(t)
+	_, missionID, agentID := seedDeliveryFixture(t, db)
+	seedDeliveryEvent(t, db, missionID, "evt_abandon")
+
+	delivery, err := createDelivery(context.Background(), db, deliveryParams{
+		WorkspaceID: "ws_dlv", MissionID: missionID, EventID: "evt_abandon", AgentID: agentID,
+	})
+	if err != nil {
+		t.Fatalf("createDelivery: %v", err)
+	}
+
+	if _, err := claimDelivery(context.Background(), db, delivery.ID); err != nil {
+		t.Fatalf("claimDelivery: %v", err)
+	}
+	abandoned, err := abandonPendingDelivery(context.Background(), db, delivery.ID)
+	if err != nil {
+		t.Fatalf("abandonPendingDelivery on a claimed row: %v", err)
+	}
+	if abandoned {
+		t.Fatal("abandonPendingDelivery succeeded on a claimed row — it must require state='pending'")
+	}
+
+	seedDeliveryEvent(t, db, missionID, "evt_abandon_2")
+	delivery2, err := createDelivery(context.Background(), db, deliveryParams{
+		WorkspaceID: "ws_dlv", MissionID: missionID, EventID: "evt_abandon_2", AgentID: agentID,
+	})
+	if err != nil {
+		t.Fatalf("createDelivery 2: %v", err)
+	}
+	abandoned, err = abandonPendingDelivery(context.Background(), db, delivery2.ID)
+	if err != nil {
+		t.Fatalf("abandonPendingDelivery on a pending row: %v", err)
+	}
+	if !abandoned {
+		t.Fatal("abandonPendingDelivery failed on a still-pending row")
+	}
+	var state string
+	if err := db.QueryRow(`SELECT state FROM mission_comment_mentions WHERE id = ?`, delivery2.ID).Scan(&state); err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state != "failed" {
+		t.Errorf("state = %q, want %q", state, "failed")
+	}
+}
+
 // TestDeliveries_ConsumeDeliveriesForRun_OnlyTouchesThatRunsClaims: the bulk
 // consume finishAssignment calls must scope strictly to claimed_by_run_id —
 // a delivery claimed by a DIFFERENT run must be untouched.
@@ -445,13 +542,15 @@ func TestMentions_DeliveryAckedBeforeDispatch(t *testing.T) {
 	}
 }
 
-// TestMentions_SelfMentionConsumesItsOwnDelivery: a self-mention is claimed
+// TestMentions_SelfMentionResolvesItsOwnDelivery: a self-mention is claimed
 // (deliverAndDispatch wins the CAS) but dispatchOne refuses to call
 // DispatchMention at all — no assignment is ever created, so nothing will
 // ever call finishAssignment for this delivery. deliverAndDispatch must
-// resolve it inline (consumeDelivery) rather than leaving it 'claimed'
-// forever.
-func TestMentions_SelfMentionConsumesItsOwnDelivery(t *testing.T) {
+// resolve it inline (failClaimedDelivery) rather than leaving it 'claimed'
+// forever. 'failed', not 'consumed' — no run ever touched it, and that must
+// read the same way whether the issue_deliveries flag was on (this path) or
+// off (persist's resolvedState mapping for the identical outcome).
+func TestMentions_SelfMentionResolvesItsOwnDelivery(t *testing.T) {
 	f := setupMentionFixture(t)
 	f.commentAsAgent(t, f.author, "note to self "+mentionToken("me", f.author))
 
@@ -460,8 +559,9 @@ func TestMentions_SelfMentionConsumesItsOwnDelivery(t *testing.T) {
 	if err := f.db.QueryRow(`SELECT state, claimed_by_run_id FROM mission_comment_mentions`).Scan(&state, &claimedBy); err != nil {
 		t.Fatalf("mention row missing: %v", err)
 	}
-	if state != "consumed" {
-		t.Errorf("state = %q, want consumed — a self-mention's delivery must not be left claimed forever", state)
+	if state != "failed" {
+		t.Errorf("state = %q, want failed — a self-mention's delivery must not be left claimed forever, "+
+			"and must agree with persist's resolvedState mapping for the same outcome with the flag off", state)
 	}
 	if claimedBy.Valid {
 		t.Errorf("claimed_by_run_id = %q, want NULL — no assignment was ever created for a self-mention", claimedBy.String)

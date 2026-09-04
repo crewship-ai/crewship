@@ -304,11 +304,17 @@ func (m mentionRecorder) deliverAndDispatch(
 	})
 	if err != nil {
 		m.logf("create delivery", mc, err)
-		// The delivery bookkeeping is best-effort, same as everything else in
-		// this file — a failure here must not silently swallow the mention
-		// itself, so fall through to the pre-B2 dispatch path rather than
-		// returning early.
-		return m.dispatchOne(ctx, mc, mention)
+		// Fail CLOSED, not open. An earlier version of this fell through to
+		// m.dispatchOne unconditionally here — but createDelivery can fail
+		// AFTER losing the INSERT race (the read-back SELECT errors), and a
+		// caller in that state has no idea whether it lost to a winner that
+		// is already dispatching. Falling through then risks the exact
+		// double-run invariant I1 exists to prevent, on precisely the
+		// SQLITE_BUSY case F57 says must be treated as "unknown", never as
+		// "safe to proceed". No delivery row to leave behind either — the
+		// row was never created (or, if it was, some other caller owns it —
+		// see createDelivery's own comment on IGNORE-then-SELECT).
+		return mentionDispatchFailed, "", err.Error()
 	}
 
 	if delivery.Created {
@@ -330,6 +336,17 @@ func (m mentionRecorder) deliverAndDispatch(
 	won, err := claimDelivery(ctx, m.db, delivery.ID)
 	if err != nil {
 		m.logf("claim delivery", mc, err)
+		// Distinct from losing the race (won==false, nil error, handled
+		// below): the CAS itself errored, so this row's fate is unknown —
+		// it may still be 'pending'. Resolve it explicitly rather than
+		// leaving a row that LOOKS terminal (dispatch_state is about to be
+		// written 'failed' by persist) sitting at state='pending' forever,
+		// where nothing will ever revisit it — B4's eventual lease sweep
+		// only reaps 'claimed' rows, and nothing scans for stuck 'pending'
+		// ones.
+		if _, aErr := abandonPendingDelivery(ctx, m.db, delivery.ID); aErr != nil {
+			m.logf("abandon pending delivery", mc, aErr)
+		}
 		return mentionDispatchFailed, "", err.Error()
 	}
 	if !won {
@@ -343,22 +360,29 @@ func (m mentionRecorder) deliverAndDispatch(
 
 	state, assignmentID, detail = m.dispatchOne(ctx, mc, mention)
 	if assignmentID != "" {
-		if err := attachDeliveryRun(ctx, m.db, delivery.ID, assignmentID); err != nil {
-			m.logf("attach delivery run", mc, err)
-		}
-		// state stays 'claimed' — consumeDeliveriesForRun (assignments_run.go,
-		// finishAssignment) transitions it to 'consumed' once the run this
-		// delivery started actually finishes.
+		// claimed_by_run_id is stamped by persist's own
+		// INSERT ... ON CONFLICT(event_id, agent_id) DO UPDATE, in the same
+		// statement that records dispatch_state/assignment_id — not here.
+		// See attachDeliveryRun's doc comment for why a second, separate
+		// UPDATE at this point is what an earlier revision did and what
+		// review caught: its own failure left claimed_by_run_id NULL on a
+		// delivery whose run really was executing, and
+		// consumeDeliveriesForRun's `WHERE claimed_by_run_id = ?` then never
+		// matched it. state stays 'claimed' here — consumeDeliveriesForRun
+		// (assignments_run.go, finishAssignment) transitions it to
+		// 'consumed' once the run this delivery started actually finishes.
 		return state, assignmentID, detail
 	}
 
 	// Claimed, but dispatch produced no run (self-mention, no dispatcher
 	// wired, a capacity refusal, or an error) — nothing will ever call
 	// finishAssignment for this delivery, so resolve it here rather than
-	// leaving it 'claimed' forever. See issue_deliveries.go's consumeDelivery
-	// doc comment.
-	if _, cErr := consumeDelivery(ctx, m.db, delivery.ID); cErr != nil {
-		m.logf("consume undispatched delivery", mc, cErr)
+	// leaving it 'claimed' forever. 'failed', not 'consumed' — see
+	// failClaimedDelivery's doc comment for why the state column has to
+	// agree with persist's resolvedState mapping for the identical outcome
+	// reached via the flag-off path.
+	if _, fErr := failClaimedDelivery(ctx, m.db, delivery.ID); fErr != nil {
+		m.logf("fail undispatched delivery", mc, fErr)
 	}
 	return state, assignmentID, detail
 }
@@ -510,6 +534,16 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 	if eventID != "" {
 		eventVal = eventID
 	}
+	// NULL, not "" — comment_id carries a real FK to mission_comments and the
+	// consistency trigger's guard is `NEW.comment_id IS NOT NULL`; an empty
+	// string is neither. createDelivery already made this conversion on its
+	// own INSERT; this is the same rule on persist's, which every caller of
+	// record reaches even when mc.CommentID is empty (an internal comment
+	// door that omits it, or a future non-comment producer).
+	var commentVal any
+	if mc.CommentID != "" {
+		commentVal = mc.CommentID
+	}
 	resolvedState := "failed"
 	if state == mentionDispatchDispatched {
 		resolvedState = "consumed"
@@ -520,10 +554,11 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 		     dispatch_state, assignment_id, dispatch_detail, state, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (event_id, agent_id) DO UPDATE SET
-		    dispatch_state  = excluded.dispatch_state,
-		    assignment_id   = excluded.assignment_id,
-		    dispatch_detail = excluded.dispatch_detail`,
-		generateCUID(), mc.WorkspaceID, mc.MissionID, mc.CommentID, eventVal, mention.AgentID,
+		    dispatch_state    = excluded.dispatch_state,
+		    assignment_id     = excluded.assignment_id,
+		    dispatch_detail   = excluded.dispatch_detail,
+		    claimed_by_run_id = excluded.assignment_id`,
+		generateCUID(), mc.WorkspaceID, mc.MissionID, commentVal, eventVal, mention.AgentID,
 		mention.Position, state, assignmentVal, detailVal, resolvedState,
 		time.Now().UTC().Format(time.RFC3339))
 	return err

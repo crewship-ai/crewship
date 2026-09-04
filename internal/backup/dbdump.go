@@ -212,11 +212,14 @@ var BackupTables = []string{
 	"mission_tasks",
 	"mission_activity",
 	"mission_comments",
-	// mission_comment_mentions FKs into missions, mission_comments, agents and
-	// assignments — all four are dumped ABOVE this line, which is what makes
-	// this position FK-safe. It must stay after "mission_comments" in
-	// particular: the parent comment is the row a mention is meaningless
-	// without, and PRAGMA foreign_keys is ON during restore.
+	// mission_comment_mentions FKs into missions, mission_comments, agents,
+	// assignments (assignment_id AND, since B2, claimed_by_run_id) and
+	// mission_activity (event_id, §9.3) — all five are dumped ABOVE this
+	// line, which is what makes this position FK-safe. It must stay after
+	// "mission_comments" in particular: the parent comment is the row a
+	// mention is meaningless without, and PRAGMA foreign_keys is ON during
+	// restore. mission_activity is dumped further above too (see its own
+	// entry), so event_id's FK is satisfied by the same ordering.
 	"mission_comment_mentions",
 	"mission_labels",
 	"mission_proposals",

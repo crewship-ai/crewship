@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/missionactivity"
 )
 
 // TestInternalIssueUpdateStatus_EmitsJournalEntry is the red-first test for
@@ -115,6 +116,47 @@ func TestIssueEvents_NilJournalAndHub(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("activity rows = %d, want 1", n)
+	}
+}
+
+// TestLogEvent_ReturnsNoIDWhenTheActivityWriteFails is the red-first test
+// for a review finding on #2338 (B2, PRD-ISSUES-AND-ROUTINES-2026 §9.3):
+// logEvent generated the activity row's id BEFORE calling missionactivity.Emit
+// and returned that id even when Emit failed and rolled back nothing was
+// ever written. Since B2 mission_comment_mentions.event_id is a real foreign
+// key into mission_activity(id), a caller (mentionRecorder.record) that
+// stored the phantom id would point a delivery row at a mission_activity row
+// that does not exist — createDelivery's own INSERT would then fail its FK
+// too, and a mention would dispatch a run while leaving NO trace anywhere,
+// worse than the pre-B2 behaviour it replaced.
+//
+// Forces Emit to fail with an invalid `action` — mission_activity's CHECK
+// constraint (20260904095700_mission_activity_widen.sql) rejects anything
+// outside its enumerated vocabulary, which is a reliable, deterministic way
+// to make Emit roll back without needing a lower-level fault injection.
+func TestLogEvent_ReturnsNoIDWhenTheActivityWriteFails(t *testing.T) {
+	db := setupTestDB(t)
+	_, wsID, crewID, leadID, _ := seedIssueFixtures(t, db)
+	id := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
+
+	e := issueEvents{db: db, hub: nil, logger: newTestLogger(), journal: nil}
+	gotID, written := e.logEvent(context.Background(), issueEvent{
+		MissionID: id, ActorType: "user", ActorID: "user-1",
+		Action: issueAction("not_a_real_action"), Details: "x",
+	})
+	if gotID != "" {
+		t.Errorf("logEvent id = %q, want empty — the activity row was never written", gotID)
+	}
+	if written != (missionactivity.Written{}) {
+		t.Errorf("logEvent Written = %+v, want the zero value", written)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM mission_activity WHERE mission_id = ?`, id).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("activity rows = %d, want 0 — the CHECK constraint should have rejected the insert", n)
 	}
 }
 

@@ -159,11 +159,18 @@ func claimDelivery(ctx context.Context, db *sql.DB, deliveryID string) (bool, er
 	return n > 0, nil
 }
 
-// attachDeliveryRun stamps claimed_by_run_id once the winning claimant has
-// an assignment id to record. No CAS guard needed: only the caller that won
-// claimDelivery ever reaches this, so there is no second writer to race
-// against — the same reasoning PendingRunStore.SetFiredRunID's doc comment
-// gives for skipping a status guard on its own post-claim backfill.
+// attachDeliveryRun stamps claimed_by_run_id directly, bypassing persist's
+// usual ON CONFLICT path — mentionRecorder.record does NOT call this: it
+// lets persist's INSERT ... ON CONFLICT(event_id, agent_id) DO UPDATE set
+// claimed_by_run_id = excluded.assignment_id in the SAME statement that
+// records dispatch_state/assignment_id, so there is exactly one write
+// (and one failure window, not two) between "a run was dispatched" and
+// "the delivery knows which run claimed it" — a real gap an earlier
+// revision of this file had, caught in review: a failed second UPDATE left
+// claimed_by_run_id NULL on a delivery whose run really was executing, and
+// consumeDeliveriesForRun's `WHERE claimed_by_run_id = ?` then never
+// matched it. Kept as a standalone primitive for direct use (tests, and any
+// future caller that attaches a run outside persist's own write).
 func attachDeliveryRun(ctx context.Context, db *sql.DB, deliveryID, runID string) error {
 	_, err := db.ExecContext(ctx,
 		`UPDATE mission_comment_mentions SET claimed_by_run_id = ? WHERE id = ?`,
@@ -172,15 +179,62 @@ func attachDeliveryRun(ctx context.Context, db *sql.DB, deliveryID, runID string
 }
 
 // consumeDelivery is the consume CAS — UPDATE ... WHERE state='claimed',
-// same F57 shape as claimDelivery. Used directly when a claimed delivery is
-// never going to have a run consume it (dispatch was refused, skipped, or
-// failed before an assignment existed) — there the winning claimant resolves
-// its own delivery inline rather than waiting on a completion callback that
-// will never fire.
+// same F57 shape as claimDelivery. Called once a run that claimed a delivery
+// has actually finished with it (see consumeDeliveriesForRun, its bulk
+// sibling) — a claimed delivery that never gets a run at all is
+// failClaimedDelivery's job, not this one; see that function's doc comment
+// for why the distinction matters.
 func consumeDelivery(ctx context.Context, db *sql.DB, deliveryID string) (bool, error) {
 	res, err := db.ExecContext(ctx, `
 		UPDATE mission_comment_mentions SET state = 'consumed'
 		WHERE id = ? AND state = 'claimed'`, deliveryID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// failClaimedDelivery is the CAS that resolves a delivery whose claim will
+// never get a run — a self-mention, a capacity refusal, no dispatcher wired,
+// or a dispatch error. Same F57 shape as claimDelivery/consumeDelivery.
+//
+// This is 'failed', not 'consumed': §9.3's state column answers "did a RUN
+// consume this", and none did here — the pre-B2 fallback path (the
+// issue_deliveries flag off, or createDelivery itself erroring) reaches the
+// identical outcome through persist's resolvedState mapping
+// (issue_mentions.go) and also writes 'failed'. Using 'consumed' here would
+// make the column's meaning depend on which code path a given delivery took
+// to reach the same fact, which defeats the point of having the column.
+func failClaimedDelivery(ctx context.Context, db *sql.DB, deliveryID string) (bool, error) {
+	res, err := db.ExecContext(ctx, `
+		UPDATE mission_comment_mentions SET state = 'failed'
+		WHERE id = ? AND state = 'claimed'`, deliveryID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// abandonPendingDelivery resolves a delivery that never got claimed because
+// the claim CAS itself errored (SQLITE_BUSY or similar) — as distinct from
+// LOSING the claim race (claimDelivery's ordinary (false, nil), handled by
+// its caller without ever reaching this function). Without this, an errored
+// claim attempt left the row at 'pending' forever with a dispatch_state that
+// reads 'failed' — a permanent, silently-stuck row nothing will ever revisit,
+// since nothing scans for 'pending' rows and B4's eventual lease sweep only
+// reaps 'claimed' ones.
+func abandonPendingDelivery(ctx context.Context, db *sql.DB, deliveryID string) (bool, error) {
+	res, err := db.ExecContext(ctx, `
+		UPDATE mission_comment_mentions SET state = 'failed'
+		WHERE id = ? AND state = 'pending'`, deliveryID)
 	if err != nil {
 		return false, err
 	}
