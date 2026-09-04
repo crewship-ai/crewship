@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   prependLive: vi.fn(),
   capturedOnEntry: null as ((e: unknown) => void) | null,
   listEntries: [] as unknown[],
+  listLoading: false,
+  listError: null as string | null,
   // Every options object the strip handed the stream hook, so a test can
   // assert what it ASKED for and not merely what happened to arrive.
   streamOptions: [] as { workspaceId: string | null; enabled: boolean }[],
@@ -28,9 +30,9 @@ vi.mock("@/hooks/use-journal-list", () => ({
   useJournalList: () => ({
     entries: mocks.listEntries,
     nextCursor: null,
-    loading: false,
+    loading: mocks.listLoading,
     loadingMore: false,
-    error: null,
+    error: mocks.listError,
     refresh: vi.fn(),
     loadMore: vi.fn(),
     prependLive: mocks.prependLive,
@@ -67,6 +69,8 @@ beforeEach(() => {
   mocks.prependLive.mockClear()
   mocks.capturedOnEntry = null
   mocks.listEntries = []
+  mocks.listLoading = false
+  mocks.listError = null
   mocks.streamOptions = []
   vi.useFakeTimers({ shouldAdvanceTime: true })
 })
@@ -97,15 +101,47 @@ describe("ResourcesStrip", () => {
     expect(batch).toHaveLength(40)
   })
 
-  it("renders the four cells and the latest reading", () => {
+  it("renders only metrics emitted by the server and the latest reading", () => {
     mocks.listEntries = [metric("m1", 12, 60_000), metric("m2", 37, 0)]
     render(<ResourcesStrip workspaceId="ws_test" crewId="crew_a" />)
 
-    for (const label of ["CPU", "MEM", "NET", "DISK"]) {
+    for (const label of ["CPU", "MEM", "NET"]) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
+    // internal/server/stats.go emits no disk metric. Rendering a DISK cell
+    // used to turn that missing input into a confident zero in aggregate mode.
+    expect(screen.queryByText("DISK")).not.toBeInTheDocument()
     // Newest sample wins the readout.
     expect(screen.getByText("37%")).toBeInTheDocument()
+  })
+
+  it("explains an empty 30-minute metrics window", () => {
+    mocks.listEntries = [metric("stale", 88, 31 * 60_000)]
+    render(<ResourcesStrip workspaceId="ws_test" crewId="crew_a" />)
+
+    expect(screen.getByText("No container metrics reported in the last 30 minutes.")).toBeInTheDocument()
+    for (const label of ["CPU", "MEM", "NET"]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument()
+    }
+  })
+
+  it("does not misreport loading or failed requests as an empty window", () => {
+    mocks.listLoading = true
+    const { rerender } = render(<ResourcesStrip workspaceId="ws_test" crewId="crew_a" />)
+    expect(screen.getByText("Loading container metrics…")).toBeInTheDocument()
+
+    mocks.listLoading = false
+    mocks.listError = "Failed to load journal"
+    rerender(<ResourcesStrip workspaceId="ws_test" crewId="crew_a" />)
+    expect(screen.getByText("Container metrics are unavailable.")).toBeInTheDocument()
+    expect(screen.queryByText("No container metrics reported in the last 30 minutes.")).not.toBeInTheDocument()
+  })
+
+  it("does not fabricate a zero network rate before two samples exist", () => {
+    mocks.listEntries = [metric("m1", 12, 60_000)]
+    render(<ResourcesStrip workspaceId="ws_test" mode="aggregate" />)
+
+    expect(screen.queryByText("0 B/s")).not.toBeInTheDocument()
   })
 
   it("does not subscribe without a workspace", () => {

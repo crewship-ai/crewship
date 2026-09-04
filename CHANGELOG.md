@@ -1093,6 +1093,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 - **Hard stop (`--hard`) now actually ends the run — it was signalling a pid that doesn't exist inside the container (#2366).** #2363's Tier 2 mechanism resolved the run's exec to an OS pid via `ExecInspect` and signalled that pid from a new exec into the container — but that pid is in the HOST pid namespace, not the container's, so the in-container `kill` found no such process and silently signalled nothing (found live on dev1: a hard-stopped run's journal read `hard_stopped -> error`, and the run only ended when the agent finished on its own, ~27s later). Tier 2 now ends the run's own tmux session instead (`tmux kill-session -t agent-{slug}`, a container-visible identity every agent run already owns), escalating to a process-group `kill -KILL` on that session's own pane pids if it's still alive after the grace period — never a host pid, never a container-level operation, and never a sibling agent's session. `hard_stop_result`/`hard_stop_at` are now also exposed on `GET .../issues/{identifier}/runs` and `crewship issue runs -f json`, so a live check can confirm a hard stop landed without reading the journal.
+- **The Journal resource strip no longer invents a disk reading or hides an
+  empty metrics window behind four dashes (#2223).** The backend has never
+  emitted disk usage, so the unfed DISK gauge is gone; CPU, memory and network
+  remain, while a 30-minute window with no samples now says so explicitly.
+  Loading and request failures keep distinct states, and aggregate metrics no
+  longer coerce a missing first network-rate sample to `0 B/s`.
 - **The Docker image builds again (#2328).** The backend stage did not copy the `config/` package that #2305 introduced for the model catalog, so `go build` inside the image failed on every branch since. `config/` is copied now, and a test (`scripts/dockerfile-sources`) fails whenever a root-level package the binaries import is missing from that stage.
 - **Two GET routes were invisible to the read-scope invariant, the same
   "assumed out of scope by registration helper" blind spot the invariant
