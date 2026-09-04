@@ -154,3 +154,46 @@ func (h *AssignmentHandler) ReconcileExpiredEphemeralSessions(ctx context.Contex
 	}
 	return int(n), nil
 }
+
+// ReconcileStaleActiveSessions settles every session still showing 'active'
+// whose active_run_id already points at a terminal (COMPLETED/FAILED/
+// CANCELLED) assignment — the durable backstop for settleSessionForAssignment
+// itself. That function's write is best-effort (CodeRabbit review on this
+// PR, #2343): a transient DB error at the exact moment finishAssignment
+// calls it is swallowed rather than retried, which could otherwise leave a
+// session rendered 'active' forever over a run that has, in fact, already
+// finished — indistinguishable from a real live run by anything reading
+// ListSessions. Riding the same ticker as the lease sweeper (not a fourth
+// scheduler, per F48) means that gap self-heals within one tick interval
+// regardless of why the original write was missed.
+//
+// FAILED -> 'error', COMPLETED/CANCELLED -> 'idle' — the identical mapping
+// settleSessionForAssignment uses, so a session's resting state does not
+// depend on whether the direct write or this reconciliation was what
+// actually landed it. A session already 'idle'/'error'/'closed'/'stale' is
+// untouched (its active_run_id, if any, is stale bookkeeping only, not a
+// live-state discrepancy this function needs to fix).
+func (h *AssignmentHandler) ReconcileStaleActiveSessions(ctx context.Context) (int, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := h.db.ExecContext(ctx, `
+		UPDATE issue_agent_sessions
+		   SET state = CASE
+		                  WHEN (SELECT a.status FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id) = 'FAILED'
+		                  THEN 'error' ELSE 'idle'
+		                END,
+		       active_run_id = NULL,
+		       updated_at = ?
+		 WHERE state = 'active'
+		   AND active_run_id IS NOT NULL
+		   AND (SELECT a.status FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id)
+		       IN ('COMPLETED','FAILED','CANCELLED')`,
+		now)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}

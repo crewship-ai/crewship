@@ -38,8 +38,12 @@ func TestStampInitialLease_SetsOwnerAndFutureExpiry(t *testing.T) {
 	insertAssignment(t, db, "a_stamp", "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "RUNNING")
 
 	before := time.Now().UTC()
-	if err := stampInitialLease(context.Background(), h.db, "a_stamp", before, 90*time.Second); err != nil {
+	stamped, err := stampInitialLease(context.Background(), h.db, "a_stamp", before, 90*time.Second)
+	if err != nil {
 		t.Fatalf("stampInitialLease: %v", err)
+	}
+	if !stamped {
+		t.Fatalf("stamped = false, want true (row is RUNNING)")
 	}
 
 	var owner, expiresAt sql.NullString
@@ -70,8 +74,12 @@ func TestStampInitialLease_NoOpWhenNotRunning(t *testing.T) {
 	h, db, _, agentIDs, chatID := stuckSweeperRig(t)
 	insertAssignment(t, db, "a_not_running", "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "FAILED")
 
-	if err := stampInitialLease(context.Background(), h.db, "a_not_running", time.Now(), 90*time.Second); err != nil {
+	stamped, err := stampInitialLease(context.Background(), h.db, "a_not_running", time.Now(), 90*time.Second)
+	if err != nil {
 		t.Fatalf("stampInitialLease: %v", err)
+	}
+	if stamped {
+		t.Errorf("stamped = true, want false (row is not RUNNING)")
 	}
 	var owner sql.NullString
 	if err := db.QueryRow(`SELECT lease_owner FROM assignments WHERE id = 'a_not_running'`).Scan(&owner); err != nil {
@@ -141,7 +149,7 @@ func TestRenewLease_CorrectOwner_ExtendsExpiry(t *testing.T) {
 func TestStartLeaseHeartbeat_RenewsRepeatedly_ThenStopsCleanly(t *testing.T) {
 	h, db, _, agentIDs, chatID := stuckSweeperRig(t)
 	insertAssignment(t, db, "a_hb", "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "RUNNING")
-	if err := stampInitialLease(context.Background(), h.db, "a_hb", time.Now(), 5*time.Second); err != nil {
+	if _, err := stampInitialLease(context.Background(), h.db, "a_hb", time.Now(), 5*time.Second); err != nil {
 		t.Fatalf("stampInitialLease: %v", err)
 	}
 
@@ -203,7 +211,7 @@ func TestStartLeaseHeartbeat_StopsWhenRowLeavesRunning(t *testing.T) {
 	// writing to a row that will never accept it again.
 	h, db, _, agentIDs, chatID := stuckSweeperRig(t)
 	insertAssignment(t, db, "a_hb_reaped", "test-workspace-id", chatID, agentIDs[0], agentIDs[0], "RUNNING")
-	if err := stampInitialLease(context.Background(), h.db, "a_hb_reaped", time.Now(), 500*time.Millisecond); err != nil {
+	if _, err := stampInitialLease(context.Background(), h.db, "a_hb_reaped", time.Now(), 500*time.Millisecond); err != nil {
 		t.Fatalf("stampInitialLease: %v", err)
 	}
 	stop := h.startLeaseHeartbeat(context.Background(), "a_hb_reaped", 15*time.Millisecond, 500*time.Millisecond)

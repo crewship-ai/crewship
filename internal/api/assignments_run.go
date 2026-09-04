@@ -755,11 +755,24 @@ func (h *AssignmentHandler) runAssignment(
 	// provisioning/build/backup-guard failure, the exec error path, and the
 	// success path) without each of those call sites needing its own stop
 	// call.
-	if err := stampInitialLease(ctx, h.db, assignmentID, time.Now(), defaultLeaseTTL); err != nil {
-		h.logger.Warn("stamp initial lease", "error", err, "assignment_id", assignmentID)
+	//
+	// Skip starting the heartbeat when the stamp itself did not land
+	// (stamped=false, or a hard DB error): there is nothing to renew, and a
+	// heartbeat goroutine started anyway would just find lease_owner still
+	// unset on its first tick and exit immediately — starting it would be
+	// harmless but pointless. The row is left exactly as any pre-B4 row
+	// would be (lease_expires_at NULL), so it still recovers via the
+	// legacy process-start heuristic; see stampInitialLease's own doc
+	// comment for why the fuller fix (status-aware cleanup before the exec
+	// spends anything) is out of this PR's scope.
+	stamped, stampErr := stampInitialLease(ctx, h.db, assignmentID, time.Now(), defaultLeaseTTL)
+	if stampErr != nil {
+		h.logger.Warn("stamp initial lease", "error", stampErr, "assignment_id", assignmentID)
 	}
-	stopHeartbeat := h.startLeaseHeartbeat(ctx, assignmentID, defaultLeaseHeartbeatInterval, defaultLeaseTTL)
-	defer stopHeartbeat()
+	if stampErr == nil && stamped {
+		stopHeartbeat := h.startLeaseHeartbeat(ctx, assignmentID, defaultLeaseHeartbeatInterval, defaultLeaseTTL)
+		defer stopHeartbeat()
+	}
 
 	// B4 session state (§10.1, #2343): "pending -> active requires winning
 	// the run-claim CAS; only a live run may hold active". This row just

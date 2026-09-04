@@ -119,24 +119,43 @@ func leaseOwnerID() string {
 //
 // WHERE status='RUNNING' guards against stamping a lease onto a row a
 // concurrent recovery/sweep path has already moved off RUNNING in the
-// instant between the two statements; RowsAffected==0 is not an error, the
-// same "lost race, not a fault" contract every other CAS in this package
-// uses.
+// instant between the two statements. Returns (false, nil) — not an
+// error — when that race is lost: the "Mark assignment as RUNNING" write
+// immediately before this call is unconditional (no status guard of its
+// own — see that comment), so in practice this can only happen if a
+// concurrent recovery/sweep path re-reaps the row in the sub-millisecond
+// gap between the two statements, which requires the row to already have
+// been RUNNING (and therefore already reaped once) before this dispatch —
+// vanishingly rare. The caller (runAssignment) skips starting a heartbeat
+// in that case: nothing to renew, and the row is left exactly as it would
+// have been before B4 shipped — lease_expires_at NULL, recoverable by the
+// pre-B4 process-start heuristic, not stuck. This is a narrower guarantee
+// than "never dispatch without a confirmed lease" (which would need
+// status-aware cleanup — releasing the agent lock, requeuing or
+// terminalising the assignment — before the exec has spent anything);
+// CodeRabbit review on this PR raised the fuller fix as a heavy lift, and
+// the fallback here is a straight rerun of the codebase's own pre-B4
+// behaviour, not a new stuck state, so it is deferred rather than
+// attempted under this PR's scope.
 //
 // ttl is a parameter (rather than reading defaultLeaseTTL directly) purely
 // for tests: production always passes defaultLeaseTTL (see runAssignment's
 // call site); a test that needs a short-lived lease to observe expiry
 // without a real 90s wait passes its own.
-func stampInitialLease(ctx context.Context, db *sql.DB, assignmentID string, now time.Time, ttl time.Duration) error {
+func stampInitialLease(ctx context.Context, db *sql.DB, assignmentID string, now time.Time, ttl time.Duration) (bool, error) {
 	expires := now.Add(ttl).UTC().Format(timeFmtRFC3339)
-	_, err := db.ExecContext(ctx, `
+	res, err := db.ExecContext(ctx, `
 		UPDATE assignments SET lease_owner = ?, lease_expires_at = ?
 		 WHERE id = ? AND status = 'RUNNING'`,
 		leaseOwnerID(), expires, assignmentID)
 	if err != nil {
-		return fmt.Errorf("stamp initial lease for %s: %w", assignmentID, err)
+		return false, fmt.Errorf("stamp initial lease for %s: %w", assignmentID, err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("stamp initial lease rows affected for %s: %w", assignmentID, err)
+	}
+	return n > 0, nil
 }
 
 // renewLease extends lease_expires_at by ttl from now, for a row THIS
@@ -159,6 +178,50 @@ func renewLease(ctx context.Context, db *sql.DB, assignmentID, owner string, now
 	n, err := res.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("renew lease rows affected for %s: %w", assignmentID, err)
+	}
+	return n > 0, nil
+}
+
+// claimLeaseStillExpired re-verifies, atomically and at the instant of the
+// call, that assignmentID is still RUNNING with no live lease — closing the
+// TOCTOU window every sweeper/recovery caller otherwise has between its own
+// SELECT and the terminal write that follows. Without this, a heartbeat
+// renewal landing in that window (rare, but the whole point of a lease is
+// that "rare" still has to be handled) would be invisible to
+// failInterruptedAssignment's plain "not already terminal" CAS, and a run
+// that is, in fact, still alive and actively renewing would be failed out
+// from under it — CodeRabbit review on this PR.
+//
+// `lease_expires_at IS NULL OR lease_expires_at < now()` is the exact
+// condition every caller's own SELECT already used to decide this row was
+// reapable (RecoverInterruptedRunning's legacy branch, SweepStuckRunning's
+// heuristic, SweepExpiredLeases' own scan) — re-asked here, in the same
+// statement that claims the row, rather than trusted from a SELECT that
+// ran moments (or, at boot, potentially much longer) earlier. Setting
+// lease_expires_at to `now` (never into the future) is what makes the
+// UPDATE's row-count meaningful: SQLite counts a row as changed whenever an
+// UPDATE's WHERE matches it, but writing a value change here — rather than
+// a no-op self-assignment — keeps the claim's intent legible in the schema
+// itself (an already-expired lease was just re-confirmed expired at this
+// instant) without ever granting the row extra life.
+//
+// Returns (false, nil) — not an error — when the row no longer qualifies:
+// a live heartbeat renewed it, a different driver already finished it, or
+// it was never RUNNING to begin with. The caller must treat that as "do
+// not reap", exactly like every other lost-race CAS in this package.
+func claimLeaseStillExpired(ctx context.Context, db *sql.DB, assignmentID string) (bool, error) {
+	now := time.Now().UTC().Format(timeFmtRFC3339)
+	res, err := db.ExecContext(ctx, `
+		UPDATE assignments SET lease_expires_at = ?
+		 WHERE id = ? AND status = 'RUNNING'
+		   AND (lease_expires_at IS NULL OR lease_expires_at < ?)`,
+		now, assignmentID, now)
+	if err != nil {
+		return false, fmt.Errorf("claim lease still expired for %s: %w", assignmentID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim lease still expired rows affected for %s: %w", assignmentID, err)
 	}
 	return n > 0, nil
 }
@@ -189,6 +252,10 @@ func (h *AssignmentHandler) startLeaseHeartbeat(ctx context.Context, assignmentI
 	stopCh := make(chan struct{})
 	var once sync.Once
 	go func() {
+		// Registered so waitForBackgroundWork drains it in tests; the run's
+		// own defer stops it long before that in production.
+		finish := beginBackgroundWork()
+		defer finish()
 		t := time.NewTicker(heartbeatInterval)
 		defer t.Stop()
 		for {
@@ -310,6 +377,11 @@ func (h *AssignmentHandler) StartLeaseSweeper(ctx context.Context, interval time
 					h.logger.Warn("lease sweeper: reconcile ephemeral sessions failed", "error", err)
 				} else if n > 0 {
 					h.logger.Info("lease sweeper: reconciled sessions for expired ephemeral agents", "count", n)
+				}
+				if n, err := h.ReconcileStaleActiveSessions(ctx); err != nil {
+					h.logger.Warn("lease sweeper: reconcile stale active sessions failed", "error", err)
+				} else if n > 0 {
+					h.logger.Info("lease sweeper: settled sessions whose run had already finished", "count", n)
 				}
 			}
 		}

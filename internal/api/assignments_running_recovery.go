@@ -86,7 +86,11 @@ const runningSweepGraceMargin = 15 * time.Minute
 // FAILED with the given reason via the normal failure completion path.
 // Returns handled=false (no error) when the row was not RUNNING
 // anymore — a live driver or a concurrent recovery path finished it
-// first; losing that race is the designed outcome.
+// first; losing that race is the designed outcome. Also returns
+// handled=false when a live lease renewal is discovered at the last
+// instant (see claimLeaseStillExpired) — a run a heartbeat is still
+// actively renewing is never reaped, no matter how stale the caller's
+// own SELECT that led here was.
 //
 // The terminal CAS lives inside finishAssignment (WHERE status is not
 // already terminal) and is the whole concurrency story: boot recovery,
@@ -98,6 +102,26 @@ const runningSweepGraceMargin = 15 * time.Minute
 // comment). runID="" skips the terminal run.* emit — recovery has no
 // run trace of its own (that is recoverOrphanedRuns' jurisdiction).
 func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assignmentID, reason string) (bool, error) {
+	// B4 (#2343, CodeRabbit review): re-verify — atomically, in the SAME
+	// statement — that the row is still RUNNING with no live lease, right
+	// before claiming it. Every caller of this function (boot recovery,
+	// both tickers) decided this row was reapable from a SELECT that ran
+	// some time ago; without this re-check, a heartbeat renewal landing in
+	// that window would be invisible to the plain "not already terminal"
+	// CAS below, and a run that is, in fact, still alive would be failed
+	// out from under it. A legacy row (lease_expires_at IS NULL) always
+	// passes this check, so the pre-B4 heuristic paths are unaffected.
+	claimed, cerr := claimLeaseStillExpired(ctx, h.db, assignmentID)
+	if cerr != nil {
+		return false, fmt.Errorf("recheck lease before reaping %s: %w", assignmentID, cerr)
+	}
+	if !claimed {
+		// Either the row already left RUNNING (another path is handling
+		// it) or its lease was renewed after the caller's own SELECT —
+		// either way, this is not this call's row to reap.
+		return false, nil
+	}
+
 	// Routing fields for the completion signals. LEFT JOIN because a
 	// soft-deleted target agent must not block the recovery of its
 	// assignment row.
