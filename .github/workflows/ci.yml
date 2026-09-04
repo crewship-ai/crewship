@@ -1063,7 +1063,12 @@ jobs:
     needs: [merge-conflict-markers]
     name: Frontend Test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 15, not 10: `pnpm test:coverage` took 7m12s before #2305 and the UX
+    # wave (#2314, #2318, #2325) and was cancelled at the 10-minute cap on
+    # #2318 with every test passing (#2333). A cancelled job is a red check
+    # with nothing to fix. If the suite keeps growing, shard it (vitest
+    # --shard) rather than raise this again.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
