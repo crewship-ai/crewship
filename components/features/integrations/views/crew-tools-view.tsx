@@ -50,17 +50,26 @@ export function CrewToolsView({
   workspaceId,
   search,
   initialServerId,
+  onServerConsumed,
   canManage,
 }: {
   workspaceId: string
   search: string
   /** `?server=` from a "Connect" link elsewhere: that row opens connecting. */
   initialServerId: string | null
+  /** Called once the linked row has opened, so a later remount does not
+   *  reopen a row the person closed. */
+  onServerConsumed?: () => void
   canManage: boolean
 }) {
   const [tools, setTools] = React.useState<CrewTool[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [openId, setOpenId] = React.useState<string | null>(initialServerId)
+  React.useEffect(() => {
+    if (initialServerId) onServerConsumed?.()
+    // Consume once, on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const load = React.useCallback(async () => {
     setError(null)

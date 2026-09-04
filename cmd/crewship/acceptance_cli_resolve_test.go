@@ -574,7 +574,7 @@ func TestAcceptance_MemoryStatus_ReadableIndexStillReportsAndExitsZero(t *testin
 
 // ─── #2106 follow-up: the agent lookup behind both log commands saw one page ──
 //
-// GET /api/v1/agents is paginated: parseListPagination(r, 100, 500)
+// GET /api/v1/agents is paginated: parsePagination(r, 100, 500)
 // (internal/api/agents.go), and the list query ends in LIMIT ? OFFSET ?. A
 // scan that sends no `limit` therefore sees the first 100 rows and nothing
 // else. #2086 consolidated `agent logs` onto that scan, and in doing so
@@ -883,7 +883,7 @@ func runMemoryCLI(t *testing.T, args ...string) (string, error) {
 // ─── #2106: the crew lookup had the agent lookup's ceiling too ──────────────
 //
 // GET /api/v1/crews paginates exactly like the agent list —
-// parseListPagination(r, 100, 500) in internal/api/crews_query.go, and the
+// parsePagination(r, 100, 500) in internal/api/crews_query.go, and the
 // query ends in LIMIT ? OFFSET ?. resolveCrewID sent no `limit`, so it saw the
 // first 100 crews and answered "crew not found" for one that exists past them.
 //

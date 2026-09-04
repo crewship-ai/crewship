@@ -61,7 +61,33 @@ const PAGE = 500
 
 export default function CrewsPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
+  if (wsLoading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
+      </div>
+    )
+  }
+  if (!workspaceId) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-2 p-6 text-center">
+        <p className="text-sm font-medium text-foreground/80">No workspace selected</p>
+        <p className="text-[12px] text-muted-foreground max-w-sm">
+          Pick a workspace from the toolbar to see its crews, agents and missions.
+        </p>
+      </div>
+    )
+  }
+  // Keyed by workspace so a switch starts from empty lists instead of
+  // showing workspace A's crews under workspace B's header until B answers.
+  return <CrewsPageBody key={workspaceId} workspaceId={workspaceId} />
+}
+
+function CrewsPageBody({ workspaceId }: { workspaceId: string }) {
   const [missions, setMissions] = useState<MissionData[]>([])
+  // Grows with "Load more" so a realtime refetch re-reads every page that
+  // is on screen instead of dropping back to the first one.
+  const [pageSize, setPageSize] = useState(PAGE)
   // Bumped by realtime events and by saves; both lists and the missions
   // re-read on it. usePagedList owns the request race (a late answer from
   // a superseded fetch is dropped), so a workspace switch cannot repaint
@@ -69,32 +95,33 @@ export default function CrewsPage() {
   const [tick, setTick] = useState(0)
 
   const crewsList = usePagedList<CrewData>({
-    url: workspaceId ? `/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}` : null,
-    limit: PAGE,
+    url: `/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`,
+    limit: pageSize,
     reloadKey: tick,
   })
   const agentsList = usePagedList<AgentData>({
-    url: workspaceId ? `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}` : null,
-    limit: PAGE,
+    url: `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`,
+    limit: pageSize,
     reloadKey: tick,
   })
 
   const crews = crewsList.items
+  const crewsComplete = crewsList.total === null || crews.length >= crewsList.total
   // The onboarding guide lives in a crew the crews list never returns; it
   // must not be the first row of the client's fleet (lib/fleet-visibility).
-  const agents = useMemo(() => visibleFleetAgents(agentsList.items, crews), [agentsList.items, crews])
+  const agents = useMemo(() => visibleFleetAgents(agentsList.items, crews, crewsComplete), [agentsList.items, crews, crewsComplete])
+  // The server's total counts the hidden guide too; say what the roster shows.
+  const hiddenAgents = agentsList.items.length - agents.length
+  const agentsTotal = agentsList.total === null ? null : Math.max(0, agentsList.total - hiddenAgents)
 
   const missionsAbort = useRef<AbortController | null>(null)
   useEffect(() => {
     missionsAbort.current?.abort()
-    if (!workspaceId) {
-      setMissions([])
-      return
-    }
     const controller = new AbortController()
     missionsAbort.current = controller
     apiFetch(`/api/v1/missions?workspace_id=${encodeURIComponent(workspaceId)}&limit=20&include_tasks=true`, { signal: controller.signal })
-      .then((r) => (r.ok ? r.json() : []))
+      // A non-OK answer keeps the last good list rather than blanking it.
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (!controller.signal.aborted && Array.isArray(data)) setMissions(data) })
       .catch(() => { /* a transient failure keeps the previous missions */ })
     return () => controller.abort()
@@ -131,7 +158,7 @@ export default function CrewsPage() {
   if (crewsList.loading || agentsList.loading) loadSeen.current = true
   const beforeFirstResponse = !loadSeen.current && !crewsList.error && !agentsList.error
   const firstLoad = beforeFirstResponse || (crewsList.loading && crewsList.total === null) || (agentsList.loading && agentsList.total === null)
-  if (wsLoading || (workspaceId && firstLoad && crews.length === 0 && agents.length === 0)) {
+  if (firstLoad && crews.length === 0 && agents.length === 0) {
     return (
       <div className="h-full flex items-center justify-center">
         <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
@@ -139,20 +166,10 @@ export default function CrewsPage() {
     )
   }
 
-  if (!workspaceId) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center gap-2 p-6 text-center">
-        <p className="text-sm font-medium text-foreground/80">No workspace selected</p>
-        <p className="text-[12px] text-muted-foreground max-w-sm">
-          Pick a workspace from the toolbar to see its crews, agents and missions.
-        </p>
-      </div>
-    )
-  }
-
   const loadMore = () => {
     if (crewsList.hasMore) void crewsList.loadMore()
     if (agentsList.hasMore) void agentsList.loadMore()
+    setPageSize((n) => n + PAGE)
   }
 
   return (
@@ -165,7 +182,7 @@ export default function CrewsPage() {
       // would mis-treat a legitimately empty workspace as still loading.
       loaded={!crewsList.loading && !agentsList.loading}
       crewsTotal={crewsList.total}
-      agentsTotal={agentsList.total}
+      agentsTotal={agentsTotal}
       hasMore={crewsList.hasMore || agentsList.hasMore}
       loadingMore={crewsList.loadingMore || agentsList.loadingMore}
       onLoadMore={loadMore}

@@ -152,6 +152,27 @@ func TestAcceptance_ListPaging_CrewList(t *testing.T) {
 	}
 }
 
+func TestAcceptance_ListPaging_Search(t *testing.T) {
+	cfg := startFleetPagingServer(t)
+
+	// --q reaches the server: only the crew whose slug contains the text,
+	// with the total narrowed to match, so no footer.
+	stdout, _ := runFleetPagingCLI(t, cfg, "crew", "list", "--q", "crew-2")
+	if n := countTableRows(stdout, `crew-\d`); n != 1 {
+		t.Errorf("--q crew-2 printed %d crews, want 1:\n%s", n, stdout)
+	}
+	if strings.Contains(stdout, "showing") {
+		t.Errorf("a search that fits one page must print no footer:\n%s", stdout)
+	}
+
+	// Role titles are searchable for agents; the seeded rows have none, so
+	// the slug is the hit.
+	stdout, _ = runFleetPagingCLI(t, cfg, "agent", "list", "--q", "agent-4")
+	if n := countTableRows(stdout, `agent-\d`); n != 1 {
+		t.Errorf("--q agent-4 printed %d agents, want 1:\n%s", n, stdout)
+	}
+}
+
 func TestAcceptance_ListPaging_AgentList(t *testing.T) {
 	cfg := startFleetPagingServer(t)
 

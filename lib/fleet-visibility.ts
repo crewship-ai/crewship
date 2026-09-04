@@ -14,14 +14,24 @@ export interface FleetAgentLike {
   crew_id: string | null
 }
 
-export function isInternalAgent(agent: FleetAgentLike, crews: ReadonlyArray<{ id: string }>): boolean {
+export function isInternalAgent(
+  agent: FleetAgentLike,
+  crews: ReadonlyArray<{ id: string }>,
+  /** Whether `crews` is the whole workspace. On a fleet larger than one
+   *  page it is not, and an agent of an unloaded crew is not internal. */
+  crewsComplete = true,
+): boolean {
   if (agent.slug.startsWith("_")) return true
-  if (agent.crew_id == null) return false
+  if (agent.crew_id == null || !crewsComplete) return false
   return !crews.some((c) => c.id === agent.crew_id)
 }
 
 /** The agents to show. Returns the input array itself when nothing is hidden. */
-export function visibleFleetAgents<T extends FleetAgentLike>(agents: T[], crews: ReadonlyArray<{ id: string }>): T[] {
-  const visible = agents.filter((a) => !isInternalAgent(a, crews))
+export function visibleFleetAgents<T extends FleetAgentLike>(
+  agents: T[],
+  crews: ReadonlyArray<{ id: string }>,
+  crewsComplete = true,
+): T[] {
+  const visible = agents.filter((a) => !isInternalAgent(a, crews, crewsComplete))
   return visible.length === agents.length ? agents : visible
 }

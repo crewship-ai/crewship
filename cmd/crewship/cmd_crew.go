@@ -29,8 +29,12 @@ var crewListCmd = &cobra.Command{
 
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
+		search, _ := cmd.Flags().GetString("q")
 		q := url.Values{}
 		setListPaging(q, limit, offset)
+		if search != "" {
+			q.Set("q", search)
+		}
 		path := "/api/v1/crews"
 		if len(q) > 0 {
 			path += "?" + q.Encode()
@@ -465,6 +469,7 @@ func statusColor(status string) string {
 func init() {
 	crewListCmd.Flags().Bool("runtime", false, "Include runtime image, cached image, and provisioning status columns")
 	addListPagingFlags(crewListCmd.Flags(), 0)
+	crewListCmd.Flags().String("q", "", "Server-side search on name and slug (case-insensitive substring)")
 
 	crewConnectCmd.Flags().String("direction", "bidirectional", "Connection direction: bidirectional or unidirectional")
 

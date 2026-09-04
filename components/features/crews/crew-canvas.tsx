@@ -12,7 +12,7 @@ import { ProvisioningBanner } from "./crew-canvas-banner"
 import { CrewNeedsYou } from "./crew-needs-you"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { deriveCrewNeeds, withDevcontainerFeature, type CrewNeed, type NeedGap } from "./crew-needs"
-import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
+import { useProvisioningStatus, type ProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { entityHref } from "@/lib/entity-links"
 import { CrewPrivilegedBadge } from "./crew-privileged-badge"
 import {
@@ -59,6 +59,8 @@ export interface CrewCanvasProps {
   onCrewChanged: () => void
   onSelectAgent: (slug: string) => void
   onOpenFiles: () => void
+  /** The layout's one provisioning poller; the canvas does not start its own. */
+  provisioning?: ProvisioningStatus
 }
 
 /**
@@ -78,6 +80,7 @@ export function CrewCanvas({
   onCrewChanged,
   onSelectAgent,
   onOpenFiles,
+  provisioning: provisioningProp,
 }: CrewCanvasProps) {
   const {
     entity: crew,
@@ -102,7 +105,10 @@ export function CrewCanvas({
   const [gaps, setGaps] = useState<NeedGap[]>([])
   const [needBusy, setNeedBusy] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const provisioning = useProvisioningStatus(workspaceId)
+  // Polls only when no parent supplies the status (a null workspace id
+  // disables the hook), so /crews runs one poller, not four.
+  const ownProvisioning = useProvisioningStatus(provisioningProp ? null : workspaceId)
+  const provisioning = provisioningProp ?? ownProvisioning
   const provisioningCrew = provisioning.detail.find((d) => d.id === crew?.id)
   const [members, setMembers] = useState<CrewMemberRow[] | null>(null)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
@@ -375,7 +381,7 @@ export function CrewCanvas({
         onInstall={installTool}
         inboxHref={entityHref({ kind: "inbox" })}
       />
-      <ProvisioningBanner crewId={crew.id} crewSlug={crew.slug} workspaceId={workspaceId} needsOwnedByStrip />
+      <ProvisioningBanner crewId={crew.id} crewSlug={crew.slug} workspaceId={workspaceId} needsOwnedByStrip provisioning={provisioning} />
 
       {/* Tabs */}
       <CanvasTabs<CrewTab> tabs={TABS} active={tab} onChange={setTab} idPrefix="crew-canvas" label="Crew sections" />

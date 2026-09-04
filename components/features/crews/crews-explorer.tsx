@@ -53,6 +53,7 @@ export interface CrewsExplorerProps {
   loadingMore?: boolean
   onLoadMore?: () => void
   provisioningByCrew?: ReadonlyMap<string, ProvisioningState>
+  gapsByCrew?: ReadonlyMap<string, number>
 }
 
 /**
@@ -76,6 +77,7 @@ export function CrewsExplorer({
   loadingMore = false,
   onLoadMore,
   provisioningByCrew,
+  gapsByCrew,
 }: CrewsExplorerProps) {
   const [search, setSearch] = useState("")
   // Every group folds after six (README §4: priority, cap, fold). On a host
@@ -84,8 +86,8 @@ export function CrewsExplorer({
   const [showAll, setShowAll] = useState<Partial<Record<ExplorerGroupKey, boolean>>>({})
 
   const grouped = useMemo(
-    () => groupExplorerCrews({ crews, agents, search, provisioningByCrew }),
-    [crews, agents, search, provisioningByCrew],
+    () => groupExplorerCrews({ crews, agents, search, provisioningByCrew, gapsByCrew }),
+    [crews, agents, search, provisioningByCrew, gapsByCrew],
   )
 
   // Open the first few crews that need a look and the selected one; the rest
@@ -282,6 +284,8 @@ export function CrewsExplorer({
             )}
 
             {hasMore && onLoadMore && (
+              // Shown under a no-match too: the search covers only what is
+              // loaded, and the rest is one click away.
               <button
                 type="button"
                 onClick={onLoadMore}

@@ -31,8 +31,12 @@ var agentListCmd = &cobra.Command{
 
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
+		search, _ := cmd.Flags().GetString("q")
 		q := url.Values{}
 		setListPaging(q, limit, offset)
+		if search != "" {
+			q.Set("q", search)
+		}
 		if crewFilter, _ := cmd.Flags().GetString("crew"); crewFilter != "" {
 			crewID, err := resolveCrewID(client, crewFilter)
 			if err != nil {
@@ -200,6 +204,7 @@ var agentGetCmd = &cobra.Command{
 func init() {
 	agentListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 	addListPagingFlags(agentListCmd.Flags(), 0)
+	agentListCmd.Flags().String("q", "", "Server-side search on name, slug and role title (case-insensitive substring)")
 
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("slug", "", "Agent slug (auto-generated from name if empty)")

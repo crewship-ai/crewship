@@ -5,7 +5,7 @@ import { AlertTriangle, Check, ChevronDown, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
-import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
+import { useProvisioningStatus, type ProvisioningStatus } from "@/hooks/use-provisioning-status"
 import {
   ProvisioningEventSteps,
   ProvisioningChecklist,
@@ -22,7 +22,7 @@ import {
 // failure with the BuildKit log tail. Collapsible is a tiny details/summary
 // wrapper used by the Settings tab. Extracted from crew-canvas.tsx.
 
-function ProvisioningBanner({ crewId, crewSlug, workspaceId, needsOwnedByStrip = false }: {
+function ProvisioningBanner({ crewId, crewSlug, workspaceId, needsOwnedByStrip = false, provisioning: provisioningProp }: {
   crewId: string
   crewSlug: string
   workspaceId: string
@@ -30,8 +30,11 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId, needsOwnedByStrip =
    *  rows with their verbs (crew-needs-you.tsx); this banner then keeps only
    *  the live build progress and the recent-build summary. */
   needsOwnedByStrip?: boolean
+  /** A parent's poller; when given, this banner does not start its own. */
+  provisioning?: ProvisioningStatus
 }) {
-  const provisioning = useProvisioningStatus(workspaceId)
+  const ownProvisioning = useProvisioningStatus(provisioningProp ? null : workspaceId)
+  const provisioning = provisioningProp ?? ownProvisioning
   const { acknowledge } = provisioning
   const crew = provisioning.detail.find((d) => d.id === crewId)
   const [triggering, setTriggering] = useState(false)

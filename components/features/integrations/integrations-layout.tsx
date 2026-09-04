@@ -432,10 +432,12 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  const [pendingDelete, setPendingDelete] = React.useState<ConnectionRow | null>(null)
-  const handleDelete = async (row: ConnectionRow) => {
-    setPendingDelete(row)
-  }
+  // The dialog decides; handleDelete resolves true only once the connection
+  // is gone, so a caller that closes a detail view afterwards does not do it
+  // under the open dialog, nor after a Cancel.
+  const [pendingDelete, setPendingDelete] = React.useState<{ row: ConnectionRow; resolve: (deleted: boolean) => void } | null>(null)
+  const handleDelete = (row: ConnectionRow) =>
+    new Promise<boolean>((resolve) => setPendingDelete({ row, resolve }))
   const deleteConnection = async (row: ConnectionRow) => {
     try {
       await remove(row.id)
@@ -786,7 +788,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                     onToggleEnabled={handleToggle}
                     onTest={handleTest}
                     onDelete={async (row) => {
-                      await handleDelete(row)
+                      if (!(await handleDelete(row))) return
                       setSelectedConnectionId(null)
                     }}
                   />
@@ -807,7 +809,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                   onOpenAdd={() => setAddOpen(true)}
                   onToggleEnabled={handleToggle}
                   onTest={handleTest}
-                  onDelete={handleDelete}
+                  onDelete={async (row) => { await handleDelete(row) }}
                   onSelect={setSelectedConnectionId}
                 />
               )}
@@ -826,6 +828,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                   workspaceId={workspaceId}
                   search={search}
                   initialServerId={linkedServerId}
+                  onServerConsumed={() => setLinkedServerId(null)}
                   canManage={canManageWorkspace}
                 />
               )}
@@ -902,8 +905,13 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        onOpenChange={(open) => { if (!open) setPendingDelete(null) }}
-        title={pendingDelete ? `Delete the connection to ${pendingDelete.name}?` : ""}
+        onOpenChange={(open) => {
+          if (!open) {
+            pendingDelete?.resolve(false)
+            setPendingDelete(null)
+          }
+        }}
+        title={pendingDelete ? `Delete the connection to ${pendingDelete.row.name}?` : ""}
         consequences={[
           { tone: "lost", text: "Nothing is delivered there any more; routines that notify through it report a delivery failure" },
           { tone: "kept", text: "The delivery log keeps what was already sent" },
@@ -911,7 +919,11 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         ]}
         confirmLabel="Delete connection"
         destructive
-        onConfirm={async () => { if (pendingDelete) await deleteConnection(pendingDelete) }}
+        onConfirm={async () => {
+          if (!pendingDelete) return
+          await deleteConnection(pendingDelete.row)
+          pendingDelete.resolve(true)
+        }}
       />
       <AddIntegrationDialog
         open={addOpen}

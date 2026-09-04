@@ -14,6 +14,10 @@ describe("isInternalAgent", () => {
   it("hides an agent whose crew is not one the workspace lists", () => {
     expect(isInternalAgent({ slug: "guide", crew_id: "crew-setup-hidden" }, crews)).toBe(true)
   })
+  it("does not hide by crew while the crew list is only a page of the fleet", () => {
+    expect(isInternalAgent({ slug: "far", crew_id: "crew-unloaded" }, crews, false)).toBe(false)
+    expect(isInternalAgent({ slug: "_crewship-setup-guide", crew_id: "crew-x" }, crews, false)).toBe(true)
+  })
   it("keeps an unassigned agent — no crew is not a hidden crew", () => {
     expect(isInternalAgent({ slug: "drifter", crew_id: null }, crews)).toBe(false)
   })

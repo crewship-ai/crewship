@@ -12,6 +12,7 @@ import { BottomPanel, type BottomTab } from "@/components/features/crews/bottom-
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
+import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 
 interface CrewData {
   id: string
@@ -133,6 +134,17 @@ export function CrewsLayout({
     () => new Map(provisioning.detail.map((d) => [d.id, d.status] as const)),
     [provisioning.detail],
   )
+  // Credential tool gaps per crew, the same probe the dashboard and the
+  // vault use (capped at its MAX_CREWS); a crew missing a CLI sorts into
+  // "Needs attention" with an "N gaps" pill.
+  const readiness = useCredentialReadiness(workspaceId)
+  const gapsByCrew = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const gaps of readiness.gapsByCredential.values()) {
+      for (const g of gaps) out.set(g.crewId, (out.get(g.crewId) ?? 0) + 1)
+    }
+    return out
+  }, [readiness.gapsByCredential])
   const {
     selectedAgentSlug,
     selectedCrewSlug,
@@ -308,6 +320,7 @@ export function CrewsLayout({
                     loadingMore={loadingMore}
                     onLoadMore={onLoadMore}
                     provisioningByCrew={provisioningByCrew}
+                    gapsByCrew={gapsByCrew}
                   />
                 </motion.div>
               </>
@@ -330,6 +343,7 @@ export function CrewsLayout({
               loadingMore={loadingMore}
               onLoadMore={onLoadMore}
               provisioningByCrew={provisioningByCrew}
+                    gapsByCrew={gapsByCrew}
             />
           </div>
         )}
@@ -365,6 +379,7 @@ export function CrewsLayout({
                   onCrewChanged={onRefresh}
                   onSelectAgent={handleAgentSelectBySlug}
                   onOpenFiles={handleOpenFiles}
+                  provisioning={provisioning}
                 />
               ) : (
                 <EmptyRoster
