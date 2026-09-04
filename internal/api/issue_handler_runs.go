@@ -44,9 +44,14 @@ type issueRunDTO struct {
 	// Source says WHY this run is attributed to the issue, not just that it
 	// is (#2313): "task" — reached via mission_tasks.assignment_id, the
 	// issue's own plan; "mention" — reached via
-	// mission_comment_mentions.assignment_id, an @mention dispatch;
-	// "delegation" — reached only via a.mission_id, a sub-agent's own
-	// /assign call mid-mission. Always one of the three; never empty.
+	// mission_comment_mentions.assignment_id (the run a comment's own
+	// @mention originally dispatched) OR .claimed_by_run_id (a B3 follow-up
+	// run that folded in deliveries queued while the session was busy —
+	// #2344: that run's id never touches assignment_id, only
+	// claimed_by_run_id, so checking assignment_id alone mislabeled every
+	// follow-up run "delegation"); "delegation" — reached only via
+	// a.mission_id, a sub-agent's own /assign call mid-mission. Always one
+	// of the three; never empty.
 	Source string `json:"source,omitempty"`
 }
 
@@ -154,7 +159,8 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		         WHEN EXISTS (SELECT 1 FROM mission_tasks mt
 		                      WHERE mt.assignment_id = a.id AND mt.mission_id = ?) THEN 'task'
 		         WHEN EXISTS (SELECT 1 FROM mission_comment_mentions mcm
-		                      WHERE mcm.assignment_id = a.id AND mcm.mission_id = ?) THEN 'mention'
+		                      WHERE (mcm.assignment_id = a.id OR mcm.claimed_by_run_id = a.id)
+		                        AND mcm.mission_id = ?) THEN 'mention'
 		         ELSE 'delegation'
 		       END AS source,
 		       (SELECT je.trace_id FROM journal_entries je
