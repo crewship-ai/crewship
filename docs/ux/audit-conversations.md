@@ -24,7 +24,7 @@ text.
 - CLI isolated with `CREWSHIP_CONFIG=<scratch>/cli-config.yaml`; `localhost`
   resolves to `::1` for the CLI while the server binds IPv4, so the server
   URL must be `127.0.0.1`.
-- 100 inbox items = 100 escalations through `POST /api/v1/internal/escalations`
+- 100 inbox items = 100 escalations through the sidecar-only internal escalation route
   (TEXT / CREDENTIAL / LINK, spread over 7 agents and 3 crews), 6 resolved
   with `crewship escalation resolve`, 3 cancelled, 8 marked read, plus 2
   guided ephemeral hires (`crewship policy set --level guided`, `crewship
@@ -33,7 +33,7 @@ text.
   2 approvals.
 - 30 conversations = 29 `crewship chat create` + rename across 7 agents, 8
   ROUTINE-origin chats and 1 AGENT-origin chat through
-  `POST /api/v1/internal/chats`, later 13 more on one agent (Riley) to test
+  the sidecar-only internal chat-create route, later 13 more on one agent (Riley) to test
   the per-agent cap.
 - **Could not be produced without a runtime**: `message` items ("your agent
   replied", issue mentions, routine progress), `failed_run`,
