@@ -186,20 +186,23 @@ func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[s
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
-	ID             string          `json:"id"`
-	WorkspaceID    string          `json:"workspace_id"`
-	CrewID         string          `json:"crew_id"`
-	CrewName       string          `json:"crew_name,omitempty"`
-	CrewSlug       string          `json:"crew_slug,omitempty"`
-	Number         *int            `json:"number"`
-	Identifier     *string         `json:"identifier"`
-	Title          string          `json:"title"`
-	Description    *string         `json:"description"`
-	Status         string          `json:"status"`
-	Priority       string          `json:"priority"`
-	AssigneeType   *string         `json:"assignee_type"`
-	AssigneeID     *string         `json:"assignee_id"`
-	AssigneeName   *string         `json:"assignee_name,omitempty"`
+	ID           string  `json:"id"`
+	WorkspaceID  string  `json:"workspace_id"`
+	CrewID       string  `json:"crew_id"`
+	CrewName     string  `json:"crew_name,omitempty"`
+	CrewSlug     string  `json:"crew_slug,omitempty"`
+	Number       *int    `json:"number"`
+	Identifier   *string `json:"identifier"`
+	Title        string  `json:"title"`
+	Description  *string `json:"description"`
+	Status       string  `json:"status"`
+	Priority     string  `json:"priority"`
+	AssigneeType *string `json:"assignee_type"`
+	AssigneeID   *string `json:"assignee_id"`
+	AssigneeName *string `json:"assignee_name,omitempty"`
+	// AssigneeSlug is set for an agent assignee — what the agent's page is
+	// keyed on, so a client can link the assignee instead of naming it.
+	AssigneeSlug   *string         `json:"assignee_slug,omitempty"`
 	DueDate        *string         `json:"due_date"`
 	SortOrder      float64         `json:"sort_order"`
 	MissionType    string          `json:"mission_type"`
@@ -403,6 +406,10 @@ func issueSelectQuery() string {
 			WHEN m.assignee_type = 'agent' THEN (
 				SELECT name FROM agents WHERE id = m.assignee_id AND workspace_id = m.workspace_id)
 		END,
+		CASE
+			WHEN m.assignee_type = 'agent' THEN (
+				SELECT slug FROM agents WHERE id = m.assignee_id AND workspace_id = m.workspace_id)
+		END,
 		m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
 		m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
 		m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
@@ -425,7 +432,7 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 	err := row.Scan(
 		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
 		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
+		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName, &issue.AssigneeSlug,
 		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
 		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,

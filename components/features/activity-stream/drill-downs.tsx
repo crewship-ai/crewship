@@ -30,6 +30,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
+import { apiFetch } from "@/lib/api-fetch"
+import { entityHref } from "@/lib/entity-links"
 import { formatDurationMs } from "@/lib/activity-stream"
 import { relTime } from "@/lib/time"
 import { runHeadline } from "@/lib/run-digest"
@@ -210,6 +212,51 @@ export interface RunDrillDownProps {
 }
 
 /**
+ * Which routine a run belongs to, asked of the journal.
+ *
+ * `?run=<id>` is the commonest inbound link in the product (the inbox, the
+ * bell, the dashboard, a routine's run rows) and it carries no routine. The
+ * run's own row lives in the routine's run-records list, so without the slug
+ * the page could only say "this run's record is not loaded" over a run the
+ * journal can name. Every entry a routine run emits carries the slug in its
+ * payload; one small read resolves it. Null while asking, "" when the journal
+ * holds nothing for that id.
+ */
+function useRoutineSlugOfRun(workspaceId: string, runID: string, known?: string): string | null {
+  const [slug, setSlug] = React.useState<string | null>(known ?? null)
+  React.useEffect(() => {
+    if (known) {
+      setSlug(known)
+      return
+    }
+    let cancelled = false
+    setSlug(null)
+    const qs = new URLSearchParams({ workspace_id: workspaceId, run_id: runID, limit: "20" })
+    apiFetch(`/api/v1/journal?${qs.toString()}`)
+      .then(async (r) => (r.ok ? await r.json() : null))
+      .then((body: { entries?: Array<{ payload?: Record<string, unknown>; refs?: Record<string, unknown> }> } | null) => {
+        if (cancelled) return
+        for (const e of body?.entries ?? []) {
+          const bag = { ...(e.payload ?? {}), ...(e.refs ?? {}) }
+          const found = bag["pipeline_slug"] ?? bag["routine_slug"]
+          if (typeof found === "string" && found) {
+            setSlug(found)
+            return
+          }
+        }
+        setSlug("")
+      })
+      .catch(() => {
+        if (!cancelled) setSlug("")
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [workspaceId, runID, known])
+  return slug
+}
+
+/**
  * One run: what it did, step by step.
  *
  * This replaced a page whose whole content was "3 events mentioning this run" —
@@ -247,8 +294,60 @@ function runStatusTone(status: string): StatItem["tone"] {
   }
 }
 
-export function RunDrillDown({ workspaceId, runID, routineSlug }: RunDrillDownProps) {
-  const { records, loading } = usePipelineRunRecords(workspaceId, routineSlug ?? null)
+/**
+ * What the journal knows about a run as an AGENT run: who ran it, for which
+ * crew, on which issue. GET /api/v1/runs/{id} answers for runs the mission
+ * engine dispatched (they carry `mission_identifier`) and 404s for a routine
+ * run, which has no run.* entries — so the links are drawn from what comes
+ * back and nothing is invented for the other kind.
+ */
+interface RunMeta {
+  agent_slug?: string
+  agent_name?: string
+  crew_name?: string
+  crew_slug?: string
+  mission_id?: string
+  mission_identifier?: string
+}
+
+function useRunMeta(runID: string): RunMeta | null {
+  const [meta, setMeta] = React.useState<RunMeta | null>(null)
+  React.useEffect(() => {
+    let cancelled = false
+    setMeta(null)
+    apiFetch(`/api/v1/runs/${encodeURIComponent(runID)}`)
+      .then(async (r) => (r.ok ? ((await r.json()) as RunMeta) : null))
+      .then((m) => {
+        if (!cancelled) setMeta(m)
+      })
+      .catch(() => {
+        if (!cancelled) setMeta(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [runID])
+  return meta
+}
+
+/** The §5 links of a run — routine, issue, agent, crew, journal — each through entityHref. */
+export function runRelatedLinks(runID: string, routineSlug: string | undefined, meta: RunMeta | null) {
+  const out: { label: string; href: string }[] = []
+  if (routineSlug) out.push({ label: `Routine · ${routineSlug}`, href: entityHref({ kind: "routine", slug: routineSlug }) })
+  if (meta?.mission_identifier) out.push({ label: `Issue · ${meta.mission_identifier}`, href: entityHref({ kind: "issue", identifier: meta.mission_identifier }) })
+  if (meta?.agent_slug) out.push({ label: `Agent · ${meta.agent_name ?? meta.agent_slug}`, href: entityHref({ kind: "agent", slug: meta.agent_slug }) })
+  if (meta?.crew_slug) out.push({ label: `Crew · ${meta.crew_name ?? meta.crew_slug}`, href: entityHref({ kind: "crew", slug: meta.crew_slug }) })
+  out.push({ label: "Journal · this run", href: entityHref({ kind: "journal", traceId: runID }) })
+  return out
+}
+
+export function RunDrillDown({ workspaceId, runID, routineSlug: knownSlug }: RunDrillDownProps) {
+  const meta = useRunMeta(runID)
+  const resolved = useRoutineSlugOfRun(workspaceId, runID, knownSlug)
+  const routineSlug = resolved || undefined
+  const resolving = resolved === null
+  const { records, loading: recordsLoading } = usePipelineRunRecords(workspaceId, routineSlug ?? null)
+  const loading = resolving || recordsLoading
   const run = React.useMemo(() => records.find((r) => r.id === runID), [records, runID])
 
   const head = run
@@ -283,6 +382,21 @@ export function RunDrillDown({ workspaceId, runID, routineSlug }: RunDrillDownPr
           {run && <Pill tone={runStatusTone(run.status)}>{run.status}</Pill>}
           {routineSlug && <Pill tone="default">{routineSlug}</Pill>}
         </div>
+        {/* Where this run leads — the second leg of the one timeline. A run
+            used to be a dead end: nothing on this page linked its issue, its
+            agent or its journal. */}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="run-related-links">
+          {runRelatedLinks(runID, routineSlug, meta).map((l) => (
+            <a
+              key={l.href}
+              href={l.href}
+              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-foreground hover:border-primary hover:no-underline"
+            >
+              {l.label}
+              <span aria-hidden className="text-muted-foreground">→</span>
+            </a>
+          ))}
+        </div>
       </Appear>
 
       {run && (
@@ -311,12 +425,16 @@ export function RunDrillDown({ workspaceId, runID, routineSlug }: RunDrillDownPr
         </div>
       )}
 
-      {!loading && !run && !routineSlug && (
+      {!loading && !run && (
         <Appear order={2}>
           <EmptyState
             icon={Terminal}
-            title="This run's record is not loaded"
-            description="The run's own row is fetched per routine, and this run was opened without one. Its journal is below."
+            title={routineSlug ? "This run is not in its routine's records" : "No routine claims this run"}
+            description={
+              routineSlug
+                ? `The routine “${routineSlug}” keeps its newest runs on file and this one is older than that window. Its steps, as the journal recorded them, are below.`
+                : "The journal holds no routine entries for this id, so there is no run record to show. Whatever it did record is below."
+            }
           />
         </Appear>
       )}
@@ -343,6 +461,8 @@ export function RunDrillDown({ workspaceId, runID, routineSlug }: RunDrillDownPr
 export interface AgentDrillDownProps {
   workspaceId: string
   agentID: string
+  /** The agent's slug — what its page is keyed on. Without it there is no page to link. */
+  agentSlug?: string
   name: string
   /** Chains this agent worked in — its history, from what the rail holds. */
   chains: ChainSummary[]
@@ -361,7 +481,7 @@ export interface AgentDrillDownProps {
  * own page, which the header links to rather than reproducing — the same rule
  * the issue surface follows.
  */
-export function AgentDrillDown({ workspaceId, agentID, name, chains, onOpenWorkflow }: AgentDrillDownProps) {
+export function AgentDrillDown({ workspaceId, agentID, agentSlug, name, chains, onOpenWorkflow }: AgentDrillDownProps) {
   void workspaceId
 
   const worked = React.useMemo(
@@ -394,9 +514,13 @@ export function AgentDrillDown({ workspaceId, agentID, name, chains, onOpenWorkf
         <div className="flex flex-wrap items-center gap-2">
           <AgentAvatar seed={agentID} alt="" className="h-6 w-6 shrink-0 rounded-full" />
           <h1 className="min-w-0 text-lg font-semibold tracking-tight">{name}</h1>
-          <a href={`/agents/${encodeURIComponent(agentID)}`} className="text-[11px] text-primary hover:underline">
-            Agent page ↗
-          </a>
+          {/* /agents/<id> was a dead route; the agent's page is keyed on its
+              slug under /crews, and a link is only drawn when there is one. */}
+          {agentSlug && (
+            <a href={entityHref({ kind: "agent", slug: agentSlug })} className="text-[11px] text-primary hover:underline">
+              Agent page ↗
+            </a>
+          )}
         </div>
       </Appear>
 

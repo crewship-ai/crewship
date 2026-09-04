@@ -68,6 +68,10 @@ export function TopologyCard({ workspaceId, anchor, anchorLabel, onOpenNode }: T
   const [chain, setChain] = React.useState<ChainGraph | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  // "Try again" used to call setChain(null), which is not in the effect's
+  // dependencies — the button cleared the graph and fetched nothing, so the
+  // same error panel re-rendered. A counter in the deps is what refetches.
+  const [attempt, setAttempt] = React.useState(0)
 
   React.useEffect(() => {
     if (!anchor) return
@@ -93,7 +97,7 @@ export function TopologyCard({ workspaceId, anchor, anchorLabel, onOpenNode }: T
     return () => {
       cancelled = true
     }
-  }, [anchor, workspaceId])
+  }, [anchor, workspaceId, attempt])
 
   const graph = React.useMemo(() => (chain ? buildChainGraph(chain) : null), [chain])
 
@@ -121,7 +125,7 @@ export function TopologyCard({ workspaceId, anchor, anchorLabel, onOpenNode }: T
         <div className="flex flex-col items-center gap-2 py-10 text-center">
           <TriangleAlert className="h-4 w-4 text-destructive" />
           <p className="text-[11px] text-muted-foreground">Could not load the chain: {error}</p>
-          <Button size="sm" variant="outline" onClick={() => setChain(null)}>
+          <Button size="sm" variant="outline" onClick={() => setAttempt((a) => a + 1)}>
             Try again
           </Button>
         </div>

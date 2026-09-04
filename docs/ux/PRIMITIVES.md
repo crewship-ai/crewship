@@ -4,6 +4,10 @@
 - 2026-09-03 · cluster A · `components/features/inbox/inbox-derive.ts` `deciderCopy()`, `escalationHeading()`, `linkToOpen()` — the words for who decides (never a role enum), the decision-card heading by what an escalation asks for, and the client-side https guard for `payload.link_url`. Reuse from any surface that renders an inbox item.
 - 2026-09-03 · cluster C · `lib/entity-links.ts` — `integrations` ref (`tab`, `section`, `server`) so a crew tool can be opened where Connect lives.
 - 2026-09-03 · cluster C · `lib/entity-links.ts` — `inbox` ref takes `agentSlug` (`/inbox-v2?agent=`), the way an agent canvas hands a decision to the inbox.
+- 2026-09-03 · cluster B · `lib/entity-links.ts` — `journal` now writes `crew_id` / `agent_id` (the keys `/journal` owns; the server resolves a slug as readily as an id) instead of `crew` / `agent`.
+- 2026-09-03 · cluster B · `hooks/use-issue-detail.ts` — `useUrlSelection(key, { aliases })` reads an older spelling of the parameter and rewrites it on the first pick; `readUrlSelection` is the pure read. Used by `/routines` (`?routine=` → `?slug=`).
+- 2026-09-03 · cluster B · `lib/activity-url.ts` — the `/activity` URL round trip (`?run` / `?pipeline` / `?mission` / `?status` kept, `?walk=`, `?lens=`, `?entry=`); reuse `activityUrl()` when linking into a walk.
+- 2026-09-03 · cluster B · `components/features/issues/issue-runs-card.tsx` — `IssueRunsCard` + `issueRunLinks()`; the run/agent/journal/activity links of an issue in one place.
 - 2026-09-03 · wave 0 · `lib/entity-refs.ts` — `refHref("routine/x")` / `refLabel` turn stored `kind/slug` owner and producer refs into routes through entityHref; null for a kind with no page.
 - 2026-09-03 · wave 0 · `components/layout/sidebar-kit.tsx` + `.kit-tap` in globals.css — every kit control is 44px under a coarse pointer; add `kit-tap` to any new interactive element in a sidebar.
 - 2026-09-03 · wave 0 · `components/ui/status-pill.tsx` + `lib/format-status.ts` — THE status pill (dot + word, six tones) and the enum→word map. Replace every local pill map with it; add missing enums to format-status, never to a component.

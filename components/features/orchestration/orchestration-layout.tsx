@@ -47,6 +47,7 @@ import type { Mission, MissionTask, IssueLabel, Project, SavedView } from "@/lib
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
+import { usePagedList } from "@/hooks/use-paged-list"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
 import { useIssueDetail } from "@/hooks/use-issue-detail"
 import { useProjectDetail } from "@/hooks/use-project-detail"
@@ -98,6 +99,8 @@ export interface OrchestrationLayoutProps {
   onRefresh: () => void
   onMissionCreated: () => void
   mode?: OrchestrationMode
+  /** The shell's fetch failed; rendered in place of the board with a retry, never as "no issues". */
+  loadError?: string | null
 }
 
 const ORCH_DRAWER_TABS = [
@@ -146,6 +149,7 @@ export function OrchestrationLayout({
   onRefresh,
   onMissionCreated: _onMissionCreated,
   mode = "default",
+  loadError = null,
 }: OrchestrationLayoutProps) {
   const isMobile = useIsMobile()
 
@@ -184,7 +188,6 @@ export function OrchestrationLayout({
   const [detailContext, setDetailContext] = useState<DetailContext>({ type: "none" })
 
   // Issues state
-  const [issues, setIssues] = useState<Mission[]>([])
   const [issueLabels, setIssueLabels] = useState<IssueLabel[]>([])
   // Persisted per-user — most teams stick with one of board/list and a
   // refresh shouldn't bounce them back to board if they prefer list.
@@ -193,6 +196,14 @@ export function OrchestrationLayout({
     "board",
   )
   const [issueSearch, setIssueSearch] = useState("")
+  // The search the SERVER runs (`?q=`), committed after a pause. The box
+  // filters the loaded page instantly; the server filters the workspace,
+  // so an issue outside the page can still be found.
+  const [committedSearch, setCommittedSearch] = useState("")
+  useEffect(() => {
+    const t = setTimeout(() => setCommittedSearch(issueSearch.trim()), 300)
+    return () => clearTimeout(t)
+  }, [issueSearch])
   const [projects, setProjects] = useState<Project[]>([])
   // Project filter applied via saved views — does NOT open the detail panel.
   // `selectedProjectId` is the authoritative "user navigated to this project"
@@ -331,14 +342,23 @@ export function OrchestrationLayout({
     return missions.filter((m) => m.id === selectedMissionId)
   }, [selectedMissionId, missions])
 
-  // Issue data fetching
-  const fetchIssues = useCallback(async () => {
-    if (!workspaceId) return
-    try {
-      const res = await apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=100`)
-      if (res.ok) setIssues(await res.json())
-    } catch { /* ignore */ }
-  }, [workspaceId])
+  // Issues, paged the S1 way: ?limit&offset with the total in X-Total-Count.
+  // The board used to fetch 100 once and present it as the workspace —
+  // "100 issues" at 1 015, a search that covered the page it had.
+  const issuesUrl = workspaceId
+    ? `/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}${
+        committedSearch ? `&q=${encodeURIComponent(committedSearch)}` : ""
+      }`
+    : null
+  const {
+    items: issues,
+    total: issuesTotal,
+    hasMore: issuesHaveMore,
+    loadingMore: issuesLoadingMore,
+    loadMore: loadMoreIssues,
+    refresh: fetchIssues,
+    error: issuesError,
+  } = usePagedList<Mission>({ url: issuesUrl, limit: 100 })
 
   const fetchIssueLabels = useCallback(async () => {
     if (!workspaceId) return
@@ -369,11 +389,10 @@ export function OrchestrationLayout({
   }, [workspaceId])
 
   useEffect(() => {
-    fetchIssues()
     fetchIssueLabels()
     fetchProjects()
     fetchSavedViews()
-  }, [fetchIssues, fetchIssueLabels, fetchProjects, fetchSavedViews])
+  }, [fetchIssueLabels, fetchProjects, fetchSavedViews])
 
   // Both selections live in the URL now — /issues?issue=ENG-4&project=p_1.
   // They used to be component state, so the open issue could not be shared,
@@ -569,7 +588,11 @@ export function OrchestrationLayout({
         <SubBar
           icon={mode === "issues" ? CircleDot : undefined}
           title={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
-          description={`${missions.length} ${missions.length === 1 ? "issue" : "issues"}`}
+          description={
+            mode === "issues"
+              ? `${(issuesTotal ?? issues.length).toLocaleString()} ${(issuesTotal ?? issues.length) === 1 ? "issue" : "issues"}`
+              : `${missions.length} ${missions.length === 1 ? "issue" : "issues"}`
+          }
           ariaLabel={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
           tabs={visibleTabs.map(({ id, label, icon }) => ({ id, label, icon }))}
           activeTab={activeTab}
@@ -662,6 +685,7 @@ export function OrchestrationLayout({
                         onPriorityFilter={setFilterPriority}
                         filterStatuses={filterStatuses}
                         onStatusFilter={setFilterStatuses}
+                        total={issuesTotal}
                       />
                     </div>
                   </motion.div>
@@ -720,6 +744,7 @@ export function OrchestrationLayout({
                     filterStatuses={filterStatuses}
                     onStatusFilter={setFilterStatuses}
                     onToggleCollapse={() => setLeftCollapsed(true)}
+                    total={issuesTotal}
                   />
                 </motion.div>
               </AnimatePresence>
@@ -822,6 +847,11 @@ export function OrchestrationLayout({
           {activeTab === "issues" && !issueDetailFullWidth && !projectDetailFullWidth && (
             <div className="h-full overflow-auto">
               <IssuesToolbarStrip
+                loaded={issues.length}
+                total={issuesTotal}
+                hasMore={issuesHaveMore}
+                loadingMore={issuesLoadingMore}
+                onLoadMore={() => void loadMoreIssues()}
                 issueViewMode={issueViewMode}
                 onViewModeChange={setIssueViewMode}
                 savedViews={savedViews}
@@ -875,6 +905,7 @@ export function OrchestrationLayout({
                   losing the current crew/agent/project filter context. */}
               <IssuesStatusChips
                 issues={statusChipIssues}
+                total={issuesTotal}
                 selected={filterStatuses}
                 onToggle={(s) =>
                   setFilterStatuses((prev) =>
@@ -883,8 +914,22 @@ export function OrchestrationLayout({
                 }
                 onClear={() => setFilterStatuses([])}
               />
-              {/* Board or List view */}
-              <div className="px-4 pb-4 h-[calc(100%-90px)]">
+              {/* A failed load is not an empty board (S6): say what failed,
+                  keep the filters, offer a retry. */}
+              {(issuesError || loadError) && (
+                <div
+                  role="alert"
+                  className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-label text-destructive"
+                >
+                  <span className="min-w-0 flex-1">{issuesError ?? loadError}</span>
+                  <Button size="sm" variant="outline" className="h-7" onClick={() => { void fetchIssues(); onRefresh() }}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+              {/* Board or List view. The pane scrolls; the board no longer
+                  pins itself to a viewport height with per-column scrollers. */}
+              <div className="px-4 pb-4">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || filterProjectId || "all"}-${filterStatuses.join(",") || "all"}-${filterPriority || "all"}`}

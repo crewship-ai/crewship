@@ -125,6 +125,8 @@ export interface Mission {
   assignee_type?: "user" | "agent" | null
   assignee_id?: string | null
   assignee_name?: string | null
+  /** The agent assignee's slug — what its page is keyed on. Absent for a user. */
+  assignee_slug?: string | null
   due_date?: string | null
   sort_order?: number
   mission_type?: MissionType
