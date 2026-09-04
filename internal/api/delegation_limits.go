@@ -527,6 +527,15 @@ type cappedAssignment struct {
 	MissionID       string
 	AuthorAgentID   string
 	CreatedByUserID string
+	// SessionID links the run to the issue_agent_sessions row it belongs to
+	// (§9.4, PRD-ISSUES-AND-ROUTINES-2026, B1 — #2332). Empty stores NULL,
+	// same as the rest of this struct's optional attribution fields: only
+	// DispatchMention resolves a session today (resolveOrCreateIssueAgentSession,
+	// issue_sessions.go), so a root /assign with no mention involved
+	// legitimately names none. The exclusivity index that would make this
+	// column load-bearing for run admission (idx_assignments_one_active_per_session,
+	// §9.4) is B3's job, not this struct's.
+	SessionID string
 }
 
 // insertCappedAssignment writes the PENDING assignment row with the fan-out
@@ -573,7 +582,7 @@ func insertCappedAssignment(
 	if scope.ParentRunID != "" {
 		parentRunVal = scope.ParentRunID
 	}
-	var missionVal, authorAgentVal, createdByUserVal any
+	var missionVal, authorAgentVal, createdByUserVal, sessionVal any
 	if a.MissionID != "" {
 		missionVal = a.MissionID
 	}
@@ -583,15 +592,18 @@ func insertCappedAssignment(
 	if a.CreatedByUserID != "" {
 		createdByUserVal = a.CreatedByUserID
 	}
+	if a.SessionID != "" {
+		sessionVal = a.SessionID
+	}
 	guardSQL, guardArgs := fanoutGuard(scope, caller, a.ChatID, lim.MaxFanout)
 	insertArgs := append([]any{
 		assignmentID, a.WorkspaceID, a.ChatID, caller.FanoutSubjectID, a.TargetID,
 		a.Task, a.GroupID, scope.Depth, parentVal, originVal, parentRunVal, a.CreatedAt,
-		missionVal, authorAgentVal, createdByUserVal,
+		missionVal, authorAgentVal, createdByUserVal, sessionVal,
 	}, guardArgs...)
 	res, err := db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at, mission_id, author_agent_id, created_by_user_id)
-		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at, mission_id, author_agent_id, created_by_user_id, session_id)
+		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		 WHERE `+guardSQL, insertArgs...)
 	if err != nil {
 		return "", err

@@ -840,6 +840,23 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 	} else {
 		createdByUserID = req.AuthorID
 	}
+
+	// Resolve-or-create the (issue, target agent) session — §9.2, B1
+	// (#2332). This is the write path the accept line's "a mention reuses an
+	// existing session rather than creating a second" is proven against: the
+	// UPSERT behind resolveOrCreateIssueAgentSession is keyed on
+	// UNIQUE(mission_id, agent_id), so two mentions of the same agent on the
+	// same issue — however close together — resolve to the same row. Best-
+	// effort like the rest of this dispatch's bookkeeping (the journal emit
+	// above, the activity log below): a session lookup failure must not
+	// refuse a dispatch the caps have already approved. Empty when the
+	// issueAgentSessionsFlagKey flag is off.
+	sessionID, sessErr := resolveOrCreateIssueAgentSession(ctx, h.db, req.WorkspaceID, req.MissionID, target.ID)
+	if sessErr != nil {
+		h.logger.Warn("dispatch mention: resolve issue agent session", "error", sessErr,
+			"mission_id", req.MissionID, "agent_id", target.ID)
+	}
+
 	assignmentID, err := insertCappedAssignment(ctx, h.db, scope, lim, caller, cappedAssignment{
 		WorkspaceID:     req.WorkspaceID,
 		ChatID:          req.MissionID,
@@ -850,6 +867,7 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 		MissionID:       req.MissionID,
 		AuthorAgentID:   authorAgentID,
 		CreatedByUserID: createdByUserID,
+		SessionID:       sessionID,
 	})
 	if err != nil {
 		return "", err

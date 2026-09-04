@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -502,6 +503,75 @@ var issueRunsCmd = &cobra.Command{
 	},
 }
 
+// issueSessionsCmd lists an issue's agent sessions. CLI parity for
+// GET /api/v1/crews/{crewId}/issues/{identifier}/sessions
+// (internal/api/issue_sessions.go, PRD-ISSUES-AND-ROUTINES-2026 §9.2, B1 —
+// #2332).
+var issueSessionsCmd = &cobra.Command{
+	Use:   "sessions <identifier>",
+	Short: "List an issue's agent sessions",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		issue, err := fetchIssue(client, args[0])
+		if err != nil {
+			return err
+		}
+		identifier := derefStr(issue.Identifier, issue.ID)
+		resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/issues/%s/sessions",
+			issue.CrewID, url.PathEscape(identifier)))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var sessions []struct {
+			ID              string `json:"id"`
+			AgentID         string `json:"agent_id"`
+			AgentName       string `json:"agent_name"`
+			State           string `json:"state"`
+			LastConsumedSeq int    `json:"last_consumed_seq"`
+			ActiveRunID     string `json:"active_run_id"`
+			AgentVersion    *int   `json:"agent_version"`
+			LastActivityAt  string `json:"last_activity_at"`
+			UpdatedAt       string `json:"updated_at"`
+		}
+		if err := cli.ReadJSON(resp, &sessions); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"AGENT", "STATE", "LAST SEQ", "VERSION", "UPDATED"}
+		rows := make([][]string, 0, len(sessions))
+		for _, s := range sessions {
+			agent := s.AgentName
+			if agent == "" {
+				agent = s.AgentID
+			}
+			version := "-"
+			if s.AgentVersion != nil {
+				version = strconv.Itoa(*s.AgentVersion)
+			}
+			rows = append(rows, []string{
+				agent,
+				s.State,
+				strconv.Itoa(s.LastConsumedSeq),
+				version,
+				issueRelativeTime(s.UpdatedAt),
+			})
+		}
+		return f.Auto(sessions, headers, rows)
+	},
+}
+
 // issueChangesCmd shows the base-branch git diff of the crew working an
 // issue. CLI parity for GET /api/v1/crews/{crewId}/git-diff — the data the
 // dashboard's issue "Changes" tab renders.
@@ -714,6 +784,7 @@ func init() {
 
 	issueCmd.AddCommand(issueCommentsCmd)
 	issueCmd.AddCommand(issueRunsCmd)
+	issueCmd.AddCommand(issueSessionsCmd)
 	issueChangesCmd.Flags().Bool("patch", false, "Print the raw unified diff instead of the file summary")
 	issueCmd.AddCommand(issueChangesCmd)
 	issueCmd.AddCommand(issueRelateCmd)
