@@ -70,10 +70,15 @@ crewship issue list --search "auth flow"
 | `--crew` | `string` | | Filter by crew slug or ID. |
 | `--assignee` | `string` | | Filter by assignee ID. |
 | `--label` | `string` | | Filter by label name. |
-| `--search` | `string` | | Search issues by title or description. |
-| `--limit` | `int` | `50` | Maximum number of issues to return. |
+| `--search` | `string` | | Search issues by title or identifier, on the server (sent as `q`). |
+| `--limit` | `int` | `50` | Rows per page (the server caps it at 500). |
+| `--offset` | `int` | `0` | Skip this many rows. Page with `--offset 50`, `--offset 100`, … |
 
 **Output columns:** ID, TITLE, STATUS, PRIORITY, ASSIGNEE, CREATOR, CREW, LABELS, UPDATED
+
+A human table ends with `showing 1–50 of 1 015 · next page: --offset 50`, read from the
+`X-Total-Count` / `X-Limit` / `X-Offset` headers every paged list sends. Machine formats
+(`json`, `yaml`, `ndjson`) stay a bare array; `quiet` stays one id per line.
 
 ---
 
@@ -285,9 +290,15 @@ List every run attributed to an issue — mission tasks, mention-dispatched runs
 
 ```bash
 crewship issue runs BE-42
+crewship issue runs BE-42 --limit 20 --offset 20
 ```
 
-**Output columns:** AGENT, TASK (truncated to 28), STATUS, STARTED (relative time), DURATION, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | `int` | `100` | Runs per page (the server caps it at 500). |
+| `--offset` | `int` | `0` | Skip this many runs; the footer names the next page. |
+
+**Output columns:** RUN (the journal run id — what `crewship journal --run-id` and the Activity page take; `—` when the assignment never reached a run), AGENT (slug), TASK (truncated to 28), STATUS, STARTED (relative time), DURATION, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
 
 ---
 
