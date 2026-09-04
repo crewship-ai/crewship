@@ -66,7 +66,8 @@ func covMissionDB(t *testing.T) *sql.DB {
 		CREATE TABLE mission_comments (id TEXT PRIMARY KEY, mission_id TEXT, author_type TEXT,
 			author_id TEXT, body TEXT, created_at TEXT, updated_at TEXT);
 		CREATE TABLE mission_activity (id TEXT PRIMARY KEY, mission_id TEXT, actor_type TEXT,
-			actor_id TEXT, action TEXT, details TEXT, created_at TEXT);
+			actor_id TEXT, action TEXT, details TEXT, created_at TEXT,
+			workspace_id TEXT, seq INTEGER, payload_json TEXT, source_kind TEXT, source_id TEXT);
 		CREATE TABLE inbox_items (id TEXT PRIMARY KEY, workspace_id TEXT, kind TEXT, source_id TEXT,
 			target_user_id TEXT, target_role TEXT, title TEXT, body_md TEXT,
 			sender_type TEXT, sender_id TEXT, sender_name TEXT,
