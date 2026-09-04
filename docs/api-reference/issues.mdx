@@ -710,9 +710,9 @@ Pages like every list: `limit` (default 100, max 500) and `offset`, with the tot
 
 ## Sessions
 
-<Note>Early: `issue_agent_sessions` is work package B1 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md`) — the event-log and session foundations. A mention resolves or creates a session; nothing yet reads it back into an agent's context, and the state machine (`pending` → `active` → …) has only its `pending` starting state wired. That is later work (B2–B5), not a gap in this endpoint.</Note>
+<Note>Early: `issue_agent_sessions` is work package B1 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md`) — the event-log and session foundations. A mention resolves or creates a session; the state machine (`pending` → `active` → …) still has only its `pending` starting state wired — that transition is later work (B4). What B3 (#2339) added is the run-admission guarantee this session exists to carry: at most one `assignments` row may be `PENDING`/`QUEUED`/`RUNNING` for a given session at a time, enforced by a partial unique index rather than a read-then-write check. `active_run_id` itself is not yet populated by any writer — read `assignments.session_id` to find a session's current or most recent run.</Note>
 
-The durable, per-(issue, agent) cursor a mention resolves or creates. `UNIQUE(mission_id, agent_id)` on the underlying table means mentioning the same agent on the same issue twice never creates a second session — the second mention finds and reuses the first's row.
+The durable, per-(issue, agent) cursor a mention resolves or creates. `UNIQUE(mission_id, agent_id)` on the underlying table means mentioning the same agent on the same issue twice never creates a second session — the second mention finds and reuses the first's row. `UNIQUE` on `assignments.session_id` (partial, live statuses only) means a session backs at most one live run: a mention that lands while the session's run is already going does not start a second one — its delivery is left unclaimed and is folded into exactly one new run once the live one finishes, rather than being marked seen by a run that never read it. See `docs/guides/issue-mentions.mdx`'s "Known limits in 1.0" for the full account.
 
 ### List Sessions
 

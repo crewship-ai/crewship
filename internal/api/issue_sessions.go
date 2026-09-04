@@ -5,22 +5,30 @@ package api
 //
 // Two things live here:
 //
-//   - resolveOrCreateIssueAgentSession, the write side. Called from
-//     DispatchMention (issue_mentions.go) so the B1 accept line ("a mention
+//   - resolveOrCreateIssueAgentSessionTx, the write side. Called from
+//     DispatchMention (issue_mentions.go, via resolveSessionAndInsertAssignment
+//     in delegation_limits.go as of B3) so the B1 accept line ("a mention
 //     reuses an existing session rather than creating a second") is proven at
-//     the one entry point B1 wires it into. The state machine transitions
-//     themselves (§10.1: pending -> active on a claimed run, -> idle on run
-//     end, the lease/idle sweeps into error/stale) are NOT this package's
-//     job — B1 creates a session in 'pending' and stops there; B2/B4 move it.
+//     the one entry point B1 wires it into. resolveOrCreateIssueAgentSession
+//     (no transaction) is the same write path's TEST-ONLY convenience form —
+//     see its own doc comment. The state machine transitions themselves
+//     (§10.1: pending -> active on a claimed run, -> idle on run end, the
+//     lease/idle sweeps into error/stale) are NOT this package's job — B1
+//     creates a session in 'pending' and stops there; B2/B4 move it.
 //   - ListSessions, the read side — GET .../issues/{identifier}/sessions,
 //     the CLI's `issue sessions` command reads this. Mirrors ListRuns'
 //     shape (issue_handler_runs.go): resolve the issue, scope to its
 //     workspace, one query, newest-first.
 //
-// What is deliberately NOT here: the partial unique index that makes
-// assignments.session_id an exclusivity key (§9.4, B3), and anything about
-// delivery/wake (§9.3, B2). Both are named in the PRD as separate work
-// packages and this file does not reach for either.
+// What is deliberately NOT here: delivery/wake bookkeeping (§9.3, B2, lives
+// in issue_deliveries.go) and the state machine transitions of §10.1 beyond
+// 'pending'. The partial unique index that makes assignments.session_id an
+// exclusivity key (§9.4, B3 — idx_assignments_one_active_per_session,
+// 20260904172200_assignments_one_active_per_session.sql) DOES reach into
+// this file as of B3: resolveOrCreateIssueAgentSessionTx below is the half
+// of the insert-path rewrite that runs inside DispatchMention's transaction
+// alongside insertCappedAssignment (delegation_limits.go) — see that
+// function's doc comment for the other half.
 
 import (
 	"context"
@@ -38,8 +46,63 @@ import (
 // moves onto unconditionally) gets a kill switch.
 const issueAgentSessionsFlagKey = "issue_agent_sessions"
 
+// dbConn is the subset of *sql.DB / *sql.Tx the session-resolve and
+// assignment-insert write path shares. *sql.DB satisfies it for every
+// caller that has no reason to hold a transaction open; DispatchMention
+// (issue_mentions.go, B3 — §9.4) passes a *sql.Tx instead, so
+// resolveOrCreateIssueAgentSessionTx and insertCappedAssignment run inside
+// the SAME transaction as the fan-out guard — the thing §9.4 says the
+// exclusivity index "guards nothing" without. Structurally identical to
+// auditExecer (credential_audit.go) — same split, same reason, kept as its
+// own type rather than shared because the two evolved in different PRs and
+// merging them is a rename, not a fix. No QueryContext: nothing on this
+// path issues a multi-row query through the interface (ListSessions reads
+// via h.db directly), so it is not part of the contract.
+type dbConn interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // resolveOrCreateIssueAgentSession returns the id of the (mission, agent)
 // session, creating it in state 'pending' if none exists yet.
+//
+// TEST-ONLY as of B3 (#2339, review on #2342): this is the flag-checked,
+// no-transaction convenience form B1 originally wired into DispatchMention
+// directly. DispatchMention has called resolveSessionAndInsertAssignment
+// (delegation_limits.go) since B3 instead, because the session
+// resolve-or-create and the admission insert have to share one transaction
+// or the exclusivity index's TOCTOU comes back (§9.4) — so this function
+// has had no production caller since. Kept, not deleted, because
+// issue_sessions_test.go's B1-era tests still exercise
+// resolveOrCreateIssueAgentSessionTx (the part that actually matters)
+// through this wrapper, and duplicating its four-line flag-check-then-call
+// body into every one of those tests would be a worse trade than one
+// unused-by-production function with an honest comment. If a second
+// production caller ever needs the no-transaction shape, this is exactly
+// what it should reach for; until then, do not add one without checking
+// whether it can share resolveSessionAndInsertAssignment's transaction
+// instead.
+//
+// Returns ("", nil) when the flag is off: the caller treats that exactly
+// like "no session" and simply does not set assignments.session_id, which
+// is the column's own default.
+func resolveOrCreateIssueAgentSession(ctx context.Context, db *sql.DB, workspaceID, missionID, agentID string) (string, error) {
+	enabled, err := featureflags.IsEnabled(ctx, db, workspaceID, issueAgentSessionsFlagKey)
+	if err != nil {
+		return "", err
+	}
+	if !enabled {
+		return "", nil
+	}
+	return resolveOrCreateIssueAgentSessionTx(ctx, db, workspaceID, missionID, agentID)
+}
+
+// resolveOrCreateIssueAgentSessionTx is resolveOrCreateIssueAgentSession's
+// write half, with the flag check split out so DispatchMention (B3) can run
+// it inside the SAME transaction as insertCappedAssignment's fan-out guard.
+// Callers are responsible for the flag check (see resolveOrCreateIssueAgentSession)
+// and for the transaction's lifetime — this function neither begins nor
+// commits/rolls one back.
 //
 // One UPSERT against UNIQUE(mission_id, agent_id)
 // (20260904095702_issue_agent_sessions.sql), not a SELECT-then-INSERT: two
@@ -53,21 +116,9 @@ const issueAgentSessionsFlagKey = "issue_agent_sessions"
 // high-water mark (§11.6) ONLY on the INSERT branch — an existing session
 // keeps whatever version it was opened under; re-stamping on every reuse
 // would defeat the point of pinning it.
-//
-// Returns ("", nil) when the flag (issueAgentSessionsFlagKey) is off: the
-// caller (DispatchMention) treats that exactly like "no session" and simply
-// does not set assignments.session_id, which is the column's own default.
-func resolveOrCreateIssueAgentSession(ctx context.Context, db *sql.DB, workspaceID, missionID, agentID string) (string, error) {
-	enabled, err := featureflags.IsEnabled(ctx, db, workspaceID, issueAgentSessionsFlagKey)
-	if err != nil {
-		return "", err
-	}
-	if !enabled {
-		return "", nil
-	}
-
+func resolveOrCreateIssueAgentSessionTx(ctx context.Context, conn dbConn, workspaceID, missionID, agentID string) (string, error) {
 	var agentVersion sql.NullInt64
-	if err := db.QueryRowContext(ctx,
+	if err := conn.QueryRowContext(ctx,
 		`SELECT MAX(version) FROM agent_config_history WHERE agent_id = ?`, agentID,
 	).Scan(&agentVersion); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
@@ -75,7 +126,7 @@ func resolveOrCreateIssueAgentSession(ctx context.Context, db *sql.DB, workspace
 
 	newID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = db.ExecContext(ctx, `
+	_, err := conn.ExecContext(ctx, `
 		INSERT INTO issue_agent_sessions
 		    (id, workspace_id, mission_id, agent_id, state, last_consumed_seq,
 		     agent_version, last_activity_at, created_at, updated_at)
@@ -87,7 +138,7 @@ func resolveOrCreateIssueAgentSession(ctx context.Context, db *sql.DB, workspace
 	}
 
 	var sessionID string
-	if err := db.QueryRowContext(ctx,
+	if err := conn.QueryRowContext(ctx,
 		`SELECT id FROM issue_agent_sessions WHERE mission_id = ? AND agent_id = ?`,
 		missionID, agentID,
 	).Scan(&sessionID); err != nil {

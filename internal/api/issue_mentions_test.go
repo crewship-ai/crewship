@@ -645,6 +645,50 @@ func TestMentions_RefusedMentionReachesTheAuthorsInbox(t *testing.T) {
 	}
 }
 
+// TestMentionNotice_QueuedMentionTellsTheAuthorRatherThanStayingSilent is a
+// regression test for a review finding on #2342: notifyMentionUndelivered
+// only fired for mentionDispatchRefused/Failed, never for B3's
+// mentionDispatchQueued (a mention that landed on a session already running
+// — see issue_session_followups.go). With the issue_deliveries flag off,
+// deliverAndDispatch skips createDelivery and its issue.delivery.acked
+// broadcast entirely, so a queued mention produced NO signal to its author
+// at all — the exact silence this function exists to close, closed for
+// refused/failed but not for this third outcome.
+//
+// Also checks the copy is not the refused/failed framing verbatim: "did not
+// start a run … nothing is queued and nothing will run on its own" would be
+// a false statement about a mention that IS queued and WILL run.
+func TestMentionNotice_QueuedMentionTellsTheAuthorRatherThanStayingSilent(t *testing.T) {
+	f := setupMentionFixture(t)
+	m := mentionRecorder{db: f.db, logger: newTestLogger()}
+
+	m.notifyMentionUndelivered(context.Background(), mentionContext{
+		WorkspaceID: f.wsID,
+		MissionID:   f.missionID,
+		Identifier:  "ENG-1",
+		CommentID:   "cmt-queued",
+		AuthorType:  "user",
+		AuthorID:    f.userID,
+	}, resolvedMention{AgentID: f.target, AgentName: "Lead"},
+		mentionDispatchQueued, "session sess_1 already has an active run (asg_1)")
+
+	var title, body, target string
+	if err := f.db.QueryRow(`
+		SELECT title, body_md, COALESCE(target_user_id,'')
+		  FROM inbox_items WHERE kind = 'message'`).Scan(&title, &body, &target); err != nil {
+		t.Fatalf("no inbox item for the queued mention — the author was told nothing: %v", err)
+	}
+	if target != f.userID {
+		t.Errorf("inbox target_user_id = %q, want the comment author %q", target, f.userID)
+	}
+	if strings.Contains(title+body, "did not start a run") || strings.Contains(body, "nothing is queued and nothing will") {
+		t.Errorf("queued notice uses the refused/failed framing, which is false for this outcome: title=%q body=%q", title, body)
+	}
+	if !strings.Contains(strings.ToLower(title+body), "queued") {
+		t.Errorf("queued notice does not say the mention is queued: title=%q body=%q", title, body)
+	}
+}
+
 // ── 10d. the brief fences every string an attacker chose ───────────────────
 //
 // mentionTaskBrief fenced the comment body and interpolated the author's

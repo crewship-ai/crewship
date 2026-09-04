@@ -100,7 +100,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -532,9 +535,13 @@ type cappedAssignment struct {
 	// same as the rest of this struct's optional attribution fields: only
 	// DispatchMention resolves a session today (resolveOrCreateIssueAgentSession,
 	// issue_sessions.go), so a root /assign with no mention involved
-	// legitimately names none. The exclusivity index that would make this
-	// column load-bearing for run admission (idx_assignments_one_active_per_session,
-	// §9.4) is B3's job, not this struct's.
+	// legitimately names none. Since B3, a non-empty SessionID is
+	// load-bearing: idx_assignments_one_active_per_session
+	// (20260904172200_assignments_one_active_per_session.sql) refuses a
+	// second PENDING/QUEUED/RUNNING row for the same session, and
+	// insertCappedAssignment below turns that refusal into a
+	// *sessionBusyError naming the run that already holds it, rather than
+	// letting the raw constraint violation surface as an opaque 500.
 	SessionID string
 }
 
@@ -554,11 +561,27 @@ type cappedAssignment struct {
 // chat keeps working off the in-flight predicate rather than a self-referential
 // chain, and NULL for the origin so it reads as the chain root it is.
 //
-// A lost race returns a *delegationRefusal, so both callers answer it the same
-// way instead of one of them treating "no row written" as success.
+// A lost race against the FAN-OUT guard returns a *delegationRefusal, so
+// both callers answer it the same way instead of one of them treating "no
+// row written" as success. A lost race against the SESSION EXCLUSIVITY
+// index (idx_assignments_one_active_per_session, §9.4/B3 — only possible
+// when a.SessionID is set) returns a *sessionBusyError instead, naming the
+// run that already holds the session, resolved with a SELECT run inside
+// the SAME conn as the failed INSERT: when db is a *sql.Tx (as
+// DispatchMention passes), that read sees a state no concurrent writer can
+// have changed out from under it between the failed insert and this read,
+// which is the whole reason the session resolve, this insert and that
+// lookup all have to share one transaction — see dbConn's doc comment
+// (issue_sessions.go).
+//
+// db accepts *sql.DB or *sql.Tx (dbConn, issue_sessions.go) so a caller that
+// needs the session-resolve-then-insert step to be one atomic unit (B3) can
+// pass a transaction; Create (assignments_run.go) keeps passing h.db
+// directly since it never sets SessionID and has nothing to make atomic
+// with this insert.
 func insertCappedAssignment(
 	ctx context.Context,
-	db *sql.DB,
+	db dbConn,
 	scope delegationScope,
 	lim delegationLimits,
 	caller dispatchCaller,
@@ -606,6 +629,28 @@ func insertCappedAssignment(
 		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		 WHERE `+guardSQL, insertArgs...)
 	if err != nil {
+		// The fan-out guard's WHERE clause fails CLOSED as zero rows
+		// affected (handled below, no error) — the session exclusivity
+		// index fails as a hard constraint violation from the INSERT
+		// itself, because unlike the fan-out subquery it is not part of
+		// this statement's WHERE clause; it is a second, independent
+		// constraint SQLite checks against the row this statement tried to
+		// write. Only ever reachable when a.SessionID is set: with it NULL
+		// the row's session_id is NULL, and idx_assignments_one_active_per_session's
+		// own WHERE excludes NULL session_id rows entirely (no two NULLs
+		// collide in a unique index).
+		if a.SessionID != "" && isSessionExclusivityErr(err) {
+			if busyErr := sessionBusyErrorFor(ctx, db, a.SessionID); busyErr != nil {
+				return "", busyErr
+			}
+			// The lookup found no in-flight run for this session after
+			// all — the row that won the race must have finished (or been
+			// cancelled) in the instant between our failed INSERT and this
+			// SELECT. Rare, and not actually a conflict any more: fall
+			// through to the raw error rather than manufacture a run id
+			// that does not exist. The caller logs it like any other
+			// insert failure; a retry of the same dispatch would succeed.
+		}
 		return "", err
 	}
 	n, err := res.RowsAffected()
@@ -620,4 +665,228 @@ func insertCappedAssignment(
 			lim.MaxFanout, SettingDelegationMaxFanout)}
 	}
 	return assignmentID, nil
+}
+
+// sessionBusyError marks the outcome of losing the race against
+// idx_assignments_one_active_per_session (§9.4/B3): the target session
+// already has a live PENDING/QUEUED/RUNNING run, named by ActiveAssignmentID.
+//
+// Deliberately NOT a *delegationRefusal — a fan-out/depth refusal means "the
+// agent should not do this work at all"; a session-busy result means "this
+// exact work is already being done, by the run this error names". The two
+// need different handling at the call site: a refusal is reported to the
+// agent that asked; a session-busy result is absorbed WITHOUT ever claiming
+// the delivery under ActiveAssignmentID — that run cannot see it (see
+// sessionBusyErrorFor's doc comment for why not, and the review finding
+// that killed an earlier revision's task-append attempt) — so
+// mentionRecorder.deliverAndDispatch (issue_mentions.go) releases the
+// delivery back to 'pending' instead. dispatchQueuedFollowUpsForSession
+// (assignments_run.go), called from finishAssignment right after
+// consumeDeliveriesForRun, is what actually picks pending deliveries back
+// up once ActiveAssignmentID finishes and the session's slot is free again.
+// A session-busy result never surfaces as a dispatch failure to the human
+// who wrote the comment either way — see DispatchMention.
+type sessionBusyError struct {
+	SessionID          string
+	ActiveAssignmentID string
+}
+
+func (e *sessionBusyError) Error() string {
+	return fmt.Sprintf("session %s already has an active run (%s)", e.SessionID, e.ActiveAssignmentID)
+}
+
+// isSessionExclusivityErr reports whether err is a UNIQUE constraint failure
+// on idx_assignments_one_active_per_session specifically.
+//
+// modernc.org/sqlite (verified directly, not assumed from
+// agents_create.go's superficially similar one_lead_per_crew check) reports
+// a partial-unique-index violation as "UNIQUE constraint failed:
+// <table>.<column>" — the INDEXED COLUMN, never the index's own name. A
+// detector written to look for "one_active_per_session" would never match
+// and every session-busy insert would fall straight through to the raw
+// constraint error this function exists to catch — caught by
+// TestSessionExclusivity_SecondInsertAttachesToActiveRun failing red against
+// exactly that string before this comment was corrected. session_id is
+// unique to this one index on this table (idx_assignments_session, B1, is a
+// plain non-unique index and cannot produce this error text), so matching
+// the column name is unambiguous.
+//
+// isUniqueViolation (feature_flags_handler.go) already owns "is this ANY
+// UNIQUE constraint failure" — including a second wrapper spelling
+// ("constraint failed: UNIQUE") this file's own detector used to miss —
+// so this narrows that answer to the specific column rather than
+// re-deriving the base check (review finding: two copies of the same
+// nil-check-plus-substring-match drift apart the next time either wording
+// changes).
+func isSessionExclusivityErr(err error) bool {
+	return isUniqueViolation(err) && strings.Contains(err.Error(), "assignments.session_id")
+}
+
+// sessionBusyErrorFor resolves which run currently holds sessionID's
+// exclusivity slot.
+//
+// It used to also append the follow-up's brief onto that run's OWN task
+// column, on the theory that dispatchByID re-reads task fresh on any actual
+// (re)dispatch. Review on #2342 found that claim false in the case that
+// actually matters: runAssignment's goroutine captures body.Task as a Go
+// VALUE at the moment DispatchMention spawns it (assignments_run.go), not a
+// row id it re-reads, so the append reached only a row that happened to be
+// re-queued through dispatchByID — not the ordinary RUNNING or
+// freshly-PENDING winner golden scenario 3 is about. Meanwhile the caller
+// was claiming the follow-up's delivery under ActiveAssignmentID
+// regardless, so consumeDeliveriesForRun marked it 'consumed' once that run
+// finished whether or not the agent had ever seen the text — exactly the
+// "consumed at the next step boundary" the PRD's own wording forbids being
+// a lie. Deleted rather than fixed in place: there is no live-injection
+// channel into an in-progress turn anywhere in this codebase (non-goal N1),
+// so nothing this function could still reach makes the claim true.
+//
+// What actually reaches the agent is dispatchQueuedFollowUpsForSession
+// (assignments_run.go, called from finishAssignment): the caller
+// (issue_mentions.go's deliverAndDispatch) leaves this delivery 'pending'
+// instead of claiming it here, and once ActiveAssignmentID finishes —
+// freeing the session's slot — every 'pending' delivery for the session is
+// folded into ONE new, real dispatch and claimed under THAT run, which
+// therefore really does have the text in its own task/brief before its
+// exec starts.
+//
+// Uses the SAME conn the failed INSERT ran on — when that is a *sql.Tx
+// (DispatchMention's case), this read is inside the one write transaction
+// SQLite serialises every writer through, so it sees the exact state the
+// failed INSERT collided with, not a state some other writer has since
+// moved on from.
+//
+// Returns nil (not an error) when no in-flight row is found: the row that
+// won the race must have reached a terminal status in the instant between
+// the failed INSERT and this SELECT. That is not this function's problem to
+// solve — the caller (insertCappedAssignment) falls back to the raw
+// constraint error, which is a true statement (the INSERT really did lose)
+// even though the slot has since freed up again.
+func sessionBusyErrorFor(ctx context.Context, db dbConn, sessionID string) *sessionBusyError {
+	var activeID string
+	err := db.QueryRowContext(ctx, `
+		SELECT id FROM assignments
+		 WHERE session_id = ? AND status IN ('PENDING','QUEUED','RUNNING')
+		 ORDER BY created_at DESC LIMIT 1`, sessionID).Scan(&activeID)
+	if err != nil || activeID == "" {
+		return nil
+	}
+	return &sessionBusyError{SessionID: sessionID, ActiveAssignmentID: activeID}
+}
+
+// resolveSessionAndInsertAssignment is the B3 rewrite of the mention
+// dispatch door's session-then-insert sequence (§9.4). It resolves-or-
+// creates the (mission, agent) session and inserts the new PENDING
+// assignment for it inside ONE explicit transaction, so nothing can observe
+// "the session exists, no active run yet" and decide it is safe to insert a
+// second row before this call's own INSERT does the same check — splitting
+// the two steps across separate autocommit statements is exactly the TOCTOU
+// §9.4 warns comes back the moment resolve-or-create and insert are not
+// atomic together.
+//
+// Four outcomes:
+//
+//   - a fresh PENDING assignment is inserted: (id, false, sessionID, nil).
+//   - the session already had a live run
+//     (idx_assignments_one_active_per_session, 20260904172200_assignments_one_active_per_session.sql):
+//     no new row is written; (existingRunID, true, sessionID, nil) is
+//     returned instead, so the caller (DispatchMention) treats the
+//     follow-up as belonging to the run already in flight rather than as a
+//     dispatch failure (§10.5) — WITHOUT claiming its delivery under that
+//     run (see sessionBusyErrorFor and dispatchQueuedFollowUpsForSession,
+//     assignments_run.go, for why not and what happens instead). sessionID
+//     here is the REAL id resolveOrCreateIssueAgentSessionTx resolved, not
+//     the empty string a caller that only kept the bool would be left
+//     rebuilding a *sessionBusyError with — a bug caught in review on
+//     #2342 (the "attached" branch was constructing one with SessionID
+//     left blank).
+//   - a flag-read/begin-tx/session-resolve fault falls back to the
+//     session-less insert (below): (id, false, "", err).
+//   - anything else (a DB fault, a fan-out/depth refusal) returns the error
+//     verbatim, exactly as insertCappedAssignment always has: ("", false,
+//     "", err).
+//
+// The issue_agent_sessions feature flag is read OUTSIDE the transaction —
+// featureflags.IsEnabled has no *sql.Tx overload, and a flag read has no
+// business holding a write lock open. Best-effort like
+// resolveOrCreateIssueAgentSession's existing contract: a flag-read,
+// begin-tx or session-resolve fault must not refuse a dispatch the caps
+// already approved, so all three fall back to the session-less insert on db
+// directly (a.SessionID stays "", which the exclusivity index's own WHERE
+// excludes) rather than failing the whole call — fallback centralises the
+// three identical copies an earlier revision had, caught in the same
+// review.
+//
+// One asymmetry worth naming: a session row created by
+// resolveOrCreateIssueAgentSessionTx is rolled back with the rest of the
+// transaction if the INSERT that follows it fails for a reason OTHER than
+// session-busy (a lost fan-out race, say) — unlike the flag-off/begin-tx/
+// session-resolve fallbacks above, which never open a transaction to roll
+// back in the first place. This is harmless, not a bug: the UPSERT behind
+// resolveOrCreateIssueAgentSessionTx is idempotent, so the next mention
+// simply recreates the identical row; nothing is lost beyond one wasted
+// write.
+func resolveSessionAndInsertAssignment(
+	ctx context.Context, db *sql.DB, logger *slog.Logger,
+	workspaceID, missionID, agentID string,
+	scope delegationScope, lim delegationLimits, caller dispatchCaller, a cappedAssignment,
+) (assignmentID string, attachedToActive bool, sessionID string, err error) {
+	// fallback is the session-less insert every early-exit path below
+	// shares — one copy instead of three, so a future change (a metric, an
+	// error wrap) lands once. cause is the fault that forced the fallback,
+	// logged only when non-nil (a cleanly disabled flag is not a fault).
+	fallback := func(step string, cause error) (string, bool, string, error) {
+		if cause != nil && logger != nil {
+			logger.Warn("resolve session and insert assignment: "+step, "error", cause,
+				"mission_id", missionID, "agent_id", agentID)
+		}
+		id, err := insertCappedAssignment(ctx, db, scope, lim, caller, a)
+		return id, false, "", err
+	}
+
+	enabled, ffErr := featureflags.IsEnabled(ctx, db, workspaceID, issueAgentSessionsFlagKey)
+	if ffErr != nil || !enabled {
+		return fallback("check issue_agent_sessions flag", ffErr)
+	}
+
+	tx, txErr := db.BeginTx(ctx, nil)
+	if txErr != nil {
+		return fallback("begin tx", txErr)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op once Commit has run; see the asymmetry note above
+
+	sid, sessErr := resolveOrCreateIssueAgentSessionTx(ctx, tx, workspaceID, missionID, agentID)
+	if sessErr != nil {
+		// Roll back BEFORE calling fallback, not after: fallback's insert
+		// runs on the pooled *sql.DB, and this tx (BEGIN IMMEDIATE via
+		// database.Open's _txlock=immediate) is still holding the write
+		// lock at this point. Returning straight to `return fallback(...)`
+		// leaves the deferred Rollback above queued to run only once this
+		// call returns — so fallback's own write blocks on the lock IT is
+		// waiting on, for the full busy_timeout, and then fails with
+		// "database is locked" instead of succeeding immediately. A
+		// cancelled context mid-transaction (client disconnect, shutdown)
+		// is a real way to reach this path, not just a theoretical one.
+		// Explicit here; the deferred call becomes a safe no-op after it.
+		_ = tx.Rollback()
+		return fallback("resolve session", sessErr)
+	}
+	a.SessionID = sid
+
+	id, insErr := insertCappedAssignment(ctx, tx, scope, lim, caller, a)
+	if insErr != nil {
+		var busy *sessionBusyError
+		if errors.As(insErr, &busy) {
+			if cErr := tx.Commit(); cErr != nil {
+				return "", false, "", fmt.Errorf("resolve session and insert assignment: commit after session busy: %w", cErr)
+			}
+			return busy.ActiveAssignmentID, true, sid, nil
+		}
+		return "", false, "", insErr
+	}
+
+	if cErr := tx.Commit(); cErr != nil {
+		return "", false, "", fmt.Errorf("resolve session and insert assignment: commit: %w", cErr)
+	}
+	return id, false, sid, nil
 }

@@ -227,6 +227,35 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   mention history outweighs the automatic-recovery benefit, so a delivery
   left `claimed` across a restore stays that way until B4's lease sweep
   ships (`internal/backup/intent.go`'s F37 comment on the table).
+- **One active turn per session — a mention on a busy issue queues instead of racing a second run, and is folded into the next one for real (#2342).**
+  A partial unique index, `idx_assignments_one_active_per_session` on
+  `assignments(session_id) WHERE status IN ('PENDING','QUEUED','RUNNING')`,
+  makes invariant I2 (PRD-ISSUES-AND-ROUTINES-2026 §9.4, work package B3)
+  a database guarantee rather than a read-then-write check a fast second
+  comment could still race past. `resolveOrCreateIssueAgentSessionTx` and
+  `insertCappedAssignment` now run inside one transaction
+  (`resolveSessionAndInsertAssignment`), closing the exact TOCTOU window
+  §9.4 named between resolving a session and inserting its run. A second
+  `@mention` that lands while the session's run is still `PENDING`,
+  `QUEUED` or `RUNNING` never starts a second run: `insertCappedAssignment`
+  turns the constraint violation into a typed `*sessionBusyError` naming
+  the run already holding the slot, rather than a raw SQL error reaching
+  the caller. Its delivery is left `pending`, not claimed by the run
+  already in flight — that run captured its own task as a value at
+  dispatch time and cannot see a comment that arrived after (there is no
+  live-injection channel into a turn already in progress; steering a live
+  turn is still future work), so claiming it there would mark the comment
+  `consumed` before anything had read it. Instead, the moment that run
+  actually finishes, `dispatchQueuedFollowUpsForSession`
+  (`internal/api/issue_session_followups.go`, called from
+  `finishAssignment` right after the existing B2 `consumeDeliveriesForRun`)
+  folds every delivery still queued for that session into exactly ONE new,
+  real dispatch — with their text in that run's own brief before its exec
+  starts — and claims them under it, so they are marked `consumed` only
+  once something has actually read them: two comments 2s apart produce one
+  run and two consumed deliveries, and ten produce one run and ten.
+  `docs/guides/issue-mentions.mdx`'s known limits and
+  `docs/api-reference/issues.mdx`'s Sessions section say what changed.
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,
