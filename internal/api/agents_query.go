@@ -20,9 +20,28 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	crewID := r.URL.Query().Get("crew_id")
 	limit, offset := parsePagination(r, 100, 500)
 
-	// Total before the window, same predicate as the page.
+	// The onboarding Guide lives in a crew of kind='setup'. GET /crews has
+	// always hidden that crew (crews_query.go); this list did not hide its
+	// agent, so every roster in the product — the chat column, the Agents
+	// facet, the mention picker, routine reach — offered a "Crewship Guide"
+	// nobody hired, and /chat opened on it because its seeded conversation
+	// was the freshest. Hidden by default; `include_setup=1` is the explicit
+	// opt-in for the one caller that means it (a deep link into the Guide's
+	// own chat). Agents with no crew are not setup agents and stay.
+	//
+	// A subquery on the agent's crew rather than a predicate on the joined
+	// crew row, so the same clause can sit in a COUNT that does not join and
+	// the total and the page cannot disagree.
+	setupWhere := " AND (a.crew_id IS NULL OR a.crew_id NOT IN (SELECT id FROM crews WHERE COALESCE(kind, '') = 'setup'))"
+	if r.URL.Query().Get("include_setup") == "1" {
+		setupWhere = ""
+	}
+
+	// Total before the window, same predicate as the page — search, crew
+	// and the setup exclusion alike, so X-Total-Count cannot disagree with
+	// the rows.
 	searchSQL, searchArgs := listSearchClause(r, "a.name", "a.slug", "a.role_title")
-	countQuery := `SELECT COUNT(*) FROM agents a WHERE a.workspace_id = ? AND a.deleted_at IS NULL` + searchSQL
+	countQuery := `SELECT COUNT(*) FROM agents a WHERE a.workspace_id = ? AND a.deleted_at IS NULL` + searchSQL + setupWhere
 	countArgs := append([]any{workspaceID}, searchArgs...)
 	if crewID != "" {
 		countQuery += " AND a.crew_id = ?"
@@ -80,11 +99,11 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	pageArgs := append([]any{workspaceID}, searchArgs...)
 	if crewID != "" {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+searchSQL+" AND a.crew_id = ?"+orderBy,
+			listQuery+searchSQL+setupWhere+" AND a.crew_id = ?"+orderBy,
 			append(pageArgs, crewID, limit, offset)...)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+searchSQL+orderBy,
+			listQuery+searchSQL+setupWhere+orderBy,
 			append(pageArgs, limit, offset)...)
 	}
 

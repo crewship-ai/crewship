@@ -573,11 +573,27 @@ listed — the filter narrows, it never reorders.
 		// Sent only when asked. An empty `kind` and an absent one mean the
 		// same thing to the server, but sending one anyway would put this
 		// command's default behaviour at the mercy of the parameter's
-		// parsing rather than of the server's default.
+		// parsing rather than of the server's default. Same for the page:
+		// the server's page is the default page (list_paging.go).
+		q := url.Values{}
 		if k := strings.TrimSpace(chatListKind); k != "" {
-			path += "?kind=" + url.QueryEscape(k)
+			q.Set("kind", k)
 		}
-		if err := getJSON(client, path, &chats); err != nil {
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+		setListPaging(q, limit, offset)
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+		resp, err := client.Get(path)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		meta := readListMeta(resp)
+		if err := cli.ReadJSON(resp, &chats); err != nil {
 			return err
 		}
 
@@ -619,7 +635,11 @@ listed — the filter narrows, it never reorders.
 				unread, activity,
 			})
 		}
-		return f.Auto(chats, headers, rows)
+		if err := f.Auto(chats, headers, rows); err != nil {
+			return err
+		}
+		printListFooter(f, meta, len(chats))
+		return nil
 	},
 }
 
@@ -894,11 +914,11 @@ func lookupChatAgentID(client *cli.Client, chatID string) (string, error) {
 	return id, err
 }
 
-// agentChatListLimit mirrors the hard `LIMIT 100` in the handler behind
-// GET /api/v1/agents/{agentId}/chats (internal/api/agent_chats.go). The
-// endpoint takes no page or limit parameter, so this is not a default the CLI
-// can raise — it is the whole window lookupChatAgent can see, and a chat older
-// than an agent's hundredth most recent is simply not in it. Naming the number
+// agentChatListLimit mirrors the default AND the ceiling of the handler
+// behind GET /api/v1/agents/{agentId}/chats (internal/api/agent_chats.go):
+// `limit` narrows the page but cannot raise it past 100, so this is the whole
+// window lookupChatAgent can see, and a chat older than an agent's hundredth
+// most recent is simply not in it. Naming the number
 // in the miss message is the difference between "your chat id is wrong" and
 // "that chat has aged out of the only listing that can find its owner".
 const agentChatListLimit = 100
@@ -926,7 +946,10 @@ const agentChatListLimit = 100
 //     as "chat not found" points the user at their chat id instead of at
 //     their permissions.
 func lookupChatAgent(client *cli.Client, chatID string) (agentID, agentSlug string, err error) {
-	resp, err := client.Get("/api/v1/agents")
+	// include_setup=1: a chat can belong to the onboarding Guide, whose crew
+	// the default roster hides; a walk that cannot see the owner answers "not
+	// found" for a chat that exists.
+	resp, err := client.Get("/api/v1/agents?include_setup=1")
 	if err != nil {
 		return "", "", err
 	}
@@ -1142,6 +1165,7 @@ func init() {
 	chatCmd.AddCommand(chatCreateCmd)
 	chatListCmd.Flags().StringVar(&chatListKind, "kind", "",
 		"only chats of these kinds: direct, routine, issue, agent (comma-separated; default all)")
+	addListPagingFlags(chatListCmd.Flags(), 0)
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatReadCmd)
 	chatCmd.AddCommand(chatRenameCmd)

@@ -4,6 +4,8 @@ import { create } from "zustand"
 export interface BreadcrumbItem {
   label: string
   onClick?: () => void
+  /** A destination, when the crumb is a place rather than an in-page action. */
+  href?: string
 }
 
 // `settingsTab` used to live here: the Settings page mirrored its local active

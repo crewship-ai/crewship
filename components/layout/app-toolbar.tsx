@@ -177,26 +177,30 @@ export function AppToolbar() {
   const chatAgentSlug = chatMatch?.[1] ? decodeURIComponent(chatMatch[1]) : null
 
   function renderBreadcrumbs() {
-    // Chat page: link back to /crews?agent=<slug> so the toolbar back-action
-    // restores agent selection in the canvas (instead of dumping the user
-    // on an empty roster).
+    // Chat page: a path back out of the conversation — Crews / <crew> /
+    // <agent> / Chat, every step a place. The chat page publishes the crew
+    // and the agent by NAME through the store once its roster resolves; the
+    // slug from the URL is only the fallback while that is in flight, and it
+    // is never shown for the onboarding Guide, whose slug is an internal
+    // identifier (docs/ux/audit-conversations.md P1-7).
     if (isChatPage && chatAgentSlug) {
+      const path = breadcrumbs.length > 0
+        ? breadcrumbs
+        : [{ label: "Crews", href: "/crews" }, ...(chatAgentSlug.startsWith("_") ? [] : [{ label: chatAgentSlug, href: `/crews?agent=${encodeURIComponent(chatAgentSlug)}` }])]
       return (
         <>
-          <Link
-            href={`/crews?agent=${encodeURIComponent(chatAgentSlug)}`}
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Crews
-          </Link>
-          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
-          <Link
-            href={`/crews?agent=${encodeURIComponent(chatAgentSlug)}`}
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors truncate"
-          >
-            {chatAgentSlug}
-          </Link>
-          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
+          {path.map((item, i) => (
+            <span key={`${item.label}-${i}`} className="flex min-w-0 items-center gap-1.5">
+              {item.href ? (
+                <Link href={item.href} className="truncate text-sm text-muted-foreground transition-colors hover:text-foreground">
+                  {item.label}
+                </Link>
+              ) : (
+                <span className="truncate text-sm text-muted-foreground">{item.label}</span>
+              )}
+              <span className="shrink-0 text-sm text-muted-foreground-soft">/</span>
+            </span>
+          ))}
           <span className="text-sm font-semibold">Chat</span>
         </>
       )
@@ -208,7 +212,11 @@ export function AppToolbar() {
         {breadcrumbs.length > 0 && breadcrumbs.map((item, i) => (
           <div key={i} className="flex items-center gap-1.5 min-w-0">
             <span className="text-muted-foreground/30 text-xs">/</span>
-            {item.onClick ? (
+            {item.href ? (
+              <Link href={item.href} className="max-w-[160px] truncate text-xs text-muted-foreground transition-colors hover:text-foreground/90">
+                {item.label}
+              </Link>
+            ) : item.onClick ? (
               <button
                 type="button"
                 onClick={item.onClick}

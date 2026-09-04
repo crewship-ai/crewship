@@ -5,10 +5,12 @@ import { AnimatePresence } from "motion/react"
 import {
   Bot,
   Command,
+  Link2,
   Wifi,
   WifiOff,
   Users,
 } from "lucide-react"
+import { StatusPill } from "@/components/ui/status-pill"
 import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
@@ -46,6 +48,9 @@ import { askFormsFromColumn, type AskForm } from "./asks/types"
 import { ConversationSearch } from "./search/conversation-search"
 import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
+import { AgentStrip, type AgentStripAgent } from "./agent-strip"
+import { ChatEmptyState } from "./chat-empty-state"
+import type { ChatKind } from "./chat-kind"
 import type { FileEntry } from "./chat-tree-row"
 import { useChatAgent } from "./chat-agent-context"
 import { ThinkingAvatar } from "./messages/thinking-avatar"
@@ -95,6 +100,12 @@ interface ChatPanelProps {
    *  Rendered as a chip in the connection bar so the user knows where
    *  they are at a glance. Undefined = unknown (pre-migration). */
   sessionOrigin?: string | null
+  /** The roster row, for the agent strip and the empty state. Optional: the
+   *  onboarding chat mounts this panel without a roster. */
+  agentMeta?: AgentStripAgent | null
+  /** direct · routine · issue · agent — decides whether an empty transcript
+   *  is something to start or a run that has not written yet. */
+  sessionKind?: ChatKind
   /** Pre-populate the chat input with this text on first render. */
   initialInput?: string
   /** When true, `initialInput` is auto-sent once the socket is connected
@@ -128,7 +139,7 @@ const CHAT_PALETTE_SHORTCUT = "⌘/"
 const EMPTY_STATE_CHIP_LIMIT = 6
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -725,23 +736,31 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     <Conversation>
       <ConversationContent className="mx-auto w-full max-w-3xl">
         {turns.length === 0 && !historyLoading && (
-          <ConversationEmptyState
-            // The agent's own face, not a generic robot. This is the one
-            // screen in the product where you are about to talk to a
-            // specific named colleague and have no other cue as to which —
-            // the transcript that would carry their portrait is, by
-            // definition, empty. Falls back to the glyph when there is no
-            // skin (classic /chat) or no agent resolved yet.
-            icon={
-              chatAgent ? (
-                <ThinkingAvatar agent={chatAgent} active={false} className="h-12 w-12" />
-              ) : (
-                <Bot className="h-12 w-12" />
-              )
-            }
-            title="Start a conversation"
-            description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
-          />
+          agentMeta ? (
+            // The agent card and "what this agent can do" — who you are
+            // about to talk to, from the roster row and its skills. A routine
+            // step or an issue chat gets one line: it is a transcript, and
+            // nothing has been written into it yet.
+            <ChatEmptyState agent={agentMeta} workspaceId={workspaceId} onPick={(p) => void handleSuggestionClick(p)} kind={sessionKind} />
+          ) : (
+            <ConversationEmptyState
+              // The agent's own face, not a generic robot. This is the one
+              // screen in the product where you are about to talk to a
+              // specific named colleague and have no other cue as to which —
+              // the transcript that would carry their portrait is, by
+              // definition, empty. Falls back to the glyph when there is no
+              // skin (classic /chat) or no agent resolved yet.
+              icon={
+                chatAgent ? (
+                  <ThinkingAvatar agent={chatAgent} active={false} className="h-12 w-12" />
+                ) : (
+                  <Bot className="h-12 w-12" />
+                )
+              }
+              title="Start a conversation"
+              description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+            />
+          )
         )}
         <AnimatePresence key={sessionId} initial={false} mode="popLayout">
           {turns.map((turn, idx) => (
@@ -818,14 +837,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               Group · {Object.keys(participantNames).length}
             </span>
           )}
-          <span className="text-micro text-muted-foreground ml-auto font-mono">
-            {sessionId.slice(0, 8)}
-          </span>
+          <span className="ml-auto"><CopyLinkButton /></span>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
         </div>
-        {turns.length === 0 && !historyLoading && (
+        {turns.length === 0 && !historyLoading && sessionKind === "direct" && (
           <div className="px-4 pb-2 shrink-0">
             <AskRail
               questions={defaultSuggestions}
@@ -863,20 +880,44 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   return (
     <div className="relative flex h-full">
       <div className="flex flex-col overflow-hidden flex-1 min-w-0">
-        <div className="flex items-center gap-2 px-4 md:px-6 h-[41px] border-b shrink-0">
-          <ConnectionBadge status={connectionStatus} />
-          <OriginChip origin={sessionOrigin} />
-          <div className="ml-auto flex items-center gap-2">
-            <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
-            <span className="text-micro text-muted-foreground font-mono">
-              {sessionId.slice(0, 8)}
-            </span>
-          </div>
+        {/* Who you are talking to, not the session id. The strip carries the
+            agent (face, status, role, crew, model, skills, credentials); the
+            connection badge still appears when the socket is not connected,
+            and the origin chip says where a machine-started chat came from.
+            The session id left the header: it is the URL, and "Copy link"
+            hands it over in the form a person can use. */}
+        <div className="flex min-h-[52px] items-center gap-3 border-b px-4 py-1.5 md:px-6 shrink-0">
+          {agentMeta ? (
+            <AgentStrip
+              agent={agentMeta}
+              className="min-w-0 flex-1"
+              trailing={
+                <>
+                  <ConnectionBadge status={connectionStatus} />
+                  <OriginChip origin={sessionOrigin} />
+                  <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
+                  <CopyLinkButton />
+                </>
+              }
+            />
+          ) : (
+            <>
+              <ConnectionBadge status={connectionStatus} />
+              <OriginChip origin={sessionOrigin} />
+              <div className="ml-auto flex items-center gap-2">
+                <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
+                <CopyLinkButton />
+              </div>
+            </>
+          )}
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
         </div>
-        {turns.length === 0 && !historyLoading && (
+        {/* Starter chips are for a conversation; a routine step or an issue
+            chat is a transcript, and "Help me get started" under one is
+            noise. */}
+        {turns.length === 0 && !historyLoading && sessionKind === "direct" && (
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
             <AskRail
               questions={defaultSuggestions}
@@ -971,6 +1012,28 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
 /* ---- Small shared sub-components extracted to reduce duplication ---- */
 
+/** The session id, in the one form a person can use: the address. */
+function CopyLinkButton() {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        navigator.clipboard?.writeText(window.location.href).then(() => {
+          setCopied(true)
+          window.setTimeout(() => setCopied(false), 1500)
+        }).catch(() => {})
+      }}
+      aria-label="Copy link to this conversation"
+      title="Copy link to this conversation"
+      className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-micro text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <Link2 className="h-3 w-3" aria-hidden="true" />
+      <span className="hidden sm:inline">{copied ? "Copied" : "Copy link"}</span>
+    </button>
+  )
+}
+
 /**
  * The chat palette's visible door.
  *
@@ -1043,20 +1106,20 @@ function ConnectionBadge({ status }: { status: string }) {
  *  origin is unknown (pre-migration sessions or legacy backends). */
 function OriginChip({ origin }: { origin?: string | null }) {
   if (!origin) return null
-  const map: Record<string, { label: string; className: string }> = {
-    UI:      { label: "UI",      className: "bg-info/15 text-info" },
-    CLI:     { label: "CLI",     className: "bg-purple/15 text-purple" },
-    WEBHOOK: { label: "Hook",    className: "bg-warn/15 text-warn" },
-    CRON:    { label: "Cron",    className: "bg-warn/15 text-warn" },
-    AGENT:   { label: "Agent",   className: "bg-purple/15 text-purple" },
+  // Words a reader does not have to decode, and ROUTINE is in the map: a
+  // routine step's chat carried no chip at all, so the one transcript most
+  // in need of a "this was not a person" label had none.
+  const map: Record<string, { label: string; tone: "blue" | "purple" | "warn" | "muted" }> = {
+    UI:      { label: "Started here", tone: "muted" },
+    CLI:     { label: "From the CLI", tone: "purple" },
+    WEBHOOK: { label: "Webhook",      tone: "warn" },
+    CRON:    { label: "Scheduled",    tone: "warn" },
+    ROUTINE: { label: "Routine step", tone: "purple" },
+    AGENT:   { label: "Delegated",    tone: "purple" },
   }
   const tag = map[origin]
-  if (!tag) return null
-  return (
-    <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", tag.className)}>
-      {tag.label}
-    </span>
-  )
+  if (!tag || origin === "UI") return null
+  return <StatusPill tone={tag.tone} label={tag.label} data-testid="origin-chip" />
 }
 
 interface StreamingIndicatorProps {

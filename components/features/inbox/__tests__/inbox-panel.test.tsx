@@ -31,6 +31,11 @@ vi.mock("@/hooks/use-pipelines", () => ({
 }))
 vi.mock("@/lib/api/inbox", () => ({ inboxBulk: (...a: unknown[]) => inboxBulk(...a) }))
 vi.mock("../waitpoint-run-detail", () => ({ WaitpointRunDetail: () => null }))
+// The pane names crews and agents through this lookup; the network it
+// would use is not this suite's concern.
+vi.mock("../use-inbox-lookup", () => ({
+  useInboxLookup: () => ({ crewById: new Map(), agentBySlug: new Map(), agentById: new Map(), ready: true }),
+}))
 vi.mock("@/hooks/use-inbox", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/use-inbox")>()
   return { ...actual, useInbox: () => ({ ...useInboxState, patch, refresh }) }
@@ -328,9 +333,13 @@ describe("context", () => {
     expect(pane.queryByText("sk-supersecret")).not.toBeInTheDocument()
   })
 
-  it("leaves a plain identifier alone — a run id is not a secret", () => {
+  it("leaves a plain identifier alone — a run id is not a secret, and it is a link", () => {
     render(<InboxList />)
     fireEvent.click(list().getByText("Approve promote"))
-    expect(within(screen.getByTestId("reading-pane")).getByText("r1")).toBeInTheDocument()
+    // The id is not masked behind a reveal toggle; it is also no longer a
+    // bare cuid in the Context card — it is the "Open run" link the pane
+    // builds from it (README §5, §6).
+    const pane = within(screen.getByTestId("reading-pane"))
+    expect(pane.getByRole("link", { name: /Open run/ }).getAttribute("href")).toContain("r1")
   })
 })

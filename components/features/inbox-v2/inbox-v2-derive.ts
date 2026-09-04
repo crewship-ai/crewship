@@ -269,6 +269,9 @@ export interface InboxV2Filters {
   type: InboxV2TypeKey | null
   deadline: InboxV2DeadlineKey | null
   unreadOnly: boolean
+  /** One crew, by id — a real field on every source (README §4: a filter has
+   *  to be answerable). The triage's "By crew" sets it. */
+  crew: string | null
 }
 
 export const EMPTY_INBOX_V2_FILTERS: InboxV2Filters = {
@@ -276,6 +279,7 @@ export const EMPTY_INBOX_V2_FILTERS: InboxV2Filters = {
   type: null,
   deadline: null,
   unreadOnly: false,
+  crew: null,
 }
 
 /** The type facet a row answers to. A grouped advisory answers as its members. */
@@ -385,6 +389,7 @@ export function filterEntries(
     if (filters.unreadOnly && !entry.unread) return false
     if (filters.type && entryType(entry) !== filters.type) return false
     if (filters.deadline && deadlineBucket(entry, now) !== filters.deadline) return false
+    if (filters.crew && entryCrewId(entry) !== filters.crew) return false
     return matchesSearch(entry, filters.search)
   })
 }
@@ -407,4 +412,162 @@ export function filterAndSortEntries(
   now = Date.now(),
 ): InboxV2Entry[] {
   return sortEntries(filterEntries(entries, filters, now))
+}
+
+/* ------------------------------------------------------------- row anatomy */
+
+/**
+ * What a row IS, as a word and a tone (README §2: a pill is a dot and a word,
+ * never a colour alone). The server's kind vocabulary is engine-shaped —
+ * "waitpoint", "escalation" — and an escalation is three different asks
+ * depending on its type; this is the client-facing name for each.
+ */
+export interface EntryKindPill {
+  label: string
+  tone: "success" | "blue" | "warn" | "danger" | "muted" | "purple"
+}
+
+export function entryKindPill(entry: InboxV2Entry): EntryKindPill {
+  if (entry.source === "approval") {
+    return entry.approval?.kind === "ephemeral_hire"
+      ? { label: "Hire", tone: "blue" }
+      : { label: "Approval", tone: "blue" }
+  }
+  if (entry.source === "mission") {
+    return entry.task?.needs_review ? { label: "Review", tone: "warn" } : { label: "Task", tone: "danger" }
+  }
+  if (entry.source === "group") return { label: "System", tone: "muted" }
+  const item = entry.inboxItem
+  if (!item) return { label: "Update", tone: "muted" }
+  switch (item.kind) {
+    case "waitpoint":
+      return payloadString(item, "kind") === "hire" ? { label: "Hire", tone: "blue" } : { label: "Approval", tone: "blue" }
+    case "escalation": {
+      const sub = payloadString(item, "kind")
+      if (sub === "skill_proposal") return { label: "Skill proposal", tone: "purple" }
+      if (sub === "routine_proposal") return { label: "Routine proposal", tone: "purple" }
+      if (item.payload?.request_type === "access") return { label: "Access request", tone: "warn" }
+      switch (payloadString(item, "escalation_type")) {
+        case "LINK": return { label: "Link", tone: "blue" }
+        case "CREDENTIAL": return { label: "Credential", tone: "warn" }
+        case "TEXT": return { label: "Question", tone: "warn" }
+      }
+      return { label: "Notice", tone: "muted" }
+    }
+    case "failed_run": return { label: "Failed run", tone: "danger" }
+    case "schedule_missed": return { label: "Missed run", tone: "warn" }
+    case "schedule_circuit_breaker_tripped": return { label: "Paused schedule", tone: "warn" }
+    case "memory_consolidation": return { label: "Memory proposal", tone: "purple" }
+    case "message":
+      if (payloadString(item, "chat_url")) return { label: "Reply", tone: "blue" }
+      if (payloadString(item, "issue_identifier")) return { label: "Issue", tone: "blue" }
+      return { label: "Update", tone: "muted" }
+  }
+  return { label: "Update", tone: "muted" }
+}
+
+/**
+ * The row's title, without the server's prefix.
+ *
+ * `escalation_handler.go` titles every escalation "Agent escalation: <reason>"
+ * — a 130px prefix that says nothing the kind pill does not, and it is the
+ * reason ("Need the Grafana …") that gets truncated off a 340px column. The
+ * payload carries the reason whole; the prefix is stripped when it is there.
+ */
+const ESCALATION_TITLE_PREFIX = /^agent escalation:\s*/i
+
+export function entryTitle(entry: InboxV2Entry): string {
+  const item = entry.inboxItem
+  if (item?.kind === "escalation") {
+    const reason = payloadString(item, "reason")
+    if (ESCALATION_TITLE_PREFIX.test(item.title)) return reason || item.title.replace(ESCALATION_TITLE_PREFIX, "")
+  }
+  return entry.title
+}
+
+/**
+ * The verb on the row — what pressing it will let the person do (README §1:
+ * every row that needs someone carries a verb, never a bare chevron).
+ */
+export function entryVerb(entry: InboxV2Entry): string {
+  if (!entry.actionable) return entry.historical ? "Record" : "Open"
+  if (entry.source === "approval") return "Approve"
+  if (entry.source === "mission") return "Review"
+  const item = entry.inboxItem
+  if (!item) return "Open"
+  switch (item.kind) {
+    case "waitpoint": return "Approve"
+    case "escalation": {
+      const sub = payloadString(item, "kind")
+      if (sub === "skill_proposal" || sub === "routine_proposal") return "Review"
+      switch (payloadString(item, "escalation_type")) {
+        case "LINK": return "Review"
+        case "CREDENTIAL": return "Grant"
+        default: return "Answer"
+      }
+    }
+    case "failed_run": return "Retry"
+    case "schedule_missed": return "Run now"
+    case "schedule_circuit_breaker_tripped": return "Re-enable"
+    case "memory_consolidation": return "Review"
+  }
+  return "Open"
+}
+
+/** The crew a row belongs to, by id, when any source names one. */
+export function entryCrewId(entry: InboxV2Entry): string | null {
+  if (entry.source === "approval") return entry.approval?.crew_id ?? null
+  if (entry.source === "mission") return entry.mission?.crew_id ?? null
+  const item = entry.inboxItem ?? entry.groupedItems?.[0]
+  if (!item) return null
+  return payloadString(item, "invoking_crew_id") || payloadString(item, "crew_id") || null
+}
+
+/**
+ * The agent behind a row, as the slug the roster is keyed by. Escalations
+ * put the agent's SLUG in sender_name; hire waitpoints put the hired agent's
+ * display name in payload.agent_name (which is not on the roster yet), so
+ * both are offered and the caller resolves what it can.
+ */
+export function entryAgentRef(entry: InboxV2Entry): { slug: string | null; id: string | null; label: string } {
+  if (entry.source === "approval") {
+    // The queue names the agent by ID and `requested_by` is often a user id
+    // or empty; the label falls back to "Agent" rather than to a cuid.
+    const id = entry.approval?.agent_id ?? null
+    const label = entry.approval?.requested_by && !looksLikeId(entry.approval.requested_by) ? entry.approval.requested_by : "Agent"
+    return { slug: null, id, label }
+  }
+  const item = entry.inboxItem
+  if (!item) return { slug: null, id: null, label: entry.subject }
+  const slug = payloadString(item, "agent_slug") || (item.sender_type === "agent" ? item.sender_name ?? null : null)
+  return { slug: slug || null, id: payloadString(item, "agent_id") || null, label: entry.subject }
+}
+
+/** A cuid-shaped string is an identifier, never a name to print. */
+export function looksLikeId(value: string): boolean {
+  return /^(c[a-z0-9]{20,}|ap_[0-9a-f]{12,}|[0-9a-f-]{32,})$/i.test(value)
+}
+
+/**
+ * A row's outcome as a status the shared pill knows. The two sources spell
+ * the same decision differently (inbox `approve` / `reject`, queue
+ * `approved` / `denied`, sweeps `expired` / `timeout` / `cancelled`), and the
+ * explorer used to print whichever word it got.
+ */
+export function outcomeStatus(outcome: string | null | undefined): string | null {
+  if (!outcome) return null
+  switch (outcome.toLowerCase()) {
+    case "approve": case "approved": return "APPROVED"
+    case "reject": case "rejected": return "REJECTED"
+    case "deny": case "denied": return "DENIED"
+    case "cancel": case "cancelled": return "CANCELLED"
+    case "expired": case "timeout": case "timed_out": return "EXPIRED"
+    case "archived": return "ARCHIVED"
+    case "dismissed": return "DISMISSED"
+    case "retried": return "RETRIED"
+    case "ran": return "RAN"
+    case "reenabled": return "RE_ENABLED"
+    case "resolved": return "RESOLVED"
+    default: return outcome
+  }
 }

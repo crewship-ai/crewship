@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { readTotalCount } from "@/hooks/use-paged-list"
 import { useWorkspace } from "@/hooks/use-workspace"
 
 import { httpError, scopeErrorMessage, useRetry } from "./scope-fetch"
@@ -163,6 +164,8 @@ export interface ChatTreeData<A extends ChatTreeAgent = ChatTreeAgent> {
    * actually fetched, which is what it knows.
    */
   kindCounts: Record<string, number> | null
+  /** Agent id → total chats of this scope on the server (X-Total-Count). */
+  totalsByAgent: Record<string, number>
   threadsLoaded: boolean
   /** Re-run the fan-out. Wired to the Retry beside a failed agent. */
   retryThreads: () => void
@@ -174,6 +177,8 @@ export interface ChatTreeData<A extends ChatTreeAgent = ChatTreeAgent> {
    * reporting it needed this to land in the same change.
    */
   retryRoster: () => void
+  /** Load every chat of this scope for one agent (the fold's "Show all"). */
+  loadAllFor: (agentId: string) => Promise<void>
   error: string | null
   wsLoading: boolean
 }
@@ -207,6 +212,11 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   const [threadsByAgent, setThreadsByAgent] = useState<Record<string, ChatTreeThread[]>>({})
   const [threadErrors, setThreadErrors] = useState<Record<string, string>>({})
   const [kindCounts, setKindCounts] = useState<Record<string, number> | null>(null)
+  // Agent id → how many chats of this scope the server HAS, from
+  // X-Total-Count. The page holds ten per agent; this is what lets the column
+  // say "13 more with Riley" and mean it. Absent for an agent when the server
+  // sent no header.
+  const [totalsByAgent, setTotalsByAgent] = useState<Record<string, number>>({})
   const [threadsLoaded, setThreadsLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { nonce: threadsNonce, retry: retryThreads } = useRetry()
@@ -216,11 +226,36 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   useEffect(() => {
     if (!workspaceId) return
     let cancelled = false
-    apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+    const base = `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`
+    apiFetch(base)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((list: A[]) => {
+      .then(async (list: A[]) => {
+        const rows = Array.isArray(list) ? list : []
+        // The server hides the onboarding Guide (a kind=setup crew) from the
+        // roster, and that is right for every roster in the product. The one
+        // arrival that still means it is a deep link INTO the Guide's own
+        // conversation; when the path names an agent the default roster does
+        // not carry, ask once more with the explicit opt-in. Any other
+        // unknown slug comes back absent from that answer too, and the page
+        // says so.
+        if (ensureSlug && !rows.some((a) => a.slug === ensureSlug)) {
+          // Guarded on its own: a second request that fails must not throw
+          // away the roster the first one already returned.
+          try {
+            const r2 = await apiFetch(`${base}&include_setup=1`)
+            if (r2.ok) {
+              const more: A[] = await r2.json()
+              if (Array.isArray(more) && more.some((a) => a.slug === ensureSlug)) return more
+            }
+          } catch {
+            /* the default roster stands */
+          }
+        }
+        return rows
+      })
+      .then((rows: A[]) => {
         if (cancelled) return
-        setRoster(Array.isArray(list) ? list : [])
+        setRoster(rows)
         setError(null)
       })
       .catch((err: unknown) => {
@@ -236,7 +271,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
     // loading skeleton forever, so the failure has to resolve the list AND be
     // reported. One without the other is how "no conversations yet" came to
     // mean "the roster request 500ed".
-  }, [workspaceId, rosterNonce])
+  }, [workspaceId, rosterNonce, ensureSlug])
 
   // Ghosts are retired agents; starting a conversation with one is not a thing
   // this surface should offer, so they are out of the tree — but still in the
@@ -282,21 +317,23 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
             // same "the server did not say" as an absent header, and the
             // column already knows how to draw that.
             const counts = parseKindCounts(r.headers?.get(CHAT_KIND_COUNTS_HEADER) ?? null)
-            return r.json().then((rows: unknown) => [rows, counts] as const)
+            const total = r.headers ? readTotalCount(r.headers) : null
+            return r.json().then((rows: unknown) => [rows, counts, total] as const)
           })
           .then(
-            ([rows, counts]) =>
+            ([rows, counts, total]) =>
               [
                 a.id,
                 Array.isArray(rows) ? (rows as ChatTreeThread[]) : [],
                 null,
                 counts,
+                total,
               ] as const,
           )
           // One agent's list failing must not blank the column — the other
           // eleven are still worth showing. It must not pass for an EMPTY
           // list either, which is what returning [] here used to do.
-          .catch((e: unknown) => [a.id, null, scopeErrorMessage(e), null] as const),
+          .catch((e: unknown) => [a.id, null, scopeErrorMessage(e), null, null] as const),
       ),
     ).then((results) => {
       if (cancelled) return
@@ -308,9 +345,11 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
       // reason nothing on screen explains, which is the same defect
       // `threadErrors` exists to prevent one layer down.
       let totals: Record<string, number> | null = null
-      for (const [id, rows, err, counts] of results) {
+      const perAgent: Record<string, number> = {}
+      for (const [id, rows, err, counts, total] of results) {
         if (rows) lists[id] = rows
         else if (err) errors[id] = err
+        if (total != null) perAgent[id] = total
         if (!counts) continue
         totals ??= {}
         for (const [k, n] of Object.entries(counts)) totals[k] = (totals[k] ?? 0) + n
@@ -318,6 +357,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
       setThreadsByAgent(lists)
       setThreadErrors(errors)
       setKindCounts(totals)
+      setTotalsByAgent(perAgent)
       setThreadsLoaded(true)
     })
     return () => {
@@ -331,18 +371,75 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
     // stop. Changing scope therefore re-runs the fan-out.
   }, [workspaceId, agents, ensureSlug, kind, threadsNonce])
 
+  /**
+   * Fetch the whole page for ONE agent — the "13 more with Riley · Show all"
+   * fold. Replaces that agent's list and its total; the other agents keep
+   * their ten. Failure leaves the fold in place, and the caller can retry.
+   */
+  const loadAllFor = useCallback(
+    async (agentId: string) => {
+      if (!workspaceId) return
+      // Page through to the total: the server clamps a page at the ceiling,
+      // and an agent with more than a hundred routine steps would otherwise
+      // keep a fold that "Show all" never clears.
+      const all: ChatTreeThread[] = []
+      let total: number | null = null
+      for (let offset = 0; offset < AGENT_CHAT_SHOW_ALL_CAP; offset += AGENT_CHAT_PAGE_CEILING) {
+        const r = await apiFetch(
+          `/api/v1/agents/${encodeURIComponent(agentId)}/chats` +
+            `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${AGENT_CHAT_PAGE_CEILING}&offset=${offset}` +
+            (kind ? `&kind=${encodeURIComponent(kind)}` : ""),
+        )
+        if (!r.ok) throw httpError(r.status)
+        const rows: unknown = await r.json()
+        const page = Array.isArray(rows) ? (rows as ChatTreeThread[]) : []
+        all.push(...page)
+        total = readTotalCount(r.headers) ?? total
+        if (page.length < AGENT_CHAT_PAGE_CEILING || (total != null && all.length >= total)) break
+      }
+      setThreadsByAgent((prev) => ({ ...prev, [agentId]: all }))
+      if (total != null) setTotalsByAgent((prev) => ({ ...prev, [agentId]: total }))
+    },
+    [workspaceId, kind],
+  )
+
   return {
     agents,
     roster,
     threadsByAgent,
     threadErrors,
     kindCounts,
+    totalsByAgent,
     threadsLoaded,
     retryThreads,
     retryRoster,
+    loadAllFor,
     error,
     wsLoading,
   }
+}
+
+/** The server's ceiling for one page of chats (internal/api/agent_chats.go). */
+export const AGENT_CHAT_PAGE_CEILING = 100
+/** How far "Show all" walks before it stops: ten pages is a thousand chats
+ *  in one scope for one agent, which is a search problem, not a column. */
+export const AGENT_CHAT_SHOW_ALL_CAP = 1000
+
+/**
+ * The folds a column should show: for every agent whose page is shorter than
+ * its total, how many more there are. Pure, so the sidebar can render it and
+ * a test can pin it.
+ */
+export function foldsFor(
+  threadsByAgent: Record<string, ChatTreeThread[]>,
+  totalsByAgent: Record<string, number>,
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [agentId, total] of Object.entries(totalsByAgent)) {
+    const have = threadsByAgent[agentId]?.length ?? 0
+    if (total > have) out[agentId] = total - have
+  }
+  return out
 }
 
 /* ------------------------------------------------------------------ props */

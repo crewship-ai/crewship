@@ -44,6 +44,12 @@ var agentListCmd = &cobra.Command{
 			}
 			q.Set("crew_id", crewID)
 		}
+		// The server hides the onboarding Guide's crew (kind=setup) from
+		// every roster; this is the explicit opt-in, sent only when asked so
+		// the default stays the server's.
+		if include, _ := cmd.Flags().GetBool("include-setup"); include {
+			q.Set("include_setup", "1")
+		}
 		path := "/api/v1/agents"
 		if len(q) > 0 {
 			path += "?" + q.Encode()
@@ -205,6 +211,7 @@ func init() {
 	agentListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 	addListPagingFlags(agentListCmd.Flags(), 0)
 	agentListCmd.Flags().String("q", "", "Server-side search on name, slug and role title (case-insensitive substring)")
+	agentListCmd.Flags().Bool("include-setup", false, "Also list the onboarding Guide (agents of the setup crew, hidden by default)")
 
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("slug", "", "Agent slug (auto-generated from name if empty)")
