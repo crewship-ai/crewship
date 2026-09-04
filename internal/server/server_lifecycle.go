@@ -78,6 +78,14 @@ var (
 	stuckRunningStaleAfter    = 2 * time.Hour
 )
 
+// B4 lease sweeper boot default (PRD-ISSUES-AND-ROUTINES-2026 §9.4/§17,
+// #2343, F8). Short relative to stuckRunningSweepInterval on purpose: a
+// lease gives owner-aware, fast recovery — a dead process's runs are
+// reclaimed within roughly one lease TTL plus this interval, not the
+// stuck-RUNNING sweeper's multi-hour floor. Var, not const, so a boot-
+// wiring integration test can shrink it; production never mutates it.
+var leaseSweepInterval = 15 * time.Second
+
 // Server is the main crewship process, wiring together the HTTP server, IPC
 
 // stats collector, and all background goroutines. It blocks until ctx is done.
@@ -152,6 +160,17 @@ func (s *Server) Start(ctx context.Context) error {
 			s.logger.Info("stuck-running sweeper started",
 				"interval", stuckRunningSweepInterval.String(),
 				"stale_after", stuckRunningStaleAfter.String())
+
+			// B4 lease sweeper (§9.4/§17, #2343, F8): reaps RUNNING rows
+			// whose lease has expired — the fast, owner-aware path this
+			// process's own runs also use to recover a dead REPLICA's
+			// runs, not just this process's own restarts. Also
+			// reconciles issue_agent_sessions for any agent the
+			// ephemeral sweeper below has since ghosted (F41). Same
+			// AssignmentHandler instance, same ctx-cancel-on-shutdown
+			// contract as the sweepers above.
+			assign.StartLeaseSweeper(ctx, leaseSweepInterval)
+			s.logger.Info("lease sweeper started", "interval", leaseSweepInterval.String())
 		}
 		// Escalation expiry sweeper: the net for questions whose agent is no
 		// longer waiting. The long poll expires its own escalation at the
