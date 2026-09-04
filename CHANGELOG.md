@@ -767,6 +767,24 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `RequireWorkspace`-populated context. `TestReadRouteScanFindsTheRealSurface`
   now also floors the `authedMut`-scanned count so the regex going blind
   again fails the build.
+- **`review-status.sh` reported `reviewed` when CodeRabbit's only activity on
+  the head commit was a bodyless reply inside an existing thread, not a read
+  of the diff (#2145).** A `COMMENTED` review with an empty body was promoted
+  to `reviewed` whenever its inline comments fell inside the review's own
+  time window — but that window doesn't distinguish a NEW thread (a real
+  finding) from a REPLY inside a thread a human already started. Seen on
+  #2128: a real `CHANGES_REQUESTED` review landed on an old head, two later
+  re-review requests came back rate-limited, and CodeRabbit's only reply on
+  the new head was a reply-wrapper — yet its `commit_id` named the head, so
+  it outranked the throttle. The classifier now reads GitHub's
+  `in_reply_to_id` on each inline comment and only counts one with none set
+  — a genuinely new thread — as evidence of a read; a bodyless review whose
+  comments are all replies now classifies as `empty-review`, same as one
+  with no comments at all. A fixture reproducing #2128's exact shape
+  (`CHANGES_REQUESTED` on an old head → bodyless reply-wrapper `COMMENTED`
+  on the new head → rate-limit notices) failed on main (`reviewed`) and now
+  reports `throttled`; the #2038/#1729 fixtures this shares logic with are
+  untouched and stay green.
 - **A deploy-window blip no longer wedges the avatar-backfill latch shut for
   the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
   whenever a request 401s and `/api/auth/token/refresh` is itself
