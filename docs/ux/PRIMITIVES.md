@@ -4,6 +4,7 @@
 - 2026-09-03 · cluster A · `components/features/inbox/inbox-derive.ts` `deciderCopy()`, `escalationHeading()`, `linkToOpen()` — the words for who decides (never a role enum), the decision-card heading by what an escalation asks for, and the client-side https guard for `payload.link_url`. Reuse from any surface that renders an inbox item.
 - 2026-09-03 · cluster C · `lib/entity-links.ts` — `integrations` ref (`tab`, `section`, `server`) so a crew tool can be opened where Connect lives.
 - 2026-09-03 · cluster C · `lib/entity-links.ts` — `inbox` ref takes `agentSlug` (`/inbox-v2?agent=`), the way an agent canvas hands a decision to the inbox.
+- 2026-09-04 · cluster B · `cmd/crewship/list_paging.go` — `printListFooter` says "no rows at offset N · the list has M" for an offset past the end instead of "showing 501–500 of 3" (found by cluster C on `crew list --offset 500`).
 - 2026-09-03 · cluster B · `lib/entity-links.ts` — `journal` now writes `crew_id` / `agent_id` (the keys `/journal` owns; the server resolves a slug as readily as an id) instead of `crew` / `agent`.
 - 2026-09-03 · cluster B · `hooks/use-issue-detail.ts` — `useUrlSelection(key, { aliases })` reads an older spelling of the parameter and rewrites it on the first pick; `readUrlSelection` is the pure read. Used by `/routines` (`?routine=` → `?slug=`).
 - 2026-09-03 · cluster B · `lib/activity-url.ts` — the `/activity` URL round trip (`?run` / `?pipeline` / `?mission` / `?status` kept, `?walk=`, `?lens=`, `?entry=`); reuse `activityUrl()` when linking into a walk.
