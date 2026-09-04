@@ -139,6 +139,36 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 ]
 ```
 
+<Note>
+  **Pagination (#2286):** the body is still the bare array above -- unchanged
+  for every existing client -- but the response now also carries two headers:
+
+  | Header | Description |
+  |---|---|
+  | `X-Total-Count` | Total rows matching the query (every filter applied, `limit`/`offset` ignored) |
+  | `X-Has-More` | `"true"` when `offset + len(body)` is less than `X-Total-Count`, else `"false"` |
+
+  A caller that only reads the array still gets identical bytes; a caller
+  that wants to know whether a 100-row page was the whole story reads the
+  headers instead of guessing. `crewship issue list` prints a "Showing N of
+  TOTAL issues" footer from them and takes `--offset` to page further; the
+  issues board (`hooks/use-issues-list.ts`) uses them to drive its own
+  "Load more".
+</Note>
+
+<Note>
+  **Error degradation contract (#2285):** the issues board classifies a
+  failed request to this endpoint instead of rendering it as an empty
+  workspace. A `403` is shown separately from a `5xx`/network failure -- it's
+  reported as "the request was refused", naming a scoped agent/CLI token as
+  the likely cause (`AuthKindCLIToken` in `internal/api/middleware.go` is the
+  credential "an agent, CI job, or script holds"; a `403` here is what an
+  agent/CLI token whose scope doesn't cover issues, or a transient token
+  problem, looks like) alongside a retry action, rather than presenting a
+  board with zero issues. See `hooks/use-issues-list.ts` for the
+  implementation and the full reasoning.
+</Note>
+
 <Accordion title="Response fields">
 
 | Field | Type | Description |

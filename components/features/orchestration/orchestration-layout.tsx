@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
@@ -9,6 +9,7 @@ import {
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   CircleDot, FolderKanban, ScrollText,
   Play, GitCompareArrows, MessageCircle,
+  AlertTriangle,
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
@@ -48,9 +49,9 @@ import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orch
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
-import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import { shouldRefetchForIssueEvent } from "@/components/features/orchestration/issue-realtime"
 import { useIssueDetail } from "@/hooks/use-issue-detail"
+import { useIssuesList } from "@/hooks/use-issues-list"
+import { useIssueBoardRealtime } from "@/hooks/use-issue-board-realtime"
 import { useProjectDetail } from "@/hooks/use-project-detail"
 import { parseSavedViews, applySavedView, issueViews } from "@/lib/saved-views"
 import { IssuesBoardInline, IssuesListInline } from "@/components/features/orchestration/issues-inline"
@@ -185,8 +186,21 @@ export function OrchestrationLayout({
   const [selectedAgentSlug] = useState<string | null>(null)
   const [detailContext, setDetailContext] = useState<DetailContext>({ type: "none" })
 
-  // Issues state
-  const [issues, setIssues] = useState<Mission[]>([])
+  // Issues state. #2286/#2285: the fetch itself — loading, error
+  // classification, and total/has-more pagination — lives in
+  // useIssuesList (hooks/use-issues-list.ts) so it's unit-testable without
+  // mounting this ~1200-line component. See that file's doc comment for
+  // the degradation contract.
+  const {
+    issues,
+    loading: issuesLoading,
+    error: issuesError,
+    total: issuesTotal,
+    hasMore: issuesHasMore,
+    loadingMore: issuesLoadingMore,
+    refetch: fetchIssues,
+    loadMore: loadMoreIssues,
+  } = useIssuesList(workspaceId)
   const [issueLabels, setIssueLabels] = useState<IssueLabel[]>([])
   // Persisted per-user — most teams stick with one of board/list and a
   // refresh shouldn't bounce them back to board if they prefer list.
@@ -214,39 +228,14 @@ export function OrchestrationLayout({
   const [filterStatuses, setFilterStatuses] = useState<MissionStatus[]>([])
   const [filterPriority, setFilterPriority] = useState<IssuePriority | null>(null)
 
-  // Realtime: agents create and advance issues live, and until #2257 the
-  // board only reflected that on a manual reload — nothing here subscribed
-  // to any issue.* event. `onRefresh` is the same full-list refetch
-  // `mission.updated` already drives (missions is fetched workspace-wide;
-  // there is no per-crew endpoint to selectively refresh), debounced so a
-  // lead splitting a brief into five sub-issues in a few seconds fires one
-  // request, not five. shouldRefetchForIssueEvent additionally skips a
-  // refetch the active crew filter can already prove is off-screen.
-  const issueRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const debouncedIssueRefetch = useCallback(() => {
-    if (issueRefetchTimerRef.current !== null) clearTimeout(issueRefetchTimerRef.current)
-    issueRefetchTimerRef.current = setTimeout(() => {
-      issueRefetchTimerRef.current = null
-      onRefresh()
-    }, 200)
-  }, [onRefresh])
-  useEffect(() => () => {
-    if (issueRefetchTimerRef.current !== null) clearTimeout(issueRefetchTimerRef.current)
-  }, [])
-  const handleIssueBoardEvent = useCallback(
-    (event: RealtimeEvent) => {
-      if (shouldRefetchForIssueEvent(event.type, event.payload, filterCrewId)) {
-        debouncedIssueRefetch()
-      }
-    },
-    [filterCrewId, debouncedIssueRefetch],
-  )
-  useRealtimeEvent("issue.created", handleIssueBoardEvent)
-  useRealtimeEvent("issue.updated", handleIssueBoardEvent)
-  useRealtimeEvent("issue.status_changed", handleIssueBoardEvent)
-  useRealtimeEvent("issue.started", handleIssueBoardEvent)
-  useRealtimeEvent("issue.deleted", handleIssueBoardEvent)
-  useRealtimeEvent("issues.bulk_updated", handleIssueBoardEvent)
+  // Realtime: agents create and advance issues live. #2257 (PR #2310)
+  // registered the issue.* subscriptions for the first time, but its client
+  // half was incomplete — the debounced refetch called `onRefresh`
+  // (missions/crews/agents/connections), never the board's own separate
+  // `issues` state, so a live issue.created never actually repainted the
+  // board. useIssueBoardRealtime (hooks/use-issue-board-realtime.ts) is the
+  // fix, and carries the full reasoning + the realtime.reconnected half.
+  useIssueBoardRealtime({ filterCrewId, fetchIssues, onRefresh })
 
   const [showCreateIssue, setShowCreateIssue] = useState(false)
   const [showCreateProject, setShowCreateProject] = useState(false)
@@ -368,15 +357,9 @@ export function OrchestrationLayout({
     return missions.filter((m) => m.id === selectedMissionId)
   }, [selectedMissionId, missions])
 
-  // Issue data fetching
-  const fetchIssues = useCallback(async () => {
-    if (!workspaceId) return
-    try {
-      const res = await apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=100`)
-      if (res.ok) setIssues(await res.json())
-    } catch { /* ignore */ }
-  }, [workspaceId])
-
+  // Issue data fetching — the issues list itself is useIssuesList (above);
+  // it fetches its own first page on mount, so it is deliberately absent
+  // from the effect below.
   const fetchIssueLabels = useCallback(async () => {
     if (!workspaceId) return
     try {
@@ -406,11 +389,10 @@ export function OrchestrationLayout({
   }, [workspaceId])
 
   useEffect(() => {
-    fetchIssues()
     fetchIssueLabels()
     fetchProjects()
     fetchSavedViews()
-  }, [fetchIssues, fetchIssueLabels, fetchProjects, fetchSavedViews])
+  }, [fetchIssueLabels, fetchProjects, fetchSavedViews])
 
   // Both selections live in the URL now — /issues?issue=ENG-4&project=p_1.
   // They used to be component state, so the open issue could not be shared,
@@ -920,25 +902,89 @@ export function OrchestrationLayout({
                 }
                 onClear={() => setFilterStatuses([])}
               />
-              {/* Board or List view */}
-              <div className="px-4 pb-4 h-[calc(100%-90px)]">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || filterProjectId || "all"}-${filterStatuses.join(",") || "all"}-${filterPriority || "all"}`}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.15, ease: "easeOut" }}
-                    className="h-full"
-                  >
-                    {issueViewMode === "board" ? (
-                      <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} />
-                    ) : (
-                      <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} workspaceId={workspaceId} />
-                    )}
-                  </motion.div>
-                </AnimatePresence>
-              </div>
+              {/* #2286: a fetch error must render as an error, never as an
+                  empty board — an empty board and a broken fetch used to be
+                  indistinguishable. With nothing loaded at all, the error
+                  replaces the board outright; if a later page (loadMore)
+                  fails, the issues already on screen stay put and the error
+                  becomes a dismissible-by-retry banner above them instead —
+                  see useIssuesList's doc comment (hooks/use-issues-list.ts)
+                  for the #2285 agent-token-403 case this also covers. */}
+              {issuesError && issues.length === 0 ? (
+                <div className="flex h-[calc(100%-90px)] flex-col items-center justify-center gap-3 px-6 text-center">
+                  <AlertTriangle className="h-8 w-8 text-destructive" />
+                  <p className="text-sm font-medium">Couldn't load issues</p>
+                  <p className="max-w-md text-sm text-muted-foreground">{issuesError.message}</p>
+                  <Button variant="outline" size="sm" onClick={() => fetchIssues()} disabled={issuesLoading}>
+                    {issuesLoading ? "Retrying…" : "Retry"}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {/* Reachable only from a failed loadMore — a failed
+                      initial/refetch always clears `issues` to [] and takes
+                      the full-panel branch above instead. So the retry here
+                      must re-request the page that failed (loadMoreIssues),
+                      NOT fetchIssues/refetch — refetch would reset to page 1
+                      and silently drop whatever loadMore had already added. */}
+                  {issuesError && (
+                    <div className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                      <span className="flex items-center gap-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        {issuesError.message}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => loadMoreIssues()}
+                        disabled={issuesLoadingMore}
+                      >
+                        {issuesLoadingMore ? "Retrying…" : "Retry"}
+                      </Button>
+                    </div>
+                  )}
+                  {/* Board or List view */}
+                  <div className="px-4 pb-2 h-[calc(100%-90px)]">
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || filterProjectId || "all"}-${filterStatuses.join(",") || "all"}-${filterPriority || "all"}`}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.15, ease: "easeOut" }}
+                        className="h-full"
+                      >
+                        {issueViewMode === "board" ? (
+                          <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} />
+                        ) : (
+                          <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} workspaceId={workspaceId} />
+                        )}
+                      </motion.div>
+                    </AnimatePresence>
+                  </div>
+                  {/* #2286: the board fetched at most 100 rows with no way
+                      to say more existed. issuesTotal is only known once the
+                      first response lands (X-Total-Count header) — until
+                      then this stays silent rather than guessing. */}
+                  {issuesTotal !== null && (issuesHasMore || issues.length > 0) && (
+                    <div className="flex items-center justify-center gap-3 px-4 pb-3 text-xs text-muted-foreground">
+                      <span>
+                        Showing {issues.length} of {issuesTotal} issue{issuesTotal === 1 ? "" : "s"}
+                      </span>
+                      {issuesHasMore && (
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          onClick={() => loadMoreIssues()}
+                          disabled={issuesLoadingMore}
+                        >
+                          {issuesLoadingMore ? "Loading…" : "Load more"}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
