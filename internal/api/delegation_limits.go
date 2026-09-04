@@ -785,78 +785,108 @@ func sessionBusyErrorFor(ctx context.Context, db dbConn, sessionID, followUpTask
 // §9.4 warns comes back the moment resolve-or-create and insert are not
 // atomic together.
 //
-// Three outcomes:
+// Four outcomes:
 //
-//   - a fresh PENDING assignment is inserted: (id, false, nil).
+//   - a fresh PENDING assignment is inserted: (id, false, sessionID, nil).
 //   - the session already had a live run
 //     (idx_assignments_one_active_per_session, 20260904172200_assignments_one_active_per_session.sql):
-//     no new row is written; (existingRunID, true, nil) is returned instead,
-//     so the caller (DispatchMention) treats the follow-up as belonging to
-//     the run already in flight — steered into its chat, its delivery
+//     no new row is written; (existingRunID, true, sessionID, nil) is
+//     returned instead, so the caller (DispatchMention) treats the
+//     follow-up as belonging to the run already in flight — its brief
+//     appended onto that run's task (sessionBusyErrorFor), its delivery
 //     attached to that run — rather than as a dispatch failure (§10.5).
+//     sessionID here is the REAL id resolveOrCreateIssueAgentSessionTx
+//     resolved, not the empty string a caller that only kept the bool
+//     would be left rebuilding a *sessionBusyError with — a bug caught in
+//     review on #2342 (the "attached" branch was constructing one with
+//     SessionID left blank).
+//   - a flag-read/begin-tx/session-resolve fault falls back to the
+//     session-less insert (below): (id, false, "", err).
 //   - anything else (a DB fault, a fan-out/depth refusal) returns the error
-//     verbatim, exactly as insertCappedAssignment always has.
+//     verbatim, exactly as insertCappedAssignment always has: ("", false,
+//     "", err).
 //
 // The issue_agent_sessions feature flag is read OUTSIDE the transaction —
 // featureflags.IsEnabled has no *sql.Tx overload, and a flag read has no
 // business holding a write lock open. Best-effort like
-// resolveOrCreateIssueAgentSession's existing contract: a flag-read or
-// session-resolve fault must not refuse a dispatch the caps already
-// approved, so both fall back to the session-less insert on db directly
-// (a.SessionID stays "", which the exclusivity index's own WHERE excludes)
-// rather than failing the whole call.
+// resolveOrCreateIssueAgentSession's existing contract: a flag-read,
+// begin-tx or session-resolve fault must not refuse a dispatch the caps
+// already approved, so all three fall back to the session-less insert on db
+// directly (a.SessionID stays "", which the exclusivity index's own WHERE
+// excludes) rather than failing the whole call — fallback centralises the
+// three identical copies an earlier revision had, caught in the same
+// review.
+//
+// One asymmetry worth naming: a session row created by
+// resolveOrCreateIssueAgentSessionTx is rolled back with the rest of the
+// transaction if the INSERT that follows it fails for a reason OTHER than
+// session-busy (a lost fan-out race, say) — unlike the flag-off/begin-tx/
+// session-resolve fallbacks above, which never open a transaction to roll
+// back in the first place. This is harmless, not a bug: the UPSERT behind
+// resolveOrCreateIssueAgentSessionTx is idempotent, so the next mention
+// simply recreates the identical row; nothing is lost beyond one wasted
+// write.
 func resolveSessionAndInsertAssignment(
 	ctx context.Context, db *sql.DB, logger *slog.Logger,
 	workspaceID, missionID, agentID string,
 	scope delegationScope, lim delegationLimits, caller dispatchCaller, a cappedAssignment,
-) (assignmentID string, attachedToActive bool, err error) {
-	enabled, ffErr := featureflags.IsEnabled(ctx, db, workspaceID, issueAgentSessionsFlagKey)
-	if ffErr != nil && logger != nil {
-		logger.Warn("resolve session and insert assignment: check issue_agent_sessions flag",
-			"error", ffErr, "mission_id", missionID, "agent_id", agentID)
-	}
-	if ffErr != nil || !enabled {
+) (assignmentID string, attachedToActive bool, sessionID string, err error) {
+	// fallback is the session-less insert every early-exit path below
+	// shares — one copy instead of three, so a future change (a metric, an
+	// error wrap) lands once. cause is the fault that forced the fallback,
+	// logged only when non-nil (a cleanly disabled flag is not a fault).
+	fallback := func(step string, cause error) (string, bool, string, error) {
+		if cause != nil && logger != nil {
+			logger.Warn("resolve session and insert assignment: "+step, "error", cause,
+				"mission_id", missionID, "agent_id", agentID)
+		}
 		id, err := insertCappedAssignment(ctx, db, scope, lim, caller, a)
-		return id, false, err
+		return id, false, "", err
+	}
+
+	enabled, ffErr := featureflags.IsEnabled(ctx, db, workspaceID, issueAgentSessionsFlagKey)
+	if ffErr != nil || !enabled {
+		return fallback("check issue_agent_sessions flag", ffErr)
 	}
 
 	tx, txErr := db.BeginTx(ctx, nil)
 	if txErr != nil {
-		if logger != nil {
-			logger.Warn("resolve session and insert assignment: begin tx", "error", txErr,
-				"mission_id", missionID, "agent_id", agentID)
-		}
-		id, err := insertCappedAssignment(ctx, db, scope, lim, caller, a)
-		return id, false, err
+		return fallback("begin tx", txErr)
 	}
-	defer func() { _ = tx.Rollback() }() // no-op once Commit has run
+	defer func() { _ = tx.Rollback() }() // no-op once Commit has run; see the asymmetry note above
 
-	sessionID, sessErr := resolveOrCreateIssueAgentSessionTx(ctx, tx, workspaceID, missionID, agentID)
+	sid, sessErr := resolveOrCreateIssueAgentSessionTx(ctx, tx, workspaceID, missionID, agentID)
 	if sessErr != nil {
-		if logger != nil {
-			logger.Warn("resolve session and insert assignment: resolve session", "error", sessErr,
-				"mission_id", missionID, "agent_id", agentID)
-		}
+		// Roll back BEFORE calling fallback, not after: fallback's insert
+		// runs on the pooled *sql.DB, and this tx (BEGIN IMMEDIATE via
+		// database.Open's _txlock=immediate) is still holding the write
+		// lock at this point. Returning straight to `return fallback(...)`
+		// leaves the deferred Rollback above queued to run only once this
+		// call returns — so fallback's own write blocks on the lock IT is
+		// waiting on, for the full busy_timeout, and then fails with
+		// "database is locked" instead of succeeding immediately. A
+		// cancelled context mid-transaction (client disconnect, shutdown)
+		// is a real way to reach this path, not just a theoretical one.
+		// Explicit here; the deferred call becomes a safe no-op after it.
 		_ = tx.Rollback()
-		id, err := insertCappedAssignment(ctx, db, scope, lim, caller, a)
-		return id, false, err
+		return fallback("resolve session", sessErr)
 	}
-	a.SessionID = sessionID
+	a.SessionID = sid
 
 	id, insErr := insertCappedAssignment(ctx, tx, scope, lim, caller, a)
 	if insErr != nil {
 		var busy *sessionBusyError
 		if errors.As(insErr, &busy) {
 			if cErr := tx.Commit(); cErr != nil {
-				return "", false, fmt.Errorf("resolve session and insert assignment: commit after session busy: %w", cErr)
+				return "", false, "", fmt.Errorf("resolve session and insert assignment: commit after session busy: %w", cErr)
 			}
-			return busy.ActiveAssignmentID, true, nil
+			return busy.ActiveAssignmentID, true, sid, nil
 		}
-		return "", false, insErr
+		return "", false, "", insErr
 	}
 
 	if cErr := tx.Commit(); cErr != nil {
-		return "", false, fmt.Errorf("resolve session and insert assignment: commit: %w", cErr)
+		return "", false, "", fmt.Errorf("resolve session and insert assignment: commit: %w", cErr)
 	}
-	return id, false, nil
+	return id, false, sid, nil
 }

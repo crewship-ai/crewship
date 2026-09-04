@@ -16,6 +16,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -58,11 +59,14 @@ func TestSessionExclusivity_SecondInsertAttachesToActiveRun(t *testing.T) {
 		MissionID:   f.missionID,
 	}
 
-	id1, attached1, err := resolveSessionAndInsertAssignment(
+	id1, attached1, sid1, err := resolveSessionAndInsertAssignment(
 		ctx, f.db, f.assign.logger, f.wsID, f.missionID, f.target,
 		sessionExclusivityScope, sessionExclusivityLim, caller, a)
 	if err != nil {
 		t.Fatalf("first resolveSessionAndInsertAssignment: %v", err)
+	}
+	if sid1 == "" {
+		t.Fatal("first call returned an empty session id")
 	}
 	if attached1 {
 		t.Fatal("first call reported attached=true — nothing was running yet")
@@ -80,11 +84,14 @@ func TestSessionExclusivity_SecondInsertAttachesToActiveRun(t *testing.T) {
 	}
 
 	a.Task = "second mention, 2s later"
-	id2, attached2, err := resolveSessionAndInsertAssignment(
+	id2, attached2, sid2, err := resolveSessionAndInsertAssignment(
 		ctx, f.db, f.assign.logger, f.wsID, f.missionID, f.target,
 		sessionExclusivityScope, sessionExclusivityLim, caller, a)
 	if err != nil {
 		t.Fatalf("second resolveSessionAndInsertAssignment surfaced a raw error instead of attaching: %v", err)
+	}
+	if sid2 != sid1 {
+		t.Fatalf("second call's session id = %q, want the same session %q", sid2, sid1)
 	}
 	if !attached2 {
 		t.Fatal("second call reported attached=false — it inserted a SECOND live run for the same session")
@@ -129,11 +136,14 @@ func TestSessionExclusivity_TerminalRunFreesTheSlot(t *testing.T) {
 		WorkspaceID: f.wsID, ChatID: f.missionID, TargetID: f.target,
 		Task: "first", GroupID: f.missionID, CreatedAt: "2026-09-04T00:00:00Z", MissionID: f.missionID,
 	}
-	id1, attached1, err := resolveSessionAndInsertAssignment(
+	id1, attached1, sid1, err := resolveSessionAndInsertAssignment(
 		ctx, f.db, f.assign.logger, f.wsID, f.missionID, f.target,
 		sessionExclusivityScope, sessionExclusivityLim, caller, a)
 	if err != nil || attached1 {
 		t.Fatalf("first insert: id=%q attached=%v err=%v", id1, attached1, err)
+	}
+	if sid1 == "" {
+		t.Fatal("first call returned an empty session id")
 	}
 
 	if _, err := f.db.Exec(`UPDATE assignments SET status = 'COMPLETED' WHERE id = ?`, id1); err != nil {
@@ -141,11 +151,14 @@ func TestSessionExclusivity_TerminalRunFreesTheSlot(t *testing.T) {
 	}
 
 	a.Task = "second, after the first finished"
-	id2, attached2, err := resolveSessionAndInsertAssignment(
+	id2, attached2, sid2, err := resolveSessionAndInsertAssignment(
 		ctx, f.db, f.assign.logger, f.wsID, f.missionID, f.target,
 		sessionExclusivityScope, sessionExclusivityLim, caller, a)
 	if err != nil {
 		t.Fatalf("second resolveSessionAndInsertAssignment: %v", err)
+	}
+	if sid2 != sid1 {
+		t.Fatalf("second call's session id = %q, want the SAME session %q (a terminal run does not rotate the session)", sid2, sid1)
 	}
 	if attached2 {
 		t.Fatal("second call reported attached=true even though the first run is COMPLETED")
@@ -192,7 +205,7 @@ func TestSessionExclusivity_ConcurrentInsertsOnlyOneWins(t *testing.T) {
 				Task: "concurrent mention", GroupID: f.missionID,
 				CreatedAt: "2026-09-04T00:00:00Z", MissionID: f.missionID,
 			}
-			id, att, err := resolveSessionAndInsertAssignment(
+			id, att, _, err := resolveSessionAndInsertAssignment(
 				context.Background(), f.db, f.assign.logger, f.wsID, f.missionID, f.target,
 				sessionExclusivityScope, sessionExclusivityLim, caller, a)
 			ids[i] = id
@@ -292,5 +305,67 @@ func TestRawIndex_RejectsConcurrentSecondInsert(t *testing.T) {
 	}
 	if err := insert("a_raw_3", "PENDING"); err != nil {
 		t.Fatalf("insert after the prior holder went terminal: %v", err)
+	}
+}
+
+// TestDispatchMention_SessionBusyErrorNamesTheRealSession is a regression
+// test for a bug caught in review on #2342: DispatchMention's "attached"
+// branch synthesized its own *sessionBusyError with SessionID left "",
+// instead of using the session id resolveSessionAndInsertAssignment had
+// already resolved — so the message persisted to
+// mission_comment_mentions.dispatch_detail read "session  already has an
+// active run (<id>)" with a blank id where the session id belongs.
+//
+// Drives the REAL DispatchMention entry point (not resolveSessionAndInsertAssignment
+// directly, and not a stub) — the bug lived in the glue between that
+// function's return values and the error DispatchMention builds around
+// them, which only exercising DispatchMention itself can catch. The
+// session/run pair is seeded directly rather than raced by two DispatchMention
+// calls, so the busy path is hit deterministically instead of depending on
+// whether a background runAssignment goroutine has finished yet.
+func TestDispatchMention_SessionBusyErrorNamesTheRealSession(t *testing.T) {
+	f := setupMentionFixture(t)
+	ctx := context.Background()
+
+	if err := ensureMissionChat(ctx, f.db, f.missionID, f.wsID, f.target, "Test issue"); err != nil {
+		t.Fatalf("ensureMissionChat: %v", err)
+	}
+	execOrFatal(t, f.db, `
+		INSERT INTO issue_agent_sessions
+		    (id, workspace_id, mission_id, agent_id, state, last_consumed_seq, created_at, updated_at)
+		VALUES ('sess_busy_detail', ?, ?, ?, 'pending', 0, datetime('now'), datetime('now'))`,
+		f.wsID, f.missionID, f.target)
+	execOrFatal(t, f.db, `
+		INSERT INTO assignments
+		    (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, created_at, mission_id, session_id)
+		VALUES ('asg_busy_detail', ?, ?, ?, ?, 'already running', 'RUNNING', 1, datetime('now'), ?, 'sess_busy_detail')`,
+		f.wsID, f.missionID, f.target, f.target, f.missionID)
+
+	_, err := f.assign.DispatchMention(ctx, mentionDispatchRequest{
+		WorkspaceID:   f.wsID,
+		MissionID:     f.missionID,
+		Identifier:    f.ident,
+		IssueTitle:    "Test issue",
+		IssueCrewID:   f.crewID,
+		CommentID:     "cmt_busy_detail",
+		CommentBody:   "follow-up",
+		AuthorType:    "user",
+		AuthorID:      f.userID,
+		TargetAgentID: f.target,
+	})
+	f.assign.WaitDispatches()
+
+	var busy *sessionBusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("DispatchMention error = %v, want a *sessionBusyError", err)
+	}
+	if busy.SessionID != "sess_busy_detail" {
+		t.Errorf("sessionBusyError.SessionID = %q, want %q (the real session, not blank)", busy.SessionID, "sess_busy_detail")
+	}
+	if busy.ActiveAssignmentID != "asg_busy_detail" {
+		t.Errorf("sessionBusyError.ActiveAssignmentID = %q, want %q", busy.ActiveAssignmentID, "asg_busy_detail")
+	}
+	if strings.Contains(busy.Error(), "session  already") {
+		t.Errorf("error text has a blank session id (double space): %q", busy.Error())
 	}
 }

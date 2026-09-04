@@ -49,11 +49,14 @@ const issueAgentSessionsFlagKey = "issue_agent_sessions"
 // (issue_mentions.go, B3 — §9.4) passes a *sql.Tx instead, so
 // resolveOrCreateIssueAgentSessionTx and insertCappedAssignment run inside
 // the SAME transaction as the fan-out guard — the thing §9.4 says the
-// exclusivity index "guards nothing" without. Modelled on auditExecer
-// (credential_audit.go), the same split for the same reason.
+// exclusivity index "guards nothing" without. Structurally identical to
+// auditExecer (credential_audit.go) — same split, same reason, kept as its
+// own type rather than shared because the two evolved in different PRs and
+// merging them is a rename, not a fix. No QueryContext: nothing on this
+// path issues a multi-row query through the interface (ListSessions reads
+// via h.db directly), so it is not part of the contract.
 type dbConn interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 

@@ -1059,7 +1059,7 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 	// turn, so it is folded into that run rather than started as a second
 	// one — see the `if attached` branch below for exactly what "folded
 	// in" means and does not mean.
-	assignmentID, attached, err := resolveSessionAndInsertAssignment(
+	assignmentID, attached, sessionID, err := resolveSessionAndInsertAssignment(
 		ctx, h.db, h.logger, req.WorkspaceID, req.MissionID, target.ID,
 		scope, lim, caller, cappedAssignment{
 			WorkspaceID:     req.WorkspaceID,
@@ -1114,7 +1114,7 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 			"comment_id", req.CommentID,
 			"target", target.Slug,
 		)
-		return assignmentID, &sessionBusyError{SessionID: "", ActiveAssignmentID: assignmentID}
+		return assignmentID, &sessionBusyError{SessionID: sessionID, ActiveAssignmentID: assignmentID}
 	}
 
 	body := createAssignmentBody{
