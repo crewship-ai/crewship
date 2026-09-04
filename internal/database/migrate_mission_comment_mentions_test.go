@@ -29,37 +29,114 @@ func seedMentionFixture(t *testing.T, db *DB) {
 		VALUES ('asg_mcm', 'ws_mcm', 'chat_mcm', 'agent_mcm_lead', 'agent_mcm_target', 'do it')`)
 }
 
+// insertMention writes one delivery row with a fresh, id-derived event_id —
+// so every existing caller (each already using a distinct row id) keeps
+// getting a distinct event_id and an ordinary successful insert, without
+// having to know §9.3's schema changed underneath it. Tests that need to
+// pin the event_id explicitly (the UNIQUE(event_id, agent_id) tests below)
+// call insertMentionWithEvent instead.
 func insertMention(t *testing.T, db *DB, id, assignmentID string) error {
+	t.Helper()
+	return insertMentionWithEvent(t, db, id, "evt_"+id, assignmentID)
+}
+
+// insertMentionWithEvent is insertMention with the event_id caller-supplied,
+// for the tests that need two rows to name the SAME event. event_id carries
+// a real FK to mission_activity(id) (20260904145200_deliveries_widen.sql),
+// so this seeds the referenced row first (INSERT OR IGNORE — several
+// callers share one event_id on purpose, in the tests proving that
+// collides).
+func insertMentionWithEvent(t *testing.T, db *DB, id, eventID, assignmentID string) error {
 	t.Helper()
 	var asg any
 	if assignmentID != "" {
 		asg = assignmentID
 	}
+	var evt any
+	if eventID != "" {
+		evt = eventID
+		execMigrationFixture(t, db, `
+			INSERT OR IGNORE INTO mission_activity (id, mission_id, actor_type, actor_id, action)
+			VALUES (?, 'msn_mcm', 'user', 'user_mcm', 'mentioned')`, eventID)
+	}
 	_, err := db.Exec(`
-		INSERT INTO mission_comment_mentions (id, workspace_id, mission_id, comment_id, agent_id, position, dispatch_state, assignment_id)
-		VALUES (?, 'ws_mcm', 'msn_mcm', 'cmt_mcm', 'agent_mcm_target', 0, 'dispatched', ?)`, id, asg)
+		INSERT INTO mission_comment_mentions (id, workspace_id, mission_id, comment_id, event_id, agent_id, position, dispatch_state, assignment_id)
+		VALUES (?, 'ws_mcm', 'msn_mcm', 'cmt_mcm', ?, 'agent_mcm_target', 0, 'dispatched', ?)`, id, evt, asg)
 	return err
 }
 
-// The UNIQUE (comment_id, agent_id) constraint is what makes "mentioned three
-// times in one comment" one mention at the DATA level rather than only in the
-// caller. The Go path de-duplicates too; this is the half that survives a
-// future caller that forgets.
-func TestMigrate_MissionCommentMentions_SameAgentTwiceIsOneRow(t *testing.T) {
+// The UNIQUE (event_id, agent_id) constraint (§9.3, B2 — #2337; it replaced
+// UNIQUE(comment_id, agent_id) in 20260904145200_deliveries_widen.sql) is
+// what makes "the same event delivered twice to the same agent" one row at
+// the DATA level rather than only in the caller — invariant I1, and the
+// schema half of the accept line's "ten concurrent identical deliveries of
+// the same event produce one run" (issue_deliveries_test.go proves the
+// concurrent-goroutine half). ExtractAgentIDs' own de-duplication is the
+// application-level belt; this is the suspenders that survive a future
+// caller that forgets.
+func TestMigrate_MissionCommentMentions_SameEventAndAgentTwiceIsOneRow(t *testing.T) {
 	t.Parallel()
 	db := migrateChainSetup(t)
 	seedMentionFixture(t, db)
 
-	if err := insertMention(t, db, "mcm_1", "asg_mcm"); err != nil {
-		t.Fatalf("first mention: %v", err)
+	if err := insertMentionWithEvent(t, db, "mcm_1", "evt_shared", "asg_mcm"); err != nil {
+		t.Fatalf("first delivery: %v", err)
 	}
-	err := insertMention(t, db, "mcm_2", "asg_mcm")
+	err := insertMentionWithEvent(t, db, "mcm_2", "evt_shared", "asg_mcm")
 	if err == nil {
-		t.Fatal("a second mention of the same agent on the same comment was accepted; " +
-			"UNIQUE (comment_id, agent_id) is what collapses it to one mention, one activity row, one run")
+		t.Fatal("a second delivery of the same event to the same agent was accepted; " +
+			"UNIQUE (event_id, agent_id) is what collapses it to one delivery, one run")
 	}
 	if !strings.Contains(strings.ToUpper(err.Error()), "UNIQUE") {
 		t.Errorf("second insert failed for the wrong reason: %v", err)
+	}
+}
+
+// The mirror of the test above: two DIFFERENT events naming the same
+// (comment, agent) pair — the shape a comment mentioning the same agent
+// twice used to collide on under the old UNIQUE(comment_id, agent_id) — must
+// now both insert. Nothing about mentioning an agent twice in one comment
+// relies on the DATABASE refusing the second row any more; ExtractAgentIDs
+// (internal/mentions) is what collapses that case today, before either
+// event is even allocated (ids), which is why this is a "must succeed" test
+// rather than a "must fail" one: it pins that the schema no longer performs
+// that de-duplication, so a reader is not misled into thinking it still
+// does.
+func TestMigrate_MissionCommentMentions_SameCommentDifferentEventsBothInsert(t *testing.T) {
+	t.Parallel()
+	db := migrateChainSetup(t)
+	seedMentionFixture(t, db)
+
+	if err := insertMentionWithEvent(t, db, "mcm_a", "evt_a", "asg_mcm"); err != nil {
+		t.Fatalf("first delivery: %v", err)
+	}
+	if err := insertMentionWithEvent(t, db, "mcm_b", "evt_b", "asg_mcm"); err != nil {
+		t.Fatalf("second delivery, different event, same comment+agent: %v", err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM mission_comment_mentions WHERE comment_id = 'cmt_mcm'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("rows for cmt_mcm = %d, want 2", n)
+	}
+}
+
+// comment_id is nullable now (§9.3): a delivery raised for a non-comment
+// event must be insertable with no comment at all.
+func TestMigrate_MissionCommentMentions_NullCommentIDInserts(t *testing.T) {
+	t.Parallel()
+	db := migrateChainSetup(t)
+	seedMentionFixture(t, db)
+	execMigrationFixture(t, db, `
+		INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action)
+		VALUES ('evt_no_comment', 'msn_mcm', 'user', 'user_mcm', 'mentioned')`)
+
+	_, err := db.Exec(`
+		INSERT INTO mission_comment_mentions (id, workspace_id, mission_id, comment_id, event_id, agent_id, position, dispatch_state)
+		VALUES ('mcm_no_comment', 'ws_mcm', 'msn_mcm', NULL, 'evt_no_comment', 'agent_mcm_target', 0, 'skipped')`)
+	if err != nil {
+		t.Fatalf("insert with NULL comment_id: %v", err)
 	}
 }
 

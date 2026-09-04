@@ -369,6 +369,40 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// differently in the restored instance). The dispatch columns are history,
 	// not live state — a restored 'refused' row records that a cap said no at
 	// the time, which is exactly the fact an operator reads it for.
+	//
+	// F37 DECISION (PRD-ISSUES-AND-ROUTINES-2026 §9.3/§16.1, work package B2,
+	// #2337): this table is now ALSO the delivery table — event_id, state,
+	// claimed_by_run_id, priority (20260904145200_deliveries_widen.sql). §9.3
+	// explicitly flags that notification_deliveries, the table this design
+	// copies its claim/consume shape from, is IntentExcludeOperational, and
+	// asks whether the same classification should apply here. It does NOT:
+	// notification_deliveries excludes because it is disposable — "operational
+	// telemetry that regenerates as new events fire" (this file's own comment
+	// on it) — and mission_comment_mentions is the opposite of disposable, for
+	// the reason stated above (re-deriving it is not just expensive, it is
+	// WRONG on a restored instance whose agent ids resolve differently).
+	// Splitting the table in two — an excluded delivery-state shard and an
+	// included mention-history shard — is exactly what §9.3 says not to do
+	// ("generalise mission_comment_mentions... do not create
+	// agent_deliveries"), so IntentInclude stays, for the whole table.
+	//
+	// The honest cost, stated per §16.1's "decide, in writing" requirement:
+	// exactly-once (I1) survives a CRASH unconditionally — the UNIQUE(event_id,
+	// agent_id) claim CAS a live process replays after a restart cannot
+	// double-claim a row it already holds. It survives a RESTORE differently:
+	// a restore returns mission_comment_mentions and assignments together, from
+	// the same snapshot, so a restored 'claimed' row's claimed_by_run_id never
+	// dangles — but any run that was in flight between the backup and the
+	// crash is gone, by definition of what a restore is, and the delivery it
+	// claimed is left 'claimed' with no run that will ever finish it. B2 ships
+	// no lease/reap mechanism (that is B4, §9.4's lease_owner/lease_expires_at)
+	// — until it lands, such a row simply sits 'claimed' after a restore, and
+	// an operator has to notice and re-mention rather than the system
+	// self-healing it. That gap is real, it is the honest trade-off named
+	// above (keeping the audit trail intact costs the automatic recovery
+	// notification_deliveries would have gotten for free), and it closes when
+	// B4's sweeper starts reaping expired leases instead of relying on the
+	// process that held them still being alive.
 	"mission_comment_mentions": IntentInclude,
 	"mission_labels":           IntentInclude,
 	"mission_proposals":        IntentInclude,
