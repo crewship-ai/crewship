@@ -256,7 +256,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   run and two consumed deliveries, and ten produce one run and ten.
   `docs/guides/issue-mentions.mdx`'s known limits and
   `docs/api-reference/issues.mdx`'s Sessions section say what changed.
-- **A killed process's runs recover in seconds, not at the next restart, and never steal a live replica's run (#TBD).**
+- **A killed process's runs recover in seconds, not at the next restart, and never steal a live replica's run (#2348).**
   `assignments` gains `lease_owner`/`lease_expires_at` (PRD-ISSUES-AND-
   ROUTINES-2026 §9.4, work package B4): the process actually driving a
   RUNNING assignment stamps its identity and a lease deadline, then renews
