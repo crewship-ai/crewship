@@ -43,6 +43,7 @@ on:
       - "cmd/**"
       - "internal/**"
       - "schemas/**"
+      - "config/**"
       - "web/**"
       - "docker/server-entrypoint.sh"
       # Self-trigger: an edit to this file's own paths: list (including a
