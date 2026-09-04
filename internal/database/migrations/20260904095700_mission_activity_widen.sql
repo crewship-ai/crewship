@@ -88,7 +88,9 @@ FROM mission_activity;
 DROP TABLE mission_activity;
 ALTER TABLE mission_activity_new RENAME TO mission_activity;
 
-CREATE INDEX IF NOT EXISTS idx_mission_activity_mission ON mission_activity(mission_id);
+-- No plain (mission_id) index: idx_mission_activity_mission_seq below is
+-- UNIQUE(mission_id, seq) and covers every lookup by mission_id, so the old
+-- idx_mission_activity_mission would be redundant (TestRedundantIndexPolicy).
 CREATE INDEX IF NOT EXISTS idx_mission_activity_created ON mission_activity(created_at);
 
 -- workspace_id: "every event in this workspace" without a join through

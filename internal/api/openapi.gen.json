@@ -48898,7 +48898,45 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "active_run_id": {
+                        "type": "string"
+                      },
+                      "agent_id": {
+                        "type": "string"
+                      },
+                      "agent_name": {
+                        "type": "string"
+                      },
+                      "agent_version": {
+                        "type": "integer"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "last_activity_at": {
+                        "type": "string"
+                      },
+                      "last_consumed_seq": {
+                        "type": "integer"
+                      },
+                      "mission_id": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      },
+                      "updated_at": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
