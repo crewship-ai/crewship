@@ -106,7 +106,15 @@ describe("<DetailCell>", () => {
   it("renders an empty list without crashing and reports zero", () => {
     renderCell({ items: [], count: 0 })
     expect(screen.getByTestId("cell-count")).toHaveTextContent("0 items")
-    expect(screen.getByText(/nothing matches/i)).toBeInTheDocument()
+    // No filter is active, so it does not blame a filter (README §6).
+    expect(screen.queryByText(/nothing matches/i)).toBeNull()
+    expect(screen.getByText(/nothing here yet/i)).toBeInTheDocument()
+  })
+
+  it("shows the caller's empty state — what would appear here and how — for an empty list", () => {
+    renderCell({ items: [], count: 0, empty: <span>No runs yet — start one from chat</span> })
+    expect(screen.getByText(/start one from chat/i)).toBeInTheDocument()
+    expect(screen.queryByText(/nothing here yet/i)).toBeNull()
   })
 
   it("marks the cell header count as needing attention when warn is set", () => {

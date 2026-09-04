@@ -212,14 +212,6 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
         </TooltipProvider>
       )}
 
-      <div className="mt-6 text-center text-xs text-muted-foreground">
-        Bulk operations live in the CLI:{" "}
-        <code className="bg-muted px-1.5 py-0.5 rounded">crewship agent list</code>{" "}
-        ·{" "}
-        <code className="bg-muted px-1.5 py-0.5 rounded">
-          crewship agent update &lt;slug&gt; --crew &lt;crew&gt;
-        </code>
-      </div>
     </div>
   )
 }

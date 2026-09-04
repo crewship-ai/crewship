@@ -12,6 +12,8 @@ import {
 import { AgentConnectorsCard } from "@/components/features/integrations/composio/access-editor"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { entityHref } from "@/lib/entity-links"
+import { InlineEmpty } from "@/components/ui/inline-empty"
+import Link from "next/link"
 import { withReturnTo } from "@/lib/return-to"
 
 import { DetailCell, type DetailCellItem, type DetailCellTone } from "../canvas/detail-cell"
@@ -230,6 +232,7 @@ export function OverviewTab({
         <DetailCell
           order={0}
           title="Issues"
+          empty={<InlineEmpty icon={CONCEPT_ICON.issues} text="Nothing assigned to this agent yet." action={<Link href={entityHref({ kind: "issues", crewSlug: agent.crew?.slug })} className="text-primary-hover hover:underline">Open issues →</Link>} />}
           icon={CONCEPT_ICON.issues}
           count={issues.length}
           filters={[
@@ -245,6 +248,7 @@ export function OverviewTab({
         <DetailCell
           order={1}
           title="Routines"
+          empty={<InlineEmpty icon={CONCEPT_ICON.routines} text="No routine runs this agent yet." action={<Link href={entityHref({ kind: "routines", crewSlug: agent.crew?.slug })} className="text-primary-hover hover:underline">Create one →</Link>} />}
           icon={CONCEPT_ICON.routines}
           count={agentPipelines.length}
           filters={[{ id: "all", label: "All" }]}
@@ -292,6 +296,7 @@ export function OverviewTab({
         <DetailCell
           order={4}
           title="Skills"
+          empty={<InlineEmpty icon={CONCEPT_ICON.skills} text="No skills assigned; it works with its base tools only." action={<Link href="/skills" className="text-primary-hover hover:underline">Browse skills →</Link>} />}
           icon={CONCEPT_ICON.skills}
           count={`${skills.filter((sk) => sk.enabled).length} / ${skills.length}`}
           filters={[
@@ -308,6 +313,7 @@ export function OverviewTab({
         <DetailCell
           order={5}
           title="Tools"
+          empty={<InlineEmpty icon={CONCEPT_ICON.tools} text="No connector granted to this agent yet." action={<Link href={entityHref({ kind: "integrations", tab: "tools", section: "crew-tools" })} className="text-primary-hover hover:underline">Crew tools →</Link>} />}
           icon={CONCEPT_ICON.tools}
           count={toolkits.length}
           filters={[{ id: "all", label: "All" }]}
@@ -318,6 +324,7 @@ export function OverviewTab({
         <DetailCell
           order={6}
           title="Channels"
+          empty={<InlineEmpty icon={CONCEPT_ICON.channels} text="This agent cannot send a notification until a human grants it a channel." />}
           icon={CONCEPT_ICON.channels}
           count={channels.length}
           filters={[{ id: "all", label: "All" }, { id: "on", label: "Active" }]}
@@ -333,6 +340,7 @@ export function OverviewTab({
         <DetailCell
           order={7}
           title="Runs"
+          empty={<InlineEmpty icon={Workflow} text="This agent has not run yet." action={<Link href={entityHref({ kind: "chat", agentSlug: agent.slug })} className="text-primary-hover hover:underline">Start from chat →</Link>} />}
           icon={CONCEPT_ICON.runs}
           count={runs?.length ?? 0}
           filters={[
@@ -348,6 +356,7 @@ export function OverviewTab({
         <DetailCell
           order={8}
           title="Sessions"
+          empty={<InlineEmpty icon={CONCEPT_ICON.sessions} text="No conversation with this agent yet." action={<Link href={entityHref({ kind: "chat", agentSlug: agent.slug })} className="text-primary-hover hover:underline">Open chat →</Link>} />}
           icon={CONCEPT_ICON.sessions}
           count={chats?.length ?? 0}
           filters={[{ id: "all", label: "All" }]}

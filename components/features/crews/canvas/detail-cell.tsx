@@ -75,6 +75,10 @@ export interface DetailCellProps {
    *  next to "Manage skills". */
   extraLabel?: string
   extraHref?: string
+  /** What the cell says when it holds nothing at all: what would appear
+   *  here and one way to make it appear (README §2 "InlineEmpty"). The
+   *  "Nothing matches this filter" line is reserved for an active filter. */
+  empty?: React.ReactNode
   className?: string
   /** Position in the grid — drives the entrance stagger. */
   order?: number
@@ -84,7 +88,7 @@ const ALL = (filters: DetailCellFilter[]) => filters[0]?.id ?? "all"
 
 export function DetailCell({
   title, icon, count, warn = false, filters, items, tall = false,
-  footerLabel, footerHref, footerOnClick, extraLabel, extraHref, className, order = 0,
+  footerLabel, footerHref, footerOnClick, extraLabel, extraHref, empty, className, order = 0,
 }: DetailCellProps) {
   const [activeFilter, setActiveFilter] = useState(() => ALL(filters))
   const [searchOpen, setSearchOpen] = useState(false)
@@ -179,8 +183,13 @@ export function DetailCell({
         {visible.map((item, index) => (
           <CellRow key={item.id} item={item} index={index} />
         ))}
-        {visible.length === 0 && (
-          <p className="type-row px-4 py-6 text-center text-muted-foreground-soft">Nothing matches this filter.</p>
+        {visible.length === 0 && (items.length > 0 || !empty) && (
+          <p className="type-row px-4 py-6 text-center text-muted-foreground-soft">
+            {items.length > 0 ? "Nothing matches this filter." : "Nothing here yet."}
+          </p>
+        )}
+        {visible.length === 0 && items.length === 0 && empty && (
+          <div className="px-3 py-3">{empty}</div>
         )}
       </div>
 
