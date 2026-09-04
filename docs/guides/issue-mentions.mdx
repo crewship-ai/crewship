@@ -256,14 +256,25 @@ person and one written by an agent are the same wire format:
 | An agent's inline comment on a status change | `PATCH /api/v1/internal/issues/{identifier}` |
 
 No new HTTP route was added for mentions — the trigger hangs off comment
-writes that already existed — so API↔CLI parity is satisfied by reuse:
+writes that already existed. `crewship issue comment` has a `--mention
+<slug>` flag (repeatable) that resolves the slug against the workspace agent
+roster and writes the link form for you:
+
+```bash
+crewship issue comment ENG-42 --mention robin "over to you"
+```
+
+The link can also be hand-typed through `--body` — this is what `--mention`
+does under the hood, and it is still the only thing the server ever reads:
 
 ```bash
 crewship issue comment ENG-42 --body 'over to you [@robin](crewship:agent/<agentId>)'
 ```
 
-Everything on this page happens on that call. `crewship issue get ENG-42`
-renders the comment and the activity that follows it.
+A bare `@robin` typed into `--body` (or a positional argument) is not a
+mention — see `docs/cli/issue.mdx`. Everything on this page happens on that
+same comment call. `crewship issue get ENG-42` renders the comment and the
+activity that follows it.
 
 ## Where the code is
 

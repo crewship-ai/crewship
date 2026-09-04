@@ -28,7 +28,12 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 	relation := obj(map[string]any{"id": str(), "source_id": str(), "target_id": str(), "relation_type": str(), "target_identifier": nullable(str()), "target_title": str(), "target_status": str(), "created_at": str()})
 	comment := obj(map[string]any{"id": str(), "mission_id": str(), "author_type": str(), "author_id": str(), "author_name": str(), "body": str(), "created_at": str(), "updated_at": str()})
 	activity := obj(map[string]any{"id": str(), "mission_id": str(), "actor_type": str(), "actor_id": str(), "actor_name": nullable(str()), "action": str(), "details": nullable(str()), "created_at": str()})
-	issueRun := obj(map[string]any{"id": str(), "status": str(), "agent_name": str(), "task": str(), "started_at": str(), "ended_at": str(), "duration_ms": integer(), "result_summary": str(), "error_message": str()})
+	// mission_id and source (#2313, item 3) tell a client WHY a run is
+	// attributed to the issue, not just that it is: "task" (the issue's own
+	// mission_tasks plan), "mention" (an @mention dispatch, via
+	// mission_comment_mentions), or "delegation" (a sub-agent's own further
+	// /assign call mid-mission, found only via assignments.mission_id).
+	issueRun := obj(map[string]any{"id": str(), "status": str(), "agent_name": str(), "task": str(), "started_at": str(), "ended_at": str(), "duration_ms": integer(), "result_summary": str(), "error_message": str(), "mission_id": nullable(str()), "source": str()})
 	checkpointState := obj(map[string]any{"agent_memory": map[string]any{"type": "object", "additionalProperties": str()}, "pending_tasks": arr(str()), "open_assignments": arr(str()), "crew_container_id": str(), "meta": open()})
 	checkpoint := obj(map[string]any{"id": str(), "workspace_id": str(), "crew_id": str(), "mission_id": str(), "label": str(), "journal_cursor": str(), "state": checkpointState, "fork_of": str(), "created_by": str(), "created_at": str()})
 	runInsights := obj(map[string]any{"window": str(), "totals": obj(map[string]any{"total": integer(), "succeeded": integer(), "failed": integer(), "running": integer()}), "duration": obj(map[string]any{"p50_ms": integer(), "p95_ms": integer()}), "by_trigger": arr(obj(map[string]any{"key": str(), "total": integer(), "failed": integer()})), "by_model": arr(obj(map[string]any{"key": str(), "total": integer(), "failed": integer()})), "by_crew": arr(obj(map[string]any{"id": str(), "name": str(), "total": integer(), "failed": integer()})), "top_agents": arr(obj(map[string]any{"id": str(), "name": str(), "crew_name": str(), "total": integer(), "failed": integer()})), "truncated": boolean()})
