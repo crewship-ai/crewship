@@ -86,7 +86,11 @@ const runningSweepGraceMargin = 15 * time.Minute
 // FAILED with the given reason via the normal failure completion path.
 // Returns handled=false (no error) when the row was not RUNNING
 // anymore — a live driver or a concurrent recovery path finished it
-// first; losing that race is the designed outcome.
+// first; losing that race is the designed outcome. Also returns
+// handled=false when a live lease renewal is discovered at the last
+// instant (see claimLeaseStillExpired) — a run a heartbeat is still
+// actively renewing is never reaped, no matter how stale the caller's
+// own SELECT that led here was.
 //
 // The terminal CAS lives inside finishAssignment (WHERE status is not
 // already terminal) and is the whole concurrency story: boot recovery,
@@ -98,6 +102,26 @@ const runningSweepGraceMargin = 15 * time.Minute
 // comment). runID="" skips the terminal run.* emit — recovery has no
 // run trace of its own (that is recoverOrphanedRuns' jurisdiction).
 func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assignmentID, reason string) (bool, error) {
+	// B4 (#2343, CodeRabbit review): re-verify — atomically, in the SAME
+	// statement — that the row is still RUNNING with no live lease, right
+	// before claiming it. Every caller of this function (boot recovery,
+	// both tickers) decided this row was reapable from a SELECT that ran
+	// some time ago; without this re-check, a heartbeat renewal landing in
+	// that window would be invisible to the plain "not already terminal"
+	// CAS below, and a run that is, in fact, still alive would be failed
+	// out from under it. A legacy row (lease_expires_at IS NULL) always
+	// passes this check, so the pre-B4 heuristic paths are unaffected.
+	claimed, cerr := claimLeaseStillExpired(ctx, h.db, assignmentID)
+	if cerr != nil {
+		return false, fmt.Errorf("recheck lease before reaping %s: %w", assignmentID, cerr)
+	}
+	if !claimed {
+		// Either the row already left RUNNING (another path is handling
+		// it) or its lease was renewed after the caller's own SELECT —
+		// either way, this is not this call's row to reap.
+		return false, nil
+	}
+
 	// Routing fields for the completion signals. LEFT JOIN because a
 	// soft-deleted target agent must not block the recovery of its
 	// assignment row.
@@ -133,17 +157,35 @@ func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assig
 	return true, nil
 }
 
-// RecoverInterruptedRunning fails every assignment still marked
-// RUNNING whose dispatch stamp predates startedBefore (the server
-// process start time). Called once from Server.Start, after
-// recoverOrphanedRuns: dispatch goroutines are process-local, so any
-// RUNNING row older than the process cannot have a live driver.
+// RecoverInterruptedRunning fails every assignment still marked RUNNING
+// that this process cannot possibly be driving. Called once from
+// Server.Start, after recoverOrphanedRuns.
 //
-// The startedBefore cutoff (rather than "all RUNNING rows") protects
-// the boot-ordering edge: the HTTP listener is already accepting
-// requests when recovery runs, so a freshly dispatched assignment
-// could legitimately be RUNNING by the time the scan executes — its
-// stamp is post-boot and it is skipped.
+// B4 (§9.4/§17, #2343, F8): a row is recoverable one of two ways, and which
+// way applies is decided by whether it carries a lease, NOT by comparing
+// timestamps against this process's own boot time:
+//
+//   - lease_expires_at IS NOT NULL — the row has a lease. It is touched
+//     ONLY if that lease has already expired (< now()). A row whose lease a
+//     DIFFERENT, still-live process is actively renewing is never touched
+//     here, no matter how long ago the recovering process itself booted —
+//     this is the direct fix for F8's two-replica case ("nothing records
+//     which process owns a run, so a second replica's boot would fail the
+//     first replica's live runs").
+//   - lease_expires_at IS NULL — a legacy row: dispatched before this
+//     migration shipped, or caught in the (sub-millisecond) window between
+//     claimCrewSlot's CAS and stampInitialLease's own write. Falls back to
+//     the pre-B4 heuristic this function always used: dispatch stamp
+//     predates startedBefore (the server process start time) — sound for
+//     exactly this case, because a legacy row genuinely predates the lease
+//     mechanism and boot-time is the only signal available for it.
+//
+// The startedBefore cutoff on the legacy branch (rather than "any NULL-
+// lease RUNNING row") protects the same boot-ordering edge it always did:
+// the HTTP listener is already accepting requests when recovery runs, so a
+// freshly dispatched (and not-yet-leased) assignment could legitimately be
+// RUNNING by the time the scan executes — its stamp is post-boot and it is
+// skipped.
 //
 // julianday() normalises the two timestamp shapes the codebase writes
 // (claimCrewSlot: 'YYYY-MM-DD HH:MM:SS.SSS'; runAssignment:
@@ -154,7 +196,8 @@ func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assig
 // logged and skipped so one bad row cannot strand the rest.
 func (h *AssignmentHandler) RecoverInterruptedRunning(ctx context.Context, startedBefore time.Time) (int, error) {
 	cutoff := startedBefore.UTC().Format("2006-01-02 15:04:05.000")
-	ids, err := h.scanRunningOlderThan(ctx, cutoff)
+	now := time.Now().UTC().Format(timeFmtRFC3339)
+	ids, err := h.scanRunningOlderThan(ctx, cutoff, now)
 	if err != nil {
 		return 0, fmt.Errorf("recoverInterruptedRunning: %w", err)
 	}
@@ -213,17 +256,32 @@ func (h *AssignmentHandler) SweepStuckRunning(ctx context.Context, staleAfter ti
 	return swept, nil
 }
 
-// scanRunningOlderThan returns the ids of RUNNING assignments whose
-// best-available dispatch stamp parses older than the cutoff (a
-// 'YYYY-MM-DD HH:MM:SS.SSS' UTC string). Boot recovery only: at boot a
-// single absolute cutoff (process start) is exact, because no pre-boot
-// row can have a live driver regardless of its agent's timeout.
-func (h *AssignmentHandler) scanRunningOlderThan(ctx context.Context, cutoff string) ([]string, error) {
+// scanRunningOlderThan returns the ids of RUNNING assignments boot
+// recovery may touch — see RecoverInterruptedRunning's doc comment for the
+// two branches this implements:
+//
+//   - a row WITH a lease (lease_expires_at IS NOT NULL) is included only if
+//     that lease has already expired against nowRFC3339 — never against
+//     cutoff, and never merely because it predates this process's boot.
+//     That is the whole F8 fix: a live lease means some process (possibly
+//     not this one) is still renewing it, and boot time is irrelevant to
+//     that fact.
+//   - a row WITHOUT a lease (lease_expires_at IS NULL — a legacy row,
+//     dispatched before this migration or in the sub-millisecond window
+//     before stampInitialLease's own write) falls back to the pre-B4
+//     heuristic: its best-available dispatch stamp (a
+//     'YYYY-MM-DD HH:MM:SS.SSS' UTC string, or runAssignment's RFC3339
+//     shape — julianday() normalises both) parses older than cutoff.
+func (h *AssignmentHandler) scanRunningOlderThan(ctx context.Context, cutoff, nowRFC3339 string) ([]string, error) {
 	rows, err := h.db.QueryContext(ctx, `
 		SELECT id FROM assignments
 		 WHERE status = 'RUNNING'
-		   AND julianday(COALESCE(running_at, started_at, created_at)) < julianday(?)
-		 ORDER BY created_at ASC`, cutoff)
+		   AND (
+		     (lease_expires_at IS NOT NULL AND lease_expires_at < ?)
+		     OR
+		     (lease_expires_at IS NULL AND julianday(COALESCE(running_at, started_at, created_at)) < julianday(?))
+		   )
+		 ORDER BY created_at ASC`, nowRFC3339, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("scan RUNNING assignments: %w", err)
 	}

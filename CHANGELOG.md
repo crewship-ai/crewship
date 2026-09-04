@@ -256,6 +256,35 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   run and two consumed deliveries, and ten produce one run and ten.
   `docs/guides/issue-mentions.mdx`'s known limits and
   `docs/api-reference/issues.mdx`'s Sessions section say what changed.
+- **A killed process's runs recover in seconds, not at the next restart, and never steal a live replica's run (#2348).**
+  `assignments` gains `lease_owner`/`lease_expires_at` (PRD-ISSUES-AND-
+  ROUTINES-2026 §9.4, work package B4): the process actually driving a
+  RUNNING assignment stamps its identity and a lease deadline, then renews
+  it every 20s from a heartbeat goroutine that wraps the agent exec —
+  stopped automatically the instant the run ends, however it ends. A new
+  sweeper (`AssignmentHandler.SweepExpiredLeases`/`StartLeaseSweeper`,
+  copied from `harbormaster.StartTimeoutSweeper`'s ticker-plus-DB-sweep
+  shape) reaps a RUNNING row within roughly one lease TTL of its owner
+  going silent, through the same completion path (`failInterruptedAssignment`)
+  the existing stuck-RUNNING sweeper uses. This is F8's actual fix, not
+  just a faster timer: boot-time `RecoverInterruptedRunning` used to fail
+  every RUNNING row older than the *recovering* process's own start time —
+  sound for one process, and wrong for two, since nothing recorded which
+  process owned a run. It now never touches a row whose lease a different,
+  still-live process is actively renewing, no matter how long ago the
+  recovering process itself booted; only a genuinely lease-expired (or
+  lease-less legacy) row is recovered. `issue_agent_sessions.state` now
+  actually moves with its runs — `pending`/`idle`/`awaiting_input`/`error`/
+  `stale` → `active` on a claimed run, `active` → `idle` (completed or
+  cancelled) or `error` (failed or lease-expired) once it ends — visible
+  through `crewship issue sessions` and `crewship issue runs`, both
+  unchanged endpoints. An ephemeral agent that expires mid-session
+  (`ReconcileExpiredEphemeralSessions`, riding the same sweeper) closes or
+  errors its session instead of leaving it rendered `active` over a ghost
+  (F41). Folded in: `crewship issue runs`' `source` column mislabelled a
+  B3 follow-up run `delegation` instead of `mention` — it only ever
+  touched `mission_comment_mentions.claimed_by_run_id`, never
+  `.assignment_id` (#2344).
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,

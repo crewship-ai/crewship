@@ -744,6 +744,44 @@ func (h *AssignmentHandler) runAssignment(
 		h.logger.Error("update assignment to running", "error", err, "assignment_id", assignmentID)
 	}
 
+	// B4 lease (§9.4/§17, #2343, F8): stamp this process as the owner of
+	// the RUNNING row and start renewing it for as long as this function
+	// keeps running. This is the ONE point every dispatch door reaches
+	// unconditionally (claimCrewSlot/pumpCrewQueue already flipped the row
+	// to RUNNING before calling us; the LeadPlanning bypass skips both and
+	// relies on the UPDATE just above), so it is where the lease's story
+	// starts regardless of which door dispatched this run. The heartbeat is
+	// stopped via `defer`, which fires on EVERY return below (early bails on
+	// provisioning/build/backup-guard failure, the exec error path, and the
+	// success path) without each of those call sites needing its own stop
+	// call.
+	//
+	// Skip starting the heartbeat when the stamp itself did not land
+	// (stamped=false, or a hard DB error): there is nothing to renew, and a
+	// heartbeat goroutine started anyway would just find lease_owner still
+	// unset on its first tick and exit immediately — starting it would be
+	// harmless but pointless. The row is left exactly as any pre-B4 row
+	// would be (lease_expires_at NULL), so it still recovers via the
+	// legacy process-start heuristic; see stampInitialLease's own doc
+	// comment for why the fuller fix (status-aware cleanup before the exec
+	// spends anything) is out of this PR's scope.
+	stamped, stampErr := stampInitialLease(ctx, h.db, assignmentID, time.Now(), defaultLeaseTTL)
+	if stampErr != nil {
+		h.logger.Warn("stamp initial lease", "error", stampErr, "assignment_id", assignmentID)
+	}
+	if stampErr == nil && stamped {
+		stopHeartbeat := h.startLeaseHeartbeat(ctx, assignmentID, defaultLeaseHeartbeatInterval, defaultLeaseTTL)
+		defer stopHeartbeat()
+	}
+
+	// B4 session state (§10.1, #2343): "pending -> active requires winning
+	// the run-claim CAS; only a live run may hold active". This row just
+	// won that CAS (the UPDATE above), so if it carries a session
+	// (assignments.session_id, B1/B3), that session becomes 'active' here.
+	// No-op for a run with no session (a mission task, a root /assign, or
+	// the issue_agent_sessions flag off at dispatch time).
+	activateSessionForAssignment(ctx, h.db, assignmentID)
+
 	// post_task_delegation: the hand-off itself is done — the assignment
 	// exists, the run record is journaled, and the row now says RUNNING.
 	// Fire-and-forget like post_agent_stop below: a hook here observes that
@@ -1188,6 +1226,15 @@ func (h *AssignmentHandler) finishAssignment(
 			"assignment_id", assignmentID, "late_status", status)
 		return false
 	}
+
+	// B4 session state (§10.1, #2343): the terminal CAS just won above means
+	// THIS call owns this run's fate, so it also owns the session
+	// transition off 'active' — COMPLETED/CANCELLED -> idle, FAILED ->
+	// error (see settleSessionForAssignment's doc comment for why
+	// awaiting_input is not reachable without B6's outcome). No-op for a
+	// run with no session, and a no-op if a newer run has already taken
+	// over active_run_id (see that function's CAS guard).
+	settleSessionForAssignment(ctx, h.db, assignmentID, status)
 
 	// Consume every delivery this run claimed (§9.3/§10.2, work package B2,
 	// #2337) — "did a run consume this" is a fact about whether the run's

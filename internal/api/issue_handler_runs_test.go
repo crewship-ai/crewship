@@ -255,3 +255,70 @@ func TestIssueRuns_MissionID_And_Source(t *testing.T) {
 		}
 	}
 }
+
+// TestIssueRuns_FollowUpRun_SourceIsMention is the red-first regression for
+// #2344 ("runs: a B3 follow-up run reports source=delegation, not
+// mention"). A B3 follow-up run (dispatchQueuedFollowUpsForSession,
+// issue_session_followups.go) claims its deliveries via
+// claimPendingDeliveriesByID — which sets mission_comment_mentions.
+// claimed_by_run_id to the NEW run's assignment id but never touches
+// .assignment_id (still the ORIGINAL mention's assignment, or NULL) — so a
+// source derivation that only checks mcm.assignment_id = a.id never
+// matches the follow-up run and falls through to the "delegation" default,
+// even though the follow-up exists ONLY because a human's @mention comment
+// arrived while the session was busy.
+func TestIssueRuns_FollowUpRun_SourceIsMention(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	m1 := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-2", "IN_PROGRESS")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	origChat := "chat-orig"
+	followUpAssign := "asg_followup"
+	execOrFatal(t, h.db, `
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, 'Mission', 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		origChat, workerID, wsID, now, now, now)
+	// The follow-up's own real run — dispatched by
+	// dispatchQueuedFollowUpsForSession, so it carries a.mission_id like any
+	// other mention-triggered dispatch, but is NOT named by any
+	// mission_comment_mentions.assignment_id.
+	execOrFatal(t, h.db, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id,
+		    task, status, started_at, finished_at, result_summary, created_at, mission_id)
+		VALUES (?, ?, ?, ?, ?, 'Do the work', 'COMPLETED', ?, ?, 'done', ?, ?)`,
+		followUpAssign, wsID, origChat, workerID, workerID, "2026-06-02T10:00:00Z", "2026-06-02T10:00:30Z", now, m1)
+	// The delivery a follow-up-comment mention queued: assignment_id still
+	// points at nothing useful (NULL — released back to 'pending' by
+	// releaseClaimedDelivery, never re-stamped), claimed_by_run_id names the
+	// follow-up run that actually consumed it.
+	commentID := "comment-followup"
+	execOrFatal(t, h.db, `
+		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
+		VALUES (?, ?, 'user', ?, 'one more thing @worker', ?, ?)`,
+		commentID, m1, workerID, now, now)
+	execOrFatal(t, h.db, `
+		INSERT INTO mission_comment_mentions (id, workspace_id, mission_id, comment_id, agent_id,
+		    dispatch_state, state, claimed_by_run_id, created_at)
+		VALUES (?, ?, ?, ?, ?, 'dispatched', 'consumed', ?, ?)`,
+		"mcm-followup", wsID, m1, commentID, workerID, followUpAssign, now)
+
+	rr := httptest.NewRecorder()
+	h.ListRuns(rr, issueRunsRequest(t, userID, wsID, crewID, "ENG-2"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var got []issueRunDTO
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body.String())
+	}
+	for _, run := range got {
+		if run.ID != followUpAssign {
+			continue
+		}
+		if run.Source != "mention" {
+			t.Errorf("follow-up run source = %q, want %q (#2344)", run.Source, "mention")
+		}
+		return
+	}
+	t.Fatalf("follow-up run %s missing from results; body=%s", followUpAssign, rr.Body.String())
+}
