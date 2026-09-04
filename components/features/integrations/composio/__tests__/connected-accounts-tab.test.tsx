@@ -56,8 +56,8 @@ describe("ConnectedAccountsTab", () => {
         onChanged={vi.fn()}
       />,
     )
-    expect(screen.getAllByText("ACTIVE")).toHaveLength(2)
-    expect(screen.getByText("EXPIRED")).toBeDefined()
+    expect(screen.getAllByText("Active")).toHaveLength(2)
+    expect(screen.getByText("Expired")).toBeDefined()
   })
 
   it("each row exposes Refresh / Revoke / Remove actions", () => {

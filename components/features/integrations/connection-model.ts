@@ -153,7 +153,7 @@ export const STATUS_LABEL: Record<ConnectionStatus, string> = {
   failing: "Failing",
   never_used: "Never used",
   disabled: "Disabled",
-  unknown: "Enabled",
+  unknown: "Not checked",
 }
 
 export const KIND_LABEL: Record<ConnectionKind, string> = {
