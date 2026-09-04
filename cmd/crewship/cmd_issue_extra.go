@@ -458,13 +458,20 @@ var issueRunsCmd = &cobra.Command{
 			DurationMs    int64  `json:"duration_ms"`
 			ResultSummary string `json:"result_summary"`
 			ErrorMessage  string `json:"error_message"`
+			// MissionID and Source (#2313, item 3) mirror issueRunDTO
+			// (internal/api/issue_handler_runs.go): the issue this run is
+			// attributed to, and WHY — "task" (the issue's own plan, via
+			// mission_tasks), "mention" (an @mention dispatch), or
+			// "delegation" (a sub-agent's own further /assign call).
+			MissionID *string `json:"mission_id,omitempty"`
+			Source    string  `json:"source,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &runs); err != nil {
 			return err
 		}
 
 		f := newFormatter()
-		headers := []string{"AGENT", "TASK", "STATUS", "STARTED", "DURATION", "RESULT"}
+		headers := []string{"AGENT", "TASK", "STATUS", "STARTED", "DURATION", "SOURCE", "RESULT"}
 		rows := make([][]string, 0, len(runs))
 		for _, run := range runs {
 			result := run.ErrorMessage
@@ -475,12 +482,17 @@ var issueRunsCmd = &cobra.Command{
 			if run.DurationMs > 0 {
 				dur = fmt.Sprintf("%dms", run.DurationMs)
 			}
+			source := run.Source
+			if source == "" {
+				source = "-"
+			}
 			rows = append(rows, []string{
 				run.AgentName,
 				truncateStr(run.Task, 28),
 				run.Status,
 				issueRelativeTime(run.StartedAt),
 				dur,
+				source,
 				// result/error is verbatim agent output — strip ANSI / control
 				// bytes before printing so a failed run can't inject escapes.
 				truncateStr(strings.ReplaceAll(sanitizeTerminal(result), "\n", " "), 50),
