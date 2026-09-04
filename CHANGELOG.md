@@ -126,6 +126,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   it, and a crew or member count over the licensed limit turns red and states
   the consequence.
 - **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#TBD).**
+- **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
   Three CLI gaps found in live validation, all against features that had
   already shipped server-side: `crewship issue comment "@riley …"` recorded a
   comment and mentioned nobody, silently, because the server only recognises
