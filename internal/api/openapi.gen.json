@@ -49141,6 +49141,9 @@
                     "identifier": {
                       "type": "string"
                     },
+                    "runs_stopped": {
+                      "type": "integer"
+                    },
                     "status": {
                       "type": "string"
                     }

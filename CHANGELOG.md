@@ -1073,6 +1073,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   kill that interrupts a run mid-exec remains a separate, not-yet-built
   capability.
 
+- **Stop now reaches a run a mention started on an issue that was never
+  started (#2320).** A mention (`@agent` on an issue's comments) can dispatch
+  a run while the issue itself is still `BACKLOG`/`TODO` — #2279 attributes
+  that run to the issue the same way a mission-task run is (`mission_id`,
+  with the `chat_id`/`group_id` fallback) — but `POST
+  /issues/{identifier}/stop` refused with 400 for any status other than
+  `IN_PROGRESS`/`REVIEW`, so the one door meant to reach every run
+  attributed to an issue (#2295) stayed closed for exactly the runs a
+  mention starts: the agent kept running with no cooperative stop
+  available from the issue. Stop now checks for a live attributed
+  assignment before refusing: when the issue is not `IN_PROGRESS`/`REVIEW`
+  but has at least one, it stamps `cancel_requested_at` on it exactly as
+  before and leaves the issue's own status untouched — it does not
+  promote the issue to `IN_PROGRESS` or move it to `CANCELLED`, since the
+  issue itself was never started. It still refuses with the original 400
+  when the issue is neither in flight nor has any live run to reach. The
+  response now also reports `runs_stopped`, the count of assignment rows
+  the call actually stamped.
+
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
   conversation: a person opening a thread, a routine minting **one chat per
