@@ -234,7 +234,16 @@ func (m mentionRecorder) record(ctx context.Context, mc mentionContext) {
 		m.logf("check issue_deliveries flag", mc, ffErr)
 	}
 
+	// One delivery per agent per comment. mentions.ExtractAgentIDs already
+	// dedupes ids, and UNIQUE(comment_id, agent_id) used to be the backstop
+	// below it; since B2 the unique key is (event_id, agent_id) and every
+	// iteration mints its own event, so the backstop moved here.
+	seenAgents := make(map[string]struct{}, len(resolved))
 	for _, mention := range resolved {
+		if _, dup := seenAgents[mention.AgentID]; dup {
+			continue
+		}
+		seenAgents[mention.AgentID] = struct{}{}
 		// The audit row FIRST — details is the BARE agent id:
 		// lib/mentions.ts's mentionTargetFromActivityDetails accepts that
 		// shape, and it is the only one of the three it accepts that cannot

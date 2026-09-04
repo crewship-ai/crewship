@@ -242,7 +242,15 @@ func (e issueEvents) logEvent(ctx context.Context, ev issueEvent) (string, missi
 		PayloadJSON: string(payload),
 	})
 	if err != nil {
+		// The row was NOT written (Emit rolls back). Hand back no id: a
+		// caller that stored actID anyway would point mission_comment_mentions'
+		// event_id (a real FK since B2) at a row that does not exist, and its
+		// own INSERT would fail — the mention would dispatch and leave no
+		// trace at all. With "" the delivery path falls back to a direct
+		// dispatch and persist stores a NULL event_id, which is the honest
+		// record of "the activity write failed".
 		e.logf("insert mission activity", ev, err)
+		return "", missionactivity.Written{}
 	}
 
 	if e.journal == nil {
