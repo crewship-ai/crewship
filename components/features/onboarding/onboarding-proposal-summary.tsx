@@ -3,6 +3,7 @@
 import { CheckCircle2, ShieldCheck, Sparkles, Star } from "lucide-react"
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { CrewIcon } from "@/components/ui/crew-icon"
 import { getModelLabel } from "@/lib/cli-adapters"
 import type { OnboardingProposal } from "./setup-agent-api"
 
@@ -25,9 +26,13 @@ export function OnboardingProposalSummary({ proposal, created }: OnboardingPropo
       className="overflow-hidden rounded-2xl border border-primary/25 bg-gradient-to-b from-primary/10 to-card shadow-lg"
     >
       <div className="flex items-center gap-3 border-b border-border/80 p-4">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-primary/15 shadow-sm shadow-primary/10">
-          <Sparkles className="h-5 w-5 text-primary" />
-        </span>
+        {proposal.crewIcon ? (
+          <CrewIcon icon={proposal.crewIcon} color={proposal.crewColor} size="lg" className="shrink-0 border border-border/60" />
+        ) : (
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/30 bg-primary/15 shadow-sm shadow-primary/10">
+            <Sparkles className="h-5 w-5 text-primary" />
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
             {created ? "Created crew" : "Proposed crew"}

@@ -19,7 +19,7 @@ import (
 // for that provider, builds the matching llm.Provider, and — if that provider
 // implements llm.ModelLister — lists live. On any failure (no credential, the
 // provider can't list, or the live call errors) it falls back to the curated
-// model set (internal/llm/models_curated.go). OLLAMA has no curated set: its
+// model set (config/models.json, via internal/llm.CuratedModels). OLLAMA has no curated set: its
 // models are whatever the local daemon has pulled, so a live failure there is
 // terminal.
 type ModelsHandler struct {

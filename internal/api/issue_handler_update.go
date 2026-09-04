@@ -356,6 +356,21 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	h.events().record(r.Context(), wsID, map[string]string{"id": missionID}, evs...)
 
+	// A distinct, second broadcast for a status transition specifically
+	// (#2257). issue.updated (just above) tells a subscriber "refetch this
+	// issue"; issue.status_changed additionally carries the from/to and
+	// crew_id a Kanban-style board needs to move a card between columns, or
+	// to tell whether the change is even on the screen it has open, without
+	// fetching first. Fired only when the PATCH actually carried a status
+	// change — a title/label/comment-only PATCH must not claim one that
+	// never happened.
+	if req.Status != nil {
+		h.broadcastIssueEvent(wsID, "issue.status_changed", map[string]string{
+			"id": missionID, "identifier": ident, "crew_id": crewID,
+			"status": *req.Status, "from": currentStatus, "to": *req.Status,
+		})
+	}
+
 	// Return updated issue
 	issue, err := scanIssueRow(h.db.QueryRowContext(r.Context(),
 		issueSelectQuery()+` WHERE m.id = ?`, missionID))
@@ -462,7 +477,7 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.broadcastIssueEvent(wsID, "issue.deleted", map[string]string{"identifier": ident})
+	h.broadcastIssueEvent(wsID, "issue.deleted", map[string]string{"identifier": ident, "crew_id": crewID})
 
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -329,7 +329,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Grumpy but excellent. Sarcastic remarks, dry commentary, reliable output.",
     avatarStyle: "bottts-neutral",
     systemPrompt: MARTIN,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
     toolProfile: "CODING", timeoutSeconds: 2400, memoryEnabled: true,
   },
   {
@@ -347,7 +347,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Paranoid skeptic. 'But what if it fails?' Edge cases, error handling, suspicion.",
     avatarStyle: "adventurer",
     systemPrompt: DANIEL,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
     toolProfile: "MINIMAL", timeoutSeconds: 1800, memoryEnabled: true,
   },
   {
@@ -356,7 +356,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Methodical scientist. Hypothesis → test → result → conclusion. Data-driven.",
     avatarStyle: "lorelei",
     systemPrompt: PETRA,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
     toolProfile: "CODING", timeoutSeconds: 2400, memoryEnabled: true,
   },
   {
@@ -365,7 +365,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Laid-back minimalist. Less is more, one-liners, clean and simple.",
     avatarStyle: "bottts-neutral",
     systemPrompt: JAKUB,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
     toolProfile: "MINIMAL", timeoutSeconds: 2400, memoryEnabled: true,
   },
   {
@@ -384,7 +384,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Dry comedian. Deadpan humor in code comments, witty variable names.",
     avatarStyle: "adventurer",
     systemPrompt: FILIP,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
     toolProfile: "CODING", timeoutSeconds: 1800, memoryEnabled: true,
   },
   {

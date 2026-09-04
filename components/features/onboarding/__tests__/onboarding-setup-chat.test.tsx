@@ -403,6 +403,37 @@ describe("OnboardingSetupChat — once connected", () => {
     )
   })
 
+  it("greets an empty conversation with starter prompts, in the language picked on step 1", async () => {
+    startSetupAgentSessionMock.mockResolvedValue({
+      ok: true,
+      session: { agentId: "a1", sessionId: "s1", workspaceId: "ws-test" },
+    })
+    mockUseChat([])
+    render(<OnboardingSetupChat onUnavailable={vi.fn()} onProposalApplied={vi.fn()} language="Czech" />)
+    await waitFor(() => expect(screen.getByTestId("onboarding-chat-welcome")).toBeTruthy())
+    expect(screen.getByText(/Ahoj, jsem Crewship Guide/)).toBeTruthy()
+    // Four concrete openers, none of them the old single grey line.
+    expect(screen.getAllByTestId("onboarding-starter-prompt")).toHaveLength(4)
+    expect(screen.queryByText(/What work should this crew take off your hands/)).toBeNull()
+  })
+
+  it("sends a starter prompt verbatim as the user's own message", async () => {
+    const { sendMessage } = await renderConnected([])
+    // The openers appear only once the transcript base has landed (they sit
+    // behind the same history gate as the rest of the transcript).
+    await waitFor(() => expect(screen.getAllByTestId("onboarding-starter-prompt")).toHaveLength(4))
+    const [first] = screen.getAllByTestId("onboarding-starter-prompt")
+    fireEvent.click(first)
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    const [text] = sendMessage.mock.calls[0]
+    expect(text).toMatch(/reviews pull requests/)
+  })
+
+  it("hides the starter prompts once the conversation has begun", async () => {
+    await renderConnected([turn({ role: "assistant", parts: [{ type: "text", text: "Hello!" }] })])
+    expect(screen.queryByTestId("onboarding-chat-welcome")).toBeNull()
+  })
+
   it("sends a message when the composer's Send is clicked, and clears the input", async () => {
     const { sendMessage } = await renderConnected([])
     const input = screen.getByRole("textbox")

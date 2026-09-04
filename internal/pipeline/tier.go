@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/llm"
 )
 
 // TierMapping is the workspace-level config that maps each named
@@ -134,15 +135,23 @@ func splitAdapterModel(s, defaultAdapter string) AdapterModel {
 // tier name. Used only when the workspace mapping is missing or
 // malformed — production workspaces always have the v78 seed.
 //
-// Models hard-coded here mirror the v78 migration default exactly so
-// behaviour stays stable when a workspace's tier JSON is reset.
+// The models are the catalog's Anthropic roles (config/models.json):
+// trivial and fast run the `cheap` model, smart the `top` one, and moderate
+// the provider default. This used to mirror the v78 migration's literal ids
+// (Haiku 4.5, Opus 4.7, Sonnet 4.6), which the migration keeps as history —
+// a reset workspace now gets the current generation, the same one every
+// other picker offers, instead of one frozen at the migration's date.
 func defaultTier(tier Complexity) AdapterModel {
+	role := llm.ModelRoleDefault
 	switch tier {
 	case ComplexityTrivial, ComplexityFast:
-		return AdapterModel{Adapter: "claude", Model: "claude-haiku-4-5-20251001"}
+		role = llm.ModelRoleCheap
 	case ComplexitySmart:
-		return AdapterModel{Adapter: "claude", Model: "claude-opus-4-7"}
-	default: // moderate or unknown
-		return AdapterModel{Adapter: "claude", Model: "claude-sonnet-4-6"}
+		role = llm.ModelRoleTop
 	}
+	model, ok := llm.CuratedModelForRole("anthropic", role)
+	if !ok {
+		model = llm.DefaultModel("anthropic")
+	}
+	return AdapterModel{Adapter: "claude", Model: model}
 }

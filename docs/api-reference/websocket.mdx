@@ -194,6 +194,19 @@ Many payloads carry only the entity `id` (and sometimes `identifier`/`status`)
 as a refresh hint -- the client is expected to refetch the full resource over
 REST. The shapes below reflect what the server actually sends.
 
+<Note>
+  The web client keeps an explicit allowlist of event types it will dispatch
+  to subscribers (`VALID_REALTIME_TYPES` in `hooks/use-realtime.tsx`) — an
+  unrecognized frame is dropped rather than crashing a handler that assumed a
+  shape it doesn't have. A Vitest parity gate
+  (`hooks/__tests__/realtime-allowlist-docs-parity.test.ts`) reads every
+  workspace-channel event type documented on this page and fails if any of
+  them is missing from that allowlist, so this table and the client can no
+  longer drift apart silently (#2125). Not every allowlisted type has a
+  subscriber yet — registering a type only stops the client from discarding
+  it; wiring a consumer is separate work tracked per surface.
+</Note>
+
 ### Workspace Channel (`workspace:{id}`)
 
 #### Crews & agents
@@ -226,9 +239,10 @@ REST. The shapes below reflect what the server actually sends.
 | `confidence.low` | A task's planning confidence is low | `{ task_id, mission_id, level }` |
 | `approval.required` | A task is awaiting human approval | `{ task_id, mission_id }` |
 | `approval.resolved` | A pending approval was resolved | `{ task_id, mission_id, ... }` |
-| `issue.created` | Issue was created | `{ id }` |
-| `issue.updated` | Issue was updated | `{ id }` (sometimes `identifier`, `status`) |
-| `issue.deleted` | Issue was deleted | `{ identifier }` |
+| `issue.created` | Issue was created | `{ id, crew_id }` |
+| `issue.updated` | Issue was updated | `{ id }` (sometimes `identifier`, `status`, `crew_id`) |
+| `issue.status_changed` | An issue's status specifically changed — fired alongside `issue.updated` by every status-transition endpoint (PATCH, review, stop) so a board can move a card without a full refetch | `{ id, identifier, crew_id, status, from, to }` |
+| `issue.deleted` | Issue was deleted | `{ identifier, crew_id }` |
 | `issue.started` | Issue execution started | `{ id, identifier, status }` |
 | `issues.bulk_updated` | Multiple issues updated in bulk | `{ count }` |
 

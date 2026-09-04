@@ -11,7 +11,18 @@ import (
 
 // ipcClient is used for all IPC HTTP calls with a reasonable timeout
 // to prevent indefinite blocking if crewshipd hangs.
-var ipcClient = &http.Client{Timeout: 30 * time.Second}
+// ipcClient speaks to crewshipd over the fixed IPC base URL. It refuses to
+// follow redirects: net/http forwards every header but a short list of
+// auth ones across a redirect, and X-Internal-Token is not on that list, so
+// a redirected IPC call would hand the token to wherever the redirect
+// pointed. The daemon never redirects IPC, so the last response is the
+// answer.
+var ipcClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 type assignRequest struct {
 	Target string `json:"target"`

@@ -152,6 +152,8 @@ interface Props {
   mode: HandoffMode | null
   pairingPending?: boolean
   adapterKey?: string
+  /** The model id picked on the model step, shown on the toolchain card. */
+  model?: string
 }
 
 /** Apple-tight easing — cubic-bezier(0.16, 1, 0.3, 1). Matches the
@@ -159,9 +161,10 @@ interface Props {
  *  the marketing site. */
 const ease = [0.16, 1, 0.3, 1] as const
 
-export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPending, adapterKey }: Props) {
+export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPending, adapterKey, model }: Props) {
   const template = crewSlug ? TEMPLATES[crewSlug] : null
   const adapterCfg = adapterKey ? getAdapterConfig(adapterKey) : undefined
+  const modelLabel = model ? getModelLabel(model) : ""
   const brand = adapterKey ? getAdapterBrand(adapterKey) : undefined
   const reduce = useReducedMotion()
   const AdapterIcon = adapterCfg?.icon
@@ -196,15 +199,7 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
         </div>
       </motion.div>
 
-      {/* connector */}
-      <div className="flex justify-center my-2">
-        <motion.div
-          initial={reduce ? { opacity: 0 } : { opacity: 0, scaleY: 0 }}
-          animate={{ opacity: 1, scaleY: 1 }}
-          transition={{ duration: 0.35, ease, delay: 0.2 }}
-          className="w-px h-6 bg-border origin-top"
-        />
-      </div>
+      <Connector reduce={reduce} delay={0.2} />
 
       {/* Crew card — empty state vs filled, animated transition between */}
       <AnimatePresence mode="wait">
@@ -302,63 +297,97 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
         )}
       </AnimatePresence>
 
-      {/* Adapter handoff badge — appears in step 3 only */}
+      {/* Toolchain card — from the model step on. This was a one-line status
+          badge ("Ready to launch with Claude Code in the browser"); it is now
+          a card of the same weight as the workspace and crew cards above it,
+          because it is the third real object the wizard creates: the model
+          credential the agents will run on. Real brand mark, the adapter's
+          name, the model, and the handoff state. */}
       <AnimatePresence>
         {mode && (
-          <motion.div
-            role="status"
-            aria-live="polite"
-            key={`${mode}-${adapterKey ?? ""}-${pairingPending}`}
-            initial={reduce ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ duration: 0.4, ease }}
-            className={`mt-4 rounded-[20px] p-3 text-xs flex items-center gap-3 shadow-md border ${
-              pairingPending
-                ? "bg-warn/10 border-warn/30 text-warn dark:text-warn"
-                : "bg-success/10 border-success/30 text-success dark:text-success"
-            }`}
-          >
-            {AdapterIcon && brand && (
-              // Adapter-brand colors come from a runtime registry
-              // (lib/cli-adapter-brand.ts) keyed off the user's
-              // selection — same reason as the template icon above:
-              // forcing every brand into a Tailwind class map would
-              // duplicate the source of truth. Border width set via
-              // the `border` utility; only color tokens are inline.
-              <span
-                className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border"
-                style={{ background: brand.bg, borderColor: brand.border }}
-              >
-                <AdapterIcon className="h-4 w-4" style={{ color: brand.fg }} />
-              </span>
-            )}
-            <span className="flex-1 min-w-0 leading-snug">
-              {mode === "browser" && adapterCfg && (
-                <>
-                  Ready to launch with <strong className="font-semibold">{adapterCfg.label}</strong> in the browser
-                </>
-              )}
-              {mode === "browser" && !adapterCfg && "Ready to launch in the browser"}
-              {mode === "cli" && pairingPending && (
-                <>
-                  Waiting for your local CLI to connect…
-                </>
-              )}
-              {mode === "cli" && !pairingPending && (
-                <>
-                  Paired with your local CLI
-                </>
-              )}
-            </span>
-            {pairingPending ? (
-              <Clock className="h-4 w-4 shrink-0" />
-            ) : (
-              <Check className="h-4 w-4 shrink-0" />
-            )}
-          </motion.div>
+          <>
+            <Connector reduce={reduce} delay={0.05} />
+            <motion.div
+              role="status"
+              aria-live="polite"
+              key={`${mode}-${adapterKey ?? ""}-${pairingPending}`}
+              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.4, ease }}
+              className="bg-card border border-border rounded-[20px] p-4 shadow-lg"
+            >
+              <div className="flex items-center gap-3">
+                {AdapterIcon && brand && (
+                  // Adapter-brand colors come from a runtime registry
+                  // (lib/cli-adapter-brand.ts) keyed off the user's
+                  // selection — same reason as the template icon above:
+                  // forcing every brand into a Tailwind class map would
+                  // duplicate the source of truth.
+                  <span
+                    className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border"
+                    style={{ background: brand.bg, borderColor: brand.border }}
+                  >
+                    <AdapterIcon className="h-5 w-5" style={{ color: brand.fg }} />
+                  </span>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold truncate tracking-tight">
+                    {adapterCfg?.label ?? "Model"}
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {modelLabel ? `${modelLabel} · ` : ""}
+                    {mode === "browser" ? "Chat in browser" : "Paired with your CLI"}
+                  </div>
+                </div>
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                    pairingPending
+                      ? "border-warn/30 bg-warn/10 text-warn"
+                      : "border-success/30 bg-success/10 text-success"
+                  }`}
+                >
+                  {pairingPending ? <Clock className="h-3 w-3" /> : <Check className="h-3 w-3" />}
+                  {pairingPending ? "Waiting for CLI" : "Ready"}
+                </span>
+              </div>
+              <div className="mt-3 border-t border-border pt-2.5 text-xs text-muted-foreground leading-snug">
+                {mode === "browser" && adapterCfg && (
+                  <>
+                    Ready to launch with <strong className="font-medium text-foreground">{adapterCfg.label}</strong> in the browser.
+                  </>
+                )}
+                {mode === "browser" && !adapterCfg && "Ready to launch in the browser."}
+                {mode === "cli" && pairingPending && "Waiting for your local CLI to connect…"}
+                {mode === "cli" && !pairingPending && "Paired with your local CLI."}
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+/**
+ * The line between two cards. A hairline used to do this, and at the scale
+ * of two 20px-radius cards a 1px grey stick reads as a rendering artefact
+ * rather than as a relationship. This is a short gradient stem with a dot at
+ * the joint — the same "this feeds into that" gesture the crews canvas draws
+ * between agents, at preview size.
+ */
+function Connector({ reduce, delay }: { reduce: boolean | null; delay: number }) {
+  return (
+    <div className="flex justify-center my-1.5" aria-hidden="true">
+      <motion.div
+        initial={reduce ? { opacity: 0 } : { opacity: 0, scaleY: 0 }}
+        animate={{ opacity: 1, scaleY: 1 }}
+        transition={{ duration: 0.35, ease, delay }}
+        className="flex origin-top flex-col items-center"
+      >
+        <div className="h-5 w-px bg-gradient-to-b from-border via-primary/50 to-primary/70" />
+        <div className="h-1.5 w-1.5 rounded-full bg-primary/70 ring-2 ring-primary/15" />
+      </motion.div>
     </div>
   )
 }

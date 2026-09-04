@@ -27,6 +27,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/crewship-ai/crewship/internal/llm"
 	"net/http"
 	"os"
 	"strings"
@@ -201,7 +202,7 @@ func (h *SkillInternalAdapter) generateStaged(w http.ResponseWriter, r *http.Req
 	body.Slug = skills.Slugify(body.Slug)
 	model := body.Model
 	if model == "" {
-		model = "claude-sonnet-4-6"
+		model = llm.DefaultModel("anthropic")
 	}
 
 	if h.prop == nil || crewID == "" {

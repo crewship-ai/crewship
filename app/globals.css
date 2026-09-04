@@ -1045,6 +1045,15 @@ body {
     display: inline-block;
     padding-block: 6px;
   }
+
+  /* The sidebar kit — search, filter, view and collapse buttons, facet
+     options, list rows, active chips — measured 26–29px tall on a phone
+     (docs/ux/audit-conversations.md §2). Each carries `kit-tap`; under a
+     coarse pointer they grow to the 44px target. Desktop density is
+     untouched. */
+  .kit-tap {
+    min-height: 44px;
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

@@ -3,7 +3,27 @@
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
-import { ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check, ExternalLink, Sparkles, AlertTriangle, ChevronsUpDown } from "lucide-react"
+import {
+  ArrowRight,
+  ArrowLeft,
+  Rocket,
+  Globe,
+  Terminal,
+  Copy,
+  Check,
+  ExternalLink,
+  Sparkles,
+  AlertTriangle,
+  ChevronsUpDown,
+  Building2,
+  Cpu,
+  Users,
+  Eye,
+  EyeOff,
+  Container,
+  KeyRound,
+  Clock,
+} from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
@@ -17,9 +37,22 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter, isLocalModel } from "@/lib/cli-adapters"
+import { ToolchainPicker } from "@/components/features/onboarding/toolchain-picker"
+import { CommandSnippet, copyText } from "@/components/features/onboarding/command-snippet"
 import { buildOnboardingSetupBody } from "@/lib/onboarding-setup"
-import { getAdapterBrand, ADAPTER_TOKEN_GUIDE, ADAPTER_TOKEN_CMD, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
+import { ADAPTER_TOKEN_GUIDE, ADAPTER_TOKEN_CMD, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
 import { LANGUAGES } from "@/lib/languages"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
@@ -70,36 +103,6 @@ import type { ApplyProposalResult, OnboardingProposal } from "@/components/featu
 
 /** Apple-tight easing — same curve crewship-web uses on hero reveal. */
 const ease = [0.16, 1, 0.3, 1] as const
-
-/**
- * legacyCopy — fallback for non-secure contexts (HTTP dev hosts).
- * Renders a hidden textarea, selects it, and triggers the deprecated
- * but still-everywhere-supported document.execCommand('copy'). The
- * surrounding caller already gated on navigator.clipboard being
- * unavailable, so this path is only ever hit when there's no
- * better option.
- */
-function legacyCopy(text: string, onSuccess: () => void) {
-  if (typeof document === "undefined") return
-  const ta = document.createElement("textarea")
-  ta.value = text
-  ta.setAttribute("readonly", "")
-  ta.style.position = "fixed"
-  ta.style.top = "-1000px"
-  ta.style.opacity = "0"
-  document.body.appendChild(ta)
-  ta.select()
-  ta.setSelectionRange(0, text.length)
-  try {
-    document.execCommand("copy")
-    onSuccess()
-  } catch {
-    // No clipboard at all — silent. The code is visible on screen
-    // so the user can still select-and-copy by hand.
-  } finally {
-    document.body.removeChild(ta)
-  }
-}
 
 /**
  * Crew picker list — sourced from the same TEMPLATES map the preview
@@ -216,6 +219,14 @@ export default function OnboardingPage() {
   // slot, and correctly so: the Guide revises one proposal at a time, and a
   // revision should replace its predecessor rather than stack up.
   const [preparedProposal, setPreparedProposal] = useState<OnboardingProposal | null>(null)
+  // Crews that already exist in the workspace, read back by the "Built so
+  // far" panel. Distinct from createdCrews, which only ever holds what THIS
+  // page's Create clicks made: a reload after Create emptied it, Launch went
+  // disabled, and the person had a real crew and no way to finish setup.
+  const [existingCrewCount, setExistingCrewCount] = useState(0)
+  // Skip is one click away from Continue and irreversible in the sense that
+  // matters — the wizard never opens again — so it asks first.
+  const [skipDialogOpen, setSkipDialogOpen] = useState(false)
   // Set when Launch has succeeded. The wizard used to redirect straight into
   // the first agent's chat, so the last thing a person saw of their own setup
   // was a text box — nothing ever told them what had actually been built, and
@@ -231,6 +242,10 @@ export default function OnboardingPage() {
   const [adapter, setAdapter] = useState<string>("CLAUDE_CODE")
   const [model, setModel] = useState<string>("")
   const [apiKey, setApiKey] = useState("")
+  // The token field is type=password by default (it is a secret), but a
+  // person pasting a 100-character string they cannot see has no way to tell
+  // a truncated paste from a good one. Reveal is opt-in and per session.
+  const [showApiKey, setShowApiKey] = useState(false)
   // Tracks the credential row persistAdapterCredential has already written
   // for THIS token, so leaving step 2 a second time (Back, edit, Continue
   // again) updates that row instead of colliding with the
@@ -544,24 +559,34 @@ export default function OnboardingPage() {
 
   const copyPairCmd = useCallback(() => {
     if (!pairCommand) return
-    const succeed = () => {
+    copyText(pairCommand, () => {
       setPairCopied(true)
       setTimeout(() => setPairCopied(false), 1500)
-    }
-    const modernAvailable =
-      typeof navigator !== "undefined" &&
-      navigator.clipboard &&
-      typeof navigator.clipboard.writeText === "function" &&
-      typeof window !== "undefined" &&
-      window.isSecureContext
-    if (modernAvailable) {
-      navigator.clipboard.writeText(pairCommand).then(succeed).catch(() => legacyCopy(pairCommand, succeed))
-      return
-    }
-    legacyCopy(pairCommand, succeed)
+    })
   }, [pairCommand])
 
   const selectedProvider = (CLI_ADAPTERS[adapter]?.provider || "ANTHROPIC").toUpperCase()
+
+  /**
+   * A client-side read of what was pasted — shape only, never validity. The
+   * real check is validateWorkspaceModelCredential on Continue; this exists
+   * so the one predictable mistake (a console API key) is named while the
+   * person is still looking at the field.
+   */
+  const tokenHint = ((): { tone: "warn" | "ok"; text: string } | null => {
+    const v = apiKey.trim()
+    if (!v || adapter !== "CLAUDE_CODE") return null
+    if (v.startsWith("sk-ant-api")) {
+      return {
+        tone: "warn",
+        text: "This is an account API key from the Anthropic console. Crewship needs the CLI token that `claude setup-token` prints — paste that instead.",
+      }
+    }
+    if (v.startsWith("sk-ant-oat")) {
+      return { tone: "ok", text: "Looks like a Claude Code CLI token. It is verified with Anthropic when you continue." }
+    }
+    return null
+  })()
   const savedCredentialSelected = Boolean(
     persistedCredential &&
       persistedCredential.provider === selectedProvider &&
@@ -614,8 +639,30 @@ export default function OnboardingPage() {
       const runtimeOk = runtimeInUse === true
       return runtimeOk && adapterReady && (savedCredentialSelected || apiKey.trim().length >= 8 || isLocalModel(model))
     }
-    if (step === 3) return crewMode === "template" ? crewSlug !== null : createdCrews.length > 0
+    if (step === 3) {
+      return crewMode === "template" ? crewSlug !== null : createdCrews.length > 0 || existingCrewCount > 0
+    }
     return false
+  }
+
+  /**
+   * Why the primary button is disabled, in one sentence, shown beside it.
+   * A disabled button with no reason is the wizard's own dead end: every
+   * gate here is legitimate, but a person who cannot see what it wants
+   * from them assumes the product is broken and leaves.
+   */
+  const blockingReason = (): string | null => {
+    if (canContinue()) return null
+    if (step === 1) return "Give your workspace a name to continue."
+    if (step === 2) {
+      if (runtimeInUse !== true) return "Waiting for a container runtime — see the note above."
+      if (CLI_ADAPTERS[adapter]?.status !== "production") return "Choose Claude Code to finish setup."
+      return "Paste your CLI token to continue."
+    }
+    if (step === 3) {
+      return crewMode === "template" ? "Pick a template to launch." : "Create a crew in the chat first, then launch."
+    }
+    return null
   }
 
   /**
@@ -773,6 +820,32 @@ export default function OnboardingPage() {
     setSubmitting(true)
     setError(null)
     try {
+      // Resumed after a reload with crews already built, and no applied
+      // proposal id left in memory to hand to /setup. Sending /setup without
+      // one would deploy a second, blank crew; /complete records completion
+      // and nothing else, which is exactly what remains to be done.
+      if (crewMode === "chat" && createdCrews.length === 0 && existingCrewCount > 0) {
+        const res = await apiFetch("/api/v1/onboarding/complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ skipped: false }),
+        })
+        if (!res.ok && res.status !== 409) {
+          const data = await res.json().catch(() => ({}))
+          setError(data.error ?? `Could not finish setup (HTTP ${res.status}). Try again.`)
+          setSubmitting(false)
+          return
+        }
+        try {
+          window.localStorage.setItem("crewship.justOnboarded", "1")
+          window.localStorage.removeItem("crewship.firstAgentId")
+          window.localStorage.removeItem("crewship.firstAgentSlug")
+        } catch {
+          // localStorage unavailable — the dashboard simply skips the banner.
+        }
+        setLaunchSummary({ agentSlug: null })
+        return
+      }
       const adapterCfg = CLI_ADAPTERS[adapter]
       // A crew from the setup agent's conversation isn't a builtin template,
       // so crewSlug (which only ever names one) has nothing to pass here.
@@ -1009,29 +1082,65 @@ export default function OnboardingPage() {
                       </p>
                     </div>
 
-                    {/* Upfront warning so users get the CLI token ready BEFORE
-                        step 2 instead of bouncing back and forth. Copy-paste
-                        cmd inline for the most common (Claude Code) case. */}
-                    <div className="rounded-xl border border-warn/30 bg-warn/5 p-3 text-xs leading-relaxed">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="h-4 w-4 text-warn shrink-0 mt-0.5" />
-                        <div className="space-y-1.5 min-w-0">
-                          <div className="text-foreground/90 font-medium">
-                            Heads up — you&apos;ll need a CLI token in step 2
-                          </div>
-                          <div className="text-muted-foreground">
-                            Crewship uses your provider&apos;s <strong className="text-foreground/80">CLI token</strong>,{" "}
-                            <em>not</em> the account API key from their web console. Get it ready now:
-                          </div>
-                          <div className="rounded-md border border-border bg-card/60 p-2 font-mono mt-1.5">
-                            <span className="text-muted-foreground">Claude Code:</span>{" "}
-                            <span className="text-success select-all">$ claude setup-token</span>
-                          </div>
-                          <div className="text-[10px] text-muted-foreground">
-                            Additional adapters remain experimental and can be configured after onboarding.
-                          </div>
+                    {/* What the person needs BEFORE step 2, said once and
+                        calmly. This used to be an amber warning box, which
+                        made the very first screen of the product look like
+                        something had already gone wrong. It is a checklist:
+                        two things to have ready, plus the runtime check the
+                        page runs on its own. */}
+                    <div className="rounded-2xl border border-border bg-card/60 p-4 text-xs leading-relaxed">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <div className="font-medium text-foreground">Before you start</div>
+                        <div className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <Clock className="h-3 w-3" /> about 3 minutes
                         </div>
                       </div>
+                      <ol className="space-y-3">
+                        <li className="flex items-start gap-3">
+                          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+                            <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+                          </span>
+                          <div className="min-w-0 flex-1 space-y-1.5">
+                            <div className="text-foreground/90">
+                              A <strong className="font-semibold">Claude Code CLI token</strong> for your agents
+                              {" "}— <em>not</em> an API key from the Anthropic console. Run this in a terminal
+                              and keep the output for step 2:
+                            </div>
+                            <CommandSnippet command="claude setup-token" />
+                          </div>
+                        </li>
+                        <li className="flex items-start gap-3">
+                          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+                            <Container className="h-3.5 w-3.5 text-muted-foreground" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-foreground/90">
+                              <strong className="font-semibold">Docker</strong> running on this server — your
+                              agents live in containers.
+                            </div>
+                            {runtimeReady === true && (
+                              <motion.div
+                                initial={{ opacity: 0, x: -6 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ duration: 0.35, ease, delay: 0.15 }}
+                                className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success"
+                              >
+                                <Check className="h-3 w-3" /> Docker detected
+                              </motion.div>
+                            )}
+                            {runtimeReady === false && (
+                              <div className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">
+                                <AlertTriangle className="h-3 w-3" /> Docker isn&apos;t reachable — start it before the last step
+                              </div>
+                            )}
+                            {runtimeReady === null && (
+                              <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                <Spinner className="h-3 w-3" /> Checking…
+                              </div>
+                            )}
+                          </div>
+                        </li>
+                      </ol>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="workspace_name">Workspace name</Label>
@@ -1052,22 +1161,6 @@ export default function OnboardingPage() {
                         anytime in Settings → Workspace.
                       </p>
                     </div>
-                    {runtimeReady === true && (
-                      <motion.div
-                        initial={{ opacity: 0, x: -6 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.35, ease, delay: 0.15 }}
-                        className="inline-flex items-center gap-2 text-xs text-success"
-                      >
-                        <Check className="h-3.5 w-3.5" /> Docker detected
-                      </motion.div>
-                    )}
-                    {runtimeReady === false && (
-                      <div className="rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-warn">
-                        Docker isn&apos;t reachable. Your agents run in containers, so you&apos;ll need it running
-                        before the last step — start it now and we&apos;ll pick it up.
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -1090,9 +1183,32 @@ export default function OnboardingPage() {
                             : "Created. Ask for another crew in the chat, or launch what you have."
                           : preparedProposal
                             ? "Review the crew below. Create it from the proposal card in the chat when it looks right."
-                            : "Chat with it on the right — it asks a couple of questions, then proposes a crew. Nothing is created until you click Create."}
+                            : "Chat with the Guide — it asks a couple of questions, then proposes a crew. Nothing is created until you click Create."}
                       </p>
                     </div>
+                    {/* The three beats of this step, spelled out while the
+                        pane on the left would otherwise be a heading and a
+                        disabled Launch button. Gone the moment there is a
+                        proposal or a crew to show instead. */}
+                    {createdCrews.length === 0 && !preparedProposal && (
+                      <ol className="space-y-2 rounded-2xl border border-border bg-card/60 p-4 text-xs" aria-label="How this step works">
+                        {[
+                          ["Describe the work", "Pick a starter prompt or write it in your own words."],
+                          ["Review the proposal", "The Guide answers with a crew: agents, roles, model and network access."],
+                          ["Create, then Launch", "Create builds the crew. Launch finishes setup and opens the chat."],
+                        ].map(([title, body], i) => (
+                          <li key={title} className="flex items-start gap-3">
+                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 font-mono text-[10px] font-semibold text-primary">
+                              {i + 1}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block font-medium text-foreground">{title}</span>
+                              <span className="block leading-relaxed text-muted-foreground">{body}</span>
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
                     {/* Every crew that really exists, then the one still
                         awaiting Create. `created` is per-proposal — it used to
                         be `appliedProposal !== null`, i.e. "has ANY crew been
@@ -1113,7 +1229,20 @@ export default function OnboardingPage() {
                         hears about them — without this the person is told in
                         prose that a routine exists and shown a panel that
                         says nothing. */}
-                    <OnboardingCreatedPanel workspaceId={onboardingWorkspaceId} />
+                    {createdCrews.length === 0 && existingCrewCount > 0 && (
+                      <div
+                        role="status"
+                        data-testid="onboarding-resumed-crews"
+                        className="rounded-xl border border-success/30 bg-success/5 p-3 text-xs leading-relaxed text-muted-foreground"
+                      >
+                        <span className="font-medium text-success">
+                          {existingCrewCount === 1 ? "A crew was already built" : `${existingCrewCount} crews were already built`}
+                        </span>{" "}
+                        before this page was reloaded — it is listed below. You can launch with it now, or ask the
+                        Guide for another. Do not create the same crew twice.
+                      </div>
+                    )}
+                    <OnboardingCreatedPanel workspaceId={onboardingWorkspaceId} onCrewsFound={setExistingCrewCount} />
                     {/* Escape hatch (PRD §4.3): a user who already knows what
                         they want must still be able to skip straight to a
                         template. Hidden once a proposal is actually applied —
@@ -1149,6 +1278,17 @@ export default function OnboardingPage() {
                         that still collects a token — step 2 already asked.
                         So the recovery this banner offers is Back, not
                         Continue. */}
+                    {chatUnavailable && (
+                      <div
+                        role="status"
+                        data-testid="onboarding-guide-unavailable"
+                        className="rounded-xl border border-warn/30 bg-warn/5 p-3 text-xs leading-relaxed text-muted-foreground"
+                      >
+                        <span className="font-medium text-foreground">Crewship Guide couldn&apos;t be reached right now.</span>{" "}
+                        Nothing is lost: pick a template below and launch — you can talk to the Guide any time
+                        afterwards from the dashboard, and add or change crews there.
+                      </div>
+                    )}
                     {chatNeedsCredential && !chatUnavailable && (
                       <div className="rounded-xl border border-warn/30 bg-warn/5 p-3 text-xs leading-relaxed text-muted-foreground">
                         Crewship Guide needs a model token before it can chat. Pick a template for
@@ -1467,41 +1607,13 @@ export default function OnboardingPage() {
                         behind the CLI choice. */}
                     <div className="space-y-2">
                       <Label>Agent toolchain</Label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {CLI_ADAPTER_KEYS.map((key) => {
-                          const cfg = CLI_ADAPTERS[key]
-                          const Icon = cfg.icon
-                          const brand = getAdapterBrand(key)
-                          const active = adapter === key
-                          return (
-                            <motion.button
-                              key={key}
-                              type="button"
-                              aria-pressed={active}
-                              onClick={() => {
-                                setAdapter(key)
-                                setModel(cfg.defaultModel)
-                              }}
-                              whileTap={{ scale: 0.98 }}
-                              className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-colors ${
-                                active ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                              }`}
-                            >
-                              <span
-                                className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                                style={{
-                                  backgroundColor: brand.bg,
-                                  borderColor: brand.border,
-                                  borderWidth: 1,
-                                }}
-                              >
-                                <Icon className="h-3.5 w-3.5" style={{ color: brand.fg }} />
-                              </span>
-                              <span className="text-xs font-medium truncate">{cfg.label}</span>
-                            </motion.button>
-                          )
-                        })}
-                      </div>
+                      <ToolchainPicker
+                        value={adapter}
+                        onChange={(key) => {
+                          setAdapter(key)
+                          setModel(CLI_ADAPTERS[key].defaultModel)
+                        }}
+                      />
                       {CLI_ADAPTERS[adapter]?.status !== "production" && (
                         <div role="alert" className="rounded-lg border border-warn/30 bg-warn/5 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
                           {CLI_ADAPTERS[adapter]?.label} is still experimental and its CLI is not guaranteed to be present in the onboarding image. Choose Claude Code to finish setup; you can add experimental adapters from the dashboard afterwards.
@@ -1556,6 +1668,8 @@ export default function OnboardingPage() {
                           {getModelsForAdapter(adapter).map((m) => (
                             <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
                               {m.label}
+                              {m.value === adapterCfg?.defaultModel ? " · recommended" : ""}
+                              {m.category === "legacy" ? " · older" : ""}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1580,14 +1694,50 @@ export default function OnboardingPage() {
                           </a>
                         )}
                       </div>
-                      <Input
-                        id="api_key"
-                        type="password"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder={savedCredentialSelected ? "Saved token — leave blank to reuse" : "CLI token (not your account API key)"}
-                        className="font-mono text-xs h-10"
-                      />
+                      <div className="relative">
+                        <Input
+                          id="api_key"
+                          type={showApiKey ? "text" : "password"}
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          placeholder={savedCredentialSelected ? "Saved token — leave blank to reuse" : "Paste your CLI token (starts with sk-ant-oat…)"}
+                          autoComplete="off"
+                          spellCheck={false}
+                          className="font-mono text-xs h-10 pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey((v) => !v)}
+                          aria-label={showApiKey ? "Hide token" : "Show token"}
+                          aria-pressed={showApiKey}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        >
+                          {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                      {/* Says what the pasted value IS before Continue asks
+                          the provider. The one mistake this field exists to
+                          catch — an sk-ant-api… console key where a CLI token
+                          belongs — used to be reported only after a round
+                          trip, as a generic "could not verify" error. */}
+                      {tokenHint && (
+                        <div
+                          role={tokenHint.tone === "warn" ? "alert" : "status"}
+                          data-testid="onboarding-token-hint"
+                          className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[11px] leading-relaxed ${
+                            tokenHint.tone === "warn"
+                              ? "border-warn/30 bg-warn/5 text-warn"
+                              : "border-success/30 bg-success/5 text-success"
+                          }`}
+                        >
+                          {tokenHint.tone === "warn" ? (
+                            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          ) : (
+                            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          )}
+                          <span>{tokenHint.text}</span>
+                        </div>
+                      )}
                       {isLocalModel(model) && (
                         <p className="text-[11px] text-muted-foreground leading-relaxed">
                           Local model selected — no API key needed. Leave this empty unless you also
@@ -1597,10 +1747,10 @@ export default function OnboardingPage() {
                         </p>
                       )}
                       {!isLocalModel(model) && ADAPTER_TOKEN_CMD[adapter] && (
-                        <div className="rounded-md border border-border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed">
-                          <span className="text-muted-foreground">Run this on your machine, paste the output above:</span>
-                          <div className="text-success mt-1 select-all">$ {ADAPTER_TOKEN_CMD[adapter]}</div>
-                        </div>
+                        <CommandSnippet
+                          command={ADAPTER_TOKEN_CMD[adapter]}
+                          caption="Run this on your machine, then paste the output above:"
+                        />
                       )}
                       {!isLocalModel(model) && (
                         <p className="text-[11px] text-muted-foreground leading-relaxed">
@@ -1687,7 +1837,16 @@ export default function OnboardingPage() {
                fixed bar would stay welded to the viewport while the user
                scrolled on into the preview pane, offering controls for a
                screen they had already left. */
-            <div className="sticky bottom-0 z-10 flex items-center justify-between border-t border-border bg-background pb-6 pt-3 lg:pb-8">
+            <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-y-2 border-t border-border bg-background pb-6 pt-3 lg:pb-8">
+              {blockingReason() && !submitting && !persistingCredential && !persistingWorkspace && (
+                <div
+                  data-testid="onboarding-blocking-reason"
+                  aria-live="polite"
+                  className="basis-full text-right text-[11px] text-muted-foreground"
+                >
+                  {blockingReason()}
+                </div>
+              )}
               <Button
                 type="button"
                 variant="ghost"
@@ -1709,16 +1868,39 @@ export default function OnboardingPage() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={handleSkip}
+                  onClick={() => setSkipDialogOpen(true)}
                   disabled={submitting || persistingCredential || persistingWorkspace}
                   className="text-muted-foreground"
                 >
                   Skip setup
                 </Button>
+                <AlertDialog open={skipDialogOpen} onOpenChange={setSkipDialogOpen}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Skip setup?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        You will land on an empty dashboard with no crew and no model token, and this wizard
+                        does not open again. Everything can still be added from the dashboard — a checklist
+                        there will walk you through it — but nothing will work until you do.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Keep going</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => {
+                          setSkipDialogOpen(false)
+                          void handleSkip()
+                        }}
+                      >
+                        Skip anyway
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
                 {step < 3 ? (
                   <Button onClick={() => void handleContinue()} disabled={!canContinue() || submitting || persistingCredential || persistingWorkspace}>
                     {persistingCredential || persistingWorkspace ? <Spinner className="mr-2 h-4 w-4" /> : null}
-                    Continue
+                    {persistingCredential ? "Verifying token…" : "Continue"}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 ) : (
@@ -1761,8 +1943,13 @@ export default function OnboardingPage() {
                 <ul className="space-y-3">
                   {createdCrews.map((c) => (
                     <li key={c.id} className="rounded-xl border border-border bg-card/60 p-3">
-                      <div className="flex items-baseline justify-between gap-3">
-                        <span className="font-medium">{c.proposal.crewName}</span>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="flex min-w-0 items-center gap-2 font-medium">
+                          {c.proposal.crewIcon && (
+                            <CrewIcon icon={c.proposal.crewIcon} color={c.proposal.crewColor} size="sm" />
+                          )}
+                          <span className="truncate">{c.proposal.crewName}</span>
+                        </span>
                         <span className="shrink-0 text-xs text-muted-foreground">
                           {c.proposal.agents.length}{" "}
                           {c.proposal.agents.length === 1 ? "agent" : "agents"}
@@ -1840,6 +2027,7 @@ export default function OnboardingPage() {
               mode={step === 2 ? mode : null}
               pairingPending={mode === "cli" && pairStatus !== "consumed"}
               adapterKey={adapter}
+              model={model}
             />
           )}
         </div>
@@ -1849,18 +2037,26 @@ export default function OnboardingPage() {
 }
 
 function VerticalStepper({ step }: { step: Step }) {
+  // Every step is one thing the person is deciding about, so each has the
+  // icon of that thing — not a bare digit. "Model", not "Adapter": nobody
+  // installing Crewship for the first time knows what an adapter is, and the
+  // step's own heading already says what it is for.
   const items = [
-    { n: 1, label: "Workspace" },
-    { n: 2, label: "Adapter" },
-    { n: 3, label: "Crew" },
+    { n: 1, label: "Workspace", hint: "Name and agent language", Icon: Building2 },
+    { n: 2, label: "Model", hint: "Toolchain and CLI token", Icon: Cpu },
+    { n: 3, label: "Crew", hint: "Tell the Guide what you need", Icon: Users },
   ] as const
   return (
-    <div className="space-y-0">
+    // A row on a phone, a column from `sm` up. Stacked, the three rows plus
+    // their hints cost the first screen ~130px of the space the actual form
+    // needs; in a row the same information is one line.
+    <ol className="flex items-start gap-4 sm:block sm:space-y-0" aria-label="Setup steps">
       {items.map((it, i) => {
         const active = step === it.n
         const done = step > it.n
+        const Icon = it.Icon
         return (
-          <div key={it.n}>
+          <li key={it.n} aria-current={active ? "step" : undefined}>
             <div className="flex items-center gap-3 text-sm">
               <motion.div
                 animate={{
@@ -1872,25 +2068,38 @@ function VerticalStepper({ step }: { step: Step }) {
                       : "var(--color-muted)",
                 }}
                 transition={{ duration: 0.25, ease }}
-                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
+                className={`flex h-8 w-8 items-center justify-center rounded-xl text-xs font-medium ${
                   done
                     ? "text-primary-foreground"
                     : active
-                      ? "text-primary border-2 border-primary"
+                      ? "text-primary border border-primary/60"
                       : "text-muted-foreground"
                 }`}
               >
-                {done ? <Check className="h-3.5 w-3.5" /> : it.n}
+                {done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
               </motion.div>
-              <span className={active || done ? "font-medium tracking-tight" : "text-muted-foreground"}>
-                {it.label}
-              </span>
+              <div className="min-w-0 leading-tight">
+                <div className={active || done ? "font-medium tracking-tight" : "text-muted-foreground"}>
+                  <span className="mr-1.5 hidden font-mono text-[10px] text-muted-foreground sm:inline">{it.n}</span>
+                  {it.label}
+                </div>
+                {active && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -2 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.25, ease }}
+                    className="hidden text-[11px] text-muted-foreground sm:block"
+                  >
+                    {it.hint}
+                  </motion.div>
+                )}
+              </div>
             </div>
-            {i < items.length - 1 && <div className="ml-3 w-px h-3 bg-border" />}
-          </div>
+            {i < items.length - 1 && <div className="ml-4 my-0.5 hidden h-3 w-px bg-border sm:block" />}
+          </li>
         )
       })}
-    </div>
+    </ol>
   )
 }
 

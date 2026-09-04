@@ -942,7 +942,7 @@ func probeAnthropicOAuthToken(parent context.Context, token string) error {
 		return nil
 	}
 	const url = "https://api.anthropic.com/v1/messages"
-	const body = `{"model":"claude-3-5-haiku-latest","max_tokens":1,"messages":[{"role":"user","content":"ok"}]}`
+	body := `{"model":"` + anthropicProbeModel + `","max_tokens":1,"messages":[{"role":"user","content":"ok"}]}`
 	// Derive from the parent so request cancellation propagates here
 	// — without it a slow Anthropic probe outlives the HTTP request
 	// it's gating, which CodeRabbit flagged as a context-propagation

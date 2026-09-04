@@ -193,7 +193,7 @@ func init() {
 		// an operator-supplied one.
 		BaseDefault:     "https://api.anthropic.com/v1/messages",
 		CatalogID:       "anthropic",
-		DefaultAuxModel: "claude-haiku-4-5",
+		DefaultAuxModel: HousekeepingModel("anthropic"),
 		New: func(m AuxModel, base, apiKey string) (Provider, error) {
 			return NewAnthropic(apiKey), nil
 		},
@@ -206,7 +206,7 @@ func init() {
 		KeyEnv:          "OPENAI_API_KEY",
 		BaseDefault:     "https://api.openai.com/v1/chat/completions",
 		CatalogID:       "openai",
-		DefaultAuxModel: "gpt-5.4-mini",
+		DefaultAuxModel: HousekeepingModel("openai"),
 		New: func(m AuxModel, base, apiKey string) (Provider, error) {
 			return NewOpenAI(apiKey), nil
 		},

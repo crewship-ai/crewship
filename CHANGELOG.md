@@ -31,6 +31,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
+- **The Track A live validation is on record, and the PRD says what it found (#2331).**
+  `docs/prd/reports/track-a-live-validation-2026-09-03.md` lists, package by
+  package, what each Track A change did on a factory-reset dev1 — including
+  the two Stop defects (#2312, #2315) and the CLI gaps (#2313) that ten green
+  test suites had not seen — and the PRD's A1 row, A1 status and §24.1
+  coverage-trap section now cite them.
+
 - **Stop now reaches a run that is still queued (#2317).** `issue stop`
   stamped only `PENDING`/`RUNNING` assignments, so a run parked as `QUEUED`
   — behind the agent's live run (#2269) or the crew budget — was missed:
@@ -84,6 +92,47 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **The setup wizard reads like a product, not a form (#2305).** Real brand
+  marks for the toolchains, a Before-you-start checklist, Claude Code as the
+  one fully supported toolchain with the experimental ones behind a disclosure,
+  a live hint that tells an account API key from a CLI token, and a Guide chat
+  that opens on a greeting with starter prompts in the chosen language. Every
+  disabled Continue/Launch says why, Skip asks first, an unreachable Guide is
+  explained, and a reload after Create keeps Launch reachable without deploying
+  a second crew. The proposal card shows the crew's icon and every agent's
+  full name, role and model.
+- **One model catalog for the binary and the web (#2305).** `config/models.json`
+  is the only list of models Crewship offers; the Go curated set, the Guide's
+  crew-sizing tiers, housekeeping models, routine execution tiers, the
+  `crewship setup` defaults and every web picker read it. The Go side no
+  longer offers gpt-4o or gemini-1.5 while the web offers GPT-5.5 and
+  Gemini 2.5; the onboarding picker offers every curated Claude model with
+  Sonnet 5 recommended.
+- **The Guide can see the workspace and give a crew a face (#2305).** A
+  read-only `workspace_overview` tool (backed by
+  `GET /api/v1/internal/workspace/overview`) returns crews with agents, icons
+  and models, routines, pages, open issues and credential providers by name.
+  The proposal marker may carry `crew_icon`/`crew_color`, validated against
+  the crew icon vocabulary; the card and the created crew take that look.
+- **A dashboard that answers in order (#2305).** A bridge strip (fleet, spend,
+  runs, what waits on you, next run), attention rows with a verb each, fleet
+  cards with the crew icon, agents with status dots, spend and a run sparkline
+  — priority-ordered, capped at six and folded for a fleet of a hundred — a
+  live journal ticker under Running now, four KPIs, a work snapshot with the
+  issues board, the pages strip and a system grid. Spend is the metered
+  ledger and says "not metered" rather than "$0.00".
+- **Shared UI primitives for every screen (#2300).** One status pill
+  (`StatusPill` + `formatStatus`), one map of where every object lives
+  (`entityHref`, `refHref`), one inline empty state, a promoted sparkline, a
+  paging hook that reads the new `X-Total-Count` header, and 44px tap targets
+  in the sidebar kit under a coarse pointer. The paging convention
+  (`?limit&offset`, `X-Total-Count`/`X-Limit`/`X-Offset`) ships with its
+  server helper and CLI list footer (#2302).
+- **Pages name their silent producers; Admin findings carry an action (#2304).**
+  A page header links its owner crew and every producer behind a panel that
+  has never been produced. Each admin posture finding shows what to do about
+  it, and a crew or member count over the licensed limit turns red and states
+  the consequence.
 - **`crewship admin seed-inbox` fills the inbox with one row of every kind.**
   The inbox has no create endpoint — every row is written by a producer, so a
   fresh workspace shows an empty inbox and there is no way to see how the
@@ -767,6 +816,33 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   (`crewship crew update <crew> --issue-prefix ""`) — and the panel now
   sends it too. The field's 5-character cap and hint text are also raised to
   the API's actual limit (`^[A-Za-z0-9_-]{1,16}$`, since #2035).
+- **The issues board now moves on its own instead of only on a manual
+  reload (#2257).** Every status-transition endpoint — the human and agent
+  PATCH, and the review-approve/request-changes/stop workflow actions — now
+  broadcasts a dedicated `issue.status_changed` event (`{id, identifier,
+  crew_id, status, from, to}`) alongside the existing `issue.updated`, and
+  `issue.created`/`issue.deleted` now carry `crew_id` too. The `/issues`
+  board (`OrchestrationLayout`) subscribes to the full issue.* event set for
+  the first time and reconciles rather than trusts: a change to the crew
+  currently in view triggers a debounced refetch, a change the active crew
+  filter can prove is off-screen is skipped, and a socket reconnect always
+  refetches so a dropped connection can't leave the board permanently wrong.
+  The decision logic is `components/features/orchestration/issue-realtime.ts`,
+  unit-tested independently of the component.
+- **The realtime allowlist stopped silently dropping most of the documented
+  event vocabulary (#2125).** `hooks/use-realtime.tsx`'s
+  `VALID_REALTIME_TYPES` had drifted from `docs/api-reference/websocket.mdx`
+  — 40 workspace-channel event types the server already emits (projects,
+  milestones, integrations, feature flags, triage rules, recurring issues,
+  the escalation terminal states, and more) were silently discarded by
+  `handleMessage`, with no error and no log. All of them are now
+  registered, a Vitest parity gate
+  (`hooks/__tests__/realtime-allowlist-docs-parity.test.ts`) reads the
+  documented vocabulary straight off that doc page and fails if the
+  allowlist ever misses one again, and a dropped frame now logs a
+  `console.warn` once per type (not per frame) instead of vanishing. No new
+  subscribers were added for the 40 types — registering them is the durable
+  half of the fix; wiring a consumer per surface is separate, future work.
 - **A run is now attributable to the issue that caused it, including
   delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither
@@ -1082,6 +1158,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   reusing `task_failed`. No further step is scheduled for the issue. A hard
   kill that interrupts a run mid-exec remains a separate, not-yet-built
   capability.
+
+- **Stop now reaches a run a mention started on an issue that was never
+  started (#2320).** A mention (`@agent` on an issue's comments) can dispatch
+  a run while the issue itself is still `BACKLOG`/`TODO` — #2279 attributes
+  that run to the issue the same way a mission-task run is (`mission_id`,
+  with the `chat_id`/`group_id` fallback) — but `POST
+  /issues/{identifier}/stop` refused with 400 for any status other than
+  `IN_PROGRESS`/`REVIEW`, so the one door meant to reach every run
+  attributed to an issue (#2295) stayed closed for exactly the runs a
+  mention starts: the agent kept running with no cooperative stop
+  available from the issue. Stop now checks for a live attributed
+  assignment before refusing: when the issue is not `IN_PROGRESS`/`REVIEW`
+  but has at least one, it stamps `cancel_requested_at` on it exactly as
+  before and leaves the issue's own status untouched — it does not
+  promote the issue to `IN_PROGRESS` or move it to `CANCELLED`, since the
+  issue itself was never started. It still refuses with the original 400
+  when the issue is neither in flight nor has any live run to reach. The
+  response now also reports `runs_stopped`, the count of assignment rows
+  the call actually stamped.
 
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
@@ -4467,6 +4562,59 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   cancelling, not the agent that raised the question), which is outside
   this issue's scope of scrubbing agent-supplied text — tracked as a
   follow-up rather than silently left unredacted.
+
+- **`on_budget_exceeded` now fires once per breach, not once per LLM call
+  while over budget (#2153).** `hooks/types.go` documents the policy/limit
+  events — `on_approval_requested`, `on_guardrail_triggered`,
+  `on_budget_exceeded` — as firing once per triggering condition, but
+  `paymaster.Enforce` dispatched it from inside the per-status loop with
+  nothing recording that a breach had already been announced: it fired on
+  every call made while a budget stayed over, and twice on a single call
+  that breached two budgets. A journal row absorbs repeats fine; a hook
+  routed to pagerduty or Slack does not. `paymaster.announceBudgetBreach`
+  now debounces per `(workspace_id, crew_id-if-the-budget-is-crew-scoped,
+  budget_id, period, limit_usd)` — the first call to push a budget over in
+  a given period dispatches, later calls in the same period do not, and it
+  fires again once the period rolls (the same boundary `sumSpend` uses) or
+  the limit is raised and breached again (folding the limit into the key
+  gets re-fire-on-raise for free, without a separate invalidation path).
+  Two budgets breached by the same call still dispatch once each — that is
+  two distinct triggering conditions, not a repeat of one. The debounce
+  state is in-memory only (mirrors `enforceLocks`' existing trade-off in
+  the same file); a `crewshipd` restart can re-announce an already-seen
+  breach once. Not built: tiered re-firing on a much larger breach (e.g.
+  10% over vs. 400% over) — noted in the PR as a possible follow-up. The
+  `budget.exceeded` journal entry itself is unchanged and still emits every
+  call. The debounce state holds one entry per budget (overwritten in
+  place as its period/limit change via a `CompareAndSwap` retry), not one
+  per `(budget, period, limit)` ever seen — an earlier draft keyed the
+  latter, which meant a regularly-breaching hourly budget grew the map
+  forever over a long `crewshipd` uptime; found in review before merge.
+
+- **`hooks.Dispatch` no longer queries `hooks_config` when nothing is
+  registered (#2154).** `Dispatch` called `ListByEvent` unconditionally
+  before its early return, so a workspace with zero hooks paid the same
+  lookup as one with ten — on every LLM call (`pre_llm_call` +
+  `post_llm_call`), every observed tool call, every delegation hop, every
+  peer query, and every breached budget. A negative cache inside `Dispatch`,
+  keyed `(workspace_id, crew_id, event)`, now remembers "nothing enabled
+  here" and returns immediately without touching the database; only the
+  negative case is cached, so a workspace that does have hooks still pays
+  the query on every call, because the `Matcher` pass that follows is
+  per-call and a cached row set can't safely stand in for it. `Register`,
+  `Update`, `Delete` and `SetEnabled` in `internal/hooks/store.go` — the
+  only writers to `hooks_config` — invalidate every cached entry for that
+  workspace on a successful write, coarse (workspace-wide, not just the
+  touched `(crew_id, event)` pair) but always correct, via an exported
+  `hooks.InvalidateCache(workspaceID)` for any writer introduced outside
+  the package. Invalidation is single-process: a second `crewshipd` writer
+  would serve a stale negative until its own next write, called out as a
+  follow-up rather than built now. A write-epoch counter closes a narrow
+  TOCTOU found in review: a hook registered for the exact triple `Dispatch`
+  is checking, landing between its `ListByEvent` read and its cache write,
+  could otherwise be cached as a permanent false negative — `Dispatch` now
+  re-checks the epoch before caching and skips caching (not an error, just
+  a forgone optimization for that one call) if a write landed in between.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

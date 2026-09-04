@@ -176,7 +176,11 @@ nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
   started and marks the issue `CANCELLED`; a step whose agent is already
   executing finishes that execution first and is then recorded as
   `CANCELLED` regardless of what it reports. There is no container kill.
-  The full contract is in the [issues API reference](/api-reference/issues).
+  Stop also reaches a run an `@mention` dispatched on an issue that was
+  never started (`BACKLOG`/`TODO`) — the run is stamped the same way, but
+  the issue's own status is left unchanged rather than moved to
+  `CANCELLED`. The full contract is in the
+  [issues API reference](/api-reference/issues).
 - **Two words for "finished".** Issues move to `DONE`; the engine records a
   mission as `COMPLETED`. Both appear in the same status column and every
   shipped filter treats them alike, so a reader of the raw API will see both.

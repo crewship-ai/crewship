@@ -385,7 +385,8 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
 ```
 
 <Warning>
-  Stops an issue cooperatively, not instantly. In one transaction: every
+  Stops an issue cooperatively, not instantly. When the issue is
+  `IN_PROGRESS` or `REVIEW`, this happens in one transaction: every
   `PENDING`/`IN_PROGRESS`/`BLOCKED` mission task is marked `CANCELLED`,
   every assignment for the issue that has not reached a terminal state —
   running, pending, or still queued behind a busy agent or the crew budget —
@@ -398,8 +399,16 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
   reports success or a late failure after Stop was called; the stamp
   always wins. No further step is scheduled for the issue. A future hard
   kill (interrupting a run mid-exec) is a separate, not-yet-built
-  capability. Only issues in `IN_PROGRESS` or `REVIEW` status can be
-  stopped.
+  capability.
+
+  An [`@mention`](/guides/issue-mentions) can dispatch a run on an issue
+  that was never started (`BACKLOG`/`TODO`) — that run is attributed to
+  the issue the same way a mission-task run is. Stop reaches it too: when
+  the issue is not `IN_PROGRESS`/`REVIEW` but has at least one live
+  attributed assignment, Stop stamps `cancel_requested_at` on it and
+  leaves the issue's own status unchanged (it does not move the issue to
+  `IN_PROGRESS` or `CANCELLED`). Stop only refuses with `400` when the
+  issue is neither `IN_PROGRESS`/`REVIEW` nor has any live attributed run.
 </Warning>
 
 **Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
@@ -411,13 +420,19 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
 ```json
 {
   "status": "CANCELLED",
-  "identifier": "ENG-42"
+  "identifier": "ENG-42",
+  "runs_stopped": 1
 }
 ```
 
+`status` is `CANCELLED` when the issue was `IN_PROGRESS`/`REVIEW`; otherwise
+it echoes the issue's unchanged status (e.g. `BACKLOG`) for the
+mention-dispatched-run case above. `runs_stopped` is the number of
+assignment rows stamped.
+
 | Status | Condition |
 |---|---|
-| `400` | Issue not in IN_PROGRESS or REVIEW status |
+| `400` | Issue not in IN_PROGRESS or REVIEW status, and no live run is attributed to it |
 | `404` | Issue not found |
 
 ### Review Issue
@@ -622,7 +637,9 @@ Lists every run attributed to an issue — not just mission tasks joined to thei
     "ended_at": "2026-01-15T10:04:12Z",
     "duration_ms": 252000,
     "result_summary": "Patched refresh path and added a regression test.",
-    "error_message": ""
+    "error_message": "",
+    "mission_id": "issue_123",
+    "source": "task"
   }
 ]
 ```
@@ -638,6 +655,8 @@ Lists every run attributed to an issue — not just mission tasks joined to thei
 | `duration_ms` | integer | Elapsed time in ms; `0` when timing can't be derived |
 | `result_summary` | string? | Agent-authored result prose, truncated for the list (omitted when empty) |
 | `error_message` | string? | Failure detail, truncated for the list (omitted when empty) |
+| `mission_id` | string? | The issue this run is attributed to (`assignments.mission_id`, #2256). Nil on a legacy row written before that column existed, never touched by the backfill, and found here only via the `mission_tasks` join |
+| `source` | string | Why this run is attributed to the issue: `task` (the issue's own `mission_tasks` plan), `mention` (an `@mention` dispatch, via `mission_comment_mentions`), or `delegation` (a sub-agent's own further `/assign` call mid-mission, found only via `mission_id`) |
 
 | Status | Condition |
 |---|---|

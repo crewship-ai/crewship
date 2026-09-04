@@ -334,6 +334,18 @@ CI (`ci.yml`) runs `pnpm lint && pnpm build` and
 security workflow runs gitleaks and the dependency audit on the same
 trigger. Both must be green for review.
 
+The root `Dockerfile` itself is **not** built on every PR — a real `docker
+build` costs minutes even with caching, so `pr-image-build.yml` only runs
+when a PR touches the Dockerfile or something one of its stages `COPY`s
+(`go.mod`/`go.sum`, `package.json`/`pnpm-lock.yaml`/`pnpm-workspace.yaml`,
+`prisma/**`, `cmd/**`, `internal/**`, `schemas/**`, `web/**`,
+`docker/server-entrypoint.sh`); it builds `linux/amd64` only and never
+pushes. `scripts/pr-image-build-paths.sh` runs on every PR regardless and
+fails if that path list ever drifts from what the Dockerfile actually
+copies. Everything else the image build catches — a `COPY` the Dockerfile
+forgot (#849, #886), a `pnpm prisma generate` or `pnpm build` break, the
+`web/out/` release gate (#1567) — otherwise waits for `nightly.yml` (#2064).
+
 ## Changelog entries
 
 `RELEASING.md` cuts release notes from `CHANGELOG.md`'s

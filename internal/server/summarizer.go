@@ -27,10 +27,10 @@ type llmSummarizer struct {
 
 func newLLMSummarizer(p llm.Provider, model string) consolidate.SummarizerClient {
 	if model == "" {
-		// Default to the smallest Haiku — consolidation prompts are short
-		// and cost-sensitive; the bigger models don't improve rule
+		// The catalog's cheap Anthropic model — consolidation prompts are
+		// short and cost-sensitive; the bigger models don't improve rule
 		// extraction quality enough to justify the 10x price.
-		model = "claude-haiku-4-5-20251001"
+		model = llm.HousekeepingModel("anthropic")
 	}
 	return &llmSummarizer{provider: p, model: model}
 }

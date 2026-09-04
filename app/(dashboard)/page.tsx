@@ -8,10 +8,9 @@ import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import {
   AttentionStrip,
+  attentionState,
   heldForWorkspace,
-  FleetHealth,
   OutcomeKpis,
-  RecentWork,
   RunningNow,
   SystemSignals,
   UpNext,
@@ -21,6 +20,11 @@ import {
 } from "@/components/features/dashboard/dashboard-overview"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
+import { BridgeStrip, deriveBridge } from "@/components/features/dashboard/bridge-strip"
+import { FleetBoard, deriveFleetBoard } from "@/components/features/dashboard/fleet-board"
+import { WorkSnapshot } from "@/components/features/dashboard/work-snapshot"
+import { ActivityTicker } from "@/components/features/dashboard/activity-ticker"
+import { PagesStrip } from "@/components/features/dashboard/pages-strip"
 import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
 import { Appear } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
@@ -34,6 +38,7 @@ import { useRealtimeEvent, useRealtimeStatusSafe } from "@/hooks/use-realtime"
 import {
   useAgentSummaries,
   useCrewServiceSummaries,
+  useCrewSpend,
   useCrewSummaries,
   useDashboardMissions,
   useInvalidateDashboard,
@@ -44,7 +49,7 @@ import {
   type TimeseriesParams,
 } from "@/hooks/use-dashboard-data"
 import type { DashboardWindow } from "./dashboard-types"
-import { crewColor } from "./dashboard-helpers"
+import { crewColor, foldRunVolumeSeries } from "./dashboard-helpers"
 import { cn } from "@/lib/utils"
 import { serverFetch } from "@/lib/server-base"
 
@@ -95,6 +100,10 @@ export default function DashboardPage() {
   const memoryQ = useMemoryHealth(workspaceId, queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
+  const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
+  // Bumped on every realtime tick the dashboard already listens to, so the
+  // activity ticker refreshes in step with the cards above it.
+  const [liveTick, setLiveTick] = useState(0)
 
   const agents = useMemo(() => agentsQ.data ?? [], [agentsQ.data])
   const crews = useMemo(() => crewsQ.data ?? [], [crewsQ.data])
@@ -110,7 +119,10 @@ export default function DashboardPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const debouncedRefresh = useCallback(() => {
     clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(invalidateDashboard, 220)
+    debounceRef.current = setTimeout(() => {
+      invalidateDashboard()
+      setLiveTick((n) => n + 1)
+    }, 220)
   }, [invalidateDashboard])
 
   useEffect(() => () => clearTimeout(debounceRef.current), [])
@@ -169,10 +181,6 @@ export default function DashboardPage() {
     [insightsQ.data],
   )
 
-  const recentWork = useMemo(
-    () => [...missions].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 5),
-    [missions],
-  )
 
   const runVolumeBuckets = useMemo<RunVolumeBucket[]>(
     () => (volumeQ.data?.buckets ?? []).map((bucket) => ({ ts: bucket.ts, ...bucket.series })),
@@ -193,12 +201,56 @@ export default function DashboardPage() {
     }))
   }, [volumeQ.data, crews])
 
+  const runVolume = useMemo(
+    () => foldRunVolumeSeries(runVolumeBuckets, runVolumeSeries),
+    [runVolumeBuckets, runVolumeSeries],
+  )
+
   const runVolumeTotal = useMemo(
     () => runVolumeBuckets.reduce(
       (total, bucket) => total + Object.entries(bucket).reduce((sum, [key, value]) => key === "ts" ? sum : sum + Number(value), 0),
       0,
     ),
     [runVolumeBuckets],
+  )
+
+  const spendByCrew = useMemo(() => {
+    const rows = spendQ.data?.rows
+    if (!rows || rows.length === 0) return null
+    return new Map(rows.map((row) => [row.crew_id, row.cost_usd]))
+  }, [spendQ.data])
+
+  // undefined = the ledger has not answered (pending or failed); null = it
+  // answered with no rows (not metered on this billing mode). The two used to
+  // collapse into "not metered", which is a claim about the billing mode made
+  // while the request was still in flight.
+  const spendTotal = useMemo<number | null | undefined>(
+    () => (spendQ.isPending || spendQ.isError ? undefined : spendByCrew ? Array.from(spendByCrew.values()).reduce((sum, v) => sum + v, 0) : null),
+    [spendByCrew, spendQ.isPending, spendQ.isError],
+  )
+
+  const runSeries = useMemo(
+    () => runVolumeBuckets.map((bucket) => Object.entries(bucket).reduce((sum, [key, value]) => key === "ts" ? sum : sum + Number(value), 0)),
+    [runVolumeBuckets],
+  )
+
+  const fleetCards = useMemo(
+    () => deriveFleetBoard({ rows: fleet, agents, spendByCrew, buckets: runVolumeBuckets }),
+    [fleet, agents, spendByCrew, runVolumeBuckets],
+  )
+
+  const attention = attentionState({ items: attentionItems, inboxLoading: inbox.loading, inboxError: inbox.error })
+  const bridge = useMemo(
+    () => deriveBridge({
+      agents,
+      crews,
+      spendRows: spendQ.isPending || spendQ.isError ? undefined : (spendQ.data?.rows ?? null),
+      kpis,
+      attentionCount: attentionItems.length,
+      attentionKnown: attention.inboxKnown,
+      schedules: schedules.schedules,
+    }),
+    [agents, crews, spendQ.data, kpis, attentionItems.length, attention.inboxKnown, schedules.schedules],
   )
 
   const serviceTotals = useMemo(() => {
@@ -286,27 +338,43 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <Appear order={0}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
+        <Appear order={0}><BridgeStrip data={bridge} window={reportWindow} realtimeStatus={realtimeStatus ?? "offline"} /></Appear>
+
+        <Appear order={1}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
+
+        <Appear order={2}><FleetBoard cards={fleetCards} workspaceId={workspaceId} /></Appear>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <Appear order={1} className="xl:col-span-2"><RunningNow runs={activeRuns.runs} agents={agents} crews={crews} /></Appear>
-          <Appear order={2}><UpNext schedules={schedules.schedules} /></Appear>
+          <Appear order={3} className="xl:col-span-2">
+            <RunningNow runs={activeRuns.runs} agents={agents} crews={crews}>
+              <ActivityTicker workspaceId={workspaceId} reloadKey={liveTick} />
+            </RunningNow>
+          </Appear>
+          <Appear order={4}><UpNext schedules={schedules.schedules} /></Appear>
         </div>
 
-        <Appear order={3}><OutcomeKpis data={kpis} window={reportWindow} /></Appear>
+        <Appear order={5}>
+          <OutcomeKpis
+            data={kpis}
+            window={reportWindow}
+            runSeries={runSeries}
+            spendUsd={spendTotal}
+            spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
+          />
+        </Appear>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
-          <Appear order={4} className="xl:col-span-3">
-            <DashboardCard title={`Run volume · ${reportWindow}`} icon={Radio} hint={volumeQ.data ? `${runVolumeTotal} runs` : "unavailable"} action={<Link href="/activity" className="text-primary-hover hover:underline">Report →</Link>}>
-              <RunVolumeChart buckets={runVolumeBuckets} series={runVolumeSeries} window={reportWindow} />
+          <Appear order={6} className="xl:col-span-3">
+            <DashboardCard title={`Run volume · ${reportWindow} · by crew`} icon={Radio} hint={volumeQ.data ? `${runVolumeTotal} runs` : "unavailable"} action={<Link href="/activity" className="text-primary-hover hover:underline">Report →</Link>} className="h-full">
+              <RunVolumeChart buckets={runVolume.buckets} series={runVolume.series} window={reportWindow} />
             </DashboardCard>
           </Appear>
-          <Appear order={5} className="xl:col-span-2"><FleetHealth rows={fleet} /></Appear>
+          <Appear order={7} className="xl:col-span-2"><WorkSnapshot missions={missions} workspaceId={workspaceId} /></Appear>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <Appear order={6} className="xl:col-span-2"><RecentWork missions={recentWork} /></Appear>
-          <Appear order={7}><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} /></Appear>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+          <Appear order={8} className="xl:col-span-3"><PagesStrip /></Appear>
+          <Appear order={9} className="xl:col-span-2"><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} realtimeStatus={realtimeStatus ?? undefined} /></Appear>
         </div>
       </main>
     </div>
@@ -318,9 +386,11 @@ function DashboardSkeleton({ crews, agents }: { crews: number; agents: number })
     <div className="flex min-h-[calc(100vh-48px)] flex-col">
       <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-4 p-4 md:p-6">
-        <Skeleton className="h-[142px] rounded-xl" />
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3"><Skeleton className="h-[290px] rounded-xl xl:col-span-2" /><Skeleton className="h-[290px] rounded-xl" /></div>
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[126px] rounded-xl" />)}</div>
+        <Skeleton className="h-[96px] rounded-xl" />
+        <Skeleton className="h-[120px] rounded-xl" />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: Math.max(1, Math.min(3, crews || 3)) }, (_, index) => <Skeleton key={index} className="h-[172px] rounded-xl" />)}</div>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3"><Skeleton className="h-[260px] rounded-xl xl:col-span-2" /><Skeleton className="h-[260px] rounded-xl" /></div>
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[118px] rounded-xl" />)}</div>
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-5"><Skeleton className="h-[330px] rounded-xl xl:col-span-3" /><Skeleton className="h-[330px] rounded-xl xl:col-span-2" /></div>
       </div>
     </div>
