@@ -39,11 +39,15 @@ List all missions, optionally filtered by crew.
 ```bash
 crewship mission list
 crewship mission list --crew backend-team
+crewship mission list --search Harborlight --limit 20 --offset 20
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--crew` | `string` | | Filter by crew slug or ID. |
+| `--search` | `string` | | Search missions by title or identifier, on the server (sent as `q`). |
+| `--limit` | `int` | `20` | Rows per page (the server caps it at 200). |
+| `--offset` | `int` | `0` | Skip this many rows; a human table ends with `showing 1–20 of N · next page: --offset 20`. |
 
 **Output columns:** ID, TITLE, STATUS, LEAD, TASKS, CREATED
 
