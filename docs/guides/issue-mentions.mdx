@@ -256,8 +256,7 @@ person and one written by an agent are the same wire format:
 | An agent's inline comment on a status change | `PATCH /api/v1/internal/issues/{identifier}` |
 
 No new HTTP route was added for mentions — the trigger hangs off comment
-writes that already existed. `crewship issue comment` has a `--mention
-<slug>` flag (repeatable) that resolves the slug against the workspace agent
+writes that already existed. `crewship issue comment` has a `--mention <slug>` flag (repeatable) that resolves the slug against the workspace agent
 roster and writes the link form for you:
 
 ```bash
