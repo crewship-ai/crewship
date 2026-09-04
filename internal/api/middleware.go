@@ -278,8 +278,24 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			// canScope checks read it from there.
 			res, err := ValidateCLITokenFull(r.Context(), m.db, token, audit)
 			if err != nil {
-				m.logger.Debug("CLI token auth failed", "error", err)
-				writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+				// errInvalidCLIToken is the sentinel for a genuinely
+				// bad token (unknown, revoked, expired, tier
+				// mismatch, missing HMAC key) — that's the only case
+				// that should read as "your session is invalid".
+				// Anything else here is a query/scan/driver failure
+				// (the NULL-full_name bug in #2259 was exactly this:
+				// every lookup error, including ones that had
+				// nothing to do with the token itself, collapsed
+				// into the same 401 and pointed the user at their
+				// session instead of the real cause). Log it
+				// distinctly and 500 instead of lying about why the
+				// request failed.
+				if errors.Is(err, errInvalidCLIToken) {
+					m.logger.Debug("CLI token auth failed", "error", err)
+					writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+					return
+				}
+				replyInternalError(w, m.logger, "CLI token validation failed (not an invalid-token case)", err)
 				return
 			}
 			user = &AuthUser{ID: res.UserID, Email: res.Email, Name: res.Name}

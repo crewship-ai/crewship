@@ -163,14 +163,34 @@ crewship backup inspect ~/.crewship/backups/crewship-workspace-acme-…tar.zst
 # { "format_version": 3, "scope": "workspace", "contents": { "workspace": { "slug": "acme", … } } }
 
 crewship backup verify ~/.crewship/backups/crewship-workspace-acme-…tar.zst
-# ✓ VALID — /home/admin/.crewship/backups/… (12.8 MiB)
+# ✓ VALID — /home/admin/.crewship/backups/… (12.8 MiB) — payload row counts match the manifest
 ```
 
-`inspect` only reads the plaintext MANIFEST — it never touches the sealed payload, so no passphrase is needed. `verify` recomputes the SHA-256 of the sealed bytes against the manifest and fails if the bundle was truncated or tampered with. Neither decrypts.
+`inspect` only reads the plaintext MANIFEST — it never touches the sealed payload, so no passphrase is needed. `verify` recomputes the SHA-256 of the sealed bytes against the manifest and fails if the bundle was truncated or tampered with — that check never decrypts an encrypted bundle.
 
-<Warning>
-`verify` proves **integrity, not completeness**. It answers "are these the bytes we wrote?" — it cannot answer "are these all the rows there were", because the manifest records no per-table row counts to compare against. A bundle that was written short reports `✓ VALID`. The guard against writing one short is on the create side (see [Which rows a bundle carries](#which-rows-a-bundle-carries)), not here.
-</Warning>
+<Note>
+**What `verify` checks (#2009).** It always checks integrity: "are these the bytes we wrote?" For an **unencrypted** bundle it also checks completeness — every table's actual row count in the payload against `manifest.contents.table_row_counts`, recorded at create time — and now reports `INVALID` on a divergence, not `VALID`:
+
+```bash
+crewship backup verify short-bundle.tar.zst
+# Error: INVALID — short-bundle.tar.zst: backup: payload row counts do not match the manifest: 1 table(s)
+#   mission_tasks: manifest recorded 40 row(s), payload carries 0
+```
+
+An **encrypted** bundle's completeness cannot be checked by `verify` — decryption needs the passphrase, and `verify` deliberately never asks for one, which is what lets it run unattended against a whole directory of nightly bundles. It still reports checksum-only `VALID`, but says so:
+
+```bash
+crewship backup verify nightly.tar.zst
+# ✓ VALID — nightly.tar.zst (12.8 MiB) — checksum only
+# Warning: Completeness NOT verified: bundle is encrypted; verify does not decrypt the
+#   payload, so row counts cannot be inspected — run `crewship backup restore <file>
+#   --dry-run` with the passphrase for a completeness check
+```
+
+`restore --dry-run` already decrypts and parses the payload for other reasons, so it makes the identical comparison and reports it as `payload_row_count_mismatches` — see [Restore](#restore) below. A bundle written before #2009 carries no recorded counts at all; `verify` reports the same "NOT verified" shape for it, never a bare `VALID` that implies the check happened.
+
+One more limit, worth being precise about: the recorded count is `len(dump.Tables[table])`, read from the exact same in-memory dump that gets written into the payload — not an independent re-derivation. A create-time scoping bug that silently drops every row for a table (the shape of #1973) produces a dump that already agrees with itself, so this check would not have caught THAT bug on its own. What it catches is the payload diverging from what its own manifest claims — a corrupted or hand-edited bundle, or the two numbers drifting apart in a future refactor. "The bundle is intact" is the guarantee; "the bundle is everything" (independent re-derivation, or reconciling against the source instance) is stronger and out of scope here.
+</Note>
 
 ## Restore
 
@@ -215,6 +235,8 @@ Step 3 is what earlier versions described as "re-run restore without the rewrite
 </Note>
 
 Restoring under the ORIGINAL identity (same workspace, or a genuinely empty instance) is unaffected: the docker phase runs in the same call and there is no step 3.
+
+A fork regenerates **identity**, not merely primary keys: alongside every row's id it also mints a fresh value for the columns that have to be unique across the whole instance rather than within a workspace — a mission's `trace_id` is the one that exists today. Without that the fork's row would collide with the source row still holding the value and be dropped in silence, taking its children down with it (#2260). Columns that are unique only *within* a workspace are left alone on purpose: an issue identifier like `ENG-14` is scoped by the workspace id the fork already remapped, so the fork keeps the identifiers your team knows.
 
 ### Forked restores re-sign the journal chain
 
@@ -320,7 +342,7 @@ A restore applies only the columns that exist on this instance. That is what let
 crewship backup restore old-bundle.tar.zst
 # ✓ Restore complete — workspace=acme crews=4 rows=311 id=ws_abc123
 # ⚠ 1 value(s) in this bundle were dropped because this instance's schema has no
-#   such column: issue_counters.crew_id (1 row(s)).
+#   such column: some_table.some_column (1 row(s)).
 #   The bundle was written against a different schema. Rows that needed one of
 #   those columns to satisfy a NOT NULL or a primary key did NOT land, and the
 #   restore could not report them individually.
@@ -328,9 +350,53 @@ crewship backup restore old-bundle.tar.zst
 
 Why it is worth a warning rather than a shrug: dropping a column is harmless when the row still makes sense without it, and it is *silent data loss* when it does not. If the dropped column was part of the row's primary key or a `NOT NULL`, the insert violates a constraint, `INSERT OR IGNORE` discards the whole row, and nothing errors — the bundle verifies, the restore reports success, and the rows are simply not there. `rows_inserted` cannot show you the difference, because a row that never landed is not counted anywhere.
 
-The case that produces it is a bundle taken before a **non-additive** migration — one that re-keys or renames a table rather than adding to it. Restoring across one is not something the restore path can repair on its own: it does not know what the old column meant. What it can do is refuse to be quiet about it, so you check the tables it names instead of finding out months later.
+The case that produces it is a bundle taken before a **non-additive** migration — one that re-keys or renames a table rather than adding to it. Restoring across one is not something the restore path can repair on its own in general: it does not know what the old column meant. What it can do is refuse to be quiet about it, so you check the tables it names instead of finding out months later. `issue_counters` (below) is the one table this restore *does* know how to repair, because #2034 taught it that table's specific rename.
 
 `--dry-run` reports the same skew (as *would be dropped*) before anything is written.
+
+### A pre-#1797 `issue_counters` row is migrated, not dropped
+
+`issue_counters` used to be keyed on `crew_id`; migration `20260820125000_issue_counters_prefix_scope` (#1797, documented in the [migrations guide](/guides/migrations)) re-keyed it to `(workspace_id, prefix)`. Without special handling that is exactly the shape of loss the previous section describes: `crew_id` is a column the new table does not have, the row degenerates into a constraint violation on the two new `NOT NULL` key columns, and `INSERT OR IGNORE` swallows it — every counter gone, silently (#2034).
+
+Restoring a bundle taken before that migration resolves each row's crew — from the bundle's own `crews` table, or from the target if the crew already exists there — to that crew's workspace and effective prefix (`issue_prefix`, or the first three letters of the slug, upper-cased — the same rule the migration's backfill and the runtime allocator both use), and writes the counter under its current key instead:
+
+```bash
+crewship backup restore pre-1797-bundle.tar.zst
+# ✓ Restore complete — workspace=acme crews=4 rows=312 id=ws_abc123
+# ✓ 1 issue_counters row(s) from a pre-#1797 bundle migrated from crew_id to
+#   (workspace_id, prefix).
+```
+
+Two crews that share an effective prefix collapse onto one migrated row, keeping the **higher** `next_number` — writing back the lower one would let the allocator hand out an identifier that already exists, which is worse than the counter being absent (an absent counter is reseeded above whatever identifiers restored alongside it).
+
+A row whose crew cannot be resolved at all — the crew, like its issues, is also gone, and is not in this bundle or on the target — is not guessed at. It falls through to the ordinary column-drop report above, `issue_counters.crew_id`, so you still hear about it; the counter itself is the one thing that scenario cannot recover, because it was the crew's only remaining record of how far it had counted.
+
+`issue_counters_migrated` in the API response (and `--dry-run`, as *would be migrated*) carries the count. Because that collapse happens **before** insert, `rows_inserted_shortfalls` (below) discounts `issue_counters` by the number of rows the collapse actually removed — the manifest's pre-collapse count minus that discount is what a healthy restore is compared against, the same discount pattern `rows_inserted_shortfalls` already applies to `users`. A genuine `issue_counters` shortfall — a row whose crew could not be resolved, or an ordinary PK collision — still shows up.
+
+### Restore checks the payload against the manifest, and the target against both (#2009)
+
+`verify` can only check completeness for an unencrypted bundle — it never decrypts. Restore already has the decrypted payload for other reasons, so it makes the SAME comparison `verify` does, regardless of encryption, and adds a second one for what actually landed:
+
+```bash
+crewship backup restore suspect-bundle.tar.zst
+# ✓ Restore complete — workspace=acme crews=4 rows=280 id=ws_abc123
+# Warning: This bundle's payload does not match its own manifest for 1 table(s):
+#   mission_tasks (recorded 40, actual 0).
+#   The manifest was written against a different dump than the payload carries —
+#   treat this bundle as suspect before relying on it for disaster recovery.
+```
+
+That first warning — **payload row counts** — is the same divergence `verify` reports for an unencrypted bundle: the decrypted payload disagrees with what `manifest.contents.table_row_counts` claims. The second, separate warning — **rows inserted** — is about the TARGET, not the bundle: a table can come up short on the way in even when the payload itself is exactly what the manifest says, because a schema-skew column drop (previous section) or a primary-key collision `INSERT OR IGNORE` swallowed kept some of its rows from landing:
+
+```bash
+# ✓ Restore complete — workspace=acme crews=4 rows=311 id=ws_abc123
+# Warning: Fewer rows landed than the manifest recorded for 1 table(s):
+#   workspaces (recorded 1, landed 0).
+#   Check ColumnsDropped and the tables above for a specific cause; if none apply,
+#   a primary-key collision on the target likely swallowed them.
+```
+
+`--dry-run` reports the payload check (nothing was inserted, so there is nothing to compare for the second one). Neither is a hard refusal — a divergence here is exactly the kind of thing a disaster-recovery operator needs to see and decide about, not something the restore should silently work around or silently block on.
 
 ## Delete & rotate
 
@@ -473,7 +539,7 @@ The backup surface is CLI-first — every operation is reachable via `crewship b
 | `POST` | `/api/v1/admin/backups` | Create a bundle. **Auth + OWNER/ADMIN.** Same trust gate as the CLI; concurrent calls hit the [advisory lock](#lock-semantics) and the second returns 409. |
 | `GET`  | `/api/v1/admin/backups` | List bundles on disk for the current workspace. |
 | `GET`  | `/api/v1/admin/backups/inspect` | Plaintext manifest only — equivalent to `crewship backup inspect`. Takes the bundle as a query param; no passphrase required. |
-| `GET`  | `/api/v1/admin/backups/verify` | SHA-256 integrity check of the sealed bytes against the manifest. **Does not decrypt** — no passphrase required. No DB writes. |
+| `GET`  | `/api/v1/admin/backups/verify` | SHA-256 integrity check of the sealed bytes against the manifest, plus a completeness check for an unencrypted bundle (#2009) — payload row counts vs. `manifest.contents.table_row_counts`. **Does not decrypt** — no passphrase required, so an encrypted bundle's completeness is reported unverifiable rather than checked. No DB writes. |
 | `POST` | `/api/v1/admin/backups/restore` | Restore. Body accepts `dry_run`, `as_workspace`, `as_crew`, and `replace` (v3 DR wipe-and-replace of existing workspace contents — workspace-scope only, incompatible with `as_workspace`/`as_crew`). **Holds the lock for the whole call.** |
 | `DELETE` | `/api/v1/admin/backups` | Delete a bundle. Idempotent — 404 is not an error in scripted use. |
 | `POST` | `/api/v1/admin/backups/rotate` | Retention sweep. Body accepts `keep_last`, `keep_days`, `dry_run`. |

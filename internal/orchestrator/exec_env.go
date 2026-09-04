@@ -38,13 +38,51 @@ func baseAgentEnv(req AgentRunRequest) []string {
 // adapter refactor (the per-CLI command building moved to adapter_*.go);
 // this function is provider-neutral and stays here next to its sidecar
 // counterpart BuildEnvVarsSidecar.
+//
+// #2092/#2246: this is the non-sidecar delivery path — taken both when the
+// sidecar is disabled instance-wide and when a worker sub-agent is dispatched
+// with SkipSidecar=true (the crew's sidecar is already running in the shared
+// container; this exec just doesn't start a new one). Every credential
+// written here is gated by credEnvDeliverable first, same as every selector
+// in BuildEnvVarsSidecar, so an unclassified type (credpolicy fallback
+// Delivery: DeliveryNone) is withheld here too — otherwise the same
+// credential in the same Keeper state would be withheld from a parent agent's
+// sidecar-built env and delivered anyway to a sub-agent taking this path.
+// This function has never taken a keeperEnabled parameter and that is
+// unchanged: DeliveryNone means no channel in EITHER Keeper state, so the
+// credpolicy gate alone is sufficient here without threading Keeper state
+// through. Extending this path to also honour KeeperGated for classified
+// types (SECRET) is a separate, larger behaviour change — this path has
+// historically delivered SECRET plaintext directly regardless of Keeper, and
+// that is out of scope for the #2092 fix, which is specifically about the
+// unclassified-type fail-safe promise, not about widening Keeper enforcement
+// to a path that never had it.
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := baseAgentEnv(req)
 
 	if activeCred != nil {
-		envVar := resolveEnvVar(activeCred)
-		env = append(env, envVar+"="+activeCred.PlainValue)
-		env = appendCredentialFields(env, *activeCred, true)
+		// #2092/#2246: a further review found this selector still unguarded
+		// — the non-sidecar path never consulted credpolicy at
+		// all, so an unclassified credential (fallback Delivery: DeliveryNone)
+		// reached the agent env here even though every selector in
+		// BuildEnvVarsSidecar now withholds it. A worker sub-agent dispatched
+		// with SkipSidecar=true takes exactly this path, so the same
+		// credential in the same Keeper state was withheld from the parent
+		// agent and delivered to its sub-agent. Gating on credEnvDeliverable
+		// alone (not keeperEnabled) matches what DeliveryNone means: no
+		// channel at all, in either Keeper state — this function has never
+		// taken a keeperEnabled parameter and pre-existing SECRET/Keeper
+		// behaviour on this path is unchanged; only the unclassified-type gap
+		// is closed here.
+		if credEnvDeliverable(*activeCred) {
+			envVar := resolveEnvVar(activeCred)
+			env = append(env, envVar+"="+activeCred.PlainValue)
+			env = appendCredentialFields(env, *activeCred, true)
+		} else {
+			slog.Default().Warn("credential withheld from agent env: type has no credpolicy delivery row",
+				"agent_slug", req.AgentSlug, "cred_type", activeCred.Type,
+				"hint", "add a credpolicy.TypePolicy row for this type in internal/credpolicy")
+		}
 	}
 
 	for _, cred := range req.Credentials {
@@ -52,6 +90,15 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 			continue
 		}
 		if cred.EnvVarName != "" && cred.PlainValue != "" {
+			// #2092/#2246: same gate as above, applied to every OTHER
+			// credential this request carries — the loop that previously wrote
+			// every credential's plaintext unconditionally.
+			if !credEnvDeliverable(cred) {
+				slog.Default().Warn("credential withheld from agent env: type has no credpolicy delivery row",
+					"agent_slug", req.AgentSlug, "env_var", cred.EnvVarName, "cred_type", cred.Type,
+					"hint", "add a credpolicy.TypePolicy row for this type in internal/credpolicy")
+				continue
+			}
 			envVar := resolveEnvVar(&cred)
 			alreadySet := false
 			for _, e := range env {
@@ -145,6 +192,29 @@ func envHasAssignment(env []string, name, value string) bool {
 	return false
 }
 
+// credEnvDeliverable reports whether cred's TYPE has any delivery channel to
+// the agent environment at all, per credpolicy. Every site in this file that
+// is about to write a credential's plaintext into the agent's env — no
+// matter which selection rule matched it (an OAuth-shaped value, an MCP
+// config's ${VAR} reference, an adapter's recognized API-key env-var name,
+// the CLI_TOKEN type, the legacy Keeper-off SECRET fallback, or the plain
+// no-sidecar BuildEnvVars path) — must gate on this first.
+//
+// #2092/#2246: a type with no explicit credpolicy row carries the fail-safe
+// fallback {Delivery: DeliveryNone, KeeperGated: true}. Only one of six
+// selectors across BuildEnvVarsSidecar and BuildEnvVars originally consulted
+// credpolicy at all (the legacy fallback loop), so an unclassified credential
+// could still reach the agent env — in the OAuth-shaped case even with
+// Keeper ON, and via BuildEnvVars regardless of Keeper state since that
+// function never took a keeperEnabled parameter at all — through whichever
+// selector matched it by value shape or env-var name instead of by type.
+// Routing every selector through one predicate closes the whole class at
+// once, instead of each selector remembering its own copy of the same guard
+// (the shape of bug that produced this in the first place).
+func credEnvDeliverable(cred Credential) bool {
+	return credpolicy.For(cred.Type).Delivery != credpolicy.DeliveryNone
+}
+
 // injectMCPCredentialEnvVars adds the actual credential values for env vars
 // referenced by the MCP config (${VAR}) into the exec env, so Claude Code and
 // the other CLIs can expand "Bearer ${TOKEN}" style references at MCP startup.
@@ -200,6 +270,18 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string, keeperEnabled
 			continue
 		}
 		if existing[cred.EnvVarName] {
+			continue
+		}
+		// #2092/#2246: an unclassified type has no delivery channel at all
+		// (credpolicy fallback Delivery: DeliveryNone) — withheld regardless
+		// of Keeper state, not just when Keeper is on. Checked before the
+		// Keeper gate below so it applies in both states.
+		if !credEnvDeliverable(cred) {
+			if logger != nil {
+				logger.Warn("credential referenced by MCP config withheld: type has no credpolicy delivery row, so it cannot be delivered by any path",
+					"env_var", cred.EnvVarName, "cred_type", cred.Type,
+					"hint", "add a credpolicy.TypePolicy row for this type in internal/credpolicy")
+			}
 			continue
 		}
 		// #1362/#1364: fail-closed withholding under Keeper. A Keeper-gated
@@ -350,11 +432,26 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	var oauthToken string
 	for _, cred := range req.Credentials {
 		isOAuth := cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat")
-		if isOAuth && cred.PlainValue != "" {
-			hasOAuth = true
-			oauthToken = cred.PlainValue
-			break
+		if !isOAuth || cred.PlainValue == "" {
+			continue
 		}
+		// #2092/#2246: the second disjunct above matches on the VALUE's
+		// shape, not the credential's type — an unclassified credential
+		// whose value happens to look like an Anthropic OAuth token must
+		// still be refused. This check does NOT depend on keeperEnabled: an
+		// unclassified type's fallback row (Delivery: DeliveryNone) has no
+		// delivery channel in EITHER Keeper state, and this loop previously
+		// ran unconditionally regardless of Keeper, so a shape collision
+		// leaked even with Keeper on.
+		if !credEnvDeliverable(cred) {
+			slog.Default().Warn("credential withheld from agent env: OAuth-shaped value but type has no credpolicy delivery row",
+				"agent_slug", req.AgentSlug, "cred_type", cred.Type,
+				"hint", "add a credpolicy.TypePolicy row for this type in internal/credpolicy")
+			continue
+		}
+		hasOAuth = true
+		oauthToken = cred.PlainValue
+		break
 	}
 
 	env := append(baseAgentEnv(req), SidecarProxyEnv()...)
@@ -455,6 +552,16 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 				// the CLI to 127.0.0.1 and the proxy injects it mid-flight.
 				continue
 			}
+			// #2092/#2246: this selector matches by EnvVarName only, never by
+			// type — an unclassified credential simply named e.g.
+			// OPENAI_API_KEY would otherwise reach the env regardless of its
+			// credpolicy row.
+			if !credEnvDeliverable(cred) {
+				slog.Default().Warn("credential withheld from agent env: env var recognized by adapter but type has no credpolicy delivery row",
+					"agent_slug", req.AgentSlug, "env_var", cred.EnvVarName, "cred_type", cred.Type, "adapter", req.CLIAdapter,
+					"hint", "add a credpolicy.TypePolicy row for this type in internal/credpolicy")
+				continue
+			}
 			env = overrideEnv(env, cred.EnvVarName, cred.PlainValue)
 			// gemini-cli reads either GOOGLE_API_KEY or GEMINI_API_KEY; mirror
 			// the value into both so config differences across versions don't
@@ -482,11 +589,35 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	// control + audit trail — so they are not injected here. When Keeper is
 	// disabled, inject them directly as env vars (legacy mode). Table-driven
 	// (credpolicy) rather than a SECRET-only special case.
+	//
+	// #2092: both halves of the row are consulted, not just KeeperGated. A
+	// type with no explicit credpolicy row gets the fail-safe fallback
+	// {Delivery: DeliveryNone, KeeperGated: true} — KeeperGated alone would
+	// route it down this "legacy fallback" path exactly like SECRET, which
+	// contradicts DeliveryNone's promise that an unclassified type is not
+	// delivered to the agent AT ALL, by any channel. Only a type that
+	// actually has a delivery channel takes the legacy env path here.
+	//
+	// An unclassified type withheld this way has no /keeper/request path
+	// either (Keeper is off), so it becomes undeliverable rather than merely
+	// gated — a behaviour change for any legacy row relying on the old
+	// (wrong) fallback-as-SECRET treatment. WARN so an operator can find out
+	// why the credential vanished and add the missing credpolicy row.
 	if !keeperEnabled {
 		for _, cred := range req.Credentials {
-			if credpolicy.IsKeeperGated(cred.Type) && cred.EnvVarName != "" && cred.PlainValue != "" {
-				env = append(env, cred.EnvVarName+"="+cred.PlainValue)
+			if cred.EnvVarName == "" || cred.PlainValue == "" {
+				continue
 			}
+			if !credpolicy.For(cred.Type).KeeperGated {
+				continue
+			}
+			if !credEnvDeliverable(cred) {
+				slog.Default().Warn("credential withheld from agent env: unclassified type has no credpolicy delivery row, so it cannot be delivered by any path with Keeper off",
+					"agent_slug", req.AgentSlug, "env_var", cred.EnvVarName, "cred_type", cred.Type,
+					"hint", "add a credpolicy.TypePolicy row for this type in internal/credpolicy")
+				continue
+			}
+			env = append(env, cred.EnvVarName+"="+cred.PlainValue)
 		}
 	}
 
@@ -827,6 +958,15 @@ func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider
 // Select picks the LOWEST Priority and round-robins within that tier, so
 // returning the first slice match could name a credential the proxy will never
 // choose. Ties keep slice order, which is Select's own pass-2 order.
+//
+// Select's third dimension — the acting agent (#2052) — needs no mirror here,
+// and that is a property of the input rather than an omission. req.Credentials
+// IS one agent's delivery, and the API tier guarantees the delivering agent is
+// among a credential's grantees (credential_grantees.go, grantedTo), so every
+// entry in this slice is one the sidecar would serve to THIS run. What changed
+// is on the other side: the store may now refuse a peer's credential it would
+// once have handed over, which can only make the set the proxy chooses from
+// smaller than the set this function sees.
 func credentialFor(req AgentRunRequest, s llmroute.Spec) (Credential, bool) {
 	now := time.Now()
 	var best Credential
@@ -875,6 +1015,14 @@ func credentialLeaseLapsed(cred Credential, now time.Time) bool {
 // happened to return would 403 every other request, with both credentials valid
 // — the same failure as naming the wrong host, arriving intermittently, which is
 // harder to diagnose than never working at all.
+//
+// Still EVERY one after #2052 scoped Select by acting agent. The rotation this
+// exists for happens within one agent's own eligible set, and this slice is one
+// agent's delivery, so the hosts it names remain exactly the ones the sidecar
+// can dial for this run. Scoping can only remove a host from the sidecar's
+// reach, never add one, so the allowlist stays a superset — the safe direction:
+// a host on the list that is never dialled costs nothing, a host dialled that is
+// not on the list is a 403 on a valid credential.
 func credentialsFor(req AgentRunRequest, s llmroute.Spec) []Credential {
 	now := time.Now()
 	var out []Credential
@@ -1118,17 +1266,21 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 
 	// OAuth: BuildEnvVarsSidecar injects only the FIRST matching token as
 	// CLAUDE_CODE_OAUTH_TOKEN and stops; mirror that so we don't over-report.
+	// #2092/#2246: also mirror the credEnvDeliverable gate — an unclassified
+	// type whose value merely looks like an OAuth token is no longer
+	// injected, so it must not be reported here either.
 	for _, cred := range req.Credentials {
 		isOAuth := cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat")
-		if isOAuth && cred.PlainValue != "" {
-			out = append(out, CredentialEnvExposure{
-				EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN",
-				Type:       "AI_CLI_TOKEN",
-				Reason:     "OAuth token authenticates inside an HTTPS CONNECT tunnel the sidecar cannot inject into, so it must live in the agent env",
-			})
-			markExposed(cred.ID)
-			break
+		if !isOAuth || cred.PlainValue == "" || !credEnvDeliverable(cred) {
+			continue
 		}
+		out = append(out, CredentialEnvExposure{
+			EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN",
+			Type:       "AI_CLI_TOKEN",
+			Reason:     "OAuth token authenticates inside an HTTPS CONNECT tunnel the sidecar cannot inject into, so it must live in the agent env",
+		})
+		markExposed(cred.ID)
+		break
 	}
 
 	// BYO API keys: CONNECT-tunneled adapters reach their upstream over an HTTPS
@@ -1148,6 +1300,12 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 			}
 			if isRouted && credentialRoutesTo(cred, routed.Spec) {
 				continue // isolated: the sidecar holds it, the env does not
+			}
+			// #2092/#2246: mirror the credEnvDeliverable gate — an
+			// unclassified credential named after an adapter-recognized env
+			// var is no longer injected, so it must not be reported here.
+			if !credEnvDeliverable(cred) {
+				continue
 			}
 			out = append(out, CredentialEnvExposure{
 				EnvVarName: cred.EnvVarName,
@@ -1202,9 +1360,18 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 	// request/execute flow when Keeper is enabled, but injected to env as a
 	// legacy fallback when it is off. This is the one exposure an operator can
 	// close, so flag it actionable. Table-driven (credpolicy).
+	//
+	// #2092: mirrors BuildEnvVarsSidecar's selector exactly — KeeperGated AND
+	// an actual delivery channel (Delivery != DeliveryNone). An unclassified
+	// type (the fail-safe fallback row) is no longer injected there, so it
+	// must not be reported as exposed here either, or this posture view
+	// over-reports a credential that was actually withheld.
 	if !keeperEnabled {
 		for _, cred := range req.Credentials {
-			if credpolicy.IsKeeperGated(cred.Type) && cred.EnvVarName != "" && cred.PlainValue != "" {
+			if cred.EnvVarName == "" || cred.PlainValue == "" {
+				continue
+			}
+			if credpolicy.For(cred.Type).KeeperGated && credEnvDeliverable(cred) {
 				out = append(out, CredentialEnvExposure{
 					EnvVarName: cred.EnvVarName,
 					Type:       cred.Type,

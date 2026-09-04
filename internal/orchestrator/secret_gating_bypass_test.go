@@ -23,6 +23,7 @@ package orchestrator
 //	exec_env.go:210      injectMCPCredentialEnvVars  — MCP ${VAR} env injection
 //	exec_env.go:487      BuildEnvVarsSidecar         — the agent's env block
 //	exec_env.go:1207     AgentEnvCredentialExposures — the operator's posture view
+//	exec_env.go:~41      BuildEnvVars                — the non-sidecar agent env block
 //	exec_sidecar.go:354  buildCredFileScript         — /secrets file delivery
 //	secrets_cleanup.go:77 hasFileMountedCreds        — post-run scrub accounting
 //
@@ -53,6 +54,12 @@ const bypassCanary = "kp-bypass-canary-9f13a7"
 // bypassPartCanary is the same idea for a SECRET *part* of a multi-part
 // credential (PRD-CREDENTIALS-V2 §2.2) — the second door into the same room.
 const bypassPartCanary = "kp-bypass-part-canary-4c02"
+
+// bypassOAuthShapeCanary carries the sk-ant-oat prefix BuildEnvVarsSidecar's
+// OAuth selector matches on VALUE shape alone (exec_env.go's hasOAuth loop),
+// so an unclassified credential whose plaintext merely looks like an
+// Anthropic OAuth token can be driven down that path regardless of type.
+const bypassOAuthShapeCanary = "sk-ant-oat-kp-bypass-9f13a7"
 
 // caseVariantSecretTypes are the spellings of "SECRET" that miss the
 // credpolicy map key. Every one of them is reachable today: the credentials
@@ -518,18 +525,36 @@ func TestBypass_AbortedRunStillScrubsGatedSecretFiles(t *testing.T) {
 // This pin asserts BOTH halves precisely (env yes, disk no, and gated under
 // Keeper ON) so it cannot decay into "something happened". When #2092 lands,
 // this test flips to the withheld assertion and its name loses the suffix.
-func TestBypass_UnclassifiedTypeReachesEnvWhenKeeperIsOff_KnownResidual(t *testing.T) {
+func TestBypass_UnclassifiedTypeNeverReachesEnv(t *testing.T) {
 	t.Parallel()
 	req := bypassReq("VAULT_HANDLE")
 
-	env := BuildEnvVarsSidecar(req, false)
-	if _, inEnv := envCarries(env, bypassCanary); !inEnv {
-		t.Fatalf("#2092 appears to be FIXED: an unclassified type no longer reaches the " +
-			"agent env with Keeper off. Good — now invert this test to assert the " +
-			"withholding and drop the _KnownResidual suffix.")
+	// #2092: an unclassified type must never reach the agent env, in EITHER
+	// Keeper state. The fail-safe fallback row is
+	// {Delivery: DeliveryNone, KeeperGated: true} — DeliveryNone means no
+	// delivery channel at all, not even the Keeper-off legacy env path that
+	// SECRET uses.
+	for _, keeper := range []bool{true, false} {
+		if _, inEnv := envCarries(BuildEnvVarsSidecar(req, keeper), bypassCanary); inEnv {
+			t.Errorf("keeper=%v: an unclassified type reached the agent env — DeliveryNone "+
+				"must never be treated as the SECRET legacy env path", keeper)
+		}
 	}
 
-	// The half that does hold: never on disk, in either Keeper state.
+	// AgentEnvCredentialExposures must mirror the withholding: it must not
+	// report an exposure for a credential that BuildEnvVarsSidecar no longer
+	// injects.
+	for _, keeper := range []bool{true, false} {
+		for _, exp := range AgentEnvCredentialExposures(req, keeper) {
+			if exp.EnvVarName == req.Credentials[0].EnvVarName {
+				t.Errorf("keeper=%v: AgentEnvCredentialExposures reported an exposure for the "+
+					"withheld unclassified credential (%+v) — it must mirror BuildEnvVarsSidecar exactly",
+					keeper, exp)
+			}
+		}
+	}
+
+	// The half that already held: never on disk, in either Keeper state.
 	for _, keeper := range []bool{true, false} {
 		script, written, _, err := buildCredFileScript(req.Credentials, "/secrets/riley", keeper)
 		if err != nil {
@@ -541,10 +566,151 @@ func TestBypass_UnclassifiedTypeReachesEnvWhenKeeperIsOff_KnownResidual(t *testi
 				keeper, written)
 		}
 	}
+}
 
-	// And the half the residual does not touch: Keeper ON still withholds it.
-	if _, inEnv := envCarries(BuildEnvVarsSidecar(req, true), bypassCanary); inEnv {
-		t.Error("an unclassified type reached the agent env with Keeper ON — this is not " +
-			"the #2092 residual, it is the invariant itself failing")
+// TestBypass_UnclassifiedTypeNeverReachesEnvViaAdapterAllowlist covers the
+// SECOND of the three selectors an independent review found still unguarded
+// after the #2092 legacy-fallback fix (#2246): BuildEnvVarsSidecar's BYO-API-key
+// override loop matches a credential by EnvVarName alone (whatever
+// apiKeyEnvVarsForAdapter allows for req.CLIAdapter) and never consulted
+// credpolicy at all. An unclassified credential simply NAMED like a
+// recognized provider key (e.g. OPENROUTER_API_KEY for an OPENCODE adapter)
+// must not reach the env by that name collision, in either Keeper state —
+// and AgentEnvCredentialExposures must not report it either.
+func TestBypass_UnclassifiedTypeNeverReachesEnvViaAdapterAllowlist(t *testing.T) {
+	t.Parallel()
+	req := AgentRunRequest{
+		AgentSlug:  "riley",
+		CLIAdapter: "OPENCODE", // apiKeyEnvVarsForAdapter("OPENCODE") includes OPENROUTER_API_KEY
+		Credentials: []Credential{{
+			ID:         "cred-adapter-bypass",
+			Type:       "VAULT_HANDLE", // unclassified: no credpolicy row
+			EnvVarName: "OPENROUTER_API_KEY",
+			PlainValue: bypassCanary,
+		}},
+	}
+
+	for _, keeper := range []bool{true, false} {
+		if _, inEnv := envCarries(BuildEnvVarsSidecar(req, keeper), bypassCanary); inEnv {
+			t.Errorf("keeper=%v: an unclassified credential named after an adapter-recognized "+
+				"env var reached the agent env — the allowlist override loop must consult "+
+				"credpolicy before it overrides, not just the env-var name", keeper)
+		}
+		for _, exp := range AgentEnvCredentialExposures(req, keeper) {
+			if exp.EnvVarName == "OPENROUTER_API_KEY" {
+				t.Errorf("keeper=%v: AgentEnvCredentialExposures reported an exposure for the "+
+					"withheld unclassified credential (%+v)", keeper, exp)
+			}
+		}
+	}
+}
+
+// TestBypass_UnclassifiedTypeNeverReachesEnvViaOAuthShape covers the THIRD
+// (and, per that review, worst) selector: BuildEnvVarsSidecar's hasOAuth loop
+// treats ANY credential whose plaintext starts with "sk-ant-oat" as an OAuth
+// token, regardless of its type, and — pre-fix — regardless of Keeper state
+// (that loop never looked at keeperEnabled at all). An unclassified
+// credential whose value merely collides with that shape must not reach the
+// env as CLAUDE_CODE_OAUTH_TOKEN in EITHER Keeper state, including Keeper ON
+// — the one state every other channel always withholds in.
+func TestBypass_UnclassifiedTypeNeverReachesEnvViaOAuthShape(t *testing.T) {
+	t.Parallel()
+	req := AgentRunRequest{
+		AgentSlug:  "riley",
+		CLIAdapter: "CLAUDE_CODE",
+		Credentials: []Credential{{
+			ID:         "cred-oauth-shape-bypass",
+			Type:       "VAULT_HANDLE", // unclassified: no credpolicy row
+			EnvVarName: "IRRELEVANT_NAME",
+			PlainValue: bypassOAuthShapeCanary,
+		}},
+	}
+
+	for _, keeper := range []bool{true, false} {
+		env := BuildEnvVarsSidecar(req, keeper)
+		if _, inEnv := envCarries(env, bypassOAuthShapeCanary); inEnv {
+			t.Errorf("keeper=%v: an unclassified credential whose value merely looks like an "+
+				"OAuth token reached the agent env — the OAuth selector matches on value shape "+
+				"and must still consult credpolicy before treating it as deliverable", keeper)
+		}
+		for _, exp := range AgentEnvCredentialExposures(req, keeper) {
+			if exp.EnvVarName == "CLAUDE_CODE_OAUTH_TOKEN" {
+				t.Errorf("keeper=%v: AgentEnvCredentialExposures reported an exposure for the "+
+					"withheld unclassified OAuth-shaped credential (%+v)", keeper, exp)
+			}
+		}
+	}
+}
+
+// TestBypass_UnclassifiedTypeNeverReachesEnvViaBuildEnvVars covers a selector
+// outside the "three" above, found by a further review of #2246: BuildEnvVars
+// (exec_env.go), the non-sidecar env builder. Unlike BuildEnvVarsSidecar it
+// never took a keeperEnabled parameter and never consulted credpolicy at
+// all — every credential's plaintext went straight into the env,
+// unconditionally, for both the "activeCred" slot and every other credential
+// on the request.
+//
+// Why this path matters as much as the sidecar one: a worker sub-agent
+// dispatched with SkipSidecar=true (internal/api/query_handler.go) takes
+// exactly this path even though the crew's sidecar is already running in the
+// shared container — orchestrator_run.go's ensureSidecar computes
+// sidecarEnabled=false and calls BuildEnvVars instead of
+// BuildEnvVarsSidecar. Pre-fix, the SAME credential in the SAME Keeper state
+// was withheld from the parent agent (via BuildEnvVarsSidecar's
+// credEnvDeliverable gate) and handed to its sub-agent anyway (via this
+// function's total absence of any gate) — a credential with no explicit
+// credpolicy row leaked to whichever agent happened to run without starting
+// its own sidecar.
+func TestBypass_UnclassifiedTypeNeverReachesEnvViaBuildEnvVars(t *testing.T) {
+	t.Parallel()
+
+	types := append([]string{}, caseVariantSecretTypes...)
+	types = append(types, novelSecretTypes...)
+
+	for _, ty := range types {
+		name := ty
+		if name == "" {
+			name = "(empty type column)"
+		}
+		name = strings.ReplaceAll(strings.ReplaceAll(name, "\n", "\\n"), "\t", "\\t")
+
+		t.Run("activeCred/type="+name, func(t *testing.T) {
+			t.Parallel()
+			cred := gatedCred(ty)
+			env := BuildEnvVars(AgentRunRequest{AgentSlug: "riley", CLIAdapter: "CLAUDE_CODE"}, &cred)
+			if envName, leaked := envCarries(env, bypassCanary); leaked {
+				t.Errorf("type %q: BuildEnvVars wrote the unclassified activeCred's plaintext "+
+					"into the agent env as %s= — the non-sidecar path must consult credpolicy "+
+					"like every other selector (exec_env.go BuildEnvVars)", ty, envName)
+			}
+			if partName, leaked := envCarries(env, bypassPartCanary); leaked {
+				t.Errorf("type %q: BuildEnvVars wrote the unclassified activeCred's SECRET part "+
+					"into the agent env as %s=", ty, partName)
+			}
+		})
+
+		t.Run("otherCredential/type="+name, func(t *testing.T) {
+			t.Parallel()
+			cred := gatedCred(ty)
+			req := AgentRunRequest{
+				AgentSlug:   "riley",
+				CLIAdapter:  "CLAUDE_CODE",
+				Credentials: []Credential{cred},
+			}
+			// activeCred nil: this credential is only reachable through the
+			// req.Credentials loop, the second unguarded site in the function.
+			env := BuildEnvVars(req, nil)
+			if envName, leaked := envCarries(env, bypassCanary); leaked {
+				t.Errorf("type %q: BuildEnvVars wrote an unclassified credential's plaintext "+
+					"into the agent env as %s= via the req.Credentials loop — a worker sub-agent "+
+					"dispatched with SkipSidecar=true takes exactly this path, so the same "+
+					"credential in the same Keeper state is withheld from a sidecar-built parent "+
+					"env and delivered anyway to its sub-agent (exec_env.go BuildEnvVars)", ty, envName)
+			}
+			if partName, leaked := envCarries(env, bypassPartCanary); leaked {
+				t.Errorf("type %q: BuildEnvVars wrote an unclassified credential's SECRET part "+
+					"into the agent env as %s= via the req.Credentials loop", ty, partName)
+			}
+		})
 	}
 }

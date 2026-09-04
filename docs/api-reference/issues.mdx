@@ -83,10 +83,13 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `crew_id` | string | -- | Filter by crew |
 | `assignee_id` | string | -- | Filter by assignee |
 | `label` | string | -- | Filter by label name |
-| `search` | string | -- | Search in title (LIKE match) |
+| `q` | string | -- | Search in title or identifier (LIKE match), on the server |
+| `search` | string | -- | Older alias of `q` |
 | `sort` | string | `"created_at"` | Sort column: `created_at`, `updated_at`, `priority`, `sort_order` |
-| `limit` | integer | `50` | Max items (1-100) |
+| `limit` | integer | `50` | Rows per page (1-500) |
 | `offset` | integer | `0` | Pagination offset |
+
+The body stays a bare array. The total the filter matched — before `limit`/`offset` — is in the `X-Total-Count` response header, with `X-Limit` and `X-Offset` echoing the values applied. An agent assignee carries `assignee_slug` next to `assignee_name`.
 
 **Response:** `200 OK`
 
@@ -107,6 +110,11 @@ Returns issues across the workspace with filtering, sorting, and pagination.
     "assignee_type": "agent",
     "assignee_id": "agent_789",
     "assignee_name": "Backend Dev",
+    "owner": null,
+    "delegate": {
+      "id": "agent_789",
+      "name": "Backend Dev"
+    },
     "created_by": {
       "type": "agent",
       "id": "agent_789",
@@ -149,9 +157,11 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `description` | string? | Issue description |
 | `status` | string | Current status |
 | `priority` | string | Priority level |
-| `assignee_type` | string? | `"user"` or `"agent"` |
-| `assignee_id` | string? | Assignee ID |
+| `assignee_type` | string? | `"user"` or `"agent"` — legacy compatibility projection, kept for existing clients during the migration to `owner`/`delegate` below. Still written on every assignment path |
+| `assignee_id` | string? | Assignee ID — same compatibility projection as `assignee_type` |
 | `assignee_name` | string? | Resolved assignee name |
+| `owner` | object? | The issue's human owner: `{id, name}`. Independent of `delegate` — delegating an issue to an agent never changes this field (invariant: human owner, agent delegate). Omitted when nobody owns the issue |
+| `delegate` | object? | The agent an issue's work has been delegated to: `{id, name}`. Independent of `owner`. Omitted when no agent has been delegated |
 | `created_by` | object? | Who created the issue: `{type, id, name}` where `type` is `"user"` (created via the API/UI) or `"agent"` (created by an agent tool call). `name` is resolved at read time like `assignee_name`. Omitted on issues that predate creator attribution |
 | `authored_via` | string? | Creation channel: `"user_api"` (human via API/UI/slash command) or `"agent_tool_call"` (agent via sidecar). Omitted on legacy issues |
 | `due_date` | string? | Due date |
@@ -340,7 +350,12 @@ Drive an issue through agent execution: start, stop, and review.
 POST /api/v1/crews/{crewId}/issues/{identifier}/start?workspace_id={workspaceId}
 ```
 
-Starts execution of a `BACKLOG` or `TODO` issue. The issue must have an assignee. This:
+Starts execution of a `BACKLOG` or `TODO` issue. The issue must have an agent
+**delegate** — `delegate_agent_id` (or an assignee resolved from the legacy
+`assignee_type='agent'` pair), naming a live, non-held agent. A human
+**owner** with no delegate is not enough (F62: existence of *any* assignee
+used to be sufficient; it is not anymore — the delegate must specifically be
+an executable agent). This:
 
 1. Creates a synthetic chat session for the mission
 2. Creates or resets tasks (resets existing tasks to PENDING for re-runs)
@@ -360,7 +375,7 @@ Starts execution of a `BACKLOG` or `TODO` issue. The issue must have an assignee
 
 | Status | Condition |
 |---|---|
-| `400` | Issue not in BACKLOG/TODO, or no assignee |
+| `400` | Issue not in BACKLOG/TODO; or no agent delegate (`"Issue must have an agent delegate before starting"`); or the delegate is not an executable agent — soft-deleted or `PENDING_REVIEW` (`"Issue delegate is not an executable agent"`) |
 | `404` | Issue not found |
 | `409` | Issue was already started by another request |
 
@@ -373,7 +388,30 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
 ```
 
 <Warning>
-  Stops a running issue. Cancels all running/pending tasks and sets status to `CANCELLED`. Only issues in `IN_PROGRESS` or `REVIEW` status can be stopped.
+  Stops an issue cooperatively, not instantly. When the issue is
+  `IN_PROGRESS` or `REVIEW`, this happens in one transaction: every
+  `PENDING`/`IN_PROGRESS`/`BLOCKED` mission task is marked `CANCELLED`,
+  every assignment for the issue that has not reached a terminal state —
+  running, pending, or still queued behind a busy agent or the crew budget —
+  gets `cancel_requested_at` stamped,
+  and the issue itself moves to `CANCELLED`. There is no container kill —
+  a run already executing when Stop is called keeps running. An
+  assignment that hasn't started its exec yet sees the stamp first and
+  never starts. One already mid-exec finishes that exec, and only then
+  is recorded — as `CANCELLED`, never `COMPLETED` or `FAILED`, even if it
+  reports success or a late failure after Stop was called; the stamp
+  always wins. No further step is scheduled for the issue. A future hard
+  kill (interrupting a run mid-exec) is a separate, not-yet-built
+  capability.
+
+  An [`@mention`](/guides/issue-mentions) can dispatch a run on an issue
+  that was never started (`BACKLOG`/`TODO`) — that run is attributed to
+  the issue the same way a mission-task run is. Stop reaches it too: when
+  the issue is not `IN_PROGRESS`/`REVIEW` but has at least one live
+  attributed assignment, Stop stamps `cancel_requested_at` on it and
+  leaves the issue's own status unchanged (it does not move the issue to
+  `IN_PROGRESS` or `CANCELLED`). Stop only refuses with `400` when the
+  issue is neither `IN_PROGRESS`/`REVIEW` nor has any live attributed run.
 </Warning>
 
 **Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
@@ -385,13 +423,19 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
 ```json
 {
   "status": "CANCELLED",
-  "identifier": "ENG-42"
+  "identifier": "ENG-42",
+  "runs_stopped": 1
 }
 ```
 
+`status` is `CANCELLED` when the issue was `IN_PROGRESS`/`REVIEW`; otherwise
+it echoes the issue's unchanged status (e.g. `BACKLOG`) for the
+mention-dispatched-run case above. `runs_stopped` is the number of
+assignment rows stamped.
+
 | Status | Condition |
 |---|---|
-| `400` | Issue not in IN_PROGRESS or REVIEW status |
+| `400` | Issue not in IN_PROGRESS or REVIEW status, and no live run is attributed to it |
 | `404` | Issue not found |
 
 ### Review Issue
@@ -577,7 +621,17 @@ The agent executions behind an issue. Issues run on the mission engine (not pipe
 GET /api/v1/crews/{crewId}/issues/{identifier}/runs?workspace_id={workspaceId}
 ```
 
-Lists the agent task-runs for an issue — each mission task joined to its `assignments` row (execution status, timing, result, error). Newest-first, capped at 100 rows.
+Lists every run attributed to an issue — not just mission tasks joined to their `assignments` row, but also mention-dispatched runs (an agent tagged in a comment) and delegation-hop runs (a sub-agent assigned further work via `/assign` mid-mission). Newest-first.
+
+Pages like every list: `limit` (default 100, max 500) and `offset`, with the total in the `X-Total-Count`, `X-Limit` and `X-Offset` response headers. Each row is one assignment (an agent task-run) and carries:
+
+| Field | Meaning |
+|---|---|
+| `id` | The assignment id — the row's identity in this list |
+| `run_id`, `trace_id` | The journal run the assignment produced (one value, `trace_id == run id`); both absent when the assignment never reached a run |
+| `agent_id`, `agent_slug`, `agent_name` | The agent that ran it — the slug is what its page is keyed on |
+| `status`, `task`, `started_at`, `ended_at`, `duration_ms`, `result_summary`, `error_message` | The execution |
+
 
 **Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
 

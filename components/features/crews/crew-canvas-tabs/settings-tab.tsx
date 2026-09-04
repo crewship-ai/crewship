@@ -116,12 +116,16 @@ export function SettingsTab({
           <Row label="Issue prefix">
             <EditableField
               value={crew.issue_prefix ?? ""}
-              onSave={(v) => patch({ issue_prefix: (v || null) && v.toUpperCase().slice(0, 5) })}
+              // `""` is the documented clear (matches the CLI and the
+              // server's `^[A-Za-z0-9_-]{1,16}$` contract, #2035) — a JSON
+              // `null` decodes server-side as "field absent" and the PATCH
+              // silently no-ops (#2118).
+              onSave={(v) => patch({ issue_prefix: v ? v.toUpperCase().slice(0, 16) : "" })}
               ariaLabel="Issue prefix"
               mono
               placeholder="ENG"
             />
-            <span className="text-[10px] text-muted-foreground ml-1">max 5 · uppercase</span>
+            <span className="text-[10px] text-muted-foreground ml-1">max 16 · uppercase</span>
           </Row>
           <Row label="Avatar style">
             <div className="flex items-center gap-2 flex-wrap">

@@ -1,0 +1,19 @@
+-- Track a webhook's consecutive fire-failure streak, so a repeated
+-- failure can be told apart from a one-off blip without a second query
+-- racing the write (PRD-ISSUES-AND-ROUTINES-2026.md §17 A4 / F20).
+--
+-- Mirrors pipeline_schedules.consecutive_failures (v96-era column, reset
+-- to 0 on a COMPLETED/DEDUPED fire, incremented on a FAILED one — see
+-- ScheduleStore.recordRun). internal/pipeline/webhooks.go's RecordFire
+-- gets the same shape: a FAILED fire increments this column, anything
+-- else resets it to 0, and the UPDATE ... RETURNING hands the caller the
+-- POST-increment value atomically, so two fires of the same webhook
+-- racing each other cannot both read a stale pre-increment count and
+-- both decide they are the one crossing the alert threshold.
+--
+-- Nullable would be wrong here (unlike pending_runs.chain_depth,
+-- 20260807210000): every existing row's true streak is "no fire has
+-- failed since whatever it last did", i.e. 0, not "unknown" — there is
+-- no ambiguous prior state to preserve. NOT NULL DEFAULT 0 says that
+-- plainly and needs no COALESCE at every read site.
+ALTER TABLE pipeline_webhooks ADD COLUMN consecutive_fire_failures INTEGER NOT NULL DEFAULT 0;

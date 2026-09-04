@@ -55,6 +55,20 @@ func openTestDB(t *testing.T) *sql.DB {
 	if _, err := db.ExecContext(context.Background(), schemaSQL); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
+
+	// negativeDispatchCache (#2154) is a package-level map shared by every
+	// test in this binary, keyed on (workspace_id, crew_id, event). A few
+	// tests seed hooks_config with a raw INSERT rather than Register (to
+	// simulate rows Register itself would now reject — a pre-existing
+	// pattern in this package, e.g. TestDispatcherLegacyBlockingObservationDoesNotGate),
+	// which bypasses the write-side InvalidateCache calls in store.go.
+	// Without a reset here, an earlier test's negative-cache entry for the
+	// same (workspace_id, crew_id, event) — most tests reuse "ws_test" —
+	// could make a later test's raw-inserted hook silently unreachable.
+	// Each test gets its own fresh db from this helper; give it a fresh
+	// cache too so its behaviour doesn't depend on what ran earlier in the
+	// same `go test` process.
+	negativeDispatchCache = sync.Map{}
 	return db
 }
 

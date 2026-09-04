@@ -185,7 +185,7 @@ func TestCov2XIssueStart_CASBranches(t *testing.T) {
 	t.Run("update blocked 500", func(t *testing.T) {
 		h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
 		missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-92", "TODO")
-		if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent' WHERE id = ?`, workerID, missionID); err != nil {
+		if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', delegate_agent_id = ? WHERE id = ?`, workerID, workerID, missionID); err != nil {
 			t.Fatalf("assign: %v", err)
 		}
 		if _, err := h.db.Exec(`CREATE TRIGGER cov2x_iw_start BEFORE UPDATE ON missions
@@ -202,7 +202,7 @@ func TestCov2XIssueStart_CASBranches(t *testing.T) {
 	t.Run("race lost 409", func(t *testing.T) {
 		h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
 		missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-93", "TODO")
-		if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent' WHERE id = ?`, workerID, missionID); err != nil {
+		if _, err := h.db.Exec(`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', delegate_agent_id = ? WHERE id = ?`, workerID, workerID, missionID); err != nil {
 			t.Fatalf("assign: %v", err)
 		}
 		if _, err := h.db.Exec(`CREATE TRIGGER cov2x_iw_race BEFORE UPDATE ON missions

@@ -18,6 +18,17 @@ import (
 // Body (optional): { "approved": true, "payload": <any JSON> }
 //   - approved defaults to true (the common "task done → continue" case)
 //   - payload is stored on the waitpoint for the resumed step to read
+//
+// This default is the OPPOSITE of the authed sibling, ApproveWaitpoint
+// (pipelines_exec.go): that endpoint defaults an omitted `approved` to
+// false (deny). Both are intentional for their own caller population —
+// this route has no JWT (the token is the sole credential) and serves
+// external systems whose completion signal is often a bare POST with
+// no body, so it fails open; the authed route serves a JWT-holding
+// human/system making a considered decision, so it fails closed. See
+// docs/api-reference/workspaces.mdx "Defaults differ from the public
+// callback" for the full reasoning. Do not change one without the
+// other's rationale in mind.
 func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.Request) {
 	if h.waitpoints == nil {
 		replyError(w, http.StatusServiceUnavailable, "waitpoint store not wired")

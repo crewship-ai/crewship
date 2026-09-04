@@ -386,7 +386,11 @@ var crewStatusCmd = &cobra.Command{
 					if utf8.RuneCountInString(task) > 60 {
 						task = string([]rune(task)[:57]) + "..."
 					}
-					fmt.Printf("  %s%-10s%s %s -> %s: %q\n", statusColor(a.Status), a.Status, cli.Reset, a.AssignedBySlug, to, task)
+					status := a.Status
+					if a.Status == "QUEUED" && a.QueuedReason != nil {
+						status += " (" + *a.QueuedReason + ")"
+					}
+					fmt.Printf("  %s%-24s%s %s -> %s: %q\n", statusColor(a.Status), status, cli.Reset, a.AssignedBySlug, to, task)
 				}
 			} else {
 				fmt.Println("  No assignments")
@@ -416,6 +420,9 @@ type crewStatusAssignment struct {
 	Status         string  `json:"status" yaml:"status"`
 	AssignedBySlug string  `json:"assigned_by_slug" yaml:"assigned_by_slug"`
 	AssignedToSlug *string `json:"assigned_to_slug" yaml:"assigned_to_slug"`
+	// QueuedReason is set only while Status is QUEUED: crew_budget or
+	// agent_busy (#2269).
+	QueuedReason *string `json:"queued_reason,omitempty" yaml:"queued_reason,omitempty"`
 }
 
 // crewStatusEscalation is one escalation row in `crew status`.

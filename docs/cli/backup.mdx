@@ -186,6 +186,14 @@ names — the manifest still carries the source crew's slug, so on a
 same-instance restore the distinction is what keeps a sibling's backup
 from being written over the source crew's live data.
 
+A fork regenerates identity, not just primary keys: it also mints a new
+value for every column that must be unique across the whole *instance*
+rather than within a workspace — a mission's `trace_id` today — so the
+fork can live alongside the source instead of colliding with it and
+losing the row. Columns that are unique only per workspace (a crew slug,
+an issue identifier like `ENG-14`) carry across unchanged, because the
+workspace id in their key was remapped already.
+
 A forked restore also **re-signs the workspace's journal hash chain**.
 `--as-workspace` / `--as-crew` regenerate the ids that chain's HMAC
 commits to, so the bundle's signatures can no longer be checked against

@@ -35,7 +35,7 @@ func TestCredStore_SelectRefusesLapsedLease(t *testing.T) {
 		LeaseExpiresAt: rfc3339(time.Now().Add(-1 * time.Minute)),
 	}})
 
-	if got := cs.Select(ProviderAnthropic); got != nil {
+	if got := cs.Select(ProviderAnthropic, ""); got != nil {
 		t.Fatalf("Select returned a lapsed lease: %+v", got)
 	}
 }
@@ -51,7 +51,7 @@ func TestCredStore_SelectHonorsLiveLease(t *testing.T) {
 		LeaseExpiresAt: rfc3339(time.Now().Add(1 * time.Hour)),
 	}})
 
-	got := cs.Select(ProviderAnthropic)
+	got := cs.Select(ProviderAnthropic, "")
 	if got == nil || got.ID != "live" {
 		t.Fatalf("Select = %+v, want the live-lease credential", got)
 	}
@@ -64,7 +64,7 @@ func TestCredStore_SelectHonorsStandingGrant(t *testing.T) {
 	cs := NewCredStore()
 	cs.Load([]Credential{{ID: "standing", Provider: ProviderAnthropic, Token: "sk-ant-standing"}})
 
-	got := cs.Select(ProviderAnthropic)
+	got := cs.Select(ProviderAnthropic, "")
 	if got == nil || got.ID != "standing" {
 		t.Fatalf("Select = %+v, want the standing credential", got)
 	}
@@ -83,7 +83,7 @@ func TestCredStore_SelectSkipsLapsedAndFallsThrough(t *testing.T) {
 
 	// Several Selects so the round-robin visits both slots in the tier.
 	for i := 0; i < 6; i++ {
-		got := cs.Select(ProviderAnthropic)
+		got := cs.Select(ProviderAnthropic, "")
 		if got == nil {
 			t.Fatalf("Select %d returned nil while a standing key is loaded", i)
 		}
@@ -103,7 +103,7 @@ func TestCredStore_UnparseableLeaseFailsClosed(t *testing.T) {
 		LeaseExpiresAt: "not-a-timestamp",
 	}})
 
-	if got := cs.Select(ProviderAnthropic); got != nil {
+	if got := cs.Select(ProviderAnthropic, ""); got != nil {
 		t.Fatalf("Select served a credential with an unparseable lease: %+v", got)
 	}
 }
@@ -165,7 +165,7 @@ func TestCredStore_ReapKeepsLeaseDeadline(t *testing.T) {
 	if removed := cs.Reap(map[string]struct{}{"leased": {}}); removed != 0 {
 		t.Fatalf("Reap removed %d, want 0 (credential is still live server-side)", removed)
 	}
-	if got := cs.Select(ProviderAnthropic); got != nil {
+	if got := cs.Select(ProviderAnthropic, ""); got != nil {
 		t.Fatalf("lease stopped being enforced after a Reap: %+v", got)
 	}
 }

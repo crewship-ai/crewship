@@ -468,7 +468,7 @@ func TestCovIHStartLeadAssignee(t *testing.T) {
 	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
 	// Assign the LEAD agent → handler skips default task creation.
 	if _, err := h.db.ExecContext(context.Background(),
-		`UPDATE missions SET assignee_id=?, assignee_type='agent' WHERE id=?`, leadID, id); err != nil {
+		`UPDATE missions SET assignee_id=?, assignee_type='agent', delegate_agent_id=? WHERE id=?`, leadID, leadID, id); err != nil {
 		t.Fatal(err)
 	}
 	req, rr := covIHReq("POST", "", userID, wsID, "OWNER", map[string]string{"crewId": crewID, "identifier": "ENG-1"})

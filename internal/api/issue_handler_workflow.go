@@ -6,6 +6,18 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/database"
+)
+
+// Named so Start's 400 body is grep-able and a test can assert exactly
+// which one fired, without parsing writeProblem's rendered text (F62,
+// PRD-ISSUES-AND-ROUTINES-2026 work package A10). Kept distinct from each
+// other on purpose: "nobody was ever delegated" and "something was
+// delegated but it can't run work" are different operator actions.
+var (
+	errIssueStartNoDelegate       = errors.New("Issue must have an agent delegate before starting")
+	errIssueStartDelegateNotAgent = errors.New("Issue delegate is not an executable agent")
 )
 
 // ── Review — POST /api/v1/crews/{crewId}/issues/{identifier}/review ────────
@@ -54,6 +66,12 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Captured before either branch mutates the row, so the broadcast below
+	// can report the transition's origin — the SELECT above only proved
+	// REVIEW-or-IN_PROGRESS, and by the time of the broadcast the row itself
+	// already reads the new status.
+	fromStatus := status
+	var toStatus string
 
 	if req.Action == "approve" {
 		// REVIEW → DONE
@@ -64,6 +82,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			internalError(w, r, h.logger, "review: approve", err)
 			return
 		}
+		toStatus = "DONE"
 
 		// Add comment
 		commentBody := "Approved"
@@ -108,6 +127,9 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				ub.Set("assignee_type", "agent")
 				ub.Set("assignee_id", agentID)
+				// Delegation (A10, I5): reassigning to an agent sets the
+				// typed delegate column, never owner_user_id.
+				ub.Set("delegate_agent_id", agentID)
 			}
 		}
 
@@ -117,6 +139,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			internalError(w, r, h.logger, "review: request_changes", err)
 			return
 		}
+		toStatus = "TODO"
 
 		// Add comment
 		commentBody := "Changes requested"
@@ -130,6 +153,10 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
+	h.broadcastIssueEvent(wsID, "issue.status_changed", map[string]string{
+		"id": missionID, "identifier": ident, "crew_id": crewID,
+		"status": toStatus, "from": fromStatus, "to": toStatus,
+	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": req.Action})
 }
@@ -192,11 +219,11 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Load issue
 	var missionID, status, title, leadAgentID string
-	var description, assigneeID sql.NullString
+	var description, delegateAgentID sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT id, status, title, description, assignee_id, lead_agent_id
+		SELECT id, status, title, description, delegate_agent_id, lead_agent_id
 		FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
-		ident, crewID, wsID).Scan(&missionID, &status, &title, &description, &assigneeID, &leadAgentID)
+		ident, crewID, wsID).Scan(&missionID, &status, &title, &description, &delegateAgentID, &leadAgentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -212,9 +239,38 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Validate assignee
-	if !assigneeID.Valid || assigneeID.String == "" {
-		writeProblem(w, r, http.StatusBadRequest, "Issue must have an assignee before starting")
+	// 3. Validate delegate (F62): pre-A10 this checked only that
+	// assignee_id EXISTED, which passed for a user-owner with no agent
+	// delegate at all, or for an assignee_id whose row had since been
+	// hard-deleted or soft-deleted — the mission_task insert below then
+	// carried a dangling assigned_agent_id, or the LEAD-planning branch
+	// silently ran nothing. delegate_agent_id is a typed FK to agents(id)
+	// (ON DELETE SET NULL), so "it exists" is now a real question about an
+	// agent specifically, not about either half of the old polymorphic
+	// assignee — and existence still isn't executability, so the row is
+	// re-checked against deleted_at and PENDING_REVIEW below.
+	if !delegateAgentID.Valid || delegateAgentID.String == "" {
+		writeProblem(w, r, http.StatusBadRequest, errIssueStartNoDelegate.Error())
+		return
+	}
+	var delegateSlug, delegateStatus, assigneeRole string
+	err = h.db.QueryRowContext(r.Context(),
+		`SELECT slug, COALESCE(status, ''), COALESCE(agent_role, '') FROM agents WHERE id = ? AND deleted_at IS NULL`,
+		delegateAgentID.String).Scan(&delegateSlug, &delegateStatus, &assigneeRole)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusBadRequest, errIssueStartDelegateNotAgent.Error())
+			return
+		}
+		internalError(w, r, h.logger, "start issue: validate delegate", err)
+		return
+	}
+	// A HELD agent (PENDING_REVIEW — created or hired by another agent,
+	// awaiting operator approval) is not executable either; refuseHeldAgent
+	// is the same predicate DispatchMention uses to keep a held agent from
+	// being woken by a mention (assignments.go).
+	if hErr := refuseHeldAgent(delegateSlug, delegateStatus); hErr != nil {
+		writeProblem(w, r, http.StatusBadRequest, hErr.Error())
 		return
 	}
 
@@ -246,16 +302,13 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 			iteration = COALESCE(iteration, 0) + 1, updated_at = ?
 			WHERE mission_id = ?`, resetNow, missionID)
 	} else {
-		// If assignee is a LEAD agent, skip creating a default task so the mission engine
-		// triggers lead planning (with sidecar and crew context for delegation).
-		var assigneeRole string
-		_ = h.db.QueryRowContext(r.Context(),
-			`SELECT agent_role FROM agents WHERE id = ? AND deleted_at IS NULL`,
-			assigneeID.String).Scan(&assigneeRole)
-
+		// If the delegate is a LEAD agent, skip creating a default task so
+		// the mission engine triggers lead planning (with sidecar and crew
+		// context for delegation). assigneeRole was already resolved by
+		// the delegate validation above (step 3) — no second query needed.
 		if assigneeRole == "LEAD" {
-			h.logger.Info("start issue: LEAD assignee — skipping default task for lead planning",
-				"issue", ident, "assignee", assigneeID.String)
+			h.logger.Info("start issue: LEAD delegate — skipping default task for lead planning",
+				"issue", ident, "delegate", delegateAgentID.String)
 		} else {
 			taskID := generateCUID()
 			now := time.Now().UTC().Format(time.RFC3339)
@@ -266,7 +319,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 			_, err = h.db.ExecContext(r.Context(), `
 				INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, description, status, task_order, depends_on, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, 'PENDING', 1, '[]', ?, ?)`,
-				taskID, missionID, assigneeID.String, title, desc, now, now)
+				taskID, missionID, delegateAgentID.String, title, desc, now, now)
 			if err != nil {
 				h.logger.Error("start issue: create task", "error", err)
 				writeProblem(w, r, http.StatusInternalServerError, "Failed to create task")
@@ -304,7 +357,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	// 7. Broadcast
 	h.broadcastIssueEvent(wsID, "issue.started", map[string]string{"id": missionID, "identifier": ident, "status": "IN_PROGRESS"})
 
-	h.logger.Info("issue started", "identifier", ident, "agent", assigneeID.String)
+	h.logger.Info("issue started", "identifier", ident, "agent", delegateAgentID.String)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "IN_PROGRESS", "identifier": ident})
 }
 
@@ -332,32 +385,130 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// assignmentMatch is the same heuristic in both branches below: mission_id
+	// (#2256) is the direct answer and the one preferred — every mission-task
+	// run (mission_tasks.go's scheduleTask), the lead-planning run
+	// (mission_tasks_planning.go's dispatchLeadPlanning), and a mention
+	// dispatch (issue_mentions.go's DispatchMention) stamp it explicitly.
+	//
+	// chat_id/group_id stay as a FALLBACK, not a redundant belt-and-braces
+	// check: a sub-agent that delegates further via /assign while running
+	// inside a mission (or a mention-dispatched run doing the same) creates
+	// its new assignment row through AssignmentHandler.Create
+	// (assignments_run.go), and neither caller of that door threads
+	// mission_id through —
+	//
+	//   - the sidecar's handleAssign (internal/sidecar/assignment.go) never
+	//     sets "mission_id" in the body it forwards, only actor_agent_id;
+	//   - the routine dispatcher's crewshipBody (crewship_actions.go)
+	//     injects workspace_id/crew_id/agent identity but not mission_id
+	//     either.
+	//
+	// That delegated row DOES inherit chat_id = the mission id, though:
+	// s.ipc.ChatID for a mission-task or mention-dispatched container is set
+	// to the mission id (mission_tasks.go:585, issue_mentions.go's ChatID:
+	// req.MissionID), and handleAssign carries that IPC chat_id straight
+	// through as the new assignment's chat_id. So a delegated sub-task has
+	// mission_id = NULL but chat_id = the mission id, and only the
+	// heuristic finds it. Dropping the fallback would make Stop silently
+	// stop reaching every delegation hop under a mission or a mention —
+	// worse than the heuristic it would replace.
+	//
+	// NOT IN (...) rather than IN ('PENDING', 'RUNNING') so a QUEUED row
+	// (#2312) is reached too, without having to enumerate every non-terminal
+	// status by name.
+	const assignmentMatch = `(mission_id = ? OR chat_id = ? OR group_id = ?) AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')`
+
 	if status != "IN_PROGRESS" && status != "REVIEW" {
-		writeProblem(w, r, http.StatusBadRequest, "Issue must be IN_PROGRESS or REVIEW to stop (current: "+status+")")
+		// #2315: a mention (DispatchMention, issue_mentions.go) can dispatch a
+		// run on an issue that was never started — status stays BACKLOG/TODO,
+		// and there is no mission_tasks row for Stop to cancel and nothing on
+		// the issue itself to move to CANCELLED (that would be option (b),
+		// rejected: Stop must not promote the issue to IN_PROGRESS/CANCELLED
+		// for a run it never started). But the live assignment IS reachable
+		// by the same match used below, and the one door meant to reach every
+		// run attributed to an issue (#2295) must not stay closed for exactly
+		// the runs a mention starts. So: stamp whatever is live, leave the
+		// issue's status alone, and only fall back to the original refusal
+		// when nothing was actually reachable.
+		res, err := h.db.ExecContext(r.Context(), `
+			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
+			 WHERE `+assignmentMatch,
+			now, missionID, missionID, missionID)
+		if err != nil {
+			internalError(w, r, h.logger, "stop issue: stamp mention-dispatched runs", err)
+			return
+		}
+		runsStopped, _ := res.RowsAffected()
+		if runsStopped == 0 {
+			writeProblem(w, r, http.StatusBadRequest, "Issue must be IN_PROGRESS or REVIEW to stop (current: "+status+")")
+			return
+		}
+
+		h.logger.Info("issue stop: reached mention-dispatched run(s) on an issue that never started",
+			"identifier", ident, "status", status, "runs_stopped", runsStopped)
+		writeJSON(w, http.StatusOK, map[string]any{"status": status, "identifier": ident, "runs_stopped": runsStopped})
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	var runsStopped int64
 
-	// Cancel running/pending tasks
-	_, _ = h.db.ExecContext(r.Context(), `
-		UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,
-		now, missionID)
+	// One transaction: the DB-visible half of "stop" — mission_tasks,
+	// assignments, and missions — moves atomically, so no reader ever
+	// observes the issue as CANCELLED while a task or assignment it owns
+	// still looks live (or vice versa).
+	//
+	// This is Tier 1 (cooperative) only: there is no kill primitive for a
+	// shared crew container (internal/provider/container.go has
+	// Exec/ExecInspect, no Kill), so a running exec is not interrupted here.
+	// cancel_requested_at is the cooperative signal the runner checks before
+	// starting any further work (assignments_run.go's runAssignment) and
+	// consults when an already-in-flight run finishes late (finishAssignment)
+	// so it records CANCELLED instead of resurrecting the row as COMPLETED.
+	err = database.WithTx(r.Context(), h.db, func(tx *sql.Tx) error {
+		// Cancel running/pending tasks
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,
+			now, missionID); err != nil {
+			return err
+		}
 
-	// Update issue status → CANCELLED
-	_, err = h.db.ExecContext(r.Context(), `
-		UPDATE missions SET status = 'CANCELLED', completed_at = ?, updated_at = ? WHERE id = ?`,
-		now, now, missionID)
+		// Signal the live assignment(s) for this issue — see assignmentMatch
+		// above for why mission_id is matched directly with a chat_id/group_id
+		// fallback.
+		res, err := tx.ExecContext(r.Context(), `
+			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
+			 WHERE `+assignmentMatch,
+			now, missionID, missionID, missionID)
+		if err != nil {
+			return err
+		}
+		runsStopped, _ = res.RowsAffected()
+
+		// Update issue status → CANCELLED
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE missions SET status = 'CANCELLED', completed_at = ?, updated_at = ? WHERE id = ?`,
+			now, now, missionID); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		internalError(w, r, h.logger, "stop issue: update", err)
 		return
 	}
 
 	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident, "status": "CANCELLED"})
+	h.broadcastIssueEvent(wsID, "issue.status_changed", map[string]string{
+		"id": missionID, "identifier": ident, "crew_id": crewID,
+		"status": "CANCELLED", "from": status, "to": "CANCELLED",
+	})
 
 	// F4.5 mission outcomes → crew memory. CANCELLED maps to neutral.
 	emitMissionOutcomeLessonAsync(r.Context(), h.db, h.storagePath, missionID, "CANCELLED", h.logger)
 
 	h.logger.Info("issue stopped", "identifier", ident)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED", "identifier": ident})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "CANCELLED", "identifier": ident, "runs_stopped": runsStopped})
 }

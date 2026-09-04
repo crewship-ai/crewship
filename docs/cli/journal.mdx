@@ -41,7 +41,7 @@ The top-level command is the list view. `--follow` opens an SSE connection to `/
 
 Global output flags apply: `--format text|json|yaml|ndjson` (default text). Enum values for `--severity`, `--actor-type`, and `--priority` are validated client-side before the request goes out, so a typo fails fast with a list of allowed values.
 
-`--type` and `--exclude-type` are **not** validated against a list — entry types are an open set that grows with the features emitting them, and an allowlist here would reject a valid filter every time the server got ahead of the CLI. The one value they do refuse is a wildcard:
+`--type` and `--exclude-type` are **not** validated against a list — entry types are an open set that grows with the features emitting them, and an allowlist here would reject a valid filter every time the server got ahead of the CLI. This is a deliberately different rule from `crewship automation create --event`, which IS checked against `journal.AllEntryTypes` (see the automations guide): a filter that matches nothing just returns an empty result, which is visible and cheap to notice, while a saved automation trigger that can never fire is silent — worth the risk of an allowlist trailing the server's real entry types for one surface and not the other. The one value `--type`/`--exclude-type` do refuse is a wildcard:
 
 ```bash
 crewship journal --type 'approval.*'

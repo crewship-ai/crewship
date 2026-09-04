@@ -496,6 +496,18 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       .catch(() => {})
   }, [agentId, workspaceId, filesVisible, sessionId])
 
+  // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
+  // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`
+  // cannot change until a send produces a render, so two clicks inside that
+  // window both used to pass the guard and both send — these chips don't go
+  // through `useMessageSubmit`, so the #2075 `submittingRef` latch doesn't
+  // cover them. Unlike the composer, a second chip click is a different
+  // question, not a duplicate of the first — silently dropping it would be a
+  // real loss, so this disables the rail (extending the existing
+  // `isStreaming` disable backwards) rather than latching or queuing. Set
+  // synchronously before the await so the very next render reflects it.
+  const [creatingSession, setCreatingSession] = useState(false)
+
   // Bumped on every locally-sent message; arms the pin-to-top spacer so the
   // just-sent question anchors at the viewport top while the reply streams
   // in below it (the pin-to-top scroll pattern).
@@ -543,12 +555,17 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const composerInitialInput = autoSendInitial ? undefined : initialInput
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
-    if (isStreaming) return
-    if (!(await ensureSessionForSend())) return
-    sendMessage(suggestion)
-    setPinNonce((n) => n + 1)
-    onSend?.(sessionId, suggestion)
-  }, [isStreaming, sendMessage, ensureSessionForSend, sessionId, onSend])
+    if (isStreaming || creatingSession) return
+    setCreatingSession(true)
+    try {
+      if (!(await ensureSessionForSend())) return
+      sendMessage(suggestion)
+      setPinNonce((n) => n + 1)
+      onSend?.(sessionId, suggestion)
+    } finally {
+      setCreatingSession(false)
+    }
+  }, [isStreaming, creatingSession, sendMessage, ensureSessionForSend, sessionId, onSend])
 
   // This agent's questionnaire forms. Empty for every agent nobody has
   // configured — which is to say for almost all of them — and an empty list
@@ -831,7 +848,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               questions={defaultSuggestions}
               forms={askFormList}
               limit={EMPTY_STATE_CHIP_LIMIT}
-              disabled={isStreaming}
+              disabled={isStreaming || creatingSession}
               onPickQuestion={handleSuggestionClick}
               onPickForm={handleFormClick}
             />
@@ -903,7 +920,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               questions={defaultSuggestions}
               forms={askFormList}
               limit={EMPTY_STATE_CHIP_LIMIT}
-              disabled={isStreaming}
+              disabled={isStreaming || creatingSession}
               onPickQuestion={handleSuggestionClick}
               onPickForm={handleFormClick}
             />
@@ -915,6 +932,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           onPick={handleSuggestionClick}
           forms={askFormList}
           onPickForm={handleFormClick}
+          disabled={creatingSession}
           // Staging a file is the user saying what this message is about, and
           // a follow-up chip SENDS IMMEDIATELY — so leaving the chips up put
           // "Tell me more" one mis-click away from firing a message that

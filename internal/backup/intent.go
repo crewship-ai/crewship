@@ -308,9 +308,24 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// (access) / Art. 17 (deletion) compliance events with required
 	// `reason` fields — a regulator audit reading "we lost the
 	// GDPR log on a restore" is not a defensible posture.
-	"gdpr_actions":     IntentInclude,
-	"hooks_config":     IntentInclude,
-	"inbox_items":      IntentInclude,
+	"gdpr_actions": IntentInclude,
+	"hooks_config": IntentInclude,
+	"inbox_items":  IntentInclude,
+	// inbox_item_reads (A7, PRD-ISSUES-AND-ROUTINES-2026.md §9.7) is the
+	// per-user "did THIS person read THIS item" marker. IntentInclude, not
+	// operational: unlike notification_deliveries (dedup/retry state that
+	// must NOT survive a restore, or a resent notification looks like a
+	// dupe), losing this table on restore is a real UX regression a real
+	// user would notice — every previously-triaged inbox item reappears as
+	// unread for every workspace member, exactly the "silently unsubscribes
+	// everyone" harm notification_channels/user_notification_prefs are
+	// IntentInclude to avoid. No workspace_id column (scoped transitively
+	// through inbox_item_id, which is NOT NULL — see the migration and
+	// dbdump.go's workspaceFilterSQL chat_read_cursors precedent), so it
+	// also needs the explicit BackupTables + workspaceFilterSQL entries;
+	// discovery alone would find it (FK walk through inbox_items) but intent
+	// classification and the actual dump both key off those two.
+	"inbox_item_reads": IntentInclude,
 	"issue_counters":   IntentInclude,
 	"memory_proposals": IntentInclude,
 	// onboarding_proposals is the crew a setup agent proposed and a human

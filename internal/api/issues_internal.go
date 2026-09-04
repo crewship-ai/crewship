@@ -505,7 +505,7 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.created", map[string]string{"id": id, "identifier": identifier, "title": req.Title})
+	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.created", map[string]string{"id": id, "identifier": identifier, "title": req.Title, "crew_id": req.CrewID})
 
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"id":         id,
@@ -656,6 +656,10 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		if *req.AssigneeID == "" {
 			ub.SetNull("assignee_id")
 			ub.SetNull("assignee_type")
+			// A10: an explicit unassign clears whichever typed slot was
+			// occupied — the caller doesn't say which, and "assigned to
+			// nobody" must not leave a stale owner or delegate behind.
+			clearOwnerAndDelegate(ub)
 			assigneeChanged = true
 		} else {
 			assigneeType := ""
@@ -694,6 +698,9 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			}
 			ub.Set("assignee_type", assigneeType)
 			ub.Set("assignee_id", *req.AssigneeID)
+			// A10 (I5): route the write to the typed owner or delegate
+			// column alongside the legacy pair above.
+			setOwnerOrDelegate(ub, assigneeType, *req.AssigneeID)
 			assigneeChanged = true
 		}
 	}
@@ -851,6 +858,17 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	}
 	h.events().record(r.Context(), req.WorkspaceID,
 		map[string]string{"id": missionID, "identifier": ident}, evs...)
+
+	// Mirrors the human PATCH's issue.status_changed broadcast (#2257,
+	// issue_handler_update.go) — same reasoning: issue.updated above is a
+	// refetch hint, this carries crew_id/from/to so a board can move the
+	// card without one.
+	if statusChanged {
+		broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.status_changed", map[string]string{
+			"id": missionID, "identifier": ident, "crew_id": crewID,
+			"status": req.Status, "from": currentStatus, "to": req.Status,
+		})
+	}
 
 	// @mentions in the inline comment. After the commit and after the audit
 	// batch, for the same reason both of those are after the mutation: the

@@ -200,6 +200,12 @@ func resolveOneEnvVar(
 	}
 
 	logger.Debug("auto-resolved MCP credential", "env_var", envVar, "credential_id", id)
+	// The three returns above and this one all omit AgentIDs, so these entries
+	// are crew-wide (#2052). That is correct for what they are — an MCP server's
+	// ${VAR} reference, resolved into the agent's own environment rather than
+	// into the sidecar's CredStore — but it is worth stating, because
+	// resolveAgentCredentials is not the only producer of mcpCredEntry and a
+	// reader who assumes it is will conclude every entry carries ownership.
 	return mcpCredEntry{ID: id, EnvVar: envVar, Value: dec, Type: credType}, true
 }
 

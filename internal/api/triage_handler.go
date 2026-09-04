@@ -526,6 +526,11 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 			if rule.AssigneeID != nil {
 				ub.Set("assignee_id", *rule.AssigneeID)
 				ub.Set("assignee_type", "agent")
+				// Triage auto-assignment always targets an agent (see the
+				// comment on triage_rules.assignee_id near its validation
+				// above) — this is a delegation, so it sets delegate_agent_id
+				// and never owner_user_id (A10, I5).
+				ub.Set("delegate_agent_id", *rule.AssigneeID)
 			}
 			if rule.Priority != nil {
 				ub.Set("priority", *rule.Priority)

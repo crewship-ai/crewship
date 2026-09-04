@@ -288,16 +288,39 @@ export function useDeleteBackup(workspaceId: string | undefined) {
 // QA pass against the live dev3 API found every one mis-shaped, so
 // these now mirror the actual JSON wire.
 
+// TableRowCountMismatch (#2009): one table whose payload row count did not
+// match what the manifest recorded at create time.
+export interface TableRowCountMismatch {
+  table: string
+  recorded: number
+  actual: number
+}
+
 export interface VerifyBackupResponse {
-  // Whether the bundle's SHA matches what the manifest recorded.
+  // Integrity AND completeness combined (#2009): false on a checksum
+  // mismatch (as always), and also false when completeness WAS checked
+  // and diverged. Stays true when completeness could not be checked at
+  // all — see completeness_checked before reading a true `valid` as "this
+  // bundle is everything the manifest claims".
   valid: boolean
   size_bytes: number
   // Parsed manifest (same shape as useInspectBackup), echoed back so
   // a caller can show details without a second round-trip.
   manifest: BackupManifest
   // Empty string on success; populated on parse / decrypt / hash
-  // failure with the reason text.
+  // failure, or a completeness divergence, with the reason text.
   error: string
+  // Whether the payload's actual per-table row counts were compared
+  // against manifest.contents.table_row_counts. false means "not
+  // evaluated" — never "confirmed complete" and never "confirmed
+  // incomplete". Common reasons: the bundle is encrypted (verify never
+  // decrypts — run `backup restore --dry-run` for that check instead), or
+  // the bundle predates row-count recording.
+  completeness_checked: boolean
+  // Explains why, when completeness_checked is false. Empty when true.
+  completeness_skip_reason: string
+  // Non-empty implies completeness_checked is true and valid is false.
+  table_row_count_mismatches: TableRowCountMismatch[] | null
 }
 
 export interface RotateBackupRequest {

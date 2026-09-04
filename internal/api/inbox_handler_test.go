@@ -61,6 +61,13 @@ func TestInboxHandler_List_VisibilityAndFilters(t *testing.T) {
 	seedInboxItem(t, h, wsID, "hidden-role", "message", "unread", "", "GHOST", "unknown role", now)
 	// State variety on visible rows
 	seedInboxItem(t, h, wsID, "vis-read", "message", "read", "", "", "already read", now.Add(-1*time.Hour))
+	// A7: state='read' alone no longer makes an item read for every caller —
+	// it needs THIS caller's own per-user marker too (seedInboxItem only
+	// sets the shared column). Without this, vis-read would compute back to
+	// 'unread' for userID below and the unread-count assertions would drift.
+	if _, err := db.Exec(`INSERT INTO inbox_item_reads (inbox_item_id, user_id) VALUES ('vis-read', ?)`, userID); err != nil {
+		t.Fatalf("seed per-user read marker for vis-read: %v", err)
+	}
 	seedInboxItem(t, h, wsID, "vis-resolved", "message", "resolved", "", "", "done", now.Add(-2*time.Hour))
 
 	// Default state=all returns everything visible (5 rows), unread_count = 3
@@ -246,6 +253,11 @@ func TestInboxHandler_UnreadCount(t *testing.T) {
 	seedInboxItem(t, h, wsID, "u1", "message", "unread", "", "", "a", now)
 	seedInboxItem(t, h, wsID, "u2", "message", "unread", userID, "", "b", now)
 	seedInboxItem(t, h, wsID, "r1", "message", "read", "", "", "c", now)
+	// A7: give userID (the caller below) their own per-user marker so r1
+	// stays computed as 'read' for them — see the vis-read comment above.
+	if _, err := db.Exec(`INSERT INTO inbox_item_reads (inbox_item_id, user_id) VALUES ('r1', ?)`, userID); err != nil {
+		t.Fatalf("seed per-user read marker for r1: %v", err)
+	}
 	// Hidden: targeted to another user — should not appear in count
 	otherUser := "user-other2-" + fmt.Sprint(time.Now().UnixNano())
 	_, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, 'Other')`,
@@ -334,6 +346,138 @@ func TestInboxHandler_PatchState_Transitions(t *testing.T) {
 	if ra.Valid || rba.Valid || resa.Valid || resba.Valid {
 		t.Errorf("unread reset should null markers: read_at.valid=%v read_by.valid=%v resolved_at.valid=%v resolved_by.valid=%v",
 			ra.Valid, rba.Valid, resa.Valid, resba.Valid)
+	}
+}
+
+// TestInboxHandler_PerUserReadState_Independent is the A7 regression test
+// (PRD-ISSUES-AND-ROUTINES-2026.md §9.7): before inbox_item_reads existed,
+// PATCH .../state=read wrote COALESCE(read_at, now) onto the SHARED
+// inbox_items row, so the FIRST of several recipients of a role-targeted
+// item to open it marked the item read for every other recipient too — a
+// second manager's inbox silently dropped an item they had never seen.
+//
+// Two OWNERs — a role-targeted item is genuinely multi-recipient, per
+// inboxVisibilityClause's role-hierarchy comment — must see independent
+// read state on the SAME item, and the shared read_at/read_by_user_id
+// columns must keep answering their own, different question: "has ANYONE
+// dealt with this", unaffected by which user's per-user marker exists.
+func TestInboxHandler_PerUserReadState_Independent(t *testing.T) {
+	db := setupTestDB(t)
+	userA := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userA)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	userB := "user-b-" + fmt.Sprint(time.Now().UnixNano())
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, 'User B')`,
+		userB, userB+"@example.com"); err != nil {
+		t.Fatalf("seed user B: %v", err)
+	}
+
+	now := time.Now().UTC()
+	// Role-targeted at OWNER: both callers below act as OWNER, so both see
+	// it via inboxVisibilityClause's role hierarchy. kind=message (not a
+	// source-managed kind) so PATCH state=unread is not refused below.
+	seedInboxItem(t, h, wsID, "shared-1", "message", "unread", "", "OWNER", "needs a decision", now)
+
+	listState := func(userID string) string {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/api/v1/inbox?state=all", nil)
+		req = withWorkspaceUser(req, userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.List(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list (%s) status = %d body=%s", userID, rr.Code, rr.Body.String())
+		}
+		var resp inboxListResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode (%s): %v", userID, err)
+		}
+		for _, row := range resp.Rows {
+			if row.ID == "shared-1" {
+				return row.State
+			}
+		}
+		t.Fatalf("shared-1 missing from %s's list", userID)
+		return ""
+	}
+
+	if got := listState(userA); got != "unread" {
+		t.Fatalf("before anyone reads it: user A state = %s, want unread", got)
+	}
+	if got := listState(userB); got != "unread" {
+		t.Fatalf("before anyone reads it: user B state = %s, want unread", got)
+	}
+
+	// User A reads it.
+	patchState := func(userID, state string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("PATCH", "/api/v1/inbox/shared-1", strings.NewReader(`{"state":"`+state+`"}`))
+		req.SetPathValue("id", "shared-1")
+		req = withWorkspaceUser(req, userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.PatchState(rr, req)
+		return rr
+	}
+
+	if rr := patchState(userA, "read"); rr.Code != http.StatusOK {
+		t.Fatalf("user A read PATCH status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	// The defect this closes: user B must STILL see it as unread. Before
+	// A7, the shared inbox_items.state column flipped to 'read' for
+	// everyone the instant user A opened it.
+	if got := listState(userB); got != "unread" {
+		t.Errorf("user B state after ONLY user A read it = %s, want unread "+
+			"(A7 regression: one reader must not clear it for another recipient)", got)
+	}
+	if got := listState(userA); got != "read" {
+		t.Errorf("user A state after their own read = %s, want read", got)
+	}
+
+	// The shared columns still answer "has anyone dealt with this" —
+	// unchanged behaviour, a different and still-useful question.
+	var sharedState, readBy string
+	var readAt sql.NullString
+	if err := db.QueryRow(`SELECT state, read_at, COALESCE(read_by_user_id,'') FROM inbox_items WHERE id='shared-1'`).
+		Scan(&sharedState, &readAt, &readBy); err != nil {
+		t.Fatalf("readback shared columns: %v", err)
+	}
+	if sharedState != "read" || !readAt.Valid || readBy != userA {
+		t.Errorf("shared columns after A's read: state=%s read_at.valid=%v read_by=%s, want read/true/%s",
+			sharedState, readAt.Valid, readBy, userA)
+	}
+
+	// Now user B reads it too — their own state flips, A's stays read, and
+	// the shared "first reader" marker still names A (COALESCE
+	// first-write-wins, unchanged from before A7).
+	if rr := patchState(userB, "read"); rr.Code != http.StatusOK {
+		t.Fatalf("user B read PATCH status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := listState(userB); got != "read" {
+		t.Errorf("user B state after their own read = %s, want read", got)
+	}
+	if got := listState(userA); got != "read" {
+		t.Errorf("user A state after B's read = %s, want still read", got)
+	}
+	var readByAfterB string
+	if err := db.QueryRow(`SELECT COALESCE(read_by_user_id,'') FROM inbox_items WHERE id='shared-1'`).Scan(&readByAfterB); err != nil {
+		t.Fatalf("readback shared read_by after B: %v", err)
+	}
+	if readByAfterB != userA {
+		t.Errorf("shared read_by_user_id after B's read = %s, want still %s (first-write-wins, unchanged)", readByAfterB, userA)
+	}
+
+	// User A marks it unread again for THEMSELVES only — B's own read
+	// state must be untouched.
+	if rr := patchState(userA, "unread"); rr.Code != http.StatusOK {
+		t.Fatalf("user A unread PATCH status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := listState(userA); got != "unread" {
+		t.Errorf("user A state after their own unread = %s, want unread", got)
+	}
+	if got := listState(userB); got != "read" {
+		t.Errorf("user B state after A's unread = %s, want still read "+
+			"(A7: unread only clears the caller's own marker)", got)
 	}
 }
 

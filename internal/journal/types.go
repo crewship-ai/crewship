@@ -22,6 +22,14 @@ import (
 // typed helpers further below. New types are free to add as long as the
 // string is stable — callers MUST NOT rename existing ones without a
 // migration that rewrites historical rows.
+//
+// After adding, removing or renaming a constant in the block below, run
+// `go generate ./internal/journal/...` and commit registry_generated.go —
+// AllEntryTypes and Registered() are generated from this exact block (see
+// cmd/gen-journal-registry), and registry_generated_test.go fails the build
+// if the generated file falls behind this one.
+//
+//go:generate go run ../../cmd/gen-journal-registry
 type EntryType string
 
 const (
@@ -46,6 +54,7 @@ const (
 	EntryAssignmentRun    EntryType = "assignment.running"
 	EntryAssignmentDone   EntryType = "assignment.completed"
 	EntryAssignmentFail   EntryType = "assignment.failed"
+	EntryAssignmentCancel EntryType = "assignment.cancelled"
 	EntryCrewAction       EntryType = "crew.action"
 	EntryTaskDelegated    EntryType = "task.delegated"
 
@@ -360,6 +369,23 @@ const (
 	// window_end (RFC3339).
 	EntryPipelineScheduleMissedOccurrences EntryType = "pipeline.schedule.missed_occurrences"
 
+	// EntryPipelineWebhookFireFailed fires whenever a webhook fire fails
+	// to become a run — the pre-run governance/pin/concurrency/idempotency
+	// checks in FireWebhook's synchronous path, or the async dispatch
+	// goroutine's exec.Run returning a Go error (as opposed to Run
+	// executing and the ROUTINE legitimately failing, which already gets
+	// EntryPipelineRunFailed from the executor's own step loop — see
+	// pipeline.pipelineEmitContext.emitRunFailed). This is #2's other
+	// half: "the fire never became a run at all". Emitted on EVERY such
+	// failure (durable per-attempt record, mirrors
+	// EntryAutomationEnqueueFailed); the human-facing alert is separate
+	// and only raised on repetition — see alertWebhookFireFailure in
+	// internal/api/pipeline_webhooks.go. Payload carries webhook_id,
+	// pipeline_id (when known), run_id (when a run was allocated),
+	// reason, and consecutive_failures (the fresh streak length read
+	// back from pipeline_webhooks.consecutive_fire_failures).
+	EntryPipelineWebhookFireFailed EntryType = "pipeline.webhook.fire_failed"
+
 	// EntryPipelineRunsSwept fires when the per-workspace pipeline_runs
 	// retention sweep (internal/pipeline/retention.go) deletes one or more
 	// terminal runs older than the configured window. run_tags cascade-
@@ -387,6 +413,22 @@ const (
 	// dispatcher refuses at the same ceiling, through the same
 	// pipeline.GuardChainDepth, and emits the same type.
 	EntryAutomationDepthExceeded EntryType = "automation.depth_exceeded"
+
+	// EntryAutomationEnqueueFailed fires when a matched automation rule
+	// could not park its deferred run — Flush's Enqueue call returned an
+	// error, meaning the run the rule decided to make genuinely never
+	// exists anywhere (#2's F20: "the same file emits journal entries for
+	// depth and throttle cases... and a bare logger.Error for this one").
+	// Emitted on EVERY enqueue failure, same as EntryAutomationDepthExceeded
+	// is emitted on every refused hop — this is the durable audit trail.
+	// The human-facing inbox alert is a SEPARATE, throttled decision (see
+	// Registry.emitEnqueueFailed): it fires only once a rule has failed to
+	// enqueue automationEnqueueFailureAlertThreshold times in a row, so one
+	// transient DB blip does not page anyone. Payload carries automation_id,
+	// automation_name, routine_slug, workspace_id, error, and
+	// consecutive_failures (the in-memory streak length at the time of this
+	// failure).
+	EntryAutomationEnqueueFailed EntryType = "automation.enqueue_failed"
 
 	// EntryRunSessionInit is the provenance of the agent CLI session a run
 	// happens inside, taken from the CLI's own session-init event and written
@@ -537,9 +579,25 @@ const (
 	// Chat — user↔agent conversation turns. Captures the trigger that
 	// kicks off a series of agent actions, so the Timeline can answer
 	// "what did the user ask?" alongside "what did the agent do?".
-	// Payload contains the message text capped to PreviewLen chars in
-	// summary; full content in payload.content. chat_id + agent_id +
-	// (optional) crew_id wire it back to the conversation surface.
+	// chat_id + agent_id + (optional) crew_id wire both entries back to
+	// the conversation surface.
+	//
+	// The two are NOT symmetrical, and this comment used to claim they
+	// were ("full content in payload.content"), which was wrong for the
+	// user entry even before #2229 and is the kind of promise a reader
+	// gets written against:
+	//
+	//   - chat.user_message carries NO message text at all. Its payload
+	//     is chat_id + agent_slug + length_chars, and its summary reads
+	//     "user → <slug>: <n> characters". The text was removed rather
+	//     than scrubbed because this table is hash-chained, append-only
+	//     and skipped by the GDPR erasure cascade, while the chat the
+	//     entry points at is erasable (#2229).
+	//   - chat.agent_response DOES carry payload.content: up to 8 KB of
+	//     the agent's reply, scrubbed at the stream tap. It is the
+	//     agent's own output rather than text a human typed, so the
+	//     pasted-secret argument does not transfer — but it is text, and
+	//     the scrubber is the only control on it.
 	EntryChatUserMessage   EntryType = "chat.user_message"
 	EntryChatAgentResponse EntryType = "chat.agent_response"
 

@@ -133,6 +133,21 @@ func seedInboxRows(now time.Time) []seedRow {
 			sender: "Scheduler", priority: "urgent",
 			payload: map[string]any{"schedule_id": "sch_seed_2"},
 		},
+		// The two trigger kinds that fire and never become a run (A4): a webhook
+		// whose fire failed three times in a row, and an automation whose match
+		// could not be enqueued three times in a row. Both route to routines.missed.
+		{
+			kind: inbox.KindWebhookFireFailed, title: "Webhook fire failed: github-push",
+			body:   "Three consecutive fires did not become a run. Check the target routine and the fire log.",
+			sender: "Webhooks", priority: "high",
+			payload: map[string]any{"webhook_id": "whk_seed_1"},
+		},
+		{
+			kind: inbox.KindAutomationEnqueueFailed, title: "Automation enqueue failed: on-issue-created",
+			body:   "The rule matched three times and the run could not be enqueued each time.",
+			sender: "Automations", priority: "high",
+			payload: map[string]any{"automation_id": "aut_seed_1"},
+		},
 		// Three source-less curator advisories: no decision endpoint, nobody
 		// blocked. They exist so the grouping rule has something to group.
 		{kind: inbox.KindEscalation, title: "Skill check: could not evaluate invoice-parser", sender: "Skill Curator", priority: "medium"},

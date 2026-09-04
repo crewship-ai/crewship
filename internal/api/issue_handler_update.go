@@ -131,6 +131,20 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ub.Set("assignee_type", assigneeType)
 		assigneeTypeSet = true
+		// A10 (I5): route the write to the typed owner or delegate column
+		// alongside the legacy pair above — never both, never the other one.
+		setOwnerOrDelegate(ub, assigneeType, *req.AssigneeID)
+	} else if req.AssigneeID != nil {
+		// Explicit unassign (assignee_id: ""): clear whichever typed slot
+		// was occupied, identical to the internal agent-facing Update
+		// (issues_internal.go) — the caller doesn't say which type was
+		// assigned, and "assigned to nobody" must not leave a stale owner
+		// or delegate behind (A10, I5). Without this the legacy pair below
+		// goes empty while owner_user_id/delegate_agent_id stay stale, and
+		// the compatibility projection and the typed columns disagree.
+		ub.SetNull("assignee_type")
+		assigneeTypeSet = true
+		clearOwnerAndDelegate(ub)
 	}
 	if req.AssigneeType != nil && !assigneeTypeSet {
 		ub.Set("assignee_type", *req.AssigneeType)
@@ -342,6 +356,21 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	h.events().record(r.Context(), wsID, map[string]string{"id": missionID}, evs...)
 
+	// A distinct, second broadcast for a status transition specifically
+	// (#2257). issue.updated (just above) tells a subscriber "refetch this
+	// issue"; issue.status_changed additionally carries the from/to and
+	// crew_id a Kanban-style board needs to move a card between columns, or
+	// to tell whether the change is even on the screen it has open, without
+	// fetching first. Fired only when the PATCH actually carried a status
+	// change — a title/label/comment-only PATCH must not claim one that
+	// never happened.
+	if req.Status != nil {
+		h.broadcastIssueEvent(wsID, "issue.status_changed", map[string]string{
+			"id": missionID, "identifier": ident, "crew_id": crewID,
+			"status": *req.Status, "from": currentStatus, "to": *req.Status,
+		})
+	}
+
 	// Return updated issue
 	issue, err := scanIssueRow(h.db.QueryRowContext(r.Context(),
 		issueSelectQuery()+` WHERE m.id = ?`, missionID))
@@ -448,7 +477,7 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.broadcastIssueEvent(wsID, "issue.deleted", map[string]string{"identifier": ident})
+	h.broadcastIssueEvent(wsID, "issue.deleted", map[string]string{"identifier": ident, "crew_id": crewID})
 
 	w.WriteHeader(http.StatusNoContent)
 }

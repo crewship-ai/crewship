@@ -5,11 +5,13 @@ import { useSearchParams } from "next/navigation"
 import { Gavel, RefreshCw, ShieldCheck, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { ApprovalCard } from "@/components/features/approvals/approval-card"
 import { ApprovalDetail } from "@/components/features/approvals/approval-detail"
 import { useApprovals } from "@/hooks/use-approvals"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { isAdminTier } from "@/lib/permissions/tiers"
 import type { ApprovalRow, ApprovalStatus } from "@/lib/types/approvals"
 
 type FilterKey = "pending" | "decided" | "all"
@@ -25,25 +27,39 @@ const FILTERS: { key: FilterKey; label: string; apiStatus: ApprovalStatus }[] = 
  * approvals; clicking a card opens the right-side detail sheet.
  */
 export default function ApprovalsPage() {
-  const { workspaceId } = useWorkspace()
+  const { workspaceId, role, loading: workspaceLoading } = useWorkspace()
   const searchParams = useSearchParams()
   const agentFilter = searchParams.get("agent_id")
   const [filter, setFilter] = useState<FilterKey>("pending")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
 
+  // GET /api/v1/approvals is roleManage (OWNER/ADMIN) server-side (#2233) —
+  // the same floor Decide/Cancel already had. Below that, don't even fetch
+  // (an enabled:false hook returns no error, so this can't be mistaken for
+  // the "not configured" empty state) and render an explicit access
+  // message instead of an empty "Inbox clear" that would misleadingly read
+  // as "there is nothing pending" rather than "you can't see this".
+  const canRead = isAdminTier(role)
   const apiStatus = FILTERS.find((f) => f.key === filter)?.apiStatus ?? "pending"
   const { rows, loading, error, notConfigured, refresh, patchRow } = useApprovals({
     status: apiStatus,
     workspaceId,
     pollMs: 15000,
-    enabled: Boolean(workspaceId),
+    enabled: Boolean(workspaceId) && canRead,
   })
 
   // "Decided" is pending=no — filter client-side because the backend
   // enumerates each decided status separately. Plus honour ?agent_id= from
   // the Crews inbox deep-link so clicking a row count lands on the right
   // filter rather than the unfiltered queue.
+  //
+  // Both useMemo calls stay ABOVE the early returns below: React's Rules of
+  // Hooks require every hook to run, in the same order, on every render, and
+  // a role that resolves from "still loading" (null) to a real value
+  // between renders would otherwise change how many hooks this component
+  // calls. rows is always [] while canRead is false (useApprovals is
+  // enabled:false), so this costs nothing for a non-admin viewer.
   const visibleRows = useMemo(() => {
     let out = rows
     if (filter === "decided") out = out.filter((r) => r.status !== "pending")
@@ -55,6 +71,40 @@ export default function ApprovalsPage() {
     () => visibleRows.find((r) => r.id === selectedId) ?? null,
     [visibleRows, selectedId],
   )
+
+  // useWorkspace().role is null while the workspace snapshot loads, and
+  // isAdminTier(null) is false — so without this check, an OWNER/ADMIN
+  // would flash "Approvals is an admin surface" on every load before role
+  // resolves. Wait for the workspace fetch to finish before trusting a
+  // "not admin" reading of a still-unknown role.
+  if (workspaceLoading) {
+    return (
+      <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 min-h-[calc(100vh-48px)]">
+        <aside className="w-full lg:w-56 shrink-0 space-y-3">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-28 w-full" />
+        </aside>
+        <div className="flex-1 min-w-0 space-y-3">
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      </div>
+    )
+  }
+
+  if (!canRead) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-24 text-center">
+        <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
+          <Gavel className="h-4 w-4 text-muted-foreground/60" />
+        </div>
+        <div className="text-sm font-medium text-foreground/80">Approvals is an admin surface</div>
+        <div className="text-[11px] text-muted-foreground max-w-sm">
+          Only workspace owners and admins can review HITL approval requests.
+        </div>
+      </div>
+    )
+  }
 
   const pendingCount = rows.filter((r) => r.status === "pending").length
 

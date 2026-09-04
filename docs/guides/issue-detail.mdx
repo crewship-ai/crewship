@@ -105,6 +105,12 @@ them together would report that a schedule did something a
 [rule](/guides/automations) did. An `automation` row names the rule.
 </Warning>
 
+## From the issue to its runs and its journal
+
+The **Runs** card lists every run on the issue, newest first — not the latest one alone. Each row names the agent (a link to its page when the slug is known), the task, the status as a word, when it started, how long it took, and **Open run**, which opens that run on the Activity page. A row whose assignment never reached a run says so instead of pretending to link. The card's footer links the issue's journal (`/journal?mission_id=ENG-4` — the identifier works, the server resolves it) and every run of the issue in Activity.
+
+The rail's **Related** card gathers the same links in one place: the crew, the agent, the run in flight, the journal trace, and Activity. The crew and the assignee in the identity row and in Properties are links too. Together with the run page's own Related row and the journal's issue pill, this is the loop the audit found broken: issue → run → journal → issue, with every leg a link.
+
 ## The layout
 
 Everything on the surface is a card, including **Run activity** — it used to
@@ -169,6 +175,22 @@ Name, icon, colour, status, priority, health, lead and **dates** are all
 editable. Dates are new: the old rail drew a row reading "Set dates" that had
 nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
 `target_date` all along.
+
+## Known limits in 1.0
+
+- **Stop is cooperative, not instant.** Stop cancels every step that has not
+  started and marks the issue `CANCELLED`; a step whose agent is already
+  executing finishes that execution first and is then recorded as
+  `CANCELLED` regardless of what it reports. There is no container kill.
+  Stop also reaches a run an `@mention` dispatched on an issue that was
+  never started (`BACKLOG`/`TODO`) — the run is stamped the same way, but
+  the issue's own status is left unchanged rather than moved to
+  `CANCELLED`. The full contract is in the
+  [issues API reference](/api-reference/issues).
+- **Two words for "finished".** Issues move to `DONE`; the engine records a
+  mission as `COMPLETED`. Both appear in the same status column and every
+  shipped filter treats them alike, so a reader of the raw API will see both.
+  Collapsing them is a 1.1 refactor.
 
 ## Where the code is
 

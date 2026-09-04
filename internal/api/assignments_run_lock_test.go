@@ -1,0 +1,171 @@
+package api
+
+// F51: chatbridge.tryMarkRunStart enforced "at most one live RunAgent exec
+// per chat" but had exactly one caller (chatbridge.Bridge.HandleChatMessage).
+// runAssignment — the door /assign, DispatchMention (@mention), and the
+// mission engine's DispatchAssignment all funnel through — never consulted
+// it, so two concurrent assignment runs (or an assignment racing a chat
+// send) for the SAME agent could both reach orchestrator.RunAgent and race
+// the identical tmux session name + /tmp scratch files
+// (orchestrator.TmuxSessionName is keyed by agent slug alone). These tests
+// prove runAssignment now shares chatbridge.AgentRunLock — keyed by target
+// AgentID — with the chat-send path.
+//
+// F51 follow-up: losing the lock is NOT a failure — the work still needs
+// doing, it just has to wait its turn behind the agent's own live run. A
+// losing call is requeued (status QUEUED, queued_at stamped) rather than
+// marked FAILED, so it is picked up again once the lock frees (see
+// assignments_lock_requeue_test.go for the drain-path tests) instead of
+// permanently polluting run history with a fake failure.
+//
+// These tests fail to compile against the pre-F51 tree: h.SetAgentRunLock and
+// chatbridge.AgentRunLock did not exist, and runAssignment had no exclusivity
+// check to prove.
+
+import (
+	"context"
+	"database/sql"
+	"sync"
+	"testing"
+
+	"github.com/crewship-ai/crewship/internal/chatbridge"
+)
+
+func lockQueuedAt(t *testing.T, db *sql.DB, id string) (status string, queuedAt sql.NullString) {
+	t.Helper()
+	if err := db.QueryRow(
+		`SELECT status, queued_at FROM assignments WHERE id = ?`, id,
+	).Scan(&status, &queuedAt); err != nil {
+		t.Fatalf("query %s: %v", id, err)
+	}
+	return status, queuedAt
+}
+
+// TestRunAssignment_ConcurrentSameAgent_SecondIsRefused simulates the real
+// production race deterministically: goroutine A's TryStart on the shared
+// per-agent lock always wins some microseconds before goroutine B's, so by
+// the time B's runAssignment call evaluates the lock, A's claim is already
+// held. Pre-claiming the lock directly reproduces exactly that ordering
+// without depending on goroutine-scheduling luck (which would make the test
+// flaky in either direction). h.orch is left nil, so if the guard did NOT
+// fire first, the row would fail with "orchestrator not available" instead
+// of landing QUEUED — a different, distinguishable outcome — proving the
+// busy check runs before any orchestrator work is attempted, not after it
+// fails for some unrelated cause.
+func TestRunAssignment_ConcurrentSameAgent_SecondIsRefused(t *testing.T) {
+	t.Parallel()
+	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
+	lock := chatbridge.NewAgentRunLock()
+	h.SetAgentRunLock(lock)
+
+	insertAssignment(t, h.db, "asg-lock-1", wsID, chatID, leadID, workerID, "PENDING")
+	body := createAssignmentBody{
+		TargetSlug: "asg-worker", Task: "t", CrewID: crewID, WorkspaceID: wsID, ChatID: chatID,
+	}
+	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
+
+	// Simulate an already-live run for this agent (a chat send, or an
+	// earlier assignment, currently holding the same slot runAssignment is
+	// about to try to claim).
+	if !lock.TryStart(workerID) {
+		t.Fatal("setup: lock should be free before the test claims it")
+	}
+	t.Cleanup(func() { lock.End(workerID) })
+
+	h.runAssignment(context.Background(), "asg-lock-1", body, target)
+
+	status, queuedAt := lockQueuedAt(t, h.db, "asg-lock-1")
+	if status != "QUEUED" {
+		t.Fatalf("status = %q, want QUEUED (losing the lock is not a failure — it waits its turn)", status)
+	}
+	if !queuedAt.Valid || queuedAt.String == "" {
+		t.Errorf("queued_at not stamped — the FIFO pump order will be broken")
+	}
+	if lock.InFlight("asg-run-should-not-have-claimed") {
+		t.Error("runAssignment must not have claimed any OTHER key")
+	}
+}
+
+// TestRunAssignment_LockFreedAfterRun_NextCallProceeds is the control: once
+// the holder releases its claim, a subsequent runAssignment for the same
+// agent must proceed normally (reach the orchestrator-availability check)
+// rather than being permanently wedged "busy". Guards against an
+// implementation that claims but never releases.
+func TestRunAssignment_LockFreedAfterRun_NextCallProceeds(t *testing.T) {
+	t.Parallel()
+	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
+	lock := chatbridge.NewAgentRunLock()
+	h.SetAgentRunLock(lock)
+
+	insertAssignment(t, h.db, "asg-lock-2", wsID, chatID, leadID, workerID, "PENDING")
+	body := createAssignmentBody{
+		TargetSlug: "asg-worker", Task: "t", CrewID: crewID, WorkspaceID: wsID, ChatID: chatID,
+	}
+	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
+
+	// No pre-held claim this time — the lock is free.
+	h.runAssignment(context.Background(), "asg-lock-2", body, target)
+
+	var status, errMsg string
+	if err := h.db.QueryRow(
+		`SELECT status, COALESCE(error_message,'') FROM assignments WHERE id = 'asg-lock-2'`,
+	).Scan(&status, &errMsg); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if status != "FAILED" || errMsg != "orchestrator not available" {
+		t.Errorf("status=%q err=%q, want the normal (nil-orchestrator) failure — the lock must release "+
+			"after the run finishes, not stay claimed", status, errMsg)
+	}
+	if lock.InFlight(workerID) {
+		t.Error("lock still reports the agent in-flight after runAssignment returned")
+	}
+}
+
+// TestRunAssignment_TwoRealGoroutines_MutualExclusion launches two genuine
+// concurrent runAssignment calls for the SAME agent (two different
+// assignment rows, as two independent dispatch doors would produce) while
+// the lock is held for the whole window, so both must lose it: neither may
+// reach the orchestrator, and both must land QUEUED rather than FAILED or
+// silently dropped. Run under -race to catch any unsynchronized access the
+// wiring might introduce.
+func TestRunAssignment_TwoRealGoroutines_MutualExclusion(t *testing.T) {
+	t.Parallel()
+	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
+	lock := chatbridge.NewAgentRunLock()
+	h.SetAgentRunLock(lock)
+
+	insertAssignment(t, h.db, "asg-lock-3a", wsID, chatID, leadID, workerID, "PENDING")
+	insertAssignment(t, h.db, "asg-lock-3b", wsID, chatID, leadID, workerID, "PENDING")
+	target := targetAgentInfo{ID: workerID, Slug: "asg-worker", Name: "Worker", CrewSlug: "asg"}
+	mkBody := func() createAssignmentBody {
+		return createAssignmentBody{TargetSlug: "asg-worker", Task: "t", CrewID: crewID, WorkspaceID: wsID, ChatID: chatID}
+	}
+
+	// Hold the lock for the duration of both calls so their entry into
+	// runAssignment is forced to overlap the same live claim, deterministically
+	// reproducing the collision window instead of hoping two fast goroutines
+	// happen to race within it.
+	if !lock.TryStart(workerID) {
+		t.Fatal("setup: lock should be free")
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); h.runAssignment(context.Background(), "asg-lock-3a", mkBody(), target) }()
+	go func() { defer wg.Done(); h.runAssignment(context.Background(), "asg-lock-3b", mkBody(), target) }()
+	wg.Wait()
+	lock.End(workerID)
+
+	for _, id := range []string{"asg-lock-3a", "asg-lock-3b"} {
+		status, queuedAt := lockQueuedAt(t, h.db, id)
+		if status != "QUEUED" {
+			t.Errorf("%s: status = %q, want QUEUED — both calls raced a held claim and neither should have "+
+				"reached the orchestrator, but losing the lock is not a failure", id, status)
+		}
+		if !queuedAt.Valid || queuedAt.String == "" {
+			t.Errorf("%s: queued_at not stamped", id)
+		}
+	}
+	if lock.InFlight(workerID) {
+		t.Error("lock must be free once every holder (test + both goroutines) released")
+	}
+}

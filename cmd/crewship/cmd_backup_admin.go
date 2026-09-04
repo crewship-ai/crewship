@@ -15,9 +15,17 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
+// verifyRowCountMismatch mirrors backup.TableRowCountMismatch for CLI JSON
+// decode.
+type verifyRowCountMismatch struct {
+	Table    string `json:"table"`
+	Recorded int    `json:"recorded"`
+	Actual   int    `json:"actual"`
+}
+
 var backupVerifyCmd = &cobra.Command{
 	Use:   "verify <file>",
-	Short: "Verify a bundle's SHA-256 checksum without restoring",
+	Short: "Verify a bundle's checksum and, when possible, its row-count completeness",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -35,19 +43,37 @@ var backupVerifyCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			Valid     bool   `json:"valid"`
-			SizeBytes int64  `json:"size_bytes"`
-			Error     string `json:"error"`
+			Valid                   bool                     `json:"valid"`
+			SizeBytes               int64                    `json:"size_bytes"`
+			Error                   string                   `json:"error"`
+			CompletenessChecked     bool                     `json:"completeness_checked"`
+			CompletenessSkipReason  string                   `json:"completeness_skip_reason"`
+			TableRowCountMismatches []verifyRowCountMismatch `json:"table_row_count_mismatches"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		if out.Valid {
-			cli.PrintSuccess(fmt.Sprintf("VALID — %s (%s)", args[0], formatBytes(out.SizeBytes)))
-			return nil
+		if !out.Valid {
+			cli.PrintError(fmt.Sprintf("INVALID — %s: %s", args[0], out.Error))
+			for _, m := range out.TableRowCountMismatches {
+				fmt.Fprintf(os.Stderr, "  %s: manifest recorded %d row(s), payload carries %d\n", m.Table, m.Recorded, m.Actual)
+			}
+			return fmt.Errorf("bundle verification failed")
 		}
-		cli.PrintError(fmt.Sprintf("INVALID — %s: %s", args[0], out.Error))
-		return fmt.Errorf("bundle verification failed")
+		// #2009: Valid=true is integrity, and completeness when it could be
+		// checked — but it says nothing at all when it could not be, and
+		// that distinction is the whole point of this change. A silent
+		// "VALID" here is exactly the bug report this feature fixes.
+		switch {
+		case out.CompletenessChecked:
+			cli.PrintSuccess(fmt.Sprintf("VALID — %s (%s) — payload row counts match the manifest", args[0], formatBytes(out.SizeBytes)))
+		case out.CompletenessSkipReason != "":
+			cli.PrintSuccess(fmt.Sprintf("VALID — %s (%s) — checksum only", args[0], formatBytes(out.SizeBytes)))
+			cli.PrintWarning("Completeness NOT verified: " + out.CompletenessSkipReason)
+		default:
+			cli.PrintSuccess(fmt.Sprintf("VALID — %s (%s)", args[0], formatBytes(out.SizeBytes)))
+		}
+		return nil
 	},
 }
 

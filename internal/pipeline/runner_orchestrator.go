@@ -71,6 +71,19 @@ type OrchestratorRunner struct {
 	// (which can import internal/api's BuildCrewRuntimeConfig without the
 	// import cycle internal/pipeline → internal/api would create).
 	crewRuntime func(ctx context.Context, crewID, workspaceID string) (provider.CrewConfig, error)
+	// agentRunLock: see OrchestratorRunnerDeps.AgentRunLock's doc. May be
+	// wired post-construction via SetAgentRunLock, the same "constructed
+	// before the lock exists at boot" pattern api.AssignmentHandler and
+	// scheduler.Scheduler use.
+	agentRunLock *chatbridge.AgentRunLock
+}
+
+// SetAgentRunLock wires the cross-surface per-agent exclusivity lock after
+// construction — needed because cmd_start.go builds the OrchestratorRunner
+// before chatbridge.Bridge exists. See OrchestratorRunnerDeps.AgentRunLock's
+// doc.
+func (r *OrchestratorRunner) SetAgentRunLock(l *chatbridge.AgentRunLock) {
+	r.agentRunLock = l
 }
 
 // OrchestratorRunnerDeps bundles the runner's dependencies. Passed
@@ -91,6 +104,13 @@ type OrchestratorRunnerDeps struct {
 	// steps (see the field doc on OrchestratorRunner). Optional: nil falls
 	// back to a minimal {ID} config.
 	CrewRuntime func(ctx context.Context, crewID, workspaceID string) (provider.CrewConfig, error) // optional
+	// AgentRunLock is the cross-surface, per-agent exclusivity lock shared
+	// with chatbridge.Bridge and api.AssignmentHandler (#2269 follow-up,
+	// defect 6). An agent_run routine step and a live assignment/chat turn
+	// for the SAME agent both exec into the identical tmux session — see
+	// AgentRunLock's own doc for why. Optional: nil is fail-open (not
+	// wired), same convention as the other two doors.
+	AgentRunLock *chatbridge.AgentRunLock // optional
 }
 
 // NewOrchestratorRunner returns a runner wired against the supplied
@@ -113,15 +133,16 @@ func NewOrchestratorRunner(deps OrchestratorRunnerDeps) (*OrchestratorRunner, er
 		deps.Logger = slog.Default()
 	}
 	return &OrchestratorRunner{
-		db:          deps.DB,
-		orch:        deps.Orch,
-		container:   deps.Container,
-		resolver:    deps.Resolver,
-		logWriter:   deps.LogWriter,
-		convStore:   deps.ConvStore,
-		journalE:    deps.Journal,
-		logger:      deps.Logger,
-		crewRuntime: deps.CrewRuntime,
+		db:           deps.DB,
+		orch:         deps.Orch,
+		container:    deps.Container,
+		resolver:     deps.Resolver,
+		logWriter:    deps.LogWriter,
+		convStore:    deps.ConvStore,
+		journalE:     deps.Journal,
+		logger:       deps.Logger,
+		crewRuntime:  deps.CrewRuntime,
+		agentRunLock: deps.AgentRunLock,
 	}, nil
 }
 
@@ -164,6 +185,16 @@ func (r *OrchestratorRunner) PrewarmCrew(ctx context.Context, crewID, workspaceI
 	return nil
 }
 
+// ErrAgentBusy is returned by RunStep when the step's target agent already
+// has a live run in progress elsewhere (a chat send, an assignment/@mention
+// dispatch, or another routine) holding chatbridge.AgentRunLock — see its
+// doc comment for why two concurrent execs into the same agent's tmux
+// session corrupt each other. Treated like any other transient step error:
+// the routine's own retry/failure policy decides what happens next: this
+// package adds no bespoke requeue path of its own (#2269 follow-up, defect
+// 6) the way the assignment queue's requeueForLockLoss does.
+var ErrAgentBusy = errors.New("pipeline: target agent has a live run in progress elsewhere")
+
 // RunStep is the AgentRunner contract entry point. Each call is one
 // LLM-equivalent invocation against the agent identified by the
 // (AuthorCrewID, AgentSlug) pair on the request. We deliberately
@@ -180,6 +211,18 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	agentID, err := r.resolveAgentID(ctx, req.WorkspaceID, req.AuthorCrewID, req.AgentSlug)
 	if err != nil {
 		return AgentStepResult{}, fmt.Errorf("resolve agent: %w", err)
+	}
+
+	// Cross-surface exclusivity (#2269 follow-up, defect 6): checked right
+	// after agentID resolves, before the container/chat cost below is
+	// spent on a step that can't run yet — same cheapest-check-first
+	// placement api.AssignmentHandler.runAssignment uses for its own
+	// TryStart check. Held for the rest of this call via defer.
+	if r.agentRunLock != nil {
+		if !r.agentRunLock.TryStart(agentID) {
+			return AgentStepResult{}, fmt.Errorf("agent %s: %w", agentID, ErrAgentBusy)
+		}
+		defer r.agentRunLock.End(agentID)
 	}
 
 	// 2. ResolveAgent → ChatInfo with credentials, system prompt,

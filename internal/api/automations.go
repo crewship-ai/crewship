@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/automation"
@@ -63,13 +62,6 @@ type automationBody struct {
 	DebounceSeconds *int                `json:"debounce_seconds,omitempty"`
 	MaxPerHour      *int                `json:"max_per_hour,omitempty"`
 }
-
-// eventTypePattern is a shape check, not a membership check: the journal has
-// 117 entry types and no exported registry of them, so the honest guarantee
-// here is "this looks like an entry type", not "this is one". A typo produces
-// a rule that never fires, which is why the docs tell you to confirm the type
-// with `crewship journal --type <t>` before creating the automation.
-var eventTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$`)
 
 // List serves GET /api/v1/automations.
 func (h *AutomationHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -128,10 +120,14 @@ func (h *AutomationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if u := UserFromContext(r.Context()); u != nil {
 		a.CreatedBy = u.ID
 	}
-	if err := h.validate(r.Context(), workspaceID, a.EventType, a.Action.RoutineSlug); err != nil {
+	if err := h.checkRoutineExists(r.Context(), workspaceID, a.Action.RoutineSlug); err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// event_type registration and matcher.payload_equals key validation
+	// happen inside automation.Automation.Validate(), which Store.Create
+	// calls — see its doc comment for why both checks live there now rather
+	// than here.
 	created, err := h.store.Create(r.Context(), a)
 	if err != nil {
 		if isAutomationUserError(err) {
@@ -160,6 +156,13 @@ func (h *AutomationHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	if body.EventType != nil {
+		// Consistent with Create, which trims event_type before validating
+		// it — a PATCH that only changes whitespace around an otherwise
+		// valid type should not save a value Registered will reject.
+		trimmed := strings.TrimSpace(*body.EventType)
+		body.EventType = &trimmed
+	}
 	patch := automation.Patch{
 		Name:            body.Name,
 		Enabled:         body.Enabled,
@@ -169,17 +172,26 @@ func (h *AutomationHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		DebounceSeconds: body.DebounceSeconds,
 		MaxPerHour:      body.MaxPerHour,
 	}
-	eventType, routine := "", ""
-	if body.EventType != nil {
-		eventType = *body.EventType
+	// The routine-existence check is the one thing PATCH validates outside
+	// automation.Automation.Validate() (see its doc comment: Validate is
+	// pure and cannot make a DB read), and it is the one place PATCH must
+	// validate ONLY what the body carries, not the rule's stored state. A
+	// rule's routine can be soft-deleted after the rule is created —
+	// Store.Update and Store.ListActive both deliberately tolerate that
+	// dangling reference — so loading the current row to re-check a routine
+	// slug the caller did not even send would turn `PATCH {"enabled":
+	// false}` on such a rule into a 400 with no way out but DELETE. Only
+	// check when this request is actually setting a routine.
+	if body.Action != nil && body.Action.RoutineSlug != "" {
+		if err := h.checkRoutineExists(r.Context(), workspaceID, body.Action.RoutineSlug); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
-	if body.Action != nil {
-		routine = body.Action.RoutineSlug
-	}
-	if err := h.validate(r.Context(), workspaceID, eventType, routine); err != nil {
-		replyError(w, http.StatusBadRequest, err.Error())
-		return
-	}
+	// event_type registration and matcher.payload_equals key validation of
+	// the EFFECTIVE (merged) row happen inside Automation.Validate(), which
+	// Store.Update calls after applying this same patch — no separate
+	// load-and-merge needed here.
 	updated, err := h.store.Update(r.Context(), workspaceID, id, patch)
 	switch {
 	case errors.Is(err, automation.ErrNotFound):
@@ -219,18 +231,19 @@ func (h *AutomationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "id": id})
 }
 
-// validate rejects the two mistakes that would otherwise produce a rule that
-// looks saved and never fires: an event type that is not shaped like a journal
-// entry type, and a routine slug that does not exist in this workspace.
+// checkRoutineExists rejects a routine_slug that names no live routine in
+// this workspace. ListActive skips an automation whose routine cannot be
+// resolved — the alternative is parking a run the dispatcher can never fire
+// — so without this the failure surfaces as silence hours later rather than
+// as a 400 at the moment of the typo.
 //
-// The second check matters more than it looks. ListActive skips an automation
-// whose routine cannot be resolved — the alternative is parking a run the
-// dispatcher can never fire — so without this the failure surfaces as silence
-// hours later rather than as a 400 at the moment of the typo.
-func (h *AutomationHandler) validate(ctx context.Context, workspaceID, eventType, routineSlug string) error {
-	if eventType != "" && !eventTypePattern.MatchString(eventType) {
-		return errors.New("event_type must look like a journal entry type, e.g. mission.status_change")
-	}
+// This is a DB read, so unlike the event_type and payload_equals checks (see
+// automation.Automation.Validate) it cannot live inside Validate itself;
+// callers must invoke it explicitly, and only when routineSlug is actually
+// part of what they are setting (see Patch, which must not re-check a
+// routine the caller did not send — a rule's routine is allowed to dangle
+// between the time it is created and the time it is next edited).
+func (h *AutomationHandler) checkRoutineExists(ctx context.Context, workspaceID, routineSlug string) error {
 	if routineSlug == "" {
 		return nil
 	}

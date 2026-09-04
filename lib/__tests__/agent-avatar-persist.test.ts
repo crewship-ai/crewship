@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { apiFetch } from "@/lib/api-fetch"
 import {
@@ -305,6 +305,87 @@ describe("queueAvatarBackfill", () => {
   it("does nothing without an agent id", async () => {
     mockFetch.mockImplementation(ok)
     await queueAvatarBackfill("", "alice", "thumbs", WS)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+})
+
+// #2203 — apiFetch synthesizes a 503 whenever the token-refresh endpoint is
+// transiently unavailable (lib/api-fetch.ts ~195-209): a 5xx, a network
+// throw, or its own 10s abort. That is a routine event during an API restart
+// or a deploy window, not evidence the avatar endpoint itself is broken — so
+// a run of them must not cost the SAME permanent latch a run of 400s earns.
+// #2199's own review found the latch masks the budget in every test that
+// trips it, so these assert the request COUNT at each stage rather than only
+// "stopped vs not stopped".
+describe("queueAvatarBackfill — failure-class discrimination (#2203)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("stops for a run of 503s, then resumes for brand-new agents once the transient window elapses", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 503 } as Response)
+    for (let i = 0; i < 5; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs", WS)
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(5)
+
+    // Backend "recovers" immediately, but inside the same minute the run of
+    // 503s must still hold the rail shut — this has to be a window, not a
+    // fluke pass on the very next call.
+    mockFetch.mockClear()
+    mockFetch.mockImplementation(ok)
+    for (let i = 5; i < 25; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs", WS)
+    }
+    expect(mockFetch).not.toHaveBeenCalled()
+
+    // The window elapses — new agents (never a retry of the ones already
+    // marked attempted) must be allowed through again, unlike a #2196-style
+    // permanent stop.
+    const future = Date.now() + 61_000
+    vi.spyOn(Date, "now").mockReturnValue(future)
+    const budget = avatarBackfillBudget()
+    for (let i = 25; i < 25 + budget + 5; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs", WS)
+    }
+    // #2199's spend-on-failure rule still applies to the 5 transient
+    // failures above, so only the remainder of the per-load budget is left
+    // for this stage — the point is that it is nonzero and requests resume,
+    // not that the whole budget rolls over.
+    expect(mockFetch).toHaveBeenCalledTimes(budget - 5)
+  })
+
+  // A network throw is the other transient path (offline, aborted
+  // navigation, server restart) and gets the same time-based treatment.
+  it("stops for a run of transport errors, then resumes once the transient window elapses", async () => {
+    mockFetch.mockRejectedValue(new Error("offline"))
+    for (let i = 0; i < 5; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs", WS)
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(5)
+
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000)
+    mockFetch.mockClear()
+    mockFetch.mockImplementation(ok)
+    await queueAvatarBackfill("ag-new", "seed-new", "thumbs", WS)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  // The 400 case is the one #2196 needed: the endpoint itself is broken, and
+  // the stop must stay permanent — the transient window elapsing must not
+  // quietly reopen it.
+  it("keeps a run of 400s permanently stopped even after the transient window would have elapsed", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 400 } as Response)
+    for (let i = 0; i < 5; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs", WS)
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(5)
+
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000)
+    mockFetch.mockClear()
+    for (let i = 5; i < 25; i++) {
+      await queueAvatarBackfill(`ag-${i}`, `seed-${i}`, "thumbs", WS)
+    }
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })

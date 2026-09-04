@@ -582,3 +582,44 @@ func autonomyGateApproved(ctx context.Context, db *sql.DB, workspaceID, targetID
 	}
 	return status == string(harbormaster.StatusApproved), true, nil
 }
+
+// refuseUnlessAutonomyGateApproved is the mission-start half of the #1768
+// hold: it reads the same row autonomyGateApproved does and, if the mission
+// is under a hold that has not been approved, writes the 403 and reports
+// false so the caller returns without starting anything.
+//
+// #2258 — this used to live only inline in the internal route
+// (InternalMissionHandler.Start), so the public route
+// (MissionHandler.Start, POST /api/v1/crews/{crewId}/missions/{missionId}/start)
+// had no equivalent check at all: any MANAGER could start a mission whose
+// gate an OWNER had explicitly denied, because applyAutonomyGateDecisionTx
+// deliberately writes no marker on the mission row itself — the approvals
+// row is documented as the ONLY door, and that guarantee only holds if every
+// route that flips PLANNING -> IN_PROGRESS reads it. Both mission-start
+// handlers now call this one helper so the next such route does not repeat
+// the omission.
+//
+// Callers must have already confirmed the mission is in PLANNING (and, for
+// the public route, resolved 404/400 for missing/wrong-state missions)
+// before calling this — a fail-closed 403 here should mean "held", not
+// "does not exist" or "already running".
+func refuseUnlessAutonomyGateApproved(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, workspaceID, missionID string) bool {
+	approved, hasHold, gerr := autonomyGateApproved(r.Context(), db, workspaceID, missionID)
+	if gerr != nil {
+		if logger != nil {
+			logger.Error("mission start: read autonomy hold", "mission_id", missionID, "error", gerr)
+		}
+		replyError(w, http.StatusInternalServerError, "internal error")
+		return false
+	}
+	if hasHold && !approved {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":      "Mission start rejected by policy",
+			"reason":     "the mission was created under an autonomy hold and has not been approved",
+			"mission_id": missionID,
+			"remedy":     "an OWNER/ADMIN must approve it (`crewship approvals approve <id>` or the /approvals page)",
+		})
+		return false
+	}
+	return true
+}

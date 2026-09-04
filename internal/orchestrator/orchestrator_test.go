@@ -728,8 +728,12 @@ func TestInjectMCPCredentialEnvVarsRespectsLiteralValues(t *testing.T) {
 			},
 		}},
 		Credentials: []Credential{
-			{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "credential-secret", Priority: 0},
-			{ID: "c2", EnvVarName: "GH_HOST", PlainValue: "github.example.com", Priority: 0},
+			// Classified (#2092/#2246): the MCP env-ref path now consults
+			// credpolicy, so a fixture with no Type is the fail-safe
+			// unclassified fallback and is withheld — unrelated to what this
+			// test actually verifies (literal-value precedence).
+			{ID: "c1", Type: "GENERIC_SECRET", EnvVarName: "GH_TOKEN", PlainValue: "credential-secret", Priority: 0},
+			{ID: "c2", Type: "GENERIC_SECRET", EnvVarName: "GH_HOST", PlainValue: "github.example.com", Priority: 0},
 		},
 	}
 
@@ -763,7 +767,8 @@ func TestInjectMCP_HTTPHeaderBearerToken(t *testing.T) {
 	req := AgentRunRequest{
 		CrewMCPConfigJSON: crewJSON,
 		Credentials: []Credential{
-			{ID: "c1", EnvVarName: "LINEAR_TOKEN", PlainValue: "lin_real_secret"},
+			// Classified (#2092/#2246): see TestInjectMCPCredentialEnvVarsRespectsLiteralValues.
+			{ID: "c1", Type: "GENERIC_SECRET", EnvVarName: "LINEAR_TOKEN", PlainValue: "lin_real_secret"},
 		},
 	}
 	got := injectMCPCredentialEnvVars(req, nil, false, nil)

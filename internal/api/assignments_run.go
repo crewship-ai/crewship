@@ -284,14 +284,71 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Create assignment record in PENDING state (group_id = chat_id for mission linkage)
 	now := time.Now().UTC().Format(time.RFC3339)
+	// mission_id derivation (closes the gap left after #2256): the sidecar's
+	// handleAssign (internal/sidecar/assignment.go) and the routine
+	// dispatcher's crewshipBody (internal/api/crewship_actions.go) never put
+	// mission_id on this request — only the three original mission-work
+	// paths (mission_tasks.go, mission_tasks_planning.go, DispatchMention in
+	// issue_mentions.go) do. A delegation hop made FROM one of those runs (a
+	// sub-agent calling /assign again while it is itself executing inside a
+	// mission or a mention-dispatched run) would otherwise land with
+	// mission_id permanently NULL, which is exactly the "every run for this
+	// issue" gap #2256 set out to close.
+	//
+	// Derived here, once, rather than patching every caller: every creator
+	// of a synthetic mission chat on this schema — ensureMissionChat here
+	// and in internal/orchestrator/mission_tasks.go,
+	// mission_handler_mutate.go's Create, issue_handler_workflow.go's
+	// Start, cartographer's Fork, task_state.go — uses the mission's OWN id
+	// as the chat's primary key. So "does a missions row exist at this
+	// chat_id" is not a heuristic guess; it is the exact invariant those six
+	// writers maintain and the exact FK target assignments.mission_id
+	// points at (ON DELETE SET NULL).
+	//
+	// Checked by existence against missions(id), deliberately NOT by
+	// chats.mode = 'MISSION': a chat can carry that mode with no backing
+	// missions row — a mission hard-delete does not cascade to its chat
+	// (see the ON DELETE SET NULL rationale on the mission_id migration),
+	// and this package's own test fixtures (covAsgRig) seed a MISSION-mode
+	// chat with no missions row at all. Trusting mode alone would either
+	// mis-attribute an orphaned chat's delegation hops to a mission that no
+	// longer exists, or — because mission_id's FK has no matching
+	// row to point at — fail assignment creation outright. The existence
+	// check can't produce that false positive: it IS the FK's own
+	// precondition.
+	missionID := body.MissionID
+	if missionID == "" {
+		var exists int
+		// Workspace-scoped like every other read (I7): a mission id from
+		// another workspace must not attribute this run, however unlikely a
+		// CUID collision is.
+		derivedErr := h.db.QueryRowContext(r.Context(),
+			`SELECT 1 FROM missions WHERE id = ? AND workspace_id = ?`, body.ChatID, body.WorkspaceID).Scan(&exists)
+		switch {
+		case derivedErr == nil:
+			missionID = body.ChatID
+		case errors.Is(derivedErr, sql.ErrNoRows):
+			// Genuinely chat-only — no missions row at this id. Leave
+			// mission_id unset; that is the correct, honest answer.
+		default:
+			// Provenance, not a cap: a lookup failure here must not block
+			// the assignment. It just leaves mission_id unattributed.
+			h.logger.Warn("could not check chat_id against missions for mission_id derivation; leaving mission_id unset",
+				"error", derivedErr, "chat_id", body.ChatID)
+		}
+	}
+
 	assignmentID, err := insertCappedAssignment(r.Context(), h.db, scope, delegationLim,
 		agentCaller(assignedByID), cappedAssignment{
-			WorkspaceID: body.WorkspaceID,
-			ChatID:      body.ChatID,
-			TargetID:    target.ID,
-			Task:        body.Task,
-			GroupID:     body.ChatID,
-			CreatedAt:   now,
+			WorkspaceID:     body.WorkspaceID,
+			ChatID:          body.ChatID,
+			TargetID:        target.ID,
+			Task:            body.Task,
+			GroupID:         body.ChatID,
+			CreatedAt:       now,
+			MissionID:       missionID, // derived above when the body omits it (#2279)
+			AuthorAgentID:   body.AuthorAgentID,
+			CreatedByUserID: body.CreatedByUserID,
 		})
 	if err != nil {
 		var refusal *delegationRefusal
@@ -409,10 +466,18 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("mission comment journal emit failed", "error", jerr, "comment_id", commentID)
 		}
 
-		// Update assignee on the issue to the target agent
+		// Update assignee on the issue to the target agent. This is the
+		// delegation path invariant I5 exists for: delegating to an agent
+		// must set delegate_agent_id and must NEVER touch owner_user_id —
+		// pre-A10 this UPDATE overwrote the single polymorphic
+		// assignee_id/assignee_type slot, so delegating to an agent
+		// silently replaced whatever human owner was recorded there (rev-1
+		// dev1 observation 11, PRD-ISSUES-AND-ROUTINES-2026 §9.10). The
+		// legacy pair is still written alongside as the compatibility
+		// projection for the migration window.
 		_, _ = h.db.ExecContext(r.Context(),
-			`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', updated_at = ? WHERE id = ?`,
-			target.ID, now, body.ChatID)
+			`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', delegate_agent_id = ?, updated_at = ? WHERE id = ?`,
+			target.ID, target.ID, now, body.ChatID)
 
 		// Activity
 		activityID := generateCUID()
@@ -456,6 +521,99 @@ func (h *AssignmentHandler) runAssignment(
 	body createAssignmentBody,
 	target targetAgentInfo,
 ) {
+	// Tier 1 cooperative stop, checked before ANYTHING is spent on this
+	// assignment — before the pre_task_delegation hook below, before
+	// container provisioning, before the exec that would actually run the
+	// agent. Every door that reaches runAssignment (Create, DispatchAssignment,
+	// the dispatch-pump retry, and the @mention path — see the four call
+	// sites of runAssignment in this package) funnels through here, so this
+	// one check is what makes "stop starting new work" true regardless of
+	// which door dispatched this row. A row that was already RUNNING when
+	// Stop was called has already passed this point; finishAssignment
+	// applies the same cancel_requested_at check again once that run
+	// eventually completes, so a late completion still lands as CANCELLED
+	// rather than resurrecting as COMPLETED/FAILED.
+	if h.assignmentCancelRequested(ctx, assignmentID) {
+		h.logger.Info("assignment dispatch skipped: cancel already requested",
+			"assignment_id", assignmentID, "target", body.TargetSlug)
+		h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "", "", nil)
+		return
+	}
+
+	// Cross-surface exclusivity: at most one live RunAgent exec per AGENT,
+	// matching chatbridge.Bridge's per-chat guard on the chat-send door (see
+	// chatbridge.AgentRunLock's doc). Two runAssignment calls for the SAME
+	// agent — from /assign, an @mention, or a chat send racing an
+	// assignment — would otherwise both reach setupTmuxExec and race the
+	// identical tmux session name + /tmp scratch files
+	// (orchestrator.TmuxSessionName is keyed by agent slug alone, with no
+	// chat/run/mission component), so the second exec's `tmux kill-session`
+	// tears down the first run's live session mid-turn. Claimed FIRST,
+	// before the pre_task_delegation hook or any DB write, so a losing call
+	// spends nothing beyond this check — same "cheapest check first"
+	// placement as the hook comment below.
+	//
+	// h.agentRunLock is nil only when a caller hasn't wired SetAgentRunLock
+	// (tests, or a build that predates it); nil is fail-open (pre-existing
+	// unguarded behaviour) rather than fail-closed, matching h.provisioner
+	// and h.resolver's nil handling elsewhere in this file.
+	//
+	// releaseLock is called explicitly right before every finishAssignment
+	// call below (not just deferred) — see the rationale on
+	// requeueForLockLoss and finishAssignment's queue-drain step. In short:
+	// finishAssignment calls pumpAndDispatch synchronously, and that pump
+	// must see this agent's slot as free. A plain `defer h.agentRunLock.
+	// End(...)` only runs once runAssignment itself returns, which is AFTER
+	// the in-body finishAssignment call (and therefore after its pump
+	// already ran) — so the very completion that should unblock this
+	// agent's own queued row would find the lock still (falsely) held and
+	// requeue it again, stalling until an unrelated crew completion or the
+	// stuck-QUEUED sweeper eventually retries it. Calling releaseLock()
+	// immediately before each finishAssignment closes that window; the
+	// deferred call remains only as a safety net for a path that forgets to
+	// (or a panic).
+	lockReleased := false
+	releaseLock := func() {
+		if h.agentRunLock != nil && !lockReleased {
+			lockReleased = true
+			h.agentRunLock.End(target.ID)
+		}
+	}
+	if h.agentRunLock != nil {
+		if !h.agentRunLock.TryStart(target.ID) {
+			reason := fmt.Sprintf(
+				"agent %s already has a live run in progress; queuing this dispatch behind it "+
+					"instead of starting a second concurrent exec into the same agent "+
+					"container/tmux session — it will be picked up once the live run finishes",
+				body.TargetSlug)
+			h.logger.Info("assignment requeued: agent busy",
+				"assignment_id", assignmentID, "target", body.TargetSlug, "agent_id", target.ID,
+				"reason", reason)
+			// Losing the lock means nothing failed — the work merely has to
+			// wait its turn behind the agent's own live run. Requeue rather
+			// than FAILED (see requeueForLockLoss doc): the row is picked up
+			// again by pumpAndDispatch the next time ANY assignment in this
+			// crew completes (including, correctly, the one currently
+			// holding the lock — see releaseLock above), by a fresh pump
+			// requeueLockLossAndMaybeDrain triggers itself when some OTHER
+			// crew member's row can use the slot this requeue just freed
+			// (defect #1, #2269 follow-up — before this fix, that pump never
+			// happened here at all, so a queued row for a DIFFERENT, idle
+			// agent could sit behind this bounce until an unrelated
+			// completion or the sweeper eventually got to it), or by the
+			// stuck-QUEUED sweeper as a backstop.
+			//
+			// The row may be RUNNING (claimCrewSlot/pumpCrewQueue already
+			// flipped it before calling us) or still PENDING (the
+			// LeadPlanning bypass never goes through the crew-budget CAS) —
+			// requeueForLockLoss (inside requeueLockLossAndMaybeDrain)
+			// accepts either.
+			h.requeueLockLossAndMaybeDrain(ctx, assignmentID, body.CrewID, target.ID, body.ChatID, body.WorkspaceID, body.TargetSlug)
+			return
+		}
+		defer releaseLock()
+	}
+
 	// pre_task_delegation: the one point every delegation door (sidecar
 	// /assign's Create, its dispatch-pump retry, the mission engine's
 	// DispatchAssignment, and the @mention DispatchMention) converges on
@@ -500,6 +658,7 @@ func (h *AssignmentHandler) runAssignment(
 		}
 		h.logger.Info("assignment refused: "+reason,
 			"assignment_id", assignmentID, "target", body.TargetSlug, "error", hookErr)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("%s: %v", reason, hookErr), nil)
 		return
@@ -662,6 +821,7 @@ func (h *AssignmentHandler) runAssignment(
 		})
 
 	if h.orch == nil {
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", "orchestrator not available", acc)
 		return
 	}
@@ -678,6 +838,7 @@ func (h *AssignmentHandler) runAssignment(
 		if perr := h.provisioner.EnsureProvisioned(ctx, body.CrewID, body.WorkspaceID, 0); perr != nil {
 			h.logger.Error("ensure provisioned for assignment", "error", perr,
 				"assignment_id", assignmentID, "crew_id", body.CrewID)
+			releaseLock()
 			h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 				fmt.Sprintf("preparing the crew container failed: %v", perr), acc)
 			return
@@ -699,6 +860,7 @@ func (h *AssignmentHandler) runAssignment(
 	if cfgErr != nil {
 		h.logger.Error("resolve crew runtime config for assignment",
 			"error", cfgErr, "crew_id", body.CrewID, "assignment_id", assignmentID)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("resolve crew runtime config: %v", cfgErr), acc)
 		return
@@ -713,6 +875,7 @@ func (h *AssignmentHandler) runAssignment(
 	containerID, err = h.orch.GetOrCreateContainerCfg(ctx, crewCfg, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("container error: %v", err), acc)
 		return
@@ -747,6 +910,7 @@ func (h *AssignmentHandler) runAssignment(
 		// resolver / resolve failure). Surface it as an assignment failure
 		// rather than dispatch an MCP-blind, HITL-inert degraded run.
 		h.logger.Error("assignment dispatch build failed", "error", buildErr, "assignment_id", assignmentID)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("dispatch error: %v", buildErr), acc)
 		return
@@ -759,6 +923,7 @@ func (h *AssignmentHandler) runAssignment(
 	guardRelease, guardErr := refuseIfBackupInProgress(ctx, h.db, body.WorkspaceID)
 	if guardErr != nil {
 		h.logger.Warn("assignment refused — backup in progress", "assignment_id", assignmentID, "workspace_id", body.WorkspaceID)
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", guardErr.Error(), acc)
 		return
 	}
@@ -780,11 +945,13 @@ func (h *AssignmentHandler) runAssignment(
 		if errors.Is(err, orchestrator.ErrAgentInBandFailure) {
 			partial = joinAssignmentOutput(outputParts)
 		}
+		releaseLock()
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, partial,
 			fmt.Sprintf("execution error: %v", err), acc)
 		return
 	}
 
+	releaseLock()
 	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID,
 		joinAssignmentOutput(outputParts), "", acc)
 }
@@ -968,6 +1135,17 @@ func (h *AssignmentHandler) finishAssignment(
 		status = "FAILED"
 	}
 
+	// Tier 1 cooperative stop: a cancel_requested_at stamp (written by issue
+	// Stop, internal/api/issue_handler_workflow.go) always wins over whatever
+	// the run itself reported — COMPLETED, FAILED, or anything else. There is
+	// no kill primitive for a shared crew container, so a run already in
+	// flight when Stop was called is not interrupted; this is what keeps its
+	// eventual, unstoppable completion from being recorded (and reported to
+	// OnAssignmentCompleted below) as anything other than CANCELLED.
+	if h.assignmentCancelRequested(ctx, assignmentID) {
+		status = "CANCELLED"
+	}
+
 	var resultVal, errVal interface{}
 	if result != "" {
 		resultVal = result
@@ -1051,9 +1229,12 @@ func (h *AssignmentHandler) finishAssignment(
 	{
 		termType := journal.EntryAssignmentDone
 		termSeverity := journal.SeverityInfo
-		if status == "FAILED" {
+		switch status {
+		case "FAILED":
 			termType = journal.EntryAssignmentFail
 			termSeverity = journal.SeverityWarn
+		case "CANCELLED":
+			termType = journal.EntryAssignmentCancel
 		}
 		// Routing/attribution for the feed: crew_id scopes a crew-filtered
 		// feed query, agent_id is the target, actor_id is the assigner so
@@ -1152,7 +1333,14 @@ func (h *AssignmentHandler) finishAssignment(
 				_ = h.db.QueryRowContext(ctx, `SELECT name FROM agents WHERE id = ?`, agentID).Scan(&agentName)
 
 				var commentBody string
-				if errMsg != "" {
+				if status == "CANCELLED" {
+					// cancel_requested_at wins even when the run itself
+					// reported a late failure (errMsg may be non-empty here)
+					// — this must be checked before errMsg != "" or a stopped
+					// run announces itself as failed. Never the failure
+					// framing/text, mirroring the broadcast switch below.
+					commentBody = fmt.Sprintf("**%s's work was cancelled.**", agentName)
+				} else if errMsg != "" {
 					// Durable, user-facing surface — never the raw error (may
 					// carry container/exec internals). The full errMsg already
 					// landed in assignments.error_message + the run journal
@@ -1180,7 +1368,10 @@ func (h *AssignmentHandler) finishAssignment(
 						cid, groupID.String, agentID, commentBody, now, now)
 					aid := generateCUID()
 					action := "task_completed"
-					if errMsg != "" {
+					switch {
+					case status == "CANCELLED":
+						action = "task_cancelled"
+					case errMsg != "":
 						action = "task_failed"
 					}
 					_, _ = h.db.ExecContext(ctx,
@@ -1195,7 +1386,23 @@ func (h *AssignmentHandler) finishAssignment(
 		return true
 	}
 
-	if errMsg != "" {
+	switch {
+	case status == "CANCELLED":
+		// cancel_requested_at wins over whatever the run itself reported —
+		// a clean completion (no error text either way) AND a late failure
+		// (errMsg may be non-empty here; see the error_message decision in
+		// this function's own comment above the CAS UPDATE). Checked before
+		// errMsg != "" specifically so a late failure that arrived after
+		// Stop still reads as cancelled, not failed — "assignment_completed"
+		// would be a lie here too (Stop was called and the row is not
+		// COMPLETED), so this case must come first, not merely before
+		// "default".
+		broadcastChannelEvent(h.hub, "session", chatID, "assignment_cancelled",
+			map[string]string{
+				"id":     assignmentID,
+				"target": targetSlug,
+			})
+	case errMsg != "":
 		// Chat bubble — user-facing, same sanitization as the mission
 		// comment above. The raw errMsg already reached the DB run
 		// record + journal entry earlier in this function.
@@ -1205,7 +1412,7 @@ func (h *AssignmentHandler) finishAssignment(
 				"target": targetSlug,
 				"error":  userFacingAssignmentError(errMsg),
 			})
-	} else {
+	default:
 		broadcastChannelEvent(h.hub, "session", chatID, "assignment_completed",
 			map[string]string{
 				"id":     assignmentID,
@@ -1226,6 +1433,25 @@ func (h *AssignmentHandler) finishAssignment(
 
 	h.logger.Info("assignment finished", "assignment_id", assignmentID, "status", status)
 	return true
+}
+
+// assignmentCancelRequested reports whether issue Stop
+// (internal/api/issue_handler_workflow.go) has stamped cancel_requested_at
+// on this assignment row — the Tier 1 cooperative signal that the runner
+// (runAssignment, finishAssignment above) checks before starting further
+// work and when deciding a late completion's terminal status.
+//
+// Best-effort, fails open (false) on a lookup error: this mirrors the
+// posture of finishAssignment's other best-effort reads in this file
+// (runAssignerID, crewID/assignedByID/assignedToID) — a DB hiccup here
+// must not turn into a spuriously-cancelled run.
+func (h *AssignmentHandler) assignmentCancelRequested(ctx context.Context, assignmentID string) bool {
+	var cancelAt sql.NullString
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT cancel_requested_at FROM assignments WHERE id = ?`, assignmentID).Scan(&cancelAt); err != nil {
+		return false
+	}
+	return cancelAt.Valid
 }
 
 // List handles GET /api/v1/crews/{crewId}/assignments.

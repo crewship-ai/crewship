@@ -284,12 +284,13 @@ reference to the chat the message lives in — enough to answer *which
 prompt ran* without storing it. The process log line for a run takes the
 same sanitised argv.
 
-`chat.user_message` is bounded rather than emptied: scrubbed and capped
-to 240 characters, because there the message *is* the entry. Within
-those characters the scrubber is the only control, so an unrecognised
-secret survives — the full text lives in the chat the entry references,
-which can be erased. Payload shape:
-[Crew Journal](/guides/crew-journal#exec-command-payload).
+`chat.user_message` is emptied too, and for the same reason rather than a
+weaker one. It used to keep a scrubbed 240-character preview, which left
+the scrubber as the only control on that text — and an unrecognised
+secret pasted at the start of a message sits inside 240 characters. It
+now stores a length and a `chat_id`, no message text and no digest of
+it; the message itself stays in the chat, which can be erased. Payload
+shape: [Crew Journal](/guides/crew-journal#exec-command-payload).
 
 This is scoped, not a claim about the whole table. `chat.agent_response`
 still stores up to 8 KB of the agent's reply and `exec.output_chunk`
@@ -297,6 +298,31 @@ stores its stdout — both scrubbed, neither prompt-free, so an agent that
 quotes its own prompt back writes that text into the journal through
 them. Those are Layer-3 surfaces in the ordinary sense: the scrubber is
 what stands behind them.
+
+`peer.escalation` (raised by `POST /internal/escalations`, an internal
+sidecar-IPC route that — like the rest of that surface — carries a
+larger trusted payload and is left to its own per-handler cap rather
+than the public API's BodyCap) scrubs and bounds the same way: `reason`,
+`context`, and `metadata` in the payload, plus the summary line, are run
+through the credential scrubber and capped at 4096 characters each
+before the entry is written (#2238). This mirrors the inbox projection
+of the same escalation, which
+scrubs and bounds for the same reason but is not the concern here — the
+inbox row is deleted by the GDPR erasure cascade on request, while the
+journal row is explicitly excluded from it and, being hash-chained, has
+no after-the-fact redaction. Absent a write-time cap, `context` in
+particular — an arbitrary agent-supplied blob with no request-size limit
+on this route — would otherwise persist unbounded forever.
+
+The same `reason` is read back out of the `escalations` row and written
+into a second `peer.escalation` entry if the question is never answered
+— the deadline sweep in `escalation_lifecycle.go` — and gets the
+identical scrub-then-cap treatment there, not only on the create path.
+`ResolveEscalation`'s closing `peer.escalation` entry scrubs and caps its
+`resolution` field the same way for every escalation type except
+`CREDENTIAL`, whose resolution carries the encrypted secret itself and is
+replaced with an opaque marker instead of being scrubbed (the plaintext
+never reaches the journal at all in that case).
 
 For the keeper credential-use path (`/execute`), the scrubber additionally
 masks the **injected secret's own value** and its common encodings — literal,

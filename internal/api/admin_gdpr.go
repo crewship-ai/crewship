@@ -59,6 +59,43 @@ import (
 //   - inbox_items (by data_subject_id) — hard delete. Soft-delete
 //     would leave the proposal title visible in the inbox feed,
 //     which the SAR forbids.
+//   - inbox_item_reads (A7, by user_id, scoped to this workspace via
+//     the inbox_items join) — the subject's own record of which
+//     inbox items they opened. Independent of the item's
+//     data_subject_id: this is the subject's activity, not content
+//     about them, and it must go even when the item itself (someone
+//     else's) is untouched.
+//   - approvals_queue (by requested_by OR decided_by) — hard delete
+//     (#2233). The table predates v107 and was never considered for
+//     either list — grep for "approvals" in this file returned zero
+//     hits before this. It has no data_subject_id column, so unlike
+//     the two rows above it is matched on the two columns that ARE
+//     user-attributable: requested_by (a user id for an
+//     interactively-triggered gate, an agent id for an
+//     autonomously-triggered one — matching is still correct because
+//     ids never collide across the two) and decided_by (always a
+//     user id — only a human decides). docs/security/gdpr.mdx already
+//     frames "agent decisions" as operator-owned content erasure may
+//     reach, distinct from the audit trail that must survive it — see
+//     "Why erase rather than exclude" below for the full argument. The
+//     row's own accountability trail (who decided what, when) survives
+//     in journal_entries regardless, which is on the excluded list.
+//
+// # Why erase approvals_queue rather than add it to the excluded list
+//
+// The three excluded tables below share one property: no user-attributable
+// content, or content that is itself the SAR's own accountability record.
+// approvals_queue is neither. Its payload is (pre-#2250) a raw tool-call
+// prompt the requester wrote, and requested_by / decided_by / reason name
+// the two participants directly — exactly the "content the operator owns"
+// gdpr.mdx's Article 17 section calls out ("agent decisions") as distinct
+// from "audit records that have to survive operator's own retention
+// obligations". Leaving it erased-nowhere was not a considered position,
+// it was the absence of one — the issue that opened this (#2233) exists
+// precisely because nobody had decided. A retention sweep (see
+// internal/harbormaster/retention.go) bounds how long an UNDECIDED-to-erase
+// row survives, but a live SAR ticket cannot wait out a 90-day default, so
+// the cascade needs its own deliberate answer: erase.
 //
 // Tables intentionally excluded:
 //
@@ -168,8 +205,13 @@ type gdprActionScope struct {
 	PeerCards       int `json:"peer_cards"`
 	MemoryVersions  int `json:"memory_versions"`
 	InboxItems      int `json:"inbox_items"`
+	InboxItemReads  int `json:"inbox_item_reads"`
 	UserModels      int `json:"user_models"`
 	PeerCardsOnDisk int `json:"peer_cards_on_disk,omitempty"`
+	// ApprovalsQueue (#2233) counts rows deleted because the subject was
+	// either the requester or the decider — see the file header "Why erase
+	// approvals_queue rather than add it to the excluded list".
+	ApprovalsQueue int `json:"approvals_queue,omitempty"`
 	// PagesTransferred counts pages handed to a crew because the subject
 	// owned them (§7.1 rule 1b). Never a delete count — a page is never
 	// deleted by this cascade, only reassigned.
@@ -258,6 +300,8 @@ func (h *AdminGDPRHandler) transferOrRefuseUserPages(ctx context.Context, action
 //     effort on-disk).
 //   - memory_versions rows tagged data_subject_id = user are gone.
 //   - inbox_items rows tagged data_subject_id = user are gone.
+//   - approvals_queue rows where the user was requester or decider are
+//     gone (#2233).
 //   - gdpr_actions has a 'delete' row with scope_json + status=
 //     'completed' (or 'failed' with error populated).
 //
@@ -447,7 +491,49 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 		scope.InboxItems = int(n)
 	}
 
-	// 4) user_models: the operator model — the one surface holding the
+	// 3b) inbox_item_reads (A7): the subject's OWN per-item read markers.
+	// Distinct from step 3 above — that deletes items ABOUT the subject
+	// (data_subject_id); this deletes the subject's activity record of
+	// having READ items, which may belong to anyone (a role-targeted
+	// escalation the subject happened to open). Rows for items step 3 just
+	// deleted are already gone via inbox_item_reads.inbox_item_id's
+	// ON DELETE CASCADE; this catches the rest. Scoped to this workspace
+	// via the inbox_items join — the subject's read markers in a DIFFERENT
+	// workspace are a separate SAR ticket.
+	res, err = h.db.ExecContext(r.Context(), `
+		DELETE FROM inbox_item_reads
+		WHERE user_id = ? AND inbox_item_id IN (SELECT id FROM inbox_items WHERE workspace_id = ?)`,
+		targetID, wsID)
+	if err != nil {
+		h.logger.Warn("gdpr delete: inbox_item_reads delete failed",
+			"action_id", actionID, "err", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		scope.InboxItemReads = int(n)
+	}
+
+	// 4) approvals_queue: hard delete every row the subject touched, either
+	// as requester or as decider (#2233) — a single statement, so a row
+	// where the subject happens to be both (a self-approved gate) is still
+	// counted once in RowsAffected, not twice. See the file header "Why
+	// erase approvals_queue rather than add it to the excluded list" for
+	// why this table is erased at all.
+	res, err = h.db.ExecContext(r.Context(),
+		`DELETE FROM approvals_queue WHERE workspace_id = ? AND (requested_by = ? OR decided_by = ?)`,
+		wsID, targetID, targetID)
+	if err != nil {
+		h.logger.Warn("gdpr delete: approvals_queue delete failed",
+			"action_id", actionID, "err", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	} else if n, _ := res.RowsAffected(); n > 0 {
+		scope.ApprovalsQueue = int(n)
+	}
+
+	// 5) user_models: the operator model — the one surface holding the
 	// subject's OWN stated facts (#1669). UNIQUE on (workspace_id,
 	// user_slug), so at most one row.
 	//
@@ -549,7 +635,7 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 
 	h.finalizeGDPRAction(r.Context(), actionID, scope, firstErr)
 
-	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.UserModels
+	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.InboxItemReads + scope.UserModels + scope.ApprovalsQueue
 	status := http.StatusAccepted
 	resp := map[string]any{
 		"action_id":    actionID,
@@ -570,14 +656,27 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 // breakage when new tables are added — new top-level keys are
 // additive.
 type gdprExportBundle struct {
-	DataSubjectID string                `json:"data_subject_id"`
-	WorkspaceID   string                `json:"workspace_id"`
-	ExportedAt    string                `json:"exported_at"`
-	ActionID      string                `json:"action_id"`
-	PeerCards     []exportPeerCard      `json:"peer_cards"`
-	MemoryVersion []exportMemoryVersion `json:"memory_versions"`
-	InboxItems    []exportInboxItem     `json:"inbox_items"`
-	UserModels    []exportUserModel     `json:"user_models"`
+	DataSubjectID  string                `json:"data_subject_id"`
+	WorkspaceID    string                `json:"workspace_id"`
+	ExportedAt     string                `json:"exported_at"`
+	ActionID       string                `json:"action_id"`
+	PeerCards      []exportPeerCard      `json:"peer_cards"`
+	MemoryVersion  []exportMemoryVersion `json:"memory_versions"`
+	InboxItems     []exportInboxItem     `json:"inbox_items"`
+	InboxItemReads []exportInboxItemRead `json:"inbox_item_reads"`
+	UserModels     []exportUserModel     `json:"user_models"`
+}
+
+// exportInboxItemRead is the subject's own per-item read marker (A7):
+// "I read inbox item X at time Y". title/kind are carried alongside the id
+// so the SAR answer is legible without a second lookup against inbox_items
+// (which may itself be a different subject's item the requester merely
+// opened).
+type exportInboxItemRead struct {
+	InboxItemID string `json:"inbox_item_id"`
+	Title       string `json:"title"`
+	Kind        string `json:"kind"`
+	ReadAt      string `json:"read_at"`
 }
 
 // exportUserModel carries the operator model INCLUDING its body. The
@@ -649,14 +748,15 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 	}
 
 	bundle := gdprExportBundle{
-		DataSubjectID: targetID,
-		WorkspaceID:   wsID,
-		ExportedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-		ActionID:      actionID,
-		PeerCards:     []exportPeerCard{},
-		MemoryVersion: []exportMemoryVersion{},
-		InboxItems:    []exportInboxItem{},
-		UserModels:    []exportUserModel{},
+		DataSubjectID:  targetID,
+		WorkspaceID:    wsID,
+		ExportedAt:     time.Now().UTC().Format(time.RFC3339Nano), // tsformat:allow: export payload field, never compared or ordered in SQL
+		ActionID:       actionID,
+		PeerCards:      []exportPeerCard{},
+		MemoryVersion:  []exportMemoryVersion{},
+		InboxItems:     []exportInboxItem{},
+		InboxItemReads: []exportInboxItemRead{},
+		UserModels:     []exportUserModel{},
 	}
 
 	scope := gdprActionScope{}
@@ -766,6 +866,46 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 		}
 		_ = ibRows.Close()
 		scope.InboxItems = len(bundle.InboxItems)
+	}
+
+	// inbox_item_reads (A7): the subject's own per-item read activity,
+	// scoped to this workspace via the inbox_items join — mirrors the
+	// DELETE cascade's step 3b.
+	irRows, err := h.db.QueryContext(r.Context(), `
+		SELECT ir.inbox_item_id, ii.title, ii.kind, ir.read_at
+		FROM inbox_item_reads ir
+		JOIN inbox_items ii ON ii.id = ir.inbox_item_id
+		WHERE ii.workspace_id = ? AND ir.user_id = ?
+		ORDER BY ir.read_at DESC
+	`, wsID, targetID)
+	if err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		h.logger.Warn("gdpr export: inbox_item_reads query failed",
+			"action_id", actionID, "err", err)
+	} else {
+		for irRows.Next() {
+			var e exportInboxItemRead
+			if scanErr := irRows.Scan(&e.InboxItemID, &e.Title, &e.Kind, &e.ReadAt); scanErr != nil {
+				h.logger.Error("gdpr export: inbox_item_reads scan failed",
+					"action_id", actionID, "err", scanErr)
+				if firstErr == nil {
+					firstErr = scanErr
+				}
+				continue
+			}
+			bundle.InboxItemReads = append(bundle.InboxItemReads, e)
+		}
+		if iterErr := irRows.Err(); iterErr != nil {
+			h.logger.Warn("gdpr export: inbox_item_reads iteration error",
+				"action_id", actionID, "err", iterErr)
+			if firstErr == nil {
+				firstErr = iterErr
+			}
+		}
+		_ = irRows.Close()
+		scope.InboxItemReads = len(bundle.InboxItemReads)
 	}
 
 	// user_models — the operator model (#1669). Body included, not just

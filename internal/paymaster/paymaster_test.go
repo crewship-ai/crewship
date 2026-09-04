@@ -74,6 +74,19 @@ func openTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+
+	// breachAnnounced (#2153's on_budget_exceeded debounce) is a
+	// package-level map shared by every test in this binary. Many tests
+	// in this package copy-paste the same literal budget id ("b1"),
+	// workspace ("ws1"), window ("day") and limit ($1.00), and Budget.ID
+	// is part of the debounce key — so without a reset here, whichever
+	// test happens to Enforce a breach on that combination first "uses
+	// up" the announcement for every later test that reuses it, and their
+	// hooks.Dispatch call silently never runs. Each test gets its own
+	// fresh db from this helper; give it a fresh debounce state too so
+	// its behaviour doesn't depend on what other tests ran earlier in the
+	// same `go test` process.
+	breachAnnounced = sync.Map{}
 	return db
 }
 

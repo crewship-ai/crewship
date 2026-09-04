@@ -430,9 +430,13 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		provider = spec.ID
-		cred := p.credStore.Select(ProviderType(spec.ID))
+		// The ACTING agent, not the store, decides which credential answers
+		// (#2052): the store is crew-wide, and a credential an operator granted
+		// to one member must not be handed to a sibling because a round-robin
+		// counter landed on it.
+		cred := p.credStore.Select(ProviderType(spec.ID), actorID)
 		if cred == nil {
-			p.logger.Error("no credential available", "provider", provider)
+			p.logger.Error("no credential available", "provider", provider, "agent_id", actorID)
 			http.Error(w, "no credential available for "+provider, http.StatusServiceUnavailable)
 			return
 		}
@@ -691,9 +695,24 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	if !allowed {
 		return
 	}
-	cred := p.credStore.Select(ProviderType(s.ID))
-	if cred == nil && s.RequireCredential {
-		p.logger.Error("no credential available for reverse proxy", "provider", s.ID, "path", r.URL.Path)
+	// Scoped to the acting agent (#2052). This is the path that matters most:
+	// OPENAI_COMPAT is reached here, and its upstream comes from the credential,
+	// so a credential picked for the wrong member sends this agent's prompt to
+	// another member's gateway with that member's key — allowlisted (the #2051
+	// union covers it) and therefore silent.
+	cred := p.credStore.Select(ProviderType(s.ID), actorID)
+	// A nil credential means two different things now, and only one of them may
+	// fall through. An EMPTY store for a spec that does not RequireCredential is
+	// the pass-through this route has always had: the request goes upstream
+	// unauthenticated (in practice carrying the agent's disposable dummy key)
+	// and the vendor answers. A REFUSAL — the store holds one for this provider
+	// and the acting agent was not granted it — must not take that path, or
+	// #2052's silent crossover is replaced by a vendor 401 that blames the key,
+	// which is no more diagnosable. Fail closed with the same 503 the
+	// RequireCredential specs already give.
+	if cred == nil && (s.RequireCredential || p.credStore.HeldForAnotherAgent(ProviderType(s.ID), actorID)) {
+		p.logger.Error("no credential available for reverse proxy",
+			"provider", s.ID, "path", r.URL.Path, "agent_id", actorID)
 		http.Error(w, "no credential available for "+s.ID, http.StatusServiceUnavailable)
 		return
 	}

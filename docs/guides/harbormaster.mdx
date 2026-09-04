@@ -93,10 +93,22 @@ CREATE TABLE approvals_queue (
 );
 ```
 
+`payload` is `{"tool": "...", "args": {...}, "review": {...}}` — `review` is
+omitted when the caller passes none. `args` is both the rule-evaluator input
+and the reward-tuning fingerprint (see [Reward-adjusted
+gating](#reward-adjusted-gating) — `HashArgs` hashes it verbatim, key *and*
+value), so a caller must only put values there that are stable across
+repeated, unrelated calls of the same shape. `review` is extra, human-facing
+context — for `agent_run` this is a scrubbed, length-bounded preview of the
+prompt that triggered the call (`{"user_prompt": "...", "user_prompt_truncated": bool}`)
+— and is stored alongside `args` for the approvals UI/CLI to show, but is
+never hashed and never affects cohorting, so it may carry per-invocation
+text that `args` cannot.
+
 ## Endpoints
 
-- `GET /api/v1/approvals?status=pending&limit=50` -- inbox. Status defaults to `pending`; use `?status=all` for full history.
-- `GET /api/v1/approvals/{id}` -- full request including payload.
+- `GET /api/v1/approvals?status=pending&limit=50` -- inbox. Status defaults to `pending`; use `?status=all` for full history. **Requires OWNER or ADMIN** workspace role; 403 otherwise (#2233 -- before this it had no role floor).
+- `GET /api/v1/approvals/{id}` -- full request including payload. **Requires OWNER or ADMIN** workspace role; 403 otherwise (#2233).
 - `POST /api/v1/approvals/{id}/decide` -- body `{"status":"approved|denied","comment":"..."}`. **Requires OWNER or ADMIN** workspace role; 403 otherwise.
 - `POST /api/v1/approvals/{id}/cancel` -- withdraw a still-pending request without approving or denying it (flips the row to `cancelled`, records no approve/deny decision). Use when the request is moot.
 - `POST /api/v1/approvals/reset-auto-tuning` -- body `{"tool":"..."}`. Clears the rolling `gate_reward_history` window for one tool (see [Reward-adjusted gating](#reward-adjusted-gating)).
@@ -110,6 +122,16 @@ See [Approvals API](/api-reference/approvals) for full schemas.
 `harbormaster.StartTimeoutSweeper(ctx, db, j, 30*time.Second)` runs a background goroutine that flips rows past `timeout_at` from `pending` to `timeout` and emits `approval.timeout`. The server starts this once at boot.
 
 On `ModeSync`, the sweeper AND the client-side deadline both try to flip the row -- whichever wins, the row is consistent. A race with a last-second decide is handled: if the UPDATE affects zero rows Gate re-reads the row and returns the human decision rather than misreporting a timeout.
+
+## Retention
+
+The timeout sweeper above only ever changes `status`; nothing deleted a row until #2233. `harbormaster.StartApprovalsRetentionSweeper(ctx, db, logger, 24*time.Hour)` runs daily and deletes **terminal** rows older than the workspace's window -- `workspaces.approvals_retention_days`, defaulting to 90 days when unset -- but only for an ALLOWLISTED `kind`: `tool_call`, `cost_threshold`, `destructive_op`, `target_environment`, `custom`, `ephemeral_hire` (`harbormaster.sweepableApprovalKinds`). A `pending` row is never eligible regardless of age; that stays the timeout sweeper's job, and an async gate's row is the operator's only handle on the wait while it's open (`gate.go`'s poll loop already treats a vanished row as denied, so deleting one out from under an agent would not strand it -- it just isn't retention's job to retire an open wait).
+
+`kind=autonomy_gate` is never eligible either, regardless of status or age -- that's not an oversight, it's excluded on purpose. For a mission target, a terminal `autonomy_gate` row **is** the hold: denying (or timing out) a mission's autonomy gate writes no marker on the mission itself, so `PLANNING` → `IN_PROGRESS` is blocked only by `autonomyGateApproved` finding that row (`internal/api/internal_autonomy_gate.go`) -- no row at all reads as "proceed". Sweep a denied/timed-out `autonomy_gate` row on the ordinary 90-day clock and a mission nobody approved eventually starts running. `sweepableApprovalKinds` is an allowlist rather than "every kind except autonomy_gate" specifically so a future `Kind` is excluded from the sweep by default until someone deliberately adds it, instead of being swept by default the day it's introduced.
+
+Set the window with `crewship workspace update --approvals-retention-days N` (`PATCH /api/v1/workspaces/{id}`, see [Workspaces](/api-reference/workspaces)). `0` means keep forever, same as `--credential-audit-retention-days` and `--audit-log-retention-days` on the same command -- deliberately, so the three flags agree: an operator who reaches for `0` on one expecting "never delete" gets that behaviour on all of them. The Crew Journal (`journal_entries`, via `AfterDecide`) durably records that a decision happened, but not the full picture -- only `approval_id`/`kind`/comment, never `reason` or the `payload` -- so `approvals_queue` is the only place those survive, and "keep forever" is a real answer here, not just a courtesy copy of the audit pair's shape. See [Migrations -- 20260901134904](/guides/migrations).
+
+The same rows are also reachable through the [GDPR Article 17 cascade](/security/gdpr) -- a live SAR ticket can't wait out a 90-day default, so erasure for a specific subject (matched on `requested_by`/`decided_by`) happens immediately on request rather than only via this sweep.
 
 ## Standing approvals leave a trail
 
@@ -306,6 +328,22 @@ biased the window (the next decisions will retrain naturally).
 never stored in `gate_reward_history`, only in the original
 `approvals_queue` row. Semantically-equal calls hash the same, so
 one cohort per operation shape.
+
+**A cohort is defined entirely by `args`, key and value.** Any
+per-invocation value in there — a prompt, a path, a timestamp — puts every
+call in a cohort of one, and the quorum this section describes can then
+never be reached. This is why `args` for `agent_run` is just `{agent_slug,
+agent_role}` (see [Payload shape](#queue-schema) above): before that, it
+also carried the user's message, so no two runs of the same agent ever
+hashed the same and reward-adjusted gating silently could not learn
+anything for `agent_run`. Any new gated tool should keep the same
+discipline — put per-invocation context in `review`, not `args`.
+
+Because the fingerprint shape changed, `agent_run` rows written before this
+fix carry an `args_hash` nothing will ever look up again — each was already
+a cohort of one, so nothing of value is orphaned. No migration was run;
+`gate_reward_history` accumulates fresh under the new shape, same as any
+`crewship approvals reset-auto-tuning` reset.
 
 Inspired by Self-Evolve's Q-value update loop, simplified: operator
 decision *is* the signal (no LLM judge needed).

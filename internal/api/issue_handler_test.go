@@ -861,8 +861,9 @@ func TestIssue_Start_NotFound(t *testing.T) {
 func TestIssue_Start_Success(t *testing.T) {
 	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
 	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
-	// Assign worker
-	if _, err := h.db.ExecContext(context.Background(), `UPDATE missions SET assignee_id=?, assignee_type='agent' WHERE id=?`, workerID, id); err != nil {
+	// Assign worker as delegate (A10: Start reads delegate_agent_id, not
+	// the legacy assignee_id, per F62).
+	if _, err := h.db.ExecContext(context.Background(), `UPDATE missions SET assignee_id=?, assignee_type='agent', delegate_agent_id=? WHERE id=?`, workerID, workerID, id); err != nil {
 		t.Fatal(err)
 	}
 

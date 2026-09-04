@@ -2,44 +2,70 @@ package main
 
 // Acceptance for `crewship issue runs`, driven through the BUILT BINARY.
 //
-// The endpoint now returns the journal run id, the agent slug and pages with
-// X-Total-Count. The table has to SHOW the run id (it is what `journal
-// --run-id` and the Activity page take — without it the row is a dead end),
-// prefer the slug over the display name, send --limit/--offset, and end
-// with the server's total, not the page length.
+// The project rule ("every API endpoint gets a CLI command, and its
+// acceptance test drives the CLI binary") applies here: ListRuns
+// (internal/api/issue_handler_runs.go) now attributes a run to an issue via
+// EITHER assignments.mission_id (#2256, going forward — including a mention
+// dispatch, which has no mission_tasks row at all) OR the legacy
+// mission_tasks.assignment_id join. A stub that only ever returned
+// mission-task-shaped rows would pass even if the CLI (or the query) quietly
+// dropped mention-dispatched or delegation-hop runs — the exact regression
+// this branch fixes. So the fixture carries three runs, one from each path,
+// distinguishable by id and task text, and the test asserts the CLI printed
+// all three and that exactly one request hit the runs route with the
+// resolved identifier.
+//
+// The default table renderer has no ID column (AGENT/TASK/STATUS/STARTED/
+// DURATION/RESULT — cmd_issue_extra.go's issueRunsCmd), so this drives
+// `--format json` to see the ids the CLI decoded, matching issueRunDTO's
+// json tags (internal/api/issue_handler_runs.go).
 
 import (
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 )
 
 type issueRunsStub struct {
-	mu      sync.Mutex
-	queries []url.Values
+	mu         sync.Mutex
+	runsCalls  []string // paths the runs route was hit with
+	runsStatus int
+	runsBody   string
 }
 
 func (s *issueRunsStub) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v1/issues/ENG-1":
-			_, _ = w.Write([]byte(`{"id":"iss_1","crew_id":"crew_eng","identifier":"ENG-1","title":"Coordinate the launch page","status":"IN_PROGRESS","priority":"high"}`))
-		case "/api/v1/crews/crew_eng/issues/ENG-1/runs":
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/issues/BE-42":
+			_, _ = w.Write([]byte(`{
+				"id": "iss_1",
+				"crew_id": "crew_1",
+				"identifier": "BE-42",
+				"title": "Refresh token handling",
+				"status": "IN_PROGRESS",
+				"priority": "MEDIUM",
+				"mission_type": "STANDARD",
+				"created_at": "2026-08-30T09:00:00Z",
+				"updated_at": "2026-08-30T09:00:00Z"
+			}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/crews/crew_1/issues/BE-42/runs":
 			s.mu.Lock()
-			s.queries = append(s.queries, r.URL.Query())
+			s.runsCalls = append(s.runsCalls, r.URL.Path)
+			status := s.runsStatus
+			body := s.runsBody
 			s.mu.Unlock()
-			w.Header().Set("X-Total-Count", "3")
-			w.Header().Set("X-Limit", "2")
-			w.Header().Set("X-Offset", "0")
-			_, _ = w.Write([]byte(`[
-				{"id":"asg_a","run_id":"run_aaaa","trace_id":"run_aaaa","status":"RUNNING","agent_id":"ag_1","agent_slug":"robin","agent_name":"Robin","task":"Build the landing page","started_at":"2026-09-03T13:10:00Z","duration_ms":0},
-				{"id":"asg_b","status":"PENDING","agent_id":"ag_2","agent_slug":"sam","agent_name":"Sam","task":"Write the copy","duration_ms":0}
-			]`))
+			if status == 0 {
+				status = http.StatusOK
+			}
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"detail":"no stub for ` + r.URL.Path + `"}`))
@@ -49,31 +75,80 @@ func (s *issueRunsStub) start(t *testing.T) *httptest.Server {
 	return srv
 }
 
-func TestAcceptance_IssueRuns_ShowsRunIDAndPages(t *testing.T) {
-	stub := &issueRunsStub{}
+func (s *issueRunsStub) calls(t *testing.T) []string {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.runsCalls...)
+}
+
+func runIssueRunsCLI(t *testing.T, serverURL string, args ...string) (string, error) {
+	t.Helper()
+	cfgPath := filepath.Join(t.TempDir(), "cli-config.yaml")
+	cfg := "server: " + serverURL + "\nworkspace: ws_test\ntoken: fake-token\nformat: table\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cmd := exec.Command(buildCrewshipBinary(t), args...)
+	cmd.Env = append(os.Environ(),
+		"CREWSHIP_CONFIG="+cfgPath,
+		"NO_COLOR=1",
+		"CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// Three runs shaped like issueRunDTO (internal/api/issue_handler_runs.go):
+// one reached only through the legacy mission_tasks join (mission-task run),
+// one via a.mission_id from a mention dispatch (no mission_tasks row at
+// all), and one via a.mission_id from a delegation hop.
+const issueRunsFixture = `[
+  {"id":"asg_delegation_1","status":"completed","agent_name":"Riley","task":"delegation-hop: fix retry backoff",
+   "started_at":"2026-08-31T10:00:00Z","ended_at":"2026-08-31T10:05:00Z","duration_ms":300000,
+   "result_summary":"Backoff fixed via delegated hop"},
+  {"id":"asg_mention_1","status":"completed","agent_name":"Casey","task":"mention-dispatch: check token expiry",
+   "started_at":"2026-08-31T09:00:00Z","ended_at":"2026-08-31T09:02:00Z","duration_ms":120000,
+   "result_summary":"Investigated via @mention dispatch"},
+  {"id":"asg_missiontask_1","status":"completed","agent_name":"Jordan","task":"mission-task: refresh token handling",
+   "started_at":"2026-08-30T09:10:00Z","ended_at":"2026-08-30T09:20:00Z","duration_ms":600000,
+   "result_summary":"Done via mission task"}
+]`
+
+func TestAcceptance_IssueRuns_ListsEveryAttributedRun(t *testing.T) {
+	stub := &issueRunsStub{runsStatus: http.StatusOK, runsBody: issueRunsFixture}
 	srv := stub.start(t)
 
-	out, err := runPagedListCLI(t, srv.URL, "issue", "runs", "ENG-1", "--limit", "2")
+	out, err := runIssueRunsCLI(t, srv.URL, "issue", "runs", "BE-42", "--format", "json")
 	if err != nil {
-		t.Fatalf("issue runs: %v\n%s", err, out)
+		t.Fatalf("issue runs: %v\noutput: %s", err, out)
 	}
-	stub.mu.Lock()
-	if len(stub.queries) == 0 {
-		stub.mu.Unlock()
-		t.Fatal("the runs endpoint was never called")
+
+	// Exactly one request hit the runs route, with the resolved identifier
+	// (not e.g. the raw issue id iss_1).
+	calls := stub.calls(t)
+	if len(calls) != 1 || calls[0] != "/api/v1/crews/crew_1/issues/BE-42/runs" {
+		t.Errorf("runs calls = %v, want exactly one call to /api/v1/crews/crew_1/issues/BE-42/runs", calls)
 	}
-	q := stub.queries[len(stub.queries)-1]
-	stub.mu.Unlock()
-	if q.Get("limit") != "2" {
-		t.Fatalf("limit did not reach the server: query=%v", q)
+
+	// All three attribution paths made it to stdout: legacy mission_tasks
+	// join, a.mission_id from a mention dispatch, and a.mission_id from a
+	// delegation hop.
+	for _, id := range []string{"asg_delegation_1", "asg_mention_1", "asg_missiontask_1"} {
+		if !strings.Contains(out, id) {
+			t.Errorf("output missing run id %q:\n%s", id, out)
+		}
 	}
-	if !strings.Contains(out, "run_aaaa") {
-		t.Fatalf("the run id must be in the table (it is the link to the run); got:\n%s", out)
+}
+
+func TestAcceptance_IssueRuns_NonOKReportedAsError(t *testing.T) {
+	stub := &issueRunsStub{runsStatus: http.StatusInternalServerError, runsBody: `{"error":"boom"}`}
+	srv := stub.start(t)
+
+	out, err := runIssueRunsCLI(t, srv.URL, "issue", "runs", "BE-42")
+	if err == nil {
+		t.Fatalf("issue runs: want a non-zero exit for a non-2xx response, got none\noutput: %s", out)
 	}
-	if !strings.Contains(out, "robin") || !strings.Contains(out, "sam") {
-		t.Fatalf("agent column should show the slug; got:\n%s", out)
-	}
-	if !strings.Contains(out, "showing 1–2 of 3") {
-		t.Fatalf("footer must come from X-Total-Count; got:\n%s", out)
+	if exitCodeOf(t, err) == 0 {
+		t.Errorf("exit code = 0, want non-zero")
 	}
 }

@@ -123,6 +123,7 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
 | `run_retention_days` | integer? | Workspace pipeline-run retention override; `null` uses the instance default. Present on Update responses. |
 | `credential_audit_retention_days` | integer? | Days of `credential_audit` history to keep. `null` uses the 90-day default; `0` means keep forever. Present on Update responses. |
 | `audit_log_retention_days` | integer? | Days of `audit_logs` history to keep. `null` **and** `0` both mean keep forever — that is the default, because `audit_logs` is the compliance trail. Present on Update responses. |
+| `approvals_retention_days` | integer? | Days of decided `approvals_queue` history to keep. `null` uses the 90-day default; `0` means keep forever, same as the audit pair above. Present on Update responses. |
 | `_count` | object | Canonical nested usage counts: `{ crews, agents, members }`. Always present (zeros included). Prefer this over the flat keys below. |
 | `_count_crews` | integer | Deprecated flat alias for `_count.crews` (omitted when `0`; retained one release for back-compat) |
 | `_count_agents` | integer | Deprecated flat alias for `_count.agents` (omitted when `0`) |
@@ -196,13 +197,23 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `run_retention_days` | integer | Positive retention override in days. |
 | `credential_audit_retention_days` | integer | Days to keep `credential_audit`. `0` is legal and means keep forever. Negative is rejected. |
 | `audit_log_retention_days` | integer | Days to keep `audit_logs`. `0` is legal and means keep forever. Negative is rejected. |
+| `approvals_retention_days` | integer | Days of decided `approvals_queue` history to keep. `0` is legal and means keep forever. Negative is rejected, and so is anything above `106751` (~292 years) — that is where `days * 24h` overflows an `int64`-nanosecond `time.Duration` and wraps negative, which would move the sweep's cutoff into the future and delete every terminal row regardless of age. |
 
 <Note>
-`0` behaves differently on the two audit windows than on `run_retention_days`,
-which rejects it. For an audit table, "keep this forever" is a retention
-decision an operator has to be able to express — so `null` means "use the
-product default" and `0` means an explicit never-delete. See
-[Migrations — 20260810170000](/guides/migrations).
+`0` behaves differently on `run_retention_days` than on the other three:
+`run_retention_days` rejects it, while `credential_audit_retention_days`,
+`audit_log_retention_days` and `approvals_retention_days` all accept it as an
+explicit "keep forever". For those three, `null` means "use the product
+default" and `0` means never-delete — a distinction that matters because
+they share one command (`workspace update`), so `0` has to mean the same
+thing on all of them or an operator moving between flags gets a silent
+surprise. `approvals_queue` earns the same sentinel as the audit pair
+despite not being a compliance table: `AfterDecide`'s journal entry captures
+only `approval_id`/`kind`/comment, not `reason` or the full `payload`, so
+`approvals_queue` is the only place those survive at all, and an operator
+wanting to keep them indefinitely needs a real way to say so. See
+[Migrations — 20260810170000](/guides/migrations) and
+[Migrations — 20260901134904](/guides/migrations).
 </Note>
 
 **Response:** `200 OK` -- updated workspace object.
@@ -1282,6 +1293,11 @@ Completes a pending approval. Decider identity is taken from the JWT user contex
 }
 ```
 
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `approved` | boolean | **effectively yes** | Always send it explicitly (the CLI and UI always do). If the field is omitted entirely, it defaults to **`false`** — a body-less `POST` to this URL **denies** the waitpoint rather than approving it, despite the endpoint being named `.../approve` (`internal/api/pipelines_exec.go`, `Approved bool` — the Go zero value). See **Defaults differ from the public callback**, below, before relying on omission either way. |
+| `comment` | string | no | Forwarded to the parked run as the wait step's output. |
+
 **Response:** `200 OK`
 
 ```json
@@ -1293,6 +1309,15 @@ Completes a pending approval. Decider identity is taken from the JWT user contex
 | `400` | Missing `token` or invalid body |
 | `409` | Waitpoint already decided or expired |
 | `503` | Waitpoint store not wired, or the wired implementation does not support completion |
+
+#### Defaults differ from the public callback — intentionally
+
+This authed endpoint and the [public token callback](#complete-a-waitpoint-by-token-public-callback) below both accept an optional `approved` field, but they resolve a missing field in opposite directions:
+
+- **Here (authed, `.../approve`):** omitted → **`false`** (deny). This is the JWT-authenticated, human/MANAGER+-driven path (`requireRole(... "update")`). A caller with a valid session making a considered decision is expected to state it; if a request is malformed enough to drop the field, failing closed means the gated run stays parked rather than being silently released.
+- **Public token callback (`POST /api/v1/waitpoint-tokens/{token}`):** omitted → **`true`** (approve). This endpoint has **no JWT** — the token in the path is the only credential — and exists for external systems (CI jobs, vendor webhooks) whose completion signal is often just "the task finished, hit this URL" with no body at all (`trigger.dev` `wait.forToken` parity). Requiring a JSON body here would break that integration pattern.
+
+Both defaults are deliberate for their own caller population, not a shared contract — do not assume the two endpoints behave the same way when a request omits `approved`, and do not rely on either default when authoring a new integration: send the field explicitly.
 
 ### Complete a waitpoint by token (public callback)
 
@@ -1308,7 +1333,7 @@ The **public** sibling of the approve endpoint (`trigger.dev` `wait.forToken` pa
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `approved` | boolean | no | Defaults to `true`. Set `false` to deny the waitpoint (`internal/api/pipeline_waitpoint_callback.go:44-47`). |
+| `approved` | boolean | no | Defaults to `true`. Set `false` to deny the waitpoint (`internal/api/pipeline_waitpoint_callback.go:44-47`). **Note:** this default is the opposite of the authed [approve/reject endpoint](#approve-reject-waitpoint) above, which defaults an omitted field to `false`. See **Defaults differ from the public callback** for the reasoning — send `approved` explicitly rather than relying on either default. |
 | `payload` | any (JSON) | no | Stored on the waitpoint for the resumed step to read (`internal/api/pipeline_waitpoint_callback.go:48-51`). |
 
 ```json

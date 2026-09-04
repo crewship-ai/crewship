@@ -21,7 +21,8 @@ healthy and the specs had drifted. So the nightly splits them:
 
 - **gate bucket** (`GATE_SPECS` in the workflow) — verified green, hard-fails
   the nightly. Today that is `create-crew-wizard.spec.ts`,
-  `routine-run-inputs.spec.ts` and `slash-run-routine-chat.spec.ts`.
+  `routine-run-inputs.spec.ts`, `shell-overflow.spec.ts` and
+  `slash-run-routine-chat.spec.ts`.
   "Verified" is literal: a spec is placed here after it has been run against a
   seeded instance under `playwright.nightly.config.ts`, at the nightly's own
   `CI=1 --workers=2`, not because it looks current.

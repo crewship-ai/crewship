@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -284,6 +286,106 @@ func (h *PipelineHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// webhookFireFailureAlertThreshold is how many consecutive fire failures
+// the SAME webhook must accumulate before a human is paged (PRD-ISSUES-
+// AND-ROUTINES-2026.md §17 A4, F20). One failure is noise-tolerant — a
+// momentary DB busy, a governance load hiccup, a sender retry landing
+// mid-deploy — and paging on it is exactly the alert fatigue that trains
+// people to ignore the inbox. Three in a row for the same webhook means
+// the fire path is structurally broken for it, not unlucky timing, and
+// every one of those three represents a delivery the sender believes it
+// made that never became a run. Deliberately lower than a schedule's
+// default of 5 (defaultMaxConsecutiveFailures, schedules.go): a schedule
+// fire that reaches FAILED at least produced a run whose failure has its
+// own EntryPipelineRunFailed trail (see EntryPipelineWebhookFireFailed's
+// doc comment); a webhook FIRE failure means no run exists AT ALL, so
+// finding out sooner matters more.
+const webhookFireFailureAlertThreshold = 3
+
+// alertWebhookFireFailure is the single chokepoint every "the fire did
+// not become a run" branch in FireWebhook calls, in place of the bare
+// `_ = h.webhooks.RecordFire(...)` this replaced. It ALWAYS writes a
+// journal entry — the durable, queryable "should have run, didn't"
+// record A4 asks for, mirroring EntryAutomationEnqueueFailed's
+// every-failure cadence — and only once the webhook's consecutive-
+// failure streak (read back atomically from RecordFire's RETURNING, so
+// concurrent fires of the same webhook can't each see a stale count and
+// both think they crossed the line) reaches webhookFireFailureAlertThreshold
+// does it raise a MANAGER inbox card. This is the same split the schedule
+// path already draws between "every failure is journaled"
+// (EntryPipelineRunFailed, per run) and "only a repeated failure pages a
+// human" (maybeTripCircuitBreaker, schedules.go).
+//
+// wh is the webhook row read before the fire attempt; runID is empty when
+// the fire never got far enough to allocate one (every synchronous
+// pre-check failure) and populated for the async-dispatch failure path;
+// reason is a short, human-readable cause safe to show in the inbox.
+//
+// Upsert, not Insert, on the inbox write: the SAME webhook can cross this
+// threshold more than once across its life (fail, recover, fail again),
+// and each crossing is news about the SAME subject (source_id = webhook
+// ID) rather than a new one-off event — a card a human already resolved
+// must be resurrected to unread, not silently swallowed by the (kind,
+// source_id) unique index the way a second Insert would be.
+func (h *PipelineHandler) alertWebhookFireFailure(ctx context.Context, wh *pipeline.Webhook, runID, reason string) {
+	var streak int64
+	if h.webhooks != nil {
+		var err error
+		streak, err = h.webhooks.RecordFire(ctx, wh.ID, runID, "FAILED")
+		if err != nil {
+			h.logger.Warn("webhook fire: record failure", "error", err, "webhook_id", wh.ID)
+		}
+	}
+
+	if h.emitter != nil {
+		_, _ = h.emitter.Emit(ctx, journal.Entry{
+			WorkspaceID: wh.WorkspaceID,
+			Type:        journal.EntryPipelineWebhookFireFailed,
+			Severity:    journal.SeverityError,
+			ActorType:   journal.ActorSystem,
+			ActorID:     "webhook",
+			Summary:     fmt.Sprintf("Webhook %s failed to fire: %s", wh.Name, reason),
+			Payload: map[string]any{
+				"webhook_id":           wh.ID,
+				"pipeline_id":          wh.TargetPipelineID,
+				"run_id":               runID,
+				"reason":               reason,
+				"consecutive_failures": streak,
+			},
+		})
+	}
+
+	// Fire the alert exactly ONCE per streak, at the moment it crosses the
+	// threshold — not "every failure from here on", which would be the same
+	// flood the threshold exists to prevent. A later success (RecordFire
+	// resets consecutive_fire_failures to 0) lets a FUTURE streak cross the
+	// threshold again and Upsert the same card back to unread.
+	if streak != webhookFireFailureAlertThreshold {
+		return
+	}
+	if err := inbox.Upsert(ctx, h.db, h.logger, inbox.Item{
+		WorkspaceID: wh.WorkspaceID,
+		Kind:        inbox.KindWebhookFireFailed,
+		SourceID:    wh.ID,
+		TargetRole:  "MANAGER",
+		Title:       fmt.Sprintf("Webhook failing to fire: %s", wh.Name),
+		BodyMD: fmt.Sprintf(
+			"Webhook **%s** has failed to fire %d times in a row — %s. "+
+				"Check the routine's recent runs and the Journal for the underlying cause.",
+			wh.Name, streak, reason),
+		SenderType: "pipeline",
+		SenderName: wh.Name,
+		Priority:   "high",
+		Payload: map[string]interface{}{
+			"webhook_id":           wh.ID,
+			"pipeline_id":          wh.TargetPipelineID,
+			"consecutive_failures": streak,
+		},
+	}); err != nil {
+		h.logger.Warn("webhook fire: inbox alert", "error", err, "webhook_id", wh.ID)
+	}
+}
+
 // FireWebhook POST /api/v1/webhooks/{token}
 //
 // Public dispatch entrypoint — NO auth middleware. Auth is the
@@ -441,13 +543,13 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// leave the operator debugging a run that never existed.
 	target, err := h.store.GetByID(r.Context(), wh.TargetPipelineID)
 	if err != nil {
-		_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+		h.alertWebhookFireFailure(r.Context(), wh, "", "could not load the target routine")
 		h.logger.Warn("webhook fire: load target pipeline", "error", err, "webhook_id", wh.ID)
 		replyError(w, http.StatusInternalServerError, "pipeline run failed")
 		return
 	}
 	if !pipeline.StatusRunnable(target.Status) {
-		_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+		h.alertWebhookFireFailure(r.Context(), wh, "", "target routine is not active (awaiting approval or disabled)")
 		replyError(w, http.StatusConflict, "routine is not active (awaiting approval or disabled)")
 		return
 	}
@@ -463,7 +565,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	if wh.TargetPipelineVersion != nil {
 		ver, verr := h.store.GetVersion(r.Context(), wh.TargetPipelineID, *wh.TargetPipelineVersion)
 		if verr != nil {
-			_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+			h.alertWebhookFireFailure(r.Context(), wh, "", "pinned routine version no longer exists")
 			replyError(w, http.StatusConflict, fmt.Sprintf(
 				"routine %q has no version %d (was it deleted? update or unpin the webhook)",
 				target.Slug, *wh.TargetPipelineVersion))
@@ -496,7 +598,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 				// Record the throttled attempt (parity with the old
 				// synchronous handler, which stamped FAILED before
 				// answering 429).
-				_ = h.webhooks.RecordFire(r.Context(), wh.ID, "", "FAILED")
+				h.alertWebhookFireFailure(r.Context(), wh, "", "concurrency limit reached before a run could start")
 				w.Header().Set("Retry-After", "5")
 				replyError(w, http.StatusTooManyRequests, "concurrency limit reached")
 				return
@@ -539,7 +641,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	if !isNew {
 		// Duplicate delivery — answer with the original run's id so
 		// retried webhooks see a stable success response. No dispatch.
-		_ = h.webhooks.RecordFire(r.Context(), wh.ID, resolvedRunID, "DEDUPED")
+		_, _ = h.webhooks.RecordFire(r.Context(), wh.ID, resolvedRunID, "DEDUPED")
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"run_id":  resolvedRunID,
 			"status":  "DEDUPED",
@@ -601,6 +703,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			// happened. Mirrors the executor's own Forget on its
 			// concurrency-rejection path.
 			_ = idem.Forget(context.Background(), wh.WorkspaceID, wh.TargetPipelineID, idemKey)
+			reason := "run dispatch failed: " + truncate(runErr.Error(), 200)
 			if errors.Is(runErr, pipeline.ErrConcurrencyLimitReached) {
 				// Residual TOCTOU race: the synchronous pre-check above
 				// saw a free slot, but another dispatch Acquire'd it
@@ -612,13 +715,25 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 				// above released the idempotency key so a sender/
 				// operator retry executes instead of DEDUPE-ing onto a
 				// run that never happened.
+				reason = "concurrency limit reached (race after the synchronous pre-check)"
 				h.logger.Warn("webhook fire (async run): concurrency limit reached despite synchronous pre-check (TOCTOU window); fire recorded FAILED, idempotency key released so a retry can execute",
 					"webhook_id", wh.ID, "run_id", runID)
 			} else {
 				h.logger.Warn("webhook fire (async run)", "error", runErr,
 					"webhook_id", wh.ID, "run_id", runID)
 			}
-		} else if res != nil && res.Status == "FAILED" {
+			// This is the "fire never became a run" case exec.Run itself
+			// reported (as opposed to a run that started and whose ROUTINE
+			// then failed — see the res.Status == "FAILED" branch below,
+			// which already gets full journal coverage from the executor's
+			// own EntryPipelineRunFailed and is deliberately NOT routed
+			// through the fire-failure alert). Bookkeeping runs on a fresh
+			// context: at shutdown dispatchCtx is already cancelled when
+			// the run winds down, and the terminal record must still land.
+			h.alertWebhookFireFailure(context.Background(), wh, firedRunID, reason)
+			return
+		}
+		if res != nil && res.Status == "FAILED" {
 			// The run executed but FAILED (Run returned no error). Without
 			// releasing the key, the idempotency reservation wedges the failed
 			// run for the full TTL (24h) and every sender redelivery DEDUPES
@@ -627,12 +742,17 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			// COMPLETED keeps its key (a real success must dedupe); WAITING /
 			// CANCELLED keep theirs too (parked or deliberately stopped, not a
 			// failure to re-fire).
+			//
+			// No fire-failure alert here: the routine genuinely ran and its
+			// own step loop already emitted EntryPipelineRunFailed with the
+			// failed step and error message — this is a routine-quality
+			// problem, not a "the trigger silently didn't fire" problem.
 			_ = idem.Forget(context.Background(), wh.WorkspaceID, wh.TargetPipelineID, idemKey)
 		}
 		// Bookkeeping on a fresh context: at shutdown dispatchCtx is
 		// already cancelled when the run winds down, and the terminal
 		// record must still land.
-		_ = h.webhooks.RecordFire(context.Background(), wh.ID, firedRunID, status)
+		_, _ = h.webhooks.RecordFire(context.Background(), wh.ID, firedRunID, status)
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]any{

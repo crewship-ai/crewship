@@ -29,6 +29,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/license"
@@ -363,6 +364,19 @@ var startCmd = &cobra.Command{
 		// announces steering_queued on the chat's WS session channel.
 		if apiRouter := srv.APIRouter(); apiRouter != nil {
 			apiRouter.SetSteerer(bridge)
+			// Share the per-agent exclusivity lock with AssignmentHandler
+			// (F51): a chat send and an /assign or @mention dispatch for
+			// the same agent must not both reach the tmux exec path at
+			// once. See chatbridge.AgentRunLock's doc comment.
+			if assign := apiRouter.Assignments(); assign != nil {
+				assign.SetAgentRunLock(bridge.AgentRunLock())
+				// Symmetric with the lock share above: a chat send's
+				// AgentRunLock release must be able to drain an assignment
+				// that queued behind it, not just wait for an unrelated
+				// crew completion or the stuck-QUEUED sweeper (#2269
+				// follow-up, defect 5). See chatbridge.AssignmentPumper.
+				bridge.SetAssignmentPumper(assign)
+			}
 		}
 		bridge.SetSteerBroadcaster(srv.WSHub())
 
@@ -480,6 +494,11 @@ var startCmd = &cobra.Command{
 				// which is exactly how a two-rule loop ran 59 hops past a cap
 				// of 8.
 				autoReg.SetChainSource(pipeline.NewRunChainReader(deps.DB))
+				// A4 (PRD-ISSUES-AND-ROUTINES-2026.md §17, F20): without this,
+				// a repeated enqueue failure still gets its per-failure
+				// journal entry but never pages a human — the same
+				// degrade-quietly contract as an unwired IssueOpener.
+				autoReg.SetInboxAlerter(automation.NewDBInboxAlerter(deps.DB, logger))
 				autoReg.Start(ctx)
 				defer autoReg.Stop()
 				jw.AddCommitObserver(autoReg.Observer)
@@ -560,6 +579,11 @@ var startCmd = &cobra.Command{
 				},
 				logger,
 			)
+			// Cross-surface exclusivity (#2269 follow-up, defect 6): a
+			// scheduled routine firing for an agent that's mid-assignment
+			// deletes the assignment's live tmux session otherwise — same
+			// lock the chat/assignment doors already share.
+			sched.SetAgentRunLock(bridge.AgentRunLock())
 			if schedulerLease != nil {
 				sched.SetLeaderGate(schedulerLease)
 			}
@@ -671,6 +695,10 @@ var startCmd = &cobra.Command{
 					CrewRuntime: func(ctx context.Context, crewID, workspaceID string) (provider.CrewConfig, error) {
 						return api.BuildCrewRuntimeConfig(ctx, deps.DB, crewID, workspaceID)
 					},
+					// Cross-surface exclusivity (#2269 follow-up, defect 6): an
+					// agent_run routine step and a live assignment/chat turn for
+					// the same agent must not both exec into its tmux session.
+					AgentRunLock: bridge.AgentRunLock(),
 				})
 				if err != nil {
 					logger.Error("pipeline orchestrator runner construct failed", "error", err)
@@ -1034,6 +1062,12 @@ var startCmd = &cobra.Command{
 				// operator's to declare and not ours to assume. See
 				// internal/api/audit_retention.go.
 				go api.StartAuditRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
+
+				// approvals_queue retention (#2233) — same daily shape, for
+				// terminal HITL approval rows that were kept forever before
+				// this. Defaults to 90 days; see
+				// internal/harbormaster/retention.go.
+				go harbormaster.StartApprovalsRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
 			}
 
 			// Pipeline schedules — cron triggers for saved pipelines.

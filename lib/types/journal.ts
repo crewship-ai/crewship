@@ -18,6 +18,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "assignment.running",
   "assignment.completed",
   "assignment.failed",
+  "assignment.cancelled",
   "crew.action",
   "task.delegated",
   // Runs
@@ -114,6 +115,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "pipeline.step.container_ready",
   "pipeline.schedule.circuit_breaker_tripped",
   "pipeline.schedule.missed_occurrences",
+  "pipeline.webhook.fire_failed",
   "pipeline.runs_swept",
   // Chat
   "conversation.compacted",
@@ -169,6 +171,7 @@ export const JOURNAL_ENTRY_TYPES = [
   // rather than in System where they would be filed and forgotten.
   "automation.throttled",
   "automation.depth_exceeded",
+  "automation.enqueue_failed",
   // Pages — docs/prd/pages.md §5, §7.1b. Unknown types are forwarded to the
   // activity feed by design (internal/journal/feed_filter.go:33-35).
   "page.produce_denied",
@@ -235,6 +238,7 @@ export const ENTRY_TYPE_GROUPS: { label: string; types: JournalEntryType[] }[] =
       "assignment.running",
       "assignment.completed",
       "assignment.failed",
+      "assignment.cancelled",
       "crew.action",
       "task.delegated",
     ],

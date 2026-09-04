@@ -218,6 +218,24 @@ type Credential struct {
 	// evict the credential once its lease lapses — the server-side gates only
 	// cover the moment of delivery, not the container's whole lifetime.
 	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	// AgentIDs is the set of crew members this credential is granted to (#2052),
+	// EMPTY meaning crew-wide — a credential linked to the crew, or bound at
+	// crew/workspace scope, which every member of the crew receives.
+	//
+	// It exists for the sidecar's CredStore, which is crew-wide by construction
+	// (one sidecar per crew container) and until #2052 answered "which
+	// credential for this provider?" with a round-robin counter and nothing
+	// about the caller. That decided whose key paid; for OPENAI_COMPAT, whose
+	// upstream comes FROM the credential, it also decided which gateway received
+	// the prompt.
+	//
+	// The set is computed per CREDENTIAL by the API tier — the grantees within
+	// the agent's own crew — not "the agent this delivery is for". The
+	// difference is load-bearing: the latter would put a different value in
+	// every member's boot payload, move sidecarConfigFingerprint on every
+	// alternation, and restart the shared sidecar each time (the thrash #1160
+	// removed). See internal/api/credential_delivery.go.
+	AgentIDs []string `json:"agent_ids,omitempty"`
 	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
 	// §2.2): AWS = access key id + secret + region, a service account = blob +
 	// filename. Nil for every credential that has none, which is the shape the
@@ -659,9 +677,21 @@ type ApprovalCheckInput struct {
 	AgentID     string
 	MissionID   string
 	Tool        string
-	Args        map[string]any
-	Mode        string // "none" | "async" | "sync"
-	UserID      string
+	// Args is both the rule-evaluator input and the reward-tuning
+	// fingerprint (harbormaster.HashArgs hashes it verbatim — key and
+	// value). It must therefore hold only values that are stable across
+	// repeated, unrelated calls of the same shape; a per-invocation value
+	// (a prompt, a path, a timestamp) hashes every call into its own
+	// cohort and silently defeats gate auto-tuning (#2234).
+	Args map[string]any
+	// Review carries extra context for a human deciding the approval —
+	// e.g. a scrubbed, bounded preview of the prompt that triggered the
+	// call. It is stored alongside Args in the approval row but is NOT
+	// part of the reward fingerprint, so a caller can put per-invocation,
+	// scrubbed text here without breaking cohorting.
+	Review map[string]any
+	Mode   string // "none" | "async" | "sync"
+	UserID string
 }
 
 type ApprovalDecision struct {

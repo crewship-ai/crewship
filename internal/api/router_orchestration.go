@@ -409,8 +409,20 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// annotation the chains route above carries, and it has to sit in the
 	// comment run IMMEDIATELY above the registration or it is ignored.
 	// openapi: query limit:integer offset:integer
-	r.mux.Handle("GET /api/v1/approvals", authed(wsCtx(http.HandlerFunc(ah.List))))
-	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
+	//
+	// roleManage (#2233): these two used to be plain authed(wsCtx(...)) —
+	// membership only, no role — while Decide/Cancel right below were
+	// already roleManage. The payload these return is full JSON (Get's own
+	// doc comment says so), so any workspace member, including tiers that
+	// can never decide anything, could read every approval ever created.
+	// Gated to match the mutation routes. Known consequence: the shipped
+	// Inbox (hooks/use-approvals.ts, called from InboxV2 and the standalone
+	// /approvals page) fetched this endpoint for every member regardless of
+	// role — those two surfaces now gate the fetch on role client-side (see
+	// their own comments) so a non-manage member gets an empty approvals
+	// feed instead of a 403 banner, rather than being left broken.
+	r.authedMut("GET", "/api/v1/approvals", roleManage, ah.List)
+	r.authedMut("GET", "/api/v1/approvals/{id}", roleManage, ah.Get)
 	r.authedMut("POST", "/api/v1/approvals/{id}/decide", roleManage, ah.Decide)
 	r.authedMut("POST", "/api/v1/approvals/{id}/cancel", roleManage, ah.Cancel)
 	r.authedMut("POST", "/api/v1/approvals/reset-auto-tuning", roleManage, ah.ResetAutoTuning)

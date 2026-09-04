@@ -8,6 +8,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +17,9 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/provider"
+	_ "modernc.org/sqlite"
 )
 
 // ---- fakes ----
@@ -346,6 +349,216 @@ func TestRunAgent_ApprovalRequiredButApprovedProceeds(t *testing.T) {
 	}
 }
 
+// TestRunAgent_ApprovalGateScrubsAndBoundsUserPrompt is the regression test
+// for #2228: the approval-gate input used to carry
+// truncateStr(req.UserMessage, 500) verbatim, unscrubbed, into
+// approvals_queue.payload — weaker than the scrubbed 240-char preview
+// chat.user_message keeps one table over. A registered credential value
+// pasted into agent chat must not reach the gate input in the clear, in
+// EITHER of its two carriers: Args (which harbormaster also hashes into the
+// reward fingerprint, see the sibling #2234 test below) and Review (the
+// human-facing context introduced to fix #2234 without re-widening #2228).
+func TestRunAgent_ApprovalGateScrubsAndBoundsUserPrompt(t *testing.T) {
+	t.Parallel()
+	gate := &covGate{dec: ApprovalDecision{Approved: true}}
+	o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+	o.SetApprovalGate(gate)
+
+	const secret = "crewship-guard-approval-secret-4f8c1a9d"
+	req := covRunReq()
+	req.Credentials = []Credential{{ID: "c1", EnvVarName: "SOME_TOKEN", PlainValue: secret, Type: "API_KEY"}}
+	// The secret sits at the very front, well inside both the old 500-char
+	// cap and the new 240-char one, so neither cap is what would hide it.
+	req.UserMessage = secret + " " + strings.Repeat("deploy the thing please ", 40)
+
+	if err := o.RunAgent(context.Background(), req, nil); err != nil {
+		t.Fatalf("RunAgent: %v", err)
+	}
+
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if len(gate.got) != 1 {
+		t.Fatalf("want 1 gate check, got %d", len(gate.got))
+	}
+	in := gate.got[0]
+
+	blob, err := json.Marshal(struct {
+		Args   map[string]any
+		Review map[string]any
+	}{in.Args, in.Review})
+	if err != nil {
+		t.Fatalf("marshal gate input: %v", err)
+	}
+	if strings.Contains(string(blob), secret) {
+		t.Fatalf("registered secret reached the approval-gate input: %s", blob)
+	}
+
+	// The human-facing preview must still be bounded — to the journal
+	// path's cap, not the old, wider one. truncateStr appends a one-rune
+	// ellipsis on top of the cap, so a truncated preview is
+	// journalUserMessageMaxChars+1 runes.
+	preview, _ := in.Review["user_prompt"].(string)
+	if n := len([]rune(preview)); n > journalUserMessageMaxChars+1 {
+		t.Errorf("review user_prompt = %d runes, want <= %d (journalUserMessageMaxChars+1)", n, journalUserMessageMaxChars+1)
+	}
+	if preview == "" {
+		t.Error("review user_prompt is empty — a human deciding this approval has no context at all")
+	}
+}
+
+// TestRunAgent_ApprovalGateReviewOmittedWhenNoUserMessage guards against a
+// regression review caught in #2250: journalUserMessage(req) was hoisted out
+// of the `if req.UserMessage != ""` guard, so the gate's Review map was built
+// unconditionally. For a run with no UserMessage that produced a non-nil,
+// non-empty map — {"user_prompt": "", "user_prompt_truncated": false} — which
+// harbormaster.Gate's `len(in.Review) > 0` check (gate.go) can't distinguish
+// from real content, so every enqueued approvals_queue row picked up a
+// meaningless "review" key even when nothing was scrubbed. Review must be
+// empty/nil when there is no user message, and still carry the preview when
+// there is one.
+func TestRunAgent_ApprovalGateReviewOmittedWhenNoUserMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty UserMessage produces no Review", func(t *testing.T) {
+		t.Parallel()
+		gate := &covGate{dec: ApprovalDecision{Approved: true}}
+		o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+		o.SetApprovalGate(gate)
+
+		req := covRunReq()
+		req.UserMessage = ""
+
+		if err := o.RunAgent(context.Background(), req, nil); err != nil {
+			t.Fatalf("RunAgent: %v", err)
+		}
+
+		gate.mu.Lock()
+		defer gate.mu.Unlock()
+		if len(gate.got) != 1 {
+			t.Fatalf("want 1 gate check, got %d", len(gate.got))
+		}
+		if len(gate.got[0].Review) != 0 {
+			t.Errorf("Review = %#v, want empty/nil for a run with no UserMessage — harbormaster.Gate's len(in.Review) > 0 check would still stamp a meaningless review key on the enqueued payload", gate.got[0].Review)
+		}
+	})
+
+	t.Run("non-empty UserMessage still produces Review", func(t *testing.T) {
+		t.Parallel()
+		gate := &covGate{dec: ApprovalDecision{Approved: true}}
+		o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+		o.SetApprovalGate(gate)
+
+		req := covRunReq() // UserMessage: "please do the thing"
+
+		if err := o.RunAgent(context.Background(), req, nil); err != nil {
+			t.Fatalf("RunAgent: %v", err)
+		}
+
+		gate.mu.Lock()
+		defer gate.mu.Unlock()
+		if len(gate.got) != 1 {
+			t.Fatalf("want 1 gate check, got %d", len(gate.got))
+		}
+		if len(gate.got[0].Review) == 0 {
+			t.Fatal("Review is empty for a run that has a UserMessage")
+		}
+		preview, _ := gate.got[0].Review["user_prompt"].(string)
+		if preview == "" {
+			t.Error(`Review["user_prompt"] is empty for a run that has a UserMessage`)
+		}
+	})
+}
+
+// openRewardTestDB gives AdjustMode/RecordOutcome somewhere to read and
+// write: just the gate_reward_history table, matching the schema
+// internal/harbormaster's own tests create (approvals_queue is not needed —
+// neither function touches it).
+func openRewardTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`
+		CREATE TABLE gate_reward_history (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+			tool_name TEXT NOT NULL, args_hash TEXT NOT NULL,
+			outcome TEXT NOT NULL, decided_by TEXT,
+			decided_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+			request_id TEXT);`); err != nil {
+		t.Fatalf("create gate_reward_history: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// TestRunAgent_ApprovalGateCohortMergesAcrossPrompts is the regression test
+// for #2234: before the fix, the gate's Args carried the user's message, so
+// harbormaster.HashArgs — which sorts and hashes every key AND value —
+// produced a different fingerprint for every differently-worded run of the
+// same agent. Reward history could never accumulate past one row per
+// cohort, so AdjustMode's quorum (RewardHistorySize/2) was unreachable and
+// gate auto-tuning silently could not learn anything for agent_run.
+//
+// This drives two real RunAgent calls with different wording, captures the
+// Args the real call site produces for each, and proves both that they
+// fingerprint into the same cohort AND that the merged cohort can actually
+// clear the quorum bar and flip the gate mode — not just that the hashes
+// happen to match.
+func TestRunAgent_ApprovalGateCohortMergesAcrossPrompts(t *testing.T) {
+	t.Parallel()
+	gate := &covGate{dec: ApprovalDecision{Approved: true}}
+	o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
+	o.SetApprovalGate(gate)
+
+	req1 := covRunReq()
+	req1.UserMessage = "deploy the api"
+	if err := o.RunAgent(context.Background(), req1, nil); err != nil {
+		t.Fatalf("RunAgent (1): %v", err)
+	}
+	req2 := covRunReq()
+	req2.UserMessage = "deploy the api again, this time with the extra flags we discussed yesterday"
+	if err := o.RunAgent(context.Background(), req2, nil); err != nil {
+		t.Fatalf("RunAgent (2): %v", err)
+	}
+
+	gate.mu.Lock()
+	if len(gate.got) != 2 {
+		gate.mu.Unlock()
+		t.Fatalf("want 2 gate checks, got %d", len(gate.got))
+	}
+	args1, args2 := gate.got[0].Args, gate.got[1].Args
+	gate.mu.Unlock()
+
+	hash1, hash2 := harbormaster.HashArgs(args1), harbormaster.HashArgs(args2)
+	if hash1 != hash2 {
+		t.Fatalf("differently-worded runs of the same agent hashed into different cohorts (%s vs %s) — "+
+			"args1=%v args2=%v", hash1, hash2, args1, args2)
+	}
+
+	// Seed a quorum of approvals under the FIRST run's args, then look the
+	// cohort up under the SECOND run's args (as a live gate check would).
+	// If the fix didn't stick, the seeded rows and the lookup would sit
+	// under different hashes and AdjustMode would see nothing.
+	db := openRewardTestDB(t)
+	ctx := context.Background()
+	for i := 0; i < harbormaster.RewardHistorySize/2; i++ {
+		if err := harbormaster.RecordOutcome(ctx, db, "ws1", "agent_run", args1,
+			harbormaster.OutcomeApproved, "alice", fmt.Sprintf("req_%d", i)); err != nil {
+			t.Fatalf("seed reward history: %v", err)
+		}
+	}
+	adjusted, reason, err := harbormaster.AdjustMode(ctx, db, "ws1", "agent_run", args2, harbormaster.ModeSync)
+	if err != nil {
+		t.Fatalf("AdjustMode: %v", err)
+	}
+	if adjusted != harbormaster.ModeAsync {
+		t.Fatalf("quorum reached seeding under run 1's args did not carry over to run 2's lookup: "+
+			"adjusted=%v reason=%q", adjusted, reason)
+	}
+}
+
 func TestRunAgent_PreAgentStartHookBlocks(t *testing.T) {
 	t.Parallel()
 	o := New(covNewRunContainer(covRunOpts{}), newMemState(), covQuietLogger())
@@ -371,7 +584,12 @@ func TestRunAgent_PreAgentStartDispatchFailureIsNotReportedAsBlock(t *testing.T)
 
 // ---- journal + state branches ----
 
-func TestRunAgent_LongUserMessageJournalTruncation(t *testing.T) {
+// Was TestRunAgent_LongUserMessageJournalTruncation, which asserted the summary
+// ended in an ellipsis because a long message was clipped into it. #2229 stopped
+// putting the message in the summary at all, so there is nothing left to clip:
+// the ellipsis assertion is inverted rather than dropped, because an ellipsis
+// reappearing here would mean message text had found its way back in.
+func TestRunAgent_LongUserMessageJournalsLengthNotText(t *testing.T) {
 	t.Parallel()
 	j := &covJournal{}
 	o := New(covNewRunContainer(covRunOpts{stream: "{}\n"}), newMemState(), covQuietLogger())
@@ -385,8 +603,11 @@ func TestRunAgent_LongUserMessageJournalTruncation(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("want 1 chat.user_message entry, got %d", len(msgs))
 	}
-	if !strings.HasSuffix(msgs[0].Summary, "…") {
-		t.Errorf("summary must be truncated with ellipsis: %q", msgs[0].Summary)
+	if strings.Contains(msgs[0].Summary, "…") {
+		t.Errorf("summary carries a truncation ellipsis, which means it carries clipped message text: %q", msgs[0].Summary)
+	}
+	if want := "user → " + req.AgentSlug + ": 300 characters"; msgs[0].Summary != want {
+		t.Errorf("summary = %q, want %q", msgs[0].Summary, want)
 	}
 	if msgs[0].Payload["length_chars"] != 300 {
 		t.Errorf("payload length_chars = %v, want 300", msgs[0].Payload["length_chars"])

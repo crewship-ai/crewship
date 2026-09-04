@@ -29,6 +29,59 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   missing, was already chronicled and is untouched.
 -->
 
+### Security
+
+- **Stop now reaches a run that is still queued (#2317).** `issue stop`
+  stamped only `PENDING`/`RUNNING` assignments, so a run parked as `QUEUED`
+  — behind the agent's live run (#2269) or the crew budget — was missed:
+  once the agent freed up, the pump started it and it landed `COMPLETED` on
+  an issue that already read `CANCELLED` (seen live on dev1). Stop now stamps
+  every non-terminal assignment, and the queued row is recorded `CANCELLED`
+  without ever starting its exec.
+
+- **The 1.0 known limits are written down where users read (#2299).** The
+  issue-mentions, routines and issue-detail guides now say plainly what Track
+  A deliberately left for 1.1: a busy agent is woken after its live run rather
+  than interrupted, and a chat to it bounces `agent_busy`; the routine
+  webhook and direct agent-run routes are not yet behind that guard; routine
+  runs are missing from the Runs view (#2284); there is no cross-run
+  continuity; Stop is cooperative; and `DONE`/`COMPLETED` are still two words
+  for finished. The mentions guide also stops saying nothing is ever queued —
+  since #2269 a mention of a busy agent is.
+
+- **An issue's owner and its delegate are two columns, not one polymorphic
+  assignee (#2297).** `missions` carried `assignee_type`/`assignee_id`, so
+  delegating an issue to an agent overwrote the person who owned it — the UI
+  then showed the agent where the owner had been, and unassigning left a
+  stale `assignee_type` behind. `missions.owner_user_id` and
+  `missions.delegate_agent_id` are now separate nullable foreign keys, both
+  `ON DELETE SET NULL`; the migration backfills them from the legacy pair.
+  Delegation writes only the delegate; `crewship issue start` refuses an
+  issue with no delegate, or whose delegate is not a live agent, with a named
+  400. The API returns `owner` and `delegate` objects beside the legacy
+  fields, and the issue header and Properties panel render both. Unassign
+  clears every one of the four columns.
+
+- **The public mission-start route now checks the #1768 autonomy gate
+  (#2258).** `autonomyGateApproved` was consulted from exactly one place —
+  the sidecar-facing `POST /api/v1/internal/missions/{missionId}/start` —
+  and never from the public `POST /api/v1/crews/{crewId}/missions/{missionId}/start`
+  that `crewship mission start` calls. `applyAutonomyGateDecisionTx`
+  deliberately writes no marker on the mission row when a gate is denied —
+  the `approvals_queue` row is documented as the *only* door — so that
+  guarantee held only for agent-triggered starts. Any MANAGER (the route's
+  `roleCreate` requirement) could start a mission whose autonomy gate was
+  pending or had been explicitly denied, including by an OWNER, simply by
+  calling the public route instead of the internal one.
+
+  The internal route's check — fail-closed on pending/denied/cancelled/
+  timed-out — is now the shared helper `refuseUnlessAutonomyGateApproved`,
+  and both mission-start handlers call it, so the two routes refuse
+  identically and the next start-like route added does not repeat the
+  omission. A privileged human override of a hold is a separate feature
+  this does not add: it would need to be explicit and audited, not an
+  accident of which handler a request reaches.
+
 ### Added
 
 - **The inbox reads as decisions, and it is never blank (#2314).** A row is a
@@ -450,6 +503,41 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Docs stopped contradicting the code on rollback, concurrency, and the
+  monthly budget; the waitpoint approve-default asymmetry is now
+  documented instead of silently differing (A5) (#2289).** No API or CLI behaviour
+  changed. `docs/cli/routine.mdx` said `routine rollback` "creates a new
+  version on top of HEAD" — it doesn't; `Store.Rollback` only repoints
+  `head_version` (no version row is inserted), matching the CLI's own
+  `--help` text, which the doc now matches too. `docs/guides/routines.mdx`
+  and `docs/guides/routines-cookbook.mdx` said two same-`concurrency_key`
+  requests "queue" (or "wait, or 429") — `RunRegistry.Acquire` always
+  rejects the second immediately with `429` + `Retry-After`; it never
+  queues or waits. That's a different mechanism than deferred dispatch's
+  `--debounce-key`, which genuinely coalesces and was already documented
+  correctly elsewhere — both docs now say so explicitly, and the
+  concurrency-gate docs now also note it has no cross-replica
+  coordination (single-process only). Separately: the authed
+  `POST .../pipelines/waitpoints/{token}/approve` defaults an omitted
+  `approved` to **false** (deny) while the public
+  `POST /api/v1/waitpoint-tokens/{token}` callback defaults it to **true**
+  (approve) — undocumented anywhere before this. Both defaults are kept
+  as-is (an existing test, `TestApproveWaitpoint_NoBody_DefaultsToApprovedFalse`,
+  already pins the authed default, and the public default matches its
+  documented `trigger.dev wait.forToken` design) but are now spelled out
+  with the security reasoning in `docs/api-reference/workspaces.mdx` and in
+  both handlers' doc comments — send `approved` explicitly rather than
+  relying on either default. And `MonthlyBudgetUSD` (`GET`/`PATCH
+  .../pipelines/{slug}/budget`) is reporting-only — it has zero references
+  in `internal/pipeline/executor.go` and never blocks a run; the enforced
+  gate is the DSL's per-run `max_cost_usd`. The field name reads as
+  enforcement, so rather than a breaking rename, every surface that shows
+  it now says so unmissably: a `<Warning>` on the API reference, and a
+  line printed by `crewship routine budget get/set/summary` and its
+  `--help` text. Also fixed a stale comment in `internal/database/database.go`
+  that still said `busy_timeout(5000ms)` next to the DSN pragma that has set
+  `busy_timeout(30000)` since the earlier login-lockout fix.
+
 - **The inbox column is the shared explorer now, and its filters are
   answerable.** `/inbox-v2` had a 190 px rail holding three nav rows and a
   permanent "all sources connected" block, plus three raw `<select>`s. Two of
@@ -709,6 +797,400 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
 
 ### Fixed
+- **A deploy-window blip no longer wedges the avatar-backfill latch shut for
+  the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
+  whenever a request 401s and `/api/auth/token/refresh` is itself
+  transiently unavailable — a 5xx, a network throw, or its own 10s abort —
+  which is a routine event during an API restart, exactly when several tabs
+  are re-rendering. #2199's latch treated a run of these identically to a
+  genuinely broken endpoint (the #2196 case) and stopped asking for the rest
+  of the JS session, recoverable only by a full reload. A run of 5xx or
+  transport failures now closes the rail for 60 seconds instead of
+  permanently, and still spends its budget; a run of 4xx (other than 403,
+  which already has its own refusal handling) still latches for the
+  session, since that is a property of the endpoint rather than of the
+  minute.
+- **A suggestion or follow-up chip clicked twice can no longer send twice
+  while its session is still being created (#2121).** The chip handler read
+  `isStreaming` — a prop that cannot change until a send produces a render —
+  before awaiting `ensureSessionForSend()`, so two clicks landing inside a
+  draft session's create window both passed the guard and both sent; these
+  chips bypass `useMessageSubmit`, so the #2075 double-submit latch never
+  covered them. Unlike the composer's identical-duplicate case, a second
+  chip is a different question, so the fix disables the chip rail for the
+  duration of the create (extending the existing streaming disable
+  backwards) rather than latching or silently dropping it.
+- **Clearing a crew's issue prefix from the web UI now actually clears it,
+  and the field accepts the same 16-character prefixes the API always has
+  (#2118).** The Issue prefix control sent `{"issue_prefix": null}` on
+  clear; the server decodes a JSON `null` as "field absent" and the write is
+  gated on the field being present (`crews_update.go`), so the PATCH
+  silently no-opped and the value reverted on the next render with no error
+  shown. `""` is the documented clear — it already worked from the CLI
+  (`crewship crew update <crew> --issue-prefix ""`) — and the panel now
+  sends it too. The field's 5-character cap and hint text are also raised to
+  the API's actual limit (`^[A-Za-z0-9_-]{1,16}$`, since #2035).
+- **The issues board now moves on its own instead of only on a manual
+  reload (#2257).** Every status-transition endpoint — the human and agent
+  PATCH, and the review-approve/request-changes/stop workflow actions — now
+  broadcasts a dedicated `issue.status_changed` event (`{id, identifier,
+  crew_id, status, from, to}`) alongside the existing `issue.updated`, and
+  `issue.created`/`issue.deleted` now carry `crew_id` too. The `/issues`
+  board (`OrchestrationLayout`) subscribes to the full issue.* event set for
+  the first time and reconciles rather than trusts: a change to the crew
+  currently in view triggers a debounced refetch, a change the active crew
+  filter can prove is off-screen is skipped, and a socket reconnect always
+  refetches so a dropped connection can't leave the board permanently wrong.
+  The decision logic is `components/features/orchestration/issue-realtime.ts`,
+  unit-tested independently of the component.
+- **The realtime allowlist stopped silently dropping most of the documented
+  event vocabulary (#2125).** `hooks/use-realtime.tsx`'s
+  `VALID_REALTIME_TYPES` had drifted from `docs/api-reference/websocket.mdx`
+  — 40 workspace-channel event types the server already emits (projects,
+  milestones, integrations, feature flags, triage rules, recurring issues,
+  the escalation terminal states, and more) were silently discarded by
+  `handleMessage`, with no error and no log. All of them are now
+  registered, a Vitest parity gate
+  (`hooks/__tests__/realtime-allowlist-docs-parity.test.ts`) reads the
+  documented vocabulary straight off that doc page and fails if the
+  allowlist ever misses one again, and a dropped frame now logs a
+  `console.warn` once per type (not per frame) instead of vanishing. No new
+  subscribers were added for the 40 types — registering them is the durable
+  half of the fix; wiring a consumer per surface is separate, future work.
+- **A run is now attributable to the issue that caused it, including
+  delegation hops and mention dispatches (#2279).** `assignments.mission_id`
+  is the direct link between a run and the issue it belongs to, but neither
+  of `AssignmentHandler.Create`'s two real callers — the sidecar's
+  `handleAssign` and the routine dispatcher's `crewshipBody` — ever set it,
+  so every delegation hop made from inside a mission task, lead-planning, or
+  mention-dispatched run created an assignment with `mission_id = NULL`,
+  invisible to `issue runs` and to Stop's live-run match alike. `Create` now
+  derives `mission_id` server-side when the body omits it: every synthetic
+  mission chat is created with the mission's own id as the chat's primary
+  key, so an existence check against `missions(id)` for the assignment's
+  `chat_id` is the exact FK precondition `mission_id` needs, not a
+  heuristic. Stop's own match now prefers `mission_id` directly over the old
+  `chat_id`/`group_id` heuristic, keeping that heuristic only as a fallback
+  for rows created before this change. `GET /issues/{identifier}/runs` and
+  `crewship issue runs` now return every run attributed to the issue —
+  mission tasks, mention-dispatched runs, and delegation-hop runs alike —
+  instead of only the mission-task rows a join could already reach.
+- **Automations refuse event types and payload keys that could never fire
+  (#2271).** `event_type` was checked for shape only, so a well-formed nonsense
+  type saved with 201 and matched nothing forever. It is now checked against
+  a generated registry (140 entry types), with a drift test, and the error
+  names valid alternatives. `payload_equals` keys are validated for the event
+  types whose payloads are known; for the rest the error, the CLI help and the
+  guide say plainly that no key validation is possible, because no
+  payload-schema registry exists.
+- **A webhook or automation that fails to start a run is now visible, not
+  just logged (#2282).** Schedules already raised a journal entry and an inbox
+  card when they failed; a webhook fire failure wrote a database row only,
+  and an automation whose enqueue failed left nothing but a log line. Both
+  now emit a journal entry on every failure and one inbox card — kinds
+  `webhook_fire_failed` and `automation_enqueue_failed`, routed to the
+  `routines.missed` channel category — once three consecutive failures show
+  the path is broken rather than a blip. A run that started and then failed
+  is not counted; it already has its own failure entry.
+- **Shipped surfaces stop claiming what they cannot show (#2291).** The Runs view's
+  header no longer says it spans routine runs — `GET /api/v1/runs` excludes
+  them by construction, so the honest label is the fix until the read side
+  changes. The three issue lifecycle events the server already emitted
+  (`issue.created`, `issue.deleted`, `issue.started`) now reach the browser
+  instead of being dropped by the realtime allowlist, and a guard test fails
+  when an emitted issue event is left unregistered. A schedule that the
+  circuit breaker disabled now shows its reason, failure streak, catch-up
+  policy and wake statistics — read-only; the editor is separate work.
+
+  **Two regressions in the first cut of this fix, found in review and fixed
+  in the same PR.** First, the registry generator only scanned
+  `internal/journal/types.go`'s const block, but at least eleven real,
+  emitted entry types are declared ad hoc in the packages that emit them
+  (`page.public_view`, `page.webhook_issued`, `keeper.rule_auto_tuned`,
+  `policy.changed`, and seven more) — so the "closed" registry rejected
+  event types that genuinely fired, and `automation create --event
+  page.public_view` (which worked before this feature existed) started
+  returning 400. The registry is now generated by scanning every
+  `journal.EntryType` value declared or used under `internal/` and `cmd/`,
+  not only `types.go`'s const block (`internal/journalgen.ScanTree`); the
+  drift test does the same scan and fails the build if an emitter anywhere
+  uses a value the registry lacks. Two call sites that wrote their entry type
+  as a bare string literal with no `EntryType` token anywhere (a shape no
+  scanner can find soundly without false-positiving on every unrelated
+  `Type:` field in the codebase) were changed to a typed const instead, the
+  same shape every other ad hoc entry type already used.
+
+  Second, `PATCH` re-validated the rule's *effective* (merged) event_type and
+  routine_slug even when the request body carried neither, so a sparse
+  `PATCH {"enabled": false}` on a rule whose target routine had since been
+  soft-deleted returned 400 with no way out but `DELETE` — `Store.Update` and
+  `Store.ListActive` both deliberately tolerate a dangling routine reference,
+  and `PATCH` now does too for whatever it did not touch. The event_type
+  registry check and the `payload_equals` key check moved into
+  `Automation.Validate()` itself (the single gate every writer already used,
+  including `internal/api/pages_wake.go`'s page-wake-gate reconciler, which
+  writes with raw SQL and relies on `Validate` to keep its rows honest) — so
+  `PATCH` no longer duplicates a load-and-merge the store already does, and
+  the wake-gate path is covered by the registry check for the first time.
+  Also: `automation.depth_exceeded`'s curated payload-key set was missing
+  five keys a third emitter (`internal/pipeline/journal.go`) writes
+  (`chain_origin`, `edge`, `pipeline_id`, `pipeline_slug`, `run_id`); and
+  `mission.comment` was removed from the curated map entirely — it has two
+  emitters with disjoint payload shapes, so no single key set is correct for
+  it, and a wrong rejection of a real key is worse than no validation at all.
+
+- **`backup verify` no longer calls a short bundle VALID (#2009).** Verify
+  only ever checked the payload's SHA-256 against the manifest — integrity,
+  not completeness — so a bundle that dumped zero rows for a table (a
+  scoping bug, corruption, or a hand-edited manifest) still reported
+  `✓ VALID`. Bundle creation now records each table's row count in the
+  manifest (`contents.table_row_counts`), and for an **unencrypted** bundle
+  `verify` compares the payload's actual counts against it, reporting
+  `INVALID` on a divergence instead of passing silently. An **encrypted**
+  bundle's completeness still cannot be checked here — `verify` deliberately
+  never asks for a passphrase, which is what lets it run unattended against
+  a whole directory of nightly bundles — but the CLI and API now say so
+  explicitly (`completeness_checked: false`, with a reason) instead of
+  implying the check happened. `crewship backup restore --dry-run`, which
+  already decrypts, makes the same comparison and reports it as
+  `payload_row_count_mismatches`, plus a second, separate comparison —
+  `rows_inserted_shortfalls` — for what actually landed on the target. A
+  bundle written before this change carries no recorded counts and is
+  reported the same honest "not verified" way, never as a false pass or a
+  new failure.
+
+  `payload_row_count_mismatches` is now taken BEFORE a `--as-workspace` /
+  `--as-crew` fork does its own bookkeeping (re-signing the journal chain,
+  adding the restoring admin to `workspace_members`) — those rows are the
+  restore's own doing, not the bundle disagreeing with its manifest, and
+  counting them the same way made every ordinary forked restore report the
+  bundle as suspect. `rows_inserted_shortfalls` no longer names a table
+  whose "shortfall" is INSERT OR IGNORE working as designed: bundled skills
+  reseed with the same IDs on every boot, a user `crewship backup restore`
+  reconciles onto a matching target account by email intentionally no-ops
+  on insert, and (once `issue_counters` re-keying, #2034, lands alongside
+  this) two crews sharing an effective prefix collapse a pre-#1797 bundle's
+  counters onto one row before insert — discounted by exactly how many rows
+  that merge folded away, not excluded outright, so a genuine
+  `issue_counters` shortfall (an unresolvable crew, a real collision) still
+  surfaces. And the warning text for both now follows which one fired —
+  `rows_inserted_shortfalls` is about the *target*, not the bundle, so it
+  no longer tells the operator to treat the bundle as suspect — and says
+  "more" rather than always "fewer" when a table landed extra rows rather
+  than too few.
+- **The crew's shared credential store had no agent dimension, so one member's
+  endpoint credential answered another member's model call (#2052).** One
+  sidecar serves a whole crew container, and `CredStore.Select` took a provider
+  and nothing else: the credential a model call got was whichever one a
+  round-robin counter landed on, not one the calling agent had been granted.
+  While every provider had a fixed vendor upstream, that decided only whose key
+  paid. `OPENAI_COMPAT` takes its upstream FROM the credential, so it also
+  decided where the prompt went — agent A's traffic to agent B's gateway,
+  authenticated with B's key, with B's host allowlisted by #2051's union so
+  there was not even a `403` to notice. `docs/architecture.mdx` had described
+  the store as one "an agent can only read credentials its `agent_id` was
+  granted" throughout; that was the intent, never the code.
+
+  Every credential now travels with the crew members it was granted to, and the
+  store refuses to serve one to anybody else. The calling agent is resolved
+  from its own per-agent route token (#812), which the orchestrator derives per
+  agent and which cannot be forged — it is an HMAC under a key the container
+  never sees. It can, however, be READ: crew members share one container and one
+  uid, and each member's token sits in its own environment and MCP config, so a
+  determined peer can present a sibling's. This is least privilege inside a
+  shared trust domain, which is what #2052 asks for — a crew is already one
+  trust domain — and not isolation from a hostile peer. A member holding no
+  credential for
+  the provider is refused with `503 no credential available` — a loud refusal
+  beats a silent crossover — and a caller whose identity cannot be established
+  at all (a sidecar running without route identity) is served crew-wide
+  credentials only, never one scoped to a named agent.
+
+  The grant you already made is the scope: a credential linked to the crew, or
+  bound at crew or workspace scope, reaches every member and stays available to
+  all of them; one granted to named agents reaches only those. Ownership is
+  computed per CREDENTIAL rather than per delivery, so every member of a crew
+  produces the same boot payload for the same credential — a value that differed
+  per member would move `sidecarConfigFingerprint` and restart the crew's shared
+  sidecar on every alternation between agents, which is the thrash #1160
+  removed. A grant covering every member of the crew is crew-wide in effect and
+  is delivered as such, which is the shape `autoAssignCredentials` leaves every
+  template-created crew in — so for a crew with no per-agent grant the payload
+  is byte-identical, the fingerprint does not move, and no running sidecar
+  restarts on upgrade. A crew that DOES hold a credential granted to a strict
+  subset of its members — the crews this fixes — gains agent ids in its payload,
+  and its sidecar restarts once; an in-flight run there sees the existing
+  fingerprint-mismatch `503` and retries.
+
+- **An invited member could not authenticate with the CLI at all (#2259).**
+  `lookupCLIToken`'s SELECT scanned `u.full_name` into a plain `string`, but
+  the column is nullable and `workspace member invite` creates the user row
+  without one — so `Scan` failed with "converting NULL to string is
+  unsupported" on the very first CLI call from a freshly invited
+  MEMBER/MANAGER/ADMIN. The auth middleware then collapsed that lookup error
+  into the same generic 401 `session_invalid` every bad-token case gets, so
+  the error pointed at the wrong thing and made it look like the token, not
+  the row, was the problem. The query now reads `COALESCE(u.full_name, '')`,
+  matching the idiom `auth_recovery.go` already used for this exact column.
+  Separately, `RequireAuth` no longer reports every lookup failure as an
+  invalid session: only the sentinel `errInvalidCLIToken` (unknown, revoked,
+  expired, tier-mismatched, or not-found token) maps to 401 now, and any
+  other lookup error — a query/scan/driver failure — is logged with its
+  underlying cause and answered with a 500, so a bug like this one names
+  itself instead of requiring a live repro to find.
+- **Every forked restore (`--as-workspace` / `--as-crew`) of a bundle
+  containing a live mission aborted on a `mission_activity` foreign-key
+  violation (#2260).** The error named the wrong row. `RemapIDs` regenerates
+  every primary key so a fork can land beside its source, and it had
+  correctly rewritten `mission_activity.mission_id` to the fork's brand-new
+  mission id — but `missions.trace_id` is `NOT NULL UNIQUE` with no workspace
+  in the key, and the source mission on the same instance was still holding
+  the bundle's value. `RestoreDump` inserts with `INSERT OR IGNORE`
+  (deliberately, so re-restoring a bundle is idempotent), so the forked
+  mission did not fail loudly on that collision — it was dropped in silence,
+  and its correctly-remapped activity rows landed pointing at a parent that
+  never arrived. The deferred `foreign_key_check` then blamed the child. Since
+  essentially every workspace has run a mission, this made `--as-workspace`
+  unusable in practice. A fork now regenerates identity, not merely primary
+  keys: `forkRegeneratedColumns` in `internal/backup/remap.go` declares the
+  columns that are unique per *instance* rather than per workspace, and pass 1
+  mints a fresh value for each — for `trace_id`, the source value's prefix
+  (`mission-`, `issue-`, `tr_`) is kept and only the identifying tail is
+  replaced, the same shape `internal/api` writes. Columns that are unique only
+  within a workspace stay untouched on purpose: `missions.identifier` was
+  rescoped to `UNIQUE(workspace_id, identifier)` by #1733, so the fork keeps
+  the issue identifiers a team already knows. Nothing stores a mission's
+  `trace_id` by value elsewhere — the `trace_id` on `journal_entries` and
+  `eval_runs` is an agent *run* id — so regenerating it breaks no reference.
+  Two tests: the reproduction, and an every-table fork that synthesises a row
+  into 102 of the 109 `BackupTables` entries and requires each remappable
+  table to gain exactly the rows the bundle carried. That second test found
+  seven more tables losing every row to the same class of collision
+  (capability tokens with a hashed twin, and unique keys over columns nothing
+  remaps); they are pinned by name in the test and filed as #2274.
+- **Restoring a bundle taken before the `issue_counters` re-key silently
+  dropped every counter row (#2034).** `#1797` re-keyed `issue_counters`
+  from `crew_id` to `(workspace_id, prefix)` — the first non-additive
+  column change the restore path had met. A bundle taken before that
+  migration carries `{crew_id, next_number}`; `crew_id` has no column on
+  the new table, so it was dropped from the `INSERT`, the statement
+  degenerated into `INSERT OR IGNORE INTO issue_counters (next_number)
+  VALUES (?)`, and the `NOT NULL` on the two new key columns turned the
+  drop into a constraint violation `OR IGNORE` swallowed — the restore
+  reported success having landed nothing. Mostly self-healing (the
+  allocator reseeds a missing counter from the highest identifier already
+  restored under that prefix), except for a crew whose issues had ALL been
+  deleted before the backup: its counter was the only remaining record of
+  how far it had counted, so the crew restarted at 1 and re-used
+  identifiers people and external systems still reference. Restore now
+  resolves each row's crew — from the bundle's own `crews` table, or the
+  target's if it already exists there — to its workspace and effective
+  prefix, and writes the counter under the current key; two crews sharing
+  an effective prefix collapse onto the higher `next_number` rather than
+  either individual value, so the allocator can never re-issue an
+  identifier that already exists. A row whose crew cannot be resolved
+  anywhere still cannot be honestly guessed at, so it falls through to the
+  counted, reported column-drop warning (`columns_dropped` /
+  `dropped_columns`) restore already surfaces for schema skew in general
+  (#2108).
+
+- **The feedback API docs still described the security hole #1213 had
+  already closed (#1617).** `docs/api-reference/feedback.mdx` and
+  `docs/guides/feedback.mdx` said `POST /api/v1/feedback` fell back to the
+  caller's most-recent workspace when `chat_id` was omitted, and one bullet
+  stated outright that "message_id ownership is not enforced" — the exact
+  cross-tenant message-existence oracle #1213 closed by requiring
+  `message_id` to resolve to a real, visible row in `conversation_messages`
+  (#1208). #1617 investigated the resulting 404 as a possible router bug —
+  POST/DELETE register through `authedSelfMut`, GET through the plain
+  `r.mux.Handle` beside it — but the route was never broken; the docs were
+  just stale. Corrected both pages, and added
+  `internal/api/feedback_route_test.go` (drives POST/GET/DELETE through the
+  real router) plus `cmd/crewship/acceptance_feedback_test.go` (drives
+  `crewship feedback create|list|delete` against a real server) so a real
+  registration regression on this route family fails loudly instead of
+  reading like this one did.
+- **A second run for a busy agent no longer kills the first (#2269).** The
+  per-agent exclusivity that already guarded chat sends is now shared with
+  `/assign` and `@mention` dispatch as `AgentRunLock`. Before, a second
+  concurrent run for one agent reused the tmux session `agent-<slug>` and the
+  exec wrapper's opening `kill-session` terminated the first run and deleted
+  its fifo and exit file. A dispatch that loses the lock is queued behind the
+  live run (back of the crew FIFO) and drained by the existing completion
+  pump — it is not failed, and the crew is pumped so a freed budget slot
+  goes to the next eligible row. A queued row now says why (`queued_reason`:
+  `crew_budget` or `agent_busy`) instead of leaving that to a server log. A
+  chat message to an agent that is busy on an issue now bounces with
+  `agent_busy` instead of colliding with it.
+
+  **Known limit.** The lock is taken by chat sends, `/assign`, `@mention`
+  dispatch, the agent cron and a routine's `agent_run` step. It is **not yet**
+  taken by the inbound agent webhook route, the direct agent-run route or the
+  peer-query path; a run started through one of those can still collide with
+  a live run for the same agent.
+- **Inbox read state is now per user, not shared (#2296).** `PATCH
+  /api/v1/inbox/{id}` with `state=read` wrote the shared `read_at` /
+  `read_by_user_id` columns on `inbox_items` with `COALESCE(existing, now)` —
+  the first person to open a role-targeted item (e.g. a MANAGER escalation
+  every MANAGER can see) marked it read for every other recipient too, so a
+  second manager's inbox silently dropped an item they never saw. A new
+  per-`(item, user)` table, `inbox_item_reads`, is now LEFT JOINed in, and the
+  `state` every response reports (`GET /api/v1/inbox`, `GET /api/v1/inbox/{id}`,
+  and the unread count) is computed for the calling user — `resolved` stays
+  workspace-shared, `read`/`unread` does not. The old shared columns are kept
+  and still written the same way as before; they now answer a narrower,
+  separate question ("has anyone dealt with this") rather than deciding
+  `state`. `inbox.Upsert` resurrecting an item back to unread now also clears
+  every caller's per-user read marker, so a refreshed item reads as unread
+  again for everyone, not just the caller who triggered the refresh.
+
+  On a fork (`backup restore --as-workspace` / `--as-crew`) inbox items
+  themselves do not land — `inbox_items` is UNIQUE(kind, source_id)
+  instance-wide (#2274) — so a read marker for one of them has no parent.
+  The restore now skips such a marker instead of aborting on the deferred
+  foreign-key check, and reports the skip in `rows_inserted_shortfalls`.
+
+- **Stop now actually stops the next step, and a late failure report still
+  reads as cancelled (#2295).** `POST /issues/{identifier}/stop` cancelled the
+  issue's row and its pending tasks, but a run already `RUNNING` when Stop
+  was called kept executing to completion and, if it finished with an error
+  after the stop, the websocket broadcast and the mission comment both
+  reported it as a failure (`assignment_failed`, "encountered an issue") —
+  the opposite of what the operator who clicked Stop asked for. Stop is Tier
+  1 (cooperative): there is no kill primitive for a shared crew container, so
+  a run mid-exec is not interrupted. What changed is that the contract is now
+  actually enforced end to end. In one transaction, Stop stamps
+  `assignments.cancel_requested_at` on every live assignment for the issue.
+  `runAssignment` checks the stamp before spending anything on the row —
+  before the container exec, before the LLM call — so a run that has not yet
+  started never starts. `finishAssignment` checks the same stamp again when
+  an already-`RUNNING` run eventually completes, and now the check runs
+  *before* the websocket broadcast switch and the mission-comment block are
+  reached, not only before the `status` column write: a late `COMPLETED` or
+  `FAILED` report is recorded and announced as `CANCELLED` either way, and
+  `mission_activity` gets a dedicated `task_cancelled` action instead of
+  reusing `task_failed`. No further step is scheduled for the issue. A hard
+  kill that interrupts a run mid-exec remains a separate, not-yet-built
+  capability.
+
+- **Stop now reaches a run a mention started on an issue that was never
+  started (#2320).** A mention (`@agent` on an issue's comments) can dispatch
+  a run while the issue itself is still `BACKLOG`/`TODO` — #2279 attributes
+  that run to the issue the same way a mission-task run is (`mission_id`,
+  with the `chat_id`/`group_id` fallback) — but `POST
+  /issues/{identifier}/stop` refused with 400 for any status other than
+  `IN_PROGRESS`/`REVIEW`, so the one door meant to reach every run
+  attributed to an issue (#2295) stayed closed for exactly the runs a
+  mention starts: the agent kept running with no cooperative stop
+  available from the issue. Stop now checks for a live attributed
+  assignment before refusing: when the issue is not `IN_PROGRESS`/`REVIEW`
+  but has at least one, it stamps `cancel_requested_at` on it exactly as
+  before and leaves the issue's own status untouched — it does not
+  promote the issue to `IN_PROGRESS` or move it to `CANCELLED`, since the
+  issue itself was never started. It still refuses with the original 400
+  when the issue is neither in flight nor has any live run to reach. The
+  response now also reports `runs_stopped`, the count of assignment rows
+  the call actually stamped.
 
 - **A routine no longer evicts your conversations from the chat column
   (#2244).** Four code paths insert into `chats` and only one of them is a
@@ -775,6 +1257,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   skips the re-sign. A plain or `--replace` restore remaps nothing, re-signs
   nothing, and is unchanged.
 
+- **A chat journal entry kept the first 240 characters of every message you
+  sent, in a row that cannot be erased (#2229).** #2215 left `chat.user_message`
+  bounded rather than emptied: its payload and summary both carried a scrubbed
+  240-character preview, on the argument that the message *is* the entry. That
+  bounded the exposure without closing it. The scrubber is defence in depth and
+  not a boundary — it cannot match a value nobody registered — so a token pasted
+  at the *start* of a message sat well inside the preview and reached a
+  hash-chained, append-only table that erasure requests deliberately skip.
+
+  The entry now records a measurement instead of the message: `chat_id`,
+  `agent_slug` and `length_chars`, with a summary reading
+  `user → morgan: 312 characters`. There is deliberately no digest of the
+  message beside it — for a short message a digest is a verifier for the pasted
+  token — so `chat_id` is the reference, and the message itself stays in the
+  chat, which **can** be erased. Expanding a Timeline row now offers **Open
+  chat** to get there, which nothing did before. Two consequences: free-text
+  journal search no longer reaches any part of a user message, and the entry's
+  `content` and `truncated` fields are gone rather than emptied.
+
 - **The journal stored the prompt text of every run, verbatim and forever
   (#2215).** `exec.command` recorded the CLI argv, and the argv carries the
   run's whole system prompt plus the verbatim user message; `chat.user_message`
@@ -794,9 +1295,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   "what ran, and with which prompt" without storing the prompt. A measured
   entry drops from about 43 KB to under 1 KB. What remains is capped, with an
   explicit `truncated` flag. `chat.user_message` is scrubbed and capped to the
-  same 240 characters its summary always was, and the run's process log line
-  takes the same sanitised argv. The #2205 scrub is kept and still runs on
-  what is left.
+  same 240 characters its summary always was — superseded by #2229 above, which
+  ships in this same release and removes that text entirely — and the run's
+  process log line takes the same sanitised argv. The #2205 scrub is kept and
+  still runs on what is left.
 
   Two UI readers were fixed with it: the Journal card's terminal line and the
   run rail's detail line both read a key the orchestrator never wrote, so they
@@ -3994,6 +4496,139 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   next to that label (e.g. "Waiting for host capacity — not enough free host
   memory"), mapped from the real `admission.Reason*` tokens and falling back
   to the raw token for one this build doesn't recognize yet.
+
+- **`approvals_queue` was kept forever, had no GDPR erasure path, and its
+  read endpoints answered any workspace member (#2233).** Every terminal
+  approval decision (approve/deny, cancel, both timeout paths) only ever
+  updated `status`/`decided_*` in place — nothing deleted a row, so the
+  table grew without bound and every row rode into every backup bundle.
+  Decided rows now age out on a per-workspace retention schedule
+  (`workspaces.approvals_retention_days`, defaulting to 90 days, swept
+  daily by `harbormaster.StartApprovalsRetentionSweeper`; set it with
+  `crewship workspace update --approvals-retention-days`, where `0` means
+  keep forever — the same as its `--credential-audit-retention-days` and
+  `--audit-log-retention-days` neighbours on that command), a pending row is
+  never touched regardless of age, a `kind=autonomy_gate` row is never swept
+  regardless of age or status either — for a mission target that row is the
+  hold itself (`autonomyGateApproved` treats "no row" as "proceed"), not
+  history, so sweeping a denied or timed-out one would eventually let a
+  mission that was never approved start running unattended — and the
+  Article 17 cascade
+  (`DELETE /api/v1/admin/users/{userId}/data`) now erases a subject's rows
+  by `requested_by`/`decided_by` since the table has no `data_subject_id`
+  column. Separately, and this is a behaviour change an integrator will
+  notice: `GET /api/v1/approvals` and `GET /api/v1/approvals/{id}` used to
+  require only workspace membership and returned the full request payload
+  to any member; they now require `OWNER`/`ADMIN`, matching the decide/
+  cancel routes next to them. The shipped Inbox (`/inbox-v2` and
+  `/approvals`) fetched this endpoint for every member regardless of role,
+  so both surfaces now gate the fetch on role client-side instead of
+  showing a 403 error banner to a MEMBER/MANAGER viewer; when that gate
+  flips off mid-session (role resolved away from admin tier), rows already
+  fetched while the viewer was authorized are now cleared rather than left
+  rendered. A companion migration
+  (`20260901140000_approvals_retention_pin_existing_workspaces`) pins every
+  workspace that predates this change to an explicit `0` (keep forever):
+  without it the sweeper's immediate first sweep at boot would have
+  resolved every existing workspace's unset override to the 90-day default
+  and deleted decided approval history on the first restart after
+  upgrading. `--approvals-retention-days` now also rejects a value above
+  106751 days (~292 years) — past that point the day count overflows the
+  `int64`-nanosecond duration the sweep computes its cutoff from and wraps
+  negative, which would otherwise delete every terminal row regardless of
+  age.
+- **An escalation's raw text reached the permanent journal entry and the
+  workspace-wide broadcast, even though the inbox copy was scrubbed
+  (#2238).** `CreateEscalation` wrote the same agent-supplied
+  `reason`/`context`/`metadata` into three places — the inbox row, the
+  `peer.escalation` journal entry, and the `escalation_created` /
+  `escalation.created` WebSocket broadcasts — but secret-redaction and a
+  length bound were applied only to the inbox copy. An inbox row is exactly
+  what a GDPR erasure request deletes, while the journal entry is explicitly
+  excluded from that erasure and is never rewritten again, so the copy that
+  survived forever was the unredacted, unbounded one: a credential-shaped
+  value an agent pasted into an escalation sat there permanently, and
+  nothing capped how large `context` could be. The journal payload and its
+  summary line are now redacted and capped at 4096 characters, the same
+  treatment the inbox copy already got — and so is the `reason` sent in
+  `CreateEscalation`'s own workspace-wide broadcast, since that goes out
+  live to every connected member the moment the escalation is raised, not
+  just the person who ends up seeing the inbox row.
+
+  The same gap existed at three other points on the escalation path, closed
+  the same way: the expiry sweeper (`escalation_lifecycle.go`) re-reads
+  `reason` out of the `escalations` table and writes a SECOND permanent
+  `peer.escalation` entry when nobody answers in time — that summary line
+  now gets the identical redact-then-bound treatment, not just the create
+  path's. The auto-confidence escalation path
+  (`confidence_handler.go`) broadcasts its own `escalation.created`
+  workspace-wide with the agent-supplied `reason` — that call site now
+  redacts too. And `ResolveEscalation`'s journal entry redacted
+  `resolution` only when the escalation's type was `CREDENTIAL` and never
+  bounded it for any type, so an operator's free-text resolution on a
+  non-`CREDENTIAL` escalation could carry a secret an operator pasted in
+  ("used token ... to unblock it") into the same permanent entry, verbatim
+  and unbounded — `resolution` is now redacted and capped the same way for
+  every non-`CREDENTIAL` type.
+
+  Left out, deliberately: `CancelEscalation`'s journal entry and broadcasts
+  also carry a raw `reason`, but that text is operator-supplied (the human
+  cancelling, not the agent that raised the question), which is outside
+  this issue's scope of scrubbing agent-supplied text — tracked as a
+  follow-up rather than silently left unredacted.
+
+- **`on_budget_exceeded` now fires once per breach, not once per LLM call
+  while over budget (#2153).** `hooks/types.go` documents the policy/limit
+  events — `on_approval_requested`, `on_guardrail_triggered`,
+  `on_budget_exceeded` — as firing once per triggering condition, but
+  `paymaster.Enforce` dispatched it from inside the per-status loop with
+  nothing recording that a breach had already been announced: it fired on
+  every call made while a budget stayed over, and twice on a single call
+  that breached two budgets. A journal row absorbs repeats fine; a hook
+  routed to pagerduty or Slack does not. `paymaster.announceBudgetBreach`
+  now debounces per `(workspace_id, crew_id-if-the-budget-is-crew-scoped,
+  budget_id, period, limit_usd)` — the first call to push a budget over in
+  a given period dispatches, later calls in the same period do not, and it
+  fires again once the period rolls (the same boundary `sumSpend` uses) or
+  the limit is raised and breached again (folding the limit into the key
+  gets re-fire-on-raise for free, without a separate invalidation path).
+  Two budgets breached by the same call still dispatch once each — that is
+  two distinct triggering conditions, not a repeat of one. The debounce
+  state is in-memory only (mirrors `enforceLocks`' existing trade-off in
+  the same file); a `crewshipd` restart can re-announce an already-seen
+  breach once. Not built: tiered re-firing on a much larger breach (e.g.
+  10% over vs. 400% over) — noted in the PR as a possible follow-up. The
+  `budget.exceeded` journal entry itself is unchanged and still emits every
+  call. The debounce state holds one entry per budget (overwritten in
+  place as its period/limit change via a `CompareAndSwap` retry), not one
+  per `(budget, period, limit)` ever seen — an earlier draft keyed the
+  latter, which meant a regularly-breaching hourly budget grew the map
+  forever over a long `crewshipd` uptime; found in review before merge.
+
+- **`hooks.Dispatch` no longer queries `hooks_config` when nothing is
+  registered (#2154).** `Dispatch` called `ListByEvent` unconditionally
+  before its early return, so a workspace with zero hooks paid the same
+  lookup as one with ten — on every LLM call (`pre_llm_call` +
+  `post_llm_call`), every observed tool call, every delegation hop, every
+  peer query, and every breached budget. A negative cache inside `Dispatch`,
+  keyed `(workspace_id, crew_id, event)`, now remembers "nothing enabled
+  here" and returns immediately without touching the database; only the
+  negative case is cached, so a workspace that does have hooks still pays
+  the query on every call, because the `Matcher` pass that follows is
+  per-call and a cached row set can't safely stand in for it. `Register`,
+  `Update`, `Delete` and `SetEnabled` in `internal/hooks/store.go` — the
+  only writers to `hooks_config` — invalidate every cached entry for that
+  workspace on a successful write, coarse (workspace-wide, not just the
+  touched `(crew_id, event)` pair) but always correct, via an exported
+  `hooks.InvalidateCache(workspaceID)` for any writer introduced outside
+  the package. Invalidation is single-process: a second `crewshipd` writer
+  would serve a stale negative until its own next write, called out as a
+  follow-up rather than built now. A write-epoch counter closes a narrow
+  TOCTOU found in review: a hook registered for the exact triple `Dispatch`
+  is checking, landing between its `ListByEvent` read and its cache write,
+  could otherwise be cached as a permanent false negative — `Dispatch` now
+  re-checks the epoch before caching and skips caching (not an error, just
+  a forgone optimization for that one call) if a write landed in between.
 
 ## [1.0.0-rc.1] — 2026-07-12
 

@@ -75,6 +75,23 @@ type Scheduler struct {
 
 	mu       sync.Mutex
 	entryMap map[string]cron.EntryID // agentID → cron entry
+
+	// agentRunLock is the cross-surface, per-agent AgentRunLock shared with
+	// chatbridge.Bridge and api.AssignmentHandler (#2269 follow-up, defect
+	// 6). A scheduled routine and a live assignment/chat turn for the SAME
+	// agent both exec into the identical tmux session
+	// (orchestrator.TmuxSessionName is keyed by agent slug alone) via
+	// setupTmuxExec's opening `tmux kill-session` — without this, a cron
+	// fire mid-assignment deletes the assignment's live session. Nil is
+	// fail-open (not wired — tests, or a build that predates this), same
+	// convention as api.AssignmentHandler's own nil handling.
+	agentRunLock *chatbridge.AgentRunLock
+}
+
+// SetAgentRunLock wires the cross-surface per-agent exclusivity lock shared
+// with chatbridge.Bridge and api.AssignmentHandler. Call before Start.
+func (s *Scheduler) SetAgentRunLock(l *chatbridge.AgentRunLock) {
+	s.agentRunLock = l
 }
 
 // SetLeaderGate attaches a leader-election gate so this scheduler only fires
@@ -430,6 +447,23 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 				s.logger.Warn("scheduled: failed to release idempotency reservation", "agent", ag.Slug, "error", fErr)
 			}
 		}
+	}
+
+	// Cross-surface exclusivity (#2269 follow-up, defect 6): claimed here,
+	// after the idempotency reservation (so releaseReservation can free it
+	// on a bounce, letting the NEXT tick retry the same occurrence) but
+	// before any real work — chat creation, container start — is spent on
+	// an occurrence that can't run yet. A busy agent is not a failure: skip
+	// this occurrence and let the schedule fire again normally.
+	if s.agentRunLock != nil {
+		if !s.agentRunLock.TryStart(ag.ID) {
+			s.logger.Info("scheduled: agent busy with another run, skipping this occurrence",
+				"agent", ag.Slug, "agent_id", ag.ID)
+			releaseReservation()
+			s.updateTimestamps(ag.ID, ag.Cron, true)
+			return
+		}
+		defer s.agentRunLock.End(ag.ID)
 	}
 
 	// 1. Create chat

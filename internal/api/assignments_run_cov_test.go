@@ -213,6 +213,39 @@ func TestAssignmentCreateCov_MissionLinked_CommentAndAssignee(t *testing.T) {
 	}
 }
 
+// TestAssignmentCreateCov_SetsMissionID (#2256) — a /assign call that names
+// its mission (body.mission_id, the field a mission-linked dispatcher sets)
+// must land that mission id on the assignments ROW itself, not only in
+// derived places like the journal payload. This is the one write path
+// through insertCappedAssignment that a human-facing caller can drive
+// directly; the mention-dispatch and mission-task paths are covered in
+// issue_mentions_test.go and internal/orchestrator.
+func TestAssignmentCreateCov_SetsMissionID(t *testing.T) {
+	h, wsID, crewID, leadID, _, chatID := covAsgRig(t)
+	if _, err := h.db.Exec(`
+		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'trace-asg-mid', 'Mission X', 'IN_PROGRESS', datetime('now'), datetime('now'))`,
+		chatID, wsID, crewID, leadID); err != nil {
+		t.Fatalf("seed mission: %v", err)
+	}
+
+	rr := covAsgPost(t, h, `{"target_slug":"asg-worker","task":"build the thing","crew_id":"`+crewID+
+		`","workspace_id":"`+wsID+`","chat_id":"`+chatID+`","mission_id":"`+chatID+`"}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var missionID string
+	if err := h.db.QueryRow(
+		`SELECT COALESCE(mission_id,'') FROM assignments WHERE chat_id = ?`, chatID).Scan(&missionID); err != nil {
+		t.Fatalf("query assignment: %v", err)
+	}
+	if missionID != chatID {
+		t.Errorf("assignments.mission_id = %q, want %q — a run created for a mission "+
+			"must be findable from it (issue_handler_runs.go's ListRuns)", missionID, chatID)
+	}
+}
+
 // ---- runAssignment / finishAssignment (called synchronously) ----
 
 func TestRunAssignment_NoOrchestrator_FailsAssignment(t *testing.T) {

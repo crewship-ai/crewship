@@ -52,8 +52,21 @@ export function useApprovals(opts: UseApprovalsOptions): UseApprovalsResult {
   const refresh = useCallback(async () => {
     if (!enabled) {
       // Disabled hooks must still drop the initial `loading=true` state
-      // or consumers render an infinite spinner. Do NOT bump reqIdRef
-      // here — we're not actually firing a request.
+      // or consumers render an infinite spinner.
+      //
+      // CWE-200 (#2254 review): `enabled` goes false mid-session when
+      // authorization changes (e.g. the role that granted read access is
+      // resolved away, or the caller stops being an admin tier). Without
+      // clearing `rows` here, data fetched while the viewer WAS authorized
+      // stays rendered after they no longer are. Bump reqIdRef too, so a
+      // request that was already in flight when `enabled` flipped can't
+      // land afterward and repopulate rows/error/notConfigured — every
+      // `if (reqIdRef.current !== reqId) return` guard above exists for
+      // exactly this race.
+      reqIdRef.current += 1
+      setRows([])
+      setError(null)
+      setNotConfigured(false)
       setLoading(false)
       return
     }

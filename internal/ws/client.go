@@ -307,7 +307,7 @@ func (c *Client) trySend(data []byte) (sent bool) {
 const agentBusyEventType = "agent_busy"
 
 // agentBusyNotice is the user-facing text of the sender-only busy rejection.
-const agentBusyNotice = "The agent is currently replying to another message in this chat. Please wait for it to finish."
+const agentBusyNotice = "The agent is busy with another run right now. Please wait for it to finish."
 
 type sendMessagePayload struct {
 	ChatID  string `json:"session_id"`

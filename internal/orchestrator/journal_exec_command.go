@@ -64,11 +64,13 @@ const (
 	// not bounded anything.
 	journalFieldMaxChars = 512
 
-	// journalUserMessageMaxChars caps what a chat.user_message entry persists
-	// of the message body. It is the bound the entry's SUMMARY has always had;
-	// the payload had none, so the shorter of the two surfaces was the only one
-	// that was bounded. The full length is still recorded in length_chars, and
-	// the message itself lives in the chat, which the entry references.
+	// journalUserMessageMaxChars caps the scrubbed preview of a user message
+	// shown to a human deciding a gated run (#2228). It is the bound the
+	// chat.user_message entry's summary used to have, kept when that entry
+	// stopped carrying message text at all (#2229): the approvals_queue row
+	// this preview lands in is ordinary, erasable data, so a scrubbed and
+	// bounded preview is affordable there in a way it never was in the
+	// hash-chained, append-only journal.
 	journalUserMessageMaxChars = 240
 
 	// promptSubstringMatchMinChars is the floor for matching a prompt value as
@@ -301,10 +303,17 @@ func execCommandPayload(req AgentRunRequest, journalCmd journalCmdView, phase st
 	return payload
 }
 
-// journalUserMessage returns what a chat.user_message entry may persist of the
-// message body: scrubbed against the run's credential values and the built-in
-// patterns, then capped at journalUserMessageMaxChars — the bound the entry's
-// summary already had.
+// journalUserMessage returns a scrubbed, bounded preview of the user's message
+// for the approval-gate review text (#2228): scrubbed against the run's
+// credential values and the built-in patterns, then capped at
+// journalUserMessageMaxChars.
+//
+// The chat.user_message journal entry used to take its preview from here too.
+// It no longer stores any message text (#2229, userMessageSizeLabel below), so
+// this helper has one caller and one sink: approvals_queue.payload, a row that
+// can be corrected and erased. That is the whole difference — the scrubber is
+// defence in depth rather than a boundary either way, and only one of the two
+// tables can be fixed after the fact.
 //
 // The scrubber is built here rather than shared for the reason
 // orchestrator_run_status.go states: AddSecretValues mutates the Scrubber, so a
@@ -320,4 +329,26 @@ func journalUserMessage(req AgentRunRequest) (preview string, truncated bool) {
 	scrubbed := s.Scrub(req.UserMessage)
 	preview = truncateStr(scrubbed, journalUserMessageMaxChars)
 	return preview, preview != scrubbed
+}
+
+// userMessageSizeLabel renders what a chat.user_message entry says INSTEAD of
+// the message: how long it was.
+//
+// The entry used to carry a scrubbed 240-char preview in both its summary and
+// its payload. That was bounded but not closed — the scrubber cannot match a
+// value nobody registered, so a token pasted at the start of a message survived
+// it — and the journal is hash-chained and append-only, so nothing could redact
+// it afterwards (#2229). The text was dropped rather than scrubbed harder, the
+// same call exec.command made for the prompt, and for the same reason: the full
+// message already lives in the chat store, which is erasable, and the entry
+// already references it by chat_id.
+//
+// The row still has to read as a Timeline row, which is why this is a sentence
+// and not a bare integer: "user → morgan: 312 characters" still answers who
+// spoke, to whom, and roughly how much, and chat_id answers the rest.
+func userMessageSizeLabel(chars int) string {
+	if chars == 1 {
+		return "1 character"
+	}
+	return fmt.Sprintf("%d characters", chars)
 }

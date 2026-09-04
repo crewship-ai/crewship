@@ -12,6 +12,9 @@ import (
 
 // Dispatch is the single entry point call sites use. Flow:
 //
+//  0. Check the negative dispatch cache (#2154): if this exact
+//     (workspaceID, crewID, event) triple is known to have zero enabled
+//     hooks, return immediately without touching the database.
 //  1. Load every enabled hook for (workspaceID, event) whose crew scope is
 //     compatible with ec.CrewID.
 //  2. Filter the list by Matcher.Matches(m, ec).
@@ -35,6 +38,21 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 		return &DispatchError{Event: event, Cause: err}
 	}
 
+	// #2154: skip the ListByEvent query entirely when we already know this
+	// (workspace, crew, event) triple has nothing registered. See
+	// dispatch_cache.go for what gets cached (negative only) and how it's
+	// invalidated (every hooks_config write, in store.go).
+	cacheKey := negativeCacheKey{WorkspaceID: ec.WorkspaceID, CrewID: ec.CrewID, Event: event}
+	if _, noHooks := negativeDispatchCache.Load(cacheKey); noHooks {
+		return nil
+	}
+
+	// Snapshot the write epoch before querying so the negative-cache Store
+	// below can tell whether a concurrent hooks_config write landed while
+	// this call was in flight — see dispatchWriteEpoch's doc comment for
+	// exactly what race this closes.
+	epochBeforeLookup := dispatchWriteEpoch.Load()
+
 	hooks, err := ListByEvent(ctx, db, ec.WorkspaceID, ec.CrewID, event)
 	if err != nil {
 		// No policy decision happened: the registry could not be read.
@@ -43,6 +61,29 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 		// rejected the operation; observation call sites may log and continue.
 		dispatchLookupFailed(ctx, emitter, event, ec, err)
 		return &DispatchError{Event: event, Cause: err}
+	}
+	if len(hooks) == 0 {
+		// Test seam for the TOCTOU dispatchWriteEpoch closes: always nil in
+		// production. A test sets it to land a concurrent Register (or any
+		// hooks_config write) deterministically in the window between the
+		// ListByEvent read above and the epoch re-check below, instead of
+		// racing goroutines for it. Same shape as store.go's
+		// updateEventRaceHookForTest — unsynchronised on purpose, so a test
+		// using it must not run under t.Parallel() or overlap another
+		// Dispatch call in a different goroutine.
+		if dispatchRaceHookForTest != nil {
+			dispatchRaceHookForTest()
+		}
+		// Nothing registered for this triple — cache it so the next call
+		// on this hot path skips ListByEvent entirely. Deliberately NOT
+		// cached when hooks is non-empty: see dispatch_cache.go for why.
+		// Skipped (not an error — just don't cache) if a write landed
+		// since epochBeforeLookup was read: this exact zero-rows result
+		// might already be stale.
+		if dispatchWriteEpoch.Load() == epochBeforeLookup {
+			negativeDispatchCache.Store(cacheKey, struct{}{})
+		}
+		return nil
 	}
 
 	// Apply the Matcher filter once up-front so we can cheaply iterate the

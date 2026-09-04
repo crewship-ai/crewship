@@ -248,6 +248,24 @@ type Bridge struct {
 	activeRunsMu sync.Mutex
 	activeRuns   map[string]int
 
+	// agentRunLock is the cross-surface, per-AGENT exclusivity lock: at most
+	// one live RunAgent exec per agent, regardless of whether it was started
+	// by a chat send (this file) or an assignment/@mention dispatch
+	// (api.AssignmentHandler, wired to the SAME instance via SetAgentRunLock
+	// so both doors share one claim). See AgentRunLock's doc for why chat id
+	// alone (activeRuns above) doesn't cover the assignment case. Never
+	// nil — always constructed in New().
+	agentRunLock *AgentRunLock
+
+	// assignmentPumper drains an agent's crew queue after THIS door
+	// (HandleChatMessage) releases agentRunLock — see the doc on
+	// SetAssignmentPumper. Nil until wired at boot (cmd_start.go); a nil
+	// pumper is fail-open, same convention as api.AssignmentHandler's own
+	// nil agentRunLock handling — a queued assignment then waits for an
+	// unrelated crew completion or the stuck-QUEUED sweeper instead of
+	// draining the instant this chat turn frees the agent.
+	assignmentPumper AssignmentPumper
+
 	// steerBroadcaster announces steering_queued events on the chat's
 	// session channel. Optional: nil means the WS announcement is
 	// skipped (the durable persist is the contract; the event is a UI
@@ -310,7 +328,51 @@ func New(
 		logger:         logger,
 		containerCache: make(map[string]string),
 		activeRuns:     make(map[string]int),
+		agentRunLock:   NewAgentRunLock(),
 	}
+}
+
+// AgentRunLock returns the Bridge's cross-surface per-agent exclusivity
+// lock, so it can be shared with api.AssignmentHandler (see
+// AssignmentHandler.SetAgentRunLock) — one lock, claimed by whichever door
+// starts a live agent exec first, chat or assignment.
+func (b *Bridge) AgentRunLock() *AgentRunLock {
+	return b.agentRunLock
+}
+
+// ErrAgentBusyElsewhere wraps ws.ErrAgentBusy for the specific case where
+// HandleChatMessage lost the CROSS-SURFACE AgentRunLock claim (below)
+// rather than the per-chat tryMarkRunStart claim above it. errors.Is(err,
+// ws.ErrAgentBusy) stays true either way, so a caller that only cares "was
+// this rejected as busy" (ws/client.go's handleSendMessage, which renders
+// the same sender-only busy notice regardless of which check failed) needs
+// no change. A caller that DOES need to tell the two apart —
+// crew_provisioning_jobs.go's deferred-message resume, which used to
+// assume "another run for the SAME chat will settle the UI" and drop the
+// message on ANY ErrAgentBusy — checks this sentinel first: for a
+// cross-surface bounce, nothing is running for the deferred message's own
+// chat, and dropping it loses the message outright (#2269 follow-up,
+// defect 8).
+var ErrAgentBusyElsewhere = errors.New("agent has a live run in progress on another chat or assignment")
+
+// AssignmentPumper drains an agent's crew queue after that agent's
+// AgentRunLock claim frees — implemented by api.AssignmentHandler
+// (PumpForAgent). Declared here, not imported, to avoid an internal/api ->
+// internal/chatbridge -> internal/api import cycle (the same reason
+// AgentRunLock itself lives in this package rather than internal/api).
+type AssignmentPumper interface {
+	PumpForAgent(ctx context.Context, agentID string)
+}
+
+// SetAssignmentPumper wires the completion-path queue pump so a chat send's
+// AgentRunLock release can drain any assignment that was queued behind it —
+// see assignmentPumper's field doc for why this door needed its own pump
+// trigger (#2269 follow-up, defect 5: HandleChatMessage's deferred
+// agentRunLock.End previously triggered no pump at all). Called once at
+// boot (cmd_start.go), alongside the existing SetAgentRunLock wiring that
+// shares the lock itself between this Bridge and AssignmentHandler.
+func (b *Bridge) SetAssignmentPumper(p AssignmentPumper) {
+	b.assignmentPumper = p
 }
 
 func truncateID(id string, n int) string {
@@ -678,6 +740,36 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("chat %s: %w", chatID, ws.ErrAgentBusy)
 	}
 	defer b.markRunEnd(chatID)
+
+	// Cross-surface exclusivity: at most one live RunAgent exec per AGENT,
+	// not just per chat. The check above stops two sends racing in THIS
+	// chat, but the same agent can also be started by an assignment or an
+	// @mention dispatch (api.AssignmentHandler.runAssignment) under an
+	// entirely different chat/mission id — see AgentRunLock's doc comment.
+	// Claimed after the per-chat check (so a same-chat double-send still
+	// bounces off the cheaper, existing map first) and released immediately
+	// on loss so this call leaves no claim behind; the per-chat claim above
+	// is released too (via the defer already registered) so a bounce here
+	// leaves the SAME no-trace guarantee bridge.go documents for the
+	// per-chat case.
+	if !b.agentRunLock.TryStart(info.AgentID) {
+		b.logger.Info("rejecting send: agent already running (cross-surface)",
+			"chat_id", chatID, "agent_id", info.AgentID, "user_id", userID)
+		return fmt.Errorf("agent %s: %w: %w", info.AgentID, ErrAgentBusyElsewhere, ws.ErrAgentBusy)
+	}
+	// The pump runs AFTER End releases the lock (not before — a pump while
+	// still holding the claim would just see this agent as busy and requeue
+	// right back), and on a FRESH context: this deferred call outlives the
+	// request ctx HandleChatMessage runs under, same reasoning as
+	// pumpAndDispatch's own context.Background() (internal/api). Nil
+	// pumper (not wired, or a test) is a no-op — see assignmentPumper's
+	// field doc.
+	defer func() {
+		b.agentRunLock.End(info.AgentID)
+		if b.assignmentPumper != nil {
+			b.assignmentPumper.PumpForAgent(context.Background(), info.AgentID)
+		}
+	}()
 
 	// Agent IS responding (private chat, or @mentioned in a group) and this
 	// send owns the run slot. Persist + broadcast the human turn now that

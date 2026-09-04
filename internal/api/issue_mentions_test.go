@@ -232,9 +232,10 @@ func TestMentions_ResolvedMentionIsPersistedAuditedAndDispatched(t *testing.T) {
 	// carrying a server-derived depth.
 	var assignedTo string
 	var depth int
+	var missionID string
 	if err := f.db.QueryRow(
-		`SELECT assigned_to_id, depth FROM assignments WHERE id = ?`, assignmentID).
-		Scan(&assignedTo, &depth); err != nil {
+		`SELECT assigned_to_id, depth, COALESCE(mission_id,'') FROM assignments WHERE id = ?`, assignmentID).
+		Scan(&assignedTo, &depth, &missionID); err != nil {
 		t.Fatalf("assignment row missing: %v", err)
 	}
 	if assignedTo != f.target {
@@ -242,6 +243,13 @@ func TestMentions_ResolvedMentionIsPersistedAuditedAndDispatched(t *testing.T) {
 	}
 	if depth != 1 {
 		t.Errorf("assignment depth = %d, want 1 — a human's mention is a root dispatch", depth)
+	}
+	// #2256: a mention dispatch is exactly the run that had NO issue<->run
+	// link before this column — mission_comment_mentions.assignment_id is a
+	// join table too, not something issue_handler_runs.go's ListRuns walks
+	// directly. mission_id on the row itself is what makes it findable.
+	if missionID != f.missionID {
+		t.Errorf("assignment mission_id = %q, want %q", missionID, f.missionID)
 	}
 }
 

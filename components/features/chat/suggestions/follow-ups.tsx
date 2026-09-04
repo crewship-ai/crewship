@@ -20,9 +20,14 @@ interface FollowUpsProps {
    *  exactly the three chips it always did. */
   forms?: AskForm[]
   onPickForm?: (form: AskForm) => void
+  /** #2121 — greys out the chips (rather than unmounting them via `show`)
+   *  while a click on one of them is still creating the session. Visible
+   *  state, not a silent drop: the same rail comes back live the instant the
+   *  create settles. */
+  disabled?: boolean
 }
 
-export function FollowUps({ prompts, onPick, show, forms, onPickForm }: FollowUpsProps) {
+export function FollowUps({ prompts, onPick, show, forms, onPickForm, disabled }: FollowUpsProps) {
   const formList = onPickForm ? forms ?? [] : []
   return (
     <AnimatePresence>
@@ -43,6 +48,7 @@ export function FollowUps({ prompts, onPick, show, forms, onPickForm }: FollowUp
             onPickQuestion={onPick}
             onPickForm={onPickForm ?? noop}
             animateChips
+            disabled={disabled}
           />
         </motion.div>
       )}

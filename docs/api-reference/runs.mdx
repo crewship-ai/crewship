@@ -38,6 +38,7 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 |---|---|---|
 | `status` | string | Filter to one of `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT`. Invalid values → `400`. |
 | `agent_id` | string | Filter by agent. |
+| `mission_id` | string | Only runs that worked on one issue — its mission id or its identifier (`ENG-4`), resolved per workspace. |
 | `trigger` | string | Filter by `payload.trigger_type` on the `run.started` entry (e.g. `USER`, `WEBHOOK`, `CRON`). |
 | `tag` | string | Match a single tag inside `payload.metadata.tags` array on the `run.started` entry. |
 | `page` | integer | 1-based page index, default `1`. Values below `1` become `1`; values above the server's maximum page are capped. |
@@ -55,6 +56,9 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
       "agent_name": "Viktor",
       "agent_slug": "viktor",
       "crew_name": "Backend",
+      "crew_slug": "backend",
+      "mission_id": "mis_42",
+      "mission_identifier": "ENG-4",
       "chat_id": "chat_xyz",
       "triggered_by": "user_42",
       "trigger_type": "USER",
@@ -81,6 +85,8 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
   }
 }
 ```
+
+`mission_id` and `mission_identifier` name the issue the run worked on (from the `run.started` entry the dispatcher stamps); both are omitted for a chat-only run. `crew_slug` is what the crew's page is keyed on. The same fields ride on `GET /api/v1/runs/{id}`.
 
 | Field | Type | Description |
 |---|---|---|

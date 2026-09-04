@@ -38,11 +38,15 @@ Idempotent at the `(message_id, user_id, signal)` tuple. A re-submit with the sa
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `message_id` | string | yes | Turn id from the chat UI. Max 256 chars. |
+| `message_id` | string | yes | Turn id from the chat UI. Must already exist in the `conversation_messages` search mirror — see below. Max 256 chars. |
 | `signal` | enum | yes | One of: `helpful`, `not_helpful`, `inaccurate`, `unsafe`, `edit`, `regenerate`. |
-| `chat_id` | string | no | When provided, the row is scoped to the workspace owning the chat. When absent, fallback to the caller's most-recent workspace. Max 256 chars. |
+| `chat_id` | string | no | Accepted for older clients but not trusted for authorization. Workspace and chat are always resolved from `message_id`'s own `session_id`. Max 256 chars. |
 | `trace_id` | string | no | OTel trace id linking the row back to the conversation trace. Max 256 chars. |
 | `reason` | string | no | Free-form text. For `edit` signals, holds the replacement text. Max 4096 chars. |
+
+<Note>
+  `message_id` must resolve to a real, visible message — not merely be well-formed. The handler looks it up in `conversation_messages` (the search mirror, migration v111) and derives `workspace_id`/`chat_id` from that row's own `session_id`, then confirms the caller is a member of that workspace. A `message_id` that was never persisted there (nothing has been sent in that chat yet, or it predates the mirror) gets the same `404` as a message in a chat the caller can't see — the two aren't distinguishable from outside, closing a cross-tenant message-existence oracle (#1208). `chat_id` in the body is accepted but no longer authoritative.
+</Note>
 
 **Response:** `201 Created`
 
@@ -56,8 +60,7 @@ Idempotent at the `(message_id, user_id, signal)` tuple. A re-submit with the sa
 |---|---|
 | `400` | Missing `message_id`, unknown `signal`, `reason` > 4096 chars, any id field > 256 chars, malformed JSON. |
 | `401` | No authenticated user. Returned BEFORE any DB lookup so anonymous probes can't enumerate ids via response codes. |
-| `403` | Authenticated user has no workspace membership (fallback path). |
-| `404` | Provided `chat_id` is not in a workspace the caller belongs to. |
+| `404` | `message_id` doesn't resolve to a row in `conversation_messages`, or it does but the caller isn't a member of that message's workspace. |
 | `413` | Request body exceeds the size cap (`http.MaxBytesReader`). |
 | `500` | DB write failure. The error body is `{"error":"internal"}` — details land in server logs. |
 

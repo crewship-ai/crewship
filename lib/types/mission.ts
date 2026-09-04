@@ -125,6 +125,14 @@ export interface Mission {
   assignee_type?: "user" | "agent" | null
   assignee_id?: string | null
   assignee_name?: string | null
+  // Owner and delegate (A10, invariant I5 — "delegating to an agent never
+  // changes the human owner"). Independent of each other and of the legacy
+  // assignee_type/assignee_id pair above, which stays for older clients
+  // during the migration window. Absent when nobody occupies that slot —
+  // render them as two separate things, and never fall back to putting an
+  // agent in owner's place.
+  owner?: IssueOwner | null
+  delegate?: IssueDelegate | null
   /** The agent assignee's slug — what its page is keyed on. Absent for a user. */
   assignee_slug?: string | null
   due_date?: string | null
@@ -156,6 +164,18 @@ export interface Mission {
 /** Who created an issue: a human user or an agent (via tool call). */
 export interface IssueCreator {
   type: "user" | "agent"
+  id: string
+  name?: string
+}
+
+/** The human owner of an issue (missions.owner_user_id). */
+export interface IssueOwner {
+  id: string
+  name?: string
+}
+
+/** The agent an issue's work has been delegated to (missions.delegate_agent_id). */
+export interface IssueDelegate {
   id: string
   name?: string
 }

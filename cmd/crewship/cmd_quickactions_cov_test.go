@@ -362,6 +362,92 @@ func TestMeCmdRunE_SessionExpired(t *testing.T) {
 
 // ─── todayCmd ────────────────────────────────────────────────────────────
 
+// TestMeCmdRunE_ApprovalsForbiddenIsAbsenceNotError pins the fix for the
+// regression CodeRabbit flagged on #2254: GET /api/v1/approvals became
+// roleManage-gated (OWNER/ADMIN) there, so a MEMBER/MANAGER now gets 403 on
+// it. The web Inbox surfaces were gated client-side to avoid turning that
+// into an error state; the CLI's `me`/`now` dashboards were not. A 403 on
+// approvals specifically must render as an empty approvals list — same as
+// "nothing pending" — and must NOT appear as a `[partial]` line, which
+// would otherwise read as a permanent, unexplained error on every `me` run
+// a non-admin does.
+func TestMeCmdRunE_ApprovalsForbiddenIsAbsenceNotError(t *testing.T) {
+	stub := covSetupCli5(t)
+	flagFormat = "json"
+
+	stub.OnGet("/api/v1/missions", clitest.JSONResponse(200, map[string]any{
+		"data": []map[string]any{{"id": "mis_1", "title": "Ship it"}},
+	}))
+	stub.OnGet("/api/v1/approvals", clitest.ErrorResponse(403, "forbidden"))
+	stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{
+		"data": []map[string]any{{"id": "run_1", "agent_slug": "eva", "status": "DONE"}},
+	}))
+
+	var err error
+	out := covCaptureAll(t, func() { err = meCmd.RunE(meCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(out, "[partial]") {
+		t.Errorf("a 403 on approvals must not render as [partial]; got:\n%s", out)
+	}
+	if strings.Contains(out, "approvals:") {
+		t.Errorf("approvals 403 leaked into output as an error; got:\n%s", out)
+	}
+
+	var decoded struct {
+		Approvals []map[string]any `json:"approvals"`
+		Errors    []string         `json:"errors"`
+	}
+	if jsonErr := json.Unmarshal([]byte(out), &decoded); jsonErr != nil {
+		t.Fatalf("decode JSON output: %v\noutput:\n%s", jsonErr, out)
+	}
+	if len(decoded.Approvals) != 0 {
+		t.Errorf("approvals = %v, want empty", decoded.Approvals)
+	}
+	if len(decoded.Errors) != 0 {
+		t.Errorf("errors = %v, want none (403 on approvals is absence, not an error)", decoded.Errors)
+	}
+}
+
+// TestNowCmdRunE_ApprovalsForbiddenIsAbsenceNotError mirrors the meCmd case
+// above for `now`'s fetchData fanout.
+func TestNowCmdRunE_ApprovalsForbiddenIsAbsenceNotError(t *testing.T) {
+	stub := covSetupCli5(t)
+	flagFormat = "json"
+
+	stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{
+		"data": []map[string]any{{"id": "run_live", "agent_slug": "eva", "started_at": "x"}},
+	}))
+	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, map[string]any{
+		"data": []map[string]any{{"slug": "eva", "status": "running"}},
+	}))
+	stub.OnGet("/api/v1/approvals", clitest.ErrorResponse(403, "forbidden"))
+
+	var err error
+	out := covCaptureAll(t, func() { err = nowCmd.RunE(nowCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(out, "[partial]") {
+		t.Errorf("a 403 on approvals must not render as [partial]; got:\n%s", out)
+	}
+
+	var decoded struct {
+		Approvals []map[string]any `json:"approvals"`
+		Errors    []string         `json:"errors"`
+	}
+	if jsonErr := json.Unmarshal([]byte(out), &decoded); jsonErr != nil {
+		t.Fatalf("decode JSON output: %v\noutput:\n%s", jsonErr, out)
+	}
+	if len(decoded.Approvals) != 0 {
+		t.Errorf("approvals = %v, want empty", decoded.Approvals)
+	}
+	if len(decoded.Errors) != 0 {
+		t.Errorf("errors = %v, want none (403 on approvals is absence, not an error)", decoded.Errors)
+	}
+}
+
 func TestTodayCmdRunE_HappyPath(t *testing.T) {
 	stub := covSetupCli5(t)
 	flagFormat = "json"

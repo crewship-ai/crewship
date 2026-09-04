@@ -59,6 +59,30 @@ export type RealtimeEventType =
   // VALID_REALTIME_TYPES — so an issue a human had open never learned that an
   // agent had written to it.
   | "issue.updated"
+  // Issue lifecycle events emitted alongside issue.updated but, until A6
+  // (docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md, #2125), missing from both this
+  // union and VALID_REALTIME_TYPES below — so handleMessage silently dropped
+  // every one of them. `issue.created` — `internal/api/issue_handler_create.go`
+  // (payload `{id}`) — also `issues_internal.go`, `recurring_issue_dispatcher.go`,
+  // `pages_wake_issue.go`. `issue.deleted` — `internal/api/issue_handler_update.go`
+  // (payload `{identifier}`), the only emitter. `issue.started` —
+  // `internal/api/issue_handler_workflow.go` (payload `{id, identifier, status}`),
+  // the only emitter. See `hooks/__tests__/realtime-allowlist-issue-events.test.ts`
+  // for the guard that keeps this list honest against the Go source.
+  | "issue.created"
+  | "issue.deleted"
+  | "issue.started"
+  // An issue's STATUS specifically changed — `{id, identifier, crew_id,
+  // status, from, to}`. Distinct from the generic issue.updated above:
+  // that one says "refetch this issue", this one carries enough to move a
+  // card between board columns (or decide the change is off-screen)
+  // without a fetch. Emitted alongside issue.updated by every
+  // status-transition endpoint (#2257): the human and agent PATCH, and
+  // the review/stop workflow actions.
+  | "issue.status_changed"
+  // Multiple issues changed in one bulk-edit request — `{count}`, no per-row
+  // identity, so a subscriber's only correct response is a full refetch.
+  | "issues.bulk_updated"
   | "task.updated"
   | "peer_conversation.updated"
   | "crew.created"
@@ -116,6 +140,53 @@ export type RealtimeEventType =
   // entry below are scaffolding so a future consumer can dispatch it without a
   // wire-contract change; until then it is deliberately inert.
   | "journal.entry"
+  // #2125: the rest of the documented `workspace:{id}` vocabulary
+  // (docs/api-reference/websocket.mdx). These 40 types were already
+  // emitted server-side and silently dropped by VALID_REALTIME_TYPES below
+  // — no subscriber uses them yet (that is the scope A6 drew for the
+  // issue.* subset, and this PR keeps: registering the type is the durable
+  // fix, wiring a consumer per type is separate, future work). The parity
+  // gate in hooks/__tests__/realtime-allowlist-docs-parity.test.ts fails
+  // if this list and the Set below ever drift from the docs table again.
+  | "mission.created"
+  | "confidence.low"
+  | "approval.required"
+  | "approval.resolved"
+  | "project.created"
+  | "project.updated"
+  | "project.deleted"
+  | "milestone.created"
+  | "milestone.updated"
+  | "milestone.deleted"
+  | "integration.created"
+  | "integration.updated"
+  | "integration.deleted"
+  | "credential.expired"
+  | "escalation.expired"
+  | "escalation.cancelled"
+  | "agent.hire_approved"
+  | "agent.skill_assigned"
+  | "agent.skill_unassigned"
+  | "port_expose.created"
+  | "port_expose.revoked"
+  | "pipeline.step.skipped"
+  | "pipeline.step.retrying"
+  | "instance_setting.updated"
+  | "feature_flag.created"
+  | "feature_flag.updated"
+  | "feature_flag.deleted"
+  | "feature_flag.override_set"
+  | "feature_flag.override_cleared"
+  | "workflow_template.created"
+  | "workflow_template.updated"
+  | "workflow_template.deleted"
+  | "triage_rule.created"
+  | "triage_rule.updated"
+  | "triage_rule.deleted"
+  | "triage.processed"
+  | "recurring_issue.created"
+  | "recurring_issue.updated"
+  | "recurring_issue.deleted"
   // Synthetic client-side event — NEVER sent by the server (and deliberately
   // absent from VALID_REALTIME_TYPES so a wire message can't spoof it).
   // Dispatched by the provider after the socket RE-connects, so pure-WS
@@ -138,7 +209,10 @@ interface RealtimeContextValue {
   subscribeChannel: (channel: string) => () => void
 }
 
-const VALID_REALTIME_TYPES: Set<string> = new Set([
+// Exported (only) so the guard test can check it against the Go emitters —
+// nothing in the app should read this directly; subscribe via
+// useRealtimeEvent instead.
+export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "run.started", "run.completed", "run.failed",
   "agent.status", "agent.created", "agent.updated", "agent.deleted",
   // PR-D F5 ephemeral lifecycle. Without these in the allowlist the
@@ -150,6 +224,12 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   // Without this, handleMessage drops every issue broadcast and the issue
   // detail can only learn about an agent's write by being reloaded.
   "issue.updated",
+  // A6 (#2125): these three were emitted server-side and dropped here.
+  // Registered together with issue.updated; see the RealtimeEventType union
+  // above for the emitter file:line for each.
+  "issue.created", "issue.deleted", "issue.started",
+  // #2257: a status transition specifically, not just "the issue changed".
+  "issue.status_changed",
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   // Without this in the allowlist, workspace.deleted is dropped by
   // handleMessage and the redirect-on-delete listener never fires (#890).
@@ -180,7 +260,35 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   // subscription dispatches them; nothing subscribes to that channel yet, so
   // today no such frame is delivered. See the type union above.
   "journal.entry",
+  // #2125: the rest of the documented workspace-channel vocabulary — see
+  // the matching block in the RealtimeEventType union above for why these
+  // are registered with no subscriber yet, and the parity gate that keeps
+  // this Set from drifting from docs/api-reference/websocket.mdx again.
+  "mission.created", "issues.bulk_updated",
+  "confidence.low", "approval.required", "approval.resolved",
+  "project.created", "project.updated", "project.deleted",
+  "milestone.created", "milestone.updated", "milestone.deleted",
+  "integration.created", "integration.updated", "integration.deleted", "credential.expired",
+  "escalation.expired", "escalation.cancelled",
+  "agent.hire_approved", "agent.skill_assigned", "agent.skill_unassigned",
+  "port_expose.created", "port_expose.revoked",
+  "pipeline.step.skipped", "pipeline.step.retrying",
+  "instance_setting.updated",
+  "feature_flag.created", "feature_flag.updated", "feature_flag.deleted",
+  "feature_flag.override_set", "feature_flag.override_cleared",
+  "workflow_template.created", "workflow_template.updated", "workflow_template.deleted",
+  "triage_rule.created", "triage_rule.updated", "triage_rule.deleted", "triage.processed",
+  "recurring_issue.created", "recurring_issue.updated", "recurring_issue.deleted",
 ])
+
+// warnedUnknownTypes tracks which dropped frame TYPES have already been
+// logged this page load. #2125: handleMessage's drop was completely silent
+// — the server logged a successful broadcast, the client discarded it, and
+// nothing anywhere said a type had been sent and refused. Module-level (not
+// a ref) so the warning survives a RealtimeProvider remount and still fires
+// exactly once per type, not once per frame — a hot type like container.stats
+// arriving every few seconds must not spam the console once it's been seen.
+const warnedUnknownTypes = new Set<string>()
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)
 
@@ -247,7 +355,21 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
 
   const handleMessage = useCallback(
     (msg: WSMessage) => {
-      if (!VALID_REALTIME_TYPES.has(msg.type)) return
+      if (!VALID_REALTIME_TYPES.has(msg.type)) {
+        if (!warnedUnknownTypes.has(msg.type)) {
+          warnedUnknownTypes.add(msg.type)
+          // Intentional: this is the one signal that a real, server-sent
+          // event type is being silently dropped (#2125). See
+          // warnedUnknownTypes above for why it's deduped per type rather
+          // than logged per frame.
+          console.warn(
+            `[realtime] dropping unknown event type "${msg.type}" — ` +
+              "not in VALID_REALTIME_TYPES (hooks/use-realtime.tsx). " +
+              "If the server is meant to send this, add it there.",
+          )
+        }
+        return
+      }
       dispatchEvent(
         msg.type as RealtimeEventType,
         (typeof msg.payload === "object" && msg.payload !== null

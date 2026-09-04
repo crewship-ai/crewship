@@ -165,6 +165,26 @@ Two more rules the dispatch inherits from the assign path:
 - **An agent does not mention itself awake.** A self-mention is recorded and
   skipped.
 
+### Known limits in 1.0
+
+Written down on purpose (they are release conditions, not footnotes):
+
+- **A busy agent is woken later, not interrupted.** An agent can have one live
+  run at a time. Mentioning it while it is running — on this issue or any
+  other — queues the mention behind the live run; it is dispatched when that
+  run ends, with the brief it would have had. The mention never reaches the
+  turn already in progress. Before this, a second run for the same agent
+  killed the first one mid-turn; queueing is the fix, steering a live turn is
+  future work.
+- **A chat message to an agent busy on an issue bounces.** The chat reports
+  `agent_busy` rather than starting a second run into the same container.
+  Wait for the run to finish, or watch it from the issue.
+- **The queue covers the doors that run an agent for an issue** — `/assign`,
+  @mentions, mission tasks, lead planning and the chat — but not a routine's
+  webhook route or a direct agent-run route. Those can still start an agent
+  that is already running; keep routines that target an agent off its busy
+  hours until this closes.
+
 And one that is not a limit but a hold:
 
 - **An agent awaiting approval is not woken.** An agent created or hired *by an
@@ -177,8 +197,9 @@ And one that is not a limit but a hold:
 
 A mention that starts nothing is recorded either way: the join row keeps
 `dispatch_state` and the reason, and the issue's History still shows the
-`mentioned` entry. Nothing is queued behind it — re-mention once the reason no
-longer holds.
+`mentioned` entry. A *refused*, *skipped* or *failed* mention is not queued —
+re-mention once the reason no longer holds. The one case that **is** queued is
+an agent that is simply busy: see the known limits above.
 
 Whether anyone is *told* depends on who wrote the comment.
 

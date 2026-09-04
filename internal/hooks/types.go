@@ -78,16 +78,14 @@ const (
 	EventPostPeerConversation Event = "post_peer_conversation"
 
 	// Policy / limit events, meant to be routed onward — pagerduty, slack,
-	// the journal, a Captain.
-	//
-	// OnApprovalRequested and OnGuardrailTriggered fire once per triggering
-	// condition. OnBudgetExceeded does NOT yet: it fires on every LLM call
-	// made while a budget is over, and twice on a call that breaches two
-	// budgets, because the check sits in the per-call path with nothing
-	// recording that this breach has already been announced. A journal row
-	// can absorb that; a pager cannot. Debouncing it to once per breach is
-	// tracked separately — until then, wire it to something that tolerates
-	// repeats.
+	// the journal, a Captain. All three fire once per triggering condition,
+	// not once per call: OnBudgetExceeded is debounced per (budget, period,
+	// limit) in paymaster.announceBudgetBreach (#2153) — the first LLM call
+	// that pushes a budget over dispatches it, later calls in the same
+	// period do not, and it fires again once the period rolls or the limit
+	// is raised and breached again. A single call that breaches two
+	// separate budgets still dispatches once per budget — that's two
+	// distinct triggering conditions, not a repeat of one.
 	EventOnApprovalRequested  Event = "on_approval_requested"
 	EventOnBudgetExceeded     Event = "on_budget_exceeded"
 	EventOnGuardrailTriggered Event = "on_guardrail_triggered"

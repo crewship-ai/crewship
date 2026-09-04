@@ -72,6 +72,18 @@ type AssignmentHandler struct {
 	// waits on it; it exists so shutdown (and tests) can drain in-flight
 	// dispatches instead of leaving them racing the DB teardown.
 	dispatchWG sync.WaitGroup
+
+	// agentRunLock is the cross-surface per-AGENT exclusivity lock shared
+	// with chatbridge.Bridge (SetAgentRunLock wires it to
+	// Bridge.AgentRunLock() at server boot, same setter-injection idiom as
+	// SetProvisioner/SetSteerBroadcaster — the Bridge is constructed after
+	// this handler in the boot sequence). nil is tolerated (mirrors
+	// provisioner/resolver: tests and any caller that doesn't wire it get
+	// the pre-existing, unguarded behaviour) rather than defaulting to a
+	// private instance, because a private instance would claim exclusively
+	// against itself and never see chat-side runs at all — silently
+	// defeating the guard while looking wired up.
+	agentRunLock *chatbridge.AgentRunLock
 }
 
 // WaitDispatches blocks until every async dispatch goroutine spawned so
@@ -114,6 +126,13 @@ func (h *AssignmentHandler) SetResolver(rz agentConfigResolver) {
 // image is available. Wired at server boot to the ProvisioningHandler.
 func (h *AssignmentHandler) SetProvisioner(p crewProvisioner) {
 	h.provisioner = p
+}
+
+// SetAgentRunLock wires the cross-surface per-agent exclusivity lock shared
+// with chatbridge.Bridge — see agentRunLock's field doc for why nil is a
+// tolerated, unguarded fallback rather than a private default.
+func (h *AssignmentHandler) SetAgentRunLock(l *chatbridge.AgentRunLock) {
+	h.agentRunLock = l
 }
 
 // SetJournal wires a journal emitter for run lifecycle events. nil maps
@@ -266,6 +285,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 			Type:           d.Type,
 			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
+			AgentIDs:       d.GrantedAgentIDs,
 		}
 		dec, err := encryption.Decrypt(d.EncryptedValue)
 		if err != nil {
@@ -330,13 +350,16 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 		AssignedToSlug string  `json:"assigned_to_slug"`
 		ResultSummary  *string `json:"result_summary"`
 		ErrorMessage   *string `json:"error_message"`
-		StartedAt      *string `json:"started_at"`
-		FinishedAt     *string `json:"finished_at"`
-		CreatedAt      string  `json:"created_at"`
+		// QueuedReason says why a QUEUED row waits: crew_budget or agent_busy
+		// (#2269). NULL unless the row is QUEUED.
+		QueuedReason *string `json:"queued_reason,omitempty"`
+		StartedAt    *string `json:"started_at"`
+		FinishedAt   *string `json:"finished_at"`
+		CreatedAt    string  `json:"created_at"`
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT a.id, a.task, a.status, a.result_summary, a.error_message,
+		SELECT a.id, a.task, a.status, a.result_summary, a.error_message, a.queued_reason,
 		       a.started_at, a.finished_at, a.created_at,
 		       by_agent.name, by_agent.slug,
 		       to_agent.name, to_agent.slug
@@ -358,7 +381,7 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item assignmentListItem
 		if err := rows.Scan(
-			&item.ID, &item.Task, &item.Status, &item.ResultSummary, &item.ErrorMessage,
+			&item.ID, &item.Task, &item.Status, &item.ResultSummary, &item.ErrorMessage, &item.QueuedReason,
 			&item.StartedAt, &item.FinishedAt, &item.CreatedAt,
 			&item.AssignedByName, &item.AssignedBySlug,
 			&item.AssignedToName, &item.AssignedToSlug,
@@ -414,18 +437,19 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		FinishedAt    *string `json:"finished_at"`
 		ResultSummary *string `json:"result_summary"`
 		ErrorMessage  *string `json:"error_message"`
+		QueuedReason  *string `json:"queued_reason,omitempty"`
 		CreatedAt     string  `json:"created_at"`
 	}
 
 	var a assignmentResult
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status,
-		       started_at, finished_at, result_summary, error_message, created_at
+		       started_at, finished_at, result_summary, error_message, queued_reason, created_at
 		FROM assignments WHERE id = ? AND workspace_id = ?
 	`, assignmentID, wsID).Scan(
 		&a.ID, &a.WorkspaceID, &a.ChatID, &a.AssignedByID, &a.AssignedToID,
 		&a.Task, &a.Status, &a.StartedAt, &a.FinishedAt,
-		&a.ResultSummary, &a.ErrorMessage, &a.CreatedAt,
+		&a.ResultSummary, &a.ErrorMessage, &a.QueuedReason, &a.CreatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

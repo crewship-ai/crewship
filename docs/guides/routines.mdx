@@ -31,6 +31,8 @@ Compared to other layers in Crewship:
 
 Two states, no tabs: the **overview**, or the routine you picked in the sidebar.
 
+The routine you picked is in the URL as `?slug=`: a pick is a history entry, so **Back** closes the detail, a reload resumes it, and `/routines?slug=page-watch` is a link you can send. Every routine link in the product is built through `entityHref`, which writes `?slug=`; the older `?routine=` spelling is still read and rewritten on the first pick.
+
 The overview answers, in the order you ask on arrival — did anything run today, is the catalog healthy, what fires next, what ran, what did it cost, what is broken:
 
 | Card | What it answers |
@@ -1631,6 +1633,8 @@ crewship routine result run_abc123 --client        # plain: "Acct — Succeeded"
 
 Redelivered events dedupe **synchronously**: a replay (same `Idempotency-Key` / `X-Crewship-Event-ID`, or identical bytes within the dedupe window) answers `202` with `"status": "DEDUPED"` and the **original** run's id — the routine executes exactly once. A `proposed`/`disabled` routine answers `409` (policy block, nothing dispatched). A delivery arriving while the routine's `concurrency_key` gate is at capacity answers `429` with a `Retry-After` header **before** anything is dispatched — a 429 never consumes the idempotency key, so redelivering the same event later executes it normally. Runs that hit a `wait: approval` step park as `WAITING` and resume once the waitpoint is approved, exactly as with other triggers.
 
+**Fire failure visibility.** A fire that never becomes a run — governance/pin/concurrency rejected it, or the dispatch itself errored before a run existed — records a `pipeline.webhook.fire_failed` journal entry **every time**. A single failure is not surfaced beyond that: it is treated as noise-tolerant (a momentary DB busy, a governance load hiccup). Once the **same webhook** fails **3 times in a row**, a MANAGER inbox card is raised; further failures past the third do not raise additional cards, and a later successful fire resets the streak so a future run of failures can alert again. This does not cover a run that started and whose routine then genuinely failed — that already has full per-run visibility via the routine's own failed-run journal entry and the Runs view.
+
 <Warning>
 The signing secret is shown **once**. To rotate it: delete the webhook + create a new one. There is no in-place rotation by design.
 </Warning>
@@ -2044,7 +2048,9 @@ Use `concurrency_key` with a template referencing the tenant-identifying input:
 }
 ```
 
-Two requests for the same `account_id` queue rather than fan out; requests for different `account_id`s run in parallel. Pair with the `Idempotency-Key` header for webhook handlers (see the [Concurrency + idempotency recipe](/guides/routines-cookbook#recipe-5-—-idempotent-routine-with-concurrency-key)).
+A second request for the same `account_id` while the first is still running is rejected immediately with `429` and a `Retry-After` header — it does not queue or wait; requests for different `account_id`s run in parallel. If you want a burst of same-key triggers to collapse into one run instead of erroring, that's a different mechanism — [deferred dispatch's debounce](#deferred-dispatch-delay-ttl-debounce-priority) — not `concurrency_key`. Pair `concurrency_key` with the `Idempotency-Key` header for webhook handlers (see the [Concurrency + idempotency recipe](/guides/routines-cookbook#recipe-5-—-idempotent-routine-with-concurrency-key)).
+
+Also note: the concurrency gate is enforced per-process, not cluster-wide — a multi-replica deployment has no cross-replica coordination, so the effective cap is `max_concurrent` × replica count (see [`runs/active` is single-replica scope](/api-reference/workspaces#list-active-runs-in-memory-registry) for the same limitation on the adjacent endpoint).
 
 The platform **fails fast** if the rendered key is empty (missing input + no literal prefix in the template) — see [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value) for why and how to fix.
 
@@ -2165,4 +2171,7 @@ These are known gaps in the current MVP — none block production use, but they 
 - **Single-instance scheduler** — running multiple replicas would double-fire schedules.
 - **`credentials_required` scope field is documentary** — the `type` is enforced at run time (a live run is refused with `422` + `missing_credentials` when the vault lacks an ACTIVE credential of that type — see [Required credentials](#required-credentials)), but the optional per-entry `scope` is not yet used for finer-grained matching.
 - **No cross-adapter tier swap yet** — same-provider model swap (Haiku→Opus) works; Claude→Gemini swap requires a shorthand→constant mapping not yet wired.
+- **Routine runs are not in the Runs view** — a routine's runs are recorded in the journal and reachable through the routine's own run history (`crewship routine runs-all`), but `GET /api/v1/runs` and the Runs tab only aggregate `run.*` entries that carry a `trace_id`, which a routine's `pipeline.run.*` entries do not. Tracked as #2284.
+- **No cross-run continuity** — each run starts with an empty context; the previous run's conversation is not carried forward, and `pipeline_routine_state` is a string key/value store for watermarks and counters, not memory. Give the agent what it needs in the routine's brief or in state you write explicitly.
+- **A trigger that has matched nothing is not flagged** — an automation whose event type or payload filter can never fire is now refused at save time, but one that is valid and has simply never matched is not surfaced after any interval. Check `crewship automation list` for rules with no fires.
 - **NL→cron covers a fixed phrase set** — `routine schedules create --when` (see [Cron schedules](#cron-schedules)) handles the common onboarding phrasings (`every weekday at 9`, `every day at 9am`, `every monday at 14:00`, `every hour`, `every N minutes/hours`) via a small hand-rolled parser, not a general NLP model; anything outside that set still needs a raw `--cron` expression.

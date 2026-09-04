@@ -164,26 +164,62 @@ func inspectWithStorage(ctx context.Context, st StorageOps, path string) (*Manif
 	return m, nil
 }
 
-// VerifyResult is returned by Verify and reports whether the bundle
-// at the given path is structurally valid and passes its recorded
-// SHA-256 checksum. Mismatch or decryption failure produces a non-nil
-// Err with the specific reason; Valid summarises.
+// VerifyResult is returned by Verify and reports whether the bundle at the
+// given path is structurally valid and passes its recorded SHA-256
+// checksum. Mismatch or decryption failure produces a non-nil Err with the
+// specific reason; Valid summarises.
+//
+// Valid is integrity AND completeness combined: it is false on a checksum
+// mismatch (as always), and — since #2009 — also false when completeness
+// WAS checked and the payload's row counts disagree with what the manifest
+// recorded. It stays true when completeness could not be checked at all;
+// see CompletenessChecked before reading a true Valid as "this bundle is
+// everything the manifest claims".
 type VerifyResult struct {
 	Manifest *Manifest
 	Valid    bool
 	Size     int64
 	Err      error
+
+	// CompletenessChecked reports whether Verify was able to compare the
+	// payload's actual per-table row counts against
+	// Manifest.Contents.TableRowCounts (#2009). false means "not
+	// evaluated" — see CompletenessSkipReason — never "confirmed
+	// complete" and never "confirmed incomplete".
+	CompletenessChecked bool
+	// CompletenessSkipReason explains why the check did not run, when
+	// CompletenessChecked is false. Empty when CompletenessChecked is
+	// true. Reasons: the bundle is encrypted (Verify does not decrypt —
+	// that property is deliberate, see the doc comment below); the
+	// payload carries no db/dump.json section; or the bundle predates
+	// row-count recording.
+	CompletenessSkipReason string
+	// TableRowCountMismatches lists every table whose recorded count does
+	// not match what the payload actually carries. Non-empty implies
+	// CompletenessChecked is true and Valid is false.
+	TableRowCountMismatches []TableRowCountMismatch
 }
 
 // Verify opens a bundle, reads the manifest, and streams the sealed
-// payload through HashingReader to confirm the SHA-256 recorded in
-// the manifest still matches. Unlike Inspect it does NOT stop at
-// the manifest — it walks the whole payload — but it never decrypts
-// (the checksum covers the sealed bytes, so no key is needed).
+// payload through HashingReader to confirm the SHA-256 recorded in the
+// manifest still matches — integrity. Unlike Inspect it does NOT stop at
+// the manifest — it walks the whole payload.
 //
-// Used by `crewship backup verify <file>` so admins can confirm a
-// stored bundle is still restorable without actually committing to a
-// restore against a test instance.
+// It never decrypts an ENCRYPTED bundle (the checksum covers the sealed
+// bytes, so no key is needed for that check) — this is deliberate and
+// stays true: it is what lets `crewship backup verify` run unattended
+// against a directory of passphrase-protected nightly bundles without ever
+// holding the passphrase. For an UNENCRYPTED bundle, nothing stops Verify
+// from also comparing the payload's actual per-table row counts against
+// Manifest.Contents.TableRowCounts (#2009), so it does — see
+// CompletenessChecked / CompletenessSkipReason on the result. An encrypted
+// bundle's completeness can still be checked, just not by this function:
+// `crewship backup restore --dry-run` already decrypts and parses the
+// payload, and performs the same comparison there.
+//
+// Used by `crewship backup verify <file>` so admins can confirm a stored
+// bundle is still restorable without actually committing to a restore
+// against a test instance.
 func Verify(ctx context.Context, path string) (*VerifyResult, error) {
 	st := getDefaultStorage()
 	info, err := st.Stat(ctx, path)
@@ -206,14 +242,67 @@ func Verify(ctx context.Context, path string) (*VerifyResult, error) {
 		}
 	}()
 
+	// hashed sits directly on the sealed tar entry, which delivers exactly
+	// hdr.Size bytes regardless of what reads it — so scanning through it
+	// for db/dump.json below, then explicitly draining whatever the scan
+	// did not consume, hashes precisely the same bytes a single
+	// io.Copy(io.Discard, hashed) would have, in the same order. That is
+	// what makes it safe to route the completeness scan through the same
+	// reader the checksum is computed from, rather than reading the
+	// payload twice.
 	hashed := NewHashingReader(sealed)
+
+	// A scan failure (payload isn't a parseable zstd/tar stream — an
+	// oddly-shaped test fixture, or a corrupted bundle) degrades to
+	// "completeness unverifiable" rather than failing Verify outright.
+	// Genuine corruption is still caught: the SAME bytes get hashed either
+	// way (scanned or drained-unread), so a tampered payload still fails
+	// the checksum comparison below regardless of what happened here.
+	var dump *DBDump
+	if !manifest.Encryption.Enabled {
+		dump, _ = scanDumpFromTarEntry(hashed)
+	}
+	// Drain whatever scanDumpFromTarEntry did not read (it stops as soon
+	// as it finds db/dump.json, hits real EOF, or gives up on a parse
+	// error) — or, for an encrypted bundle, the entire payload, exactly as
+	// before #2009. A genuine I/O failure (as opposed to "not shaped like
+	// a tar") surfaces HERE, as an ordinary Verify failure, same as always.
 	if _, err := io.Copy(io.Discard, hashed); err != nil {
 		return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: err}, nil
 	}
 	if err := VerifyChecksum(manifest.Checksums.PayloadSHA256, hashed.Sum()); err != nil {
 		return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: err}, nil
 	}
-	return &VerifyResult{Manifest: manifest, Valid: true, Size: info.Size()}, nil
+
+	hasCounts := len(manifest.Contents.TableRowCounts) > 0
+	if manifest.Encryption.Enabled || dump == nil || !hasCounts {
+		return &VerifyResult{
+			Manifest:                manifest,
+			Valid:                   true,
+			Size:                    info.Size(),
+			CompletenessChecked:     false,
+			CompletenessSkipReason:  completenessSkipReason(manifest.Encryption.Enabled, dump != nil, hasCounts),
+			TableRowCountMismatches: nil,
+		}, nil
+	}
+
+	mismatches := compareRowCounts(manifest.Contents.TableRowCounts, tableRowCounts(dump))
+	if len(mismatches) > 0 {
+		return &VerifyResult{
+			Manifest:                manifest,
+			Valid:                   false,
+			Size:                    info.Size(),
+			Err:                     fmt.Errorf("%w: %d table(s)", ErrIncompleteBundle, len(mismatches)),
+			CompletenessChecked:     true,
+			TableRowCountMismatches: mismatches,
+		}, nil
+	}
+	return &VerifyResult{
+		Manifest:            manifest,
+		Valid:               true,
+		Size:                info.Size(),
+		CompletenessChecked: true,
+	}, nil
 }
 
 // ForceReleaseLock deletes the backup_lock row for the given

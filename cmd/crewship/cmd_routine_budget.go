@@ -41,13 +41,21 @@ type budgetSummaryRowsResponse struct {
 
 var routineBudgetCmd = &cobra.Command{
 	Use:   "budget",
-	Short: "Per-routine monthly spend budget — view actuals or set a cap",
-	Long: `A routine's monthly budget is an out-of-band spend cap (set here, not
+	Short: "Per-routine monthly spend REPORT (not enforced) — view actuals or set the tracked cap",
+	Long: `WARNING: this budget is reporting-only. Setting it does NOT stop, block, or
+reject any run — the executor has no code path that reads it. It only drives
+the "over budget" flag and percentage shown by 'get'/'summary'.
+
+A routine's monthly budget is an out-of-band spend cap (set here, not
 in the DSL) compared against actual pipeline_runs.cost_usd for the
 current calendar month. Distinct from a routine's DSL max_cost_usd,
-which is a per-RUN hard gate authored into the definition itself and
-enforced mid-run by the executor — this is a budget-vs-actual VIEW, plus
-an optional monthly cap. A routine can have neither, either, or both.
+which is a per-RUN HARD GATE authored into the definition itself and
+enforced mid-run by the executor (it actually aborts a run) — this
+command's budget is a budget-vs-actual VIEW plus an optional monthly
+tripwire for dashboards/alerts, not an enforcement gate. A routine can
+have neither, either, or both. If you need runs refused or aborted for
+cost, set max_cost_usd in the routine's DSL definition instead, not this
+budget.
 
 Examples:
   crewship routine budget get my-routine
@@ -94,6 +102,7 @@ var routineBudgetGetCmd = &cobra.Command{
 			}
 			fmt.Printf("%s (%s): %s\n", row.Slug, row.Month, budgetMeterBar(row.SpentUSD, row.MonthlyBudgetUSD))
 			fmt.Printf("  $%.2f of $%.2f (%.0f%%)%s\n", row.SpentUSD, row.MonthlyBudgetUSD, row.PctUsed, flag)
+			fmt.Println("  (reporting only — does not stop or block runs; use the DSL's max_cost_usd for a hard per-run gate)")
 		})
 	},
 }
@@ -139,6 +148,7 @@ var routineBudgetSetCmd = &cobra.Command{
 				return
 			}
 			fmt.Printf("Budget set for %s: $%.2f/month\n", args[0], row.MonthlyBudgetUSD)
+			fmt.Println("(reporting only — this does not stop or block runs; use the DSL's max_cost_usd for a hard per-run gate)")
 		})
 	},
 }
@@ -200,6 +210,7 @@ var routineBudgetSummaryCmd = &cobra.Command{
 			return err
 		}
 		fmt.Printf("\n%s total: $%.2f spent of $%.2f budgeted\n", out.Month, out.TotalSpentUSD, out.TotalBudgetUSD)
+		fmt.Println("(reporting only — budgets do not stop or block runs; use each routine's DSL max_cost_usd for a hard per-run gate)")
 		return nil
 	},
 }

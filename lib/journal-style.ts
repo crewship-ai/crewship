@@ -214,6 +214,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "assignment.running": "assignment",
   "assignment.completed": "assignment",
   "assignment.failed": "assignment",
+  "assignment.cancelled": "assignment",
   "task.delegated": "assignment",
   "approval.requested": "approval",
   "approval.granted": "approval",
@@ -287,9 +288,11 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "pipeline.dry_run": "routine",
   "pipeline.schedule.circuit_breaker_tripped": "routine",
   "pipeline.schedule.missed_occurrences": "routine",
+  "pipeline.webhook.fire_failed": "routine",
   "pipeline.runs_swept": "routine",
   "automation.throttled": "routine",
   "automation.depth_exceeded": "routine",
+  "automation.enqueue_failed": "routine",
 
   // ── Pages. The whole surface in one chip: panels, freshness verdicts,
   // wake gates, action dispatches, spec edits, grants, ownership, and the
@@ -425,6 +428,7 @@ export const TYPE_PILL_LABEL: Record<string, string> = {
   "assignment.running": "assign·run",
   "assignment.completed": "assign·done",
   "assignment.failed": "assign·fail",
+  "assignment.cancelled": "assign·stop",
   "task.delegated": "delegate",
   "approval.requested": "approval",
   "approval.granted": "approval·ok",

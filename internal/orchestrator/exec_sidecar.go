@@ -1120,6 +1120,17 @@ type sidecarCred struct {
 	// sidecar sees exactly the bytes it saw before these fields existed.
 	BaseURL string            `json:"base_url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// AgentIDs is the set of crew members this credential was granted to
+	// (#2052); empty means crew-wide and is the shape every credential had
+	// before the field existed. The CredStore refuses to serve a credential to a
+	// member it does not name, so this is what stops one member's endpoint
+	// credential answering another member's call.
+	//
+	// omitempty is load-bearing twice over: the payload stays byte-identical for
+	// a crew-wide credential (so an older sidecar sees exactly the bytes it saw
+	// before), and sidecarConfigFingerprint — which hashes this same struct —
+	// does not move for any crew that has no per-agent grant.
+	AgentIDs []string `json:"agent_ids,omitempty"`
 }
 
 // sidecarConfigFingerprint returns a secret-safe identity for the exact
@@ -1168,6 +1179,14 @@ func sidecarConfigFingerprint(key string, creds []Credential) string {
 // an empty fingerprint is what makes Proxy.authorizeLLMRoute skip the route-token
 // check entirely — every agent sharing the crew container could then reach
 // whichever credential the proxy currently serves.
+//
+// #2052 narrowed what "whichever" means without removing the reason to warn:
+// with no route token there is no acting agent, and CredStore.Select serves an
+// unidentified caller only CREW-WIDE credentials, never one scoped to a named
+// member. So the exposure in this state is the crew's shared credentials, which
+// every member is entitled to anyway — but nothing is attributed, nothing is
+// bound to a configuration, and a run cannot be told from a peer's. Still worth
+// one warning.
 //
 // Defence in depth, not an operational state: config.Load cannot produce an
 // empty internal token (operator value, else derived from ENCRYPTION_KEY, else a
@@ -1230,9 +1249,33 @@ func buildSidecarCreds(creds []Credential, logger *slog.Logger) []sidecarCred {
 			LeaseExpiresAt: c.LeaseExpiresAt,
 			BaseURL:        c.BaseURL,
 			Headers:        c.Headers,
+			AgentIDs:       sortedGranteeIDs(c.AgentIDs),
 		})
 	}
 	return sc
+}
+
+// sortedGranteeIDs returns a sorted COPY of a credential's grantee set, or nil
+// when it is empty (crew-wide).
+//
+// Sorted, because this value is hashed by sidecarConfigFingerprint: the API
+// tier computes the same set for every member of a crew, and two members whose
+// deliveries listed it in different orders would otherwise produce different
+// fingerprints and restart each other's shared sidecar (#1160's thrash, through
+// a new door). A copy, because the caller's slice belongs to the delivered
+// credential and callers downstream still read it.
+//
+// nil rather than an empty slice: `omitempty` drops both, but the nil keeps
+// buildSidecarCreds's output comparable with reflect.DeepEqual in the tests that
+// pin the payload.
+func sortedGranteeIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, len(ids))
+	copy(out, ids)
+	sort.Strings(out)
+	return out
 }
 
 // credTypeToProvider maps orchestrator credential types to sidecar provider types.

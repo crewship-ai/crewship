@@ -1,10 +1,36 @@
 "use client"
 
 // RunsView — the "Runs" tab inside /journal, reframed as a fleet
-// operations overview rather than a flat run list. It's the only surface
-// that spans ALL runs in the workspace (routine + ad-hoc agent/chat/user),
-// so it leans into breakdowns the routine-scoped Routines→Insights view
-// structurally can't show: by trigger, by crew, by model.
+// operations overview rather than a flat run list. The header used to
+// claim it "spans ALL runs in the workspace (routine + ad-hoc
+// agent/chat/user)" while only subscribing to run.* — never
+// pipeline.run.* — so a routine-triggered run never repainted this view
+// live (F33). That subscription gap is fixed below (A6,
+// docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md).
+//
+// IMPORTANT — the claim above is still not fully true after that fix, and
+// this comment says so on purpose (the point of A6 is that a shipped
+// surface's own header must not overstate what it shows): a routine run
+// writes journal_entries with entry_type 'pipeline.run.*' and never sets
+// trace_id (internal/journal/queries.go:39-40, "pipeline/routine runs
+// never set TraceID"). /api/v1/runs (internal/journal/runs.go:264-267)
+// requires `entry_type LIKE 'run.%' AND trace_id IS NOT NULL`, which
+// 'pipeline.run.*' never matches — a pipeline/routine run reaches neither
+// this table nor the KPI/breakdown rows above it, whether or not the
+// routine has an agent_run step (agent-kind pipeline steps run through
+// internal/pipeline/runner_orchestrator.go / runner_llm.go, which emit no
+// run.* journal entries at all — a fully separate path from the
+// assignments/mission runner that does). The subscription below makes the
+// live pulse strip and table *refetch* when a routine fires, which is real
+// and worth having, but the refetch still returns nothing for that run:
+// the gap is in the read-side SQL, not in this component. See F33.
+//
+// Four sections:
+//   1. Live pulse strip  — running executions across the whole fleet, live.
+//   2. KPI row           — outcome split + success rate + duration percentiles.
+//   3. Breakdown row     — by trigger / top crews / by model.
+//   4. Recent runs table — demoted list; each row deep-links to the Activity
+//                          trace. Adds the resolved Model column.
 //
 // Four sections:
 //   1. Live pulse strip  — running executions across the whole fleet, live.
@@ -16,7 +42,10 @@
 // Data:
 //   - /api/v1/runs               — the recent-runs table + live strip (status=RUNNING).
 //   - /api/v1/runs/insights      — sections 2 & 3 (windowed aggregates).
-// Both refresh silently on the same run.* WebSocket events.
+// Both refresh silently on run.* AND pipeline.run.* WebSocket events —
+// the latter is what actually reaches this component when a routine
+// fires (see the header note on why the refetch can still come back
+// empty for those).
 
 import { useCallback, useEffect, useState } from "react"
 import {
@@ -316,7 +345,14 @@ export function RunsView({
 
   // Real-time refetch on run events. Backend collapses terminal statuses
   // into run.completed / run.failed; subscribing to these three covers the
-  // lifecycle. Refresh table, live strip and aggregates together.
+  // agent/chat/user-triggered lifecycle. Refresh table, live strip and
+  // aggregates together.
+  //
+  // pipeline.run.* is the routine-triggered equivalent — every other
+  // pipeline consumer subscribes to it (hooks/use-pipeline-runs.ts,
+  // use-active-runs.ts, use-trace.ts); this view didn't, so a routine
+  // firing never repainted it live (F33, #2257). See the header comment
+  // for why the resulting refetch can still come back empty today.
   const silentRefetch = useCallback(() => {
     fetchRuns({ silent: true })
     fetchInsights()
@@ -325,6 +361,9 @@ export function RunsView({
   useRealtimeEvent("run.started", silentRefetch)
   useRealtimeEvent("run.completed", silentRefetch)
   useRealtimeEvent("run.failed", silentRefetch)
+  useRealtimeEvent("pipeline.run.started", silentRefetch)
+  useRealtimeEvent("pipeline.run.completed", silentRefetch)
+  useRealtimeEvent("pipeline.run.failed", silentRefetch)
 
   const isLoading = workspaceLoading || loading
 

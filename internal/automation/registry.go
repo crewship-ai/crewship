@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
@@ -45,6 +47,34 @@ type ChainSource interface {
 // the write path.
 type loader interface {
 	ListActive(ctx context.Context) ([]Resolved, error)
+}
+
+// InboxAlerter raises a human-facing card. Modeled on Enqueuer, IssueOpener
+// and ChainSource: every side effect this package performs beyond the
+// journal is a narrow interface, never a raw *sql.DB, so Flush stays
+// testable without a database. NewDBInboxAlerter wraps internal/inbox for
+// production wiring; nil (the zero value) is a safe no-op, matching every
+// other optional sink here (issues, chains).
+type InboxAlerter interface {
+	Insert(ctx context.Context, item inbox.Item) error
+}
+
+// dbInboxAlerter adapts internal/inbox.Upsert (not Insert — see
+// emitEnqueueFailed for why the alert must be able to resurrect a
+// previously-resolved card) to InboxAlerter.
+type dbInboxAlerter struct {
+	db     *sql.DB
+	logger *slog.Logger
+}
+
+// NewDBInboxAlerter is the production InboxAlerter, wired at boot
+// (cmd_start.go) alongside SetChainSource / SetIssueOpener.
+func NewDBInboxAlerter(db *sql.DB, logger *slog.Logger) InboxAlerter {
+	return dbInboxAlerter{db: db, logger: logger}
+}
+
+func (a dbInboxAlerter) Insert(ctx context.Context, item inbox.Item) error {
+	return inbox.Upsert(ctx, a.db, a.logger, item)
 }
 
 // Options tunes a Registry. Zero values pick the documented defaults.
@@ -88,6 +118,10 @@ type Registry struct {
 	journal journal.Emitter
 	logger  *slog.Logger
 	now     func() time.Time
+	// inbox raises the human-facing card once an automation's enqueue
+	// failures repeat (see emitEnqueueFailed). nil until SetInboxAlerter is
+	// called, matching issues/chains' optional-until-wired contract.
+	inbox InboxAlerter
 
 	refreshEvery time.Duration
 	flushEvery   time.Duration
@@ -124,6 +158,24 @@ type Registry struct {
 	ceiling map[string]time.Time
 	// notices are automation.throttled entries the flusher will emit.
 	notices []journal.Entry
+	// enqueueFailureStreak counts, per automation id, the CONSECUTIVE
+	// enqueue failures Flush has seen for it since its last successful
+	// enqueue. In-memory and reset to 0 on the next success, deliberately
+	// the same durability contract as `rate`/`charged`/`ceiling` above: it
+	// survives a rule-set refresh but not a process restart. A restart
+	// losing a partial streak only delays a possible alert by a few more
+	// failures — every failure still gets its own durable journal entry
+	// (emitEnqueueFailed) regardless of streak state, so nothing about the
+	// AUDIT trail depends on this map surviving. See
+	// automationEnqueueFailureAlertThreshold for the alerting threshold.
+	enqueueFailureStreak map[string]int
+	// enqueueFailureAlerted marks, per automation id, that the CURRENT
+	// streak already raised its inbox card. Without it every failure past
+	// the threshold (not just the one that crosses it) would re-Upsert and
+	// re-notify — the exact flood the threshold exists to prevent. Cleared
+	// alongside enqueueFailureStreak on the next success, so a FUTURE
+	// streak can alert again.
+	enqueueFailureAlerted map[string]bool
 
 	wake   chan struct{}
 	stopMu sync.Mutex
@@ -260,6 +312,117 @@ func (r *Registry) emitDepthExceeded(ctx context.Context, it *intent, depth int)
 	})
 }
 
+// automationEnqueueFailureAlertThreshold is how many CONSECUTIVE enqueue
+// failures the same automation must accumulate before a human is paged
+// (PRD-ISSUES-AND-ROUTINES-2026.md §17 A4, F20). One failure is
+// noise-tolerant — a momentary SQLITE_BUSY or a fleeting disk hiccup on
+// the enqueue write — and paging on it is exactly the alert fatigue that
+// trains people to ignore the inbox. Three in a row for the same rule
+// means the enqueue path is structurally broken for it, not unlucky
+// timing, and every one of those three represents a run the rule decided
+// to make that will now never exist. Matches
+// webhookFireFailureAlertThreshold (internal/api/pipeline_webhooks.go) —
+// same reasoning, same number, for the trigger kind's sibling gap.
+const automationEnqueueFailureAlertThreshold = 3
+
+// emitEnqueueFailed is Flush's response to r.enq.Enqueue returning an
+// error: the rule matched, coalesced, and reached the front of the queue,
+// and the run it decided to make still never exists (F20's "the same file
+// emits journal entries for depth and throttle cases... and a bare
+// logger.Error for this one").
+//
+// It ALWAYS writes a journal entry — the durable, per-failure audit trail,
+// mirroring emitDepthExceeded's every-refusal cadence — and separately
+// tracks a per-automation consecutive-failure streak (r.enqueueFailureStreak,
+// guarded by r.mu since Flush's enqueue loop runs unlocked). Only once that
+// streak reaches automationEnqueueFailureAlertThreshold, and only once for
+// that streak (r.enqueueFailureAlerted), does it raise a MANAGER inbox
+// card — the same split the schedule pattern draws between "every failure
+// is journaled" and "only a repeated failure pages a human"
+// (internal/pipeline/schedules.go: EntryPipelineRunFailed vs
+// maybeTripCircuitBreaker).
+//
+// Upsert, not Insert, on the inbox write (via InboxAlerter — see
+// dbInboxAlerter): the SAME automation can cross this threshold more than
+// once across its life (fail, recover, fail again), and each crossing is
+// news about the SAME subject (source_id = automation ID) rather than a
+// new one-off event, so a card a human already resolved is resurrected to
+// unread instead of being silently swallowed by the (kind, source_id)
+// unique index the way a second Insert would be.
+func (r *Registry) emitEnqueueFailed(ctx context.Context, it *intent, cause error) {
+	r.mu.Lock()
+	r.enqueueFailureStreak[it.automationID]++
+	streak := r.enqueueFailureStreak[it.automationID]
+	// Alert exactly once per streak, at the moment it CROSSES the
+	// threshold — not "every failure from here on", which would be the
+	// same flood the threshold exists to prevent.
+	shouldAlert := streak >= automationEnqueueFailureAlertThreshold && !r.enqueueFailureAlerted[it.automationID]
+	if shouldAlert {
+		r.enqueueFailureAlerted[it.automationID] = true
+	}
+	r.mu.Unlock()
+
+	r.logger.Error("automation: enqueue failed",
+		"err", cause, "automation_id", it.automationID,
+		"routine", it.pipelineSlug, "workspace_id", it.workspaceID,
+		"consecutive_failures", streak)
+
+	if r.journal != nil {
+		_, _ = r.journal.Emit(ctx, journal.Entry{
+			WorkspaceID: it.workspaceID,
+			Type:        journal.EntryAutomationEnqueueFailed,
+			Severity:    journal.SeverityError,
+			ActorType:   journal.ActorSystem,
+			ActorID:     "automation",
+			Summary: fmt.Sprintf("automation %q could not enqueue its run: %s",
+				it.automationName, cause.Error()),
+			Payload: map[string]any{
+				"automation_id":        it.automationID,
+				"automation_name":      it.automationName,
+				"routine_slug":         it.pipelineSlug,
+				"workspace_id":         it.workspaceID,
+				"error":                cause.Error(),
+				"consecutive_failures": streak,
+			},
+		})
+	}
+
+	if !shouldAlert || r.inbox == nil {
+		return
+	}
+	if err := r.inbox.Insert(ctx, inbox.Item{
+		WorkspaceID: it.workspaceID,
+		Kind:        inbox.KindAutomationEnqueueFailed,
+		SourceID:    it.automationID,
+		TargetRole:  "MANAGER",
+		Title:       fmt.Sprintf("Automation failing to enqueue: %s", it.automationName),
+		BodyMD: fmt.Sprintf(
+			"Automation **%s** has matched %d times in a row and failed to enqueue its routine run every time — %s. "+
+				"Every one of those runs never happened. Check the Journal for the underlying cause.",
+			it.automationName, streak, cause.Error()),
+		SenderType: "automation",
+		SenderName: it.automationName,
+		Priority:   "high",
+		Payload: map[string]interface{}{
+			"automation_id":        it.automationID,
+			"routine_slug":         it.pipelineSlug,
+			"consecutive_failures": streak,
+		},
+	}); err != nil {
+		r.logger.Error("automation: enqueue-failure inbox alert failed", "err", err, "automation_id", it.automationID)
+	}
+}
+
+// resetEnqueueFailureStreak clears an automation's consecutive-failure
+// tracking after a successful enqueue, so the NEXT streak of failures (if
+// any) can cross automationEnqueueFailureAlertThreshold and alert again.
+func (r *Registry) resetEnqueueFailureStreak(automationID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.enqueueFailureStreak, automationID)
+	delete(r.enqueueFailureAlerted, automationID)
+}
+
 func NewRegistry(store loader, enq Enqueuer, opts Options) *Registry {
 	if opts.RefreshInterval <= 0 {
 		opts.RefreshInterval = 60 * time.Second
@@ -274,22 +437,31 @@ func NewRegistry(store loader, enq Enqueuer, opts Options) *Registry {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Registry{
-		store:        store,
-		enq:          enq,
-		journal:      opts.Journal,
-		logger:       opts.Logger,
-		now:          opts.Now,
-		refreshEvery: opts.RefreshInterval,
-		flushEvery:   opts.FlushInterval,
-		byEvent:      map[eventKey][]Resolved{},
-		rate:         map[string]*window{},
-		pending:      map[string]*intent{},
-		charged:      map[string]time.Time{},
-		ceiling:      map[string]time.Time{},
-		wake:         make(chan struct{}, 1),
-		stop:         make(chan struct{}),
+		store:                 store,
+		enq:                   enq,
+		journal:               opts.Journal,
+		logger:                opts.Logger,
+		now:                   opts.Now,
+		refreshEvery:          opts.RefreshInterval,
+		flushEvery:            opts.FlushInterval,
+		byEvent:               map[eventKey][]Resolved{},
+		rate:                  map[string]*window{},
+		pending:               map[string]*intent{},
+		charged:               map[string]time.Time{},
+		ceiling:               map[string]time.Time{},
+		enqueueFailureStreak:  map[string]int{},
+		enqueueFailureAlerted: map[string]bool{},
+		wake:                  make(chan struct{}, 1),
+		stop:                  make(chan struct{}),
 	}
 }
+
+// SetInboxAlerter installs the sink for the enqueue-failure alert (A4,
+// F20). Without one, repeated enqueue failures still get their per-failure
+// journal entry (emitEnqueueFailed) but never raise a human-facing card —
+// the same degrade-quietly contract SetIssueOpener documents for issue-kind
+// rules with no opener wired.
+func (r *Registry) SetInboxAlerter(a InboxAlerter) { r.inbox = a }
 
 // Load installs a rule set directly, without reading the database. Refresh
 // funnels through it, and so do tests.
@@ -731,11 +903,10 @@ func (r *Registry) Flush(ctx context.Context) int {
 			ChainDepth:    it.chainDepth,
 			ChainOrigin:   origin,
 		}); err != nil {
-			r.logger.Error("automation: enqueue failed",
-				"err", err, "automation_id", it.automationID,
-				"routine", it.pipelineSlug, "workspace_id", it.workspaceID)
+			r.emitEnqueueFailed(ctx, it, err)
 			continue
 		}
+		r.resetEnqueueFailureStreak(it.automationID)
 		n++
 	}
 

@@ -202,8 +202,23 @@ type mcpCredEntry struct {
 	// RFC3339 UTC, empty for a standing grant (#1373). It rides the boot payload
 	// into the sidecar's CredStore, which refuses and then evicts a credential
 	// once the deadline passes — the only way lease expiry can reach a
-	// crew-shared, credential-scoped store that has no per-agent dimension.
+	// crew-shared store whose supply line ends at boot. The deadline travels
+	// with the credential rather than with a grant because delivery is
+	// credential-scoped: AgentIDs below says WHO may use a credential, not for
+	// how long each of them may, and #1373's TTL is per grant.
 	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	// AgentIDs is the set of crew members this credential is granted to
+	// (#2052), empty meaning crew-wide. It rides the boot payload into the
+	// sidecar's CredStore, which is crew-wide by construction and — before this
+	// existed — served whichever credential a round-robin counter landed on to
+	// whichever member asked. For OPENAI_COMPAT, whose upstream comes from the
+	// credential, that chose the GATEWAY as well as the key.
+	//
+	// omitempty is load-bearing for the same reason as the three above, and for
+	// one more: sidecarConfigFingerprint hashes this value, and a crew with no
+	// per-agent grant must keep the fingerprint it has or every shared sidecar
+	// restarts once on upgrade.
+	AgentIDs []string `json:"agent_ids,omitempty"`
 	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
 	// §2.2), already named by credential_field_delivery.go. omitempty is
 	// load-bearing for compatibility: a credential with no parts — every

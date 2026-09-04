@@ -245,7 +245,13 @@ func TestIssueActionValidation(t *testing.T) {
 
 func TestUnknownActionKindStillRefused(t *testing.T) {
 	a := Automation{
-		WorkspaceID: "ws_1", Name: "n", EventType: "x", ActionKind: "notify",
+		// EventType must be registered: Validate checks event_type
+		// registration before the action_kind switch (A3 moved that check
+		// into Validate itself — see its doc comment), so an unregistered
+		// placeholder like "x" would be refused for THAT reason and this
+		// test would no longer be exercising the action_kind refusal it
+		// names.
+		WorkspaceID: "ws_1", Name: "n", EventType: string(journal.EntryMissionStatus), ActionKind: "notify",
 		DebounceSeconds: 10, MaxPerHour: 60,
 	}
 	if err := a.Validate(); err == nil || !strings.Contains(err.Error(), "not supported") {

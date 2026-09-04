@@ -15,6 +15,20 @@ import (
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
 
+// maxJournalEscalationFieldLen bounds each agent-supplied text field
+// (reason, context, metadata) written into the peer.escalation journal
+// payload. Unlike the escalations row and the inbox projection, a journal
+// entry is permanent (append-only, hash-chained) and explicitly excluded
+// from the GDPR erasure cascade (admin_gdpr.go), and this route bypasses
+// BodyCap entirely (router.go ~813-818) — so without a cap here, an agent
+// can put an unbounded blob into `context` and it survives every erasure
+// forever. 4096 runes is generous enough to keep genuine multi-paragraph
+// escalation detail (the summary line, separately, is bounded to 140
+// chars for the single-line UI) while giving the pathological case — a
+// megabyte of tool output stuffed into context — a real ceiling rather
+// than a nominally-large one. See #2238.
+const maxJournalEscalationFieldLen = 4096
+
 // PendingEscalationCount returns the number of unresolved escalations workspace-wide.
 func (h *QueryHandler) PendingEscalationCount(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -282,6 +296,18 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	// Dual-write the escalation into the journal. Severity=warn because
 	// an unresolved escalation should surface in the default "things
 	// needing attention" filter (severity IN (warn, error)).
+	//
+	// Unlike the escalations row (access-controlled source of truth) and
+	// like the inbox projection above, the journal is a projection too —
+	// and a permanent one (append-only, hash-chained, excluded from GDPR
+	// erasure) that this internal-IPC route can fill with an unbounded
+	// agent-supplied blob (no BodyCap on this path). So every
+	// agent-supplied field here gets the same treatment as the inbox
+	// copy — inbox.RedactSecrets, then bounded — rather than a second
+	// redaction policy. See #2238.
+	journalReason := truncate(inbox.RedactSecrets(body.Reason), maxJournalEscalationFieldLen)
+	journalContext := truncate(inbox.RedactSecrets(body.Context), maxJournalEscalationFieldLen)
+	journalMetadata := truncate(inbox.RedactSecrets(body.Metadata), maxJournalEscalationFieldLen)
 	_, _ = h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID,
@@ -290,31 +316,41 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		Severity:    journal.SeverityWarn,
 		ActorType:   journal.ActorAgent,
 		ActorID:     fromAgentID,
-		Summary:     fmt.Sprintf("escalation from %s: %s", body.FromSlug, truncate(body.Reason, 140)),
+		// Redact BEFORE truncating for the same reason the inbox title
+		// does above: a secret whose closing delimiter falls past the
+		// 140-char cut would otherwise leave an unmatched (= unredacted)
+		// prefix in this permanent, human-visible summary line.
+		Summary: fmt.Sprintf("escalation from %s: %s", body.FromSlug, truncate(inbox.RedactSecrets(body.Reason), 140)),
 		Payload: map[string]any{
-			"reason":          body.Reason,
-			"context":         body.Context,
+			"reason":          journalReason,
+			"context":         journalContext,
 			"escalation_type": escalationType,
-			"metadata":        body.Metadata,
+			"metadata":        journalMetadata,
 			"from_slug":       body.FromSlug,
 			"state":           "pending",
 		},
 		Refs: map[string]any{"escalation_id": escalationID, "chat_id": body.ChatID},
 	})
 
-	// Broadcast escalation event
+	// Broadcast escalation event. Ephemeral (not stored), but distributed
+	// wider than either projection above: the workspace-scoped broadcast
+	// reaches every connected member, not just this escalation's audience
+	// — so `reason` gets the same redaction as everywhere else in this
+	// function even though, unlike the journal, it isn't the retention
+	// risk. See #2238.
+	broadcastReason := inbox.RedactSecrets(body.Reason)
 	broadcastChannelEvent(h.hub, "session", body.ChatID, "escalation_created",
 		map[string]string{
 			"id":     escalationID,
 			"from":   body.FromSlug,
-			"reason": body.Reason,
+			"reason": broadcastReason,
 		})
 	broadcastWorkspaceEvent(h.hub, body.WorkspaceID, "escalation.created",
 		map[string]string{
 			"id":        escalationID,
 			"crew_id":   body.CrewID,
 			"from_slug": body.FromSlug,
-			"reason":    body.Reason,
+			"reason":    broadcastReason,
 		})
 
 	h.logger.Info("escalation created",
@@ -653,7 +689,16 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// stream visible to every workspace reader. Replace with an
 	// opaque marker instead; the encrypted value in `escalations.
 	// resolution` stays the canonical record.
-	resolutionForJournal := body.Resolution
+	//
+	// Every OTHER type still writes body.Resolution — an operator-supplied
+	// free-text field — straight into the same permanent, hash-chained
+	// entry. The type check above only catches a secret the escalation
+	// itself was ABOUT; it says nothing about a secret the resolving human
+	// happens to paste into a TOOL or TEXT resolution ("used token ghp_...
+	// to unblock it"), so it needs the same redact-then-bound treatment
+	// CreateEscalation gives the agent-supplied fields (#2238) rather than a
+	// second policy that only fires on one escalation type.
+	resolutionForJournal := truncate(inbox.RedactSecrets(body.Resolution), maxJournalEscalationFieldLen)
 	if escalationType == "CREDENTIAL" {
 		resolutionForJournal = "***REDACTED:credential***"
 	}

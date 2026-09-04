@@ -6,8 +6,11 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 )
 
 type createWorkspaceRequest struct {
@@ -129,6 +132,16 @@ type updateWorkspaceRequest struct {
 	// internal/api/audit_retention.go.
 	CredentialAuditRetentionDays *int `json:"credential_audit_retention_days"`
 	AuditLogRetentionDays        *int `json:"audit_log_retention_days"`
+	// ApprovalsRetentionDays (#2233) — window for the approvals_queue
+	// retention sweep. nil leaves the column untouched.
+	//
+	// Like the audit pair above (and unlike RunRetentionDays), 0 IS
+	// accepted and means an explicit "keep forever": this flag sits on the
+	// same `workspace update` command as the two audit ones, where 0
+	// already means keep-forever, so giving it different semantics here
+	// would silently delete what an operator typing 0 out of habit with
+	// its neighbours expected to keep. See internal/harbormaster/retention.go.
+	ApprovalsRetentionDays *int `json:"approvals_retention_days"`
 }
 
 // Update modifies workspace settings such as name, slug, logo, and preferred language.
@@ -171,6 +184,20 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AuditLogRetentionDays != nil && *req.AuditLogRetentionDays < 0 {
 		replyError(w, http.StatusBadRequest, "audit_log_retention_days must be 0 (keep forever) or a positive number of days")
+		return
+	}
+	if req.ApprovalsRetentionDays != nil && *req.ApprovalsRetentionDays < 0 {
+		replyError(w, http.StatusBadRequest, "approvals_retention_days must be 0 (keep forever) or a positive number of days")
+		return
+	}
+	// Reject before persisting rather than let it reach the sweeper:
+	// time.Duration is int64 nanoseconds, so *days*24h overflows past
+	// harbormaster.MaxApprovalsRetentionDays (~106751 days, ~292 years)
+	// and wraps NEGATIVE — a cutoff in the future that would match every
+	// terminal row regardless of age. See retention.go.
+	if req.ApprovalsRetentionDays != nil && *req.ApprovalsRetentionDays > harbormaster.MaxApprovalsRetentionDays {
+		replyError(w, http.StatusBadRequest, fmt.Sprintf(
+			"approvals_retention_days is %d; the maximum is %d", *req.ApprovalsRetentionDays, harbormaster.MaxApprovalsRetentionDays))
 		return
 	}
 
@@ -241,6 +268,17 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ub.Set("audit_log_retention_days", *req.AuditLogRetentionDays)
 	}
+	if req.ApprovalsRetentionDays != nil {
+		// Opposite direction from audit_logs above but the same rule: the
+		// transition worth a durable line is the one that changes what gets
+		// pruned. approvals_queue defaults to a 90-day window, so setting it
+		// to 0 is what turns pruning OFF.
+		if *req.ApprovalsRetentionDays == 0 {
+			h.logger.Warn("workspace set approvals_queue to keep forever (#2233)",
+				"workspace_id", workspaceID)
+		}
+		ub.Set("approvals_retention_days", *req.ApprovalsRetentionDays)
+	}
 	persisted := !ub.Empty()
 	if persisted {
 		query, args := ub.Build("workspaces", "id = ?", workspaceID)
@@ -255,6 +293,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials, w.run_retention_days,
 			w.credential_audit_retention_days, w.audit_log_retention_days,
+			w.approvals_retention_days,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
@@ -263,6 +302,7 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
 		&ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
+		&ws.ApprovalsRetentionDays,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		replyInternalError(w, h.logger, "get workspace after update", err)
@@ -297,6 +337,9 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AuditLogRetentionDays != nil {
 		changed = append(changed, "audit_log_retention_days")
+	}
+	if req.ApprovalsRetentionDays != nil {
+		changed = append(changed, "approvals_retention_days")
 	}
 	meta := map[string]interface{}{"fields": changed}
 	if req.AllowPrivilegedCredentials != nil {

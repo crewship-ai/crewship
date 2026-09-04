@@ -514,6 +514,19 @@ type cappedAssignment struct {
 	Task        string
 	GroupID     string
 	CreatedAt   string
+	// MissionID, AuthorAgentID, CreatedByUserID persist what a lock-loss
+	// requeue needs to rebuild an identical dispatch door later (#2269
+	// follow-up): dispatchByID (assignments_dispatch_pump.go) used to
+	// derive MissionID from GroupID, which is wrong for a door whose
+	// GroupID is a chat id rather than a mission id (Create's /assign —
+	// see its call site). Persisted here instead so dispatchByID reads
+	// the row's own word for it rather than reverse-engineering GroupID's
+	// meaning per caller. Empty stores NULL (see parentVal's reasoning
+	// above); a row with no mission/attribution is legitimately NULL, not
+	// "".
+	MissionID       string
+	AuthorAgentID   string
+	CreatedByUserID string
 }
 
 // insertCappedAssignment writes the PENDING assignment row with the fan-out
@@ -560,14 +573,25 @@ func insertCappedAssignment(
 	if scope.ParentRunID != "" {
 		parentRunVal = scope.ParentRunID
 	}
+	var missionVal, authorAgentVal, createdByUserVal any
+	if a.MissionID != "" {
+		missionVal = a.MissionID
+	}
+	if a.AuthorAgentID != "" {
+		authorAgentVal = a.AuthorAgentID
+	}
+	if a.CreatedByUserID != "" {
+		createdByUserVal = a.CreatedByUserID
+	}
 	guardSQL, guardArgs := fanoutGuard(scope, caller, a.ChatID, lim.MaxFanout)
 	insertArgs := append([]any{
 		assignmentID, a.WorkspaceID, a.ChatID, caller.FanoutSubjectID, a.TargetID,
 		a.Task, a.GroupID, scope.Depth, parentVal, originVal, parentRunVal, a.CreatedAt,
+		missionVal, authorAgentVal, createdByUserVal,
 	}, guardArgs...)
 	res, err := db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at)
-		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at, mission_id, author_agent_id, created_by_user_id)
+		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?
 		 WHERE `+guardSQL, insertArgs...)
 	if err != nil {
 		return "", err

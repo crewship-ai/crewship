@@ -84,12 +84,28 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 
 	limit, offset := parsePagination(r, 100, 500)
 
+	// Two ways a run names this issue, and a real clone has rows from both:
+	//
+	//   * a.mission_id (#2256) — every assignment-creating path stamps it
+	//     going forward, including a mention dispatch, which has no
+	//     mission_tasks row at all.
+	//   * mission_tasks.assignment_id — the pre-#2256 link, still the only
+	//     one a row written before this column existed can be found by.
+	//
+	// The same predicate feeds the COUNT(*) that becomes X-Total-Count, so
+	// the total can never disagree with the page.
+	const belongsToIssue = `
+		WHERE a.workspace_id = ?
+		  AND (
+		        a.mission_id = ?
+		        OR a.id IN (SELECT assignment_id FROM mission_tasks
+		                     WHERE mission_id = ? AND assignment_id IS NOT NULL)
+		      )`
+
 	var total int
-	if err := h.db.QueryRowContext(r.Context(), `
-		SELECT COUNT(*)
-		FROM mission_tasks mt
-		JOIN assignments a ON a.id = mt.assignment_id
-		WHERE mt.mission_id = ? AND a.workspace_id = ?`, missionID, wsID).Scan(&total); err != nil {
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(DISTINCT a.id) FROM assignments a`+belongsToIssue,
+		wsID, missionID, missionID).Scan(&total); err != nil {
 		internalError(w, r, h.logger, "issue runs: count", err)
 		return
 	}
@@ -99,21 +115,24 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	// mission_id = this mission and payload.assignment_id = the row. The
 	// correlated subquery walks idx_journal_mission_ts, so it is bounded by
 	// the issue's own entries, not the workspace's.
+	//
+	// DISTINCT because a mission-task run satisfies both attribution paths
+	// after the backfill / going-forward write, and the OR would otherwise
+	// return it twice.
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT a.id, a.status, a.started_at, a.finished_at, a.result_summary,
+		SELECT DISTINCT a.id, a.status, a.started_at, a.finished_at, a.result_summary,
 		       a.error_message, a.task,
 		       COALESCE(ag.name, ''), COALESCE(ag.id, ''), COALESCE(ag.slug, ''),
 		       (SELECT je.trace_id FROM journal_entries je
-		         WHERE je.mission_id = mt.mission_id
+		         WHERE je.mission_id = ?
 		           AND je.entry_type = 'run.started'
 		           AND json_extract(je.payload, '$.assignment_id') = a.id
-		         ORDER BY je.ts DESC LIMIT 1)
-		FROM mission_tasks mt
-		JOIN assignments a ON a.id = mt.assignment_id
-		LEFT JOIN agents ag ON ag.id = a.assigned_to_id
-		WHERE mt.mission_id = ? AND a.workspace_id = ?
-		ORDER BY COALESCE(a.started_at, a.created_at) DESC
-		LIMIT ? OFFSET ?`, missionID, wsID, limit, offset)
+		         ORDER BY je.ts DESC LIMIT 1),
+		       COALESCE(a.started_at, a.created_at) AS sort_key
+		FROM assignments a
+		LEFT JOIN agents ag ON ag.id = a.assigned_to_id`+belongsToIssue+`
+		ORDER BY sort_key DESC
+		LIMIT ? OFFSET ?`, missionID, wsID, missionID, missionID, limit, offset)
 	if err != nil {
 		internalError(w, r, h.logger, "issue runs: query", err)
 		return
@@ -126,8 +145,9 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 			dto                                            issueRunDTO
 			started, finished, result, errMsg, task, runID sql.NullString
 		)
+		var sortKey sql.NullString
 		if err := rows.Scan(&dto.ID, &dto.Status, &started, &finished, &result,
-			&errMsg, &task, &dto.AgentName, &dto.AgentID, &dto.AgentSlug, &runID); err != nil {
+			&errMsg, &task, &dto.AgentName, &dto.AgentID, &dto.AgentSlug, &runID, &sortKey); err != nil {
 			internalError(w, r, h.logger, "issue runs: scan", err)
 			return
 		}

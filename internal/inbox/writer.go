@@ -40,6 +40,19 @@ const (
 	// the constraint and the "your routine was disabled" alert reached
 	// nobody. Requires migration v168.
 	KindScheduleCircuitBreakerTripped = "schedule_circuit_breaker_tripped"
+	// KindWebhookFireFailed surfaces a webhook whose fire has failed to
+	// become a run repeatedly in a row (PRD A4 / F20). Written via Upsert,
+	// not Insert: the same webhook can trip this more than once across its
+	// life (fail, recover, fail again), and each trip is news about the
+	// SAME subject rather than a new one-off event, so a resolved card is
+	// resurrected to unread rather than silently swallowed by the unique
+	// index. See alertWebhookFireFailure, internal/api/pipeline_webhooks.go.
+	KindWebhookFireFailed = "webhook_fire_failed"
+	// KindAutomationEnqueueFailed surfaces an automation rule that matched
+	// but could not park its run repeatedly in a row (PRD A4 / F20) — the
+	// automation-side twin of KindWebhookFireFailed, same Upsert-not-Insert
+	// reasoning. See Registry.emitEnqueueFailed, internal/automation/registry.go.
+	KindAutomationEnqueueFailed = "automation_enqueue_failed"
 )
 
 // AllKinds is the canonical set of inbox_items.kind values the product
@@ -59,6 +72,8 @@ var AllKinds = []string{
 	KindMemoryConsolidation,
 	KindScheduleMissed,
 	KindScheduleCircuitBreakerTripped,
+	KindWebhookFireFailed,
+	KindAutomationEnqueueFailed,
 }
 
 // ExternalNotifier is the injected seam that fans a freshly-committed
@@ -241,7 +256,11 @@ func UpsertMessage(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 // Upsert inserts an inbox row, or — when a row with the same (kind,
 // source_id) already exists — refreshes it in place: title/body/payload
 // are replaced, timestamps bumped, and the row is resurrected to
-// 'unread' with its read/resolved markers cleared.
+// 'unread' with its read/resolved markers cleared, including every
+// caller's OWN per-user inbox_item_reads marker (A7) — a resurrected
+// item carries genuinely new content, so a user who read the PREVIOUS
+// occurrence must see this one as unread too, not skip it because their
+// old marker is still sitting on the row.
 //
 // This is the primitive for a source that can fire more than once about
 // the SAME subject: repeated chat replies update ONE bell item instead
@@ -323,6 +342,14 @@ func Upsert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 	if err != nil {
 		logger.Warn("inbox upsert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
 		return err
+	}
+	// Clear every per-user read marker (A7) alongside the shared columns
+	// the UPSERT above just reset. Best-effort: the row itself already
+	// resurrected correctly, so a failure here logs rather than fails the
+	// whole call — worst case a stale per-user marker survives one refresh
+	// cycle, not a lost notification.
+	if _, iirErr := db.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id = ?`, id); iirErr != nil {
+		logger.Warn("inbox upsert: clear per-user read markers", "error", iirErr, "kind", in.Kind, "source_id", in.SourceID)
 	}
 	// Unlike Insert, Upsert always fans out — by design, a repeated call
 	// here means a genuinely new event (another chat reply, another

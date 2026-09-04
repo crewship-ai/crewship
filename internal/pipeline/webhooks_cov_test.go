@@ -158,7 +158,7 @@ func TestWebhookStore_ClosedDB_ErrorPaths(t *testing.T) {
 	if err := store.SoftDelete(ctx, "x"); err == nil {
 		t.Error("SoftDelete should error on closed DB")
 	}
-	if err := store.RecordFire(ctx, "x", "r", "s"); err == nil {
+	if _, err := store.RecordFire(ctx, "x", "r", "s"); err == nil {
 		t.Error("RecordFire should error on closed DB")
 	}
 }

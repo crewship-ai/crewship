@@ -84,10 +84,12 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "pipeline.step.validation_failed",
       "pipeline.schedule.circuit_breaker_tripped",
       "pipeline.schedule.missed_occurrences",
+      "pipeline.webhook.fire_failed",
       // An automation exists to fire a routine, so a person asking "why
       // did my routine not run" looks here — not under System.
       "automation.throttled",
       "automation.depth_exceeded",
+      "automation.enqueue_failed",
     ],
   },
   {
@@ -105,6 +107,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "assignment.running",
       "assignment.completed",
       "assignment.failed",
+      "assignment.cancelled",
       "crew.action",
       "task.delegated",
     ],

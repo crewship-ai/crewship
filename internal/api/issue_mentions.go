@@ -828,33 +828,42 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 	// building it twice stored one text on the assignment row and handed the
 	// agent a different one. The row is the audit trail for what was asked.
 	brief := mentionTaskBrief(req, target.Name)
+	// Creator attribution, the same pairing missions v129 uses: exactly one of
+	// the two is set, so a run started by a person's mention is not filed under
+	// an agent that had nothing to do with it. Computed BEFORE the insert (not
+	// after, as before) so the row itself carries it — a lock-loss requeue
+	// re-dispatches from the row alone (dispatchByID), so attribution that
+	// only ever lived on the in-memory `body` never survived a requeue.
+	var authorAgentID, createdByUserID string
+	if req.AuthorType == "agent" {
+		authorAgentID = req.AuthorID
+	} else {
+		createdByUserID = req.AuthorID
+	}
 	assignmentID, err := insertCappedAssignment(ctx, h.db, scope, lim, caller, cappedAssignment{
-		WorkspaceID: req.WorkspaceID,
-		ChatID:      req.MissionID,
-		TargetID:    target.ID,
-		Task:        brief,
-		GroupID:     req.MissionID,
-		CreatedAt:   now,
+		WorkspaceID:     req.WorkspaceID,
+		ChatID:          req.MissionID,
+		TargetID:        target.ID,
+		Task:            brief,
+		GroupID:         req.MissionID,
+		CreatedAt:       now,
+		MissionID:       req.MissionID,
+		AuthorAgentID:   authorAgentID,
+		CreatedByUserID: createdByUserID,
 	})
 	if err != nil {
 		return "", err
 	}
 
 	body := createAssignmentBody{
-		TargetSlug:  target.Slug,
-		Task:        brief,
-		CrewID:      targetCrewID,
-		WorkspaceID: req.WorkspaceID,
-		ChatID:      req.MissionID,
-		MissionID:   req.MissionID,
-	}
-	// Creator attribution, the same pairing missions v129 uses: exactly one of
-	// the two is set, so a run started by a person's mention is not filed under
-	// an agent that had nothing to do with it.
-	if req.AuthorType == "agent" {
-		body.AuthorAgentID = req.AuthorID
-	} else {
-		body.CreatedByUserID = req.AuthorID
+		TargetSlug:      target.Slug,
+		Task:            brief,
+		CrewID:          targetCrewID,
+		WorkspaceID:     req.WorkspaceID,
+		ChatID:          req.MissionID,
+		MissionID:       req.MissionID,
+		AuthorAgentID:   authorAgentID,
+		CreatedByUserID: createdByUserID,
 	}
 	body.CrewMembers = h.loadCrewMembers(ctx, targetCrewID, target.ID)
 
