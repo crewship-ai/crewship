@@ -319,7 +319,7 @@ SOURCE is why the run is attributed to the issue: `task` (the issue's own missio
 
 ## `crewship issue sessions`
 
-<Note>`issue_agent_sessions` is work package B1 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md`). A mention resolves or creates a session — mentioning the same agent on the same issue twice reuses it rather than creating a second. As of B4 (#2348) the session's `state` moves `pending` → `active` → `idle`/`error` with `active_run_id` set while a run is live; `awaiting_input` and the `idle` → `stale` sweep are not wired yet. As of B5 (#2345), every session-bearing dispatch also reads the session back into the agent's context — see `crewship issue checkpoints` below and `docs/guides/issue-mentions.mdx`.</Note>
+<Note>Session lifecycle: `issue_agent_sessions` is work package B1 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md`). A mention resolves or creates a session — mentioning the same agent on the same issue twice reuses it rather than creating a second. As of B4 (#2348) the session's `state` moves `pending` → `active` → `idle`/`error` with `active_run_id` set while a run is live; `awaiting_input` and the `idle` → `stale` sweep are not wired yet. As of B5 (#2345), every session-bearing dispatch also reads the session back into the agent's context — see `crewship issue checkpoints` below and `docs/guides/issue-mentions.mdx`.</Note>
 
 List the durable, per-(issue, agent) sessions a mention has opened on an issue. Hits `GET /api/v1/crews/{crewId}/issues/{ident}/sessions` after resolving `<identifier>` to its crew via `fetchIssue`.
 
