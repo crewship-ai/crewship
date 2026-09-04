@@ -53,6 +53,134 @@ func enforceLockFor(scope Scope) *sync.Mutex {
 	return actual.(*sync.Mutex)
 }
 
+// breachAnnounced tracks, per budget, the (period, limit) of the most
+// recently announced on_budget_exceeded breach — one entry per budget ever
+// breached, not one per (budget, period) pair ever seen — so Enforce fires
+// the hook once per breach instead of on every LLM call made while the
+// budget stays over. See #2153 and announceBudgetBreach below for how the
+// entry is read and swapped.
+//
+// Bounded the same way enforceLocks above is: the key space is the set of
+// budgets that exist, not the set of periods that have ever elapsed. An
+// earlier version of this keyed by (budget, period, limit) together, which
+// meant every period rollover left its old entry behind forever — an hourly
+// budget that breaches regularly would grow this map without bound over a
+// long crewshipd uptime. Overwriting a single per-budget entry in place
+// keeps the map's size proportional to "budgets that have ever breached",
+// matching enforceLocks' "workspaces that have ever called Enforce" bound.
+//
+// In-memory only, same trade-off enforceLocks makes: a crewshipd restart
+// clears this map, so a breach that was already announced can announce once
+// more right after a restart. Persisting it would mean either a new column
+// on budget_limits (a migration, plus a write on the hot path this debounce
+// exists to keep cheap) or a small side table keyed the same way —
+// disproportionate for a once-per-breach notification whose worst failure
+// mode, an extra pager ping after a restart, is exactly the at-least-once
+// behaviour this fixes away from "every call" down to "one restart window".
+// Accepted for now; a persisted marker is the natural follow-up if
+// restart-time re-announcing turns out to matter in practice.
+var breachAnnounced sync.Map // breachIdentity → breachState
+
+// breachIdentity identifies one budget for breach-announcement purposes.
+// Budget.ID already uniquely determines (workspace_id, scope_kind,
+// scope_id, window) — see the UNIQUE constraint on budget_limits — so it
+// alone would be enough. WorkspaceID and CrewID are carried anyway because
+// they're what the issue's key asks for and because they make a key printed
+// in a log line legible without a lookup; CrewID is populated only for a
+// budget whose own ScopeKind is crew — a workspace/mission/agent-scoped
+// budget breached by calls from several different crews must announce once
+// for the budget, not once per crew that happened to trip it.
+type breachIdentity struct {
+	WorkspaceID string
+	CrewID      string
+	BudgetID    string
+}
+
+// breachState is what's recorded against a breachIdentity: the period and
+// limit of the breach most recently announced for that budget.
+type breachState struct {
+	Period   string
+	LimitUSD float64
+}
+
+// announceBudgetBreach reports whether THIS call is the one that should
+// dispatch on_budget_exceeded for budget b: true the first time a given
+// (budget, period, limit) breach is seen, false for every subsequent call
+// against the same (period, limit) for that budget.
+//
+// Period is windowStart's period for hour/day/week/month budgets, so the
+// recorded state changes — and the breach re-announces — the moment the
+// window rolls. A mission-window budget has no period to roll; per the
+// #2153 decision, its "period identifier" falls back to a constant, and
+// LimitUSD is what lets it re-announce (see below).
+//
+// LimitUSD is part of the comparison deliberately, not just Period: the
+// decision behind #2153 also requires "the budget limit is raised and then
+// breached again" to re-fire even within the SAME period. Comparing the
+// current limit against the recorded one gets that for free — raising the
+// limit produces a state that doesn't match what's recorded, without any
+// extra invalidation logic needed on the budget-update write path — and it
+// is also what makes the mission-window fallback ("no period, use the
+// budget row id/version") work without an actual version column: the limit
+// change IS the version bump that matters here.
+//
+// Uses LoadOrStore + a CompareAndSwap retry loop rather than a plain
+// LoadOrStore, because — unlike the old (budget, period, limit)-keyed
+// design — a new (period, limit) has to overwrite the identity's existing
+// entry rather than create a new one, and two goroutines racing to make
+// that exact transition must not both see themselves as "the one that
+// announced": CompareAndSwap makes the swap itself the single arbiter.
+func announceBudgetBreach(b Budget, now time.Time) bool {
+	id := breachIdentity{WorkspaceID: b.WorkspaceID, BudgetID: b.ID}
+	if b.ScopeKind == ScopeCrew {
+		id.CrewID = b.ScopeID
+	}
+	want := breachState{Period: periodIdentifier(b.Window, now), LimitUSD: b.LimitUSD}
+
+	for {
+		actual, loaded := breachAnnounced.LoadOrStore(id, want)
+		if !loaded {
+			return true // first breach ever recorded for this budget
+		}
+		if actual.(breachState) == want {
+			return false // this exact (period, limit) was already announced
+		}
+		// Period rolled or limit changed since the recorded state: try to
+		// claim the transition. If another goroutine wins the swap first,
+		// re-read and re-compare rather than assuming we lost outright —
+		// it may have swapped in a THIRD state (e.g. the limit changed
+		// twice in quick succession), which still needs its own check.
+		if breachAnnounced.CompareAndSwap(id, actual, want) {
+			return true
+		}
+	}
+}
+
+// periodIdentifier turns a budget window into the string that changes
+// exactly when the window rolls. Reuses windowStart so the debounce period
+// boundary always agrees with the spend-summing boundary in sumSpend — a
+// budget can never be "in a new period" for one purpose and not the other.
+//
+// WindowMission has no period (a mission budget sums the whole mission's
+// spend regardless of time); windowStart's sentinel zero-time would collide
+// across every mission-window budget, so this returns a fixed string
+// instead of calling windowStart at all. Disambiguation for that case comes
+// from Budget.ID and LimitUSD in the caller's key, not from Period.
+func periodIdentifier(w BudgetWindow, now time.Time) string {
+	if w == WindowMission {
+		return "mission"
+	}
+	start, ok := windowStart(w, now)
+	if !ok {
+		// Unknown window. windowStart already returns an error to Check /
+		// sumSpend for this case, so Enforce never reaches here in
+		// practice; the fallback just avoids handing announceBudgetBreach
+		// a period that can't be computed.
+		return "unknown:" + string(w)
+	}
+	return start.UTC().Format(tsLayout)
+}
+
 // Check resolves every budget that applies to scope and returns the current
 // status of each. "Applies" = workspace budgets always apply; crew/mission/
 // agent budgets apply only when the scope identifies that level. The list is
@@ -119,6 +247,13 @@ func Enforce(ctx context.Context, db *sql.DB, j journal.Emitter, scope Scope) er
 		return err
 	}
 
+	// Single "now" for every breach-key computed below, so a batch of
+	// budgets breached by this one call agree on which period they're in
+	// even though Check computed its own now internally a moment earlier.
+	// Window granularity is at least hourly, so the few-ms drift between
+	// the two calls to time.Now() never crosses a boundary in practice.
+	now := time.Now().UTC()
+
 	var blocking []BudgetStatus
 	for _, s := range statuses {
 		switch s.State {
@@ -178,21 +313,22 @@ func Enforce(ctx context.Context, db *sql.DB, j journal.Emitter, scope Scope) er
 			// moment that hook exists for, and Enforce already has db + j
 			// in hand on every call.
 			//
-			// Cadence caveat, because this is the comment someone reads
-			// before wiring a pager to it: Enforce runs on EVERY LLM call,
-			// and this dispatch sits inside the per-status loop with
-			// nothing recording that the breach was already announced. So
-			// it fires on every call made while a budget is over, and twice
-			// on a call that breaches two budgets — unlike
-			// on_approval_requested and on_guardrail_triggered, which fire
-			// once per triggering condition. A journal row absorbs that; a
-			// notification sink generally does not. Debouncing to once per
-			// breach is tracked in #2153; until then this is an
-			// at-least-once signal, not an edge-triggered one.
+			// Debounced (#2153): Enforce runs on EVERY LLM call, so without
+			// a guard this would fire on every call made while a budget
+			// stays over, and twice on a call that breaches two budgets.
+			// announceBudgetBreach makes it once per breach instead, like
+			// its siblings on_approval_requested / on_guardrail_triggered:
+			// the first call to push a given budget over in a given period
+			// dispatches, every later call in that same period does not,
+			// and it dispatches again once the period rolls or the limit
+			// is raised (see announceBudgetBreach's doc comment for the
+			// exact key). The journal entry above is deliberately NOT
+			// debounced — it keeps firing every call same as before, since
+			// a journal row absorbs repeats fine and a pager does not.
 			//
 			// Skipped when WorkspaceID is empty rather than dispatched
 			// against a scope hooks.Dispatch would reject outright.
-			if scope.WorkspaceID != "" {
+			if scope.WorkspaceID != "" && announceBudgetBreach(s.Budget, now) {
 				_ = hooks.Dispatch(ctx, db, j, hooks.EventOnBudgetExceeded, hooks.EventContext{
 					WorkspaceID: scope.WorkspaceID,
 					CrewID:      scope.CrewID,

@@ -86,6 +86,14 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 			}
 		}
 	}
+
+	// #2154: a fresh row can make a previously-cached "no enabled hooks"
+	// entry for this workspace wrong. Invalidate after the insert commits,
+	// not before — an invalidation ahead of a write that then fails would
+	// just cost the next Dispatch call an unnecessary query, but ordering
+	// it after keeps the simpler invariant: the cache is never stale for
+	// longer than "between this write landing and this call returning".
+	InvalidateCache(h.WorkspaceID)
 	return h.ID, nil
 }
 
@@ -306,6 +314,13 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 			}
 		}
 	}
+
+	// #2154: the row's event and/or crew scope may just have changed, so a
+	// cached negative for either its old or new (crew_id, event) could now
+	// be wrong. Invalidating the whole workspace rather than tracking the
+	// old values is the coarse-but-always-correct choice — see
+	// dispatch_cache.go.
+	InvalidateCache(workspaceID)
 	return nil
 }
 
@@ -357,6 +372,10 @@ func Delete(ctx context.Context, db *sql.DB, workspaceID, id string) error {
 	if n == 0 {
 		return sql.ErrNoRows
 	}
+	// #2154: the deleted row may have been the last enabled hook for its
+	// (crew_id, event) — or the only thing keeping a cached negative from
+	// this workspace stale in the other direction. Invalidate either way.
+	InvalidateCache(workspaceID)
 	return nil
 }
 
@@ -381,6 +400,12 @@ func SetEnabled(ctx context.Context, db *sql.DB, workspaceID, id string, enabled
 	if n == 0 {
 		return sql.ErrNoRows
 	}
+	// #2154: enabling a previously-disabled row can turn a cached negative
+	// for its (crew_id, event) stale; disabling the last enabled row for a
+	// triple leaves a stale positive lookup no longer cached anyway (only
+	// negatives are cached), so this call is a no-op cache-wise in that
+	// direction but still cheap and always correct to make.
+	InvalidateCache(workspaceID)
 	return nil
 }
 
