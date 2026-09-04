@@ -14,6 +14,15 @@ describe("formatStatus", () => {
     expect(formatStatus("DONE").label).toBe("Done")
   })
 
+  it("maps the connection, delivery and agent states the fleet screens carry", () => {
+    expect(formatStatus("delivering")).toEqual({ label: "Delivering", tone: "success" })
+    expect(formatStatus("never_used")).toEqual({ label: "Never used", tone: "warn" })
+    expect(formatStatus("NOT_CHECKED")).toEqual({ label: "Not checked", tone: "muted" })
+    expect(formatStatus("dropped_pref").label).toBe("Muted")
+    expect(formatStatus("dropped_rate").label).toBe("Rate-gated")
+    expect(formatStatus("STOPPED").tone).toBe("warn")
+  })
+
   it("never shows a raw enum for an unknown status", () => {
     expect(formatStatus("SOME_NEW_STATE")).toEqual({ label: "Some new state", tone: "muted" })
     expect(formatStatus("awaiting-something")).toEqual({ label: "Awaiting something", tone: "muted" })

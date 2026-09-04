@@ -4,7 +4,7 @@ import * as React from "react"
 import { Clock, Lock } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
-import { cn } from "@/lib/utils"
+import { StatusPill } from "@/components/ui/status-pill"
 import type { NotificationDelivery } from "@/hooks/use-notification-deliveries"
 import type { ConnectionRow } from "../connection-model"
 
@@ -18,21 +18,6 @@ import type { ConnectionRow } from "../connection-model"
  * exactly like a broken webhook.
  */
 
-const STATUS_STYLE: Record<string, string> = {
-  sent: "border-success/30 bg-success/10 text-success",
-  failed: "border-destructive/35 bg-destructive/10 text-destructive",
-  pending: "border-info/25 bg-info/10 text-info",
-  dropped_pref: "border-warn/30 bg-warn/10 text-warn",
-  dropped_rate: "border-warn/30 bg-warn/10 text-warn",
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  sent: "sent",
-  failed: "failed",
-  pending: "pending",
-  dropped_pref: "muted",
-  dropped_rate: "rate-gated",
-}
 
 function reasonFor(d: NotificationDelivery): string {
   if (d.error) return d.error
@@ -154,14 +139,7 @@ export function DeliveriesView({
                       </span>
                     </td>
                     <td className="px-4 py-2">
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[10px]",
-                          STATUS_STYLE[d.status] ?? "border-white/10 bg-white/[0.03] text-muted-foreground",
-                        )}
-                      >
-                        {STATUS_LABEL[d.status] ?? d.status}
-                      </span>
+                      <StatusPill status={d.status} />
                     </td>
                     <td className="max-w-[22rem] px-4 py-2 text-[11px] text-muted-foreground">
                       <span className="block truncate" title={reasonFor(d)}>

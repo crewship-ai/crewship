@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { CheckCircle2, AlertCircle } from "lucide-react"
+
+import { StatusPill } from "@/components/ui/status-pill"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
@@ -49,19 +50,10 @@ export function ToolkitIcon({ toolkit, size = 20 }: { toolkit: Toolkit; size?: n
   )
 }
 
+/** Composio account state as the one status pill; the raw enum used to be
+ *  printed beside an icon (ACTIVE, INITIATED, FAILED). */
 export function StatusDot({ status }: { status: string }) {
-  const ok = status?.toUpperCase() === "ACTIVE" || status?.toUpperCase() === "ENABLED"
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 text-[11px]",
-        ok ? "text-success" : "text-warn",
-      )}
-    >
-      {ok ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
-      {status}
-    </span>
-  )
+  return <StatusPill status={status} />
 }
 
 export function EmptyHint({ text }: { text: string }) {

@@ -7,12 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
+import { StatusPill } from "@/components/ui/status-pill"
 import { useChannelAgents } from "@/hooks/use-channel-agents"
 import type { NotificationDelivery } from "@/hooks/use-notification-deliveries"
 import { NOTIFICATION_CATEGORY_GROUPS } from "@/lib/notification-categories"
 import { ProviderMark } from "../provider-marks"
-import { STATUS_LABEL, type ConnectionRow } from "../connection-model"
+import type { ConnectionRow } from "../connection-model"
 
 /**
  * One connection, in full.
@@ -24,13 +24,6 @@ import { STATUS_LABEL, type ConnectionRow } from "../connection-model"
  * single connection whole.
  */
 
-const STATUS_STYLE: Record<string, string> = {
-  delivering: "border-success/30 bg-success/10 text-success",
-  failing: "border-destructive/35 bg-destructive/10 text-destructive",
-  never_used: "border-warn/30 bg-warn/10 text-warn",
-  disabled: "border-white/10 bg-white/[0.03] text-muted-foreground",
-  unknown: "border-info/25 bg-info/10 text-info",
-}
 
 /** Category key -> the label the preference matrix shows. */
 const CATEGORY_LABEL = new Map(
@@ -96,14 +89,7 @@ export function ConnectionDetail({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px]",
-                STATUS_STYLE[row.status],
-              )}
-            >
-              {STATUS_LABEL[row.status]}
-            </span>
+            <StatusPill status={row.status === "unknown" ? "NOT_CHECKED" : row.status} live={row.status === "delivering"} />
             {!row.readOnly && (
               <>
                 <Switch
@@ -225,18 +211,7 @@ export function ConnectionDetail({
                   <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground/80">
                     {d.category}
                   </span>
-                  <span
-                    className={cn(
-                      "shrink-0 rounded-full border px-1.5 py-0.5 font-mono text-[10px]",
-                      d.status === "sent"
-                        ? "border-success/30 bg-success/10 text-success"
-                        : d.status === "failed"
-                          ? "border-destructive/35 bg-destructive/10 text-destructive"
-                          : "border-warn/30 bg-warn/10 text-warn",
-                    )}
-                  >
-                    {d.status}
-                  </span>
+                  <StatusPill status={d.status} />
                 </li>
               ))}
             </ul>

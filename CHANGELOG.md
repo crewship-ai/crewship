@@ -165,6 +165,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   browser's `confirm()`. One dialog says what is lost, what is kept and where
   to recover; deleting a crew asks for its slug typed back; a failed action
   keeps the dialog open.
+- **One status pill (#2318).** The agent canvas, the roster, the explorer,
+  the notification connections and deliveries and the Composio accounts all
+  read their state through the shared dot-and-word pill; raw enums (ACTIVE,
+  pending_review, never_used) no longer reach the screen, and a connection
+  whose delivery log the viewer may not read says "Not checked" instead of
+  "Enabled".
 - **List endpoints describe their window (#2318).** `GET /api/v1/crews`,
   `/agents` and `/credentials` return `X-Total-Count`, `X-Limit` and
   `X-Offset` (bodies unchanged) and take `?q=` for a server-side search;

@@ -9,13 +9,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
+import { StatusPill } from "@/components/ui/status-pill"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { ProviderMark } from "../provider-marks"
 import {
-  STATUS_LABEL,
   type ConnectionKind,
   type ConnectionRow,
-  type ConnectionStatus,
+  
 } from "../connection-model"
 
 const KIND_ICON: Record<ConnectionKind, LucideIcon> = {
@@ -27,13 +27,6 @@ const KIND_ICON: Record<ConnectionKind, LucideIcon> = {
   tools: Bot,
 }
 
-const STATUS_STYLE: Record<ConnectionStatus, string> = {
-  delivering: "border-success/30 bg-success/10 text-success",
-  failing: "border-destructive/35 bg-destructive/10 text-destructive",
-  never_used: "border-warn/30 bg-warn/10 text-warn",
-  disabled: "border-white/10 bg-white/[0.03] text-muted-foreground",
-  unknown: "border-info/25 bg-info/10 text-info",
-}
 
 interface ConnectionsViewProps {
   rows: ConnectionRow[]
@@ -229,14 +222,7 @@ export function ConnectionsView({
                         </td>
                       )}
                       <td className="px-4 py-2.5">
-                        <span
-                          className={cn(
-                            "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px]",
-                            STATUS_STYLE[row.status],
-                          )}
-                        >
-                          {STATUS_LABEL[row.status]}
-                        </span>
+                        <StatusPill status={row.status === "unknown" ? "NOT_CHECKED" : row.status} live={row.status === "delivering"} />
                       </td>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center justify-end gap-1">
