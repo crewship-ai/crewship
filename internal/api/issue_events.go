@@ -202,6 +202,22 @@ type issueEvents struct {
 // mutation want one "the issue changed" nudge, not one per field; see
 // record.
 //
+// A thin wrapper over logEvent for the (many) callers that only care that
+// the row landed, not what it was allocated as.
+func (e issueEvents) log(ctx context.Context, ev issueEvent) {
+	e.logEvent(ctx, ev)
+}
+
+// logEvent is log's full form: it hands back the activity row's own id and
+// the missionactivity.Written it was allocated (seq, workspace_id, crew_id).
+//
+// Added for PRD-ISSUES-AND-ROUTINES-2026 §9.3 (work package B2, #2337): a
+// delivery row (mission_comment_mentions, widened) references the event it
+// was raised for via `event_id`, and the only place that id is minted is
+// here — mentionRecorder.record calls this instead of log so the delivery
+// it creates can point at the exact row the "mentioned" activity produced,
+// rather than re-deriving it with a second query.
+//
 // The row itself is written through missionactivity.Emit — the one seq-
 // allocating helper every mission_activity writer in the codebase now goes
 // through (PRD-ISSUES-AND-ROUTINES-2026 §9.1, B1) — rather than a bare
@@ -209,7 +225,7 @@ type issueEvents struct {
 // issueEventPayload already builds for the journal entry below, so a reader
 // of the row (the future context-assembly delta, §11.1; an automation
 // matcher) does not have to parse `details` prose to recover them.
-func (e issueEvents) log(ctx context.Context, ev issueEvent) {
+func (e issueEvents) logEvent(ctx context.Context, ev issueEvent) (string, missionactivity.Written) {
 	actID := generateCUID()
 	payload, err := json.Marshal(issueEventPayload(ev))
 	if err != nil {
@@ -230,7 +246,7 @@ func (e issueEvents) log(ctx context.Context, ev issueEvent) {
 	}
 
 	if e.journal == nil {
-		return
+		return actID, written
 	}
 
 	workspaceID, crewID := written.WorkspaceID, written.CrewID
@@ -238,7 +254,7 @@ func (e issueEvents) log(ctx context.Context, ev issueEvent) {
 		// Some legacy callers pass a chat id as the mission id, and the
 		// journal write needs a workspace to be tenant-scoped at all. Skip
 		// silently: the activity row above already landed.
-		return
+		return actID, written
 	}
 
 	actor := journal.ActorType(ev.ActorType)
@@ -261,6 +277,7 @@ func (e issueEvents) log(ctx context.Context, ev issueEvent) {
 		Payload: issueEventPayload(ev),
 		Refs:    map[string]any{"mission_id": ev.MissionID, "activity_id": actID, "seq": written.Seq},
 	})
+	return actID, written
 }
 
 // record logs every event of one mutation and then announces the issue once.

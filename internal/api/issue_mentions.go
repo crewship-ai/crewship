@@ -57,11 +57,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/mentions"
 	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/untrusted"
 )
+
+// issueDeliveriesFlagKey gates deliverAndDispatch's claim/consume path — see
+// 20260904145201_issue_deliveries_flag.sql for why the delivery bookkeeping
+// specifically (and not mission_comment_mentions itself, which every mention
+// has always written) gets a kill switch, mirroring
+// issueAgentSessionsFlagKey (issue_sessions.go).
+const issueDeliveriesFlagKey = "issue_deliveries"
 
 // Dispatch outcomes recorded on mission_comment_mentions.dispatch_state. The
 // strings land in a persisted column, so add rather than rename.
@@ -181,6 +189,15 @@ type mentionRecorder struct {
 // be recorded must not retroactively fail a comment the author has already
 // seen posted. Failures are logged with the comment id, which is what makes
 // "why did nothing happen?" answerable.
+//
+// Per-mention order is deliberately event-then-delivery-then-dispatch, not
+// the reverse — this is B2's "the ack event before any model call"
+// (PRD-ISSUES-AND-ROUTINES-2026 §9.3/§15, #2337). Before this PR, dispatchOne
+// (which starts the run) ran FIRST and the activity/delivery bookkeeping ran
+// after; a human watching the issue learned nothing until the run itself
+// produced a comment. Now: the `mentioned` event lands, the pending delivery
+// row lands, issue.delivery.acked broadcasts — all before dispatchOne is
+// ever called.
 func (m mentionRecorder) record(ctx context.Context, mc mentionContext) {
 	ids := mentions.ExtractAgentIDs(mc.CommentBody)
 	if len(ids) == 0 {
@@ -212,13 +229,33 @@ func (m mentionRecorder) record(ctx context.Context, mc mentionContext) {
 		return
 	}
 
+	deliveriesEnabled, ffErr := featureflags.IsEnabled(ctx, m.db, mc.WorkspaceID, issueDeliveriesFlagKey)
+	if ffErr != nil {
+		m.logf("check issue_deliveries flag", mc, ffErr)
+	}
+
 	for _, mention := range resolved {
-		state, assignmentID, detail := m.dispatchOne(ctx, mc, mention)
+		// The audit row FIRST — details is the BARE agent id:
+		// lib/mentions.ts's mentionTargetFromActivityDetails accepts that
+		// shape, and it is the only one of the three it accepts that cannot
+		// smuggle a label into the timeline. The frontend was written before
+		// the producer; this is the producer meeting it rather than the
+		// reverse. logEvent (not log) because the delivery row below needs
+		// the id it allocates.
+		eventID, written := m.events.logEvent(ctx, issueEvent{
+			MissionID: mc.MissionID,
+			ActorType: mc.AuthorType,
+			ActorID:   mc.AuthorID,
+			Action:    actionMentioned,
+			Details:   mention.AgentID,
+		})
+
+		state, assignmentID, detail := m.deliverAndDispatch(ctx, mc, mention, eventID, written.Seq, deliveriesEnabled)
 
 		// The row lands regardless of the dispatch outcome — "R was mentioned
 		// and the cap refused the run" is precisely the fact an operator needs,
 		// and it is unrecoverable if only successful dispatches are recorded.
-		if err := m.persist(ctx, mc, mention, state, assignmentID, detail); err != nil {
+		if err := m.persist(ctx, mc, mention, eventID, state, assignmentID, detail); err != nil {
 			m.logf("persist comment mention", mc, err)
 		}
 
@@ -226,20 +263,95 @@ func (m mentionRecorder) record(ctx context.Context, mc mentionContext) {
 		// notifyMentionUndelivered — a 201 with a rendered mention and no run
 		// is the failure mode this closes.
 		m.notifyMentionUndelivered(ctx, mc, mention, state, detail)
+	}
+}
 
-		// details is the BARE agent id: lib/mentions.ts's
-		// mentionTargetFromActivityDetails accepts that shape, and it is the
-		// only one of the three it accepts that cannot smuggle a label into
-		// the timeline. The frontend was written before the producer; this is
-		// the producer meeting it rather than the reverse.
-		m.events.log(ctx, issueEvent{
-			MissionID: mc.MissionID,
-			ActorType: mc.AuthorType,
-			ActorID:   mc.AuthorID,
-			Action:    actionMentioned,
-			Details:   mention.AgentID,
+// deliverAndDispatch is the delivery half of record: create the pending
+// delivery, ack it, claim it, and — only if this call wins the claim —
+// dispatch.
+//
+// When deliveriesEnabled is false (the issue_deliveries flag off, or the
+// flag check itself failed), this degrades to exactly the pre-B2 behaviour:
+// dispatch unconditionally, no delivery row, no ack broadcast. That mirrors
+// resolveOrCreateIssueAgentSession's own off-switch shape (issue_sessions.go)
+// — a flag that is off must reproduce the OLD code path, not a half-built
+// new one.
+func (m mentionRecorder) deliverAndDispatch(
+	ctx context.Context, mc mentionContext, mention resolvedMention,
+	eventID string, seq int, deliveriesEnabled bool,
+) (state, assignmentID, detail string) {
+	if !deliveriesEnabled || eventID == "" {
+		return m.dispatchOne(ctx, mc, mention)
+	}
+
+	delivery, err := createDelivery(ctx, m.db, deliveryParams{
+		WorkspaceID: mc.WorkspaceID,
+		MissionID:   mc.MissionID,
+		EventID:     eventID,
+		CommentID:   mc.CommentID,
+		AgentID:     mention.AgentID,
+		Position:    mention.Position,
+		Priority:    deliveryPriorityNormal,
+	})
+	if err != nil {
+		m.logf("create delivery", mc, err)
+		// The delivery bookkeeping is best-effort, same as everything else in
+		// this file — a failure here must not silently swallow the mention
+		// itself, so fall through to the pre-B2 dispatch path rather than
+		// returning early.
+		return m.dispatchOne(ctx, mc, mention)
+	}
+
+	if delivery.Created {
+		// "the ack event before any model call" (§15) — broadcast BEFORE
+		// dispatchOne, which is the call that (via DispatchMention's
+		// background goroutine) reaches the model. Only on the call that
+		// actually created the row: a redelivery of an already-acked event
+		// must not re-notify a human who already saw "received".
+		broadcastWorkspaceEvent(m.events.hub, mc.WorkspaceID, "issue.delivery.acked", map[string]any{
+			"mission_id":  mc.MissionID,
+			"identifier":  mc.Identifier,
+			"agent_id":    mention.AgentID,
+			"delivery_id": delivery.ID,
+			"event_id":    eventID,
+			"seq":         seq,
 		})
 	}
+
+	won, err := claimDelivery(ctx, m.db, delivery.ID)
+	if err != nil {
+		m.logf("claim delivery", mc, err)
+		return mentionDispatchFailed, "", err.Error()
+	}
+	if !won {
+		// Ten concurrent identical deliveries of this event collapse to this
+		// branch for the nine that lost the claim CAS — exactly the golden
+		// scenario §18.2 and the accept line's "ten concurrent identical
+		// deliveries produce one run". No dispatchOne call here: calling it
+		// would start a second run for a delivery someone else already owns.
+		return mentionDispatchSkipped, "", "delivery already claimed by a concurrent dispatch"
+	}
+
+	state, assignmentID, detail = m.dispatchOne(ctx, mc, mention)
+	if assignmentID != "" {
+		if err := attachDeliveryRun(ctx, m.db, delivery.ID, assignmentID); err != nil {
+			m.logf("attach delivery run", mc, err)
+		}
+		// state stays 'claimed' — consumeDeliveriesForRun (assignments_run.go,
+		// finishAssignment) transitions it to 'consumed' once the run this
+		// delivery started actually finishes.
+		return state, assignmentID, detail
+	}
+
+	// Claimed, but dispatch produced no run (self-mention, no dispatcher
+	// wired, a capacity refusal, or an error) — nothing will ever call
+	// finishAssignment for this delivery, so resolve it here rather than
+	// leaving it 'claimed' forever. See issue_deliveries.go's consumeDelivery
+	// doc comment.
+	if _, cErr := consumeDelivery(ctx, m.db, delivery.ID); cErr != nil {
+		m.logf("consume undispatched delivery", mc, cErr)
+	}
+	return state, assignmentID, detail
 }
 
 // resolveMentionedAgents turns unresolved claims into agents, in first-seen
@@ -354,13 +466,29 @@ func (m mentionRecorder) dispatchOne(ctx context.Context, mc mentionContext, men
 	}
 }
 
-// persist writes the join row.
+// persist writes the dispatch outcome onto the delivery row.
 //
-// INSERT OR IGNORE against UNIQUE (comment_id, agent_id): the constraint is
-// what makes "mentioned twice in one comment" one mention. ExtractAgentIDs
-// already de-duplicates, so this is the belt to that suspenders — and the one
-// that survives a future caller that forgets.
-func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention resolvedMention, state, assignmentID, detail string) error {
+// Before B2, this was the ONLY writer of mission_comment_mentions, via
+// INSERT OR IGNORE against UNIQUE(comment_id, agent_id) — "mentioned twice
+// in one comment is one mention" enforced at the data level as a backstop to
+// ExtractAgentIDs' own de-duplication. §9.3 replaces that constraint with
+// UNIQUE(event_id, agent_id), and deliverAndDispatch's createDelivery call
+// (when the issue_deliveries flag is on) now writes the row FIRST, in
+// 'pending' state, before dispatch is even attempted — so this function's
+// job changes from "create the row" to "finish it": an INSERT that lands on
+// the SAME (event_id, agent_id) via ON CONFLICT becomes an UPDATE of
+// dispatch_state/assignment_id/dispatch_detail only, leaving the delivery's
+// own state/position/priority/comment_id exactly as createDelivery wrote
+// them.
+//
+// When no delivery row exists yet (the flag is off, or createDelivery
+// itself failed and deliverAndDispatch fell back to dispatching directly),
+// the INSERT branch fires instead and this is once again the row's sole
+// writer — resolvedState mirrors the exact dispatched->consumed / else->failed
+// mapping 20260904145200_deliveries_widen.sql's backfill uses, so a row
+// written on this path reads the same way a pre-B2 row does after that
+// migration: its lifecycle is already over, because nothing ever claims it.
+func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention resolvedMention, eventID, state, assignmentID, detail string) error {
 	var assignmentVal any
 	if assignmentID != "" {
 		assignmentVal = assignmentID
@@ -369,13 +497,25 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 	if detail != "" {
 		detailVal = detail
 	}
+	var eventVal any
+	if eventID != "" {
+		eventVal = eventID
+	}
+	resolvedState := "failed"
+	if state == mentionDispatchDispatched {
+		resolvedState = "consumed"
+	}
 	_, err := m.db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO mission_comment_mentions
-		    (id, workspace_id, mission_id, comment_id, agent_id, position,
-		     dispatch_state, assignment_id, dispatch_detail, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		generateCUID(), mc.WorkspaceID, mc.MissionID, mc.CommentID, mention.AgentID,
-		mention.Position, state, assignmentVal, detailVal,
+		INSERT INTO mission_comment_mentions
+		    (id, workspace_id, mission_id, comment_id, event_id, agent_id, position,
+		     dispatch_state, assignment_id, dispatch_detail, state, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (event_id, agent_id) DO UPDATE SET
+		    dispatch_state  = excluded.dispatch_state,
+		    assignment_id   = excluded.assignment_id,
+		    dispatch_detail = excluded.dispatch_detail`,
+		generateCUID(), mc.WorkspaceID, mc.MissionID, mc.CommentID, eventVal, mention.AgentID,
+		mention.Position, state, assignmentVal, detailVal, resolvedState,
 		time.Now().UTC().Format(time.RFC3339))
 	return err
 }
