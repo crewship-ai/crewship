@@ -205,6 +205,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `GET /agents/{id}/chats` honours `limit`/`offset` with `X-Total-Count`
   (`crewship chat list --limit/--offset`). `GET /agents` hides the setup
   crew's agent unless `include_setup=1` (`crewship agent list --include-setup`).
+- **Duplicate deliveries collapse to one run, and a mention is acknowledged
+  before any model call (#2337, #TBD).** `mission_comment_mentions` is now
+  also the delivery table (PRD-ISSUES-AND-ROUTINES-2026 §9.3, work package
+  B2): `comment_id` is nullable, `event_id` links a delivery to the
+  `mission_activity` row that raised it, and a new `state` column
+  (`pending`/`claimed`/`consumed`/`failed`/`superseded`) tracks whether a
+  run actually consumed the delivery — a separate question from
+  `dispatch_state`, which only says whether the dispatcher created one.
+  `UNIQUE(event_id, agent_id)` plus a claim/consume CAS (copied from
+  `PendingRunStore.MarkFired`'s error-handling shape) means ten concurrent
+  deliveries of the same event produce exactly one run. On comment, the
+  server now writes the event and delivery and pushes
+  `issue.delivery.acked` on the workspace channel before `dispatchOne` is
+  ever called, so a human sees their mention was received without a
+  refresh — even while the agent is still finishing a prior turn. Gated by
+  the `issue_deliveries` feature flag, which degrades to the exact pre-B2
+  dispatch when off. `mission_comment_mentions` keeps riding backups
+  (`IntentInclude`) rather than switching to `notification_deliveries`'
+  exclude-operational classification — the audit-trail cost of losing
+  mention history outweighs the automatic-recovery benefit, so a delivery
+  left `claimed` across a restore stays that way until B4's lease sweep
+  ships (`internal/backup/intent.go`'s F37 comment on the table).
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,

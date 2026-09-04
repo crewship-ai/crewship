@@ -83,6 +83,15 @@ export type RealtimeEventType =
   // Multiple issues changed in one bulk-edit request — `{count}`, no per-row
   // identity, so a subscriber's only correct response is a full refetch.
   | "issues.bulk_updated"
+  // A comment mentioning an agent was received and durably recorded — pushed
+  // BEFORE any model call, from mentionRecorder.record
+  // (internal/api/issue_mentions.go, PRD-ISSUES-AND-ROUTINES-2026 §9.3/§15,
+  // work package B2, #2337). `{mission_id, identifier, agent_id,
+  // delivery_id, event_id, seq}`. This is the "Frontend received your
+  // message" signal §15 calls for — it lands well before the run itself
+  // could ever produce one, closing the gap where a human watching the
+  // issue learned nothing until the agent's own comment appeared.
+  | "issue.delivery.acked"
   | "task.updated"
   | "peer_conversation.updated"
   | "crew.created"
@@ -230,6 +239,12 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "issue.created", "issue.deleted", "issue.started",
   // #2257: a status transition specifically, not just "the issue changed".
   "issue.status_changed",
+  // #2337 (B2): the mention-received ack, pushed before dispatch even
+  // starts. Without this in the allowlist, handleMessage drops it and a
+  // human watching the issue has no signal until the agent's own reply
+  // appears — exactly the gap §15's "Acknowledgement under one second"
+  // exists to close.
+  "issue.delivery.acked",
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   // Without this in the allowlist, workspace.deleted is dropped by
   // handleMessage and the redirect-on-delete listener never fires (#890).

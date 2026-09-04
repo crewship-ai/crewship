@@ -245,6 +245,7 @@ REST. The shapes below reflect what the server actually sends.
 | `issue.deleted` | Issue was deleted | `{ identifier, crew_id }` |
 | `issue.started` | Issue execution started | `{ id, identifier, status }` |
 | `issues.bulk_updated` | Multiple issues updated in bulk | `{ count }` |
+| `issue.delivery.acked` | A comment mentioning an agent was received and durably recorded — pushed before any model call, so the human sees "received" without a refresh | `{ mission_id, identifier, agent_id, delivery_id, event_id, seq }` |
 
 #### Projects & milestones
 
