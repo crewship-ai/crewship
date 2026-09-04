@@ -46,6 +46,7 @@ export function OrchestrationPageShell({ mode }: { mode: OrchestrationMode }) {
         !missionsRes.ok && `issues (HTTP ${missionsRes.status})`,
         !crewsRes.ok && `crews (HTTP ${crewsRes.status})`,
         !agentsRes.ok && `agents (HTTP ${agentsRes.status})`,
+        !connsRes.ok && `crew connections (HTTP ${connsRes.status})`,
       ].filter((x): x is string => Boolean(x))
       setLoadError(failed.length > 0 ? `Could not load ${failed.join(", ")}` : null)
     } catch (e) {

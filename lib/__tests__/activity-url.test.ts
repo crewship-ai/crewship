@@ -43,6 +43,14 @@ describe("activityUrlParams", () => {
 })
 
 describe("parseActivityUrl", () => {
+  it("ignores a walk segment whose percent-encoding is broken instead of throwing", () => {
+    // A truncated or hand-edited `%` sequence used to throw out of
+    // decodeURIComponent during mount and on every popstate.
+    const parsed = parseActivityUrl(new URLSearchParams("walk=routine%3Apage-watch/run%3A%E0%A4%A&lens=issues"))
+    expect(parsed.path.stops.map((s) => [s.kind, s.id])).toEqual([["routine", "page-watch"]])
+    expect(parsed.lens).toBe("issues")
+  })
+
   it("round-trips every shape", () => {
     const shapes: ActivityPath[] = [
       ACTIVITY_HOME,

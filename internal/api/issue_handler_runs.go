@@ -165,7 +165,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(a.started_at, a.created_at) AS sort_key
 		FROM assignments a
 		LEFT JOIN agents ag ON ag.id = a.assigned_to_id`+belongsToIssue+`
-		ORDER BY sort_key DESC
+		ORDER BY sort_key DESC, a.id DESC
 		LIMIT ? OFFSET ?`, missionID, missionID, missionID, wsID, missionID, missionID, limit, offset)
 	if err != nil {
 		internalError(w, r, h.logger, "issue runs: query", err)

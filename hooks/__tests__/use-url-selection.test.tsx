@@ -58,6 +58,14 @@ describe("useUrlSelection", () => {
     expect(result.current[0]).toBeNull()
   })
 
+  it("an explicit empty key beats the alias", () => {
+    // `?slug=&routine=legacy`: the reader (or a clear) said nothing is
+    // selected; the alias is only read when the key is absent altogether.
+    setLocation("?slug=&routine=legacy")
+    const { result } = renderHook(() => useUrlSelection("slug", { aliases: ["routine"] }))
+    expect(result.current[0]).toBeNull()
+  })
+
   it("clearing removes the key and leaves the other parameters alone", () => {
     setLocation("?slug=page-watch&tab=runs")
     const { result } = renderHook(() => useUrlSelection("slug"))

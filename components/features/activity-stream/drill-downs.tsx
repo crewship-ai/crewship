@@ -26,6 +26,7 @@ import * as React from "react"
 import { Bot, CircleDot, Clock, ListTree, Terminal } from "lucide-react"
 
 import { Appear, DetailCard, EmptyState, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
@@ -219,22 +220,35 @@ export interface RunDrillDownProps {
  * run's own row lives in the routine's run-records list, so without the slug
  * the page could only say "this run's record is not loaded" over a run the
  * journal can name. Every entry a routine run emits carries the slug in its
- * payload; one small read resolves it. Null while asking, "" when the journal
- * holds nothing for that id.
+ * payload; one small read resolves it. `slug` is null while asking and ""
+ * when the journal holds nothing for that id; `failed` is set when the
+ * journal could not be asked at all, which is a different sentence than
+ * "no routine claims this run" and gets a retry instead (S6).
  */
-function useRoutineSlugOfRun(workspaceId: string, runID: string, known?: string): string | null {
+function useRoutineSlugOfRun(
+  workspaceId: string,
+  runID: string,
+  known?: string,
+): { slug: string | null; failed: boolean; retry: () => void } {
   const [slug, setSlug] = React.useState<string | null>(known ?? null)
+  const [failed, setFailed] = React.useState(false)
+  const [attempt, setAttempt] = React.useState(0)
   React.useEffect(() => {
     if (known) {
       setSlug(known)
+      setFailed(false)
       return
     }
     let cancelled = false
     setSlug(null)
+    setFailed(false)
     const qs = new URLSearchParams({ workspace_id: workspaceId, run_id: runID, limit: "20" })
     apiFetch(`/api/v1/journal?${qs.toString()}`)
-      .then(async (r) => (r.ok ? await r.json() : null))
-      .then((body: { entries?: Array<{ payload?: Record<string, unknown>; refs?: Record<string, unknown> }> } | null) => {
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return (await r.json()) as { entries?: Array<{ payload?: Record<string, unknown>; refs?: Record<string, unknown> }> }
+      })
+      .then((body) => {
         if (cancelled) return
         for (const e of body?.entries ?? []) {
           const bag = { ...(e.payload ?? {}), ...(e.refs ?? {}) }
@@ -247,13 +261,16 @@ function useRoutineSlugOfRun(workspaceId: string, runID: string, known?: string)
         setSlug("")
       })
       .catch(() => {
-        if (!cancelled) setSlug("")
+        if (cancelled) return
+        setFailed(true)
+        setSlug("")
       })
     return () => {
       cancelled = true
     }
-  }, [workspaceId, runID, known])
-  return slug
+  }, [workspaceId, runID, known, attempt])
+  const retry = React.useCallback(() => setAttempt((a) => a + 1), [])
+  return { slug, failed, retry }
 }
 
 /**
@@ -343,7 +360,7 @@ export function runRelatedLinks(runID: string, routineSlug: string | undefined, 
 
 export function RunDrillDown({ workspaceId, runID, routineSlug: knownSlug }: RunDrillDownProps) {
   const meta = useRunMeta(runID)
-  const resolved = useRoutineSlugOfRun(workspaceId, runID, knownSlug)
+  const { slug: resolved, failed: lookupFailed, retry: retryLookup } = useRoutineSlugOfRun(workspaceId, runID, knownSlug)
   const routineSlug = resolved || undefined
   const resolving = resolved === null
   const { records, loading: recordsLoading } = usePipelineRunRecords(workspaceId, routineSlug ?? null)
@@ -425,7 +442,21 @@ export function RunDrillDown({ workspaceId, runID, routineSlug: knownSlug }: Run
         </div>
       )}
 
-      {!loading && !run && (
+      {!loading && !run && lookupFailed && (
+        <Appear order={2}>
+          <EmptyState
+            icon={Terminal}
+            title="Could not ask the journal which routine ran this"
+            description="The lookup that names the routine failed, so the run record could not be fetched. The steps below are whatever the journal answered on its own."
+            action={
+              <Button size="sm" variant="outline" onClick={retryLookup} data-testid="run-routine-lookup-retry">
+                Try again
+              </Button>
+            }
+          />
+        </Appear>
+      )}
+      {!loading && !run && !lookupFailed && (
         <Appear order={2}>
           <EmptyState
             icon={Terminal}
