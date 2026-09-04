@@ -350,7 +350,7 @@ Every filter is AND-combined and indexed at the DB level:
 |---|---|---|
 | `crew_id` | `--crew` | `crew_id = ?` (name/slug resolved to an id first — see below) |
 | `agent_id` | `--agent` | `agent_id = ?` (name/slug resolved to an id first — see below) |
-| `mission_id` | `--mission` | `mission_id = ?` |
+| `mission_id` | `--mission` | `mission_id = ?` — takes the issue identifier (`ENG-4`) as well as the id; resolved per workspace, and an unknown reference matches nothing |
 | `trace_id` | `--trace-id` | `trace_id = ?` (one run's spans) |
 | `run_id` | `--run-id` | `(trace_id = ? OR actor_id = ? OR run_id = ?)` — a run id reaches the journal by three doors depending on the engine |
 | `crew_ids` | -- | CSV `crew_id IN (?,?,...)` (takes precedence over `crew_id`) |
@@ -458,6 +458,10 @@ Since PR #234 the standalone `/runs` page is folded into `/journal` as a preset 
 All three share the same SSE stream and FTS index — selecting a tab does not retrigger a fetch, only a client-side filter shift. Audit-tab navigation is dropped (it was always a redirect placeholder); the `/audit` page remains in the sidebar for security review.
 
 ### Timeline — row anatomy
+
+An issue focus (`/journal?mission_id=ENG-4`, the link the issue detail builds) narrows the timeline to one issue and shows a clearable **issue ENG-4** pill that links back to the issue. An expanded row's `mission_id` jumps to that issue's timeline, and offers **open issue** when the lookup knows the identifier. On the **Runs** tab each run names the issue it worked on in an Issue column (a link), and the crew is a link.
+
+Below the `md` breakpoint the stats rail does not render and a row is two lines — the summary, then time · type · actor — so a phone shows the entries rather than a column of timestamps.
 
 Seven columns, left to right (`components/features/logs/logs-list.tsx`):
 

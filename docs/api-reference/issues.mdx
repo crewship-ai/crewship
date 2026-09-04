@@ -84,10 +84,13 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `crew_id` | string | -- | Filter by crew |
 | `assignee_id` | string | -- | Filter by assignee |
 | `label` | string | -- | Filter by label name |
-| `search` | string | -- | Search in title (LIKE match) |
+| `q` | string | -- | Search in title or identifier (LIKE match), on the server |
+| `search` | string | -- | Older alias of `q` |
 | `sort` | string | `"created_at"` | Sort column: `created_at`, `updated_at`, `priority`, `sort_order` |
-| `limit` | integer | `50` | Max items (1-100) |
+| `limit` | integer | `50` | Rows per page (1-500) |
 | `offset` | integer | `0` | Pagination offset |
+
+The body stays a bare array. The total the filter matched — before `limit`/`offset` — is in the `X-Total-Count` response header, with `X-Limit` and `X-Offset` echoing the values applied. An agent assignee carries `assignee_slug` next to `assignee_name`.
 
 **Response:** `200 OK`
 
@@ -649,7 +652,17 @@ The agent executions behind an issue. Issues run on the mission engine (not pipe
 GET /api/v1/crews/{crewId}/issues/{identifier}/runs?workspace_id={workspaceId}
 ```
 
-Lists every run attributed to an issue — not just mission tasks joined to their `assignments` row, but also mention-dispatched runs (an agent tagged in a comment) and delegation-hop runs (a sub-agent assigned further work via `/assign` mid-mission). Newest-first, capped at 100 rows.
+Lists every run attributed to an issue — not just mission tasks joined to their `assignments` row, but also mention-dispatched runs (an agent tagged in a comment) and delegation-hop runs (a sub-agent assigned further work via `/assign` mid-mission). Newest-first.
+
+Pages like every list: `limit` (default 100, max 500) and `offset`, with the total in the `X-Total-Count`, `X-Limit` and `X-Offset` response headers. Each row is one assignment (an agent task-run) and carries:
+
+| Field | Meaning |
+|---|---|
+| `id` | The assignment id — the row's identity in this list |
+| `run_id`, `trace_id` | The journal run the assignment produced (one value, `trace_id == run id`); both absent when the assignment never reached a run |
+| `agent_id`, `agent_slug`, `agent_name` | The agent that ran it — the slug is what its page is keyed on |
+| `status`, `task`, `started_at`, `ended_at`, `duration_ms`, `result_summary`, `error_message` | The execution |
+
 
 **Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
 

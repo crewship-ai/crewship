@@ -44,7 +44,7 @@ All filters are AND-combined; CSV-valued ones expand to `IN (?, ?, ...)` predica
 |---|---|---|
 | `crew_id` | string | Filter by a single crew — id, slug or display name (see [References](#references)). |
 | `agent_id` | string | Filter by a single agent — id, slug or display name (see [References](#references)). |
-| `mission_id` | string | Filter by mission ID. |
+| `mission_id` | string | Only one issue — its mission id or its identifier (`ENG-4`); resolved per workspace, an unknown reference matches nothing. |
 | `trace_id` | string | Narrow to one run's spans (`trace_id` == run id). |
 | `crew_ids` | string | CSV multi-crew filter — takes precedence over `crew_id` when non-empty. Each value is resolved the same way. |
 | `agent_ids` | string | CSV multi-agent filter — takes precedence over `agent_id` when non-empty. Each value is resolved the same way. |
