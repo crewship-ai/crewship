@@ -168,7 +168,7 @@ export function SettingsTab({
         <h2 className="text-lg font-semibold">Autonomy &amp; behavior</h2>
         <p className="text-xs text-muted-foreground -mt-1">
           Governs how this crew&rsquo;s agents request operator approval and how the behavior
-          monitor responds to anti-patterns. (PRD §6 F2 / F4.2)
+          monitor responds to anti-patterns.
         </p>
         <CrewPolicyControls crewId={crew.id} workspaceId={workspaceId} />
       </section>
@@ -178,7 +178,7 @@ export function SettingsTab({
         <h2 className="text-lg font-semibold">Runtime &amp; security</h2>
         <Collapsible
           title="Container resources"
-          summary={`${formatMemory(crew.container_memory_mb)} · ${crew.container_cpus} CPU · TTL ${crew.container_ttl_hours ?? "—"}h`}
+          summary={`${formatMemory(crew.container_memory_mb)} · ${crew.container_cpus} CPU${crew.container_ttl_hours ? ` · stops after ${crew.container_ttl_hours}h idle` : ""}`}
         >
           <CrewContainerConfig
             memoryMb={crew.container_memory_mb}
@@ -253,7 +253,7 @@ export function SettingsTab({
 
         <Collapsible
           title="Escalations"
-          summary="harbormaster sync · deny on miss"
+          summary="who an escalation reaches, and what happens when nobody answers"
         >
           <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
         </Collapsible>

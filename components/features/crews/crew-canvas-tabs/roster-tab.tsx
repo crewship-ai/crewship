@@ -1,6 +1,8 @@
 "use client"
 
 import Link from "next/link"
+import { getModelLabel } from "@/lib/cli-adapters"
+import { formatCrewDate } from "../crew-summary"
 import { Plus } from "lucide-react"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { isLeadRole } from "@/lib/agent-role"
@@ -65,7 +67,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                 <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
                   {a.llm_model && (
                     <span className="px-1.5 py-0.5 rounded bg-muted border border-white/10 truncate">
-                      {a.llm_model}
+                      {getModelLabel(a.llm_model)}
                     </span>
                   )}
                   {a._count?.skills !== undefined && <span>{a._count.skills} skills</span>}
@@ -114,7 +116,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                   </div>
                   <div className="text-[10px] text-muted-foreground truncate">
                     {m.user?.email}
-                    {m.created_at && ` · joined ${new Date(m.created_at).toLocaleDateString()}`}
+                    {m.created_at && ` · joined ${formatCrewDate(m.created_at)}`}
                   </div>
                 </div>
               </div>

@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
 import { entityHref } from "@/lib/entity-links"
+import { getModelLabel } from "@/lib/cli-adapters"
 
 import {
   CanvasShell,
@@ -456,7 +457,7 @@ export function AgentCanvas({
                 <span className="opacity-40">·</span>
                 <span className="inline-flex items-center gap-1.5">
                   {providerMark(agent.llm_provider)}
-                  {agent.llm_model}
+                  <span title={agent.llm_model}>{getModelLabel(agent.llm_model)}</span>
                 </span>
               </>
             )}

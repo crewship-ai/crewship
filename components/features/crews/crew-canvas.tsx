@@ -15,6 +15,7 @@ import { deriveCrewNeeds, withDevcontainerFeature, type CrewNeed, type NeedGap }
 import { useProvisioningStatus, type ProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { entityHref } from "@/lib/entity-links"
 import { crewHeaderLinks } from "./crew-links"
+import { crewContainerSummary, formatCrewDate } from "./crew-summary"
 import Link from "next/link"
 import { CrewPrivilegedBadge } from "./crew-privileged-badge"
 import {
@@ -39,7 +40,6 @@ import type {
   IssuesSnapshot,
   MissionData,
 } from "./crew-canvas-tabs/types"
-import { formatMemory } from "./crew-canvas-tabs/types"
 
 
 type CrewTab = "overview" | "roster" | "missions" | "files" | "settings"
@@ -302,7 +302,7 @@ export function CrewCanvas({
     )
   }
 
-  const containerSummary = `${crew.runtime_image ?? "debian:trixie-slim"} · ${formatMemory(crew.container_memory_mb)} · ${crew.container_cpus} CPU · TTL ${crew.container_ttl_hours ?? "—"}h · network: ${crew.network_mode}`
+  const containerSummary = crewContainerSummary(crew)
 
   return (
     <CanvasShell loading={false} error={null} notLoadedLabel="">
@@ -353,7 +353,7 @@ export function CrewCanvas({
               </>
             )}
             <span className="text-muted-foreground-soft">·</span>
-            <span className="text-xs">Created {new Date(crew.created_at).toLocaleDateString()}</span>
+            <span className="text-xs">Created {formatCrewDate(crew.created_at)}</span>
           </div>
           {/* Every link the contract asks of a crew (README §5), in one row —
               the header used to offer Files and nothing else. */}
