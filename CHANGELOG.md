@@ -92,7 +92,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
-- **One event log per issue, and a durable session per (issue, agent) (#TBD).**
+- **One event log per issue, and a durable session per (issue, agent) (#2336).**
   `mission_activity` was a status-change audit table with no CHECK on
   `action`, no `workspace_id`, and two writers (`assignments_run.go`,
   `orchestrator/mission_tasks_completion.go`) that INSERTed straight into it,
