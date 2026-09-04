@@ -195,10 +195,6 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 // batchCountByAgentID lives in agents_loaders.go — agent-specific
 // batch helper kept out of the handler file.
 
-// parseListPagination pulls standard ?limit=&offset= params, clamping to sane
-// bounds. defaultLimit is used when unspecified; maxLimit caps what clients
-// can request. Shared helper for list endpoints.
-
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	if agentID == "" {

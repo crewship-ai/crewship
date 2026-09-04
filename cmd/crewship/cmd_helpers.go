@@ -124,7 +124,7 @@ func resolveAgentID(client *cli.Client, slugOrID string) (string, error) {
 		// instead of forwarding a doomed id.
 	}
 
-	// The route paginates — parseListPagination(r, 100, 500) in
+	// The route paginates — parsePagination(r, 100, 500) in
 	// internal/api/agents.go, and the list query ends in LIMIT ? OFFSET ? —
 	// so an unqualified GET scans the first 100 agents and resolves nothing
 	// past them (#2106). 500 is the route's own ceiling; a workspace larger
@@ -182,7 +182,7 @@ func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
 	}
 
 	// Same ceiling as the agent list, for the same reason:
-	// parseListPagination(r, 100, 500) in internal/api/crews_query.go and a
+	// parsePagination(r, 100, 500) in internal/api/crews_query.go and a
 	// query ending in LIMIT ? OFFSET ?. An unqualified GET scans the first
 	// 100 crews and resolves nothing past them (#2106) — which now reaches
 	// further than it did, since `skill proposed list|approve|reject --crew`
