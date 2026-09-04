@@ -31,6 +31,8 @@ interface IssuesStatusChipsProps {
   selected: MissionStatus[]
   onToggle: (status: MissionStatus) => void
   onClear: () => void
+  /** The server's total for the whole workspace (X-Total-Count); the All chip shows it when the page is shorter. */
+  total?: number | null
 }
 
 // Horizontal row of status chips with live counts. Multi-select: clicking
@@ -41,7 +43,10 @@ export function IssuesStatusChips({
   selected,
   onToggle,
   onClear,
+  total = null,
 }: IssuesStatusChipsProps) {
+  const allCount = total != null && total > issues.length ? total : issues.length
+  const perStatusIsPage = total != null && total > issues.length
   const counts = useMemo(() => {
     const m = new Map<MissionStatus, number>()
     for (const i of issues) {
@@ -70,7 +75,7 @@ export function IssuesStatusChips({
         )}
       >
         All
-        <span className="ml-1 text-[10px] tabular-nums opacity-60">{issues.length}</span>
+        <span className="ml-1 text-[10px] tabular-nums opacity-60">{allCount.toLocaleString()}</span>
       </button>
 
       <div className="h-4 w-px bg-white/[0.08] shrink-0" />
@@ -85,6 +90,7 @@ export function IssuesStatusChips({
             type="button"
             onClick={() => onToggle(status)}
             aria-pressed={active}
+            title={perStatusIsPage ? `${count} of the ${issues.length} loaded issues` : undefined}
             className={cn(
               "shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
               active

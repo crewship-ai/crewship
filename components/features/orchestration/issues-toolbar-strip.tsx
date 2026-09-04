@@ -12,6 +12,22 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import type { SavedView } from "@/lib/types/mission"
+import { Spinner } from "@/components/ui/spinner"
+
+/** 1015 → "1 015": a count a person reads, not a locale-dependent one. */
+export function formatCount(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ")
+}
+
+/**
+ * How much of the list is on screen, from the server's total — null when the
+ * page IS the list, or the total is not known yet. The board used to print
+ * the length of the page it received as if it were the workspace.
+ */
+export function issuesShowingLabel(loaded: number, total: number | null): string | null {
+  if (total == null || total <= loaded) return null
+  return `Showing newest ${formatCount(loaded)} of ${formatCount(total)}`
+}
 
 export interface IssuesToolbarStripProps {
   issueViewMode: "board" | "list"
@@ -21,6 +37,12 @@ export interface IssuesToolbarStripProps {
   onSavedViewsOpenChange: (open: boolean) => void
   activeViewId: string | null
   onActiveViewChange: (id: string | null, viewType?: "board" | "list") => void
+  /** Paging facts from usePagedList: what is loaded, the server's total, and a way to get more. */
+  loaded?: number
+  total?: number | null
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
 }
 
 /** Toolbar strip for the issues center panel — view mode toggle + saved views dropdown */
@@ -32,7 +54,13 @@ export function IssuesToolbarStrip({
   onSavedViewsOpenChange,
   activeViewId,
   onActiveViewChange,
+  loaded = 0,
+  total = null,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
 }: IssuesToolbarStripProps) {
+  const showing = issuesShowingLabel(loaded, total)
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] shrink-0">
       <div className="flex gap-1 bg-white/[0.04] rounded-md p-0.5" role="group" aria-label="View mode">
@@ -98,6 +126,24 @@ export function IssuesToolbarStrip({
       )}
 
       <div className="flex-1" />
+      {/* The list is bigger than the page: say so, and offer the next page.
+          Silent when the page is the list. */}
+      {showing && (
+        <span className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground" data-testid="issues-showing">
+          {showing}
+          {hasMore && onLoadMore && (
+            <button
+              type="button"
+              onClick={onLoadMore}
+              disabled={loadingMore}
+              className="inline-flex items-center gap-1 text-primary-hover hover:underline disabled:opacity-60"
+            >
+              {loadingMore && <Spinner className="h-3 w-3" />}
+              Load 100 more
+            </button>
+          )}
+        </span>
+      )}
     </div>
   )
 }
