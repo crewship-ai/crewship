@@ -53,8 +53,11 @@ List all missions across the workspace.
 | `workspace_id` | string | Required | Workspace ID |
 | `status` | string | -- | Filter by status (e.g., `IN_PROGRESS`) |
 | `include_tasks` | string | `"false"` | Set to `"true"` to include task details |
-| `limit` | integer | `20` | Max items (1-100) |
+| `q` | string | -- | Search in title or identifier (LIKE match), on the server |
+| `limit` | integer | `20` | Rows per page (1-200; each row can carry its task list) |
 | `offset` | integer | `0` | Pagination offset |
+
+The body stays a bare array. The total the filter matched — before `limit`/`offset` — is in the `X-Total-Count` response header, with `X-Limit` and `X-Offset` echoing the values applied.
 
 **Response:** `200 OK`
 

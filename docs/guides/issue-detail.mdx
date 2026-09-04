@@ -105,6 +105,12 @@ them together would report that a schedule did something a
 [rule](/guides/automations) did. An `automation` row names the rule.
 </Warning>
 
+## From the issue to its runs and its journal
+
+The **Runs** card lists every run on the issue, newest first — not the latest one alone. Each row names the agent (a link to its page when the slug is known), the task, the status as a word, when it started, how long it took, and **Open run**, which opens that run on the Activity page. A row whose assignment never reached a run says so instead of pretending to link. The card's footer links the issue's journal (`/journal?mission_id=ENG-4` — the identifier works, the server resolves it) and every run of the issue in Activity.
+
+The rail's **Related** card gathers the same links in one place: the crew, the agent, the run in flight, the journal trace, and Activity. The crew and the assignee in the identity row and in Properties are links too. Together with the run page's own Related row and the journal's issue pill, this is the loop the audit found broken: issue → run → journal → issue, with every leg a link.
+
 ## The layout
 
 Everything on the surface is a card, including **Run activity** — it used to

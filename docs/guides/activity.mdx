@@ -191,9 +191,25 @@ This is the question every reader of the old page arrives with. The trace canvas
 
 There is no step object on this page: a run's steps **are** its drill-down. Saved views, the heatmap toolbar, group-by axes and keyboard step selection went with the canvas and have no replacement.
 
+## The URL is the state
+
+Whatever you are looking at on `/activity` is in the address bar, and a change of position is a history entry: **Back** closes the drill-down you just opened, a reload resumes the walk, and the page can be sent to someone.
+
+| Parameter | Carries |
+|-----------|---------|
+| `?run=`, `?pipeline=`, `?mission=` | A single run, routine or issue — and the routine→run pair — in the same spelling the inbound links below use |
+| `?walk=kind:id/kind:id` | Any deeper walk (a workflow, an agent, a crew, two runs) |
+| `?lens=issues\|agents\|routines` | The rail's lens; absent for Workflows |
+| `?status=` | The status segment |
+| `?entry=` | The opened journal record, once the window holding it has loaded |
+
+Position (the walk, the opened record) is pushed; lens and status are replaced, so Back does not step through every tab you tried. Ids read from a URL show as ids until the entities they name load, then the trail re-labels them.
+
+A bare `?run=` with no routine used to render "This run's record is not loaded", because the record lives in the routine's run list and the link carried no routine. The run page now asks the journal which routine emitted the run and loads the record from there. Under the run's heading a **Related** row links its routine, its issue, its agent, its crew and its own journal trace — the second leg of the one timeline (issue → run → journal → issue).
+
 ## Deep links
 
-Fourteen places across the product link into `/activity` with a query string the trace canvas defined. Those links still work — the parameters are translated rather than dropped (`lib/activity-deeplink.ts`). They are read **once, at mount**; after that the page owns the selection.
+Fourteen places across the product link into `/activity` with a query string the trace canvas defined. Those links still work — the parameters are translated rather than dropped (`lib/activity-deeplink.ts`) and written back in the same spelling.
 
 | Parameter | Lands on | Emitted by |
 |-----------|----------|------------|
