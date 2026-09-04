@@ -432,3 +432,74 @@ pages:
         producer: routine/page-watch
         sla: 6h
         span: 12
+
+  # ── Demo pack pages (seeddata/packs.go) ─────────────────────────────────
+  # One page per pack, every panel produced by the pack's report routine.
+  # No `demo` payloads: these panels are ROUTINE-produced, so the only honest
+  # way for them to hold data is the routine running — which the seeder
+  # triggers once (seedPageProducerRoutines) when the pack is runnable.
+  - slug: ci-watch
+    name: CI watch
+    description: Are the scheduled GitHub Actions workflows green, red, or silently not running?
+    owner: crew/ops
+    panels:
+      - id: status
+        schema: status.v1
+        title: Scheduled workflows
+        icon: clock
+        owner: crew/ops
+        producer: routine/ci-nightly-triage
+        sla: 30h
+        span: 12
+      - id: summary
+        schema: narrative.v1
+        title: Last triage
+        icon: alert
+        owner: crew/ops
+        producer: routine/ci-nightly-triage
+        sla: 30h
+        span: 12
+
+  - slug: docs-drift
+    name: Docs drift
+    description: Documentation against code, both directions — phantoms the code does not have, gaps the docs never mention.
+    owner: crew/quality
+    panels:
+      - id: status
+        schema: status.v1
+        title: Last scan
+        icon: calendar
+        owner: crew/quality
+        producer: routine/docs-drift-audit
+        sla: 170h
+        span: 12
+      - id: summary
+        schema: narrative.v1
+        title: What the audit found
+        icon: alert
+        owner: crew/quality
+        producer: routine/docs-drift-audit
+        sla: 170h
+        span: 12
+
+  - slug: site-replica
+    name: Site replica
+    description: The engineering crew's copy of a public home page, and whether it meets the mechanical bar.
+    owner: crew/engineering
+    panels:
+      - id: acceptance
+        schema: status.v1
+        title: Acceptance checks
+        icon: deploy
+        owner: crew/engineering
+        producer: routine/site-replica-audit
+        sla: 48h
+        span: 12
+      - id: verdict
+        schema: narrative.v1
+        title: Verdict
+        icon: alert
+        owner: crew/engineering
+        producer: routine/site-replica-audit
+        sla: 48h
+        span: 12

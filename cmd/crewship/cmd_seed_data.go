@@ -609,6 +609,14 @@ func seedDemoCredentials(ctx context.Context, client *cli.Client, crewIDs map[st
 			fmt.Fprintf(os.Stderr, "  = Binding skipped: crew %s not seeded\n", b.CrewSlug)
 			continue
 		}
+		// A demo pack bound a REAL token to this crew's slot. The inert
+		// account must not take it — binding is first-wins with a 409 for
+		// the second, so this is a courtesy skip with a reason rather than a
+		// swallowed conflict.
+		if packBoundSlots[b.CrewSlug+"/"+b.Slot] {
+			fmt.Fprintf(os.Stderr, "  = Binding skipped: %s on crew %s already carries a demo pack credential\n", b.Slot, b.CrewSlug)
+			continue
+		}
 		resp, err := client.Post("/api/v1/credentials/bindings", map[string]string{
 			"credential_id": credID,
 			"slot":          b.Slot,

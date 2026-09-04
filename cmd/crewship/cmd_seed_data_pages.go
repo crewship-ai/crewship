@@ -129,6 +129,15 @@ func seedPageProducerRoutines(ctx context.Context, client *cli.Client, wsID stri
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// A demo pack whose requirement is unmet (no SEED_GITHUB_TOKEN, say)
+		// would only produce a failed run record here. Say why instead, in
+		// the same words `seed verify` uses.
+		if p, ok := seeddata.PackForRoutine(slug); ok {
+			if runnable, reason := packRunnable(p); !runnable {
+				fmt.Fprintf(os.Stderr, "  routine %s: skipped — %s (pack %s)\n", slug, reason, p.Slug)
+				continue
+			}
+		}
 		if err := seedRunRoutine(client, wsID, slug); err != nil {
 			// Same rule as a failed push: report and carry on. A demo missing
 			// one page beats a seed that aborted after creating half a

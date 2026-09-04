@@ -6,17 +6,23 @@ crews:
       runtime_image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
       devcontainer_config: '{"image":"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm","containerEnv":{"PATH":"/home/agent/.local/bin:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},"features":{"ghcr.io/devcontainers/features/common-utils:2":{"username":"agent","userUid":"1001","userGid":"1001","installZsh":false,"upgradePackages":false},"ghcr.io/devcontainers-extra/features/claude-code:2":{},"ghcr.io/devcontainers/features/github-cli:1":{}},"postCreateCommand":"(sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends xdg-utils ripgrep python3 python3-pip 2>&1 | tail -3) || true && mkdir -p $HOME/.local && npm config set prefix $HOME/.local 2>/dev/null || true && npm install -g @openai/codex 2>&1 | tail -5 || true && npm install -g @google/gemini-cli 2>&1 | tail -5 || true && npm install -g opencode-ai 2>&1 | tail -5 || true && (curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh && bash /tmp/cursor-install.sh -y 2>&1 | tail -5) || true && (curl -fsSL https://app.factory.ai/cli -o /tmp/droid-install.sh && bash /tmp/droid-install.sh 2>&1 | tail -5) || true"}'
       mise_config: '{"tools":{"node":"22","python":"3.12"}}'
-      # Real website-copy and release-feed issues plus the public-page audit
-      # routine. The allowlist is deliberately host-specific.
+      # The site-replica pack fetches www.seznam.cz; the public-page audit
+      # routine reads crewship.ai. The allowlist is deliberately host-specific.
       allowed_domains:
         - crewship.ai
         - docs.crewship.ai
         - github.com
+        - www.seznam.cz
     - name: Quality
       slug: quality
       color: '#10B981'
       icon: shield-check
       runtime_image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+      # The docs-drift pack clones the repository over HTTPS and the auditor
+      # may read it back with the gh CLI.
+      allowed_domains:
+        - github.com
+        - api.github.com
       devcontainer_config: '{"image":"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm","containerEnv":{"PATH":"/home/agent/.local/bin:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},"features":{"ghcr.io/devcontainers/features/common-utils:2":{"username":"agent","userUid":"1001","userGid":"1001","installZsh":false,"upgradePackages":false},"ghcr.io/devcontainers-extra/features/claude-code:2":{},"ghcr.io/devcontainers/features/python:1":{},"ghcr.io/devcontainers/features/github-cli:1":{}},"postCreateCommand":"(sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends xdg-utils ripgrep python3 python3-pip 2>&1 | tail -3) || true && mkdir -p $HOME/.local && npm config set prefix $HOME/.local 2>/dev/null || true && npm install -g @openai/codex 2>&1 | tail -5 || true && npm install -g @google/gemini-cli 2>&1 | tail -5 || true && npm install -g opencode-ai 2>&1 | tail -5 || true && (curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh && bash /tmp/cursor-install.sh -y 2>&1 | tail -5) || true && (curl -fsSL https://app.factory.ai/cli -o /tmp/droid-install.sh && bash /tmp/droid-install.sh 2>&1 | tail -5) || true"}'
     - name: Ops
       slug: ops
@@ -25,13 +31,18 @@ crews:
       runtime_image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
       devcontainer_config: '{"image":"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm","containerEnv":{"PATH":"/home/agent/.local/bin:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},"features":{"ghcr.io/devcontainers/features/common-utils:2":{"username":"agent","userUid":"1001","userGid":"1001","installZsh":false,"upgradePackages":false},"ghcr.io/devcontainers-extra/features/claude-code:2":{},"ghcr.io/devcontainers/features/docker-in-docker:2":{},"ghcr.io/devcontainers/features/terraform:1":{},"ghcr.io/devcontainers/features/github-cli:1":{}},"postCreateCommand":"(sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends xdg-utils ripgrep python3 python3-pip 2>&1 | tail -3) || true && mkdir -p $HOME/.local && npm config set prefix $HOME/.local 2>/dev/null || true && npm install -g @openai/codex 2>&1 | tail -5 || true && npm install -g @google/gemini-cli 2>&1 | tail -5 || true && npm install -g opencode-ai 2>&1 | tail -5 || true && (curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh && bash /tmp/cursor-install.sh -y 2>&1 | tail -5) || true && (curl -fsSL https://app.factory.ai/cli -o /tmp/droid-install.sh && bash /tmp/droid-install.sh 2>&1 | tail -5) || true"}'
       mise_config: '{"tools":{"terraform":"1.9"}}'
-      # Reliability issues and the token-zero GitHub Status wake gate. Keep
-      # httpbin.org for the opt-in trajectory eval catalogue.
+      # The ci-watch pack reads the Actions API and downloads failed-job logs
+      # (gh fetches those from objects.githubusercontent.com); the GitHub
+      # Status wake gate reads www.githubstatus.com. Keep httpbin.org for the
+      # opt-in trajectory eval catalogue.
       allowed_domains:
         - httpbin.org
         - www.githubstatus.com
         - crewship.ai
         - docs.crewship.ai
+        - api.github.com
+        - github.com
+        - objects.githubusercontent.com
     # Opt-in local-model demo crew (CREWSHIP_SEED_OLLAMA=1). Bakes only
     # opencode-ai (the OpenCode CLI drives any OpenAI-compatible endpoint).
     # allow_private_endpoints=true is required to reach a host Ollama at

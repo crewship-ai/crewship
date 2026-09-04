@@ -234,6 +234,18 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Crew connection seeding hit an error (continuing): %v\n", err)
 	}
 
+	// ── Phase 2c: Demo pack files ──
+	// BEFORE provisioning is triggered: the host can write a crew's shared
+	// tree only until the container entrypoint chowns it to the agent UID,
+	// after which a write needs a RUNNING container — and a fresh seed has
+	// none. Non-fatal; `seed verify` compares what landed against the embed.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedPackFiles(ctx, client, crewIDs); err != nil {
+		fmt.Fprintf(os.Stderr, "Pack file delivery hit an error (continuing): %v\n", err)
+	}
+
 	// ── Phase 2b: Provision crews with devcontainer config (parallel) ──
 	// Without provisioning, `crewship run <agent>` fails with "Crew has
 	// devcontainer configuration but no provisioned image". In default
@@ -290,6 +302,11 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 	if err := seedCredentials(ctx, client, agentIDs); err != nil {
 		return err
+	}
+	// Crew-scoped pack credentials go between the real credentials and the
+	// demo vault: the vault's inert bindings consult packBoundSlots.
+	if err := seedPackCredentials(ctx, client, crewIDs); err != nil {
+		fmt.Fprintf(os.Stderr, "  ! Pack credentials: %v\n", err)
 	}
 	// Demo vault: one credential of every shape, all inert. Non-fatal — a
 	// workspace without the demo tour is still a working workspace, and a

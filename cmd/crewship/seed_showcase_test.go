@@ -214,7 +214,9 @@ func TestSeedShowcase_UsesRealPublicSources(t *testing.T) {
 		joined.WriteByte('\n')
 	}
 	text := joined.String()
-	for _, want := range []string{"https://crewship.ai", "https://docs.crewship.ai", "https://www.githubstatus.com"} {
+	// One real source per pack (seeddata/packs.go): the Actions API of this
+	// repository, its checkout, and a public home page to replicate.
+	for _, want := range []string{"crewship-ai/crewship", "https://www.seznam.cz", "gh api"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("seed issues do not exercise real public source %s", want)
 		}

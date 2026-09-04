@@ -21,8 +21,10 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// Create labels
+	// Create labels — keeping their IDs, because an issue names labels by
+	// catalogue name and the bulk endpoint attaches them by ID.
 	fmt.Fprintln(os.Stderr, "Creating labels...")
+	labelIDs := map[string]string{} // name → id
 	for _, l := range seeddata.Labels {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -32,9 +34,20 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 			fmt.Fprintf(os.Stderr, "  ! Label %s: %v\n", l.Name, err)
 			continue
 		}
-		resp.Body.Close()
 		if resp.StatusCode < 400 {
+			var created struct {
+				ID string `json:"id"`
+			}
+			if cli.ReadJSON(resp, &created) == nil && created.ID != "" {
+				labelIDs[l.Name] = created.ID
+			}
 			fmt.Fprintf(os.Stderr, "  + Label: %s\n", l.Name)
+			continue
+		}
+		resp.Body.Close()
+		// A re-seed: the label exists. Its ID still matters for attachment.
+		if id, rerr := resolveByName(client, "/api/v1/labels", l.Name); rerr == nil && id != "" {
+			labelIDs[l.Name] = id
 		}
 	}
 
@@ -139,6 +152,16 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 		}
 		fmt.Fprintf(os.Stderr, "  + %s: %s (%s)\n", ident, truncate(def.Title, 50), def.Priority)
 
+		// Labels: named in the fixture, attached by ID through the bulk
+		// endpoint (the only route that writes mission_labels). A name the
+		// catalogue does not carry is reported — the board would otherwise
+		// show an issue without the chip the fixture promised.
+		if len(def.Labels) > 0 && created.ID != "" {
+			if err := attachIssueLabels(client, created.ID, def.Labels, labelIDs); err != nil {
+				fmt.Fprintf(os.Stderr, "  ! %s labels: %v\n", ident, err)
+			}
+		}
+
 		// Transition to target state
 		if def.TargetState != "" && def.TargetState != "BACKLOG" && ident != "" {
 			for _, status := range seeddata.StatusPath(def.TargetState) {
@@ -199,13 +222,16 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 		sourceKey, targetKey, rtype string
 	}
 	rels := []relDef{
-		{"Audit the live Crewship home page content and metadata", "Rebuild the Crewship home page — delegate research and implementation", "relates_to"},
-		{"Recreate the Crewship docs landing page as an accessible static page", "Rebuild the Crewship home page — delegate research and implementation", "relates_to"},
-		{"Build a deterministic parser for the Crewship release feed", "Build a release dashboard from the normalized Crewship feed", "blocks"},
-		{"Run the acceptance suite and escalate any release-blocking decision", "Coordinate the website release gate and issue a go or no-go verdict", "blocks"},
-		{"Review the release-feed parser for correctness and failure handling", "Build a deterministic parser for the Crewship release feed", "relates_to"},
-		{"Build a read-only GitHub status collector and incident snapshot", "Run a GitHub dependency incident drill with delegated evidence collection", "relates_to"},
-		{"Run a GitHub dependency incident drill with delegated evidence collection", "Write the release dependency runbook from live GitHub status evidence", "relates_to"},
+		// site-replica: the hand-off order inside the engineering crew.
+		{"Map the seznam.cz home page — sections, navigation and metadata", "Build the static replica from the content map", "blocks"},
+		{"Extract the seznam.cz home page into a structured data model", "Build the static replica from the content map", "blocks"},
+		{"Build the static replica from the content map", "Run the replica acceptance checks and report PASS or FAIL", "blocks"},
+		{"Run the replica acceptance checks and report PASS or FAIL", "Replicate https://www.seznam.cz as a self-contained static page — delegate analysis, data, build and test", "blocks"},
+		// docs-drift: the fact-check gates the fix list.
+		{"Fact-check every docs-drift candidate against the file and line it cites", "Run the docs-drift audit on main and turn it into a fix list", "blocks"},
+		// ci-watch: reconciliation and the stale investigation feed the handover.
+		{"Run the CI probe against crewship-ai/crewship and reconcile it with GitHub", "Bring the nightly CI watch live and hand me the first real report", "relates_to"},
+		{"Explain why a scheduled workflow went stale", "Bring the nightly CI watch live and hand me the first real report", "relates_to"},
 	}
 	for _, rd := range rels {
 		if err := ctx.Err(); err != nil {
@@ -231,4 +257,27 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 
 	fmt.Fprintf(os.Stderr, "  Seeded %d labels, %d projects, %d issues\n", len(seeddata.Labels), len(projectIDs), len(seeddata.Issues))
 	return nil
+}
+
+// attachIssueLabels resolves label names to IDs and attaches them in one
+// bulk update. Unknown names are an error rather than a skip: the fixture
+// and the catalogue live in the same file and must agree.
+func attachIssueLabels(client *cli.Client, issueID string, names []string, labelIDs map[string]string) error {
+	ids := make([]string, 0, len(names))
+	for _, n := range names {
+		id, ok := labelIDs[n]
+		if !ok {
+			return fmt.Errorf("label %q is not in the seeded catalogue", n)
+		}
+		ids = append(ids, id)
+	}
+	resp, err := client.Patch("/api/v1/issues/bulk", map[string]interface{}{
+		"ids":     []string{issueID},
+		"updates": map[string]interface{}{"labels": ids},
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return cli.CheckError(resp)
 }

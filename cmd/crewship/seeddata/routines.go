@@ -1317,7 +1317,7 @@ var routineLibrary = []RoutineDef{
 // older transformation recipes remain in routineLibrary as source examples,
 // while model regression coverage is available through `seed --with-evals`.
 // A fresh product demo should read like an operating team, not a test fixture.
-var Routines = curatedDemoRoutines(routineLibrary)
+var Routines = curatedDemoRoutines(append(append([]RoutineDef{}, routineLibrary...), packRoutines...))
 
 func curatedDemoRoutines(library []RoutineDef) []RoutineDef {
 	wanted := map[string]bool{
@@ -1332,6 +1332,12 @@ func curatedDemoRoutines(library []RoutineDef) []RoutineDef {
 		"approval-gate-demo":    true, // production change plan + human decision
 		"cost-spike-probe":      true, // budget wake gate
 		"page-watch":            true, // routine-produced operational page
+		// Demo packs (packs.go): a real source, a deterministic core, a
+		// verifiable report.
+		"ci-probe":           true, // token-zero wake gate over GitHub Actions
+		"ci-nightly-triage":  true, // agent triage only after the gate wakes
+		"docs-drift-audit":   true, // deterministic scan + agent judgement
+		"site-replica-audit": true, // acceptance of the crew's site replica
 	}
 
 	out := make([]RoutineDef, 0, len(wanted))

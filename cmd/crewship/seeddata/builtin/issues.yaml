@@ -1,265 +1,298 @@
-# Real-world work for a freshly seeded Crewship workspace.
+# Real work for a freshly seeded Crewship workspace.
 #
-# One coherent scenario: a small team preparing the public Crewship site and
-# release operations. Every issue is safe to repeat, names its evidence and
-# output, and exercises delegation, review, escalation, or a real public source.
+# Three demo packs (seeddata/packs.go), one crew each. Every issue reads a real
+# public source, names its evidence and its output path, and stays inside its
+# crew — /crew/shared is a per-crew volume, so a hand-off through files only
+# works between agents of the same crew. Each pack exercises one thing the
+# product is for: the CI watch a silent failure, the docs audit a judgement
+# over deterministic candidates with a human decision at the boundary, the
+# site replica a lead delegating across four specialists.
 issues:
-  - crew_slug: engineering
-    assignee: alex
-    title: Rebuild the Crewship home page — delegate research and implementation
+  # ── ci-watch (ops) ─────────────────────────────────────────────────────
+  - crew_slug: ops
+    assignee: morgan
+    title: Bring the nightly CI watch live and hand me the first real report
     description: |-
-      Create an accessible, self-contained reference implementation of the
-      public Crewship home page at /crew/shared/site-rebuild/index.html.
+      The ops crew now owns the nightly CI watch for crewship-ai/crewship. Get
+      it to a first real report and check it yourself before anyone schedules
+      it.
 
-      Start from the live page at https://crewship.ai and coordinate the work:
-      1. Delegate to Sam: inventory the visible sections, headings, calls to
-         action, navigation targets, and page metadata. Save evidence and a
-         concise content map to /crew/shared/site-rebuild/content-audit.md.
-      2. Delegate to Robin: implement the responsive HTML/CSS using the content
-         map. No external JavaScript, trackers, fonts, or copied proprietary
-         assets; use semantic HTML and local CSS only.
+      Delegate to Riley: run the probe as it runs in the routine —
+      `python3 /crew/shared/scripts/ci_probe.py --repo crewship-ai/crewship`
+      (GH_TOKEN is in the environment) — save the JSON to
+      /crew/shared/ci-watch/probe.json, then triage every RED or STALE entry
+      with the skills ci-triage and known-flaky and write
+      /crew/shared/ci-watch/report.md ending with the COUNTS line.
 
-      When both assignments return, review the page at mobile and desktop
-      widths, verify keyboard navigation and heading order, and write
-      /crew/shared/site-rebuild/acceptance.md. The goal is a faithful training
-      replica, not a deployment and not a pixel-perfect copy.
+      When Riley returns, reconcile: regressions + flaky + infra + unclear
+      must equal the probe's `red`, and stale must equal its `stale`. Write
+      /crew/shared/ci-watch/handover.md with the reconciliation, what you
+      would schedule (`ci-nightly-triage` behind the `ci-probe` wake gate, one
+      cron, Europe/Prague) and what you would not, and any flaky signature
+      Riley proposes adding to the known-flaky skill. Do not create the
+      schedule yourself.
     priority: high
-    project: Website Experience
+    project: CI Watch
+    labels: [Delegation, Wake gate, Real source]
     target_state: TODO
     comment: >-
-      Demo path: start this issue to exercise a LEAD agent creating two
-      assignments, waiting for both results, and integrating the shared output.
+      Demo path: start this issue to watch a LEAD create an assignment,
+      wait for the result, and reconcile it against the deterministic probe.
 
-  - crew_slug: engineering
-    assignee: sam
-    title: Audit the live Crewship home page content and metadata
+  - crew_slug: ops
+    assignee: riley
+    title: Run the CI probe against crewship-ai/crewship and reconcile it with GitHub
     description: |-
-      Fetch https://crewship.ai with curl using a 20-second timeout and save the
-      response to /crew/shared/site-audit/home.html. Produce
-      /crew/shared/site-audit/content.md with:
-      - final URL, HTTP status, content type, title, and meta description;
-      - navigation labels and destinations;
-      - H1/H2 heading outline in document order;
-      - primary calls to action and their destinations;
-      - broken same-site links found by HEAD/GET checks.
+      Run `python3 /crew/shared/scripts/ci_probe.py --repo crewship-ai/crewship`
+      and save the output to /crew/shared/ci-watch/probe.json.
 
-      Keep the raw response as evidence, make no requests outside crewship.ai,
-      and report blocked or redirected URLs instead of inventing content.
+      Then build the same picture independently with `gh api`: list the
+      active workflows, and for each one the latest run with
+      `event=schedule` on main. Write /crew/shared/ci-watch/reconciliation.md
+      with one row per workflow — probe status, your status, and whether they
+      agree. Explain every disagreement (a run that finished between the two
+      reads is a valid explanation; "probably fine" is not). Keep the raw
+      `gh api` responses as evidence. Read only; never re-run a workflow.
     priority: medium
-    project: Website Experience
+    project: CI Watch
+    labels: [Real source]
 
-  - crew_slug: engineering
-    assignee: robin
-    title: Recreate the Crewship docs landing page as an accessible static page
+  - crew_slug: ops
+    assignee: riley
+    title: Explain why a scheduled workflow went stale
     description: |-
-      Use https://docs.crewship.ai as the visual and information reference.
-      Build /crew/shared/docs-replica/index.html as one self-contained HTML file
-      with responsive CSS and no third-party assets or scripts.
+      Take every entry with status STALE from /crew/shared/ci-watch/probe.json
+      (run the probe first if the file is missing). For each one find the
+      concrete cause, following the skill ci-triage: is the workflow disabled
+      (`gh api repos/crewship-ai/crewship/actions/workflows` — look at
+      `state`), did its cron change or disappear, is the YAML broken, or was
+      it renamed so the probe pairs runs under the old name?
 
-      Preserve the information hierarchy, search affordance, primary
-      navigation, and representative documentation cards. Do not copy logos or
-      illustrations; replace them with accessible text or CSS shapes. Include a
-      visible note that this is a training replica. Verify keyboard focus,
-      reduced-motion behaviour, colour contrast, and layouts at 390 px and
-      1440 px. Record checks in /crew/shared/docs-replica/verification.md.
+      Write /crew/shared/ci-watch/stale-<workflow-slug>.md per workflow with
+      the evidence you checked, the cause, and the one-line recommendation for
+      a human. "It did not run" is not a cause. If there is no stale entry
+      tonight, write /crew/shared/ci-watch/stale-none.md saying what you
+      checked and when.
     priority: high
-    project: Website Experience
+    project: CI Watch
+    labels: [Silent failure, Real source]
     target_state: TODO
 
-  - crew_slug: engineering
-    assignee: sam
-    title: Build a deterministic parser for the Crewship release feed
-    description: |-
-      Download https://github.com/crewship-ai/crewship/releases.atom and build
-      /crew/shared/release-tools/parse_releases.py using only the Python
-      standard library. The script must accept an Atom file path and write a
-      JSON array containing the five newest entries with exactly these keys:
-      version, published_at, title, and url.
-
-      Save one real feed response as releases.atom, run the parser twice, and
-      prove both JSON outputs are byte-identical. Handle an empty feed and
-      malformed XML with a non-zero exit and a useful stderr message. Add
-      unittest coverage and a short README with the exact commands used.
-    priority: high
-    project: Release Operations
-    target_state: TODO
-
-  - crew_slug: engineering
-    assignee: robin
-    title: Build a release dashboard from the normalized Crewship feed
-    description: |-
-      Read /crew/shared/release-tools/releases.json and create
-      /crew/shared/release-dashboard/index.html: a self-contained, responsive
-      release dashboard with a latest-release summary, a searchable version
-      list, published dates, and source links.
-
-      Render an honest empty state when the JSON contains no entries and an
-      explicit error state when it is invalid. Keep data embedded locally so
-      opening the file makes no network requests. Add a short verification
-      note covering keyboard use, 390 px layout, and malformed input.
-    priority: medium
-    project: Release Operations
-
+  # ── docs-drift (quality) ───────────────────────────────────────────────
   - crew_slug: quality
     assignee: jordan
-    title: Coordinate the website release gate and issue a go or no-go verdict
+    title: Run the docs-drift audit on main and turn it into a fix list
     description: |-
-      Coordinate a release-readiness review of the files under
-      /crew/shared/site-rebuild and /crew/shared/docs-replica.
+      Run the scan as the routine runs it:
+      `GH_TOKEN` is in the environment; `REPO=crewship-ai/crewship BRANCH=main
+      bash /crew/shared/scripts/docs_audit.sh > /crew/shared/docs-drift/scan.json`.
+      The repository is then checked out under /crew/shared/work/crewship.
 
-      Delegate the detailed accessibility and functional pass to Casey. Ask
-      Alex for the implementation scope and any known exceptions. Then publish
-      /crew/shared/quality/website-release-verdict.md with one unambiguous
-      verdict (GO or NO-GO), the evidence checked, blocking findings, accepted
-      risks, and the next owner for every open item. Do not mark GO without
-      executable evidence.
+      Delegate to Casey the fact-check of every candidate against the real
+      files (skill docs-drift). When Casey returns, write
+      /crew/shared/docs-drift/fix-list.md: one line per confirmed finding —
+      docs path:line, code path:line, the one-sentence fix — grouped by page,
+      followed by the rejected candidates with their reasons, and ending with
+      the line `COUNTS: candidates=<n> confirmed=<n> rejected=<n>
+      truncated=<n>`. The numbers must match Casey's report and the scan's
+      `total_candidates`. Change nothing in the repository.
     priority: high
-    project: Quality Gate
-    target_state: TODO
-
-  - crew_slug: quality
-    assignee: casey
-    title: Run the acceptance suite and escalate any release-blocking decision
-    description: |-
-      Review /crew/shared/site-rebuild/index.html and
-      /crew/shared/docs-replica/index.html against this release gate:
-      semantic landmarks, one H1, logical heading order, keyboard-visible
-      controls, no mixed content, no third-party runtime requests, working
-      same-page links, and readable layouts at 390 px and 1440 px.
-
-      Save reproducible checks and findings to
-      /crew/shared/quality/site-acceptance.md. If either input is missing, or a
-      finding requires accepting user-visible or security risk, call the
-      sidecar /escalate endpoint with type DECISION. State the exact choice,
-      evidence, recommended option, and a deadline; do not silently choose for
-      the human. Continue all non-blocked checks while the decision is pending.
-    priority: high
-    project: Quality Gate
+    project: Docs Drift
+    labels: [Delegation, Real source]
     target_state: TODO
     comment: >-
-      Demo path: start this issue to produce a real human-decision escalation
-      in Inbox when a prerequisite or release-blocking exception is present.
+      Demo path: a LEAD hands deterministic candidates to a worker for
+      judgement and reconciles the counts before publishing.
 
   - crew_slug: quality
     assignee: casey
-    title: Review the release-feed parser for correctness and failure handling
+    title: Fact-check every docs-drift candidate against the file and line it cites
     description: |-
-      Review /crew/shared/release-tools/parse_releases.py and its tests. Run it
-      against the saved real Atom feed, an empty valid feed, malformed XML, a
-      duplicate entry, and entries without optional fields.
+      Read /crew/shared/docs-drift/scan.json (if it is missing, run
+      `REPO=crewship-ai/crewship BRANCH=main bash
+      /crew/shared/scripts/docs_audit.sh` first) and the checkout under
+      /crew/shared/work/crewship.
 
-      Write /crew/shared/quality/release-parser-review.md with the command and
-      observed result for each case, findings as severity/file/line/fix, and a
-      final PASS or FAIL. Do not modify the parser during the review.
-    priority: medium
-    project: Quality Gate
+      For every candidate decide CONFIRMED or REJECTED with the skill
+      docs-drift: open the documentation line and grep the code beyond the
+      listed package before calling anything a phantom. Write
+      /crew/shared/docs-drift/review.md with, per confirmed finding, the docs
+      path:line, the code path:line, what the page claims or omits, and why it
+      hurts a reader; per rejected candidate, one sentence.
 
-  - crew_slug: ops
-    assignee: morgan
-    title: Run a GitHub dependency incident drill with delegated evidence collection
-    description: |-
-      Treat GitHub as a production dependency for the release workflow. Start
-      an incident drill using the live public summary at
-      https://www.githubstatus.com/api/v2/summary.json.
-
-      Delegate to Riley: collect the current component states and unresolved
-      incidents, preserve the raw JSON, and produce a timestamped evidence
-      note. Use that result to write /crew/shared/incidents/github-drill.md with
-      severity, blast radius, first safe action, update cadence, rollback or
-      pause criteria, and exit criteria. If the proposed response would pause a
-      release or change production, escalate that decision to a human; never
-      execute a production change in this drill.
+      If a confirmed finding is a SECURITY claim — the documentation promises
+      an allowlist, a validation or a restriction the code does not enforce —
+      do not decide alone how to word it: call the sidecar /escalate endpoint
+      with type DECISION, the exact sentence, the code evidence, your
+      recommended wording and a deadline, and continue with the rest while
+      the decision is pending. End the report with the COUNTS line.
     priority: high
-    project: Reliability Operations
+    project: Docs Drift
+    labels: [Escalation, Real source]
+    target_state: TODO
+    comment: >-
+      Demo path: a worker hits a risk boundary and produces a real
+      human-decision escalation in the Inbox instead of choosing silently.
+
+  - crew_slug: quality
+    assignee: casey
+    title: Narrow the widest docs-drift pair so its report becomes readable
+    description: |-
+      The pair docs/manifest/routine.md ↔ internal/pipeline/types.go yields
+      the most candidates because types.go holds the whole DSL and the page
+      only part of it. Using /crew/shared/docs-drift/scan.json and the
+      checkout under /crew/shared/work/crewship, propose a narrower `pkg`
+      list (files, or a smaller set of structs) that keeps the fields the page
+      documents and drops the wire-only ones.
+
+      Write /crew/shared/docs-drift/narrowing-proposal.md with the proposed
+      map entry, the candidate count before and after (run docs_drift.py
+      directly with `--doc` and `--pkg` to measure), and which dropped
+      candidates were real findings, if any. Do not edit
+      /crew/shared/config/docs_map.json — the map is reviewed like code.
+    priority: medium
+    project: Docs Drift
+    labels: [Acceptance]
+
+  # ── site-replica (engineering) ─────────────────────────────────────────
+  - crew_slug: engineering
+    assignee: alex
+    title: Replicate https://www.seznam.cz as a self-contained static page — delegate analysis, data, build and test
+    description: |-
+      Produce a self-contained, accessible static replica of the
+      https://www.seznam.cz home page under /crew/shared/site-replica/. This
+      is a training replica for the team, not a deployment and not a
+      pixel-perfect copy.
+
+      Coordinate the crew, one hand-off at a time:
+      1. Delegate to Taylor: fetch the live page and write
+         /crew/shared/site-replica/content-map.json (with a top-level
+         "sections" array of the visible section names, plus navigation and
+         metadata) and content-map.md.
+      2. Delegate to Sam: from the saved source, build
+         /crew/shared/site-replica/data.json — the structured model of
+         sections, headings, link counts and images — with a small
+         deterministic extraction script and its tests.
+      3. Delegate to Robin: build /crew/shared/site-replica/index.html from
+         the content map and data.json — semantic HTML, local CSS only, no
+         scripts, no external assets, one h1, a viewport meta tag.
+      4. Delegate to Jamie: run
+         `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
+         and write the acceptance report.
+
+      When all four return, read Jamie's report, write
+      /crew/shared/site-replica/acceptance.md with GO or NO-GO and the open
+      items with an owner each. Do not mark GO while any check fails.
+    priority: high
+    project: Site Replica
+    labels: [Delegation, Real source, Acceptance]
+    target_state: TODO
+    comment: >-
+      Demo path: say "copy seznam.cz" to Alex, or start this issue, and watch
+      one crew hand work across four specialists through its shared volume.
+
+  - crew_slug: engineering
+    assignee: taylor
+    title: Map the seznam.cz home page — sections, navigation and metadata
+    description: |-
+      Fetch https://www.seznam.cz with curl (follow redirects, 20-second
+      timeout, a plain User-Agent) and save the raw response to
+      /crew/shared/site-replica/source.html together with the final URL and
+      HTTP status.
+
+      Write /crew/shared/site-replica/content-map.json with: url, fetched_at,
+      title, meta description, a "sections" array of the visible section
+      names in document order, and a "navigation" array of {label, href}.
+      Write the same as prose in content-map.md. Report blocked or redirected
+      URLs instead of inventing content, and make no request outside
+      www.seznam.cz.
+    priority: high
+    project: Site Replica
+    labels: [Real source]
     target_state: TODO
 
-  - crew_slug: ops
-    assignee: riley
-    title: Build a read-only GitHub status collector and incident snapshot
+  - crew_slug: engineering
+    assignee: sam
+    title: Extract the seznam.cz home page into a structured data model
     description: |-
-      Build /crew/shared/ops/collect_github_status.py using only Python's
-      standard library. Fetch these real public endpoints with a 20-second
-      timeout:
-      - https://www.githubstatus.com/api/v2/summary.json
-      - https://www.githubstatus.com/api/v2/incidents/unresolved.json
+      Read /crew/shared/site-replica/source.html (ask Taylor's issue to run
+      first if it is missing) and write
+      /crew/shared/site-replica/extract.py using only the Python standard
+      library. It must produce data.json: sections with their headings, the
+      number of links and images per section, and the navigation entries.
 
-      Save raw responses and write a deterministic status.json containing
-      checked_at, overall_indicator, affected_components, and unresolved
-      incidents. Do not fail merely because the service is degraded; fail only
-      when evidence cannot be fetched or parsed. Add fixture-based tests that
-      run without internet access and document one-shot and repeated use.
+      Run it twice and prove both outputs are byte-identical. Handle a missing
+      or malformed file with a non-zero exit and a useful stderr message. Add
+      unittest coverage that runs without network access and a short README
+      with the exact commands.
+    priority: medium
+    project: Site Replica
+    labels: [Acceptance]
+
+  - crew_slug: engineering
+    assignee: robin
+    title: Build the static replica from the content map
+    description: |-
+      Build /crew/shared/site-replica/index.html from content-map.json and
+      data.json as one self-contained file: semantic HTML, local CSS in a
+      <style> element, no <script>, no external fonts, images or trackers,
+      exactly one h1, a <meta name="viewport"> tag, a visible note that this
+      is a training replica, and every section from the content map present
+      by name. Do not copy logos or illustrations; use accessible text or CSS
+      shapes.
+
+      Before you finish, run
+      `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
+      and fix what it reports. Record the checks you made at 390 px and
+      1440 px in /crew/shared/site-replica/build-notes.md.
     priority: high
-    project: Reliability Operations
+    project: Site Replica
+    labels: [Acceptance]
     target_state: TODO
 
-  - crew_slug: ops
-    assignee: riley
-    title: Audit security and caching headers on Crewship public properties
+  - crew_slug: engineering
+    assignee: jamie
+    title: Run the replica acceptance checks and report PASS or FAIL
     description: |-
-      Inspect response headers for https://crewship.ai and
-      https://docs.crewship.ai using curl with redirects enabled and a
-      20-second timeout. Record each redirect hop and the final values for HSTS,
-      CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy,
-      Cache-Control, ETag, and Content-Encoding.
+      Run `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
+      and write /crew/shared/site-replica/acceptance-report.md: the exact
+      command, the JSON output, one line per check with PASS or FAIL and the
+      detail, and a single-line verdict at the end.
 
-      Save raw headers and a comparison table to
-      /crew/shared/ops/public-web-headers.md. Distinguish missing headers from
-      headers that are not applicable. This is read-only observation: do not
-      scan paths, fuzz parameters, or attempt to bypass controls.
+      If index.html does not exist, the verdict is NOT BUILT — report it and
+      stop; do not build it yourself. If content-map.json is missing, say
+      that coverage could not be measured. Do not modify the replica.
     priority: medium
-    project: Reliability Operations
-
-  - crew_slug: ops
-    assignee: morgan
-    title: Write the release dependency runbook from live GitHub status evidence
-    description: |-
-      Use the latest files in /crew/shared/ops and the public GitHub Status API
-      to write /crew/shared/runbooks/github-release-dependency.md.
-
-      Cover detection, severity mapping, evidence capture, release-pause
-      criteria, communications cadence, human approval boundaries, recovery
-      verification, and a compact post-incident checklist. Separate observed
-      facts from assumptions and include the exact public endpoints used. Keep
-      the runbook under two pages and usable during an incident.
-    priority: medium
-    project: Reliability Operations
+    project: Site Replica
+    labels: [Acceptance]
 
 labels:
-  - name: Website
-    color: '#06B6D4'
-  - name: Release
-    color: '#8B5CF6'
-  - name: Accessibility
-    color: '#22C55E'
-  - name: Reliability
+  - name: Wake gate
+    color: '#3B82F6'
+  - name: Silent failure
     color: '#EF4444'
   - name: Delegation
-    color: '#3B82F6'
+    color: '#8B5CF6'
   - name: Escalation
     color: '#F97316'
-  - name: External evidence
+  - name: Real source
     color: '#EAB308'
-  - name: Automation
-    color: '#EC4899'
+  - name: Acceptance
+    color: '#22C55E'
 
 projects:
-  - name: Website Experience
-    color: '#06B6D4'
-    icon: globe
-    status: in_progress
-    priority: high
-  - name: Release Operations
-    color: '#8B5CF6'
-    icon: rocket
-    status: in_progress
-    priority: high
-  - name: Quality Gate
-    color: '#22C55E'
-    icon: shield-check
-    status: in_progress
-    priority: high
-  - name: Reliability Operations
+  - name: CI Watch
     color: '#EF4444'
     icon: activity
+    status: in_progress
+    priority: high
+  - name: Docs Drift
+    color: '#8B5CF6'
+    icon: file-search
+    status: in_progress
+    priority: high
+  - name: Site Replica
+    color: '#06B6D4'
+    icon: globe
     status: in_progress
     priority: high

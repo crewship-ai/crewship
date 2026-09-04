@@ -35,6 +35,11 @@ type IssueDef struct {
 	Project     string `yaml:"project,omitempty"`      // project name (resolved to ID during seed)
 	TargetState string `yaml:"target_state,omitempty"` // final status after creation (empty = BACKLOG)
 	Comment     string `yaml:"comment,omitempty"`
+	// Labels names entries of the Labels catalogue below to attach on
+	// creation. A name that is not in the catalogue is a seed-time error,
+	// not a silent skip — the board would show an issue without the chip
+	// the fixture promised.
+	Labels []string `yaml:"labels,omitempty"`
 }
 
 // issuesBundle is the on-disk shape of builtin/issues.yaml — three

@@ -121,8 +121,9 @@ func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
 // time out of the box. httpbin.org remains for opt-in trajectory evals.
 func TestSeedCrewsAllowDomainsTheirDemoContentNeeds(t *testing.T) {
 	required := map[string][]string{
-		"engineering": {"crewship.ai", "docs.crewship.ai", "github.com"},
-		"ops":         {"httpbin.org", "www.githubstatus.com", "crewship.ai", "docs.crewship.ai"},
+		"engineering": {"crewship.ai", "docs.crewship.ai", "github.com", "www.seznam.cz"},
+		"quality":     {"github.com", "api.github.com"},
+		"ops":         {"httpbin.org", "www.githubstatus.com", "crewship.ai", "docs.crewship.ai", "api.github.com", "github.com", "objects.githubusercontent.com"},
 	}
 	bySlug := map[string]CrewDef{}
 	for _, c := range Crews {

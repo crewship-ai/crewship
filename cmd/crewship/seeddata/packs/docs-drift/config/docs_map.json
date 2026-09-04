@@ -1,0 +1,49 @@
+{
+  "_comment": "Curated list of documentation ↔ code pairs. This is the only part that changes over time — add pages where drift actually hurts (reference schemas, not prose). Keep the scope NARROW: internal/manifest as a whole yields 139 candidates and nobody opens that report; internal/manifest/schema.go yields 18 and those can be read.",
+  "pairs": [
+    {
+      "doc": "docs/configuration/manifest-schema.mdx",
+      "pkg": [
+        "internal/manifest/schema.go"
+      ],
+      "why": "Reference schema of the Workspace manifest. As of 2026-08-06 it did not know files:, composio or notification_channels."
+    },
+    {
+      "doc": "docs/configuration/devcontainers.mdx",
+      "pkg": [
+        "internal/devcontainer/config.go"
+      ],
+      "why": "Described a feature-registry allowlist that does not exist in the code."
+    },
+    {
+      "doc": "docs/manifest/routine.md",
+      "pkg": [
+        "internal/pipeline/types.go"
+      ],
+      "why": "Routine DSL. Promises the JSON can be copied into kind: Routine without changing semantics. The WIDEST pair — types.go holds the whole DSL, the page only part of it, so it yields ~100 candidates. Candidate for narrowing.",
+      "max_candidates": 15
+    },
+    {
+      "doc": "docs/manifest/agent.md",
+      "pkg": [
+        "internal/manifest/kinds/agent.go"
+      ],
+      "why": "Agent fields — the provider/cli_adapter/tool_profile enums move with the model catalogue."
+    },
+    {
+      "doc": "docs/manifest/crew.md",
+      "pkg": [
+        "internal/manifest/kinds/crew.go",
+        "internal/manifest/crewfile/crewfile.go"
+      ],
+      "why": "Crew + files: delivery of shared files."
+    },
+    {
+      "doc": "docs/manifest/workspace.md",
+      "pkg": [
+        "internal/manifest/schema.go"
+      ],
+      "why": "Second reference page of the same schema — tends to be more current than the one under configuration/."
+    }
+  ]
+}

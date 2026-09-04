@@ -53,6 +53,18 @@ func TestSeedDataIsSelfSatisfiable(t *testing.T) {
 	if want == "" {
 		t.Fatal("AnthropicCredentialType() is empty — the seed would declare an unsatisfiable requirement")
 	}
+	// The seed creates the Anthropic credential AND the demo vault
+	// (credentials_demo.go) — one inert credential of every shape, always.
+	// A pack routine's `CLI_TOKEN` requirement is therefore satisfiable in
+	// every seeding mode: by the crew-scoped pack credential when
+	// SEED_GITHUB_TOKEN is set, and by the inert demo account otherwise —
+	// in which case the probe fails loudly at GitHub (a 401 becomes
+	// wake=true with the error in the report), which is the honest outcome,
+	// not a 422 before the run starts.
+	created := map[string]bool{want: true}
+	for _, dc := range DemoCredentials() {
+		created[strings.ToUpper(dc.Def.Type)] = true
+	}
 
 	for _, tc := range []struct {
 		label string
@@ -68,10 +80,10 @@ func TestSeedDataIsSelfSatisfiable(t *testing.T) {
 			continue
 		}
 		for _, typ := range got {
-			if strings.ToUpper(typ) != want {
-				t.Errorf("%s declares credentials_required type %q but the seed creates %q. "+
+			if !created[strings.ToUpper(typ)] {
+				t.Errorf("%s declares credentials_required type %q but the seed creates only %v. "+
 					"The resolver matches type EXACTLY, so every run of that routine 422s.",
-					tc.label, typ, want)
+					tc.label, typ, created)
 			}
 		}
 	}
