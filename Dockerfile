@@ -79,6 +79,16 @@ COPY config/ ./config/
 # github.com/crewship-ai/crewship/schemas (#886). Regular CI hides this
 # because it builds from a full checkout; this stage copies dirs selectively.
 COPY schemas/ ./schemas/
+# config/ is the second such root-level package (embed.go + models.json +
+# rate-limits.yml), imported by internal/llm since #2305. Same rule as
+# schemas/: it is not under cmd/ or internal/, so it has to be copied by
+# name or the in-image build fails to resolve
+# github.com/crewship-ai/crewship/config — which is exactly how the
+# 2026-09-04 nightly image build broke while every PR check stayed green.
+# The PR image build (#2064) now catches this class before merge, and
+# scripts/pr-image-build-paths.sh keeps its path filter in step with the
+# COPY lines here.
+COPY config/ ./config/
 COPY web/ ./web/
 COPY --from=frontend /app/out ./web/out
 # Release gate (#1567). web/out/ now always compiles — a tracked placeholder

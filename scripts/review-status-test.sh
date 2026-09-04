@@ -436,6 +436,39 @@ expect_eq "an ack before a real review raises nothing" "" \
       "$(cmt 2026-07-30T21:52:53Z "$ACK_BODY")" \
       "$(rev 2026-07-30T21:55:00Z APPROVED "$REVIEW_BODY" "$SHA")")" | tr -d '-')"
 
+echo "== a bodyless COMMENTED reply-wrapper is not a review (#2145) =="
+
+# Verbatim shape from #2128: a real CHANGES_REQUESTED review landed on an old
+# head, more commits followed, and CodeRabbit's only activity on the new head
+# was replying inside existing review threads — a COMMENTED review object with
+# an EMPTY body, whose inline comments all carry in_reply_to_id (a reply to a
+# thread a human started, not a new finding). Two later re-review requests then
+# came back rate-limited. review-status.sh reported `reviewed`, because the
+# COMMENTED review's commit_id named the head and its (reply) inline comments
+# satisfied the same "inline comments ⇒ read the diff" check #1729 added for
+# genuine new-thread comments — a review-shaped object that said nothing about
+# the code outranked the throttle that followed it.
+REPLY_WRAPPER_COMMENTS='[{"createdAt":"2026-07-30T21:45:05Z","inReplyTo":555000111}]'
+
+REPLY_WRAPPER_IN="$(in_json_rc "$NOW" "$OPENED" "$SHA" success "Review rate limited" \
+  "$(merge "$(cmt 2026-07-30T21:50:00Z "$RATE_LIMITED_ACK_BODY")" \
+           "$(cmt 2026-07-30T21:55:00Z "$THROTTLE_BODY")")" \
+  "$(merge "$(rev 2026-07-30T21:20:00Z CHANGES_REQUESTED "$REVIEW_BODY" "$OLD_SHA")" \
+           "$(rev 2026-07-30T21:45:00Z COMMENTED "" "$SHA")")" \
+  "$REPLY_WRAPPER_COMMENTS")"
+expect_eq "a bodyless COMMENTED review with only reply-wrapper comments does not outrank a later throttle" \
+  "throttled" "$(state_of "$REPLY_WRAPPER_IN")"
+expect_contains "…and the stale earlier review is named, not silently dropped" \
+  "$(notes_of "$REPLY_WRAPPER_IN")" "an earlier review exists"
+
+# The control: the same inline comment WITHOUT in_reply_to_id is a genuine new
+# thread, and must still promote a bodyless review — this is #1729's own
+# fixture (EMPTY_BODY_WITH_INLINE above), re-asserted here so a fix that
+# started ignoring reviewComments altogether would be caught by this section
+# too, not just by the one above it.
+expect_eq "…but the same comment as a NEW thread (no in_reply_to_id) still counts" \
+  "reviewed" "$(state_of "$EMPTY_BODY_WITH_INLINE")"
+
 echo "== the check status is cross-examined, never trusted =="
 
 expect_contains "green status on an unreviewed PR is named as the hazard" \

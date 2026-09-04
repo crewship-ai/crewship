@@ -747,6 +747,67 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 - **The Docker image builds again (#2328).** The backend stage did not copy the `config/` package that #2305 introduced for the model catalog, so `go build` inside the image failed on every branch since. `config/` is copied now, and a test (`scripts/dockerfile-sources`) fails whenever a root-level package the binaries import is missing from that stage.
+- **Two GET routes were invisible to the read-scope invariant, the same
+  "assumed out of scope by registration helper" blind spot the invariant
+  exists to catch (#2144).** `route_read_scope_invariant_test.go` scanned
+  `r.mux.Handle("GET …")` and `r.authedAdmin("GET", …)` but not
+  `r.authedMut(` — recorded as "246 uses, zero reads" — which was wrong:
+  `GET /api/v1/admin/keeper/judge/models`, `GET /api/v1/memory/export`, and
+  `GET /api/v1/approvals{,/{id}}` all register that way and were absent from
+  `scanReadRoutes()` entirely, not merely unclassified. Proved by a
+  throwaway test asserting `scanReadRoutes()` returns those two keys — it
+  failed on main. The scan now keys on the verb (`authedMutReadLine`,
+  `authedSelfMutReadLine`) rather than trusting a helper's name, mirroring
+  the mutation invariant's `wrapperMutationLine`. All four routes were
+  checked by hand: `authedMut` always composes
+  `RequireAuth(RequireWorkspace(...))` regardless of the declared role, so
+  they are scoped by the identical chokepoint as `wsCtx` — `judge/models`
+  reads no workspace-scoped rows at all, `memory/export` additionally fences
+  its `crew_id` inside the handler (`TestMemoryExport_CrossWorkspaceCrewIs404`),
+  and the two `approvals` routes read `workspaceID` from the same
+  `RequireWorkspace`-populated context. `TestReadRouteScanFindsTheRealSurface`
+  now also floors the `authedMut`-scanned count so the regex going blind
+  again fails the build.
+- **`review-status.sh` reported `reviewed` when CodeRabbit's only activity on
+  the head commit was a bodyless reply inside an existing thread, not a read
+  of the diff (#2145).** A `COMMENTED` review with an empty body was promoted
+  to `reviewed` whenever its inline comments fell inside the review's own
+  time window — but that window doesn't distinguish a NEW thread (a real
+  finding) from a REPLY inside a thread a human already started. Seen on
+  #2128: a real `CHANGES_REQUESTED` review landed on an old head, two later
+  re-review requests came back rate-limited, and CodeRabbit's only reply on
+  the new head was a reply-wrapper — yet its `commit_id` named the head, so
+  it outranked the throttle. The classifier now reads GitHub's
+  `in_reply_to_id` on each inline comment and only counts one with none set
+  — a genuinely new thread — as evidence of a read; a bodyless review whose
+  comments are all replies now classifies as `empty-review`, same as one
+  with no comments at all. A fixture reproducing #2128's exact shape
+  (`CHANGES_REQUESTED` on an old head → bodyless reply-wrapper `COMMENTED`
+  on the new head → rate-limit notices) failed on main (`reviewed`) and now
+  reports `throttled`; the #2038/#1729 fixtures this shares logic with are
+  untouched and stay green.
+- **A recent-order sort could put the earlier of two invocations first, in
+  the same second, for pipelines that had never raced a clock before
+  (#2294).** `internal/pipeline/store.go` wrote `created_at` / `updated_at` /
+  `last_invoked_at` with `time.RFC3339Nano`, which trims trailing zero
+  fractional digits — two instants in the same wall-clock second can then
+  serialise to strings of different width, and `List`'s
+  `ORDER BY COALESCE(last_invoked_at, created_at) DESC` compares them as
+  TEXT: `Z` (0x5A) sorts after `0` (0x30), so a shorter, more-trimmed string
+  can sort AFTER a longer one even though it encodes an earlier instant.
+  Pinned with a deterministic (clock-injected, not raced) test reproducing
+  the issue's own collision — `…18.1Z` (05:38:18.100000000) versus
+  `…18.10001Z` (05:38:18.100010000, 10µs later) — which failed on main for
+  both the `created_at` and `last_invoked_at` write paths.
+  `internal/pipeline` now writes every timestamp through the existing
+  `internal/tsformat` package (fixed 9-digit fraction, #990) instead of
+  `time.RFC3339Nano` directly, and a new migration
+  (`20260903190851_pipelines_timestamp_fixed_width`) pads every existing
+  `pipelines` and `pipeline_versions` row to match, so an old (trimmed) row
+  and a new (fixed-width) row compare correctly against each other.
+  `internal/pipeline/waitpoints.go` and `idempotency.go` carry the same
+  `time.RFC3339Nano` pattern under an explicit `tsformat:allow` and are left
+  alone here — see the PR for why each is judged safe on its own terms.
 - **A deploy-window blip no longer wedges the avatar-backfill latch shut for
   the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
   whenever a request 401s and `/api/auth/token/refresh` is itself
