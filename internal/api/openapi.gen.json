@@ -36558,6 +36558,14 @@
           },
           {
             "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "search",
             "required": false,
             "schema": {
@@ -62559,23 +62567,7 @@
           },
           {
             "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
             "name": "mission_type",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
             "required": false,
             "schema": {
               "type": "string"
@@ -62592,14 +62584,6 @@
           {
             "in": "query",
             "name": "project_id",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "search",
             "required": false,
             "schema": {
               "type": "string"
@@ -68408,6 +68392,14 @@
           {
             "in": "query",
             "name": "include_tasks",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
             "required": false,
             "schema": {
               "type": "string"
@@ -83361,6 +83353,14 @@
           {
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mission_id",
             "required": false,
             "schema": {
               "type": "string"
