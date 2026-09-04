@@ -122,7 +122,7 @@ export function OverviewTab({
     title: p.name ?? p.slug,
     subtitle: p.slug,
     tag: "all",
-    href: "/routines",
+    href: entityHref({ kind: "routines", crewSlug: agent.crew?.slug }),
   }))
 
   const triggerItems: DetailCellItem[] = triggers.map((t): DetailCellItem => ({
@@ -250,7 +250,7 @@ export function OverviewTab({
           filters={[{ id: "all", label: "All" }]}
           items={routineItems}
           footerLabel="Open routines"
-          footerHref="/routines"
+          footerHref={entityHref({ kind: "routines", crewSlug: agent.crew?.slug })}
         />
         <DetailCell
           order={2}
@@ -279,7 +279,7 @@ export function OverviewTab({
           ]}
           items={credItems}
           footerLabel="Open vault"
-          footerHref="/credentials"
+          footerHref={entityHref({ kind: "credentials", crewSlug: agent.crew?.slug })}
         />
       </div>
       </RowGroup>
@@ -302,6 +302,8 @@ export function OverviewTab({
           items={skillItems}
           footerLabel="Manage skills"
           footerOnClick={() => setManager("skills")}
+          extraLabel="Browse skills"
+          extraHref="/skills"
         />
         <DetailCell
           order={5}

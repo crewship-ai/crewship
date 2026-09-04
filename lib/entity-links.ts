@@ -19,6 +19,7 @@ export type EntityRef =
   | { kind: "run"; runId: string; pipelineSlug?: string }
   | { kind: "journal"; crewSlug?: string; agentSlug?: string; missionId?: string; traceId?: string }
   | { kind: "page"; slug: string }
+  | { kind: "pages"; crewSlug?: string }
   | { kind: "credential"; id: string }
   | { kind: "credentials"; crewSlug?: string }
   | { kind: "inbox"; itemId?: string; itemKind?: string; agentSlug?: string }
@@ -58,6 +59,8 @@ export function entityHref(ref: EntityRef): string {
       return withQuery("/journal", { crew_id: ref.crewSlug, agent_id: ref.agentSlug, mission_id: ref.missionId, trace_id: ref.traceId })
     case "page":
       return `/pages/${enc(ref.slug)}`
+    case "pages":
+      return withQuery("/pages", { crew: ref.crewSlug })
     case "credential":
       return withQuery("/credentials", { id: ref.id })
     case "credentials":

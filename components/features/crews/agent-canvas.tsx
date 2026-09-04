@@ -446,13 +446,9 @@ export function AgentCanvas({
             {agent.crew && (
               <>
                 {agent.role_title && <span className="opacity-40">·</span>}
-                <button
-                  type="button"
-                  onClick={() => onSelectCrew(agent.crew!.slug)}
-                  className="text-primary hover:underline"
-                >
+                <Link href={entityHref({ kind: "crew", slug: agent.crew.slug })} className="text-primary hover:underline">
                   {agent.crew.name}
-                </button>
+                </Link>
               </>
             )}
             {agent.llm_model && (

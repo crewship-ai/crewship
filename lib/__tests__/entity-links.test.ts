@@ -32,6 +32,11 @@ describe("entityHref", () => {
     expect(entityHref({ kind: "integrations" })).toBe("/integrations")
   })
 
+  it("lists pages, scoped to a crew when one is named", () => {
+    expect(entityHref({ kind: "pages", crewSlug: "ops" })).toBe("/pages?crew=ops")
+    expect(entityHref({ kind: "pages" })).toBe("/pages")
+  })
+
   it("encodes and drops empty params", () => {
     expect(entityHref({ kind: "chat", agentSlug: "a b", sessionId: "" })).toBe("/chat/a%20b")
     expect(entityHref({ kind: "journal", missionId: "m/1" })).toBe("/journal?mission_id=m%2F1")

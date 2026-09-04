@@ -14,6 +14,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { deriveCrewNeeds, withDevcontainerFeature, type CrewNeed, type NeedGap } from "./crew-needs"
 import { useProvisioningStatus, type ProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { entityHref } from "@/lib/entity-links"
+import { crewHeaderLinks } from "./crew-links"
+import Link from "next/link"
 import { CrewPrivilegedBadge } from "./crew-privileged-badge"
 import {
   CanvasShell,
@@ -353,6 +355,20 @@ export function CrewCanvas({
             <span className="text-muted-foreground-soft">·</span>
             <span className="text-xs">Created {new Date(crew.created_at).toLocaleDateString()}</span>
           </div>
+          {/* Every link the contract asks of a crew (README §5), in one row —
+              the header used to offer Files and nothing else. */}
+          <nav aria-label="Crew links" className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            {crewHeaderLinks({
+              crew,
+              agents: agentsForCrew,
+              counts: { issues: health.openIssues, credentials: integrations === null ? null : undefined },
+            }).map((l) => (
+              <Link key={l.id} href={l.href} title={l.title} className="inline-flex items-center gap-1 text-foreground/85 hover:text-primary-hover hover:underline">
+                {l.label}
+                {l.count && <span className="font-mono text-[11px] text-muted-foreground">{l.count}</span>}
+              </Link>
+            ))}
+          </nav>
           <div className="text-xs text-muted-foreground mt-1.5 flex items-center gap-3 flex-wrap">
             <span><span className="text-foreground/80">{crew._count?.agents ?? agentsForCrew.length}</span> agents</span>
             <span><span className="text-foreground/80">{crew._count?.members ?? 0}</span> member{crew._count?.members === 1 ? "" : "s"}</span>
@@ -399,6 +415,9 @@ export function CrewCanvas({
           setActivityFilter={setActivityFilter}
           onOpenFiles={onOpenFiles}
           applyAvatarStyle={applyAvatarStyle}
+          crewSlug={crew.slug}
+          onOpenRoster={() => setTab("roster")}
+          onOpenMissions={() => setTab("missions")}
         />
       )}
 

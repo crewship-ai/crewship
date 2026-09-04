@@ -5,6 +5,7 @@
 - 2026-09-03 · cluster B · `hooks/use-issue-detail.ts` — `useUrlSelection(key, { aliases })` reads an older spelling of the parameter and rewrites it on the first pick; `readUrlSelection` is the pure read. Used by `/routines` (`?routine=` → `?slug=`).
 - 2026-09-03 · cluster B · `lib/activity-url.ts` — the `/activity` URL round trip (`?run` / `?pipeline` / `?mission` / `?status` kept, `?walk=`, `?lens=`, `?entry=`); reuse `activityUrl()` when linking into a walk.
 - 2026-09-03 · cluster B · `components/features/issues/issue-runs-card.tsx` — `IssueRunsCard` + `issueRunLinks()`; the run/agent/journal/activity links of an issue in one place.
+- 2026-09-04 · cluster C · `lib/entity-links.ts` — `pages` ref (`crewSlug`) for the pages list; `components/features/crews/crew-links.ts` builds a crew's §5 link row through entityHref.
 - 2026-09-04 · cluster C · `components/ui/confirm-dialog.tsx` — `ConfirmDialog`: THE irreversible-action confirmation (what is lost / kept, optional typed name, stays open on failure). Replace every `window.confirm` with it.
 - 2026-09-03 · cluster C · `lib/entity-links.ts` — `integrations` ref (`tab`, `section`, `server`) so a crew tool can be opened where Connect lives.
 - 2026-09-03 · cluster C · `lib/entity-links.ts` — `inbox` ref takes `agentSlug` (`/inbox-v2?agent=`), the way an agent canvas hands a decision to the inbox.

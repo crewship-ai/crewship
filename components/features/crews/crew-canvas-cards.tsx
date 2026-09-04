@@ -7,12 +7,14 @@ import { cn } from "@/lib/utils"
 // HealthCard renders a labeled metric tile (optionally tinted by tone);
 // QuickAction renders a square icon-tile button.
 
-function HealthCard({ label, value, hint, tone, href }: {
+function HealthCard({ label, value, hint, tone, href, onClick }: {
   label: string
   value: string
   hint: string
   tone: "active" | "neutral" | "danger"
   href?: string
+  /** In-page destination (a tab of the same canvas) when there is no route. */
+  onClick?: () => void
 }) {
   const inner = (
     <div
@@ -20,7 +22,7 @@ function HealthCard({ label, value, hint, tone, href }: {
         "rounded-xl border bg-card p-4 transition-colors",
         tone === "danger" ? "border-destructive/30 ring-1 ring-destructive/20" :
         tone === "active" ? "border-white/10" : "border-white/8",
-        href && "hover:border-white/20",
+        (href || onClick) && "hover:border-white/20",
       )}
     >
       <div className="flex items-center justify-between mb-2">
@@ -36,7 +38,15 @@ function HealthCard({ label, value, hint, tone, href }: {
       <div className="text-[11px] text-muted-foreground">{hint}</div>
     </div>
   )
-  return href ? <Link href={href}>{inner}</Link> : inner
+  if (href) return <Link href={href}>{inner}</Link>
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className="block w-full text-left">
+        {inner}
+      </button>
+    )
+  }
+  return inner
 }
 
 

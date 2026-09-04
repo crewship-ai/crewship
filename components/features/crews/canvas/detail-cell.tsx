@@ -71,6 +71,10 @@ export interface DetailCellProps {
   footerHref?: string
   /** Used instead of `footerHref` when the destination is in-page. */
   footerOnClick?: () => void
+  /** A second, route-bound link beside the footer action — "Browse skills"
+   *  next to "Manage skills". */
+  extraLabel?: string
+  extraHref?: string
   className?: string
   /** Position in the grid — drives the entrance stagger. */
   order?: number
@@ -80,7 +84,7 @@ const ALL = (filters: DetailCellFilter[]) => filters[0]?.id ?? "all"
 
 export function DetailCell({
   title, icon, count, warn = false, filters, items, tall = false,
-  footerLabel, footerHref, footerOnClick, className, order = 0,
+  footerLabel, footerHref, footerOnClick, extraLabel, extraHref, className, order = 0,
 }: DetailCellProps) {
   const [activeFilter, setActiveFilter] = useState(() => ALL(filters))
   const [searchOpen, setSearchOpen] = useState(false)
@@ -187,6 +191,12 @@ export function DetailCell({
         {footerLabel && footerHref && (
           <Link href={footerHref} className="ml-auto inline-flex items-center gap-1 text-primary hover:underline">
             {footerLabel}
+            <ArrowUpRight className="h-3 w-3" />
+          </Link>
+        )}
+        {extraLabel && extraHref && (
+          <Link href={extraHref} className={cn("inline-flex items-center gap-1 text-primary hover:underline", !footerLabel && "ml-auto")}>
+            {extraLabel}
             <ArrowUpRight className="h-3 w-3" />
           </Link>
         )}

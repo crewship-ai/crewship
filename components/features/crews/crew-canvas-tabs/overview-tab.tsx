@@ -3,6 +3,7 @@
 import { Files, RotateCcw } from "lucide-react"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
 import { cn } from "@/lib/utils"
+import { entityHref } from "@/lib/entity-links"
 
 import { HealthCard, QuickAction } from "../crew-canvas-cards"
 import type { AgentSummary, IssuesSnapshot, MissionData } from "./types"
@@ -23,6 +24,9 @@ export interface OverviewTabProps {
   setActivityFilter: (filter: "all" | string) => void
   onOpenFiles: () => void
   applyAvatarStyle: (resetOverrides: boolean) => void
+  crewSlug: string
+  onOpenRoster: () => void
+  onOpenMissions: () => void
 }
 
 export function OverviewTab({
@@ -35,6 +39,9 @@ export function OverviewTab({
   setActivityFilter,
   onOpenFiles,
   applyAvatarStyle,
+  crewSlug,
+  onOpenRoster,
+  onOpenMissions,
 }: OverviewTabProps) {
   return (
     <div className="space-y-7">
@@ -49,6 +56,7 @@ export function OverviewTab({
               : `${health.running} running · ${agentsForCrew.length - health.running} idle`
           }
           tone={health.errored > 0 ? "danger" : health.running > 0 ? "active" : "neutral"}
+          onClick={onOpenRoster}
         />
         <HealthCard
           label="Open issues"
@@ -59,7 +67,7 @@ export function OverviewTab({
               : "loading…"
           }
           tone={(health.openIssues ?? 0) > 0 ? "active" : "neutral"}
-          href="/issues"
+          href={entityHref({ kind: "issues", crewSlug })}
         />
         <HealthCard
           label="Missions"
@@ -70,6 +78,7 @@ export function OverviewTab({
               : "no active missions"
           }
           tone={health.activeMissions > 0 ? "active" : "neutral"}
+          onClick={onOpenMissions}
         />
       </section>
 
