@@ -72,6 +72,12 @@ func printListFooter(f *cli.Formatter, meta listMeta, shown int) {
 	if shown >= meta.Total && meta.Offset == 0 {
 		return
 	}
+	// An offset past the end: nothing to number, so say where the list ends
+	// instead of "showing 501–500 of 3".
+	if shown == 0 {
+		fmt.Fprintf(f.Writer, "no rows at offset %d · the list has %d\n", meta.Offset, meta.Total)
+		return
+	}
 	next := meta.Offset + shown
 	if next < meta.Total && meta.Limit > 0 {
 		fmt.Fprintf(f.Writer, "showing %d–%d of %d · next page: --offset %d\n",
