@@ -1,5 +1,6 @@
 # Shared UI primitives — one line per change, newest first
 
+- 2026-09-04 · cluster B · `cmd/crewship/list_paging.go` — `printListFooter` says "no rows at offset N · the list has M" for an offset past the end instead of "showing 501–500 of 3" (found by cluster C on `crew list --offset 500`).
 - 2026-09-03 · cluster B · `lib/entity-links.ts` — `journal` now writes `crew_id` / `agent_id` (the keys `/journal` owns; the server resolves a slug as readily as an id) instead of `crew` / `agent`.
 - 2026-09-03 · cluster B · `hooks/use-issue-detail.ts` — `useUrlSelection(key, { aliases })` reads an older spelling of the parameter and rewrites it on the first pick; `readUrlSelection` is the pure read. Used by `/routines` (`?routine=` → `?slug=`).
 - 2026-09-03 · cluster B · `lib/activity-url.ts` — the `/activity` URL round trip (`?run` / `?pipeline` / `?mission` / `?status` kept, `?walk=`, `?lens=`, `?entry=`); reuse `activityUrl()` when linking into a walk.
