@@ -58,7 +58,11 @@ export type { ChatRow, RunRow, AgentSkillRow, AgentCredRow, PeerMessageRow } fro
 // Two entries, not six. Four of the old tabs were relations the agent merely
 // points at; they hang off the overview's reach strip now, so a reader picks
 // between "what is going on" and "how is it set up" instead of six nouns.
-type AgentTab = "overview" | "config"
+export type AgentTab = "overview" | "config"
+
+export function isAgentTab(value: unknown): value is AgentTab {
+  return value === "overview" || value === "config"
+}
 
 const TABS: Array<{ id: AgentTab; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -83,6 +87,9 @@ export interface AgentCanvasProps {
   onSelectCrew: (slug: string | null) => void
   /** Open the bottom panel pre-targeted to the Files tab. Wired by CrewsLayout. */
   onOpenFiles?: () => void
+  /** The tab the URL names (`?tab=`); changes are reported back. */
+  tab?: string | null
+  onTabChange?: (tab: AgentTab) => void
 }
 
 /**
@@ -100,6 +107,8 @@ export function AgentCanvas({
   onAgentChanged,
   onSelectCrew,
   onOpenFiles,
+  tab: tabProp,
+  onTabChange,
 }: AgentCanvasProps) {
   const router = useRouter()
   const {
@@ -119,7 +128,12 @@ export function AgentCanvas({
     detailErrorMessage: "agent detail failed",
   })
 
-  const [tab, setTab] = useState<AgentTab>("overview")
+  const [localTab, setLocalTab] = useState<AgentTab>("overview")
+  const tab: AgentTab = isAgentTab(tabProp) ? tabProp : localTab
+  const setTab = useCallback((next: AgentTab) => {
+    setLocalTab(next)
+    onTabChange?.(next)
+  }, [onTabChange])
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
   const [memoryOpen, setMemoryOpen] = useState(false)
 

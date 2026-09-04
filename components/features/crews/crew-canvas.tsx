@@ -42,7 +42,11 @@ import type {
 } from "./crew-canvas-tabs/types"
 
 
-type CrewTab = "overview" | "roster" | "missions" | "files" | "settings"
+export type CrewTab = "overview" | "roster" | "missions" | "files" | "settings"
+
+export function isCrewTab(value: unknown): value is CrewTab {
+  return value === "overview" || value === "roster" || value === "missions" || value === "files" || value === "settings"
+}
 
 const TABS: Array<{ id: CrewTab; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -63,6 +67,10 @@ export interface CrewCanvasProps {
   onOpenFiles: () => void
   /** The layout's one provisioning poller; the canvas does not start its own. */
   provisioning?: ProvisioningStatus
+  /** The tab the URL names (`?tab=`); the canvas reports changes back so a
+   *  reload lands where the person was (README §6). Uncontrolled when absent. */
+  tab?: string | null
+  onTabChange?: (tab: CrewTab) => void
 }
 
 /**
@@ -83,6 +91,8 @@ export function CrewCanvas({
   onSelectAgent,
   onOpenFiles,
   provisioning: provisioningProp,
+  tab: tabProp,
+  onTabChange,
 }: CrewCanvasProps) {
   const {
     entity: crew,
@@ -101,7 +111,12 @@ export function CrewCanvas({
     detailErrorMessage: "crew detail fetch failed",
   })
 
-  const [tab, setTab] = useState<CrewTab>("overview")
+  const [localTab, setLocalTab] = useState<CrewTab>("overview")
+  const tab: CrewTab = isCrewTab(tabProp) ? tabProp : localTab
+  const setTab = useCallback((next: CrewTab) => {
+    setLocalTab(next)
+    onTabChange?.(next)
+  }, [onTabChange])
   const [issues, setIssues] = useState<IssuesSnapshot | null>(null)
   const [recentIssues, setRecentIssues] = useState<IssueRow[]>([])
   const [integrations, setIntegrations] = useState<CrewIntegration[] | null>(null)

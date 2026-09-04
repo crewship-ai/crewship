@@ -97,6 +97,7 @@ export function BottomPanel({
   initialTab,
   initialOpen = false,
   onOpenChange,
+  onTabChange,
 }: BottomPanelProps) {
   const tabIds = tabs && tabs.length > 0 ? tabs : DEFAULT_TABS
   // Fall back to the first tab in the page's own set rather than a hardcoded
@@ -165,6 +166,7 @@ export function BottomPanel({
   const handleTab = (next: BottomTab) => {
     setTab(next)
     setOpen(true)
+    onTabChange?.(next)
   }
 
   return (

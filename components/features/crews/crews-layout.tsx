@@ -11,6 +11,7 @@ import { EmptyRoster } from "@/components/features/crews/empty-roster"
 import { BottomPanel, type BottomTab } from "@/components/features/crews/bottom-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
+import { useShallowSearchParam } from "@/hooks/use-shallow-search-param"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 
@@ -155,8 +156,23 @@ export function CrewsLayout({
 
   const [explorerCollapsed, setExplorerCollapsed] = useState(false)
   const [explorerOverlayOpen, setExplorerOverlayOpen] = useState(false)
-  const [bottomTab, setBottomTab] = useState<BottomTab>("messages")
-  const [bottomOpen, setBottomOpen] = useState(false)
+  // The URL is the state (README §6): `?tab=` names the canvas tab and
+  // `?dock=` the open dock tab, so a reload — or a link built through
+  // entityHref({kind: "crew", tab}) — lands where the person was.
+  const [tabParam, setTabParam] = useShallowSearchParam("tab")
+  const [dockParam, setDockParam] = useShallowSearchParam("dock")
+  const dockTabs: BottomTab[] = ["messages", "exec", "yaml", "docker", "files", "terminal"]
+  const [bottomTab, setBottomTab] = useState<BottomTab>(dockTabs.includes(dockParam as BottomTab) ? (dockParam as BottomTab) : "messages")
+  const [bottomOpen, setBottomOpen] = useState(dockTabs.includes(dockParam as BottomTab))
+  const onCanvasTabChange = useCallback((next: string) => setTabParam(next === "overview" ? null : next), [setTabParam])
+  const onDockOpenChange = useCallback((open: boolean) => {
+    setBottomOpen(open)
+    setDockParam(open ? bottomTab : null)
+  }, [bottomTab, setDockParam])
+  const onDockTabChange = useCallback((next: BottomTab) => {
+    setBottomTab(next)
+    setDockParam(next)
+  }, [setDockParam])
 
   useEffect(() => {
     if (isMobile) setExplorerCollapsed(true)
@@ -207,23 +223,25 @@ export function CrewsLayout({
   const handleCrewSelect = useCallback((crewId: string) => {
     const crew = crews.find((c) => c.id === crewId)
     if (!crew) return
+    setTabParam(null)
     if (selectedCrewSlug === crew.slug && !selectedAgentSlug) {
       selectCrew(null)
       return
     }
     selectCrew(crew.slug)
-  }, [crews, selectedCrewSlug, selectedAgentSlug, selectCrew])
+  }, [crews, selectedCrewSlug, selectedAgentSlug, selectCrew, setTabParam])
 
   const handleAgentSelect = useCallback((agentId: string) => {
     const agent = agents.find((a) => a.id === agentId)
     if (!agent) return
+    setTabParam(null)
     if (selectedAgentSlug === agent.slug) {
       selectAgent(null)
       return
     }
     const parentCrew = agent.crew_id ? crews.find((c) => c.id === agent.crew_id) : null
     update({ agent: agent.slug, crew: parentCrew?.slug ?? null })
-  }, [agents, crews, selectedAgentSlug, selectAgent, update])
+  }, [agents, crews, selectedAgentSlug, selectAgent, update, setTabParam])
 
   const handleAgentSelectBySlug = useCallback((slug: string) => {
     const agent = agents.find((a) => a.slug === slug)
@@ -233,7 +251,8 @@ export function CrewsLayout({
   const handleOpenFiles = useCallback(() => {
     setBottomTab("files")
     setBottomOpen(true)
-  }, [])
+    setDockParam("files")
+  }, [setDockParam])
 
   // Bottom panel context: selected agent > selected crew > none.
   // Agent context carries the parent crew's id+slug because the Terminal
@@ -369,6 +388,8 @@ export function CrewsLayout({
                   }}
                   onSelectCrew={(slug) => selectCrew(slug)}
                   onOpenFiles={handleOpenFiles}
+                  tab={tabParam}
+                  onTabChange={onCanvasTabChange}
                 />
               ) : selectedCrew ? (
                 <CrewCanvas
@@ -380,6 +401,8 @@ export function CrewsLayout({
                   onSelectAgent={handleAgentSelectBySlug}
                   onOpenFiles={handleOpenFiles}
                   provisioning={provisioning}
+                  tab={tabParam}
+                  onTabChange={onCanvasTabChange}
                 />
               ) : (
                 <EmptyRoster
@@ -399,7 +422,8 @@ export function CrewsLayout({
         context={bottomContext}
         initialTab={bottomTab}
         initialOpen={bottomOpen}
-        onOpenChange={setBottomOpen}
+        onOpenChange={onDockOpenChange}
+        onTabChange={onDockTabChange}
       />
     </div>
   )

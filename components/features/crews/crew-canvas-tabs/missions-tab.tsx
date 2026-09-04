@@ -1,6 +1,9 @@
 "use client"
 
 import Link from "next/link"
+import { StatusPill } from "@/components/ui/status-pill"
+import { entityHref } from "@/lib/entity-links"
+import { formatCrewDate } from "../crew-summary"
 import { cn } from "@/lib/utils"
 
 import type { CrewRecord, IssueRow, IssuesSnapshot, MissionData } from "./types"
@@ -25,7 +28,7 @@ export function MissionsTab({ crew, recentMissions, issues, recentIssues }: Miss
               <span className="text-muted-foreground text-sm font-normal ml-2">{recentMissions.length}</span>
             )}
           </h2>
-          <Link href="/issues" className="text-xs text-primary hover:underline">
+          <Link href={entityHref({ kind: "issues", crewSlug: crew.slug })} className="text-xs text-primary hover:underline">
             Open in /issues →
           </Link>
         </div>
@@ -41,16 +44,10 @@ export function MissionsTab({ crew, recentMissions, issues, recentIssues }: Miss
                   href={`/missions/${encodeURIComponent(m.id)}/timeline`}
                   className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-white/[0.03] transition-colors"
                 >
-                  <span className={cn(
-                    "w-1.5 h-1.5 rounded-full shrink-0",
-                    m.status === "RUNNING" ? "bg-success" : m.status === "FAILED" ? "bg-destructive" : "bg-muted-foreground",
-                  )} />
                   <span className="truncate flex-1 text-foreground/85">{m.title}</span>
-                  <span className="text-[10px] text-muted-foreground shrink-0 uppercase">
-                    {m.status?.replace(/_/g, " ").toLowerCase()}
-                  </span>
+                  <StatusPill status={m.status} live={m.status === "RUNNING"} />
                   <span className="text-[10px] text-muted-foreground shrink-0">
-                    {new Date(m.created_at).toLocaleDateString()}
+                    {formatCrewDate(m.created_at)}
                   </span>
                 </Link>
               </li>
@@ -68,7 +65,7 @@ export function MissionsTab({ crew, recentMissions, issues, recentIssues }: Miss
               <span className="text-muted-foreground text-sm font-normal ml-2 font-mono uppercase">{crew.issue_prefix}</span>
             )}
           </h2>
-          <Link href="/issues" className="text-xs text-primary hover:underline">
+          <Link href={entityHref({ kind: "issues", crewSlug: crew.slug })} className="text-xs text-primary hover:underline">
             Open in /issues →
           </Link>
         </div>

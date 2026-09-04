@@ -106,4 +106,6 @@ export interface BottomPanelProps {
   initialOpen?: boolean
   /** Notified when panel open state changes so parent can persist if desired. */
   onOpenChange?: (open: boolean) => void
+  /** Notified when the active tab changes, so the URL can carry it. */
+  onTabChange?: (tab: BottomTab) => void
 }
