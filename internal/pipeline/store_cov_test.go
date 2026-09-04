@@ -303,6 +303,102 @@ func TestStore_List_OrderAndFilterBranches(t *testing.T) {
 	}
 }
 
+// TestStore_TimestampFixedWidthSort pins #2294: time.RFC3339Nano trims
+// trailing zero fractional digits, so two instants in the SAME wall-clock
+// second can serialise to strings of different width — and
+// List(OrderByRecent)'s `ORDER BY COALESCE(last_invoked_at, created_at)
+// DESC` compares those strings lexicographically, not numerically.
+//
+// The collision is the one from the issue: 05:38:18.100000000 ("earlier")
+// trims to "…18.1Z"; 05:38:18.100010000 ("later", 10µs after it) trims to
+// "…18.10001Z". 'Z' (0x5A) sorts after '0' (0x30), so "…18.1Z" —
+// the EARLIER instant — sorts lexicographically AFTER "…18.10001Z", and
+// DESC then returns the earlier row first: exactly backwards.
+//
+// Store.now is injected rather than raced: reproducing a nanosecond-precise
+// collision by sleeping between two real time.Now() calls is not reliable
+// on any given run, and the point of this test is that the fix must hold
+// for this pattern every time it occurs, not only when a run gets lucky
+// enough to reproduce it.
+//
+// Table-driven over the two write paths the fix touches: RecordInvocation
+// (last_invoked_at) and Save/INSERT (created_at, exercised when neither row
+// has ever been invoked and List falls back to the COALESCE's second arm).
+func TestStore_TimestampFixedWidthSort(t *testing.T) {
+	base := time.Date(2026, 8, 31, 5, 38, 18, 0, time.UTC)
+	earlier := base.Add(100 * time.Millisecond)                   // trims to "…18.1Z"
+	later := base.Add(100*time.Millisecond + 10*time.Microsecond) // trims to "…18.10001Z"
+
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, store *Store, ctx context.Context)
+	}{
+		{
+			name: "created_at, via Save, never invoked",
+			setup: func(t *testing.T, store *Store, ctx context.Context) {
+				store.now = func() time.Time { return earlier }
+				if _, err := store.Save(ctx, validSaveInput("earlier")); err != nil {
+					t.Fatalf("save earlier: %v", err)
+				}
+				store.now = func() time.Time { return later }
+				if _, err := store.Save(ctx, validSaveInput("later")); err != nil {
+					t.Fatalf("save later: %v", err)
+				}
+			},
+		},
+		{
+			name: "last_invoked_at, via RecordInvocation",
+			setup: func(t *testing.T, store *Store, ctx context.Context) {
+				// Created at an ordinary time; only the invocation
+				// timestamps collide, so this exercises RecordInvocation's
+				// write in isolation from Save's.
+				store.now = time.Now
+				e, err := store.Save(ctx, validSaveInput("earlier"))
+				if err != nil {
+					t.Fatalf("save earlier: %v", err)
+				}
+				l, err := store.Save(ctx, validSaveInput("later"))
+				if err != nil {
+					t.Fatalf("save later: %v", err)
+				}
+				store.now = func() time.Time { return earlier }
+				if err := store.RecordInvocation(ctx, e.ID, "COMPLETED"); err != nil {
+					t.Fatalf("record invocation earlier: %v", err)
+				}
+				store.now = func() time.Time { return later }
+				if err := store.RecordInvocation(ctx, l.ID, "COMPLETED"); err != nil {
+					t.Fatalf("record invocation later: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openStoreTestDB(t)
+			defer db.Close()
+			store := NewStore(db)
+			ctx := context.Background()
+
+			tc.setup(t, store, ctx)
+			store.now = time.Now
+
+			got, err := store.List(ctx, ListFilters{WorkspaceID: "ws_test", OrderBy: OrderByRecent})
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			if len(got) != 2 || got[0].Slug != "later" || got[1].Slug != "earlier" {
+				slugs := make([]string, len(got))
+				for i, p := range got {
+					slugs[i] = p.Slug
+				}
+				t.Errorf("recent order = %v, want [later earlier] — the chronologically later "+
+					"invocation/save must sort first", slugs)
+			}
+		})
+	}
+}
+
 // TestStore_ClosedDB_ErrorPaths drives the wrapped-error returns of
 // the query helpers via a closed DB handle, asserting each method's
 // distinguishing error context survives the wrap.
