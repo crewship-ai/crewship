@@ -108,10 +108,13 @@ GET /api/v1/crews/{crewId}/missions?workspace_id={workspaceId}
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `status` | string | -- | Filter by status |
+| `q` | string | -- | Search title and identifier on the server (substring match) |
 | `limit` | integer | `20` | Max items (1-100) |
 | `offset` | integer | `0` | Pagination offset |
 
-**Response:** `200 OK` -- array of mission objects with `task_stats`.
+**Response:** `200 OK` -- array of mission objects with `task_stats`. The same
+`X-Total-Count`, `X-Limit` and `X-Offset` headers as the workspace list, so a
+crew-scoped page knows how many rows the crew has.
 
 ### Create Mission
 

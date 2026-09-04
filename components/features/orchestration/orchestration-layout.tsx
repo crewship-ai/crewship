@@ -233,11 +233,16 @@ export function OrchestrationLayout({
   // lead splitting a brief into five sub-issues in a few seconds fires one
   // request, not five. shouldRefetchForIssueEvent additionally skips a
   // refetch the active crew filter can already prove is off-screen.
+  // The issue list itself is paged (usePagedList, below) and no longer part
+  // of what `onRefresh` fetches, so the debounce reloads both: the shell's
+  // missions and crews, and the page of issues the board is showing.
   const issueRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fetchIssuesRef = useRef<() => void>(() => {})
   const debouncedIssueRefetch = useCallback(() => {
     if (issueRefetchTimerRef.current !== null) clearTimeout(issueRefetchTimerRef.current)
     issueRefetchTimerRef.current = setTimeout(() => {
       issueRefetchTimerRef.current = null
+      fetchIssuesRef.current()
       onRefresh()
     }, 200)
   }, [onRefresh])
@@ -396,6 +401,9 @@ export function OrchestrationLayout({
     refresh: fetchIssues,
     error: issuesError,
   } = usePagedList<Mission>({ url: issuesUrl, limit: 100 })
+  useEffect(() => {
+    fetchIssuesRef.current = () => { void fetchIssues() }
+  }, [fetchIssues])
 
   const fetchIssueLabels = useCallback(async () => {
     if (!workspaceId) return

@@ -49,8 +49,16 @@ function encodeStop(s: ActivityStop): string {
 function decodeStop(segment: string): ActivityStop | null {
   const i = segment.indexOf(":")
   if (i <= 0) return null
-  const kind = decodeURIComponent(segment.slice(0, i))
-  const id = decodeURIComponent(segment.slice(i + 1))
+  let kind: string
+  let id: string
+  try {
+    kind = decodeURIComponent(segment.slice(0, i))
+    id = decodeURIComponent(segment.slice(i + 1))
+  } catch {
+    // A hand-edited or truncated `%` sequence is not a stop; the walk simply
+    // does not include it rather than the page failing to mount.
+    return null
+  }
   if (!kind || !id) return null
   // The id is the honest label until the shell resolves a name for it.
   return { kind, id, label: id }
