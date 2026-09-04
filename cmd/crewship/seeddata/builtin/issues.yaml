@@ -1,307 +1,265 @@
+# Real-world work for a freshly seeded Crewship workspace.
+#
+# One coherent scenario: a small team preparing the public Crewship site and
+# release operations. Every issue is safe to repeat, names its evidence and
+# output, and exercises delegation, review, escalation, or a real public source.
 issues:
-    - crew_slug: engineering
-      assignee: alex
-      title: Coordinate the Harborlight launch page — delegate copy and build
-      description: |-
-        We're shipping a launch page for Harborlight, the crew's demo product
-        (a status dashboard for self-hosted services).
+  - crew_slug: engineering
+    assignee: alex
+    title: Rebuild the Crewship home page — delegate research and implementation
+    description: |-
+      Create an accessible, self-contained reference implementation of the
+      public Crewship home page at /crew/shared/site-rebuild/index.html.
 
-        Plan the work, then delegate two subtasks to your crew:
-        1. Delegate to Sam: write the launch copy — a headline, three feature
-           bullets, and a short FAQ. Save it to /crew/shared/harborlight/copy.md.
-        2. Delegate to Robin: build a single-file landing page at
-           /crew/shared/harborlight/index.html with clean semantic HTML/CSS and
-           placeholder sections for the copy.
+      Start from the live page at https://crewship.ai and coordinate the work:
+      1. Delegate to Sam: inventory the visible sections, headings, calls to
+         action, navigation targets, and page metadata. Save evidence and a
+         concise content map to /crew/shared/site-rebuild/content-audit.md.
+      2. Delegate to Robin: implement the responsive HTML/CSS using the content
+         map. No external JavaScript, trackers, fonts, or copied proprietary
+         assets; use semantic HTML and local CSS only.
 
-        When both subtasks come back, review the results, merge Sam's copy into
-        Robin's page, and post a short summary of what shipped. Everything stays
-        inside the crew workspace — no external services needed.
-      priority: high
-      project: Launch Prep
-      target_state: TODO
-    - crew_slug: engineering
-      assignee: sam
-      title: Rewrite the Harborlight README so a newcomer can follow it
-      description: |-
-        Our README grew by accretion and buries the lede. Rewrite it for clarity
-        and save the result to /crew/shared/harborlight/README.md.
+      When both assignments return, review the page at mobile and desktop
+      widths, verify keyboard navigation and heading order, and write
+      /crew/shared/site-rebuild/acceptance.md. The goal is a faithful training
+      replica, not a deployment and not a pixel-perfect copy.
+    priority: high
+    project: Website Experience
+    target_state: TODO
+    comment: >-
+      Demo path: start this issue to exercise a LEAD agent creating two
+      assignments, waiting for both results, and integrating the shared output.
 
-        Raw source to refactor (keep the facts, cut the filler):
-        ---
-        harborlight is a thing for watching your self hosted stuff, it does
-        dashboards. install: clone the repo then maybe docker compose up but you
-        might need to set PORT first (default 8321) and HL_DB_PATH if you want
-        sqlite somewhere else. there is also HL_POLL_SECONDS (default 30). auth
-        is basic auth, set HL_USER/HL_PASS or it runs open which is bad. probes:
-        http probe checks a url returns 200, tcp probe checks a port, disk probe
-        warns at 90%. alerts go to a webhook you set with HL_WEBHOOK_URL.
-        troubleshooting: if the dashboard is blank check the db path is
-        writable, if probes never fire check HL_POLL_SECONDS isnt 0.
-        ---
-        Structure it as: What it is / Quick start / Configuration (a table) /
-        Probes / Troubleshooting. Finish with a two-line summary of what you
-        changed and why.
-      priority: medium
-      project: Launch Prep
-    - crew_slug: ops
-      assignee: riley
-      title: Research and draft a competitive teardown of self-hosted agent runtimes
-      description: |-
-        Write a one-page competitive teardown at
-        /crew/shared/research/agent-runtimes-teardown.md.
+  - crew_slug: engineering
+    assignee: sam
+    title: Audit the live Crewship home page content and metadata
+    description: |-
+      Fetch https://crewship.ai with curl using a 20-second timeout and save the
+      response to /crew/shared/site-audit/home.html. Produce
+      /crew/shared/site-audit/content.md with:
+      - final URL, HTTP status, content type, title, and meta description;
+      - navigation labels and destinations;
+      - H1/H2 heading outline in document order;
+      - primary calls to action and their destinations;
+      - broken same-site links found by HEAD/GET checks.
 
-        Compare at least three self-hosted approaches to running AI agents
-        (agent frameworks, workflow orchestrators, DIY cron + scripts) on:
-        deployment model, agent persistence between tasks, scheduling and
-        automation, memory, and multi-agent coordination.
+      Keep the raw response as evidence, make no requests outside crewship.ai,
+      and report blocked or redirected URLs instead of inventing content.
+    priority: medium
+    project: Website Experience
 
-        Use web research if the container has internet access (curl works). If
-        a source is unreachable, work from what you already know and clearly
-        mark those rows as unverified — do not fabricate citations.
+  - crew_slug: engineering
+    assignee: robin
+    title: Recreate the Crewship docs landing page as an accessible static page
+    description: |-
+      Use https://docs.crewship.ai as the visual and information reference.
+      Build /crew/shared/docs-replica/index.html as one self-contained HTML file
+      with responsive CSS and no third-party assets or scripts.
 
-        Close with a comparison table and a three-sentence "so what" about
-        where a crew-based runtime stands out.
-      priority: high
-      project: Research
-      target_state: TODO
-    - crew_slug: ops
-      assignee: morgan
-      title: Draft the Harborlight incident response runbook
-      description: |-
-        Write /crew/shared/runbooks/incident-response.md for operating
-        Harborlight in production:
-        - Severity ladder (SEV1–SEV3) with one concrete example each
-        - First-15-minutes checklist
-        - Escalation and comms rules: who gets woken, what gets posted where,
-          at what cadence
-        - Rollback criteria
-        - A short postmortem template
+      Preserve the information hierarchy, search affordance, primary
+      navigation, and representative documentation cards. Do not copy logos or
+      illustrations; replace them with accessible text or CSS shapes. Include a
+      visible note that this is a training replica. Verify keyboard focus,
+      reduced-motion behaviour, colour contrast, and layouts at 390 px and
+      1440 px. Record checks in /crew/shared/docs-replica/verification.md.
+    priority: high
+    project: Website Experience
+    target_state: TODO
 
-        Keep it under two pages and checklist-heavy — it has to be usable at
-        3 a.m.
-      priority: high
-      project: Reliability
-      target_state: TODO
-    - crew_slug: engineering
-      assignee: sam
-      title: Create a directory tree with sample files
-      description: |-
-        Create the following directory structure under /tmp/demo-project/:
-          /tmp/demo-project/
-            README.md        (with project name and date)
-            src/
-              main.py        (simple hello world)
-              utils.py       (a helper function)
-            tests/
-              test_main.py   (a basic test)
-            data/
-              config.json    (sample config with 3 keys)
+  - crew_slug: engineering
+    assignee: sam
+    title: Build a deterministic parser for the Crewship release feed
+    description: |-
+      Download https://github.com/crewship-ai/crewship/releases.atom and build
+      /crew/shared/release-tools/parse_releases.py using only the Python
+      standard library. The script must accept an Atom file path and write a
+      JSON array containing the five newest entries with exactly these keys:
+      version, published_at, title, and url.
 
-        Verify all files exist and list the tree.
-      priority: high
-      project: File Operations
-    - crew_slug: engineering
-      assignee: robin
-      title: Generate a CSV report with random data
-      description: |-
-        Create a Python script that generates a CSV file with 50 rows of sample data.
-        Columns: id, name, email, score (random 0-100), status (active/inactive).
-        Save the script as /tmp/generate-data.py and run it.
-        Output CSV should be at /tmp/sample-data.csv.
-        Print the first 5 rows and a summary (total rows, average score).
-      priority: medium
-      project: File Operations
-    - crew_slug: quality
-      assignee: casey
-      title: Write a log parser that extracts errors
-      description: |-
-        Create a bash script /tmp/log-parser.sh that:
-        1. Generates a sample log file /tmp/app.log with 100 lines (mix of INFO, WARN, ERROR)
-        2. Extracts all ERROR lines into /tmp/errors.txt
-        3. Counts occurrences of each log level
-        4. Prints a summary: total lines, errors, warnings, info
+      Save one real feed response as releases.atom, run the parser twice, and
+      prove both JSON outputs are byte-identical. Handle an empty feed and
+      malformed XML with a non-zero exit and a useful stderr message. Add
+      unittest coverage and a short README with the exact commands used.
+    priority: high
+    project: Release Operations
+    target_state: TODO
 
-        Run the script and verify the output.
-      priority: medium
-      project: File Operations
-    - crew_slug: ops
-      assignee: riley
-      title: Fetch and parse the Hacker News front page
-      description: |-
-        Use curl to download https://news.ycombinator.com/ (HTML).
-        Parse the response to extract the top 10 story titles.
-        Save to /tmp/hackernews-top10.txt with format:
-          1. Story title here
-          2. Another story
-          ...
+  - crew_slug: engineering
+    assignee: robin
+    title: Build a release dashboard from the normalized Crewship feed
+    description: |-
+      Read /crew/shared/release-tools/releases.json and create
+      /crew/shared/release-dashboard/index.html: a self-contained, responsive
+      release dashboard with a latest-release summary, a searchable version
+      list, published dates, and source links.
 
-        Note: Use grep/sed/awk for parsing, no external libraries needed.
-      priority: high
-      project: Web Scraping
-    - crew_slug: ops
-      assignee: riley
-      title: Fetch current weather data from wttr.in
-      description: |-
-        Use curl to fetch weather for Prague from wttr.in:
-          curl -s "wttr.in/Prague?format=j1"
+      Render an honest empty state when the JSON contains no entries and an
+      explicit error state when it is invalid. Keep data embedded locally so
+      opening the file makes no network requests. Add a short verification
+      note covering keyboard use, 390 px layout, and malformed input.
+    priority: medium
+    project: Release Operations
 
-        Parse the JSON response and extract:
-        - Current temperature
-        - Weather description
-        - Wind speed
-        - Humidity
+  - crew_slug: quality
+    assignee: jordan
+    title: Coordinate the website release gate and issue a go or no-go verdict
+    description: |-
+      Coordinate a release-readiness review of the files under
+      /crew/shared/site-rebuild and /crew/shared/docs-replica.
 
-        Save a human-readable summary to /tmp/weather-prague.txt
-      priority: medium
-      project: Web Scraping
-    - crew_slug: ops
-      assignee: morgan
-      title: Download and analyze a public JSON API
-      description: |-
-        Fetch a list of users from https://jsonplaceholder.typicode.com/users
-        Parse the JSON and create a report /tmp/users-report.txt with:
-        - Total number of users
-        - List of all usernames and cities
-        - Users grouped by company name
+      Delegate the detailed accessibility and functional pass to Casey. Ask
+      Alex for the implementation scope and any known exceptions. Then publish
+      /crew/shared/quality/website-release-verdict.md with one unambiguous
+      verdict (GO or NO-GO), the evidence checked, blocking findings, accepted
+      risks, and the next owner for every open item. Do not mark GO without
+      executable evidence.
+    priority: high
+    project: Quality Gate
+    target_state: TODO
 
-        Use curl + python3 or jq for parsing.
-      priority: low
-      project: Web Scraping
-    - crew_slug: engineering
-      assignee: robin
-      title: Build a single-file interactive changelog page
-      description: |-
-        Create /crew/shared/harborlight/changelog.html — one self-contained
-        HTML file (inline CSS + JS, no external assets) that renders this
-        changelog data with a version filter:
+  - crew_slug: quality
+    assignee: casey
+    title: Run the acceptance suite and escalate any release-blocking decision
+    description: |-
+      Review /crew/shared/site-rebuild/index.html and
+      /crew/shared/docs-replica/index.html against this release gate:
+      semantic landmarks, one H1, logical heading order, keyboard-visible
+      controls, no mixed content, no third-party runtime requests, working
+      same-page links, and readable layouts at 390 px and 1440 px.
 
-        [{"version":"0.3.0","date":"2026-06-24","changes":["disk probe","webhook alerts"]},
-         {"version":"0.2.1","date":"2026-06-10","changes":["fix: tcp probe timeout"]},
-         {"version":"0.2.0","date":"2026-05-28","changes":["tcp probes","basic auth"]}]
+      Save reproducible checks and findings to
+      /crew/shared/quality/site-acceptance.md. If either input is missing, or a
+      finding requires accepting user-visible or security risk, call the
+      sidecar /escalate endpoint with type DECISION. State the exact choice,
+      evidence, recommended option, and a deadline; do not silently choose for
+      the human. Continue all non-blocked checks while the decision is pending.
+    priority: high
+    project: Quality Gate
+    target_state: TODO
+    comment: >-
+      Demo path: start this issue to produce a real human-decision escalation
+      in Inbox when a prerequisite or release-blocking exception is present.
 
-        Keep it clean and readable: system font stack, sensible spacing, one
-        subtle accent color. No network access needed — verify by checking the
-        file is well-formed HTML.
-      priority: medium
-      project: Launch Prep
-    - crew_slug: engineering
-      assignee: robin
-      title: Create a bash system info collector
-      description: |-
-        Write /tmp/sysinfo.sh that collects and saves to /tmp/sysinfo.txt:
-        - Hostname and OS info (uname -a)
-        - Current date and uptime
-        - Disk usage (df -h)
-        - Memory usage (free -m or /proc/meminfo)
-        - Running processes count
-        - Network interfaces and IPs
-        - Environment variables count
+  - crew_slug: quality
+    assignee: casey
+    title: Review the release-feed parser for correctness and failure handling
+    description: |-
+      Review /crew/shared/release-tools/parse_releases.py and its tests. Run it
+      against the saved real Atom feed, an empty valid feed, malformed XML, a
+      duplicate entry, and entries without optional fields.
 
-        Make it executable and run it.
-      priority: medium
-      project: Script Factory
-    - crew_slug: quality
-      assignee: casey
-      title: Write and run a simple test suite in bash
-      description: |-
-        Create /tmp/test-suite.sh — a minimal test framework in bash.
-        Define at least 5 test cases:
-        1. Test that /tmp exists and is writable
-        2. Test that curl is available
-        3. Test that python3 is available
-        4. Test that DNS resolution works (nslookup google.com)
-        5. Test that /etc/hostname is readable
+      Write /crew/shared/quality/release-parser-review.md with the command and
+      observed result for each case, findings as severity/file/line/fix, and a
+      final PASS or FAIL. Do not modify the parser during the review.
+    priority: medium
+    project: Quality Gate
 
-        Output format: [PASS] or [FAIL] for each test, with a summary at the end.
-        Run the test suite and save results to /tmp/test-results.txt
-      priority: medium
-      project: Script Factory
-    - crew_slug: quality
-      assignee: casey
-      title: Triage raw beta feedback into a prioritized fix list
-      description: |-
-        Beta feedback dump below. Turn it into /crew/shared/quality/beta-triage.md:
-        a markdown table with columns theme | severity (P0–P3) | affected area |
-        suggested owner (Sam = backend, Robin = frontend, Riley = platform),
-        followed by a "Top 3 to fix before launch" section with one-line
-        justifications.
+  - crew_slug: ops
+    assignee: morgan
+    title: Run a GitHub dependency incident drill with delegated evidence collection
+    description: |-
+      Treat GitHub as a production dependency for the release workflow. Start
+      an incident drill using the live public summary at
+      https://www.githubstatus.com/api/v2/summary.json.
 
-        Feedback:
-        - "dashboard goes blank after ~a day, have to restart the container"
-        - "love the http probes, wish alerts had a quiet-hours setting"
-        - "setup took 5 minutes, docs were fine"
-        - "basic auth popup on every page load in Safari is annoying"
-        - "disk probe fired at 90% but the box died at 92%, threshold should be configurable"
-        - "webhook alert JSON has no timestamp field??"
-        - "CPU usage creeps up over a week"
-        - "would pay for a hosted version"
-      priority: high
-      project: Launch Prep
-    - crew_slug: ops
-      assignee: casey
-      title: Map container resource limits and environment
-      description: |-
-        Collect container environment info and save to /tmp/container-info.txt:
-        - CPU count (nproc)
-        - Memory total and available (/proc/meminfo)
-        - Disk space (df -h /)
-        - Container ID (hostname or /proc/1/cgroup)
-        - User ID and groups (id)
-        - Network interfaces (ip addr or ifconfig)
-        - Mounted filesystems (mount)
-        - Key environment variables (HOME, PATH, USER)
-      priority: low
-      project: System Info
+      Delegate to Riley: collect the current component states and unresolved
+      incidents, preserve the raw JSON, and produce a timestamped evidence
+      note. Use that result to write /crew/shared/incidents/github-drill.md with
+      severity, blast radius, first safe action, update cadence, rollback or
+      pause criteria, and exit criteria. If the proposed response would pause a
+      release or change production, escalate that decision to a human; never
+      execute a production change in this drill.
+    priority: high
+    project: Reliability Operations
+    target_state: TODO
+
+  - crew_slug: ops
+    assignee: riley
+    title: Build a read-only GitHub status collector and incident snapshot
+    description: |-
+      Build /crew/shared/ops/collect_github_status.py using only Python's
+      standard library. Fetch these real public endpoints with a 20-second
+      timeout:
+      - https://www.githubstatus.com/api/v2/summary.json
+      - https://www.githubstatus.com/api/v2/incidents/unresolved.json
+
+      Save raw responses and write a deterministic status.json containing
+      checked_at, overall_indicator, affected_components, and unresolved
+      incidents. Do not fail merely because the service is degraded; fail only
+      when evidence cannot be fetched or parsed. Add fixture-based tests that
+      run without internet access and document one-shot and repeated use.
+    priority: high
+    project: Reliability Operations
+    target_state: TODO
+
+  - crew_slug: ops
+    assignee: riley
+    title: Audit security and caching headers on Crewship public properties
+    description: |-
+      Inspect response headers for https://crewship.ai and
+      https://docs.crewship.ai using curl with redirects enabled and a
+      20-second timeout. Record each redirect hop and the final values for HSTS,
+      CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy,
+      Cache-Control, ETag, and Content-Encoding.
+
+      Save raw headers and a comparison table to
+      /crew/shared/ops/public-web-headers.md. Distinguish missing headers from
+      headers that are not applicable. This is read-only observation: do not
+      scan paths, fuzz parameters, or attempt to bypass controls.
+    priority: medium
+    project: Reliability Operations
+
+  - crew_slug: ops
+    assignee: morgan
+    title: Write the release dependency runbook from live GitHub status evidence
+    description: |-
+      Use the latest files in /crew/shared/ops and the public GitHub Status API
+      to write /crew/shared/runbooks/github-release-dependency.md.
+
+      Cover detection, severity mapping, evidence capture, release-pause
+      criteria, communications cadence, human approval boundaries, recovery
+      verification, and a compact post-incident checklist. Separate observed
+      facts from assumptions and include the exact public endpoints used. Keep
+      the runbook under two pages and usable during an incident.
+    priority: medium
+    project: Reliability Operations
+
 labels:
-    - name: Network
-      color: '#3B82F6'
-    - name: Filesystem
-      color: '#22C55E'
-    - name: Scripting
-      color: '#A855F7'
-    - name: Data
-      color: '#F97316'
-    - name: Monitoring
-      color: '#EAB308'
-    - name: Web
-      color: '#06B6D4'
-    - name: Automation
-      color: '#EC4899'
-    - name: Quick
-      color: '#6B7280'
+  - name: Website
+    color: '#06B6D4'
+  - name: Release
+    color: '#8B5CF6'
+  - name: Accessibility
+    color: '#22C55E'
+  - name: Reliability
+    color: '#EF4444'
+  - name: Delegation
+    color: '#3B82F6'
+  - name: Escalation
+    color: '#F97316'
+  - name: External evidence
+    color: '#EAB308'
+  - name: Automation
+    color: '#EC4899'
+
 projects:
-    - name: Launch Prep
-      color: '#EC4899'
-      icon: rocket
-      status: in_progress
-      priority: high
-    - name: Research
-      color: '#8B5CF6'
-      icon: search
-      status: in_progress
-      priority: medium
-    - name: Reliability
-      color: '#EF4444'
-      icon: activity
-      status: in_progress
-      priority: high
-    - name: File Operations
-      color: '#22C55E'
-      icon: file-text
-      status: in_progress
-      priority: high
-    - name: Web Scraping
-      color: '#06B6D4'
-      icon: globe
-      status: in_progress
-      priority: medium
-    - name: Script Factory
-      color: '#A855F7'
-      icon: terminal
-      status: in_progress
-      priority: medium
-    - name: System Info
-      color: '#F97316'
-      icon: cpu
-      status: planned
-      priority: low
+  - name: Website Experience
+    color: '#06B6D4'
+    icon: globe
+    status: in_progress
+    priority: high
+  - name: Release Operations
+    color: '#8B5CF6'
+    icon: rocket
+    status: in_progress
+    priority: high
+  - name: Quality Gate
+    color: '#22C55E'
+    icon: shield-check
+    status: in_progress
+    priority: high
+  - name: Reliability Operations
+    color: '#EF4444'
+    icon: activity
+    status: in_progress
+    priority: high

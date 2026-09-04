@@ -1,13 +1,13 @@
-# A complete Crewship example: an hourly news routine publishes its own
-# payload onto a typed Page. No secrets live here; the agents bind the
-# workspace's existing ANTHROPIC_API_KEY credential slot.
+# A complete Crewship example: an hourly English-language brief built from a
+# real public Czech news feed and published to a typed Page. No secrets live
+# here; agents bind the workspace's existing ANTHROPIC_API_KEY slot.
 
 apiVersion: crewship/v1
 kind: Crew
 metadata:
-  name: Zpravodajský tým
+  name: Newsroom
   slug: news-crew
-  description: Hodinový přehled hlavních zpráv ze Seznam Zpráv pro Crewship Pages.
+  description: Hourly English-language brief from the public Seznam News feed.
   icon: newspaper
   color: blue
 spec:
@@ -46,7 +46,7 @@ spec:
   agents:
     - slug: news-research-lead
       name: Research Lead
-      role_title: Vedoucí zpravodajského týmu
+      role_title: Newsroom Lead
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm: { provider: ANTHROPIC, model: claude-sonnet-5 }
@@ -54,13 +54,13 @@ spec:
       memory_enabled: true
       env_refs: [ANTHROPIC_API_KEY]
       prompt: |
-        Jsi vedoucí Crewship crew pro zpravodajský přehled. Hlídáš přesnost,
-        původ informací a kvalitu výstupu. Nevymýšlej fakta mimo dodaný zdroj,
-        vždy rozlišuj titulek od interpretace a pracuj výhradně v češtině.
+        You lead the news brief. Protect source fidelity and clearly separate a
+        feed headline from interpretation. Use only facts present in the
+        supplied source and write in English.
 
     - slug: news-data-collector
       name: Data Collector
-      role_title: Sběrač zpráv
+      role_title: Feed Collector
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm: { provider: ANTHROPIC, model: claude-sonnet-5 }
@@ -68,13 +68,13 @@ spec:
       memory_enabled: true
       env_refs: [ANTHROPIC_API_KEY]
       prompt: |
-        Jsi specialista na přesný výběr z RSS/XML zdrojů. Vypisuj pouze položky,
-        které jsou skutečně v dodaném feedu. Zachovej přesný titulek a URL,
-        odstraň technická XML pole a duplicity. Odpovídej česky.
+        Extract only entries present in the supplied RSS/XML feed. Preserve
+        exact source titles and URLs, remove technical XML fields and
+        duplicates, and write in English.
 
     - slug: news-analyst
       name: Analyst
-      role_title: Analytik hlavních zpráv
+      role_title: News Analyst
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm: { provider: ANTHROPIC, model: claude-haiku-4-5 }
@@ -82,13 +82,13 @@ spec:
       memory_enabled: true
       env_refs: [ANTHROPIC_API_KEY]
       prompt: |
-        Jsi editor hlavních zpráv. Z dodaného seznamu vyber nejvýše deset
-        nejdůležitějších a různorodých témat. Nepřidávej fakta, která ve vstupu
-        nejsou, a transparentně zachovej odkazy na zdroj. Odpovídej česky.
+        Select at most ten important, diverse topics from the supplied entries.
+        Add no facts absent from the input and preserve source links. Write in
+        English.
 
     - slug: news-report-writer
       name: Report Writer
-      role_title: Autor přehledu
+      role_title: Brief Writer
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm: { provider: ANTHROPIC, model: claude-haiku-4-5 }
@@ -96,22 +96,22 @@ spec:
       memory_enabled: true
       env_refs: [ANTHROPIC_API_KEY]
       prompt: |
-        Převádíš ověřený výběr zpráv do stručného českého přehledu pro Crewship
-        Page. Každá položka musí mít titulek a jednu větu. URL ve výstupu
-        neuváděj: narrative.v1 je z bezpečnostních důvodů nepovoluje. Nepiš
-        úvodní konverzační fráze ani závěrečné nabídky další pomoci.
+        Turn the verified selection into a concise English Crewship Page brief.
+        Give every item a title and one sentence. Do not include URLs because
+        narrative.v1 rejects them. Avoid conversational openings and offers of
+        further help.
 
 ---
 apiVersion: crewship/v1
 kind: Routine
 metadata:
-  name: Hlavní zprávy ze Seznamu
-  slug: seznam-hlavni-zpravy
+  name: Seznam News Brief
+  slug: seznam-news-brief
   labels:
     crew: news-crew
 spec:
   dsl_version: "1.0"
-  description: Každou hodinu načte RSS Seznam Zpráv a publikuje český přehled na Page.
+  description: Fetch the Seznam News RSS feed hourly and publish a source-grounded English brief.
   estimated_cost_usd: 0.06
   estimated_duration_seconds: 240
   max_cost_usd: 0.25
@@ -141,11 +141,11 @@ spec:
       agent_slug: news-analyst
       needs: [collect]
       prompt: |
-        Vyber z následujících položek nejvýše šest hlavních zpráv. Omez
-        duplicity stejného tématu a zachovej titulek i URL každé vybrané
-        položky. Výstup bude podkladem pro hodinový přehled.
+        Select at most six important stories from the entries below. Avoid
+        duplicate topics and preserve the title and URL of every selected
+        entry. Use only the supplied feed.
 
-        Kandidáti:
+        Candidates:
         {{ steps.collect.output }}
 
     - id: write
@@ -153,12 +153,12 @@ spec:
       agent_slug: news-report-writer
       needs: [select]
       prompt: |
-        Vytvoř stručný český přehled pro Page. Začni řádkem
-        "Aktualizováno: právě teď". Potom pro každou zprávu napiš číslovanou
-        položku s titulkem a jednou stručnou větou. URL do výstupu neuváděj.
-        Použij pouze dodaný výběr. Celý výstup musí mít nejvýše 1800 znaků.
+        Create a concise English Page brief. Start with "Updated: just now".
+        Then write one numbered item per story with its title and one short
+        sentence. Do not include URLs. Use only the supplied selection and keep
+        the complete output under 1,800 characters.
 
-        Výběr:
+        Selection:
         {{ steps.select.output }}
 
     - id: limit
@@ -174,10 +174,10 @@ spec:
       action: page.write
       needs: [limit]
       args:
-        page: seznam-hlavni-zpravy
-        panel: prehled
+        page: seznam-news-brief
+        panel: brief
         data:
-          verdict: Hlavní zprávy ze Seznamu
+          verdict: Seznam News Brief
           blocks:
             - kind: paragraph
               text: "{{ steps.limit.output }}"
@@ -192,16 +192,16 @@ spec:
 apiVersion: crewship/v1
 kind: Page
 metadata:
-  name: Hlavní zprávy ze Seznamu
-  slug: seznam-hlavni-zpravy
-  description: Automaticky aktualizovaný hodinový přehled hlavních zpráv.
+  name: Seznam News Brief
+  slug: seznam-news-brief
+  description: Automatically refreshed, source-grounded hourly news brief.
 spec:
   panels:
-    - id: prehled
+    - id: brief
       schema: narrative.v1
-      title: Aktuální hlavní zprávy
+      title: Current top stories
       icon: alert
       owner: crew/news-crew
-      producer: routine/seznam-hlavni-zpravy
+      producer: routine/seznam-news-brief
       sla: 2h
       span: 12

@@ -44,6 +44,7 @@ func init() {
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
 	seedCmd.Flags().Bool("yes", false, "Skip the --nuke confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug.")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
+	seedCmd.Flags().Bool("with-evals", false, "Also seed model-regression routines (kept out of the normal product demo)")
 	seedCmd.Flags().String("password", "", "Admin password for bootstrap (defaults to devDefaultPassword)")
 	seedCmd.Flags().Bool("smoke-test", false, "After seeding, send a test prompt to each agent to verify end-to-end")
 	seedCmd.Flags().Int("smoke-timeout", 60, "Per-agent timeout (seconds) for smoke test")
@@ -144,6 +145,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
+	withEvals, _ := cmd.Flags().GetBool("with-evals")
 	password, _ := cmd.Flags().GetString("password")
 	smokeTest, _ := cmd.Flags().GetBool("smoke-test")
 	smokeTimeout, _ := cmd.Flags().GetInt("smoke-timeout")
@@ -314,7 +316,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := seedRoutines(ctx, client, crewIDs); err != nil {
+	if err := seedRoutines(ctx, client, crewIDs, withEvals); err != nil {
 		fmt.Fprintf(os.Stderr, "Routine seeding hit an error (continuing): %v\n", err)
 	}
 

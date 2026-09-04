@@ -190,6 +190,45 @@ func TestSeedShowcase_LeadDelegationIssue(t *testing.T) {
 	}
 }
 
+// A normal worker must demonstrate the agent-to-human decision path. This is
+// separate from lead delegation: the useful product story is that autonomy
+// stops at an explicit risk boundary and creates an actionable Inbox item.
+func TestSeedShowcase_WorkerDecisionEscalationIssue(t *testing.T) {
+	roles := map[string]string{}
+	for _, agent := range seeddata.Agents {
+		roles[agent.Slug] = agent.AgentRole
+	}
+	for _, issue := range seeddata.Issues {
+		body := strings.ToLower(issue.Description)
+		if roles[issue.Assignee] == "AGENT" && strings.Contains(body, "/escalate") && strings.Contains(body, "decision") {
+			return
+		}
+	}
+	t.Fatal("no seeded worker issue exercises a DECISION escalation through /escalate")
+}
+
+func TestSeedShowcase_UsesRealPublicSources(t *testing.T) {
+	var joined strings.Builder
+	for _, issue := range seeddata.Issues {
+		joined.WriteString(issue.Description)
+		joined.WriteByte('\n')
+	}
+	text := joined.String()
+	for _, want := range []string{"https://crewship.ai", "https://docs.crewship.ai", "https://www.githubstatus.com"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("seed issues do not exercise real public source %s", want)
+		}
+	}
+}
+
+func TestSeedShowcase_DefaultRoutinesExcludeEvalFixtures(t *testing.T) {
+	for _, routine := range seeddata.Routines {
+		if strings.HasPrefix(routine.Slug, "eval-") {
+			t.Errorf("default routine catalogue contains eval fixture %q; evals must be opt-in", routine.Slug)
+		}
+	}
+}
+
 // The retired network-busywork issues must stay retired.
 func TestSeedShowcase_BusyworkIssuesRetired(t *testing.T) {
 	retired := []string{

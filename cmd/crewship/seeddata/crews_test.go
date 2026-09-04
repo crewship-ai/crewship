@@ -115,14 +115,14 @@ func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
 
 // TestSeedCrewsAllowDomainsTheirDemoContentNeeds guards against #1200: seeded
 // crews default to network_mode=restricted with an empty allowed_domains, but
-// the seed also ships demo content that needs real internet access — OPS
-// issues fetching Hacker News / wttr.in / a public JSON API, and the
-// engineering/ops "httpbin.org" routines. Without an explicit allowlist entry
-// per host, that demo content fails 100% of the time out of the box.
+// the seed also ships demo content that needs real internet access — the
+// public Crewship website/docs, its GitHub release feed, and GitHub Status.
+// Without an explicit allowlist entry per host, that content fails 100% of the
+// time out of the box. httpbin.org remains for opt-in trajectory evals.
 func TestSeedCrewsAllowDomainsTheirDemoContentNeeds(t *testing.T) {
 	required := map[string][]string{
-		"engineering": {"httpbin.org"},                                                                    // fetch-and-extract routine
-		"ops":         {"httpbin.org", "news.ycombinator.com", "wttr.in", "jsonplaceholder.typicode.com"}, // feed-watch-probe/feed-change-report + OPS-3/4/5 issues
+		"engineering": {"crewship.ai", "docs.crewship.ai", "github.com"},
+		"ops":         {"httpbin.org", "www.githubstatus.com", "crewship.ai", "docs.crewship.ai"},
 	}
 	bySlug := map[string]CrewDef{}
 	for _, c := range Crews {

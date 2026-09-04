@@ -199,10 +199,13 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 		sourceKey, targetKey, rtype string
 	}
 	rels := []relDef{
-		{"Triage raw beta feedback into a prioritized fix list", "Coordinate the Harborlight launch page — delegate copy and build", "blocks"},
-		{"Rewrite the Harborlight README so a newcomer can follow it", "Coordinate the Harborlight launch page — delegate copy and build", "relates_to"},
-		{"Build a single-file interactive changelog page", "Coordinate the Harborlight launch page — delegate copy and build", "relates_to"},
-		{"Draft the Harborlight incident response runbook", "Map container resource limits and environment", "relates_to"},
+		{"Audit the live Crewship home page content and metadata", "Rebuild the Crewship home page — delegate research and implementation", "relates_to"},
+		{"Recreate the Crewship docs landing page as an accessible static page", "Rebuild the Crewship home page — delegate research and implementation", "relates_to"},
+		{"Build a deterministic parser for the Crewship release feed", "Build a release dashboard from the normalized Crewship feed", "blocks"},
+		{"Run the acceptance suite and escalate any release-blocking decision", "Coordinate the website release gate and issue a go or no-go verdict", "blocks"},
+		{"Review the release-feed parser for correctness and failure handling", "Build a deterministic parser for the Crewship release feed", "relates_to"},
+		{"Build a read-only GitHub status collector and incident snapshot", "Run a GitHub dependency incident drill with delegated evidence collection", "relates_to"},
+		{"Run a GitHub dependency incident drill with delegated evidence collection", "Write the release dependency runbook from live GitHub status evidence", "relates_to"},
 	}
 	for _, rd := range rels {
 		if err := ctx.Err(); err != nil {

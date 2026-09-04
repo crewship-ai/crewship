@@ -1488,7 +1488,10 @@ crewship routine schedules update <schedule_id> --no-wake
 
 This gives schedules a cost ladder: **agentless schedule** (always free) → **wake-gated schedule** (probe free, LLM only on signal) → **plain schedule** (today's default, unchanged).
 
-A freshly-seeded workspace ships the routines for this pattern unscheduled: `feed-watch-probe` (agentless) and `feed-change-report` (agent routine). Wire them together yourself to see it work:
+A freshly-seeded workspace ships this pattern against the real public GitHub
+Status unresolved-incidents feed: `feed-watch-probe` is agentless and
+`feed-change-report` is the agent-written incident brief. They remain
+unscheduled until you wire them together:
 
 ```bash
 crewship routine schedules create --slug feed-change-report \
@@ -1496,7 +1499,9 @@ crewship routine schedules create --slug feed-change-report \
     --wake-slug feed-watch-probe
 ```
 
-Point the probe's `url`/`expected_items` inputs at your own endpoint to make it real.
+The default baseline is zero unresolved incidents. To use another provider,
+change both routines' `url`, update the probe's transform for that response
+shape, and add the hostname to each routine's `egress_targets`.
 
 Semantics worth knowing:
 

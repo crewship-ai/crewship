@@ -1,6 +1,6 @@
 ---
 title: "Seed"
-description: "Provision a complete demo workspace — crews, agents, credentials, integrations, routines, and sample issues — through the REST API."
+description: "Provision a coherent release-operations demo — crews, agents, credentials, routines, Pages, and executable issues — through the REST API."
 icon: "leaf"
 stability: experimental
 tag: Experimental
@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship seed
 
-Replaces the old `prisma/seed.ts` script. Creates a full demo environment — admin user, workspace, four connected crews, agents with system prompts, credentials, integrations, routines, schedules, and sample issues — entirely through the REST API so business logic (validation, encryption, audit logging) is exercised end-to-end.
+Replaces the old `prisma/seed.ts` script. Creates a release-operations demo environment — admin user, workspace, connected crews, agents with system prompts, credentials, integrations, focused routines, Pages, and executable issues — entirely through the REST API so business logic (validation, encryption, audit logging) is exercised end-to-end. The default content uses real read-only public sources (`crewship.ai`, `docs.crewship.ai`, the Crewship GitHub release feed, and GitHub Status) and keeps synthetic model-regression routines out of the normal product demo.
 
 ```bash
 crewship seed [flags]
@@ -23,6 +23,7 @@ On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself.
 | `--nuke` | `false` | Delete all workspace contents before seeding. Runs *after* auth, so a missing/invalid token won't wipe the wrong workspace. **Prompts for confirmation** — see below. |
 | `--yes` | `false` | Skip the `--nuke` confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug; a non-interactive session refuses to nuke unless `--yes` is set. |
 | `--skip-issues` | `false` | Skip the issue/project/label phase. Useful when you only need crews + agents and want a faster seed. |
+| `--with-evals` | `false` | Also install the synthetic model-regression routine catalogue. Intended for eval development, not the normal product demo. |
 | `--password <pw>` | `password123` | Admin password used by bootstrap. The default is the dev convention `password123` — override in any non-local environment. |
 | `--smoke-test` | `false` | After seeding, send a test prompt to each agent to verify end-to-end execution. Implies `--wait-provision`. |
 | `--smoke-timeout <s>` | `60` | Per-agent timeout (seconds) for the smoke test. |
