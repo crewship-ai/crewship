@@ -140,6 +140,64 @@ func TestAcceptance_IssueRuns_ListsEveryAttributedRun(t *testing.T) {
 	}
 }
 
+// issueRunsFixtureWithAttribution mirrors issueRunDTO's #2313 addition:
+// mission_id and source (task | mention | delegation), one row per
+// attribution path.
+const issueRunsFixtureWithAttribution = `[
+  {"id":"asg_delegation_1","status":"completed","agent_name":"Riley","task":"delegation-hop: fix retry backoff",
+   "started_at":"2026-08-31T10:00:00Z","ended_at":"2026-08-31T10:05:00Z","duration_ms":300000,
+   "result_summary":"Backoff fixed via delegated hop","mission_id":"mission_1","source":"delegation"},
+  {"id":"asg_mention_1","status":"completed","agent_name":"Casey","task":"mention-dispatch: check token expiry",
+   "started_at":"2026-08-31T09:00:00Z","ended_at":"2026-08-31T09:02:00Z","duration_ms":120000,
+   "result_summary":"Investigated via @mention dispatch","mission_id":"mission_1","source":"mention"},
+  {"id":"asg_missiontask_1","status":"completed","agent_name":"Jordan","task":"mission-task: refresh token handling",
+   "started_at":"2026-08-30T09:10:00Z","ended_at":"2026-08-30T09:20:00Z","duration_ms":600000,
+   "result_summary":"Done via mission task","mission_id":"mission_1","source":"task"}
+]`
+
+// TestAcceptance_IssueRuns_JSON_ShowsMissionIDAndSource is the #2313-item-3
+// regression: ListRuns has always carried mission_id and source, but the
+// CLI's own `runs` struct (issueRunsCmd) stopped at status/agent_name/task/
+// started_at/duration_ms and silently dropped both — a client watching the
+// runs via the CLI could not tell WHY a run was attributed to the issue.
+func TestAcceptance_IssueRuns_JSON_ShowsMissionIDAndSource(t *testing.T) {
+	stub := &issueRunsStub{runsStatus: http.StatusOK, runsBody: issueRunsFixtureWithAttribution}
+	srv := stub.start(t)
+
+	out, err := runIssueRunsCLI(t, srv.URL, "issue", "runs", "BE-42", "--format", "json")
+	if err != nil {
+		t.Fatalf("issue runs: %v\noutput: %s", err, out)
+	}
+
+	for _, want := range []string{`"mission_id": "mission_1"`, `"source": "delegation"`, `"source": "mention"`, `"source": "task"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("json output missing %s:\n%s", want, out)
+		}
+	}
+}
+
+// TestAcceptance_IssueRuns_Table_HasSourceColumn is the table half of the
+// same regression: the dashboard-parity table (AGENT/TASK/STATUS/STARTED/
+// DURATION/RESULT) never surfaced attribution at all.
+func TestAcceptance_IssueRuns_Table_HasSourceColumn(t *testing.T) {
+	stub := &issueRunsStub{runsStatus: http.StatusOK, runsBody: issueRunsFixtureWithAttribution}
+	srv := stub.start(t)
+
+	out, err := runIssueRunsCLI(t, srv.URL, "issue", "runs", "BE-42")
+	if err != nil {
+		t.Fatalf("issue runs: %v\noutput: %s", err, out)
+	}
+
+	if !strings.Contains(out, "SOURCE") {
+		t.Errorf("table output missing a SOURCE column header:\n%s", out)
+	}
+	for _, want := range []string{"delegation", "mention", "task"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table output missing source value %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestAcceptance_IssueRuns_NonOKReportedAsError(t *testing.T) {
 	stub := &issueRunsStub{runsStatus: http.StatusInternalServerError, runsBody: `{"error":"boom"}`}
 	srv := stub.start(t)

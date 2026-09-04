@@ -30,14 +30,41 @@ var issueCommentCmd = &cobra.Command{
 		if body == "" && len(args) > 1 {
 			body = strings.Join(args[1:], " ")
 		}
-		if body == "" {
-			return fmt.Errorf("comment body is required (pass as arguments or use --body)")
+		mentionSlugs, _ := cmd.Flags().GetStringArray("mention")
+		if body == "" && len(mentionSlugs) == 0 {
+			return fmt.Errorf("comment body is required (pass as arguments, --body, or --mention)")
 		}
 
 		client := newAPIClient()
 		issue, err := fetchIssue(client, args[0])
 		if err != nil {
 			return err
+		}
+
+		// The server only recognises a mention written as the Markdown link
+		// [@<slug>](crewship:agent/<agentId>) — internal/mentions parses the
+		// comment as CommonMark and reads only real link nodes, so a bare
+		// "@slug" typed into the body is never a mention, just text. Resolve
+		// each --mention slug to its agent id (resolveAgentID: the same
+		// slug-or-CUID scan every other agent-slug flag uses, so an unknown
+		// slug fails with the same "Did you mean" / "Available" hints) and
+		// prepend one link per mention, space-separated, before the user's
+		// own text.
+		if len(mentionSlugs) > 0 {
+			links := make([]string, 0, len(mentionSlugs))
+			for _, raw := range mentionSlugs {
+				slug := strings.TrimPrefix(raw, "@")
+				agentID, err := resolveAgentID(client, slug)
+				if err != nil {
+					return err
+				}
+				links = append(links, fmt.Sprintf("[@%s](crewship:agent/%s)", slug, agentID))
+			}
+			if body == "" {
+				body = strings.Join(links, " ")
+			} else {
+				body = strings.Join(links, " ") + " " + body
+			}
 		}
 
 		identifier := derefStr(issue.Identifier, issue.ID)
