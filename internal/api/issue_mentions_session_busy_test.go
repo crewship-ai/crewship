@@ -117,56 +117,68 @@ func TestMentions_FollowUpDuringActiveSessionIsQueuedNotClaimedByTheRunInFlight(
 		t.Fatalf("assignments for this mission = %d, want 1 (\"one run\")", runCount)
 	}
 
+	// Read every delivery keyed by its OWN dispatch_state rather than by
+	// row order: both comments mention the same single target, so each is
+	// the FIRST (and only) resolved mention in its own comment and gets
+	// position=0 independently — ORDER BY position, created_at has no
+	// tiebreaker precise enough (SQLite's datetime('now') is second-
+	// resolution) to guarantee which row a plain slice index lands on
+	// (review finding). dispatch_state itself is the unique, meaningful
+	// key here: exactly one row is 'dispatched' and exactly one is
+	// 'queued', and that is exactly the distinction under test.
 	rows, err := f.db.Query(`
-		SELECT id, dispatch_state, state, COALESCE(claimed_by_run_id,'')
-		  FROM mission_comment_mentions WHERE mission_id = ? ORDER BY position, created_at`, f.missionID)
+		SELECT dispatch_state, state, COALESCE(claimed_by_run_id,'')
+		  FROM mission_comment_mentions WHERE mission_id = ?`, f.missionID)
 	if err != nil {
 		t.Fatalf("query deliveries: %v", err)
 	}
 	defer rows.Close()
-	type row struct{ id, dispatchState, state, claimedBy string }
-	var got []row
+	type row struct{ state, claimedBy string }
+	byDispatchState := map[string]row{}
 	for rows.Next() {
+		var dispatchState string
 		var r row
-		if err := rows.Scan(&r.id, &r.dispatchState, &r.state, &r.claimedBy); err != nil {
+		if err := rows.Scan(&dispatchState, &r.state, &r.claimedBy); err != nil {
 			t.Fatalf("scan delivery: %v", err)
 		}
-		got = append(got, r)
+		if _, dup := byDispatchState[dispatchState]; dup {
+			t.Fatalf("more than one delivery with dispatch_state=%q — expected exactly one of each", dispatchState)
+		}
+		byDispatchState[dispatchState] = r
 	}
-	if len(got) != 2 {
-		t.Fatalf("mission_comment_mentions rows = %d, want 2 (one per comment)", len(got))
-	}
-
-	// The first delivery is the fresh dispatch: claimed by the run that IS
-	// processing it, dispatch_state 'dispatched'.
-	if got[0].dispatchState != mentionDispatchDispatched {
-		t.Errorf("first delivery dispatch_state = %q, want %q", got[0].dispatchState, mentionDispatchDispatched)
-	}
-	if got[0].state != "claimed" {
-		t.Errorf("first delivery state = %q, want claimed (the run it belongs to has not finished)", got[0].state)
-	}
-	if got[0].claimedBy != activeRunID {
-		t.Errorf("first delivery claimed_by_run_id = %q, want %q", got[0].claimedBy, activeRunID)
+	if len(byDispatchState) != 2 {
+		t.Fatalf("mission_comment_mentions rows = %d, want 2 (one per comment)", len(byDispatchState))
 	}
 
-	// The second is B3's queued outcome — dispatch_state distinguishes it
-	// from the first (mentionDispatchQueued, not mentionDispatchDispatched,
-	// so an operator can tell "folded in" apart from "started a new run"),
-	// but critically it is back at 'pending', NOT 'claimed' under
-	// activeRunID: that run cannot see this comment (see the file doc
-	// comment for why), so nothing may mark it consumed on that run's
+	// The first comment is the fresh dispatch: claimed by the run that IS
+	// processing it.
+	dispatched, ok := byDispatchState[mentionDispatchDispatched]
+	if !ok {
+		t.Fatalf("no delivery with dispatch_state=%q", mentionDispatchDispatched)
+	}
+	if dispatched.state != "claimed" {
+		t.Errorf("dispatched delivery state = %q, want claimed (the run it belongs to has not finished)", dispatched.state)
+	}
+	if dispatched.claimedBy != activeRunID {
+		t.Errorf("dispatched delivery claimed_by_run_id = %q, want %q", dispatched.claimedBy, activeRunID)
+	}
+
+	// The second is B3's queued outcome — back at 'pending', NOT 'claimed'
+	// under activeRunID: that run cannot see this comment (see the file
+	// doc comment for why), so nothing may mark it consumed on that run's
 	// account. dispatchQueuedFollowUpsForSession (assignments_run.go) is
 	// what actually claims and consumes it, once a run that CAN see the
 	// text is dispatched — proven end to end in
 	// issue_session_followups_test.go, not here.
-	if got[1].dispatchState != mentionDispatchQueued {
-		t.Errorf("second delivery dispatch_state = %q, want %q", got[1].dispatchState, mentionDispatchQueued)
+	queued, ok := byDispatchState[mentionDispatchQueued]
+	if !ok {
+		t.Fatalf("no delivery with dispatch_state=%q", mentionDispatchQueued)
 	}
-	if got[1].state != "pending" {
-		t.Errorf("second delivery state = %q, want pending — it must not be claimed by a run that cannot see it", got[1].state)
+	if queued.state != "pending" {
+		t.Errorf("queued delivery state = %q, want pending — it must not be claimed by a run that cannot see it", queued.state)
 	}
-	if got[1].claimedBy != "" {
-		t.Errorf("second delivery claimed_by_run_id = %q, want empty", got[1].claimedBy)
+	if queued.claimedBy != "" {
+		t.Errorf("queued delivery claimed_by_run_id = %q, want empty", queued.claimedBy)
 	}
 
 	// The winner's own delivery still consumes normally once it finishes —
