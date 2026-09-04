@@ -220,3 +220,54 @@ func TestInternalIssue_CreateComment_NotFound(t *testing.T) {
 		t.Errorf("status = %d, want 404", rr.Code)
 	}
 }
+
+func TestInternalIssue_ListComments(t *testing.T) {
+	h, wsID, crewID, leadID, _ := newInternalIssueHandler(t)
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
+
+	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","agent_id":"agent-worker","body":"first"}`)
+	req := httptest.NewRequest("POST", "/", body)
+	req.SetPathValue("identifier", "ENG-1")
+	rr := httptest.NewRecorder()
+	h.CreateComment(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("seed comment: status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	listReq := httptest.NewRequest("GET", "/api/v1/internal/issues/ENG-1/comments?workspace_id="+wsID, nil)
+	listReq.SetPathValue("identifier", "ENG-1")
+	listRR := httptest.NewRecorder()
+	h.ListComments(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", listRR.Code, listRR.Body.String())
+	}
+	var got []commentResponse
+	if err := json.Unmarshal(listRR.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 1 || got[0].Body != "first" {
+		t.Fatalf("got %+v, want one comment with body \"first\"", got)
+	}
+}
+
+func TestInternalIssue_ListComments_MissingWorkspaceID(t *testing.T) {
+	h, _, _, _, _ := newInternalIssueHandler(t)
+	req := httptest.NewRequest("GET", "/api/v1/internal/issues/ENG-1/comments", nil)
+	req.SetPathValue("identifier", "ENG-1")
+	rr := httptest.NewRecorder()
+	h.ListComments(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+func TestInternalIssue_ListComments_NotFound(t *testing.T) {
+	h, wsID, _, _, _ := newInternalIssueHandler(t)
+	req := httptest.NewRequest("GET", "/api/v1/internal/issues/MISS/comments?workspace_id="+wsID, nil)
+	req.SetPathValue("identifier", "MISS")
+	rr := httptest.NewRecorder()
+	h.ListComments(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rr.Code)
+	}
+}

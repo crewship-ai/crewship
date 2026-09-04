@@ -78,12 +78,18 @@ type contextPackEvent struct {
 // insertCappedAssignment need (§11.4's per-run metrics, and the cursor
 // advance).
 type contextPack struct {
-	// Text is empty when there is nothing to assemble (no session — flag
-	// off, or resolve failed) — DispatchMention appends nothing in that
-	// case, which is also the historical (pre-B5) behavior.
+	// Text carries at least the issue snapshot (§11.1 item 2) whenever the
+	// mission resolves, regardless of whether a session exists yet — a
+	// first-ever mention gets a snapshot-only pack, not no pack at all.
+	// Empty only when the mission itself could not be read (a lookup
+	// failure DispatchMention already logs separately).
 	Text string
-	// Compaction is "" (nothing assembled), "fit", "summarized" or
-	// "truncated" — assignments.context_pack_compaction's own vocabulary.
+	// Compaction answers "what did the unread-delta rendering do", not
+	// "was any pack text produced" — "" when no session exists yet (there
+	// was no delta to compact anything at all), "fit"/"summarized"/
+	// "truncated" once one does, even when the delta itself was empty (0
+	// unread events is a trivial 'fit', not "").
+	// assignments.context_pack_compaction's own vocabulary.
 	Compaction string
 	// TokensEstimate is tokenutil.EstimateTokens(Text) — §11.4 row 3.
 	TokensEstimate int
@@ -286,7 +292,7 @@ func renderCheckpoint(cp orchestrator.CheckpointData) string {
 // contiguous prefix.
 func renderUnreadDelta(ctx context.Context, db *sql.DB, missionID string, lastConsumedSeq int) (text, compaction string, eventCount, dropped, upToSeq int, err error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT a.seq, a.actor_type,
+		SELECT a.seq,
 		       CASE
 		         WHEN a.actor_type = 'user'  THEN COALESCE((SELECT full_name FROM users  WHERE id = a.actor_id), a.actor_id)
 		         WHEN a.actor_type = 'agent' THEN COALESCE((SELECT name      FROM agents WHERE id = a.actor_id), a.actor_id)
@@ -305,10 +311,7 @@ func renderUnreadDelta(ctx context.Context, db *sql.DB, missionID string, lastCo
 	var events []contextPackEvent
 	for rows.Next() {
 		var e contextPackEvent
-		if err := rows.Scan(&e.Seq, &e.Actor, new(string), &e.Action, &e.Detail); err != nil {
-			// actor_type is scanned into a throwaway: the rendered actor
-			// column above already folds type+name into one string via the
-			// CASE, so the raw type is not needed a second time here.
+		if err := rows.Scan(&e.Seq, &e.Actor, &e.Action, &e.Detail); err != nil {
 			return "", "", 0, 0, lastConsumedSeq, err
 		}
 		events = append(events, e)

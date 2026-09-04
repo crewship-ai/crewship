@@ -285,6 +285,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   B3 follow-up run `delegation` instead of `mention` — it only ever
   touched `mission_comment_mentions.claimed_by_run_id`, never
   `.assignment_id` (#2344).
+- **An agent that wakes on an issue gets a bounded context pack instead of nothing, and can finally read the comment thread it was woken for (#TBD).**
+  `agent_session_checkpoints` (PRD-ISSUES-AND-ROUTINES-2026 §9.5, work
+  package B5) is the structured `done`/`plan`/`facts`/`blockers`/`next_step`/
+  `confidence` state a session-bearing run reports at the end of every run
+  (enforced the way HANDOFF is enforced, with `parsed=false` recorded rather
+  than guessed when a run does not comply); `GET .../sessions/{sessionId}/checkpoints`
+  and `crewship issue checkpoints <identifier> [--agent]` read it back. Every
+  session-bearing dispatch now assembles a §11.1 context pack — the issue
+  snapshot, the session's latest checkpoint, and the `mission_activity` delta
+  since `last_consumed_seq` (oldest-first, `#seq · actor · kind · text`) — and
+  appends it to the run's brief inside the same `<untrusted>` fence (and
+  Lookout injection scan) an ordinary mention comment already gets, closing
+  F40 for stored content replayed into a later wake. The delta degrades to a
+  terser one-line-per-event render rather than being silently dropped when it
+  overflows its ~1200-token budget, and the path actually taken (`fit`/
+  `summarized`/`truncated`) is recorded on the run
+  (`assignments.context_pack_compaction`/`context_pack_tokens`) instead of
+  only a journal entry, closing F14 for this new pack the same way. The
+  session's `last_consumed_seq` only ever advances over the CONTIGUOUS range
+  actually shown, never past a dropped event — a pack whose backlog is 200
+  events is the same bounded size as one with 5, not 40x larger. The sidecar
+  gains its missing comment-READ verb, `GET /issue/{id}/comments`, fenced the
+  same way `GET /issue/{id}` already is. Mid-run delivery of a follow-up
+  through the steering queue (F3) is out of scope for this package and is
+  tracked separately as B3b (#2350).
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,

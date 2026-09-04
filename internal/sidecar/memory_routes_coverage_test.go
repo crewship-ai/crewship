@@ -72,6 +72,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"GET /issue/":           guardHandlerIdentity,
 	"PATCH /issue/":         guardHandlerIdentity,
 	"POST /issue/ /comment": guardHandlerIdentity,
+	"GET /issue/ /comments": guardHandlerIdentity,
 	"POST /issue/ /link":    guardHandlerIdentity,
 	// Attachments (#1768 item 7). The READ arms are guardHandlerIdentity for
 	// the same reason the rest of the issue reads are, and one more besides:

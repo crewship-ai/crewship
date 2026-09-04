@@ -18,10 +18,16 @@
 -- unstructured entries, not by a query CI or an operator can point a
 -- threshold at.
 --
--- Nullable, no default: NULL means no context pack was assembled for this
--- run (the issue_agent_sessions flag was off, or this run predates B5) —
--- deliberately distinct from 'fit', which means a pack WAS assembled and
--- fit inside budget without any compaction decision at all.
+-- Nullable, no default: NULL means no SESSION existed for this dispatch yet
+-- (the issue_agent_sessions flag was off, this run predates B5, or this is
+-- the very first mention on this (issue, agent) pair) — so there was no
+-- checkpoint/delta compaction decision to make at all. The issue-snapshot
+-- section of the pack (§11.1 item 2) is still assembled and appended to the
+-- brief in that case; this column specifically answers "what did the
+-- unread-delta rendering do", not "was any pack text produced" — which is
+-- also why 0 unread events (a session that exists but has nothing new) is
+-- 'fit', not NULL: the compaction QUESTION was asked and answered trivially,
+-- it just had nothing to compact.
 ALTER TABLE assignments ADD COLUMN context_pack_compaction TEXT
     CHECK (context_pack_compaction IS NULL OR context_pack_compaction IN ('fit', 'summarized', 'truncated'));
 
