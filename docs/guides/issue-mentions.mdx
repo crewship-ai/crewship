@@ -119,15 +119,26 @@ be recorded never turns a posted comment into an error.
    no notification, no run. A mention of an agent in a *different* workspace is
    a probe, not a typo, and is treated the same way.
 
-3. **The resolved set is stored** in `mission_comment_mentions`, one row per
-   (comment, agent), so nothing ever re-parses a comment on read. Naming the
-   same agent three times in one comment is one row, one activity entry and one
-   run. The row also records what the trigger did — `dispatched`, `refused`
-   (a limit said no, with the refusal verbatim), `skipped`, or `failed` — so a
+3. **A `mentioned` activity is written** to the issue's History first, with
+   the agent id in `details` — this is what everything below references.
+
+4. **A delivery is recorded and acknowledged.** The resolved set is stored in
+   `mission_comment_mentions`, one row per (event, agent), so nothing ever
+   re-parses a comment on read. Naming the same agent three times in one
+   comment is still one row, one activity entry and one run — the same
+   guarantee as before, now held by the delivery's own key rather than the
+   comment's. The moment this row is written, the server pushes
+   `issue.delivery.acked` on the issue's workspace channel — **before any
+   model call happens.** That is what lets the UI show "received" the instant
+   you post, rather than only once the agent's own reply appears. The row
+   also records what the dispatch trigger did — `dispatched`, `refused` (a
+   limit said no, with the refusal verbatim), `skipped`, or `failed` — so a
    mention that did not wake its agent is answerable rather than mysterious.
 
-4. **A `mentioned` activity is written** to the issue's History, with the agent
-   id in `details`.
+   A duplicate delivery of the same event — a redelivered event after a
+   server restart, for instance — is collapsed to the row above rather than
+   starting a second run: only the first delivery to claim the row is
+   dispatched.
 
 5. **The agent is dispatched**, through the same endpoint an agent-to-agent
    assignment goes through. It inherits that endpoint's authorization and its
@@ -169,13 +180,17 @@ Two more rules the dispatch inherits from the assign path:
 
 Written down on purpose (they are release conditions, not footnotes):
 
-- **A busy agent is woken later, not interrupted.** An agent can have one live
-  run at a time. Mentioning it while it is running — on this issue or any
-  other — queues the mention behind the live run; it is dispatched when that
-  run ends, with the brief it would have had. The mention never reaches the
-  turn already in progress. Before this, a second run for the same agent
-  killed the first one mid-turn; queueing is the fix, steering a live turn is
-  future work.
+- **A busy agent is woken later, not interrupted — but you are told either
+  way.** An agent can have one live run at a time. Mentioning it while it is
+  running — on this issue or any other — queues the mention behind the live
+  run; it is dispatched when that run ends, with the brief it would have had.
+  The mention never reaches the turn already in progress. Before this, a
+  second run for the same agent killed the first one mid-turn; queueing is
+  the fix, steering a live turn is future work. What changed: the delivery is
+  now recorded and acknowledged (`issue.delivery.acked`) the instant you
+  post, whether or not the agent is free — a busy agent still finishes its
+  current turn first, but you no longer have to guess whether the comment
+  was even received while you wait for it.
 - **A chat message to an agent busy on an issue bounces.** The chat reports
   `agent_busy` rather than starting a second run into the same container.
   Wait for the run to finish, or watch it from the issue.

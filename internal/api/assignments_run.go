@@ -1189,6 +1189,21 @@ func (h *AssignmentHandler) finishAssignment(
 		return false
 	}
 
+	// Consume every delivery this run claimed (§9.3/§10.2, work package B2,
+	// #2337) — "did a run consume this" is a fact about whether the run's
+	// turn PROCESSED the delivery, not about whether it succeeded, so this
+	// runs for every terminal status (COMPLETED, FAILED, CANCELLED) rather
+	// than only on success. Placed right after the terminal CAS is won: this
+	// is the one place an assignment's outcome is decided, and a delivery
+	// left 'claimed' forever is exactly the gap intent.go's F37 comment on
+	// mission_comment_mentions names as needing B4's lease sweep to close —
+	// this closes the ordinary (non-crash) case without waiting for it.
+	if n, err := consumeDeliveriesForRun(ctx, h.db, assignmentID); err != nil {
+		h.logger.Warn("consume deliveries for run", "error", err, "assignment_id", assignmentID)
+	} else if n > 0 {
+		h.logger.Info("deliveries consumed", "assignment_id", assignmentID, "count", n)
+	}
+
 	// Emit the terminal run.* journal entry — the source of truth post
 	// Phase J. trace_id == runID joins it with the run.started entry.
 	if runID != "" {
