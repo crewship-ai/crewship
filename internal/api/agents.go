@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
@@ -336,18 +335,3 @@ type agentResponse struct {
 
 // List returns all non-deleted agents in the workspace with their crew and count metadata.
 // GET /api/v1/agents
-
-func parseListPagination(r *http.Request, defaultLimit, maxLimit int) (int, int) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if limit <= 0 {
-		limit = defaultLimit
-	}
-	if limit > maxLimit {
-		limit = maxLimit
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	return limit, offset
-}
