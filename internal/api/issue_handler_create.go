@@ -325,7 +325,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// an open browser tab could see.
 	h.logActivity(r.Context(), id, "user", callerID, "created", req.Title)
 
-	h.broadcastIssueEvent(wsID, "issue.created", map[string]string{"id": id})
+	h.broadcastIssueEvent(wsID, "issue.created", map[string]string{"id": id, "crew_id": crewID})
 
 	writeJSON(w, http.StatusCreated, resp)
 }

@@ -85,6 +85,12 @@ export function OrchestrationPageShell({ mode }: { mode: OrchestrationMode }) {
 
   useRealtimeEvent("task.updated", handleTaskUpdate)
   useRealtimeEvent("mission.updated", useCallback(() => fetchData(), [fetchData]))
+  // #2257: a dropped socket must not leave a permanently wrong board. The
+  // per-event issue.* subscriptions live in OrchestrationLayout (where the
+  // crew filter needed to skip an off-screen refetch is in scope) — this
+  // one catches everything a gap in the connection may have missed,
+  // regardless of what changed while it was down.
+  useRealtimeEvent("realtime.reconnected", useCallback(() => fetchData(), [fetchData]))
 
   if (loading || wsLoading) {
     return (

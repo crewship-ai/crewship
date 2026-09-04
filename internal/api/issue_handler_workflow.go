@@ -66,6 +66,12 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Captured before either branch mutates the row, so the broadcast below
+	// can report the transition's origin — the SELECT above only proved
+	// REVIEW-or-IN_PROGRESS, and by the time of the broadcast the row itself
+	// already reads the new status.
+	fromStatus := status
+	var toStatus string
 
 	if req.Action == "approve" {
 		// REVIEW → DONE
@@ -76,6 +82,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			internalError(w, r, h.logger, "review: approve", err)
 			return
 		}
+		toStatus = "DONE"
 
 		// Add comment
 		commentBody := "Approved"
@@ -132,6 +139,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			internalError(w, r, h.logger, "review: request_changes", err)
 			return
 		}
+		toStatus = "TODO"
 
 		// Add comment
 		commentBody := "Changes requested"
@@ -145,6 +153,10 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
+	h.broadcastIssueEvent(wsID, "issue.status_changed", map[string]string{
+		"id": missionID, "identifier": ident, "crew_id": crewID,
+		"status": toStatus, "from": fromStatus, "to": toStatus,
+	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": req.Action})
 }
@@ -451,6 +463,10 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident, "status": "CANCELLED"})
+	h.broadcastIssueEvent(wsID, "issue.status_changed", map[string]string{
+		"id": missionID, "identifier": ident, "crew_id": crewID,
+		"status": "CANCELLED", "from": status, "to": "CANCELLED",
+	})
 
 	// F4.5 mission outcomes → crew memory. CANCELLED maps to neutral.
 	emitMissionOutcomeLessonAsync(r.Context(), h.db, h.storagePath, missionID, "CANCELLED", h.logger)

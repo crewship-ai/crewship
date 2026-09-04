@@ -730,6 +730,33 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   (`crewship crew update <crew> --issue-prefix ""`) — and the panel now
   sends it too. The field's 5-character cap and hint text are also raised to
   the API's actual limit (`^[A-Za-z0-9_-]{1,16}$`, since #2035).
+- **The issues board now moves on its own instead of only on a manual
+  reload (#2257).** Every status-transition endpoint — the human and agent
+  PATCH, and the review-approve/request-changes/stop workflow actions — now
+  broadcasts a dedicated `issue.status_changed` event (`{id, identifier,
+  crew_id, status, from, to}`) alongside the existing `issue.updated`, and
+  `issue.created`/`issue.deleted` now carry `crew_id` too. The `/issues`
+  board (`OrchestrationLayout`) subscribes to the full issue.* event set for
+  the first time and reconciles rather than trusts: a change to the crew
+  currently in view triggers a debounced refetch, a change the active crew
+  filter can prove is off-screen is skipped, and a socket reconnect always
+  refetches so a dropped connection can't leave the board permanently wrong.
+  The decision logic is `components/features/orchestration/issue-realtime.ts`,
+  unit-tested independently of the component.
+- **The realtime allowlist stopped silently dropping most of the documented
+  event vocabulary (#2125).** `hooks/use-realtime.tsx`'s
+  `VALID_REALTIME_TYPES` had drifted from `docs/api-reference/websocket.mdx`
+  — 40 workspace-channel event types the server already emits (projects,
+  milestones, integrations, feature flags, triage rules, recurring issues,
+  the escalation terminal states, and more) were silently discarded by
+  `handleMessage`, with no error and no log. All of them are now
+  registered, a Vitest parity gate
+  (`hooks/__tests__/realtime-allowlist-docs-parity.test.ts`) reads the
+  documented vocabulary straight off that doc page and fails if the
+  allowlist ever misses one again, and a dropped frame now logs a
+  `console.warn` once per type (not per frame) instead of vanishing. No new
+  subscribers were added for the 40 types — registering them is the durable
+  half of the fix; wiring a consumer per surface is separate, future work.
 - **A run is now attributable to the issue that caused it, including
   delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither
