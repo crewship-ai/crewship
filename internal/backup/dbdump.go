@@ -174,6 +174,12 @@ var BackupTables = []string{
 	"agent_config_history",
 	"agent_runs",
 	"checkpoints",
+	// issue_agent_sessions (§9.2, B1 — #2332) must land here: it FKs into
+	// missions and agents (both already dumped above), and "assignments"
+	// right below FKs INTO IT (session_id, ON DELETE SET NULL) — the
+	// child-before-its-own-parent-arrives shape #2260's fix (remap.go's
+	// forkRegeneratedColumns doc) exists to prevent.
+	"issue_agent_sessions",
 	"assignments",
 	"approvals_queue",
 	"pipelines",
@@ -424,6 +430,23 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "pipeline_routine_state":
 		// No workspace_id column — scoped via its routine (pipeline).
 		return "pipeline_id IN (SELECT id FROM pipelines WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "mission_activity":
+		// mission_activity DOES have a workspace_id column now
+		// (20260904095700_mission_activity_widen.sql, §9.1, B1 — #2332), so
+		// without this case the generic `default` branch below would use it
+		// directly — and that column is nullable, backfilled once at
+		// migration time from missions.workspace_id, with no constraint
+		// that keeps it in sync forever after. Relying on it here would
+		// make backup coverage of a whole issue's timeline depend on every
+		// present and future writer populating it correctly: a single
+		// writer that forgot (or a row from before the backfill ran) would
+		// silently vanish from every bundle — the exact "we forgot to back
+		// up a new table" failure mode §16.1 exists to catch, just at the
+		// column level instead of the table level. mission_id is, and
+		// always has been, NOT NULL — the transitive join through missions
+		// stays the scoping source of truth for this table regardless of
+		// what the denormalized column says.
+		return "mission_id IN (SELECT id FROM missions WHERE workspace_id = ?)", []any{workspaceID}, true
 	default:
 		// Generic case: table has a workspace_id column.
 		return "workspace_id = ?", []any{workspaceID}, false

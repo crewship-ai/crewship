@@ -57,6 +57,12 @@ var (
 	assignmentStatusSet  = []string{"pending", "queued", "running", "completed", "failed", "cancelled", "other"}
 	pipelineRunStatusSet = []string{"queued", "running", "completed", "failed", "cancelled", "dry_run", "interrupted", "other"}
 	runEventSet          = []string{"started", "completed", "failed", "cancelled", "timeout"}
+	// issueAgentSessionStateSet mirrors issue_agent_sessions.state's CHECK
+	// constraint (20260904095702_issue_agent_sessions.sql, §10.1). B1 only
+	// ever writes 'pending' — the other states are B2/B4 transitions — but
+	// the set is declared complete now so the metric never needs a second
+	// migration-adjacent change when those land.
+	issueAgentSessionStateSet = []string{"pending", "active", "awaiting_input", "idle", "error", "stale", "closed", "other"}
 )
 
 // domainMetricsCache memoizes the rendered text block. Zero value is
@@ -156,6 +162,7 @@ func foldStatus(set []string, raw string) string {
 // series — a broken query must not take the whole scrape down.
 func (s *Server) collectDomainMetrics(ctx context.Context, b *strings.Builder, hostname string) {
 	s.collectAssignmentMetrics(ctx, b, hostname)
+	s.collectIssueAgentSessionMetrics(ctx, b, hostname)
 	s.collectQueueMetrics(ctx, b, hostname)
 	s.collectPipelineRunMetrics(ctx, b, hostname)
 	s.collectRunEventMetrics(ctx, b, hostname)
@@ -189,6 +196,37 @@ func (s *Server) collectAssignmentMetrics(ctx context.Context, b *strings.Builde
 	writePromMetric(b, "crewshipd_assignments",
 		"Assignments currently in each status", "gauge", hostname,
 		statusSamples(assignmentStatusSet, "status", counts))
+}
+
+// collectIssueAgentSessionMetrics is the §16.1 integration-checklist metric
+// for issue_agent_sessions (§9.2, work package B1 — #2332): "Add metrics ...
+// The SLO is unmeasurable" otherwise. Same shape as collectAssignmentMetrics
+// — one gauge, one GROUP BY, a closed zero-filled label set.
+func (s *Server) collectIssueAgentSessionMetrics(ctx context.Context, b *strings.Builder, hostname string) {
+	counts := map[string]float64{}
+	if s.db != nil {
+		rows, err := s.db.QueryContext(ctx, `SELECT state, COUNT(*) FROM issue_agent_sessions GROUP BY state`)
+		if err != nil {
+			s.logger.Warn("metrics: issue agent sessions count failed", "error", err)
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var state string
+				var n float64
+				if err := rows.Scan(&state, &n); err != nil {
+					s.logger.Warn("metrics: issue agent sessions scan failed", "error", err)
+					break
+				}
+				counts[foldStatus(issueAgentSessionStateSet, state)] += n
+			}
+			if err := rows.Err(); err != nil {
+				s.logger.Warn("metrics: issue agent sessions rows failed", "error", err)
+			}
+		}
+	}
+	writePromMetric(b, "crewshipd_issue_agent_sessions",
+		"Issue agent sessions currently in each state", "gauge", hostname,
+		statusSamples(issueAgentSessionStateSet, "state", counts))
 }
 
 func (s *Server) collectQueueMetrics(ctx context.Context, b *strings.Builder, hostname string) {
