@@ -43,7 +43,7 @@ failures use the status codes listed in each operation's error table.
 | DELETE | [`/api/v1/admin/backups`](#delete-apiv1adminbackups) | Delete a bundle from disk |
 
 <Note>
-  Path-based endpoints (`inspect`, `verify`, `download`, `restore`, `delete`) validate that the supplied path lives under `~/.crewship/backups` and belongs to the caller's workspace. **Symlinks are explicitly rejected during path validation** — no escape via `ln -s` to read files outside the backup directory. Paths from other workspaces return `404 Not Found` rather than `403`, so the endpoint does not confirm existence of bundles outside the caller's scope.
+  Path-based endpoints (`inspect`, `verify`, `download`, `restore`, `delete`) validate that the supplied path lives under the server's default backups directory (`$CREWSHIP_DATA_DIR/backups`, or `~/.crewship/backups` if unset) and belongs to the caller's workspace. **Symlinks are explicitly rejected during path validation** — no escape via `ln -s` to read files outside the backup directory. Paths from other workspaces return `404 Not Found` rather than `403`, so the endpoint does not confirm existence of bundles outside the caller's scope.
 </Note>
 
 ## Create and list
@@ -76,7 +76,7 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 | `passphrase` | string | AGE passphrase. Exactly one of `passphrase` / `recipient` / `no_encrypt` must be supplied. |
 | `recipient` | string | AGE X25519 public key (`age1…`). Parsed with `age.ParseX25519Recipient`. |
 | `no_encrypt` | bool | Plaintext payload. Use for test / CI only. |
-| `output_dir` | string | Optional override. Must resolve under `~/.crewship/backups`; symlinks rejected. |
+| `output_dir` | string | Optional override. Must resolve under the default backups directory (`$CREWSHIP_DATA_DIR/backups`, or `~/.crewship/backups` if unset); symlinks rejected. |
 
 ### Response — `201 Created`
 
@@ -119,7 +119,7 @@ Audit action: `backup.create`.
 
 ### GET /api/v1/admin/backups
 
-List bundles from `~/.crewship/backups` filtered to the caller's workspace (bundles of other workspaces are hidden from the response).
+List bundles from the default backups directory (`$CREWSHIP_DATA_DIR/backups`, or `~/.crewship/backups` if unset) filtered to the caller's workspace (bundles of other workspaces are hidden from the response).
 
 ### Response — `200 OK`
 
@@ -245,7 +245,7 @@ The request has no body. **Response:** `200 OK` with the manifest JSON.
 
 | Parameter | Required | Notes |
 |---|---|---|
-| `path` | ✓ | Absolute path. Must live under `~/.crewship/backups` and belong to the caller's workspace. |
+| `path` | ✓ | Absolute path. Must live under the default backups directory (`$CREWSHIP_DATA_DIR/backups`, or `~/.crewship/backups` if unset) and belong to the caller's workspace. |
 
 ### Response — `200 OK`
 
@@ -430,7 +430,7 @@ missing or unsafe `path`, `404` indicates a bundle outside the workspace, and
 
 | Parameter | Required | Notes |
 |---|---|---|
-| `path` | ✓ | Absolute path. Must live under `~/.crewship/backups` and belong to the caller's workspace. |
+| `path` | ✓ | Absolute path. Must live under the default backups directory (`$CREWSHIP_DATA_DIR/backups`, or `~/.crewship/backups` if unset) and belong to the caller's workspace. |
 
 Audit action: `backup.delete`.
 

@@ -1664,8 +1664,11 @@ func TestValidateSuggestion(t *testing.T) {
 	good := AISuggestResponse{
 		CrewName: "X", CrewSlug: "x",
 		Agents: []AISuggestedAgent{
-			{Name: "L", Slug: "l", AgentRole: "LEAD", SystemPrompt: "lead"},
-			{Name: "A", Slug: "a", AgentRole: "AGENT", SystemPrompt: "agent"},
+			// Names/slugs must clear agents_create.go's 2-byte minimum
+			// (#2204) — "L"/"A" no longer pass validateSuggestion, since
+			// POST /api/v1/agents never accepted them either.
+			{Name: "Lead", Slug: "lead", AgentRole: "LEAD", SystemPrompt: "lead"},
+			{Name: "Agent", Slug: "agent", AgentRole: "AGENT", SystemPrompt: "agent"},
 		},
 	}
 	if err := validateSuggestion(&good); err != nil {

@@ -47,6 +47,34 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   every non-terminal assignment, and the queued row is recorded `CANCELLED`
   without ever starting its exec.
 
+- **Erasing a user left them named on four Pages tables (#1976).** The
+  Article 17 cascade transferred the subject's pages and stopped, so
+  `page_versions.author_user_id`, `page_grants.granted_by_user_id`,
+  `page_public_tokens.created_by_user_id` and
+  `page_webhooks.created_by_user_id` still carried the name of a person whose
+  SAR ticket had been closed as "erased" — and the public links and inbound
+  webhook tokens they had issued were still live. Every one of those columns
+  already declares what should become of it when the human goes away (three
+  `ON DELETE CASCADE`, one `SET NULL`), and none of them ever fired, because a
+  workspace-scoped erasure deliberately never deletes the `users` row. The
+  cascade now runs those declared actions itself, inside the erased workspace
+  only: the page version keeps its history and loses its author, while the
+  grants (including grants naming the subject), public `/p/{token}` links and
+  webhook tokens are revoked by removal and stop working at once. The receipt
+  and the `gdpr_actions` audit row gained a count per table with the verb in
+  the key (`page_versions_anonymised`, `page_grants_removed`,
+  `page_public_tokens_revoked`, `page_webhooks_revoked`); an anonymised row is
+  not counted in `rows_deleted`, because nothing was deleted. Each revocation
+  also writes the same journal entry the ordinary revoke path writes, so the
+  operator can still see *which* page a crew lost access to and *which*
+  integration the erasure just broke — carrying `fire_count` and
+  `last_seen_at` with it, since the row that held them is gone, and
+  deliberately never writing the subject's own id into a table the erasure
+  cannot reach. `docs/security/gdpr.mdx` now states the contract the erasure
+  keeps, and — equally important for anyone answering a strict RTBF request —
+  the three kinds of row that still name the subject afterwards, plus the
+  longer tail tracked in #2308.
+
 - **The 1.0 known limits are written down where users read (#2299).** The
   issue-mentions, routines and issue-detail guides now say plainly what Track
   A deliberately left for 1.1: a busy agent is woken after its live run rather
@@ -807,6 +835,82 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `internal/pipeline/waitpoints.go` and `idempotency.go` carry the same
   `time.RFC3339Nano` pattern under an explicit `tsformat:allow` and are left
   alone here — see the PR for why each is judged safe on its own terms.
+- **`GET /api/v1/oauth/callback` answers its error branches with
+  `application/json`, matching what the spec has always declared (#2102).**
+  Every error branch used raw `http.Error`, which writes
+  `text/plain; charset=utf-8`; the generated OpenAPI document declares
+  `application/json` for every non-2xx response on every route (#1919), on
+  the grounds that both error helpers route through `writeJSON` — `Callback`
+  reached for neither, so it was the API contract gate's one remaining
+  "Undocumented Content-Type" finding. All nine error branches now go
+  through `replyError`, the same helper the sibling `Initiate`/`Exchange`
+  handlers in the file already use; the success branch's deliberate
+  `text/html` (a browser following the OAuth redirect) is untouched.
+- **`crew-ai-suggest` no longer hands back agent names or slugs
+  `POST /api/v1/agents` refuses (#2204).** Follow-up to #2197/#2200:
+  `validateSuggestion` gave `agent_role` a post-condition — every value an
+  accepted suggestion carries is a literal the create endpoint accepts —
+  but never extended it to name or slug. A suggestion like
+  `{"name":"Q",…}` passed validation and the wizard's very next call died
+  with `400 name must be 2-100 characters`; `slugify` never capped its
+  output either, so a long, space-free name could derive a slug over the
+  50-byte cap. Both bounds are now checked against the same
+  `agentNameMinLen`/`agentNameMaxLen`/`agentSlugMinLen`/`agentSlugMaxLen`
+  constants `agents_create.go` enforces (agents.go now defines them once,
+  shared by both call sites) rather than restated numbers, so the two
+  cannot drift.
+- **`crewship backup` defaults its bundle directory under the instance's own
+  data dir, not a home directory shared by every instance on the host
+  (#2262).** `backup create`/`verify`/`inspect`/`restore` resolved their
+  default location as `Home()+".crewship/backups"` regardless of
+  `CREWSHIP_DATA_DIR`, the env var every other piece of per-instance state
+  (`DATABASE_URL`, `CREWSHIP_BOLT_PATH`, `CREWSHIP_SOCKET_PATH`, storage)
+  already honours. Several isolated instances run by the same user on one
+  host — three dev clones, any number of ephemeral test instances — shared
+  one bundle directory, and a `restore` that picked up another instance's
+  bundle by name landed foreign data into a live database. The default now
+  resolves under `$CREWSHIP_DATA_DIR/backups` when the env var is set,
+  falling back to `~/.crewship/backups` only when it is not; `--output` /
+  `output_dir` still override it explicitly.
+- **A fetch failure on the issues board now renders as an error, and the
+  board says when it's showing a partial page (#2286).** `fetchIssues` used
+  to be `try { if (res.ok) setIssues(...) } catch {}` — any non-2xx response
+  or thrown fetch left `issues` exactly where it was (`[]` on first load),
+  indistinguishable from a genuinely empty workspace. The fetch now lives in
+  `hooks/use-issues-list.ts`, which always resolves to loading, a typed
+  `error`, or populated `issues`; the board renders a dedicated error panel
+  with a retry action instead of going blank. Separately, the board fetched
+  at most 100 rows with no total exposed anywhere, so a 101st issue was
+  silently invisible — `GET /api/v1/issues` now reports the filtered total
+  and whether the page was partial via `X-Total-Count`/`X-Has-More` response
+  headers (the JSON body is unchanged, so no existing client breaks), and
+  the board shows "Showing N of TOTAL issues" with a "Load more" action.
+  `crewship issue list` prints the same footer and gains `--offset` to page
+  past `--limit`.
+- **A 403 on the issues board's request is now reported as a specific,
+  actionable error instead of a request that took the whole board down
+  looking indistinguishable from empty (#2285).** Observed on dev1: a
+  transient 403 — the shape a scoped agent/CLI token failure takes
+  (`AuthKindCLIToken`, `internal/api/middleware.go`, documented as the
+  credential "an agent, CI job, or script holds") — silently emptied the
+  board. `useIssuesList` classifies a 403 separately from a 401/5xx/network
+  failure and names the likely cause (a scoped token, possibly transient)
+  in the error message, with a retry action, rather than rendering an empty
+  board that looks like a workspace with no issues.
+- **A live issue.created/issue.status_changed/etc. event still never
+  repainted the issues board — completing #2257's client half (#2257,
+  #2310).** #2310 registered the board's issue.* realtime subscriptions for
+  the first time, but wired the debounced refetch to `onRefresh`
+  (`OrchestrationPageShell.fetchData` — missions/crews/agents/connections),
+  never to the board's own separate `issues` state
+  (`useIssuesList`/`fetchIssues`, #2285/#2286 above). So the subscription
+  fired, Graph/Timeline data moved, and the issues board itself stayed
+  stale until a manual reload — exactly the symptom #2257 shipped to fix.
+  The wiring is now `hooks/use-issue-board-realtime.ts`, unit-testable
+  without mounting `OrchestrationLayout`: it calls both `fetchIssues` (the
+  board's pagination-preserving refetch) and `onRefresh` (still needed for
+  Graph/Timeline/Activity), debounced together, and also refreshes issues
+  on `realtime.reconnected` — which had the identical gap.
 - **A deploy-window blip no longer wedges the avatar-backfill latch shut for
   the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
   whenever a request 401s and `/api/auth/token/refresh` is itself
@@ -867,6 +971,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `console.warn` once per type (not per frame) instead of vanishing. No new
   subscribers were added for the 40 types — registering them is the durable
   half of the fix; wiring a consumer per surface is separate, future work.
+- **Routine runs now reach `GET /api/v1/runs` and the Runs view (#2284).**
+  The endpoint aggregated `journal_entries` under `trace_id IS NOT NULL AND
+  entry_type LIKE 'run.%'` — a filter a routine run's `pipeline.run.*`
+  entries structurally could never match, since `internal/pipeline/journal.go`
+  stamps `actor_id` to the run's own id and never sets `trace_id` at all
+  (#2291 made the Runs view's header stop overclaiming this; this is the read
+  fix behind it). `journal.ListRuns` and `journal.GetRunByID` now group on
+  `COALESCE(trace_id, actor_id)`, admitting `pipeline.run.*` rows alongside
+  `run.*` ones, and tag every row `kind: "agent" | "pipeline"` so a caller
+  can tell the two apart — `crewship run list` shows a KIND column. A
+  cancelled routine run (which reuses `pipeline.run.failed` — there is no
+  dedicated `pipeline.run.cancelled` entry type) reports `CANCELLED`, not
+  `FAILED`. Deliberately not widened: `GET /api/v1/runs/insights` and the
+  `stats` tile embedded in `GET /api/v1/runs` itself still aggregate ad-hoc
+  runs only — unifying cost roll-ups and correlation across the two engines
+  is a separate decision this PR did not make.
 - **A run is now attributable to the issue that caused it, including
   delegation hops and mention dispatches (#2279).** `assignments.mission_id`
   is the direct link between a run and the issue it belongs to, but neither

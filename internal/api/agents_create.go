@@ -5,6 +5,7 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -110,12 +111,12 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" || len(req.Name) < 2 || len(req.Name) > 100 {
-		replyError(w, http.StatusBadRequest, "name must be 2-100 characters")
+	if req.Name == "" || len(req.Name) < agentNameMinLen || len(req.Name) > agentNameMaxLen {
+		replyError(w, http.StatusBadRequest, fmt.Sprintf("name must be %d-%d characters", agentNameMinLen, agentNameMaxLen))
 		return
 	}
-	if req.Slug == "" || len(req.Slug) < 2 || len(req.Slug) > 50 {
-		replyError(w, http.StatusBadRequest, "slug must be 2-50 characters")
+	if req.Slug == "" || len(req.Slug) < agentSlugMinLen || len(req.Slug) > agentSlugMaxLen {
+		replyError(w, http.StatusBadRequest, fmt.Sprintf("slug must be %d-%d characters", agentSlugMinLen, agentSlugMaxLen))
 		return
 	}
 	// V-17: Validate slug format to prevent injection via container names / file paths

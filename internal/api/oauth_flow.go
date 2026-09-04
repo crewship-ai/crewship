@@ -130,11 +130,11 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	issParam := r.URL.Query().Get("iss")
 
 	if errParam != "" {
-		http.Error(w, fmt.Sprintf("OAuth error: %s", html.EscapeString(errParam)), http.StatusBadRequest)
+		replyError(w, http.StatusBadRequest, fmt.Sprintf("OAuth error: %s", errParam))
 		return
 	}
 	if code == "" || state == "" {
-		http.Error(w, "Missing code or state parameter", http.StatusBadRequest)
+		replyError(w, http.StatusBadRequest, "Missing code or state parameter")
 		return
 	}
 
@@ -145,17 +145,17 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		Scan(&credentialID, &workspaceID, &redirectURI, &codeVerifier, &createdAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Invalid or expired state token", http.StatusBadRequest)
+			replyError(w, http.StatusBadRequest, "Invalid or expired state token")
 		} else {
 			h.logger.Error("query oauth_states", "error", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 		}
 		return
 	}
 	// V-13: Reject states older than 15 minutes
 	if t, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
 		if time.Since(t) > 15*time.Minute {
-			http.Error(w, "OAuth state expired", http.StatusBadRequest)
+			replyError(w, http.StatusBadRequest, "OAuth state expired")
 			return
 		}
 	}
@@ -165,7 +165,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		decrypted, decErr := encryption.Decrypt(codeVerifier)
 		if decErr != nil {
 			h.logger.Error("decrypt code_verifier", "error", decErr)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		codeVerifier = decrypted
@@ -175,10 +175,10 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	cred, loadErr := h.loadOAuthCredential(r.Context(), credentialID, workspaceID)
 	if loadErr != nil {
 		if errors.Is(loadErr, sql.ErrNoRows) {
-			http.Error(w, "Credential not found", http.StatusNotFound)
+			replyError(w, http.StatusNotFound, "Credential not found")
 		} else {
 			h.logger.Error("load OAuth credential in callback", "error", loadErr)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 		}
 		return
 	}
@@ -188,7 +188,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	// was bound to at connect time.
 	if issErr := validateIssuer(cred.Issuer, issParam); issErr != nil {
 		h.logger.Warn("OAuth issuer validation failed", "error", issErr, "credential_id", credentialID)
-		http.Error(w, "Issuer validation failed", http.StatusBadRequest)
+		replyError(w, http.StatusBadRequest, "Issuer validation failed")
 		return
 	}
 
@@ -196,14 +196,14 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, code, redirectURI, codeVerifier, cred.Resource)
 	if err != nil {
 		h.logger.Error("OAuth token exchange failed", "error", err, "credential_id", credentialID)
-		http.Error(w, "Token exchange failed", http.StatusBadGateway)
+		replyError(w, http.StatusBadGateway, "Token exchange failed")
 		return
 	}
 
 	// Encrypt and store tokens
 	if err := h.storeOAuthTokens(r.Context(), credentialID, tokenResp); err != nil {
 		h.logger.Error("store OAuth tokens", "error", err)
-		http.Error(w, "Failed to store tokens", http.StatusInternalServerError)
+		replyError(w, http.StatusInternalServerError, "Failed to store tokens")
 		return
 	}
 

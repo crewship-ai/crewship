@@ -671,21 +671,21 @@ Uses AI to suggest a crew configuration based on a natural language description.
 ```
 
 The model's answer is validated before it is returned. What that validation
-guarantees is the roles and the shape: 2–6 agents, exactly one with
-`agent_role` `LEAD` and the rest `AGENT` — the same two values
-[`POST /api/v1/agents`](/api-reference/agents) accepts, so every role in a
-returned suggestion is one you can go on to create. Any other role makes the
-whole suggestion a `502`, rather than a crew you are offered and then cannot
-create. Roles are matched case-insensitively and returned in upper case; an
-omitted `agent_role` is `AGENT`. Slugs are normalised, and derived from the
-agent's name when missing or unusable.
+guarantees is the shape and every agent's create-time bounds: 2–6 agents,
+exactly one with `agent_role` `LEAD` and the rest `AGENT` — the same two
+values [`POST /api/v1/agents`](/api-reference/agents) accepts — and each
+agent's `name` (2–100 bytes) and derived `slug` (2–50 bytes) within the
+same limits the create endpoint enforces, judged against its actual
+constants rather than restated numbers. Any agent outside those bounds
+makes the whole suggestion a `502`, rather than a crew you are offered and
+then cannot create. Roles are matched case-insensitively and returned in
+upper case; an omitted `agent_role` is `AGENT`. Slugs are normalised, and
+derived from the agent's name when missing or unusable.
 
-It does **not** guarantee that every other field will pass the create
-endpoint. Names and slugs are checked for presence, not length, so a
-suggestion can carry a one-character agent name that `POST /api/v1/agents`
-then refuses with `400 name must be 2-100 characters` (and likewise its
-2–50 rule for slugs). Treat a suggestion as a draft to review, not as a
-validated payload.
+It does **not** guarantee that `crew_name` / `crew_slug` clear the bounds
+[`POST /api/v1/crews`](/api-reference/crews) enforces — only the
+per-agent fields above are checked. Treat a suggestion as a draft to
+review, not as a validated payload.
 
 | Status | Condition |
 |---|---|
