@@ -35,6 +35,19 @@ type issueRunDTO struct {
 	DurationMs    int64  `json:"duration_ms"`
 	ResultSummary string `json:"result_summary,omitempty"`
 	ErrorMessage  string `json:"error_message,omitempty"`
+	// MissionID is the issue (mission) this run is attributed to —
+	// assignments.mission_id (#2256). Nullable: a legacy row written before
+	// that column existed, and never touched by the backfill migration
+	// (20260901180224), still shows up here (found via the mission_tasks
+	// join below) but names no mission of its own.
+	MissionID *string `json:"mission_id,omitempty"`
+	// Source says WHY this run is attributed to the issue, not just that it
+	// is (#2313): "task" — reached via mission_tasks.assignment_id, the
+	// issue's own plan; "mention" — reached via
+	// mission_comment_mentions.assignment_id, an @mention dispatch;
+	// "delegation" — reached only via a.mission_id, a sub-agent's own
+	// /assign call mid-mission. Always one of the three; never empty.
+	Source string `json:"source,omitempty"`
 }
 
 // parseRunTime accepts the timestamp shapes the engine + SQLite defaults
@@ -92,8 +105,16 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	//   * mission_tasks.assignment_id — the pre-#2256 link, still the only
 	//     one a row written before this column existed can be found by.
 	//
-	// The same predicate feeds the COUNT(*) that becomes X-Total-Count, so
-	// the total can never disagree with the page.
+	// Two ways a run names this issue, and a real clone has rows from both:
+	//
+	//   * a.mission_id (#2256) — every assignment-creating path stamps it
+	//     going forward, including a mention dispatch, which has no
+	//     mission_tasks row at all.
+	//   * mission_tasks.assignment_id — the pre-#2256 link, still the only
+	//     one a row written before this column existed can be found by.
+	//
+	// The same predicate feeds the COUNT that becomes X-Total-Count, so the
+	// total can never disagree with the page.
 	const belongsToIssue = `
 		WHERE a.workspace_id = ?
 		  AND (
@@ -110,19 +131,32 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// DISTINCT because a mission-task run satisfies both attribution paths
+	// after the backfill / going-forward write, and the OR would otherwise
+	// return it twice.
+	//
+	// source is derived with two correlated EXISTS subqueries rather than a
+	// LEFT JOIN: a JOIN against mission_tasks/mission_comment_mentions can
+	// widen the DISTINCT row set if either table ever carries more than one
+	// matching row for the same assignment_id (no UNIQUE constraint forbids
+	// it), which would silently duplicate a run. EXISTS can't.
+	//
 	// The run id comes from the journal: assignments_run.go emits one
 	// run.started entry per dispatched assignment with trace_id = run id,
 	// mission_id = this mission and payload.assignment_id = the row. The
 	// correlated subquery walks idx_journal_mission_ts, so it is bounded by
 	// the issue's own entries, not the workspace's.
-	//
-	// DISTINCT because a mission-task run satisfies both attribution paths
-	// after the backfill / going-forward write, and the OR would otherwise
-	// return it twice.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT DISTINCT a.id, a.status, a.started_at, a.finished_at, a.result_summary,
 		       a.error_message, a.task,
-		       COALESCE(ag.name, ''), COALESCE(ag.id, ''), COALESCE(ag.slug, ''),
+		       COALESCE(ag.name, ''), COALESCE(ag.id, ''), COALESCE(ag.slug, ''), a.mission_id,
+		       CASE
+		         WHEN EXISTS (SELECT 1 FROM mission_tasks mt
+		                      WHERE mt.assignment_id = a.id AND mt.mission_id = ?) THEN 'task'
+		         WHEN EXISTS (SELECT 1 FROM mission_comment_mentions mcm
+		                      WHERE mcm.assignment_id = a.id AND mcm.mission_id = ?) THEN 'mention'
+		         ELSE 'delegation'
+		       END AS source,
 		       (SELECT je.trace_id FROM journal_entries je
 		         WHERE je.mission_id = ?
 		           AND je.entry_type = 'run.started'
@@ -132,7 +166,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		FROM assignments a
 		LEFT JOIN agents ag ON ag.id = a.assigned_to_id`+belongsToIssue+`
 		ORDER BY sort_key DESC
-		LIMIT ? OFFSET ?`, missionID, wsID, missionID, missionID, limit, offset)
+		LIMIT ? OFFSET ?`, missionID, missionID, missionID, wsID, missionID, missionID, limit, offset)
 	if err != nil {
 		internalError(w, r, h.logger, "issue runs: query", err)
 		return
@@ -142,12 +176,12 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	out := []issueRunDTO{}
 	for rows.Next() {
 		var (
-			dto                                            issueRunDTO
-			started, finished, result, errMsg, task, runID sql.NullString
+			dto                                                          issueRunDTO
+			started, finished, result, errMsg, task, runID, missionIDCol sql.NullString
 		)
 		var sortKey sql.NullString
 		if err := rows.Scan(&dto.ID, &dto.Status, &started, &finished, &result,
-			&errMsg, &task, &dto.AgentName, &dto.AgentID, &dto.AgentSlug, &runID, &sortKey); err != nil {
+			&errMsg, &task, &dto.AgentName, &dto.AgentID, &dto.AgentSlug, &missionIDCol, &dto.Source, &runID, &sortKey); err != nil {
 			internalError(w, r, h.logger, "issue runs: scan", err)
 			return
 		}
@@ -156,6 +190,10 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		dto.StartedAt = started.String
 		dto.EndedAt = finished.String
 		dto.Task = task.String
+		if missionIDCol.Valid && missionIDCol.String != "" {
+			mid := missionIDCol.String
+			dto.MissionID = &mid
+		}
 		// result_summary is agent-authored prose; truncate hard like the
 		// routine run list so a verbose summary can't bloat the row.
 		dto.ResultSummary = truncateErrorForList(result.String)
