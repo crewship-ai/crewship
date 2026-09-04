@@ -22,6 +22,22 @@ Onboarding takes a **CLI token**, not a raw provider API key. For Anthropic it e
 
 After that flag flips, both `/onboarding` and the bootstrap auth page redirect to the regular sign-in flow — the wizard is intentionally one-shot.
 
+## The three steps
+
+The web wizard is a split screen: the form on the left, a live preview of what is being built on the right. The stepper names the three things you decide about — **Workspace**, **Model**, **Crew** — and each step persists what it collected before the next one opens, so a reload or re-login resumes where you left off.
+
+1. **Workspace** — a name and the language your agents reply in. A "Before you start" checklist on this step tells you the two things you will need: a Claude Code CLI token (with a copyable `claude setup-token`) and Docker running on the server (checked automatically).
+2. **Model** — the agent toolchain and its CLI token. Only **Claude Code** is fully supported today, so it is the one card shown; the other adapters (OpenCode, Codex CLI, Gemini CLI, Cursor CLI, Factory Droid) sit behind a "Show experimental toolchains" disclosure and cannot finish setup yet. The model list offers every curated model for the toolchain (from `config/models.json`), with the catalog's default marked *recommended* and older generations marked *older*. The token field says what you pasted before the server verifies it: an `sk-ant-api…` console key is flagged immediately, an `sk-ant-oat…` CLI token is confirmed on Continue.
+3. **Crew** — a conversation with Crewship Guide on the right. The chat opens with a short greeting and four starter prompts in your chosen language; pick one or describe the work in your own words, and the Guide proposes a crew. Nothing is created until you click **Create** on the proposal card. The card shows the crew's icon and colour (the Guide picks them from the same set the crews page uses), one row per agent with its name, role and model, the extra container tools and the network access — never a summary in place of the rows. "Prefer to pick a template instead?" is the escape hatch to the four built-in templates.
+
+### Guards against dead ends
+
+- **A disabled Continue or Launch always says why**, in one line beside the button (no workspace name, no container runtime, an experimental toolchain, no token, no crew yet).
+- **Skip setup asks first.** The wizard is one-shot, so skipping lands on an empty dashboard; the confirmation says so and points at the dashboard checklist.
+- **If Crewship Guide cannot be reached**, the Crew step switches to templates and says so, rather than showing templates with no explanation.
+- **A reload after Create does not strand you.** The "Built so far" panel reads the workspace's real crews back; when one exists but the page no longer holds its proposal, Launch stays enabled and finishes setup through `POST /api/v1/onboarding/complete` without deploying a second crew.
+- **Phones and tablets** stack the form above the preview; the stepper collapses to one row, every control meets the 44px touch target, and nothing scrolls horizontally.
+
 ## Related
 
 - [First Crew](/guides/first-crew) — what the wizard's "first crew" step actually provisions.

@@ -14,8 +14,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -191,6 +193,107 @@ func TestIssue_Stop_FallsBackForDelegatedRunWithNoMissionID(t *testing.T) {
 	}
 	if cancelAt == "" {
 		t.Errorf("a-delegated.cancel_requested_at not stamped by Stop — the chat_id/group_id fallback must still catch a NULL-mission_id delegation hop")
+	}
+}
+
+// TestIssue_Stop_ReachesMentionDispatchedRunOnNeverStartedIssue is the fix
+// for #2315: DispatchMention (issue_mentions.go) can dispatch a run on an
+// issue that was never started — the issue stays BACKLOG/TODO, and no
+// mission_tasks row is ever created for it. Before this fix, Stop refused
+// with 400 for any status other than IN_PROGRESS/REVIEW, so the one door
+// meant to reach every run attributed to an issue (#2295) was closed for
+// exactly the runs a mention starts. Since the issue never started, there is
+// nothing for Stop to cancel in mission_tasks and nothing to move to
+// CANCELLED on the issue itself (that is option (b) from #2315, rejected —
+// Stop must not promote the issue to IN_PROGRESS/CANCELLED for a run it
+// never started); the live assignment is what must still be reachable.
+func TestIssue_Stop_ReachesMentionDispatchedRunOnNeverStartedIssue(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-4", "BACKLOG")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	// DispatchMention lazily creates this same synthetic chat, keyed by the
+	// mission id, exactly like TestIssue_Stop_ReachesMentionDispatchedRun
+	// above (issue_mentions.go).
+	if _, err := h.db.Exec(`
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, 'Mission: ENG-4', 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		id, leadID, wsID, now, now, now); err != nil {
+		t.Fatalf("seed mission chat: %v", err)
+	}
+	if _, err := h.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, mission_id, created_at, started_at)
+		VALUES ('a-mentioned-never-started', ?, ?, ?, ?, 'reply to mention', 'RUNNING', ?, ?, ?, ?)`,
+		wsID, id, leadID, workerID, id, id, now, now); err != nil {
+		t.Fatalf("seed mention-dispatched assignment: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-4")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var cancelAt string
+	if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,'') FROM assignments WHERE id='a-mentioned-never-started'`).Scan(&cancelAt); err != nil {
+		t.Fatalf("query a-mentioned-never-started: %v", err)
+	}
+	if cancelAt == "" {
+		t.Errorf("cancel_requested_at not stamped — Stop must reach a mention-dispatched run even when the issue itself never started")
+	}
+
+	var missionStatus string
+	if err := h.db.QueryRow(`SELECT status FROM missions WHERE id=?`, id).Scan(&missionStatus); err != nil {
+		t.Fatalf("query mission status: %v", err)
+	}
+	if missionStatus != "BACKLOG" {
+		t.Errorf("mission status = %q, want unchanged BACKLOG — Stop must not move the issue for a run it never started (option (a), not (b))", missionStatus)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["status"] != "BACKLOG" {
+		t.Errorf("response status = %v, want BACKLOG (unchanged)", body["status"])
+	}
+	if runsStopped, ok := body["runs_stopped"].(float64); !ok || runsStopped != 1 {
+		t.Errorf("response runs_stopped = %v, want 1", body["runs_stopped"])
+	}
+}
+
+// TestIssue_Stop_RefusesWhenNotInFlightAndNoLiveRun proves the other half of
+// the same fix: an issue that is neither IN_PROGRESS/REVIEW NOR has any live
+// attributed run still gets the original 400, unchanged. Widening Stop to
+// reach a mention-dispatched run on a never-started issue must not turn Stop
+// into a no-op success for every non-live status.
+func TestIssue_Stop_RefusesWhenNotInFlightAndNoLiveRun(t *testing.T) {
+	h, userID, wsID, crewID, leadID, _ := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-5", "BACKLOG")
+
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-5")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s, want 400", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Issue must be IN_PROGRESS or REVIEW to stop") {
+		t.Errorf("body = %q, want the unchanged refusal message", rr.Body.String())
+	}
+
+	var missionStatus string
+	if err := h.db.QueryRow(`SELECT status FROM missions WHERE id=?`, id).Scan(&missionStatus); err != nil {
+		t.Fatalf("query mission status: %v", err)
+	}
+	if missionStatus != "BACKLOG" {
+		t.Errorf("mission status = %q, want unchanged BACKLOG", missionStatus)
 	}
 }
 

@@ -192,7 +192,7 @@ func (h *CrewAIHandler) getLLMProvider(ctx context.Context, wsID string) (llm.Pr
 // suggest calls the LLM provider to generate a crew definition from a description.
 func (h *CrewAIHandler) suggest(ctx context.Context, provider llm.Provider, description string) (*AISuggestResponse, error) {
 	resp, err := provider.Complete(ctx, llm.Request{
-		Model:     "claude-3-5-haiku-20241022",
+		Model:     llm.HousekeepingModel("anthropic"),
 		System:    crewDesignerSystemPrompt,
 		MaxTokens: 2048,
 		Messages:  []llm.Message{{Role: llm.RoleUser, Content: description}},

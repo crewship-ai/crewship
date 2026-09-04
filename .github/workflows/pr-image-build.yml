@@ -1,0 +1,120 @@
+name: PR Image Build
+
+# Half (b) of #2064. The root Dockerfile is built by release.yml and
+# nightly.yml only — neither runs on a pull request — so the compiler stage's
+# base image, the selective `COPY` set (#849/#886: a root-level package the
+# backend stage forgot to copy, invisible to regular CI because that builds
+# from a full checkout), `pnpm prisma generate`, `pnpm build`, and the
+# `web/out/` release gate (#1567) are all first exercised by nightly at the
+# earliest, no matter how green the PR looks. Half (a), a static consistency
+# check for the Go toolchain pins specifically, landed in #2101 — see
+# scripts/go-toolchain-pin.sh's header for why a build can never catch that
+# one class of drift. This is the other half: a real `docker build`, so
+# everything else in that list gets exercised on the PR that changes it.
+#
+# `paths:` keeps it off the vast majority of PRs — it lists the Dockerfile
+# itself plus every file/directory its stages `COPY` from the build context
+# (read the Dockerfile to see them), so a PR that never touches anything the
+# image build reads never pays for one. scripts/pr-image-build-paths.sh
+# checks that list against the Dockerfile's own COPY lines on every PR (via
+# ci.yml's `Shell` job) so the two cannot drift apart silently — the same
+# failure mode this workflow exists to close, one layer up.
+#
+# Deliberately its own workflow rather than a job in ci.yml: ci.yml triggers
+# on `pull_request` with only a whole-workflow `paths-ignore` (docs and
+# similar), and every job inside it either runs on every PR or is gated by
+# `if: github.event_name == 'push'` — there is no existing per-job `paths:`
+# pattern to fold this into, and inventing one would touch a 2000+ line file
+# for a filter that only this job needs. A path-filtered `pull_request`
+# trigger at the workflow level is the same pattern smoke-test.yml already
+# uses for its pre-merge package smoke.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "go.mod"
+      - "go.sum"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "prisma/**"
+      - "cmd/**"
+      - "internal/**"
+      - "schemas/**"
+      - "config/**"
+      - "web/**"
+      - "docker/server-entrypoint.sh"
+      # Self-trigger: an edit to this file's own paths: list (including a
+      # regression scripts/pr-image-build-paths.sh would catch) must run the
+      # build it changes, or the fix is unverified by the PR that makes it.
+      - ".github/workflows/pr-image-build.yml"
+  # Manual re-run, same as release.yml / nightly.yml.
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# PR runs supersede each other, same rationale as ci.yml's PR branch of its
+# concurrency group (see the long-form note there): a push while a build is
+# still running should cancel the stale one, not queue behind it.
+concurrency:
+  group: pr-image-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: PR Image Build
+    runs-on: ubuntu-latest
+    # release.yml's docker job gets 45 for a multi-arch (amd64+arm64) push
+    # under QEMU. This builds linux/amd64 only, natively, with no push and no
+    # signing — a PR wants a verdict quickly, and every failure class this
+    # guards against (#849/#886's missing COPY, a `pnpm prisma generate` or
+    # `pnpm build` break, the #1567 web/out gate) is architecture-independent,
+    # so amd64-only loses no coverage that matters here.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # `load: true` pulls the built image into the runner's local Docker
+      # daemon so the smoke step below can `docker run` it directly — no
+      # registry round-trip, and nothing is pushed anywhere (no `push:` key
+      # at all; `load` and `push` are mutually exclusive in buildx). A
+      # separate GHA cache scope from release.yml / nightly.yml's default
+      # scope keeps this job's frequent, throwaway PR builds from evicting
+      # the layers those two release paths depend on.
+      - name: Build image (no push)
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6.18.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: crewship:pr-build
+          build-args: |
+            VERSION=pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+            COMMIT=${{ github.event.pull_request.head.sha }}
+            DATE=${{ github.event.pull_request.updated_at }}
+          cache-from: type=gha,scope=pr-image-build
+          cache-to: type=gha,mode=max,scope=pr-image-build
+
+      # Same probe smoke-test.yml's "Smoke Docker image" job runs post-release
+      # against the published tag, minus the registry pull — the image never
+      # left this runner. Cheap (a container start + exit), and it is the one
+      # check that proves the multi-stage COPY chain produced a binary that
+      # actually runs, not just one that compiled.
+      - name: Probe `crewship version` inside the built image
+        run: |
+          set -euo pipefail
+          VERSION="pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}"
+          OUT=$(docker run --rm crewship:pr-build version)
+          echo "$OUT"
+          if ! echo "$OUT" | grep -qF "$VERSION"; then
+            echo "::error::container 'crewship version' output did not contain the build's own version string ($VERSION)"
+            exit 1
+          fi

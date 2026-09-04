@@ -22,26 +22,34 @@ import (
 // rather than "crew_id"). Without the yaml tag, --format yaml and --format
 // json return the same data under different key casing (#1211).
 type issueItem struct {
-	ID           string        `json:"id" yaml:"id"`
-	CrewID       string        `json:"crew_id" yaml:"crew_id"`
-	CrewName     string        `json:"crew_name" yaml:"crew_name"`
-	CrewSlug     string        `json:"crew_slug" yaml:"crew_slug"`
-	Number       *int          `json:"number" yaml:"number"`
-	Identifier   *string       `json:"identifier" yaml:"identifier"`
-	Title        string        `json:"title" yaml:"title"`
-	Description  *string       `json:"description" yaml:"description"`
-	Status       string        `json:"status" yaml:"status"`
-	Priority     string        `json:"priority" yaml:"priority"`
-	AssigneeType *string       `json:"assignee_type" yaml:"assignee_type"`
-	AssigneeID   *string       `json:"assignee_id" yaml:"assignee_id"`
-	AssigneeName *string       `json:"assignee_name" yaml:"assignee_name"`
-	DueDate      *string       `json:"due_date" yaml:"due_date"`
-	MissionType  string        `json:"mission_type" yaml:"mission_type"`
-	CreatedBy    *issueCreator `json:"created_by" yaml:"created_by"`
-	CreatedAt    string        `json:"created_at" yaml:"created_at"`
-	UpdatedAt    string        `json:"updated_at" yaml:"updated_at"`
-	Labels       []issueLabel  `json:"labels" yaml:"labels"`
-	CommentCount int           `json:"comment_count" yaml:"comment_count"`
+	ID           string  `json:"id" yaml:"id"`
+	CrewID       string  `json:"crew_id" yaml:"crew_id"`
+	CrewName     string  `json:"crew_name" yaml:"crew_name"`
+	CrewSlug     string  `json:"crew_slug" yaml:"crew_slug"`
+	Number       *int    `json:"number" yaml:"number"`
+	Identifier   *string `json:"identifier" yaml:"identifier"`
+	Title        string  `json:"title" yaml:"title"`
+	Description  *string `json:"description" yaml:"description"`
+	Status       string  `json:"status" yaml:"status"`
+	Priority     string  `json:"priority" yaml:"priority"`
+	AssigneeType *string `json:"assignee_type" yaml:"assignee_type"`
+	AssigneeID   *string `json:"assignee_id" yaml:"assignee_id"`
+	AssigneeName *string `json:"assignee_name" yaml:"assignee_name"`
+	// Owner and Delegate (#2297, A10 — invariant I5: delegating to an agent
+	// never changes the human owner) are the typed projection of the
+	// server's missions.owner_user_id / delegate_agent_id, independent of
+	// each other and of the legacy AssigneeType/AssigneeID pair above,
+	// which stays for old clients during the migration window. Nil when
+	// nobody occupies that slot.
+	Owner        *issueOwnerRef    `json:"owner,omitempty" yaml:"owner,omitempty"`
+	Delegate     *issueDelegateRef `json:"delegate,omitempty" yaml:"delegate,omitempty"`
+	DueDate      *string           `json:"due_date" yaml:"due_date"`
+	MissionType  string            `json:"mission_type" yaml:"mission_type"`
+	CreatedBy    *issueCreator     `json:"created_by" yaml:"created_by"`
+	CreatedAt    string            `json:"created_at" yaml:"created_at"`
+	UpdatedAt    string            `json:"updated_at" yaml:"updated_at"`
+	Labels       []issueLabel      `json:"labels" yaml:"labels"`
+	CommentCount int               `json:"comment_count" yaml:"comment_count"`
 }
 
 // issueCreator mirrors the API's created_by object: who created the issue —
@@ -51,6 +59,40 @@ type issueCreator struct {
 	Type string `json:"type" yaml:"type"`
 	ID   string `json:"id" yaml:"id"`
 	Name string `json:"name" yaml:"name"`
+}
+
+// issueOwnerRef mirrors the API's issueOwnerResponse: the issue's human
+// owner (missions.owner_user_id).
+type issueOwnerRef struct {
+	ID   string `json:"id" yaml:"id"`
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+}
+
+// issueDelegateRef mirrors the API's issueDelegateResponse: the agent an
+// issue's work has been delegated to (missions.delegate_agent_id).
+type issueDelegateRef struct {
+	ID   string `json:"id" yaml:"id"`
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+}
+
+// ownerLabel renders the Owner ref for table output: the resolved name, or
+// "-" when nobody owns the issue. Deliberately does NOT fall back to the raw
+// id the way creatorLabel does — the API's issueOwnerResponse always carries
+// a name when the ref itself is non-nil, and manufacturing one out of an id
+// would hide a server-side regression instead of surfacing it.
+func ownerLabel(o *issueOwnerRef) string {
+	if o == nil || o.Name == "" {
+		return "-"
+	}
+	return o.Name
+}
+
+// delegateLabel is ownerLabel's counterpart for the Delegate ref.
+func delegateLabel(d *issueDelegateRef) string {
+	if d == nil || d.Name == "" {
+		return "-"
+	}
+	return d.Name
 }
 
 // creatorLabel renders the creator for table output: the resolved name
@@ -356,6 +398,8 @@ var issueGetCmd = &cobra.Command{
 			{"Crew", issue.CrewSlug},
 			{"Assignee", derefStr(issue.AssigneeName, "-")},
 			{"Assignee Type", derefStr(issue.AssigneeType, "-")},
+			{"Owner", ownerLabel(issue.Owner)},
+			{"Delegate", delegateLabel(issue.Delegate)},
 			{"Due Date", derefStr(issue.DueDate, "-")},
 			{"Mission Type", issue.MissionType},
 			{"Labels", strings.Join(labelNames, ", ")},
@@ -469,6 +513,9 @@ func init() {
 
 	// issue comment flags
 	issueCommentCmd.Flags().String("body", "", "Comment body (alternative to positional args)")
+	issueCommentCmd.Flags().StringArray("mention", nil, "Mention an agent by slug (repeatable) — resolved to the "+
+		"workspace agent and written as the real [@slug](crewship:agent/<id>) link the server requires. "+
+		"A bare @slug typed into the body or --body is plain text and mentions nobody.")
 
 	// register subcommands
 	issueCmd.AddCommand(issueListCmd)

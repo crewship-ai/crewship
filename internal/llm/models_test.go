@@ -287,8 +287,8 @@ func TestCuratedModels(t *testing.T) {
 		{provider: "anthropic", wantSome: "claude-opus-4-8", wantLen: true},
 		{provider: "anthropic", wantSome: "claude-fable-5", wantLen: true},
 		{provider: "anthropic", wantSome: "claude-sonnet-5", wantLen: true},
-		{provider: "OPENAI", wantSome: "gpt-4o", wantLen: true},
-		{provider: "GOOGLE", wantSome: "gemini-2.0-flash", wantLen: true},
+		{provider: "OPENAI", wantSome: "gpt-5.5", wantLen: true},
+		{provider: "GOOGLE", wantSome: "gemini-2.5-pro", wantLen: true},
 		{provider: "OLLAMA", wantSome: "", wantLen: false},
 		{provider: "UNKNOWN", wantSome: "", wantLen: false},
 	}

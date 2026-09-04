@@ -62,7 +62,7 @@ export function SidebarSearch({
   return (
     <div
       className={cn(
-        "flex items-center gap-1.5 h-8 px-2.5 flex-1 min-w-0 rounded-md",
+        "kit-tap flex items-center gap-1.5 h-8 px-2.5 flex-1 min-w-0 rounded-md",
         "bg-white/[0.04] border border-white/[0.08]",
         "focus-within:border-primary/40 transition-colors",
         className,
@@ -115,7 +115,7 @@ export function SidebarFilterButton({
     <button
       type="button"
       className={cn(
-        "inline-flex items-center gap-1.5 h-8 px-2.5 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
+        "kit-tap inline-flex items-center gap-1.5 h-8 px-2.5 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
         on
           ? "bg-primary/10 border-primary/30 text-primary-hover"
           : "bg-white/[0.04] border-white/[0.08] text-muted-foreground/70 hover:text-foreground",
@@ -304,7 +304,7 @@ export function SidebarFacet({
         onClick={onReset}
         aria-pressed={resetActive}
         className={cn(
-          "w-full px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+          "kit-tap w-full px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
           resetActive ? "text-primary" : "text-muted-foreground/80",
         )}
       >
@@ -333,7 +333,7 @@ export function SidebarFacetOption({
       onClick={onToggle}
       aria-pressed={active}
       className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+        "kit-tap flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
         active ? "text-primary" : "text-muted-foreground/80",
         className,
       )}
@@ -359,7 +359,7 @@ export function SidebarViewButton({
       type="button"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex items-center justify-center h-8 w-8 shrink-0 rounded-md border text-muted-foreground/70",
+        "kit-tap inline-flex items-center justify-center h-8 w-8 shrink-0 rounded-md border text-muted-foreground/70",
         "bg-white/[0.04] border-white/[0.08] hover:text-foreground transition-colors",
         className,
       )}
@@ -388,7 +388,7 @@ export function SidebarCollapseButton({
       aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       title={collapsed ? "Expand" : "Collapse"}
       className={cn(
-        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/70",
+        "kit-tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground/70",
         "hover:text-foreground hover:bg-white/[0.04] transition-colors",
         className,
       )}
@@ -412,7 +412,7 @@ export function SidebarActiveChip({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[10px]",
+        "kit-tap inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[10px]",
         "bg-primary/10 border border-primary/25 text-primary-hover",
         className,
       )}
@@ -488,7 +488,7 @@ export function SidebarSection({
             onClick={onToggle}
             aria-expanded={!collapsed}
             className={cn(
-              "flex flex-1 items-center gap-1.5 px-3 py-1.5 hover:bg-white/[0.02] transition-colors",
+              "kit-tap flex flex-1 items-center gap-1.5 px-3 py-1.5 hover:bg-white/[0.02] transition-colors",
               headerClassName,
             )}
           >
@@ -534,7 +534,7 @@ export function SidebarRow({
         // py-1 rather than py-1.5: with the role line gone from every
         // unselected row, the portrait is what sets the height, and the extra
         // padding was only ever there to keep two lines of text from touching.
-        "mx-1.5 gap-2 rounded-md px-2 py-1 type-nav",
+        "kit-tap mx-1.5 gap-2 rounded-md px-2 py-1 type-nav",
         indent && "ml-6",
         className,
       )}

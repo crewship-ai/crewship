@@ -385,12 +385,75 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// assignmentMatch is the same heuristic in both branches below: mission_id
+	// (#2256) is the direct answer and the one preferred — every mission-task
+	// run (mission_tasks.go's scheduleTask), the lead-planning run
+	// (mission_tasks_planning.go's dispatchLeadPlanning), and a mention
+	// dispatch (issue_mentions.go's DispatchMention) stamp it explicitly.
+	//
+	// chat_id/group_id stay as a FALLBACK, not a redundant belt-and-braces
+	// check: a sub-agent that delegates further via /assign while running
+	// inside a mission (or a mention-dispatched run doing the same) creates
+	// its new assignment row through AssignmentHandler.Create
+	// (assignments_run.go), and neither caller of that door threads
+	// mission_id through —
+	//
+	//   - the sidecar's handleAssign (internal/sidecar/assignment.go) never
+	//     sets "mission_id" in the body it forwards, only actor_agent_id;
+	//   - the routine dispatcher's crewshipBody (crewship_actions.go)
+	//     injects workspace_id/crew_id/agent identity but not mission_id
+	//     either.
+	//
+	// That delegated row DOES inherit chat_id = the mission id, though:
+	// s.ipc.ChatID for a mission-task or mention-dispatched container is set
+	// to the mission id (mission_tasks.go:585, issue_mentions.go's ChatID:
+	// req.MissionID), and handleAssign carries that IPC chat_id straight
+	// through as the new assignment's chat_id. So a delegated sub-task has
+	// mission_id = NULL but chat_id = the mission id, and only the
+	// heuristic finds it. Dropping the fallback would make Stop silently
+	// stop reaching every delegation hop under a mission or a mention —
+	// worse than the heuristic it would replace.
+	//
+	// NOT IN (...) rather than IN ('PENDING', 'RUNNING') so a QUEUED row
+	// (#2312) is reached too, without having to enumerate every non-terminal
+	// status by name.
+	const assignmentMatch = `(mission_id = ? OR chat_id = ? OR group_id = ?) AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')`
+
 	if status != "IN_PROGRESS" && status != "REVIEW" {
-		writeProblem(w, r, http.StatusBadRequest, "Issue must be IN_PROGRESS or REVIEW to stop (current: "+status+")")
+		// #2315: a mention (DispatchMention, issue_mentions.go) can dispatch a
+		// run on an issue that was never started — status stays BACKLOG/TODO,
+		// and there is no mission_tasks row for Stop to cancel and nothing on
+		// the issue itself to move to CANCELLED (that would be option (b),
+		// rejected: Stop must not promote the issue to IN_PROGRESS/CANCELLED
+		// for a run it never started). But the live assignment IS reachable
+		// by the same match used below, and the one door meant to reach every
+		// run attributed to an issue (#2295) must not stay closed for exactly
+		// the runs a mention starts. So: stamp whatever is live, leave the
+		// issue's status alone, and only fall back to the original refusal
+		// when nothing was actually reachable.
+		res, err := h.db.ExecContext(r.Context(), `
+			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
+			 WHERE `+assignmentMatch,
+			now, missionID, missionID, missionID)
+		if err != nil {
+			internalError(w, r, h.logger, "stop issue: stamp mention-dispatched runs", err)
+			return
+		}
+		runsStopped, _ := res.RowsAffected()
+		if runsStopped == 0 {
+			writeProblem(w, r, http.StatusBadRequest, "Issue must be IN_PROGRESS or REVIEW to stop (current: "+status+")")
+			return
+		}
+
+		h.logger.Info("issue stop: reached mention-dispatched run(s) on an issue that never started",
+			"identifier", ident, "status", status, "runs_stopped", runsStopped)
+		writeJSON(w, http.StatusOK, map[string]any{"status": status, "identifier": ident, "runs_stopped": runsStopped})
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	var runsStopped int64
 
 	// One transaction: the DB-visible half of "stop" — mission_tasks,
 	// assignments, and missions — moves atomically, so no reader ever
@@ -412,42 +475,17 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		// Signal the live assignment(s) for this issue.
-		//
-		// mission_id (#2256) is the direct answer and the one preferred: every
-		// mission-task run (mission_tasks.go's scheduleTask), the lead-planning
-		// run (mission_tasks_planning.go's dispatchLeadPlanning), and a mention
-		// dispatch (issue_mentions.go's DispatchMention) stamp it explicitly.
-		//
-		// chat_id/group_id stay as a FALLBACK, not a redundant belt-and-braces
-		// check: a sub-agent that delegates further via /assign while running
-		// inside a mission (or a mention-dispatched run doing the same) creates
-		// its new assignment row through AssignmentHandler.Create
-		// (assignments_run.go), and neither caller of that door threads
-		// mission_id through —
-		//
-		//   - the sidecar's handleAssign (internal/sidecar/assignment.go) never
-		//     sets "mission_id" in the body it forwards, only actor_agent_id;
-		//   - the routine dispatcher's crewshipBody (crewship_actions.go)
-		//     injects workspace_id/crew_id/agent identity but not mission_id
-		//     either.
-		//
-		// That delegated row DOES inherit chat_id = the mission id, though:
-		// s.ipc.ChatID for a mission-task or mention-dispatched container is set
-		// to the mission id (mission_tasks.go:585, issue_mentions.go's ChatID:
-		// req.MissionID), and handleAssign carries that IPC chat_id straight
-		// through as the new assignment's chat_id. So a delegated sub-task has
-		// mission_id = NULL but chat_id = the mission id, and only the
-		// heuristic finds it. Dropping the fallback would make Stop silently
-		// stop reaching every delegation hop under a mission or a mention —
-		// worse than the heuristic it would replace.
-		if _, err := tx.ExecContext(r.Context(), `
+		// Signal the live assignment(s) for this issue — see assignmentMatch
+		// above for why mission_id is matched directly with a chat_id/group_id
+		// fallback.
+		res, err := tx.ExecContext(r.Context(), `
 			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
-			 WHERE (mission_id = ? OR chat_id = ? OR group_id = ?)
-			   AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')`,
-			now, missionID, missionID, missionID); err != nil {
+			 WHERE `+assignmentMatch,
+			now, missionID, missionID, missionID)
+		if err != nil {
 			return err
 		}
+		runsStopped, _ = res.RowsAffected()
 
 		// Update issue status → CANCELLED
 		if _, err := tx.ExecContext(r.Context(), `
@@ -472,5 +510,5 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	emitMissionOutcomeLessonAsync(r.Context(), h.db, h.storagePath, missionID, "CANCELLED", h.logger)
 
 	h.logger.Info("issue stopped", "identifier", ident)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED", "identifier": ident})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "CANCELLED", "identifier": ident, "runs_stopped": runsStopped})
 }

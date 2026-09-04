@@ -351,6 +351,21 @@ jobs:
       - name: Go toolchain pin guard negative test
         run: bash scripts/go-toolchain-pin-test.sh
 
+      # #2064 half (b): pr-image-build.yml runs an actual `docker build` on a
+      # PR, but only behind a `paths:` filter — otherwise it would cost every
+      # PR the ~10 min a full image build takes. That filter can go stale the
+      # same way the pins above can: add a source the Dockerfile now `COPY`s
+      # without adding it here, and the build keeps skipping the PR that most
+      # needs it while everything else stays green. Same placement rationale
+      # as the toolchain guard above: cheap, pure-bash, and it has to run on
+      # every PR to catch drift on the PR that introduces it — including a
+      # Dockerfile-only PR that pr-image-build.yml's own filter would not
+      # otherwise trigger for.
+      - name: "PR image build paths: list matches the Dockerfile's COPY set"
+        run: bash scripts/pr-image-build-paths.sh
+      - name: PR image build paths guard negative test
+        run: bash scripts/pr-image-build-paths-test.sh
+
   # ── Per-PR control-plane harness ──
   # This is intentionally a small, explicit subset. Runtime suites that need
   # a provider key remain in nightly-harness.yml; they are listed there with
@@ -1048,7 +1063,14 @@ jobs:
     needs: [merge-conflict-markers]
     name: Frontend Test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 15, not 10: on 2026-09-04 the job ran 8 min on main under org-wide
+    # runner contention and was cancelled at the 10-min cap on two main
+    # commits and on three PRs whose diffs touched no frontend file, with
+    # every test still passing when the axe fell (the #1998 cancelled-vs-
+    # failure ambiguity, live). Quiet-hours runs take 5-6 min, so this is
+    # headroom for contention, not a licence for a slower suite -- a run
+    # that needs it in quiet hours is a regression to look at.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -70,7 +70,7 @@ func TestRoutinesMCP_ToolsList_ValidSchema(t *testing.T) {
 			t.Errorf("tool %q inputSchema.type = %v, want object", tl.Name, schema["type"])
 		}
 	}
-	want := []string{"save_routine", "list_routines", "run_routine", "save_page", "discover_capabilities", "validate_manifest"}
+	want := []string{"save_routine", "list_routines", "run_routine", "save_page", "discover_capabilities", "workspace_overview", "validate_manifest"}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
@@ -798,5 +798,32 @@ func TestRoutinesMCP_DiscoverWithoutCrew_AsksAboutItself(t *testing.T) {
 
 	if strings.Contains(capsQuery, "target_crew_slug") {
 		t.Errorf("query = %q, must not carry an empty target_crew_slug", capsQuery)
+	}
+}
+
+// workspace_overview is a pure forward of the internal overview route, scoped
+// by the sidecar's own IPC workspace — the caller cannot name another one.
+func TestRoutinesMCP_WorkspaceOverview_ForwardsScopedRead(t *testing.T) {
+	var gotPath string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.RequestURI()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"crews":[{"name":"Web Watch","slug":"web-watch","icon":"eye","agents":[]}],"routines":[],"pages":[],"open_issues":2,"credentials":[]}`))
+	}))
+	defer mock.Close()
+	s := newRoutineMCPTestServer(t, &IPCConfig{BaseURL: mock.URL, Token: "t", WorkspaceID: "ws-9"})
+
+	body := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"workspace_overview","arguments":{"workspace_id":"someone-elses"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp/routines", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	s.handleRoutinesMCP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", w.Code, w.Body.String())
+	}
+	if gotPath != "/api/v1/internal/workspace/overview?workspace_id=ws-9" {
+		t.Fatalf("forwarded to %q, want the IPC workspace, not the caller's argument", gotPath)
+	}
+	if !strings.Contains(w.Body.String(), "web-watch") || !strings.Contains(w.Body.String(), "open_issues") {
+		t.Fatalf("overview body not returned to the agent: %s", w.Body.String())
 	}
 }

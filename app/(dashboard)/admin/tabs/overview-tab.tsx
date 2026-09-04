@@ -1,7 +1,9 @@
+import Link from "next/link"
 import React from "react"
 import {
   AlertTriangle, Check, Container, Cpu, Database, HardDrive, Info,
   KeyRound, Radio, ShieldCheck, Sparkles,
+  ChevronRight,
 } from "lucide-react"
 import { StatusDot } from "@/components/ui/status-badge"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
@@ -53,6 +55,31 @@ function formatBytes(b: number): string {
 function against(used: number, limit?: number): string {
   if (!limit || limit <= 0) return `${used}`
   return `${used} / ${limit}`
+}
+
+/** True when a licensed ceiling is exceeded — the row turns red and says what
+ *  that means, instead of printing "101 / 15" in the same grey as "1 / 5". */
+export function overLimit(used: number, limit?: number): boolean {
+  return Boolean(limit && limit > 0 && used > limit)
+}
+
+/**
+ * What a person can DO about a posture finding, by key. A finding without a
+ * verb is a worry; with one it is a task. Keys mirror
+ * internal/api/admin_security_posture.go; an unknown key gets no action, not
+ * a made-up one.
+ */
+export const FINDING_ACTIONS: Record<string, { label: string; href: string }> = {
+  no_backup_recorded: { label: "Create a backup", href: "/admin?tab=backups" },
+  rate_limit_disabled: { label: "Rate limiters", href: "/admin?tab=rate-limits" },
+  signup_open: { label: "Users", href: "/admin?tab=users" },
+  seed_account_default_password: { label: "Users", href: "/admin?tab=users" },
+  privileged_credentials_enabled: { label: "Access & Secrets", href: "/settings?tab=access" },
+  private_endpoints_in_use: { label: "Runtime", href: "/admin?tab=runtime" },
+  private_endpoints_ceiling_open: { label: "Runtime", href: "/admin?tab=runtime" },
+  encryption_key_generated: { label: "Key custody", href: "/admin?tab=backups" },
+  encryption_key_missing: { label: "Key custody", href: "/admin?tab=backups" },
+  plaintext_secrets_allowed: { label: "Access & Secrets", href: "/settings?tab=access" },
 }
 
 const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2, info: 3 }
@@ -178,6 +205,15 @@ export const OverviewTab = React.memo(function OverviewTab({
                       </span>
                       <span className="text-[11px] text-foreground/80">{wn.message}</span>
                     </div>
+                    {FINDING_ACTIONS[wn.key] && (
+                      <Link
+                        href={FINDING_ACTIONS[wn.key].href}
+                        className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-border/70 px-2 py-1 text-[11px] font-medium text-foreground/90 transition-colors hover:border-primary/50 hover:text-primary-hover"
+                        data-testid="admin-finding-action"
+                      >
+                        {FINDING_ACTIONS[wn.key].label} <ChevronRight className="h-3 w-3" />
+                      </Link>
+                    )}
                   </div>
                 )
               })
@@ -305,8 +341,18 @@ export const OverviewTab = React.memo(function OverviewTab({
             something anyone acts on; "3 / 15 crews" is. */}
         <section aria-label="Capacity">
           <SettingsCard title="Capacity" description="This workspace against its licensed limits">
-            <SettingsRow label="Crews">
-              <span className="font-mono text-xs tabular-nums text-foreground">
+            <SettingsRow
+              label="Crews"
+              description={
+                overLimit(stats?.crews ?? 0, license?.max_crews)
+                  ? `${(stats?.crews ?? 0) - (license?.max_crews ?? 0)} over the licensed limit — new crews are refused until this is resolved`
+                  : undefined
+              }
+            >
+              <span
+                className={cn("font-mono text-xs tabular-nums", overLimit(stats?.crews ?? 0, license?.max_crews) ? "text-destructive" : "text-foreground")}
+                data-testid="admin-capacity-crews"
+              >
                 {against(stats?.crews ?? 0, license?.max_crews)}
               </span>
             </SettingsRow>
@@ -318,8 +364,11 @@ export const OverviewTab = React.memo(function OverviewTab({
                 {stats?.agents ?? 0}
               </span>
             </SettingsRow>
-            <SettingsRow label="Members">
-              <span className="font-mono text-xs tabular-nums text-foreground">
+            <SettingsRow
+              label="Members"
+              description={overLimit(stats?.users ?? 0, license?.max_members) ? "Over the licensed seats — invitations are refused" : undefined}
+            >
+              <span className={cn("font-mono text-xs tabular-nums", overLimit(stats?.users ?? 0, license?.max_members) ? "text-destructive" : "text-foreground")}>
                 {against(stats?.users ?? 0, license?.max_members)}
               </span>
             </SettingsRow>

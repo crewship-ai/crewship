@@ -99,7 +99,9 @@ crewship issue get BE-42
 
 The identifier can be the issue identifier (e.g., `BE-42`) or the full ID.
 
-**Output fields:** Identifier, Title, Status, Priority, Crew, Assignee, Assignee Type, Description, Due Date, Mission Type, Labels, Comments count, Created By, Created, Updated, ID.
+**Output fields:** Identifier, Title, Status, Priority, Crew, Assignee, Assignee Type, Owner, Delegate, Description, Due Date, Mission Type, Labels, Comments count, Created By, Created, Updated, ID.
+
+`Owner` and `Delegate` are the typed projection of the issue's human owner and agent delegate (`owner`/`delegate` in the API — #2297, independent of each other and of the legacy `Assignee`/`Assignee Type` pair above). Each shows the resolved name, or `-` when nobody occupies that slot. In `--format json` / `--format yaml`, the same data is `owner`/`delegate` objects (`{id, name}`), omitted entirely when unset.
 
 Comments are displayed below the detail section.
 
@@ -202,6 +204,8 @@ Add a comment to an issue.
 ```bash
 crewship issue comment <identifier> This is a comment
 crewship issue comment BE-42 --body "Detailed comment here"
+crewship issue comment BE-42 --mention riley "the CSV job is failing on empty rows"
+crewship issue comment BE-42 --mention riley --mention casey "over to you both"
 ```
 
 The comment body can be passed as positional arguments after the identifier, or via the `--body` flag (which takes precedence).
@@ -209,6 +213,11 @@ The comment body can be passed as positional arguments after the identifier, or 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--body` | `string` | | Comment body (alternative to positional args). |
+| `--mention` | `string` | | Mention an agent by slug. Repeatable. Resolved against the workspace agent roster (same lookup as `--assignee` elsewhere) and prepended to the body as the real `[@slug](crewship:agent/<id>)` link the server requires — one per mention, space-separated, before the rest of the text. Fails with a clear error naming the slug and the workspace's real agents if a slug does not resolve. `--mention` alone with no other text is a valid comment. |
+
+<Warning>
+A bare `@slug` typed into the body (positionally or via `--body`) is **not** a mention — it is plain text, and the mentioned agent is never notified or dispatched. The server only recognises the Markdown link form `[@slug](crewship:agent/<agentId>)` (`internal/mentions`, `docs/guides/issue-mentions.mdx`). Use `--mention` to write a real one.
+</Warning>
 
 ---
 
@@ -238,6 +247,8 @@ crewship issue start BE-42
 ## `crewship issue stop`
 
 Stop an issue -- a cooperative cancel, not an instant kill. Marks pending/in-progress tasks `CANCELLED` and stamps `cancel_requested_at` on every live assignment; a run that hasn't started its exec yet never starts, one already mid-exec finishes that exec and is then recorded `CANCELLED` regardless of what it reports. No further step is scheduled. There is no container kill, so nothing mid-exec is interrupted.
+
+Also reaches a run an `@mention` dispatched on an issue that was never started (`BACKLOG`/`TODO`): the assignment gets the same `cancel_requested_at` stamp, and the issue's own status is left unchanged. `stop` still refuses when the issue is not `IN_PROGRESS`/`REVIEW` and has no live run to reach.
 
 ```bash
 crewship issue stop <identifier>
@@ -294,9 +305,12 @@ List every run attributed to an issue — mission tasks, mention-dispatched runs
 
 ```bash
 crewship issue runs BE-42
+crewship issue runs BE-42 --format json | jq '.[] | select(.source=="mention")'
 ```
 
-**Output columns:** AGENT, TASK (truncated to 28), STATUS, STARTED (relative time), DURATION, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
+**Output columns:** AGENT, TASK (truncated to 28), STATUS, STARTED (relative time), DURATION, SOURCE, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
+
+SOURCE is why the run is attributed to the issue: `task` (the issue's own mission-task plan), `mention` (an `@mention` dispatch), or `delegation` (a sub-agent's own further `/assign` call mid-mission). In `--format json`, the same run also carries `mission_id` (the issue's mission ID; omitted on a legacy row that predates `assignments.mission_id`).
 
 ---
 

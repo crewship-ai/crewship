@@ -14,7 +14,7 @@ its first run). Discovery is **live when possible, curated when not**:
 
 - If the workspace has an active API key for the provider, Crewship asks the
   provider's own models API and returns exactly what your key can use.
-- Otherwise it returns a **curated fallback** — a hand-maintained list of the
+- Otherwise it returns a **curated fallback** — a hand-maintained list (`config/models.json`, shared with the web pickers) of the
   provider's current generally-available models.
 
 The response always reports which path was taken via a `source` field

@@ -29,9 +29,11 @@ import (
 )
 
 type issueStopStub struct {
-	mu         sync.Mutex
-	stopCalls  []string // paths the stop route was hit with
-	stopStatus int
+	mu          sync.Mutex
+	stopCalls   []string // paths the stop route was hit with
+	stopStatus  int
+	stopBody    string // overrides the default success/error body when set
+	issueStatus string // status the GET .../issues/BE-42 stub reports (default IN_PROGRESS)
 }
 
 func (s *issueStopStub) start(t *testing.T) *httptest.Server {
@@ -40,12 +42,18 @@ func (s *issueStopStub) start(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/issues/BE-42":
+			s.mu.Lock()
+			issueStatus := s.issueStatus
+			s.mu.Unlock()
+			if issueStatus == "" {
+				issueStatus = "IN_PROGRESS"
+			}
 			_, _ = w.Write([]byte(`{
 				"id": "iss_1",
 				"crew_id": "crew_1",
 				"identifier": "BE-42",
 				"title": "Refresh token handling",
-				"status": "IN_PROGRESS",
+				"status": "` + issueStatus + `",
 				"priority": "MEDIUM",
 				"mission_type": "STANDARD",
 				"created_at": "2026-08-30T09:00:00Z",
@@ -55,14 +63,18 @@ func (s *issueStopStub) start(t *testing.T) *httptest.Server {
 			s.mu.Lock()
 			s.stopCalls = append(s.stopCalls, r.URL.Path)
 			status := s.stopStatus
+			body := s.stopBody
 			s.mu.Unlock()
 			if status == 0 {
 				status = http.StatusOK
 			}
 			w.WriteHeader(status)
-			if status >= 200 && status < 300 {
-				_, _ = w.Write([]byte(`{"status":"CANCELLED","identifier":"BE-42"}`))
-			} else {
+			switch {
+			case body != "":
+				_, _ = w.Write([]byte(body))
+			case status >= 200 && status < 300:
+				_, _ = w.Write([]byte(`{"status":"CANCELLED","identifier":"BE-42","runs_stopped":1}`))
+			default:
 				_, _ = w.Write([]byte(`{"error":"issue must be IN_PROGRESS or REVIEW to stop"}`))
 			}
 		default:
@@ -126,6 +138,33 @@ func TestAcceptance_IssueStop_CooperativeStopContract(t *testing.T) {
 	}
 	if strings.Contains(out, "Stopped BE-42") {
 		t.Errorf("output = %q, still carries the old instant-cancel wording", out)
+	}
+}
+
+// TestAcceptance_IssueStop_ReachesMentionRunOnNeverStartedIssue covers #2315:
+// a mention can dispatch a run on an issue that never left BACKLOG. The
+// server now answers 200 with the issue's status left unchanged instead of
+// refusing — this asserts the CLI still reports the same cooperative
+// success line rather than assuming (or requiring) the body says CANCELLED.
+func TestAcceptance_IssueStop_ReachesMentionRunOnNeverStartedIssue(t *testing.T) {
+	stub := &issueStopStub{
+		stopStatus:  http.StatusOK,
+		stopBody:    `{"status":"BACKLOG","identifier":"BE-42","runs_stopped":1}`,
+		issueStatus: "BACKLOG",
+	}
+	srv := stub.start(t)
+
+	out, err := runIssueStopCLI(t, srv.URL, "issue", "stop", "BE-42")
+	if err != nil {
+		t.Fatalf("issue stop: %v\noutput: %s", err, out)
+	}
+
+	calls := stub.calls(t)
+	if len(calls) != 1 || calls[0] != "/api/v1/crews/crew_1/issues/BE-42/stop" {
+		t.Errorf("stop calls = %v, want exactly one call to the stop route", calls)
+	}
+	if !strings.Contains(out, "Stop requested for BE-42") {
+		t.Errorf("output = %q, want the cooperative success line even though the issue's own status stayed BACKLOG", out)
 	}
 }
 
