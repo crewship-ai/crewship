@@ -540,7 +540,11 @@ GDPR Art. 17 (Right to Erasure) — cascade purge every row referencing the user
   "scope": {
     "peer_cards": 3,
     "memory_versions": 2,
-    "inbox_items": 2
+    "inbox_items": 2,
+    "page_versions_anonymised": 5,
+    "page_grants_removed": 0,
+    "page_public_tokens_revoked": 0,
+    "page_webhooks_revoked": 0
   }
 }
 ```
@@ -550,8 +554,8 @@ On partial failure the same shape is returned with an additional `"error": "<fir
 | Field | Type | Description |
 |-------|------|-------------|
 | `action_id` | `string` | The audit row id. The same SAR re-run writes a **second** action row — idempotent in row counts (zero on second run) but the audit trail records every attempt. |
-| `rows_deleted` | `int` | Sum across all cascadable tables. |
-| `scope` | `object` | Per-table count summary (extensible — new keys appear additively as new tables join the cascade). |
+| `rows_deleted` | `int` | Sum of rows that went **away**. Rows the cascade only anonymised or reassigned (`page_versions_anonymised`, `pages_transferred`) are excluded — nothing was deleted there. |
+| `scope` | `object` | Per-table count summary (extensible — new keys appear additively as new tables join the cascade). A key ending in `_anonymised` means the row survived without the subject's name on it; `_removed` / `_revoked` means the row is gone and any capability it carried stopped working. See the [GDPR guide](/security/gdpr) for the per-table contract. |
 | `error` | `string?` | Present only on HTTP 207. First error encountered; consult the audit row for the full per-table picture. |
 
 <Warning>
