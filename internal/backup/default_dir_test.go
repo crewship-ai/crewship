@@ -162,6 +162,20 @@ func TestDefaultBackupsDirFor_DataDirEnvRelative_MadeAbsolute(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldwd) })
 
+	// filepath.Abs resolves a relative path against os.Getwd(), not against
+	// the string t.TempDir() handed back — on macOS those two disagree
+	// (t.TempDir() returns an unresolved /var/folders/... path while
+	// os.Getwd() reads back the symlink-resolved /private/var/folders/...,
+	// the same "Apple's /var → /private/var" divergence documented in
+	// internal/api/backup.go's validateBackupPath). Deriving `want` from
+	// Getwd() here — the same call defaultBackupsDirFor's filepath.Abs
+	// makes internally — keeps this assertion honest on every OS instead
+	// of assuming t.TempDir()'s string is already canonical.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd (post-Chdir): %v", err)
+	}
+
 	t.Setenv("CREWSHIP_DATA_DIR", "relative-data-dir")
 	st := stubStorageOpsForDefaultDir{homeErr: errors.New("Home must not be called when CREWSHIP_DATA_DIR is set")}
 
@@ -169,7 +183,7 @@ func TestDefaultBackupsDirFor_DataDirEnvRelative_MadeAbsolute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("defaultBackupsDirFor: %v", err)
 	}
-	want := filepath.Join(tmp, "relative-data-dir", "backups")
+	want := filepath.Join(wd, "relative-data-dir", "backups")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
