@@ -75,3 +75,24 @@ func TestAcceptance_AgentList_HidesSetupByDefault(t *testing.T) {
 		t.Errorf("roster not rendered:\n%s", out)
 	}
 }
+
+func TestAcceptance_Resolver_AsksForTheSetupCrewToo(t *testing.T) {
+	// `chat list <slug>` resolves the slug through the roster. A resolver is
+	// not a roster: the Guide is hidden from listings but addressable by
+	// name, so the lookup must carry the opt-in.
+	stub := &chatListStub{body: chatListFixture}
+	srv := stub.start(t)
+
+	out, err := runChatListCLI(t, srv.URL, "chat", "list", "casey")
+	if err != nil {
+		t.Fatalf("chat list: %v\noutput: %s", err, out)
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.agentQueries) == 0 {
+		t.Fatal("the roster was never asked")
+	}
+	if q := stub.agentQueries[0]; !strings.Contains(q, "include_setup=1") {
+		t.Errorf("resolver query = %q, want include_setup=1", q)
+	}
+}

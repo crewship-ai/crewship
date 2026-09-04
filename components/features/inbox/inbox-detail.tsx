@@ -9,6 +9,7 @@ import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { StatusPill } from "@/components/ui/status-pill"
 import { entityHref } from "@/lib/entity-links"
 import { crewColor } from "@/app/(dashboard)/dashboard-helpers"
+import { hostOf } from "@/lib/routine-step-describe"
 import type { InboxLookup } from "@/components/features/inbox-v2/inbox-v2-types"
 import { RoutineProposalDiff } from "./routine-proposal-diff"
 import { Button } from "@/components/ui/button"
@@ -27,7 +28,7 @@ import {
   absolute, canRole, deciderCopy, decisionMetaFor, expiresIn, jumpFor, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
   payloadString, payloadStrings, safeChatURL, since, subjectOf, type WorkspaceRole,
 } from "./inbox-derive"
-import { entryKindPill, inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
+import { entryKindPill, entryTitle, inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
 
 // =============================================================================
 // The reading pane.
@@ -311,7 +312,9 @@ export function DecisionCard({
           )}
         </div>
 
-        <div className="text-body font-semibold">{item.title}</div>
+        {/* The question, not the server's "Agent escalation:" prefix — the
+            kind pill beside the heading already says what this is. */}
+        <div className="text-body font-semibold">{entryTitle(inboxEntry(item))}</div>
 
         <DecisionSubject item={item} />
 
@@ -478,14 +481,6 @@ function Definition({
   )
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host
-  } catch {
-    return url
-  }
-}
-
 /** The crew id a row names, whichever key the producer used. */
 export function crewIdOf(item: InboxItem): string | null {
   return payloadString(item, "invoking_crew_id") || payloadString(item, "crew_id") || null
@@ -609,7 +604,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
         ) : (
           <DetailCard>
             <div className="flex flex-col gap-3">
-              <div className="text-body font-semibold">{item.title}</div>
+              <div className="text-body font-semibold">{entryTitle(inboxEntry(item))}</div>
               <DecisionSubject item={item} />
               <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={isResolved} />
             </div>
@@ -642,6 +637,10 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: crewColor(crew?.color ?? agent?.crew?.color ?? null) }} aria-hidden />
                   <span className="truncate">{crewName}</span>
                 </Link>
+              ) : crewID ? (
+                // A crew id the lookup cannot name: still loading, or a crew
+                // this list does not carry. Not "No crew".
+                <span className="text-muted-foreground">{lookup?.ready ? "A crew this list does not show" : "…"}</span>
               ) : (
                 <span className="text-muted-foreground">No crew</span>
               )}

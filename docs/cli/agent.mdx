@@ -55,6 +55,7 @@ crewship agent list --crew backend-team
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--crew` | `string` | | Filter by crew slug or ID. |
+| `--include-setup` | `bool` | `false` | Also list the onboarding Guide — agents of the `kind=setup` crew, which the server hides from every roster by default (`?include_setup=1`). |
 | `--limit` | `int` | server default (100) | Rows per page; the server caps it at 500. |
 | `--offset` | `int` | `0` | Rows to skip — page with `--offset 100`, `200`, … |
 

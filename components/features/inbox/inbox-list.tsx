@@ -11,6 +11,7 @@ import { usePipelines } from "@/hooks/use-pipelines"
 import { inboxBulk } from "@/lib/api/inbox"
 
 import { InboxDetail } from "./inbox-detail"
+import { useInboxLookup } from "./use-inbox-lookup"
 import { InboxListPanel } from "./inbox-list-panel"
 import type { DirectoryEntry } from "./inbox-subject-picker"
 import {
@@ -103,6 +104,8 @@ export function InboxList() {
   // the pipeline list. Both are workspace-scoped and neither depends on what
   // happens to be in the inbox window.
   const { data: agents } = useAgentSummaries(workspaceId)
+  // The same pane as /inbox-v2 names crews and agents through this lookup.
+  const lookup = useInboxLookup(workspaceId)
   const { pipelines, refresh: refreshPipelines } = usePipelines(workspaceId)
   useEffect(() => { void refreshPipelines() }, [refreshPipelines])
 
@@ -314,6 +317,7 @@ export function InboxList() {
           <InboxDetail
             key={selected.id}
             item={selected}
+            lookup={lookup}
             role={(role as WorkspaceRole | null) ?? null}
             onResolve={async (action) => {
               // patch() rejects on a 409 (source-managed kinds) and on any

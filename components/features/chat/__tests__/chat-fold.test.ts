@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { foldsFor, readTotal, type ChatTreeThread } from "../chat-tree-data"
+import { foldsFor, type ChatTreeThread } from "../chat-tree-data"
 
 const thread = (id: string): ChatTreeThread => ({
   id, title: id, status: "ACTIVE", message_count: 1, started_at: "2026-09-03T10:00:00Z",
@@ -20,15 +20,5 @@ describe("foldsFor", () => {
     // The fan-out can fail one agent while the count arrived: nothing loaded,
     // three exist. That is three more, not zero.
     expect(foldsFor({}, { sam: 3 })).toEqual({ sam: 3 })
-  })
-})
-
-describe("readTotal", () => {
-  it("reads the header and refuses nonsense", () => {
-    expect(readTotal("19")).toBe(19)
-    expect(readTotal("0")).toBe(0)
-    expect(readTotal(null)).toBeNull()
-    expect(readTotal("many")).toBeNull()
-    expect(readTotal("-1")).toBeNull()
   })
 })

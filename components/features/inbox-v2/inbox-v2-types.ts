@@ -58,6 +58,21 @@ export interface InboxAgentRef {
 export interface InboxLookup {
   crewById: ReadonlyMap<string, InboxCrewRef>
   agentBySlug: ReadonlyMap<string, InboxAgentRef>
+  /** The approvals queue names agents by id, inbox rows by slug. */
+  agentById: ReadonlyMap<string, InboxAgentRef>
+  /** True once both lists answered — before that, an unresolved crew is
+   *  "still loading", not "no crew". */
+  ready: boolean
 }
 
-export const EMPTY_INBOX_LOOKUP: InboxLookup = { crewById: new Map(), agentBySlug: new Map() }
+export const EMPTY_INBOX_LOOKUP: InboxLookup = { crewById: new Map(), agentBySlug: new Map(), agentById: new Map(), ready: false }
+
+/** The agent behind a row, by whichever key the source used. */
+export function resolveAgent(lookup: InboxLookup, ref: { slug: string | null; id?: string | null }): InboxAgentRef | null {
+  if (ref.slug) {
+    const bySlug = lookup.agentBySlug.get(ref.slug)
+    if (bySlug) return bySlug
+  }
+  if (ref.id) return lookup.agentById.get(ref.id) ?? null
+  return null
+}

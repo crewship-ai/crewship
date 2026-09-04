@@ -130,7 +130,10 @@ func resolveAgentID(client *cli.Client, slugOrID string) (string, error) {
 	// past them (#2106). 500 is the route's own ceiling; a workspace larger
 	// than that is what the CUID fast path above is for, since a direct
 	// /api/v1/agents/{id} has no ceiling at all.
-	resp, err := client.Get("/api/v1/agents?limit=500")
+	// A resolver, not a roster: the server hides the onboarding Guide's crew
+	// from GET /agents by default, but `crewship agent get
+	// _crewship-setup-guide` and `chat read <guide-chat>` name it on purpose.
+	resp, err := client.Get("/api/v1/agents?limit=500&include_setup=1")
 	if err != nil {
 		return "", fmt.Errorf("resolve agent: %w", err)
 	}
