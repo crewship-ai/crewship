@@ -947,14 +947,25 @@ export function OrchestrationLayout({
                 </div>
               ) : (
                 <>
+                  {/* Reachable only from a failed loadMore — a failed
+                      initial/refetch always clears `issues` to [] and takes
+                      the full-panel branch above instead. So the retry here
+                      must re-request the page that failed (loadMoreIssues),
+                      NOT fetchIssues/refetch — refetch would reset to page 1
+                      and silently drop whatever loadMore had already added. */}
                   {issuesError && (
                     <div className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                       <span className="flex items-center gap-1.5">
                         <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                         {issuesError.message}
                       </span>
-                      <Button variant="ghost" size="xs" onClick={() => fetchIssues()}>
-                        Retry
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => loadMoreIssues()}
+                        disabled={issuesLoadingMore}
+                      >
+                        {issuesLoadingMore ? "Retrying…" : "Retry"}
                       </Button>
                     </div>
                   )}

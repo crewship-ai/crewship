@@ -115,8 +115,11 @@ describe("useIssuesList", () => {
     expect(result.current.issues.map((i) => i.id)).toEqual(["i1", "i2", "i3"])
     expect(result.current.hasMore).toBe(false)
 
+    // Next page's offset is how many rows are already loaded, not a fixed
+    // ISSUES_PAGE_LIMIT stride — robust even when a page (like this test's
+    // 2-row fixture) returns fewer than a full page.
     const secondCallUrl = String(vi.mocked(apiFetch).mock.calls[1][0])
-    expect(secondCallUrl).toContain("offset=100")
+    expect(secondCallUrl).toContain("offset=2")
   })
 
   it("a failed loadMore keeps the already-loaded issues on screen", async () => {
@@ -135,6 +138,30 @@ describe("useIssuesList", () => {
     expect(result.current.issues).toHaveLength(1)
   })
 
+  it("calling loadMore again after a failure retries the same page, not a new one", async () => {
+    const page1 = [issue("i1")]
+    const page2 = [issue("i2")]
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce(jsonResponse(200, page1, { "X-Total-Count": "2", "X-Has-More": "true" }))
+      .mockResolvedValueOnce(jsonResponse(503, { error: "unavailable" }))
+      .mockResolvedValueOnce(jsonResponse(200, page2, { "X-Total-Count": "2", "X-Has-More": "false" }))
+    const { result } = renderHook(() => useIssuesList("ws-1"))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await result.current.loadMore()
+    await waitFor(() => expect(result.current.error).not.toBeNull())
+
+    // This is the board's banner "Retry" action (orchestration-layout.tsx)
+    // — it calls loadMore() again, not refetch(). Since the failed attempt
+    // never advanced past 1 loaded row, retrying must ask for offset=1
+    // again, and land the row the first attempt lost.
+    await result.current.loadMore()
+    await waitFor(() => expect(result.current.issues).toHaveLength(2))
+    expect(result.current.error).toBeNull()
+    const retryUrl = String(vi.mocked(apiFetch).mock.calls[2][0])
+    expect(retryUrl).toContain("offset=1")
+  })
+
   it("refetch clears a previous error once the request succeeds", async () => {
     vi.mocked(apiFetch)
       .mockResolvedValueOnce(jsonResponse(403, { error: "unrecognized agent token" }))
@@ -146,6 +173,47 @@ describe("useIssuesList", () => {
     await result.current.refetch()
     await waitFor(() => expect(result.current.error).toBeNull())
     expect(result.current.issues).toHaveLength(1)
+  })
+
+  it("refetch restores pages already loaded via loadMore instead of snapping back to page 1", async () => {
+    // Mirrors OrchestrationLayout's handleIssueUpdated/onCreated, which call
+    // refetch() after any issue edit or creation — a workspace with 150
+    // issues where the user had clicked "Load more" once (200 loaded) must
+    // not silently revert to 100 after an unrelated edit.
+    const page1 = Array.from({ length: 100 }, (_, i) => issue(`p1-${i}`))
+    const page2 = Array.from({ length: 50 }, (_, i) => issue(`p2-${i}`))
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce(jsonResponse(200, page1, { "X-Total-Count": "150", "X-Has-More": "true" }))
+      .mockResolvedValueOnce(jsonResponse(200, page2, { "X-Total-Count": "150", "X-Has-More": "false" }))
+    const { result } = renderHook(() => useIssuesList("ws-1"))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await result.current.loadMore()
+    await waitFor(() => expect(result.current.issues).toHaveLength(150))
+
+    vi.mocked(apiFetch).mockReset()
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce(jsonResponse(200, page1, { "X-Total-Count": "150", "X-Has-More": "true" }))
+      .mockResolvedValueOnce(jsonResponse(200, page2, { "X-Total-Count": "150", "X-Has-More": "false" }))
+
+    await result.current.refetch()
+    await waitFor(() => expect(result.current.issues).toHaveLength(150))
+    expect(vi.mocked(apiFetch).mock.calls).toHaveLength(2)
+    expect(String(vi.mocked(apiFetch).mock.calls[0][0])).toContain("offset=0")
+    expect(String(vi.mocked(apiFetch).mock.calls[1][0])).toContain("offset=100")
+  })
+
+  it("refetch does not fetch extra pages when only one page had been loaded", async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      jsonResponse(200, [issue("i1")], { "X-Total-Count": "1", "X-Has-More": "false" }),
+    )
+    const { result } = renderHook(() => useIssuesList("ws-1"))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    vi.mocked(apiFetch).mockClear()
+    await result.current.refetch()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(apiFetch).toHaveBeenCalledTimes(1)
   })
 
   it("does not fetch without a workspace id", () => {

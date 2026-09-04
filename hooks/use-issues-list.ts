@@ -86,12 +86,21 @@ export interface UseIssuesListResult {
    *  callers must treat null as "unknown", not zero). */
   total: number | null
   hasMore: boolean
+  /** How many rows are currently loaded — also where the next loadMore()
+   *  page starts (see fetchPage's `nextOffset` argument below). */
   offset: number
   limit: number
-  /** Re-fetch page 1, replacing `issues`. */
+  /** Re-fetch page 1. If more than one page had been loaded (via loadMore)
+   *  before this call, those additional pages are re-fetched too — an
+   *  edit/create-triggered refresh (OrchestrationLayout's
+   *  handleIssueUpdated / onCreated) must not silently undo pagination
+   *  progress by snapping the board back down to a single page. */
   refetch: () => Promise<void>
   /** Fetch the next page and append it to `issues`. No-op while a fetch is
-   *  already in flight or when hasMore is false. */
+   *  already in flight or when hasMore is false. Safe to call again after a
+   *  failure — it always asks for the page starting at the current
+   *  (unchanged, since a failed append never touched `issues`) `offset`,
+   *  so retrying re-requests exactly the page that failed. */
   loadMore: () => Promise<void>
 }
 
@@ -101,15 +110,25 @@ export function useIssuesList(workspaceId: string | null | undefined): UseIssues
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<IssuesFetchError | null>(null)
   const [total, setTotal] = useState<number | null>(null)
-  const [offset, setOffset] = useState(0)
   // Guards against a slow, superseded request clobbering a faster later one
   // (refetch fired twice in quick succession, or loadMore racing a refetch).
   const requestSeq = useRef(0)
+  // Mirrors `issues`/`total` synchronously (state updates aren't visible
+  // until the next render, and refetch's page-restoration loop below needs
+  // up-to-date values BETWEEN awaits within a single call).
+  const issuesRef = useRef<Mission[]>([])
+  const totalRef = useRef<number | null>(null)
+  // True only while the request that is CURRENTLY the latest one (seq ===
+  // requestSeq.current) is in flight — see the finally block: only that
+  // request's completion clears it, so a superseded request finishing late
+  // can never mark "not fetching" while a newer one is still running.
   const fetchingRef = useRef(false)
 
+  /** Fetches one page and returns whether it succeeded (false on error, or
+   *  on being superseded by a newer request before it resolved). */
   const fetchPage = useCallback(
-    async (nextOffset: number, append: boolean) => {
-      if (!workspaceId) return
+    async (nextOffset: number, append: boolean): Promise<boolean> => {
+      if (!workspaceId) return false
       const seq = ++requestSeq.current
       fetchingRef.current = true
       if (append) setLoadingMore(true)
@@ -118,26 +137,37 @@ export function useIssuesList(workspaceId: string | null | undefined): UseIssues
         const res = await apiFetch(
           `/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=${ISSUES_PAGE_LIMIT}&offset=${nextOffset}`,
         )
-        if (seq !== requestSeq.current) return
+        if (seq !== requestSeq.current) return false
         if (!res.ok) {
           const kind = classify(res.status)
           setError({ kind, status: res.status, message: messageFor(kind, res.status) })
-          if (!append) setIssues([])
-          return
+          if (!append) {
+            issuesRef.current = []
+            setIssues([])
+          }
+          return false
         }
         const page = (await res.json()) as Mission[]
         const totalHeader = res.headers.get("X-Total-Count")
+        const nextTotal = totalHeader !== null && totalHeader !== "" ? Number(totalHeader) : null
+        const merged = append ? [...issuesRef.current, ...page] : page
+        issuesRef.current = merged
+        totalRef.current = nextTotal
         setError(null)
-        setTotal(totalHeader !== null && totalHeader !== "" ? Number(totalHeader) : null)
-        setOffset(nextOffset)
-        setIssues((prev) => (append ? [...prev, ...page] : page))
+        setTotal(nextTotal)
+        setIssues(merged)
+        return true
       } catch {
-        if (seq !== requestSeq.current) return
+        if (seq !== requestSeq.current) return false
         setError({ kind: "network", status: null, message: messageFor("network", null) })
-        if (!append) setIssues([])
+        if (!append) {
+          issuesRef.current = []
+          setIssues([])
+        }
+        return false
       } finally {
-        fetchingRef.current = false
         if (seq === requestSeq.current) {
+          fetchingRef.current = false
           if (append) setLoadingMore(false)
           else setLoading(false)
         }
@@ -146,13 +176,29 @@ export function useIssuesList(workspaceId: string | null | undefined): UseIssues
     [workspaceId],
   )
 
-  const refetch = useCallback(() => fetchPage(0, false), [fetchPage])
+  const refetch = useCallback(async () => {
+    const priorCount = issuesRef.current.length
+    const ok = await fetchPage(0, false)
+    if (!ok) return
+    // Restore any pages beyond the first that were loaded via loadMore
+    // before this refetch. Each page's correct offset is simply how many
+    // rows are loaded so far — the backend always returns a full page
+    // (ISSUES_PAGE_LIMIT rows) until the last one, so this naturally lands
+    // on page boundaries without tracking them separately.
+    while (
+      issuesRef.current.length < priorCount &&
+      (totalRef.current === null || issuesRef.current.length < totalRef.current)
+    ) {
+      const more = await fetchPage(issuesRef.current.length, true)
+      if (!more) break
+    }
+  }, [fetchPage])
 
-  const loadMore = useCallback(() => {
-    if (fetchingRef.current) return Promise.resolve()
-    if (total !== null && issues.length >= total) return Promise.resolve()
-    return fetchPage(offset + ISSUES_PAGE_LIMIT, true)
-  }, [fetchPage, offset, total, issues.length])
+  const loadMore = useCallback(async () => {
+    if (fetchingRef.current) return
+    if (totalRef.current !== null && issuesRef.current.length >= totalRef.current) return
+    await fetchPage(issuesRef.current.length, true)
+  }, [fetchPage])
 
   useEffect(() => {
     fetchPage(0, false)
@@ -172,7 +218,7 @@ export function useIssuesList(workspaceId: string | null | undefined): UseIssues
     error,
     total,
     hasMore,
-    offset,
+    offset: issues.length,
     limit: ISSUES_PAGE_LIMIT,
     refetch,
     loadMore,
