@@ -66,6 +66,18 @@ const STATUS: Record<string, StatusMeta> = {
   STANDARD: { label: "Standard", tone: "muted" },
   SEALED: { label: "Sealed", tone: "purple" },
   INITIATED: { label: "Initiated", tone: "blue" },
+  STOPPED: { label: "Stopped", tone: "warn" },
+  // notification connections and deliveries
+  DELIVERING: { label: "Delivering", tone: "success" },
+  FAILING: { label: "Failing", tone: "danger" },
+  NEVER_USED: { label: "Never used", tone: "warn" },
+  // A viewer who may not read the delivery log cannot know; "Enabled" was
+  // what this used to say, which is not the same fact.
+  NOT_CHECKED: { label: "Not checked", tone: "muted" },
+  SENT: { label: "Sent", tone: "success" },
+  DROPPED_PREF: { label: "Muted", tone: "muted" },
+  DROPPED_RATE: { label: "Rate-gated", tone: "warn" },
+  NO_AUTH: { label: "No auth needed", tone: "muted" },
 }
 
 /** Human words for a raw status. Case-insensitive; dashes and spaces are

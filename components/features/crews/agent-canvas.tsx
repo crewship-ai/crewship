@@ -24,7 +24,9 @@ import {
 } from "@/components/ui/dialog"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Pill } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
@@ -80,25 +82,6 @@ export interface AgentCanvasProps {
   onSelectCrew: (slug: string | null) => void
   /** Open the bottom panel pre-targeted to the Files tab. Wired by CrewsLayout. */
   onOpenFiles?: () => void
-}
-
-/** Status → the kit's pill tone, so agent state reads like routine state. */
-const STATUS_PILL_TONE: Record<string, "default" | "success" | "destructive" | "warn" | "blue" | "purple"> = {
-  RUNNING: "success",
-  IDLE: "default",
-  ERROR: "destructive",
-  STOPPED: "warn",
-  PENDING_REVIEW: "warn",
-  EXPIRED: "default",
-}
-
-const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
-  RUNNING: { label: "running", className: "bg-success/15 text-success border-success/30", pulse: true },
-  IDLE: { label: "idle", className: "bg-muted/40 text-muted-foreground border-white/10" },
-  ERROR: { label: "error", className: "bg-destructive/15 text-destructive border-destructive/30" },
-  STOPPED: { label: "stopped", className: "bg-warn/15 text-warn border-warn/30" },
-  PENDING_REVIEW: { label: "pending review", className: "bg-warn/15 text-warn border-warn/30" },
-  EXPIRED: { label: "expired", className: "bg-muted-foreground/15 text-muted-foreground border-border/30" },
 }
 
 /**
@@ -287,9 +270,9 @@ export function AgentCanvas({
     }
   }, [agent, patch])
 
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const handleDelete = useCallback(async () => {
     if (!agent) return
-    if (!confirm(`Delete agent "${agent.name}"? Sessions and runs are kept for 30 days, then purged.`)) return
     try {
       const res = await apiFetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -297,6 +280,7 @@ export function AgentCanvas({
       onAgentChanged()
     } catch (err) {
       toast.error(`Delete failed: ${err instanceof Error ? err.message : err}`)
+      throw err
     }
   }, [agent, onAgentChanged, workspaceId])
 
@@ -314,7 +298,6 @@ export function AgentCanvas({
 
   const ghost = isGhost(agent)
   const statusKey = effectiveStatus(agent)
-  const status = STATUS_BADGE[statusKey] || STATUS_BADGE.IDLE
   const isRunning = agent.status === "RUNNING" && !ghost
   const isPendingHire = agent.ephemeral === true && agent.status === "PENDING_REVIEW" && !ghost
   const ttl = agent.ephemeral && !ghost ? ttlRemaining(agent.expires_at) : ""
@@ -434,7 +417,7 @@ export function AgentCanvas({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={handleDelete}
+                  onClick={() => setConfirmDelete(true)}
                   className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -446,10 +429,7 @@ export function AgentCanvas({
         </div>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          <Pill tone={STATUS_PILL_TONE[statusKey] ?? "default"}>
-            <span className={cn("h-1.5 w-1.5 rounded-full bg-current", isRunning && "animate-pulse")} />
-            {status.label}
-          </Pill>
+          <StatusPill status={statusKey} live={isRunning} size="md" />
           {agent.agent_role === "LEAD" && <Pill tone="purple">Lead</Pill>}
           {agent.ephemeral && !ghost && (
             <Pill tone="warn">
@@ -575,6 +555,20 @@ export function AgentCanvas({
         </DialogContent>
       </Dialog>
 
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete agent ${agent.name}?`}
+        description="The agent stops and leaves its crew. It cannot be undone."
+        consequences={[
+          { tone: "lost", text: "Its credential and connector grants are removed" },
+          { tone: "kept", text: "Sessions and runs stay readable for 30 days, then are purged" },
+          { tone: "kept", text: "Issues it was assigned stay open, unassigned" },
+        ]}
+        confirmLabel="Delete agent"
+        destructive
+        onConfirm={handleDelete}
+      />
     </CanvasShell>
   )
 }

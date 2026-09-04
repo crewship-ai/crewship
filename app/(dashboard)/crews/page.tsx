@@ -124,7 +124,13 @@ export default function CrewsPage() {
 
   // First paint only: a silent refetch after a save keeps the canvas up,
   // otherwise the list the open canvas resolved from would blank for a beat.
-  const firstLoad = (crewsList.loading && crewsList.total === null) || (agentsList.loading && agentsList.total === null)
+  // The lists report "not loading" for the one render before their first
+  // effect fires, which painted an empty roster for a frame; until a load has
+  // been seen, an empty workspace is "not fetched yet", not "empty".
+  const loadSeen = useRef(false)
+  if (crewsList.loading || agentsList.loading) loadSeen.current = true
+  const beforeFirstResponse = !loadSeen.current && !crewsList.error && !agentsList.error
+  const firstLoad = beforeFirstResponse || (crewsList.loading && crewsList.total === null) || (agentsList.loading && agentsList.total === null)
   if (wsLoading || (workspaceId && firstLoad && crews.length === 0 && agents.length === 0)) {
     return (
       <div className="h-full flex items-center justify-center">

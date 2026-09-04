@@ -56,8 +56,8 @@ describe("ConnectedAccountsTab", () => {
         onChanged={vi.fn()}
       />,
     )
-    expect(screen.getAllByText("ACTIVE")).toHaveLength(2)
-    expect(screen.getByText("EXPIRED")).toBeDefined()
+    expect(screen.getAllByText("Active")).toHaveLength(2)
+    expect(screen.getByText("Expired")).toBeDefined()
   })
 
   it("each row exposes Refresh / Revoke / Remove actions", () => {
@@ -86,6 +86,10 @@ describe("ConnectedAccountsTab", () => {
     )
     const expiredRow = screen.getByTestId("account-row-acc_yt_expired")
     fireEvent.click(within(expiredRow).getByRole("button", { name: "Remove" }))
+    // Removing is irreversible: it goes through the confirmation that says
+    // what is lost, and nothing is sent until it is confirmed.
+    expect(global.fetch).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole("button", { name: "Remove account" }))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
     const [url, opts] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(String(url)).toContain("/accounts/acc_yt_expired")

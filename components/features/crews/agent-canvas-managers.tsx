@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Plus, Trash2 } from "lucide-react"
 import type { AgentCredRow, AgentSkillRow } from "./agent-canvas"
 import { apiFetch } from "@/lib/api-fetch"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 interface WorkspaceSkill {
   id: string
@@ -70,8 +71,8 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
     }
   }, [agentId, refresh, onChange])
 
+  const [pendingRemove, setPendingRemove] = useState<{ id: string; name: string } | null>(null)
   const remove = useCallback(async (assignmentId: string, name: string) => {
-    if (!confirm(`Remove skill "${name}" from ${agentSlug}?`)) return
     setBusy(true)
     try {
       const r = await apiFetch(`/api/v1/agents/${agentId}/skills/${assignmentId}`, { method: "DELETE" })
@@ -84,7 +85,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
     } finally {
       setBusy(false)
     }
-  }, [agentId, agentSlug, refresh, onChange])
+  }, [agentId, refresh, onChange])
 
   const assignedIds = useMemo(() => new Set((assigned ?? []).map((a) => a.skill_id)), [assigned])
   const pickable = useMemo(() => (available ?? []).filter((s) => !assignedIds.has(s.id)), [available, assignedIds])
@@ -123,7 +124,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => remove(row.id, row.skill.display_name ?? row.skill.name)}
+                onClick={() => setPendingRemove({ id: row.id, name: row.skill.display_name ?? row.skill.name })}
                 className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive flex items-center gap-1"
                 title="Remove skill"
               >
@@ -150,6 +151,18 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
           busy={busy}
         />
       )}
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => { if (!open) setPendingRemove(null) }}
+        title={pendingRemove ? `Remove skill ${pendingRemove.name} from ${agentSlug}?` : ""}
+        consequences={[
+          { tone: "lost", text: "The agent stops using it on its next run" },
+          { tone: "kept", text: "The skill stays in the workspace library; assign it again any time" },
+        ]}
+        confirmLabel="Remove skill"
+        destructive
+        onConfirm={async () => { if (pendingRemove) await remove(pendingRemove.id, pendingRemove.name) }}
+      />
     </section>
   )
 }
@@ -232,8 +245,8 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
     }
   }, [agentId, refresh, onChange])
 
+  const [pendingRemove, setPendingRemove] = useState<{ id: string; name: string } | null>(null)
   const remove = useCallback(async (assignmentId: string, name: string) => {
-    if (!confirm(`Unassign credential "${name}" from ${agentSlug}?`)) return
     setBusy(true)
     try {
       const r = await apiFetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}`, { method: "DELETE" })
@@ -246,7 +259,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
     } finally {
       setBusy(false)
     }
-  }, [agentId, agentSlug, refresh, onChange])
+  }, [agentId, refresh, onChange])
 
   const assignedIds = useMemo(() => new Set((assigned ?? []).map((a) => a.credential_id)), [assigned])
   const pickable = useMemo(() => (available ?? []).filter((c) => !assignedIds.has(c.id)), [available, assignedIds])
@@ -289,7 +302,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => remove(row.id, row.credential_name)}
+                onClick={() => setPendingRemove({ id: row.id, name: row.credential_name })}
                 className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive flex items-center gap-1"
                 title="Unassign credential"
               >
@@ -316,6 +329,18 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
           busy={busy}
         />
       )}
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(open) => { if (!open) setPendingRemove(null) }}
+        title={pendingRemove ? `Unassign credential ${pendingRemove.name} from ${agentSlug}?` : ""}
+        consequences={[
+          { tone: "lost", text: "The agent loses access on its next run" },
+          { tone: "kept", text: "The credential stays in the vault for every other holder" },
+        ]}
+        confirmLabel="Unassign"
+        destructive
+        onConfirm={async () => { if (pendingRemove) await remove(pendingRemove.id, pendingRemove.name) }}
+      />
     </section>
   )
 }
