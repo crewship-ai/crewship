@@ -322,6 +322,11 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
 
   return (
     <div className="rounded-xl border border-white/8 bg-card p-4 space-y-4">
+      {!effectiveCanEdit && (
+        <p className="text-[11px] text-muted-foreground" data-testid="policy-readonly-reason">
+          Requires an admin to change — you can read the policy but not set it.
+        </p>
+      )}
       <div>
         <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Autonomy level</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

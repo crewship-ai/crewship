@@ -89,6 +89,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 
   // Step validity gates the "Continue" button.
   const stepValid = useMemo(() => stepIsValid(step, state), [step, state])
+  const blocker = useMemo(() => stepBlocker(step, state), [step, state])
 
   const lineupSummary = useMemo(() => deriveLineupSummary(state), [state])
 
@@ -333,12 +334,16 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
           // position twice over — the numbered chips on a pointer device, and
           // "3 / 4" beside a progress bar on a phone — and the header's meta
           // says it a third time. The footer's job is the keyboard hint.
+          // …unless Continue is off, in which case the footer says why —
+          // a grey button with nothing to read was this dialog's dead end.
           hint={
             panel
               ? undefined
-              : step === 4
-                ? "⌘+Enter to confirm · Esc cancel"
-                : "⌘+Enter to continue"
+              : blocker
+                ? <span className="text-warn">{blocker}</span>
+                : step === 4
+                  ? "⌘+Enter to confirm · Esc cancel"
+                  : "⌘+Enter to continue"
           }
           // Inside the panel, Cancel means "back out of the panel" — the same
           // rule the project modal's icon panel follows, and the reason
@@ -382,6 +387,23 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 // =============================================================================
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/
+
+/** Why Continue is off, in words next to it (README §6): a dead button with
+ *  nothing to read was the create-crew dialog's one dead end. Null when the
+ *  step is valid. Mirrors stepIsValid rule for rule. */
+export function stepBlocker(step: WizardStep, s: WizardState): string | null {
+  if (step === 1) {
+    if (s.name.trim().length < 2) return "Name must be at least 2 characters"
+    if (s.slug.trim().length < 2 || !SLUG_RE.test(s.slug)) {
+      return "Slug must use only lowercase letters, digits and hyphens (2+ chars)"
+    }
+    return null
+  }
+  if (step === 2 && s.mode === "browse" && !s.pickedTemplateSlug) {
+    return "Pick a template, or start with an empty lineup"
+  }
+  return null
+}
 
 function stepIsValid(step: WizardStep, s: WizardState): boolean {
   if (step === 1) {

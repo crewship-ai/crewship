@@ -143,7 +143,10 @@ export function CrewRuntimeConfig({
         )}
 
         {canEdit && hasConfig && (
-          <div className="flex gap-1.5 ml-auto">
+          <div className="flex items-center gap-1.5 ml-auto">
+            {!isProvisioned && hasChanges && (
+              <span className="text-[11px] text-warn">Save changes first</span>
+            )}
             {!isProvisioned && (
               <Button
                 size="sm"

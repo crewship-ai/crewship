@@ -128,7 +128,8 @@ export function OverviewTab({
       </section>
 
       {/* Quick actions */}
-      <section className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      <section className="space-y-2">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <QuickAction
           icon={<Files className="h-3.5 w-3.5" />}
           label="Open Files"
@@ -146,6 +147,10 @@ export function OverviewTab({
           onClick={() => applyAvatarStyle(true)}
           disabled={agentsForCrew.length === 0}
         />
+      </div>
+      {agentsForCrew.length === 0 && (
+        <p className="text-[11px] text-muted-foreground">Avatar actions need at least one agent in the crew — add one with + Agent in the toolbar.</p>
+      )}
       </section>
     </div>
   )
