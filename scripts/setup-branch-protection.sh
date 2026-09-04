@@ -33,6 +33,13 @@ fi
 #   - Grype Source Scan: informational (fail-build: false until baseline clean)
 #   - E2E devcontainer: nightly / on-demand only, not in the per-PR gate
 #   - Binary Build: push-only post-merge embed sanity check
+#   - PR Image Build (pr-image-build.yml, #2064): path-filtered to the
+#     Dockerfile and what it COPYs. A required check that a path filter lets
+#     not run on a given PR blocks that PR's merge forever — GitHub never
+#     reports a status for a job that never ran, so a required check has to
+#     run on every PR (same reason smoke-test.yml's `pull_request` jobs are
+#     absent from this list too). Making it required would mean widening its
+#     trigger to every PR first.
 read -r -d '' PAYLOAD <<'JSON' || true
 {
   "required_status_checks": {

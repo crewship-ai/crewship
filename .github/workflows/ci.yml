@@ -351,6 +351,21 @@ jobs:
       - name: Go toolchain pin guard negative test
         run: bash scripts/go-toolchain-pin-test.sh
 
+      # #2064 half (b): pr-image-build.yml runs an actual `docker build` on a
+      # PR, but only behind a `paths:` filter — otherwise it would cost every
+      # PR the ~10 min a full image build takes. That filter can go stale the
+      # same way the pins above can: add a source the Dockerfile now `COPY`s
+      # without adding it here, and the build keeps skipping the PR that most
+      # needs it while everything else stays green. Same placement rationale
+      # as the toolchain guard above: cheap, pure-bash, and it has to run on
+      # every PR to catch drift on the PR that introduces it — including a
+      # Dockerfile-only PR that pr-image-build.yml's own filter would not
+      # otherwise trigger for.
+      - name: "PR image build paths: list matches the Dockerfile's COPY set"
+        run: bash scripts/pr-image-build-paths.sh
+      - name: PR image build paths guard negative test
+        run: bash scripts/pr-image-build-paths-test.sh
+
   # ── Per-PR control-plane harness ──
   # This is intentionally a small, explicit subset. Runtime suites that need
   # a provider key remain in nightly-harness.yml; they are listed there with
