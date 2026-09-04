@@ -160,6 +160,17 @@ CREATE INDEX IF NOT EXISTS idx_mission_comment_mentions_workspace
 -- this column. Not a prefix of UNIQUE(event_id, agent_id) — claimed_by_run_id
 -- is neither leading column of that index — so this is not redundant with it
 -- (TestRedundantIndexPolicy).
+-- The rebuild must not lose the two foreign keys the old table had indexed:
+-- assignment_id led idx_mission_comment_mentions_assignment (a run's
+-- deletion enforces ON DELETE SET NULL by scanning this table otherwise),
+-- and comment_id was the leading column of the old UNIQUE(comment_id,
+-- agent_id) — a comment's cascade needs it just as much now that the unique
+-- key leads with event_id. TestForeignKeyIndexPolicy ratchets both.
+CREATE INDEX IF NOT EXISTS idx_mission_comment_mentions_assignment
+    ON mission_comment_mentions(assignment_id);
+CREATE INDEX IF NOT EXISTS idx_mission_comment_mentions_comment
+    ON mission_comment_mentions(comment_id);
+
 CREATE INDEX IF NOT EXISTS idx_mission_comment_mentions_claimed_by_run
     ON mission_comment_mentions(claimed_by_run_id);
 
