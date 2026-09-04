@@ -299,7 +299,7 @@ The superseded draft recorded twelve observations from a live dev1 session (two 
 
 | Status | Findings |
 |---|---|
-| MERGED — `a1` #2295 (Stop, terminal guards, late-failure leak) and `a2` #2279 (`mission_id`, derivation) | F1, F6 (Tier 1), F7, F9 |
+| MERGED — `a1` #2295 (Stop, terminal guards, late-failure leak) and `a2` #2279 (`mission_id`, derivation); **live validation found two A1 defects the package tests never saw** — a `QUEUED` run survived Stop (#2312 → #2317) and a mention-started run on a never-started issue was unreachable by Stop (#2315 → #2320); both fixed and re-checked live | F1, F6 (Tier 1), F7, F9 |
 | MERGED — `a3` #2271 (registry now scans every ad hoc `journal.EntryType` under `internal/`+`cmd/`, 140 types, not just `types.go`; sparse `PATCH` validates only what it changes) | F19 |
 | MERGED — `a4` #2282 | F20 |
 | MERGED — `a5` #2289 (docs, labels, stale comment) | F25, F26, F23 (docs half) |
@@ -947,7 +947,7 @@ If 1.0 is genuinely meant to include Track B, that is a decision to *redefine 1.
 
 **A1 · Stop actually stops (Tier 1), and terminal states hold.** *(merged #2295)*
 Cooperative cancellation per §10.3 Tier 1: `cancel_requested_at`, checked before any exec starts and again when the run reports back, and terminal-state guards on `mission_tasks` and `assignments`. **As built there is no mid-execution poll** — a run already inside its exec finishes that exec and is then recorded `CANCELLED`, and the mission engine schedules nothing further (proven for a live RUNNING run, `mission_tasks_stop_midflight_test.go`). That matches the promise exactly; do not describe it as more. `assignments` becomes reachable in `CANCELLED` (F9). The old stop route keeps its path and gains real behaviour. A late *failure* report on a stopped run now also reads as cancelled on every user-facing surface (broadcast, mission comment, activity), not only in `status`. UI label: "Stopping — will finish the current step".
-*Status:* on branch `a1-stop-actually-stops`, which also carries A2 (merged), the 5a proof tests and the late-failure fix.
+*Status:* merged (#2295). Live validation on dev1 (2026-09-03, `docs/prd/reports/track-a-live-validation-2026-09-03.md`) then broke the accept line twice — a `QUEUED` run was not stamped and ran to `COMPLETED` after the issue read `CANCELLED` (#2312, fixed #2317), and Stop refused a `BACKLOG` issue whose only live run a mention had started (#2315, fixed #2320). Both re-checked live after the fixes.
 *Why 1.0:* a control that is documented and does nothing is the definition of the bar's condition #2. Fixes F6 (worst half) and F7 entirely.
 *Accept:* a stopped run starts no further step; a late callback changes nothing (regression test must fail on current `main`); the UI label matches the guarantee; no `docker kill` on a shared crew container anywhere in the diff.
 
@@ -1239,6 +1239,8 @@ Two specific traps the audit caught, worth repeating because they are the genera
 
 - A test asserting that a UI renders the string value of `catchup_policy` is not coverage of scenario 12. It proves a column reached a label; it never touches fire-time arithmetic or the three policy variants.
 - A test asserting that a component *subscribes* to `pipeline.run.*` is not proof that a received event repaints anything.
+
+- **The A1 accept line was ticked by package tests and failed live, twice.** "A stopped run starts no further step" held for every row the tests seeded — `PENDING` and `RUNNING`. The first live run on dev1 (2026-09-03) parked a run as `QUEUED` behind a busy agent (#2269's own queue), stopped the issue, and watched the run start and land `COMPLETED` (#2312). The same session mentioned an agent on an issue nobody had started and found Stop refusing the issue by status while the run kept going (#2315). Neither is a subtle race; both are shapes the package tests never constructed. Package coverage is not scenario coverage — the scenario is *a user stops an issue and nothing attributed to it runs on*, and only a live board with a busy agent and a bare mention exercised it.
 
 **Rule going forward:** a scenario counts as covered only when the test observes the behaviour a user would observe. Column-write tests and subscription-argument tests are legitimate unit coverage and are not scenario proof. State which kind each test is.
 

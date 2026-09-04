@@ -2,8 +2,10 @@
 
 Two kinds of file live here, and they are not maintained the same way.
 
-**Authored.** `release-1-0-test-readiness.md` and `wp21-go-todo-triage.md` are
-written by hand and reviewed like any other document.
+**Authored.** `release-1-0-test-readiness.md`, `wp21-go-todo-triage.md` and
+`track-a-live-validation-2026-09-03.md` (what the Track A packages did on a
+real instance, and the three defects that found) are written by hand and
+reviewed like any other document.
 
 **Generated, and deliberately not checked in.**
 `release-1-0-api-cli-inventory.json` and `release-1-0-api-cli-inventory.md` are
