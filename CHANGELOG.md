@@ -310,7 +310,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   same way `GET /issue/{id}` already is. Mid-run delivery of a follow-up
   through the steering queue (F3) is out of scope for this package and is
   tracked separately as B3b (#2350).
-- **The outcome contract — one routing table, not a guess per consumer (#TBD).**
+- **The outcome contract — one routing table, not a guess per consumer (#2358).**
   `outcome` (PRD-ISSUES-AND-ROUTINES-2026 §9.6, work package B6) lands on
   both run tables — `assignments` and `pipeline_runs` — as a CHECK'd column
   with the seven-value vocabulary (`NO_CHANGE`, `SUCCEEDED`, `WORK_CREATED`,
