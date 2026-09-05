@@ -155,7 +155,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
-- **`DONE` is now the only word for "finished" on `missions.status`; `COMPLETED` is retired (#TBD).**
+- **`DONE` is now the only word for "finished" on `missions.status`; `COMPLETED` is retired (#2383).**
   Issues moved to `DONE` while the mission engine's PATCH endpoint moved an
   orchestrated mission to `COMPLETED` for the identical REVIEW→terminal
   approval, sharing one column — a decision documented in
