@@ -185,3 +185,16 @@ func TestNextOccurrences_InvalidTimezone(t *testing.T) {
 		t.Fatal("expected error for invalid timezone")
 	}
 }
+
+// TestNextOccurrences_BoundsTheCount pins the library-side clamp: a caller
+// asking for a million fire times gets MaxNextOccurrences, not a
+// user-sized allocation.
+func TestNextOccurrences_BoundsTheCount(t *testing.T) {
+	occs, err := NextOccurrences("* * * * *", "UTC", 1_000_000, time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("NextOccurrences: %v", err)
+	}
+	if len(occs) != MaxNextOccurrences {
+		t.Fatalf("len = %d, want the clamp %d", len(occs), MaxNextOccurrences)
+	}
+}

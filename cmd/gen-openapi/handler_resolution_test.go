@@ -313,6 +313,7 @@ var requiredQueryParametersInSpec = []string{
 	"GET /api/v1/oauth/callback ?code",
 	"GET /api/v1/oauth/callback ?state",
 	"GET /api/v1/skills/proposed ?crew_id",
+	"GET /api/v1/workspaces/{workspaceId}/pipeline-schedules/preview ?cron_expr", // B9 (#2362): the preview has nothing to compute without an expression
 	"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff ?from",
 	"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff ?to",
 	"POST /api/v1/connectors/{connectorId}/install ?workspace_id",
