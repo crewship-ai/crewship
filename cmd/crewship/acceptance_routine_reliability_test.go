@@ -64,6 +64,10 @@ func startReliabilityAcceptanceServer(t *testing.T) (cfgPath, serverURL string) 
 	mustExec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
 		VALUES ('rel-pipe', ?, 'rel-routine', 'rel-routine', '{"name":"rel-routine","steps":[]}', 'hash', ?, ?, ?)`,
 		reliabilityAcceptanceWorkspaceID, now, now, now)
+	// A second routine so webhook --slug retargeting has somewhere to go.
+	mustExec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, created_at, updated_at, last_test_run_at)
+		VALUES ('rel-pipe-2', ?, 'rel-routine-2', 'rel-routine-2', '{"name":"rel-routine-2","steps":[]}', 'hash', ?, ?, ?)`,
+		reliabilityAcceptanceWorkspaceID, now, now, now)
 
 	const ownerToken = "crewship_cli_relowner00000000000000000"
 	mustExec(`INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES ('clt-rel-owner', 'rel-owner', 't', ?, datetime('now'))`,
@@ -303,5 +307,75 @@ func TestAcceptance_RoutineWebhooksUpdate_RotateSecret_ChangesSecretNotURL(t *te
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusAccepted {
 		t.Fatalf("status with new secret on the SAME URL = %d, want 202 (the token/URL must survive a secret rotation)", resp2.StatusCode)
+	}
+}
+
+// TestAcceptance_RoutineWebhooksUpdate_SlugAndVersionPin drives the CLI
+// parity fields `update` shares with `schedules update` — code review on
+// this PR found them missing from the CLI even though the server, the
+// OpenAPI schema and the docs all advertised them. Proves --slug actually
+// retargets, --pin-version actually pins, and --unpin actually clears it —
+// again, none of it touching the URL.
+func TestAcceptance_RoutineWebhooksUpdate_SlugAndVersionPin(t *testing.T) {
+	cfgPath, serverURL := startReliabilityAcceptanceServer(t)
+
+	createOut, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "webhooks", "create",
+		"--slug", "rel-routine", "--name", "retarget-me", "--base-url", serverURL)
+	if err != nil {
+		t.Fatalf("routine webhooks create failed: %v\n%s", err, createOut)
+	}
+	var created struct {
+		ID        string `json:"id"`
+		PublicURL string `json:"public_url"`
+	}
+	if err := json.Unmarshal([]byte(createOut), &created); err != nil {
+		t.Fatalf("decode create output: %v\nraw: %s", err, createOut)
+	}
+
+	updateOut, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "webhooks", "update", created.ID,
+		"--slug", "rel-routine-2", "--pin-version", "3")
+	if err != nil {
+		t.Fatalf("routine webhooks update --slug --pin-version failed: %v\n%s", err, updateOut)
+	}
+	var updated struct {
+		TargetPipelineSlug    string `json:"target_pipeline_slug"`
+		TargetPipelineVersion *int   `json:"target_pipeline_version"`
+		PublicURL             string `json:"public_url"`
+	}
+	if err := json.Unmarshal([]byte(updateOut), &updated); err != nil {
+		t.Fatalf("decode update output: %v\nraw: %s", err, updateOut)
+	}
+	if updated.TargetPipelineSlug != "rel-routine-2" {
+		t.Errorf("target_pipeline_slug = %q, want rel-routine-2", updated.TargetPipelineSlug)
+	}
+	if updated.TargetPipelineVersion == nil || *updated.TargetPipelineVersion != 3 {
+		t.Errorf("target_pipeline_version = %v, want 3", updated.TargetPipelineVersion)
+	}
+
+	unpinOut, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "webhooks", "update", created.ID, "--unpin")
+	if err != nil {
+		t.Fatalf("routine webhooks update --unpin failed: %v\n%s", err, unpinOut)
+	}
+	var unpinned struct {
+		TargetPipelineVersion *int `json:"target_pipeline_version"`
+	}
+	if err := json.Unmarshal([]byte(unpinOut), &unpinned); err != nil {
+		t.Fatalf("decode unpin output: %v\nraw: %s", err, unpinOut)
+	}
+	if unpinned.TargetPipelineVersion != nil {
+		t.Errorf("target_pipeline_version = %v after --unpin, want nil (cleared)", unpinned.TargetPipelineVersion)
+	}
+
+	// Retargeting + pinning + unpinning never touched the URL: the original
+	// public URL still resolves (401, not 404 — unsigned, but the token is
+	// still known).
+	req, _ := http.NewRequest(http.MethodPost, created.PublicURL, bytes.NewReader([]byte(`{}`)))
+	resp, derr := http.DefaultClient.Do(req)
+	if derr != nil {
+		t.Fatalf("fire after retarget/pin/unpin: %v", derr)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		t.Fatalf("the URL stopped resolving after --slug/--pin-version/--unpin — the token rotated")
 	}
 }

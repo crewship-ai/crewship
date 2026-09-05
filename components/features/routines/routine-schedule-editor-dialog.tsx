@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { describeCron } from "@/lib/cron-describe"
-import type { PipelineSchedule, ScheduleSaveBody, SchedulePreview } from "@/hooks/use-pipeline-schedules"
+import type { PipelineSchedule, SchedulePatchBody, SchedulePreview } from "@/hooks/use-pipeline-schedules"
 
 /**
  * RoutineScheduleEditorDialog — the reliability editor (B9, #2362, §13.2).
@@ -43,7 +43,7 @@ export interface RoutineScheduleEditorDialogProps {
   schedule: PipelineSchedule | null
   submitting?: boolean
   onCancel: () => void
-  onSave: (body: ScheduleSaveBody) => void
+  onSave: (body: SchedulePatchBody) => void
   onPreview: (cronExpr: string, timezone: string, count?: number) => Promise<SchedulePreview>
 }
 
@@ -72,6 +72,12 @@ export function RoutineScheduleEditorDialog({
   const [preview, setPreview] = useState<SchedulePreview | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  // Guards against out-of-order responses: onPreview takes no AbortSignal
+  // (it's a plain GET the hook fires-and-returns), so a request for an
+  // EARLIER cron/timezone pair that happens to resolve AFTER a later one
+  // must not overwrite the later result. Bumped on every request; a
+  // response is applied only if it's still the most recent one in flight.
+  const previewSeqRef = useRef(0)
 
   useEffect(() => {
     if (!schedule) return
@@ -90,16 +96,19 @@ export function RoutineScheduleEditorDialog({
 
   const runPreview = useCallback(async () => {
     if (!cronExpr.trim()) return
+    const seq = ++previewSeqRef.current
     setPreviewLoading(true)
     setPreviewError(null)
     try {
       const out = await onPreview(cronExpr, timezone || "UTC", 5)
+      if (seq !== previewSeqRef.current) return // a newer request already landed
       setPreview(out)
     } catch (e) {
+      if (seq !== previewSeqRef.current) return
       setPreview(null)
       setPreviewError(e instanceof Error ? e.message : String(e))
     } finally {
-      setPreviewLoading(false)
+      if (seq === previewSeqRef.current) setPreviewLoading(false)
     }
   }, [cronExpr, timezone, onPreview])
 
@@ -117,7 +126,7 @@ export function RoutineScheduleEditorDialog({
   const isDraft = schedule.activation === "draft"
 
   const submit = () => {
-    const body: ScheduleSaveBody = {
+    const body: SchedulePatchBody = {
       name,
       cron_expr: cronExpr,
       timezone,

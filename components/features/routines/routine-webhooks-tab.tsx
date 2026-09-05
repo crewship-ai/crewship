@@ -38,8 +38,11 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
       const updated = await update(editing.id, body)
       if (updated?.signing_secret) {
         // A rotation happened — reuse the create-time reveal card so the
-        // new secret gets the same one-shot "copy now" treatment.
-        setJustCreated(updated)
+        // new secret gets the same one-shot "copy now" treatment, but with
+        // rotation-specific copy (mode="rotated"): unlike create, the URL
+        // here is NOT new, and "delete + recreate to rotate" is exactly
+        // the sentence this dialog makes false.
+        setJustCreated({ webhook: updated, mode: "rotated" })
         toast.success("Secret rotated", { description: "Copy the new signing secret now — it won't be shown again" })
       } else {
         toast.success("Webhook updated")
@@ -57,7 +60,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
   const [signingSecret, setSigningSecret] = useState("")
   const [rateLimit, setRateLimit] = useState(60)
   const [busy, setBusy] = useState(false)
-  const [justCreated, setJustCreated] = useState<PipelineWebhook | null>(null)
+  const [justCreated, setJustCreated] = useState<{ webhook: PipelineWebhook; mode: "created" | "rotated" } | null>(null)
 
   const submit = async () => {
     setBusy(true)
@@ -71,7 +74,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
         inputs_template: {},
       })
       if (w) {
-        setJustCreated(w)
+        setJustCreated({ webhook: w, mode: "created" })
         toast.success("Webhook created", {
           description: "Copy the token + signing secret now — they won't be shown again",
         })
@@ -115,7 +118,9 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
         </Card>
       )}
 
-      {justCreated && <CreatedReveal webhook={justCreated} onDismiss={() => setJustCreated(null)} />}
+      {justCreated && (
+        <CreatedReveal webhook={justCreated.webhook} mode={justCreated.mode} onDismiss={() => setJustCreated(null)} />
+      )}
 
       {ours.length === 0 && !formOpen ? (
         <Card title="Webhooks">
@@ -289,7 +294,23 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
   )
 }
 
-function CreatedReveal({ webhook, onDismiss }: { webhook: PipelineWebhook; onDismiss: () => void }) {
+function CreatedReveal({
+  webhook,
+  onDismiss,
+  mode = "created",
+}: {
+  webhook: PipelineWebhook
+  onDismiss: () => void
+  /**
+   * "created" — the CreateWebhook response (this card's original caller).
+   * "rotated" — an UpdateWebhook response after --rotate-secret (F21, B9
+   * #2362): the URL is unchanged from before, only the secret is new, so
+   * the copy must not claim the webhook was just "created" or that
+   * rotating requires delete + recreate — this card IS the in-place
+   * rotation path now.
+   */
+  mode?: "created" | "rotated"
+}) {
   const [copied, setCopied] = useState<string | null>(null)
   const [showSecret, setShowSecret] = useState(false)
 
@@ -308,10 +329,14 @@ function CreatedReveal({ webhook, onDismiss }: { webhook: PipelineWebhook; onDis
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-success">Webhook created — copy values now</span>
+              <span className="text-sm font-semibold text-success">
+                {mode === "rotated" ? "Signing secret rotated — copy it now" : "Webhook created — copy values now"}
+              </span>
             </div>
             <p className="mt-1 text-[12px] text-muted-foreground">
-              The signing secret is only shown once. To rotate, delete and recreate.
+              {mode === "rotated"
+                ? "The URL above is unchanged. The new signing secret is only shown once — update your sender's configured secret."
+                : "The signing secret is only shown once. To rotate it later without losing this URL, use Edit → Rotate signing secret."}
             </p>
           </div>
           <Button

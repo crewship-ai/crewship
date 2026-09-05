@@ -84,6 +84,52 @@ describe("RoutineScheduleEditorDialog", () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
+  it("ignores a stale preview response that resolves after a newer one (out-of-order network)", async () => {
+    // Code-review finding: runPreview had no sequencing, so a SLOWER
+    // earlier request landing after a FASTER later one could overwrite the
+    // correct result with a stale one. Two deferred promises, resolved in
+    // reverse order, reproduce exactly that race.
+    type Deferred = { resolve: (v: unknown) => void }
+    const deferreds: Deferred[] = []
+    onPreview.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          deferreds.push({ resolve: resolve as (v: unknown) => void })
+        }),
+    )
+
+    render(
+      <RoutineScheduleEditorDialog schedule={baseSchedule()} onCancel={onCancel} onSave={onSave} onPreview={onPreview} />,
+    )
+    await waitFor(() => expect(deferreds.length).toBe(1)) // mount's own preview call
+    const mountCall = deferreds[0]
+
+    fireEvent.change(screen.getByLabelText(/cron expression/i), { target: { value: "1 1 * * *" } })
+    await waitFor(() => expect(deferreds.length).toBe(2), { timeout: 2000 })
+    const firstEditCall = deferreds[1]
+
+    fireEvent.change(screen.getByLabelText(/cron expression/i), { target: { value: "2 2 * * *" } })
+    await waitFor(() => expect(deferreds.length).toBe(3), { timeout: 2000 })
+    const secondEditCall = deferreds[2]
+
+    // Resolve the SECOND edit's request first (it's the correct/current
+    // one), then the FIRST edit's request (now stale), then mount's (very
+    // stale). Only the second edit's result must ever be shown.
+    secondEditCall.resolve({ cron_expr: "2 2 * * *", timezone: "UTC", occurrences: ["2026-01-01T02:02:00Z"] })
+    await waitFor(() => {
+      expect(screen.getByTestId("schedule-preview")).toHaveTextContent("2026")
+    })
+
+    firstEditCall.resolve({ cron_expr: "1 1 * * *", timezone: "UTC", occurrences: ["2099-01-01T01:01:00Z"] })
+    mountCall.resolve({ cron_expr: "0 8 * * *", timezone: "UTC", occurrences: ["2099-01-01T08:00:00Z"] })
+
+    // Give the stale resolutions a tick to (incorrectly) apply if the bug
+    // were still present, then assert the correct result still stands.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.getByTestId("schedule-preview")).not.toHaveTextContent("2099")
+    expect(screen.getByTestId("schedule-preview")).toHaveTextContent("2026")
+  })
+
   it("renders the preview occurrences once they resolve", async () => {
     onPreview.mockResolvedValue({
       cron_expr: "0 8 * * *",

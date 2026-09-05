@@ -291,16 +291,19 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 
 	pipelineID := existing.TargetPipelineID
+	slug := ""
 	if body.TargetPipelineSlug != "" || body.TargetPipelineID != "" {
-		pid, _, rerr := h.resolveWebhookPipelineID(r, workspaceID, &body)
+		pid, sl, rerr := h.resolveWebhookPipelineID(r, workspaceID, &body)
 		if rerr != nil {
 			replyError(w, http.StatusBadRequest, rerr.Error())
 			return
 		}
-		pipelineID = pid
-	}
-	slug := ""
-	if p, perr := h.store.GetByID(r.Context(), pipelineID); perr == nil {
+		pipelineID, slug = pid, sl
+	} else if p, perr := h.store.GetByID(r.Context(), pipelineID); perr == nil {
+		// Unchanged target — reuse UpdateSchedule's shape (pipeline_schedules.go)
+		// rather than resolving twice: resolveWebhookPipelineID above already
+		// returns the slug on the retarget path, so this lookup only runs
+		// when the target didn't change.
 		slug = p.Slug
 	}
 
@@ -312,8 +315,15 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 	if _, mentioned := rawKeys["inputs_template"]; !mentioned {
 		_ = json.Unmarshal([]byte(existing.InputsTemplateJSON), &inputsTemplate)
 	}
+	// Mentioned-only, matching every other field in this merge (and
+	// CreateWebhook, which stores whatever value it's given verbatim — the
+	// fire path's defaultWebhookRatePerMin floor is what turns 0 into
+	// "effectively unlimited-ish default", not this handler). An earlier
+	// version additionally required > 0, which silently dropped an
+	// explicit 0 or negative value with a 200 that echoed the OLD limit —
+	// indistinguishable from success to a caller resetting to default.
 	rateLimit := existing.RateLimitPerMin
-	if _, mentioned := rawKeys["rate_limit_per_min"]; mentioned && body.RateLimitPerMin > 0 {
+	if _, mentioned := rawKeys["rate_limit_per_min"]; mentioned {
 		rateLimit = body.RateLimitPerMin
 	}
 

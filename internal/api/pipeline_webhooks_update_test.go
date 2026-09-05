@@ -135,6 +135,36 @@ func TestUpdateWebhook_NameRateLimitAndInputsTemplate_ChangeInPlace(t *testing.T
 // "explicit, opt-in token rotation" — WITHOUT rotate_secret the secret is
 // preserved (previous test); WITH it, a new one is minted and revealed
 // exactly once, same as create.
+// TestUpdateWebhook_ExplicitZeroRateLimit_IsHonoured — an earlier version of
+// the merge gate was `mentioned && body.RateLimitPerMin > 0`, which silently
+// dropped an explicit 0 (or negative) with a 200 that echoed the OLD limit,
+// indistinguishable from success to a caller resetting the rate limit.
+// Mentioned-only, matching every other field in this handler and matching
+// CreateWebhook (which stores whatever value it's given verbatim).
+func TestUpdateWebhook_ExplicitZeroRateLimit_IsHonoured(t *testing.T) {
+	h, db, userID, wsID := webhookHandlerRig(t)
+	pipelineID := "pw-zero-rate"
+	seedWebhookPipeline(t, db, wsID, pipelineID, "zero-rate-pipe")
+	wh := seedWebhookRow(t, db, wsID, pipelineID, "s", true)
+
+	req := withWorkspaceUser(httptest.NewRequest("PATCH",
+		"/api/v1/workspaces/"+wsID+"/pipeline-webhooks/"+wh.ID, strings.NewReader(`{"rate_limit_per_min":0}`)),
+		userID, wsID, "OWNER")
+	req.SetPathValue("webhookId", wh.ID)
+	rr := httptest.NewRecorder()
+	h.UpdateWebhook(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	var out webhookResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.RateLimitPerMin != 0 {
+		t.Fatalf("rate_limit_per_min = %d, want 0 (explicit value must be honoured, not silently ignored)", out.RateLimitPerMin)
+	}
+}
+
 func TestUpdateWebhook_RotateSecret_IsOptIn(t *testing.T) {
 	h, db, userID, wsID := webhookHandlerRig(t)
 	pipelineID := "pw-rotate"

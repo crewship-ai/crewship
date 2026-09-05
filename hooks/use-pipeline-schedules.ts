@@ -58,7 +58,15 @@ export interface PipelineSchedule {
   activation?: "draft"
 }
 
-export interface ScheduleSaveBody {
+// SchedulePatchBody is the PATCH wire shape: every field absent-keeps-
+// existing (mirroring the server's merge semantics in UpdateSchedule),
+// cron_expr included — an update legitimately doesn't touch it. create()
+// below layers a required cron_expr on top via ScheduleSaveBody, because a
+// NEW schedule always needs one; widening this shared type to make
+// cron_expr optional here must not silently make it optional for create
+// too (code review, B9: that regression would only be caught at runtime by
+// the server's 400, where main had a compile error).
+export interface SchedulePatchBody {
   name?: string
   target_pipeline_slug?: string
   target_pipeline_id?: string
@@ -78,6 +86,11 @@ export interface ScheduleSaveBody {
   wake_inputs?: Record<string, unknown>
   wake_fail_closed?: boolean
 }
+
+// ScheduleSaveBody is create()'s body — same shape, but cron_expr is
+// REQUIRED, restoring the compile-time guarantee a new schedule always
+// declares one.
+export type ScheduleSaveBody = SchedulePatchBody & { cron_expr: string }
 
 // SchedulePreview is the wire shape of GET
 // /pipeline-schedules/preview (B9, #2362, §13.2 "When").
@@ -165,7 +178,7 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
   )
 
   const update = useCallback(
-    async (id: string, body: ScheduleSaveBody): Promise<PipelineSchedule | null> => {
+    async (id: string, body: SchedulePatchBody): Promise<PipelineSchedule | null> => {
       if (!workspaceId) return null
       const res = await apiFetch(
         `/api/v1/workspaces/${workspaceId}/pipeline-schedules/${id}`,

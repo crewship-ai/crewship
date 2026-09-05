@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { Plus, Trash2, Calendar, Power, PowerOff, Pencil } from "lucide-react"
-import { usePipelineSchedules, type PipelineSchedule, type ScheduleSaveBody } from "@/hooks/use-pipeline-schedules"
+import { usePipelineSchedules, type PipelineSchedule, type SchedulePatchBody } from "@/hooks/use-pipeline-schedules"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
@@ -44,7 +44,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
   // Reliability editor (B9, #2362) — every §13.2 row, opened per schedule.
   const [editing, setEditing] = useState<PipelineSchedule | null>(null)
   const [editSaving, setEditSaving] = useState(false)
-  const saveEdit = async (body: ScheduleSaveBody) => {
+  const saveEdit = async (body: SchedulePatchBody) => {
     if (!editing) return
     setEditSaving(true)
     try {

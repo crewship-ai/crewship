@@ -1520,9 +1520,12 @@ crewship routine webhooks update wh_abc123 \
 | Flag | Description |
 |------|-------------|
 | `--name` | New webhook name. |
+| `--slug` | Retarget the webhook to a different routine slug. |
 | `--rate-limit` | New max fires per minute. |
 | `--inputs-template` | Replace the JSON template merged with the request body. |
 | `--enabled` / `--enabled=false` | Set enabled state — presence required, same convention as `schedules update`. |
+| `--pin-version` | Pin (or re-pin) the webhook to a specific routine version; fires execute that immutable version instead of head. |
+| `--unpin` | Remove the version pin (fires track head again). Mutually exclusive with `--pin-version`; mentioning neither keeps the existing pin. |
 | `--rotate-secret` | Mint a new HMAC signing secret, shown once in the response — same show-once contract as `create`. **The URL/token is never rotated by this command, with or without this flag.** |
 
 At least one flag is required. `--format json` on an ordinary edit (no
