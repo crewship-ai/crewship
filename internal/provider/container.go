@@ -282,26 +282,26 @@ type ContainerProvider interface {
 // ExecPIDProvider is an optional capability for container providers that can
 // report the OS-level process id backing a still-running exec.
 //
-// It is the one new primitive Tier 2 hard termination (PRD-ISSUES-AND-
-// ROUTINES-2026 §10.3, work package B7) needs: Docker has no "kill this
-// exec" call, and the crew container is shared by every agent on the crew
-// (docker.go's Exec/ExecAttach hijack one stream per exec, but `docker kill`
-// or a container-level signal reaches the whole container's init process
-// and every descendant under it — every sibling agent's in-flight exec
-// included). Resolving the PID lets a caller signal exactly the one process
-// behind execID (`kill -TERM/-KILL <pid>`, itself executed as a NEW exec
-// into the same container — see hardTerminateExec in
-// internal/api/issue_handler_hard_stop.go) instead of touching the
-// container at all.
+// It was Tier 2 hard termination's (PRD-ISSUES-AND-ROUTINES-2026 §10.3, work
+// package B7) original primitive, and docker.go still implements it — but
+// #2365 found that dockerd's ExecInspect reports the pid in the HOST pid
+// namespace, not the container's, so `kill <that pid>` run as a new exec
+// INSIDE the container (the only kind of exec Tier 2 may ever issue — see
+// TmuxKillSessionCmd's doc) finds no such process there and silently signals
+// nothing. Tier 2 (internal/api/issue_handler_hard_stop.go, work package
+// B7b, #2365) therefore no longer calls ExecPID at all; it signals by the
+// run's own tmux session name instead, a container-visible identity by
+// construction. The interface and docker's implementation are kept —
+// unused by Tier 2 today, but namespace-correct pids are exactly the shape
+// a future provider without pid-namespace separation (or one sharing the
+// host's, e.g. `--pid=host`) could report, and ExecPID would be usable by
+// Tier 2 again for that one.
 //
 // A separate, optional interface rather than a new ContainerProvider method
 // on purpose: ContainerProvider has ~20 from-scratch test fakes across
 // internal/api and internal/orchestrator that assert conformance by literal
 // struct, and none of them exercise Tier 2. Adding a required method would
-// force every one of those to grow a stub it never calls. Callers that need
-// Tier 2 type-assert for this interface and treat a provider that lacks it
-// as "hard stop unsupported here" — never as an error worth failing the
-// (already-cooperative) Tier 1 stop over.
+// force every one of those to grow a stub it never calls.
 type ExecPIDProvider interface {
 	// ExecPID returns the pid backing execID. pid == 0 with a nil error means
 	// the provider has no PID to report (the exec already finished, or was
@@ -310,15 +310,55 @@ type ExecPIDProvider interface {
 	ExecPID(ctx context.Context, execID string) (pid int, err error)
 }
 
-// KillSignalCmd builds the argv Tier 2 hard termination execs into a
-// container to deliver one signal to one pid — POSIX `kill -TERM <pid>` /
-// `kill -KILL <pid>`, run as a brand-new Exec in the SAME container the
-// target pid lives in (never `docker kill` on the container itself). One
-// place builds this argv so the production hard-stop path
-// (internal/api/issue_handler_hard_stop.go) and the in-memory test fake
-// (internal/provider/providertest) can never drift on its shape.
+// KillSignalCmd builds `kill -TERM <pid>` / `kill -KILL <pid>` — a single
+// pid, signalled by a brand-new Exec into the SAME container the pid lives
+// in (never `docker kill` on the container itself). Superseded as Tier 2
+// hard termination's primary mechanism by TmuxKillSessionCmd (#2365 — see
+// ExecPIDProvider's doc for why a bare pid is unsafe there); kept as the
+// argv shape a provider with a namespace-correct ExecPIDProvider could still
+// use.
 func KillSignalCmd(signal string, pid int) []string {
 	return []string{"kill", "-" + signal, strconv.Itoa(pid)}
+}
+
+// TmuxKillSessionCmd builds `tmux kill-session -t <session>` — Tier 2 hard
+// termination's primary signal (#2365, work package B7b): every agent run
+// owns a tmux session named orchestrator.TmuxSessionName(agentSlug) inside
+// its crew container (internal/orchestrator/orchestrator_exec_env.go's
+// setupTmuxExec), a name that is meaningful in the SAME pid namespace the
+// signal is delivered in — unlike a pid from ExecPID (see its doc), which
+// is not. Ending the session ends exactly that agent's own process tree;
+// tmux's session table is per-container, so a sibling agent's differently-
+// named session in the same crew container is never touched. Run as a
+// brand-new Exec into that same container, never a container-level
+// operation.
+func TmuxKillSessionCmd(session string) []string {
+	return []string{"tmux", "kill-session", "-t", session}
+}
+
+// TmuxListPanePIDsCmd builds `tmux list-panes -t <session> -F '#{pane_pid}'`
+// — read BEFORE TmuxKillSessionCmd runs (tmux discards a session's own
+// bookkeeping, list-panes included, the moment kill-session succeeds), so
+// Tier 2 has pids in hand to escalate against if the session's own SIGHUP
+// was not enough. Run as an exec inside the target container, these pids
+// are container-local by construction — the same namespace KillProcessGroupCmd
+// signals into — never a host pid.
+func TmuxListPanePIDsCmd(session string) []string {
+	return []string{"tmux", "list-panes", "-t", session, "-F", "#{pane_pid}"}
+}
+
+// KillProcessGroupCmd builds `kill -SIGNAL -- -pgid1 -pgid2 ...`: Tier 2's
+// escalation after TmuxKillSessionCmd's own signal was not enough, one exec
+// signalling every listed pane's whole process group (tmux starts each
+// pane's command as its own session/group leader, so pgid == pane pid) —
+// container-local pids obtained from TmuxListPanePIDsCmd, never a host pid.
+// The leading "--" stops `kill` from parsing a negative pgid as a flag.
+func KillProcessGroupCmd(signal string, pgids []int) []string {
+	cmd := []string{"kill", "-" + signal, "--"}
+	for _, pgid := range pgids {
+		cmd = append(cmd, "-"+strconv.Itoa(pgid))
+	}
+	return cmd
 }
 
 // AdmissionGate holds a crew container start until the host can afford one

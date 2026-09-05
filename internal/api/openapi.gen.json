@@ -48733,6 +48733,12 @@
                       "error_message": {
                         "type": "string"
                       },
+                      "hard_stop_at": {
+                        "type": "string"
+                      },
+                      "hard_stop_result": {
+                        "type": "string"
+                      },
                       "id": {
                         "type": "string"
                       },

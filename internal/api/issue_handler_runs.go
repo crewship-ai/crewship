@@ -59,6 +59,16 @@ type issueRunDTO struct {
 	// finishAssignment writes one on every run that reaches it going
 	// forward, defaulting to FAILED when the agent reported none.
 	Outcome string `json:"outcome,omitempty"`
+	// HardStopResult and HardStopAt (work package B7b, #2365) are Tier 2
+	// hard termination's own record — TERMINATED_TERM | TERMINATED_KILL |
+	// ALREADY_EXITED | UNSUPPORTED | NOT_FOUND | ERROR | PENDING_EXEC, and
+	// when it was written — independent of Outcome/Status, which Tier 1's
+	// stamp always sets regardless of what Tier 2 achieved. Both empty on a
+	// run that was never hard-stopped, or predates the hard_stop_result
+	// column. Exposed here so a live check (or any client) can read what a
+	// `?hard=true` Stop actually did without reading the journal.
+	HardStopResult string `json:"hard_stop_result,omitempty"`
+	HardStopAt     string `json:"hard_stop_at,omitempty"`
 }
 
 // parseRunTime accepts the timestamp shapes the engine + SQLite defaults
@@ -161,7 +171,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		SELECT DISTINCT a.id, a.status, a.started_at, a.finished_at, a.result_summary,
 		       a.error_message, a.task,
 		       COALESCE(ag.name, ''), COALESCE(ag.id, ''), COALESCE(ag.slug, ''), a.mission_id,
-		       COALESCE(a.outcome, ''),
+		       COALESCE(a.outcome, ''), COALESCE(a.hard_stop_result, ''), COALESCE(a.hard_stop_at, ''),
 		       CASE
 		         WHEN EXISTS (SELECT 1 FROM mission_tasks mt
 		                      WHERE mt.assignment_id = a.id AND mt.mission_id = ?) THEN 'task'
@@ -195,7 +205,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		var sortKey sql.NullString
 		if err := rows.Scan(&dto.ID, &dto.Status, &started, &finished, &result,
 			&errMsg, &task, &dto.AgentName, &dto.AgentID, &dto.AgentSlug, &missionIDCol,
-			&dto.Outcome, &dto.Source, &runID, &sortKey); err != nil {
+			&dto.Outcome, &dto.HardStopResult, &dto.HardStopAt, &dto.Source, &runID, &sortKey); err != nil {
 			internalError(w, r, h.logger, "issue runs: scan", err)
 			return
 		}

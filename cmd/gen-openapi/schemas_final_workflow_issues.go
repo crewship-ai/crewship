@@ -36,7 +36,10 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 	// outcome (§9.6, work package B6, #2349) is the routing decision —
 	// NO_CHANGE | SUCCEEDED | WORK_CREATED | PARTIAL | NEEDS_HUMAN | FAILED
 	// | CANCELLED — empty on a run that predates the column.
-	issueRun := obj(map[string]any{"id": str(), "status": str(), "agent_name": str(), "task": str(), "started_at": str(), "ended_at": str(), "duration_ms": integer(), "result_summary": str(), "error_message": str(), "mission_id": nullable(str()), "source": str(), "outcome": str()})
+	// hard_stop_result / hard_stop_at (work package B7b, #2365) are Tier 2
+	// hard termination's own record — empty on a run that was never
+	// hard-stopped.
+	issueRun := obj(map[string]any{"id": str(), "status": str(), "agent_name": str(), "task": str(), "started_at": str(), "ended_at": str(), "duration_ms": integer(), "result_summary": str(), "error_message": str(), "mission_id": nullable(str()), "source": str(), "outcome": str(), "hard_stop_result": str(), "hard_stop_at": str()})
 	checkpointState := obj(map[string]any{"agent_memory": map[string]any{"type": "object", "additionalProperties": str()}, "pending_tasks": arr(str()), "open_assignments": arr(str()), "crew_container_id": str(), "meta": open()})
 	checkpoint := obj(map[string]any{"id": str(), "workspace_id": str(), "crew_id": str(), "mission_id": str(), "label": str(), "journal_cursor": str(), "state": checkpointState, "fork_of": str(), "created_by": str(), "created_at": str()})
 	runInsights := obj(map[string]any{"window": str(), "totals": obj(map[string]any{"total": integer(), "succeeded": integer(), "failed": integer(), "running": integer()}), "duration": obj(map[string]any{"p50_ms": integer(), "p95_ms": integer()}), "by_trigger": arr(obj(map[string]any{"key": str(), "total": integer(), "failed": integer()})), "by_model": arr(obj(map[string]any{"key": str(), "total": integer(), "failed": integer()})), "by_crew": arr(obj(map[string]any{"id": str(), "name": str(), "total": integer(), "failed": integer()})), "top_agents": arr(obj(map[string]any{"id": str(), "name": str(), "crew_name": str(), "total": integer(), "failed": integer()})), "truncated": boolean()})

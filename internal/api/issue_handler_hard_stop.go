@@ -3,13 +3,16 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -101,11 +104,21 @@ const (
 // going to answer at all inside the 5s budget.
 const hardStopSignalTimeout = 1 * time.Second
 
+// hardStopProbeTimeout bounds one tmuxPanePIDs (list-panes) attempt — a
+// pure read, tried up to twice (one retry on a transient failure) BEFORE
+// the TERM/KILL sequence below, so it is deliberately shorter than
+// hardStopSignalTimeout: a full-length timeout on a read attempted twice
+// would eat into the 5s budget the signal sequence itself needs.
+const hardStopProbeTimeout = 300 * time.Millisecond
+
 // hardStopGrace is how long, after each signal, hardStopOne waits for the
 // exec to actually stop running before escalating. TERM then (if needed)
 // KILL, each with its own send + grace: worst case
-// 2×(hardStopSignalTimeout+hardStopGrace) ≈ 4s, inside the PRD's 5s bound
-// with margin for the DB/journal writes around it.
+// 2×hardStopProbeTimeout (list-panes, plus one retry) +
+// 2×(hardStopSignalTimeout+hardStopGrace) (kill-session/TERM-wait,
+// kill-KILL/wait) ≈ 0.6s + 4s = 4.6s, inside the PRD's 5s bound — tighter
+// than before tmuxPanePIDs existed, but still with margin for the
+// DB/journal writes around it.
 const hardStopGrace = 1 * time.Second
 
 // hardStopPollInterval is how often hardStopOne re-checks ExecInspect while
@@ -155,10 +168,20 @@ func (h *IssueHandler) hardStopTargets(ctx context.Context, wsID, ident string, 
 func (h *IssueHandler) hardStopRunningTarget(ctx context.Context, wsID string, t cancelTarget) {
 	containerID, execID, ok := h.awaitExecID(ctx, t)
 	if !ok {
-		h.recordHardStopResult(ctx, wsID, t.ID, "", "", 0, hardStopPendingExec)
+		h.recordHardStopResult(ctx, wsID, t.ID, "", "", "", hardStopPendingExec)
 		return
 	}
-	h.hardStopOne(ctx, wsID, t.ID, containerID, execID)
+	agentSlug, err := h.assignmentAgentSlug(ctx, t.ID)
+	if err != nil {
+		// A real DB error here (busy/locked, connection dropped) is not
+		// "the assignee isn't an agent" — record it honestly as ERROR
+		// rather than UNSUPPORTED, which would misattribute a transient
+		// failure to a configuration gap.
+		h.logger.Warn("hard stop: resolve agent slug", "error", err, "assignment_id", t.ID)
+		h.recordHardStopResult(ctx, wsID, t.ID, containerID, execID, "", hardStopError)
+		return
+	}
+	h.hardStopOne(ctx, wsID, t.ID, containerID, execID, agentSlug)
 }
 
 // awaitExecID returns t's exec_id/exec_container_id, re-reading the row
@@ -192,82 +215,202 @@ func (h *IssueHandler) awaitExecID(ctx context.Context, t cancelTarget) (contain
 	}
 }
 
-// hardStopOne resolves execID's pid and signals it, escalating from TERM to
-// KILL after a grace period, then records what happened on both the
-// assignment row and the journal. Never touches the container itself
-// (StopCrewRuntime/RemoveCrewRuntime) — only ever a new Exec running `kill`
-// against one pid, so a sibling agent's exec in the same container is
-// untouched by construction.
-func (h *IssueHandler) hardStopOne(ctx context.Context, wsID, assignmentID, containerID, execID string) {
-	if h.container == nil {
-		h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, 0, hardStopUnsupported)
-		return
+// assignmentAgentSlug resolves the slug of the agent assigned to
+// assignmentID — the container-visible identity Tier 2 needs to build the
+// run's tmux session name (orchestrator.TmuxSessionName). Every agent run
+// dispatches through setupTmuxExec (internal/orchestrator/
+// orchestrator_exec_env.go) under a session named exactly that, so the slug
+// is all a hard stop needs to find it — no pid, host or container, involved.
+// A miss (the assignee is not an agent, or the agent row is gone) returns
+// "", nil: the caller treats an empty slug as "no session name to build",
+// never as an error worth surfacing on its own.
+func (h *IssueHandler) assignmentAgentSlug(ctx context.Context, assignmentID string) (string, error) {
+	var slug string
+	err := h.db.QueryRowContext(ctx, `
+		SELECT COALESCE(ag.slug, '') FROM assignments a
+		JOIN agents ag ON ag.id = a.assigned_to_id
+		WHERE a.id = ?`, assignmentID).Scan(&slug)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
 	}
-	signaler, ok := h.container.(provider.ExecPIDProvider)
-	if !ok {
-		h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, 0, hardStopUnsupported)
-		return
-	}
-
-	pid, err := signaler.ExecPID(ctx, execID)
-	switch {
-	case err != nil:
-		// Distinct from "still running but signalling failed" (hardStopError,
-		// set by signalAndEscalate below): the provider could not even
-		// resolve execID to a pid — the exec id is stale (the container was
-		// recreated since it was recorded) or the daemon rejected the
-		// lookup outright. Either way there is nothing here to signal.
-		h.logger.Warn("hard stop: exec pid lookup failed", "error", err, "assignment_id", assignmentID)
-		h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, 0, hardStopNotFound)
-		return
-	case pid <= 0:
-		// A resolvable but zero pid means the provider positively knows the
-		// exec already finished (ExecPIDProvider's own contract) — the run
-		// ended on its own between the Tier 1 stamp and this lookup.
-		h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, 0, hardStopAlreadyExited)
-		return
-	}
-
-	result := h.signalAndEscalate(ctx, containerID, execID, pid)
-	h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, pid, result)
+	return slug, nil
 }
 
-// signalAndEscalate is the TERM-then-KILL sequence itself, factored out of
-// hardStopOne so it can be read (and tested) as one linear decision: send,
-// wait, escalate, wait, give up.
-func (h *IssueHandler) signalAndEscalate(ctx context.Context, containerID, execID string, pid int) string {
-	if !h.sendSignal(ctx, containerID, pid, "TERM") {
+// hardStopOne ends the run behind execID by killing the tmux session it
+// runs inside — a container-visible identity — rather than resolving
+// execID to a pid and signalling that (#2365: ExecPIDProvider's pid is in
+// the HOST pid namespace; a `kill <that pid>` run as a new exec INSIDE the
+// container — the only kind Tier 2 may ever issue — finds no such process
+// there and silently signals nothing, which is exactly what dev1 hit).
+// Escalates from tmux's own kill-session signal to a direct process-group
+// KILL on the session's own pane pids if the exec is still alive after a
+// grace period. Never touches the container itself
+// (StopCrewRuntime/RemoveCrewRuntime), and never a session other than this
+// run's own — a sibling agent's session in the same crew container has a
+// different name and is never named by this call.
+func (h *IssueHandler) hardStopOne(ctx context.Context, wsID, assignmentID, containerID, execID, agentSlug string) {
+	if h.container == nil {
+		h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, "", hardStopUnsupported)
+		return
+	}
+
+	running, _, err := h.container.ExecInspect(ctx, execID)
+	switch {
+	case err != nil:
+		// The provider could not even resolve execID — a stale exec id (the
+		// container was recreated since it was recorded) or the daemon
+		// rejected the lookup outright. Either way there is nothing here to
+		// signal.
+		h.logger.Warn("hard stop: exec inspect failed", "error", err, "assignment_id", assignmentID)
+		h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, "", hardStopNotFound)
+		return
+	case !running:
+		// The run ended on its own between the Tier 1 stamp and this check.
+		h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, "", hardStopAlreadyExited)
+		return
+	}
+
+	if agentSlug == "" {
+		// No container-visible identity to build a session name from (the
+		// assignee is not, or is no longer, an agent) — nothing safe left
+		// to signal by.
+		h.logger.Warn("hard stop: no agent slug for assignment, cannot build a tmux session name", "assignment_id", assignmentID)
+		h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, "", hardStopUnsupported)
+		return
+	}
+
+	session := orchestrator.TmuxSessionName(agentSlug)
+	result := h.killTmuxSession(ctx, containerID, execID, session)
+	h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, session, result)
+}
+
+// killTmuxSession is the container-visible-identity TERM-then-KILL
+// sequence, factored out of hardStopOne so it can be read (and tested) as
+// one linear decision: confirm the session exists, end it, wait, escalate,
+// wait, give up.
+//
+// Pane pids are captured BEFORE kill-session runs: tmux discards a
+// session's own bookkeeping — list-panes included — the moment
+// kill-session succeeds, so escalation would have nothing left to query if
+// it waited until after. That same pre-check doubles as proof the session
+// exists at all: not every RUNNING exec has one (setupTmuxExec's
+// stdin-delivery bypass for oversized prompts, or a container without tmux
+// installed, both fall back to a bare exec — internal/orchestrator/
+// orchestrator_run.go's buildExecCommand) — sending kill-session and
+// burning a full grace period against a session that provably does not
+// exist would waste most of the 5s budget for a foregone ERROR.
+func (h *IssueHandler) killTmuxSession(ctx context.Context, containerID, execID, session string) string {
+	panePIDs, sessionFound, err := h.tmuxPanePIDs(ctx, containerID, session)
+	if err != nil {
+		// One retry: a single list-panes exec timing out under daemon load
+		// should not be treated the same as a confirmed-absent session, nor
+		// permanently disable escalation for this run.
+		panePIDs, sessionFound, err = h.tmuxPanePIDs(ctx, containerID, session)
+	}
+	if err == nil && !sessionFound {
+		// Confirmed absent, not merely unresolved — this run was never
+		// tmux-wrapped, or its session ended between the Tier 1 stamp and
+		// here. Recheck the exec directly to report which.
+		if running, _, inspectErr := h.container.ExecInspect(ctx, execID); inspectErr == nil && !running {
+			return hardStopAlreadyExited
+		}
+		h.logger.Warn("hard stop: no tmux session for a running exec, cannot signal by session name", "session", session)
+		return hardStopNotFound
+	}
+	if err != nil {
+		// Still unresolved after the retry — proceed on a best-effort basis
+		// (kill-session may still reach it) rather than giving up outright,
+		// but this is exactly the "unknown" case sessionFound's doc warns
+		// about: not a confirmed absence.
+		h.logger.Warn("hard stop: could not confirm tmux session before kill-session", "error", err, "session", session)
+	}
+
+	if !h.runShortExec(ctx, containerID, provider.TmuxKillSessionCmd(session)) {
 		return hardStopError
 	}
 	if h.waitExited(ctx, execID, hardStopGrace) {
 		return hardStopTerminatedTerm
 	}
-	if !h.sendSignal(ctx, containerID, pid, "KILL") {
+	if len(panePIDs) == 0 {
+		// kill-session's own signal was the only shot this run got — there
+		// is nothing captured to escalate against.
+		return hardStopError
+	}
+	if !h.runShortExec(ctx, containerID, provider.KillProcessGroupCmd("KILL", panePIDs)) {
 		return hardStopError
 	}
 	if h.waitExited(ctx, execID, hardStopGrace) {
 		return hardStopTerminatedKill
 	}
-	// Still running after SIGKILL from inside its own container should not
-	// happen (SIGKILL cannot be caught or blocked), but a hung daemon exec
-	// or a zombie in an unusual pid-namespace state means it CAN read this
-	// way — report it honestly as ERROR rather than claim success.
+	// Still running after a process-group SIGKILL should not happen, but a
+	// hung daemon exec or a zombie in an unusual state means it CAN read
+	// this way — report it honestly as ERROR rather than claim success.
 	return hardStopError
 }
 
-// sendSignal execs `kill -SIGNAL pid` into containerID — a brand new exec,
-// never a container-level operation — and reports whether the exec itself
-// ran (not whether the target pid still exists; that answer comes from
-// waitExited's ExecInspect poll, which is authoritative).
-func (h *IssueHandler) sendSignal(ctx context.Context, containerID string, pid int, signal string) bool {
+// tmuxPanePIDs lists session's pane pids by running
+// provider.TmuxListPanePIDsCmd as a new exec into containerID — container-
+// local pids, read from INSIDE the container the run lives in, never a
+// host pid.
+//
+// Three-way return distinguishes "confirmed absent" from "unknown", which
+// killTmuxSession's callers must not conflate: err != nil means the exec
+// itself could not be run or timed out (hardStopProbeTimeout is
+// deliberately short — see its doc) — the session's existence is UNKNOWN,
+// not disproven. err == nil, sessionFound == false means the exec ran to
+// completion and tmux reported a non-zero exit (list-panes' own
+// "can't find session" error, in practice) — the session is CONFIRMED
+// absent. err == nil, sessionFound == true means pids holds every pane pid
+// tmux reported for a session that positively exists.
+func (h *IssueHandler) tmuxPanePIDs(ctx context.Context, containerID, session string) (pids []int, sessionFound bool, err error) {
+	// One shared deadline for the whole attempt (create + drain + wait for
+	// exit), not one hardStopProbeTimeout per call — otherwise a single
+	// attempt could cost up to 2×hardStopProbeTimeout and the retry above
+	// would blow past the budget hardStopGrace's doc computes.
+	probeCtx, cancel := context.WithTimeout(ctx, hardStopProbeTimeout)
+	defer cancel()
+	res, execErr := h.container.Exec(probeCtx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         provider.TmuxListPanePIDsCmd(session),
+	})
+	if execErr != nil {
+		return nil, false, fmt.Errorf("list tmux panes: %w", execErr)
+	}
+	out, _ := io.ReadAll(res.Reader)
+	_ = res.Reader.Close()
+	code, waitErr := provider.WaitExecExit(probeCtx, h.container, res.ExecID, hardStopProbeTimeout)
+	if waitErr != nil {
+		return nil, false, fmt.Errorf("list tmux panes: %w", waitErr)
+	}
+	if code != 0 {
+		return nil, false, nil
+	}
+	for _, field := range strings.Fields(string(out)) {
+		if pid, err := strconv.Atoi(field); err == nil && pid > 0 {
+			pids = append(pids, pid)
+		}
+	}
+	return pids, true, nil
+}
+
+// runShortExec runs cmd as a brand-new exec into containerID — never a
+// container-level operation — and reports whether the exec itself ran, not
+// its exit status: waitExited's ExecInspect poll of the ORIGINAL exec is
+// what actually decides whether the target stopped, so a signal command's
+// own exit code (tmux reporting "no such session" because the run already
+// exited, say) is not a failure worth distinguishing here.
+func (h *IssueHandler) runShortExec(ctx context.Context, containerID string, cmd []string) bool {
 	sigCtx, cancel := context.WithTimeout(ctx, hardStopSignalTimeout)
 	defer cancel()
 	res, err := h.container.Exec(sigCtx, provider.ExecConfig{
 		ContainerID: containerID,
-		Cmd:         provider.KillSignalCmd(signal, pid),
+		Cmd:         cmd,
 	})
 	if err != nil {
-		h.logger.Warn("hard stop: send signal failed", "error", err, "signal", signal, "pid", pid, "container_id", containerID)
+		h.logger.Warn("hard stop: signal exec failed", "error", err, "cmd", cmd, "container_id", containerID)
 		return false
 	}
 	// Drain and close: the signal-delivery exec is a short-lived helper
@@ -305,7 +448,7 @@ func (h *IssueHandler) waitExited(ctx context.Context, execID string, timeout ti
 // answer "was this hard-stopped, and did it work" without reading the
 // journal) and the journal (so it survives independent of the row's later
 // terminal write, and shows up in the issue's own timeline).
-func (h *IssueHandler) recordHardStopResult(ctx context.Context, wsID, assignmentID, containerID, execID string, pid int, result string) {
+func (h *IssueHandler) recordHardStopResult(ctx context.Context, wsID, assignmentID, containerID, execID, session, result string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := h.db.ExecContext(ctx,
 		`UPDATE assignments SET hard_stop_at = ?, hard_stop_result = ? WHERE id = ?`,
@@ -324,8 +467,8 @@ func (h *IssueHandler) recordHardStopResult(ctx context.Context, wsID, assignmen
 	if execID != "" {
 		payload["exec_id"] = execID
 	}
-	if pid > 0 {
-		payload["pid"] = pid
+	if session != "" {
+		payload["session"] = session
 	}
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: wsID,

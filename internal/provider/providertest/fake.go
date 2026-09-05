@@ -37,10 +37,21 @@ type FakeProvider struct {
 	lastAttachStdin bool
 	seq             int
 	execs           map[string]*fakeExec
-	// pids maps a synthetic pid back to the exec id it belongs to, so
-	// runCommand's "kill" case (and ExecPID's callers) can resolve one from the other
-	// exactly like a real container's pid table would.
-	pids map[int]string
+	// containerPIDs maps a synthetic CONTAINER-namespace pid back to the
+	// exec id it belongs to — the only pid table runCommand's "kill" and
+	// process-group-kill cases (and TmuxListPanePIDsCmd) resolve against,
+	// modelling what a `kill`/`tmux list-panes` exec run INSIDE the
+	// container can actually see. Deliberately a SEPARATE table from
+	// ExecPID's reported pid (fakeExec.hostPID) — see fakeExec's doc for
+	// why: that mismatch is #2365 itself, modelled so a hard-stop path that
+	// still signals by ExecPID's pid fails here exactly like it does
+	// against a real docker daemon.
+	containerPIDs map[int]string
+	// sessions maps a tmux session name (see HoldSessionCmd) to the exec id
+	// running "under" it, so runCommand's "tmux kill-session"/"tmux
+	// list-panes" cases can resolve a session name to its exec exactly like
+	// a real per-container tmux server would.
+	sessions map[string]string
 
 	unblockOnce sync.Once
 	unblockCh   chan struct{}
@@ -83,12 +94,21 @@ type Breaks struct {
 type fakeExec struct {
 	done     chan struct{}
 	exitCode int
-	// pid is a synthetic, unique-within-the-provider process id, assigned at
-	// creation. It stands in for the real OS pid a container runtime would
-	// report via ExecInspect, so the fake can prove out the exact primitive
-	// B7 hard termination depends on: resolve a pid from an exec id, then
-	// signal that pid — never the whole container.
-	pid int
+	// hostPID is what ExecPID reports for this exec — modelled on dockerd's
+	// ExecInspect Pid field, which is the exec's pid in the HOST pid
+	// namespace (#2365). Deliberately drawn from a range disjoint from
+	// containerPID below and NEVER resolvable by runCommand's "kill" or
+	// "tmux" cases (both run as execs INSIDE the container): that mismatch
+	// IS the bug B7b fixed, modelled here so a hard-stop path that still
+	// signals by ExecPID's pid goes red exactly like it does against a real
+	// docker daemon, while one that signals by tmux session name (or a
+	// containerPID obtained via TmuxListPanePIDsCmd) does not.
+	hostPID int
+	// containerPID is a synthetic pid in the CONTAINER's own pid namespace
+	// — what a real `tmux list-panes -F '#{pane_pid}'` run inside the
+	// container would report. The only pid runCommand's "kill" and
+	// process-group-kill cases resolve.
+	containerPID int
 	// killCh delivers a signal name ("TERM", "KILL") to a running "hold"
 	// exec (see runCommand). Buffered so a TERM immediately followed by a
 	// KILL (the hard-stop grace-period escalation) never blocks the sender.
@@ -108,14 +128,23 @@ var (
 	fakeStderrCmd    = []string{"stderr"}
 	fakeBlockCmd     = []string{"block"}
 	// HoldCmd starts a "process" that ignores context cancellation and only
-	// ever stops when signalled by pid via provider.KillSignalCmd (or the
-	// test's global Unblock, as a cleanup safety net) — the fake's
-	// stand-in for an agent CLI running inside a crew-shared container.
-	// Exported so an hardTerminateExec test (internal/api) can start one
+	// ever stops when signalled — by containerPID via provider.KillSignalCmd
+	// / provider.KillProcessGroupCmd, by tmux session via HoldSessionCmd
+	// below, or via the test's global Unblock as a cleanup safety net — the
+	// fake's stand-in for an agent CLI running inside a crew-shared
+	// container. Exported so a hard-stop test (internal/api) can start one
 	// exec per simulated agent and drive the real hard-stop code path
 	// against it.
 	HoldCmd = []string{"hold"}
 )
+
+// HoldSessionCmd is HoldCmd registered under a tmux session name — the
+// fake's stand-in for setupTmuxExec's real tmux-wrapped exec
+// (internal/orchestrator/orchestrator_exec_env.go), so a test can drive
+// Tier 2 hard termination's actual signal, provider.TmuxKillSessionCmd(name)
+// / provider.TmuxListPanePIDsCmd(name), rather than a bare pid. name is
+// ordinarily orchestrator.TmuxSessionName(agentSlug).
+func HoldSessionCmd(session string) []string { return []string{"hold", session} }
 
 func fakeExitCmd(code int) []string { return []string{"exit", strconv.Itoa(code)} }
 
@@ -125,7 +154,8 @@ func NewFakeProvider() *FakeProvider {
 		ContainerUserValue: DefaultSafeUser,
 		StderrText:         "contract-stderr-marker",
 		execs:              make(map[string]*fakeExec),
-		pids:               make(map[int]string),
+		containerPIDs:      make(map[int]string),
+		sessions:           make(map[string]string),
 		unblockCh:          make(chan struct{}),
 	}
 }
@@ -209,10 +239,18 @@ func (f *FakeProvider) Exec(ctx context.Context, cfg provider.ExecConfig) (*prov
 	f.lastAttachStdin = attach
 	f.seq++
 	execID := fmt.Sprintf("fake-exec-%d", f.seq)
-	pid := f.seq
-	entry := &fakeExec{done: make(chan struct{}), pid: pid, killCh: make(chan string, 2)}
+	// Two disjoint ranges on purpose — see fakeExec's doc: hostPID (what
+	// ExecPID reports) must never collide with a containerPID (what
+	// runCommand's "kill"/"tmux" cases can resolve), the same way a real
+	// exec's host-namespace pid and its container-namespace pid never do.
+	containerPID := f.seq
+	hostPID := f.seq + fakeHostPIDOffset
+	entry := &fakeExec{done: make(chan struct{}), hostPID: hostPID, containerPID: containerPID, killCh: make(chan string, 2)}
 	f.execs[execID] = entry
-	f.pids[pid] = execID
+	f.containerPIDs[containerPID] = execID
+	if len(cfg.Cmd) == 2 && cfg.Cmd[0] == "hold" && cfg.Cmd[1] != "" {
+		f.sessions[cfg.Cmd[1]] = execID
+	}
 	f.mu.Unlock()
 
 	pr, pw := io.Pipe()
@@ -269,34 +307,63 @@ func (f *FakeProvider) runCommand(ctx context.Context, cfg provider.ExecConfig, 
 		case <-time.After(30 * time.Second):
 		}
 	case len(cfg.Cmd) == 3 && cfg.Cmd[0] == "kill":
-		// The exact argv hardTerminateExec issues for real: resolve the pid
-		// back to its owning exec and deliver the signal on ITS killCh only
-		// — never anything container-wide, and never any other exec's
-		// channel, which is what proves a sibling agent is unaffected.
+		// provider.KillSignalCmd's argv: one containerPID. Resolved ONLY
+		// against containerPIDs — a caller that hands this ExecPID's
+		// hostPID (the pre-#2365 bug) always misses here, exactly like it
+		// misses against a real container's own pid table.
 		pid, _ := strconv.Atoi(cfg.Cmd[2])
 		sig := strings.TrimPrefix(cfg.Cmd[1], "-")
+		code = f.signalContainerPID(pid, sig)
+	case len(cfg.Cmd) >= 4 && cfg.Cmd[0] == "kill" && cfg.Cmd[2] == "--":
+		// provider.KillProcessGroupCmd's argv: Tier 2's escalation, one exec
+		// signalling every listed pane's whole group. Success if ANY listed
+		// pid resolved — mirrors POSIX kill(1), which reports failure only
+		// when every operand failed.
+		sig := strings.TrimPrefix(cfg.Cmd[1], "-")
+		code = 1
+		for _, tok := range cfg.Cmd[3:] {
+			pid, _ := strconv.Atoi(strings.TrimPrefix(tok, "-"))
+			if c := f.signalContainerPID(pid, sig); c == 0 {
+				code = 0
+			}
+		}
+	case len(cfg.Cmd) == 4 && cfg.Cmd[0] == "tmux" && cfg.Cmd[1] == "kill-session" && cfg.Cmd[2] == "-t":
+		// provider.TmuxKillSessionCmd's argv: Tier 2's PRIMARY signal
+		// (#2365) — resolved by session NAME, a container-visible identity,
+		// never a pid of either namespace. Ending session must never reach
+		// a different session in the same (fake) container: sessions is
+		// looked up by its exact name only.
+		session := cfg.Cmd[3]
 		f.mu.Lock()
-		targetID, ok := f.pids[pid]
+		execID, ok := f.sessions[session]
 		var target *fakeExec
 		if ok {
-			target = f.execs[targetID]
+			target = f.execs[execID]
 		}
 		f.mu.Unlock()
-		switch {
-		case !ok || target == nil:
-			code = 1 // kill: (<pid>) - No such process
-		default:
-			select {
-			case <-target.done:
-				code = 1 // already exited — nothing left to signal
-			default:
-				select {
-				case target.killCh <- sig:
-					code = 0
-				default:
-					code = 0 // already has a pending signal queued; still a "success"
-				}
+		if !ok {
+			code = 1 // tmux: session not found
+		} else {
+			code = f.signalExec(target, "TERM")
+		}
+	case len(cfg.Cmd) == 6 && cfg.Cmd[0] == "tmux" && cfg.Cmd[1] == "list-panes" && cfg.Cmd[2] == "-t":
+		// provider.TmuxListPanePIDsCmd's argv: reports the session's
+		// containerPID on stdout, exactly what a real `tmux list-panes`
+		// would report from inside the container — never a host pid.
+		session := cfg.Cmd[3]
+		f.mu.Lock()
+		execID, ok := f.sessions[session]
+		var containerPID int
+		if ok {
+			if e := f.execs[execID]; e != nil {
+				containerPID = e.containerPID
 			}
+		}
+		f.mu.Unlock()
+		if !ok || containerPID == 0 {
+			code = 1
+		} else {
+			_, _ = io.WriteString(pw, strconv.Itoa(containerPID)+"\n")
 		}
 	}
 	if f.Breaks.LoseExitCode {
@@ -305,6 +372,46 @@ func (f *FakeProvider) runCommand(ctx context.Context, cfg provider.ExecConfig, 
 	entry.exitCode = code
 	_ = pw.Close()
 	close(entry.done)
+}
+
+// signalContainerPID resolves pid against the container-local pid table
+// (containerPIDs) and delivers sig to its owning exec — exactly what a real
+// in-container `kill` can do, and ALL it can do: a hostPID (ExecPID's
+// namespace) is simply absent from this table, matching a real container's
+// own pid table not containing it either.
+func (f *FakeProvider) signalContainerPID(pid int, sig string) int {
+	f.mu.Lock()
+	execID, ok := f.containerPIDs[pid]
+	var target *fakeExec
+	if ok {
+		target = f.execs[execID]
+	}
+	f.mu.Unlock()
+	return f.signalExec(target, sig)
+}
+
+// signalExec delivers sig to target's killCh (or reports the matching
+// failure exit code) — the shared tail of every signal-delivery command the
+// fake understands: pid-based kill, process-group kill, and tmux
+// kill-session all resolve to a *fakeExec one way or another and then call
+// this. Never touches any exec but target — no sibling's channel is ever
+// written, by construction (the caller decides which target, this method
+// only ever signals THAT one).
+func (f *FakeProvider) signalExec(target *fakeExec, sig string) int {
+	if target == nil {
+		return 1 // kill: (<pid>) - No such process / tmux: session not found
+	}
+	select {
+	case <-target.done:
+		return 1 // already exited — nothing left to signal
+	default:
+	}
+	select {
+	case target.killCh <- sig:
+		return 0
+	default:
+		return 0 // already has a pending signal queued; still a "success"
+	}
 }
 
 func (f *FakeProvider) ExecInspect(_ context.Context, execID string) (bool, int, error) {
@@ -331,10 +438,17 @@ func (f *FakeProvider) ExecInspect(_ context.Context, execID string) (bool, int,
 	}
 }
 
+// fakeHostPIDOffset separates hostPID's numeric range from containerPID's —
+// see fakeExec's doc. Large enough that no realistic containerPID sequence
+// in a single test could ever collide with it.
+const fakeHostPIDOffset = 100000
+
 // ExecPID implements provider.ExecPIDProvider. pid == 0 (nothing to signal)
 // once the exec's done channel has closed, matching the interface's
 // contract and the real docker provider's behaviour (dockerd reports Pid 0
-// for a finished exec).
+// for a finished exec). Reports hostPID, not containerPID — see fakeExec's
+// doc: this is deliberately NOT the pid runCommand's "kill"/"tmux" cases can
+// resolve, modelling #2365.
 func (f *FakeProvider) ExecPID(_ context.Context, execID string) (int, error) {
 	f.mu.Lock()
 	entry, ok := f.execs[execID]
@@ -346,7 +460,7 @@ func (f *FakeProvider) ExecPID(_ context.Context, execID string) (int, error) {
 	case <-entry.done:
 		return 0, nil
 	default:
-		return entry.pid, nil
+		return entry.hostPID, nil
 	}
 }
 
