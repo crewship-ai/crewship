@@ -111,6 +111,11 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// Routines integration). CRUD-only; the scheduler runs in-process
 	// in cmd_start and reads the table directly.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.ListSchedules))))
+	// Next-five-fire-times preview (B9, #2362, §13.2 "When"). Registered
+	// before the create route reads naturally but ordering doesn't matter
+	// here — "preview" can never collide with {scheduleId} because no GET
+	// .../pipeline-schedules/{scheduleId} route exists to conflict with.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-schedules/preview", authed(wsCtx(http.HandlerFunc(pipes.PreviewSchedule))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-schedules", roleInline, pipes.CreateSchedule)
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", roleManage, pipes.UpdateSchedule)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", roleManage, pipes.DeleteSchedule)
@@ -194,6 +199,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// endpoint authenticates via the token + optional HMAC instead.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks", authed(wsCtx(http.HandlerFunc(pipes.ListWebhooks))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks", roleCreate, pipes.CreateWebhook)
+	// Edit in place (F21, B9 #2362): name / target / inputs_template /
+	// enabled / rate limit, with the token never rotating and the signing
+	// secret rotating only when the caller explicitly opts in.
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.UpdateWebhook)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.DeleteWebhook)
 	// Public dispatch — no `authed` wrapper. The token in the path
 	// is the auth surface; signing_secret + HMAC layered on top.
