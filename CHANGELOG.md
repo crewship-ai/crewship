@@ -120,6 +120,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **The issues board moves without a refresh, resyncs a dropped frame, and a parent waits for its children (#TBD).**
+  `issue.session.state`, `issue.checkpoint.written` and `run.outcome` are
+  now broadcast on the workspace channel (`internal/api/issue_session_realtime.go`)
+  and registered on the client allowlist (`hooks/use-realtime.tsx`) —
+  before this PR none of the three were ever emitted, so an issue's session
+  panel and the Runs card's status pill went stale until a manual reload.
+  A new `GET /api/v1/crews/{crewId}/issues/{identifier}/events?after_seq=`
+  (`crewship issue events --after-seq`) reads the B1 event log by its own
+  `seq` cursor rather than `created_at`, and a client-side gap detector
+  (`hooks/use-issue-event-gap-resync.ts`) calls it whenever the next
+  `issue.delivery.acked` seq it sees isn't exactly one more than the last —
+  the WebSocket hub's non-blocking dispatch silently drops a frame under
+  load, so registering a realtime type is not the same as never missing
+  one (F43). Separately, §10.4's terminal-children rule: an issue with a
+  non-terminal sub-issue or plan task can no longer move to `DONE`/`REVIEW`
+  without `?force=true`, and forcing past one writes a receipt — the same
+  status-change activity/event row, naming who forced it and which
+  children were still open — rather than a silent override.
+
 - **The reliability editor — every §13.2 field settable, a DST-safe fire
   preview, webhook edit in place (#2372, closes #2362).** Almost every
   schedule field the backend already carried (cron/timezone, catch-up
