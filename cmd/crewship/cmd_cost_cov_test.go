@@ -143,8 +143,8 @@ func TestFetchCrewSpendCov_ServerError(t *testing.T) {
 
 func TestPrintCostHelpers_EmptyRowsPrintNothing(t *testing.T) {
 	out, _ := captureStdoutCovCli10(t, func() error {
-		printCostTopSpenders(nil)
-		printCostByCrew(nil)
+		printCostTopSpenders(nil, workspaceSlugs{})
+		printCostByCrew(nil, workspaceSlugs{})
 		printCostSubscriptions(nil)
 		return nil
 	})

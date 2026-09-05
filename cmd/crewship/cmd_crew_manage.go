@@ -244,11 +244,15 @@ var crewCreateCmd = &cobra.Command{
 			return err
 		}
 
-		cli.PrintSuccess(fmt.Sprintf("Crew created: %s (%s)", created.Slug, created.ID))
-		for _, warning := range created.Warnings {
-			cli.PrintWarning(warning)
-		}
-		return nil
+		// The warnings ride along in the machine formats too: they are part of
+		// the server's answer (an undersized crew is accepted, not refused),
+		// and a caller that only sees the id cannot tell the two apart.
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			cli.PrintSuccess(fmt.Sprintf("Crew created: %s (%s)", created.Slug, created.ID))
+			for _, warning := range created.Warnings {
+				cli.PrintWarning(warning)
+			}
+		})
 	},
 }
 

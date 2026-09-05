@@ -113,8 +113,9 @@ var agentCreateCmd = &cobra.Command{
 			return err
 		}
 
-		cli.PrintSuccess(fmt.Sprintf("Agent created: %s (%s)", created.Slug, created.ID))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			cli.PrintSuccess(fmt.Sprintf("Agent created: %s (%s)", created.Slug, created.ID))
+		})
 	},
 }
 

@@ -107,6 +107,15 @@ type runResponse struct {
 	AgentSlug                  *string              `json:"agent_slug,omitempty"`
 	CrewName                   *string              `json:"crew_name,omitempty"`
 	CrewSlug                   *string              `json:"crew_slug,omitempty"`
+	// PipelineSlug names the routine a Kind=="pipeline" run executed.
+	//
+	// A routine run has no agent by design — a schedule- or webhook-triggered
+	// run has no invoking agent at all, so agent_id is empty, the agent
+	// enrichment above skips it, and agent_slug stays null. Every consumer
+	// then rendered the row as "?", which reads as missing data rather than
+	// as "this was a routine". This is the field that says which routine, so
+	// the row can name itself. Absent for agent runs, which have no routine.
+	PipelineSlug *string `json:"pipeline_slug,omitempty"`
 }
 
 type runListResponse struct {
@@ -536,6 +545,59 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 		}
 	}
 
+	// Same bounded lookup for the ROUTINE rows on this page.
+	//
+	// A pipeline run's journal record carries neither the routine's slug nor
+	// how it was triggered: the writer emits mode/author_crew/step_count and
+	// nothing else, so trigger_type comes back "" and there is no name to
+	// show. Both facts do exist, in the pipeline_runs row keyed by the same
+	// id (RunAggregated.ID is the pipeline run id for this kind), so one
+	// bounded IN () lookup recovers them. Nothing here writes a value the
+	// journal disagrees with — triggered_via is only used where the journal
+	// had nothing at all.
+	type pipelineLookup struct{ slug, triggeredVia string }
+	pipelineRuns := map[string]pipelineLookup{}
+	{
+		runIDs := make([]any, 0, len(aggregated))
+		seenP := map[string]struct{}{}
+		for _, r := range aggregated {
+			if r.Kind != journal.RunKindPipeline || r.ID == "" {
+				continue
+			}
+			if _, ok := seenP[r.ID]; ok {
+				continue
+			}
+			seenP[r.ID] = struct{}{}
+			runIDs = append(runIDs, r.ID)
+		}
+		if len(runIDs) > 0 {
+			ph := "?"
+			for i := 1; i < len(runIDs); i++ {
+				ph += ",?"
+			}
+			args := make([]any, 0, len(runIDs)+1)
+			args = append(args, workspaceID)
+			args = append(args, runIDs...)
+			rows, err := h.db.QueryContext(ctx,
+				`SELECT id, pipeline_slug, triggered_via FROM pipeline_runs
+				 WHERE workspace_id = ? AND id IN (`+ph+`)`, args...)
+			if err == nil {
+				for rows.Next() {
+					var id string
+					var slug, via sql.NullString
+					if err := rows.Scan(&id, &slug, &via); err == nil {
+						pipelineRuns[id] = pipelineLookup{slug: slug.String, triggeredVia: via.String}
+					}
+				}
+				_ = rows.Close()
+			} else {
+				// Best-effort, exactly like the agent lookup above: a routine
+				// row losing its name must not cost the caller the run list.
+				h.logger.Warn("enrich runs pipeline lookup failed", "error", err)
+			}
+		}
+	}
+
 	// Same bounded lookup for the issues the page's runs belong to, so a
 	// row can say "ENG-4" instead of a cuid nothing links.
 	identifiers := map[string]string{}
@@ -648,6 +710,18 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			if l.crewSlug.Valid && l.crewSlug.String != "" {
 				c := l.crewSlug.String
 				resp.CrewSlug = &c
+			}
+		}
+		if p, ok := pipelineRuns[r.ID]; ok {
+			if p.slug != "" {
+				s := p.slug
+				resp.PipelineSlug = &s
+			}
+			// Only when the journal had none: the run.started payload is the
+			// authoritative source where it carries one, and this is the
+			// fallback for the writer that never sets it.
+			if resp.TriggerType == "" && p.triggeredVia != "" {
+				resp.TriggerType = p.triggeredVia
 			}
 		}
 		out = append(out, resp)

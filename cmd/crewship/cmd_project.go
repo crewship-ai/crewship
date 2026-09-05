@@ -142,8 +142,9 @@ var projectCreateCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("Created project: %s (%s)", created.Name, created.Slug))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			cli.PrintSuccess(fmt.Sprintf("Created project: %s (%s)", created.Name, created.Slug))
+		})
 	},
 }
 

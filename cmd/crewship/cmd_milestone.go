@@ -128,8 +128,9 @@ var projectMilestoneCreateCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("Milestone created: %s (%s)", created.Name, created.ID))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			cli.PrintSuccess(fmt.Sprintf("Milestone created: %s (%s)", created.Name, created.ID))
+		})
 	},
 }
 

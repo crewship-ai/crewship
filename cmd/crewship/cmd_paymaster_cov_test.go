@@ -19,7 +19,7 @@ func TestPrintSpendTable_CrewRows(t *testing.T) {
 		{CrewID: "backend", CostUSD: 1.2345, CallCount: 10, InTokens: 700, OutTokens: 300},
 	}
 	var err error
-	out := covCaptureStdoutCli5(t, func() { err = printSpendTable("Crew", rows) })
+	out := covCaptureStdoutCli5(t, func() { err = printSpendTable("Crew", rows, workspaceSlugs{}) })
 	if err != nil {
 		t.Fatalf("printSpendTable: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestPrintSpendTable_AgentRows(t *testing.T) {
 		{AgentID: "viktor", CostUSD: 0.5, CallCount: 3, InTokens: 80, OutTokens: 20},
 	}
 	var err error
-	out := covCaptureStdoutCli5(t, func() { err = printSpendTable("Agent", rows) })
+	out := covCaptureStdoutCli5(t, func() { err = printSpendTable("Agent", rows, workspaceSlugs{}) })
 	if err != nil {
 		t.Fatalf("printSpendTable: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestPrintSpendTable_AgentRows(t *testing.T) {
 func TestPrintSpendTable_UnsupportedType(t *testing.T) {
 	covSetupCli5(t)
 	var err error
-	covCaptureStdoutCli5(t, func() { err = printSpendTable("X", []string{"nope"}) })
+	covCaptureStdoutCli5(t, func() { err = printSpendTable("X", []string{"nope"}, workspaceSlugs{}) })
 	if err == nil || !strings.Contains(err.Error(), "unsupported rows type") {
 		t.Errorf("expected unsupported-type error; got %v", err)
 	}
@@ -59,7 +59,7 @@ func TestPrintSpendTable_JSONFormat(t *testing.T) {
 	flagFormat = "json"
 	rows := []crewSpendRow{{CrewID: "x", CostUSD: 2}}
 	var err error
-	out := covCaptureStdoutCli5(t, func() { err = printSpendTable("Crew", rows) })
+	out := covCaptureStdoutCli5(t, func() { err = printSpendTable("Crew", rows, workspaceSlugs{}) })
 	if err != nil {
 		t.Fatalf("printSpendTable json: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestPrintSpendTable_YAMLFormat(t *testing.T) {
 	flagFormat = "yaml"
 	var err error
 	out := covCaptureStdoutCli5(t, func() {
-		err = printSpendTable("Crew", []crewSpendRow{{CrewID: "y", CostUSD: 1}})
+		err = printSpendTable("Crew", []crewSpendRow{{CrewID: "y", CostUSD: 1}}, workspaceSlugs{})
 	})
 	if err != nil {
 		t.Fatalf("printSpendTable yaml: %v", err)
