@@ -335,6 +335,40 @@ func TestStore_Save_UpsertsExisting(t *testing.T) {
 	}
 }
 
+func TestStore_Save_DescriptionOmissionIsPatchLike(t *testing.T) {
+	db := openStoreTestDB(t)
+	defer db.Close()
+	s := NewStore(db)
+	ctx := context.Background()
+
+	first := validSaveInput("description-patch")
+	first.Description = "keep this"
+	if _, err := s.Save(ctx, first); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+
+	omitted := validSaveInput("description-patch")
+	omitted.Description = ""
+	omitted.PreserveDescription = true
+	got, err := s.Save(ctx, omitted)
+	if err != nil {
+		t.Fatalf("re-save with omitted description: %v", err)
+	}
+	if got.Description != "keep this" {
+		t.Errorf("description after omission = %q, want %q", got.Description, "keep this")
+	}
+
+	explicitClear := validSaveInput("description-patch")
+	explicitClear.Description = ""
+	got, err = s.Save(ctx, explicitClear)
+	if err != nil {
+		t.Fatalf("re-save with explicit empty description: %v", err)
+	}
+	if got.Description != "" {
+		t.Errorf("description after explicit clear = %q, want empty", got.Description)
+	}
+}
+
 func TestStore_GetBySlug(t *testing.T) {
 	db := openStoreTestDB(t)
 	defer db.Close()

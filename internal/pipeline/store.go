@@ -229,7 +229,9 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 		}
 		_, err = tx.ExecContext(ctx, `
 UPDATE pipelines SET
-    name = ?, description = ?, dsl_version = ?, definition_json = ?, definition_hash = ?,
+    name = ?,
+    description = CASE WHEN ? THEN description ELSE ? END,
+    dsl_version = ?, definition_json = ?, definition_hash = ?,
     author_crew_id = ?,
     -- Empty means "the save did not mention it", not "clear it". The field
     -- became load-bearing with the crewship step kind (it is the agent every
@@ -249,7 +251,8 @@ UPDATE pipelines SET
     updated_at = ?,
     deleted_at = NULL`+resurrectClause+`
 WHERE id = ?`,
-			in.Name, nullStr(in.Description), in.DSLVersion, in.DefinitionJSON, hash,
+			in.Name, in.PreserveDescription && !wasDeleted, nullStr(in.Description),
+			in.DSLVersion, in.DefinitionJSON, hash,
 			nullStr(in.Author.CrewID), nullStr(in.Author.AgentID), nullStr(in.Author.UserID),
 			nullStr(in.Author.ChatID), nullStr(in.Author.RunID),
 			string(in.Author.Via), nullStr(in.Author.ImportedURL),

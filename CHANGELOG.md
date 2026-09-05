@@ -1219,6 +1219,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   remain, while a 30-minute window with no samples now says so explicitly.
   Loading and request failures keep distinct states, and aggregate metrics no
   longer coerce a missing first network-rate sample to `0 B/s`.
+- **`crewship routine save` no longer erases a routine's description when `--description` is omitted; an explicit empty value still clears it (#2373).**
 - **The Docker image builds again (#2328).** The backend stage did not copy the `config/` package that #2305 introduced for the model catalog, so `go build` inside the image failed on every branch since. `config/` is copied now, and a test (`scripts/dockerfile-sources`) fails whenever a root-level package the binaries import is missing from that stage.
 - **Two GET routes were invisible to the read-scope invariant, the same
   "assumed out of scope by registration helper" blind spot the invariant
