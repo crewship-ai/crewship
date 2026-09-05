@@ -130,13 +130,11 @@ func TestAcceptance_InboxAct_AnswerResumesRun_ReceiptOnSameCard(t *testing.T) {
 	if (delState != "claimed" && delState != "consumed") || delRun != newRun {
 		t.Fatalf("delivery = (%s, %s), want (claimed|consumed, %s)", delState, delRun, newRun)
 	}
-	var sessState string
-	if err := db.QueryRow(`SELECT state FROM issue_agent_sessions WHERE id = 'iba-sess'`).Scan(&sessState); err != nil {
-		t.Fatal(err)
-	}
-	if sessState == "awaiting_input" {
-		t.Fatal("session still awaiting_input")
-	}
+	// The session's awaiting_input → active flip happens in the resumed
+	// run's goroutine after the HTTP response, so it is not asserted here
+	// (it raced in CI); the handler test waits for dispatches and covers
+	// it. The new run being bound to the session above is what proves the
+	// run resumed the session that asked.
 
 	// The receipt, on the issue's event log and visible through the CLI.
 	out, err = runInboxActCLI(t, cfgPath, "issue", "events", "IBA-1", "--after-seq", "0", "--format", "json")
