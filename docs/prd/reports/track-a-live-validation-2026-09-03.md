@@ -31,3 +31,7 @@ Gates on `main`: `docker-api-surface` in sync (32 endpoints); `docs-inventory -s
 - Schedule `psched_cmtmpyikl0001a69b5c8b`: `0 8 * * *` UTC, catch-up `skip`, next fire 2026-09-05 08:00 UTC — the first scheduled fire on a working clone is itself a §2.1 data point; check `crewship routine schedules list --slug issue-triage-daily` after it.
 - Track B packages B1–B13 exist as ENG-7…ENG-19 on the dev1 board (crew engineering), so the 1.1 work is tracked in the product.
 - Rows on dev1 are therefore of three kinds now: seed (`./dev.sh seed`), validation (OPS-8…OPS-13, R1–R3, a4-live webhook), dogfood (issue-triage-daily and its comments, ENG-7…19). The B0 re-audit of §2.1 must say which is which.
+
+## First scheduled fire on a working clone — 2026-09-05 08:00 UTC
+
+`issue-triage-daily`'s schedule (`0 8 * * *`) fired on time: run `run_cmto3f3fk…`, trigger `schedule`, 1 m 19 s, $0.15, `pipeline.run.completed`, and the triage comment landed on OPS-1 at 08:01:44Z. That is the first routine ever to run from a schedule on a working clone (§2.1 said nothing had). Its **outcome read `FAILED` — "no outcome reported"**: the prompt predates B6 and never asked the agent for an `outcome:` line, so B6's default applied exactly as specified. The routine's prompt now ends with the outcome instruction (new version saved through B8's `routine save`); the next fire is the check that the default no longer bites. Two footguns found on the way: a re-save without `--description` blanks the stored description (#2373), and a `--draft` save raises two inbox cards (noted on #2364).

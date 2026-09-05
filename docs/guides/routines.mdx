@@ -1939,6 +1939,13 @@ being read as a silent success. §9.6 also names an issue-comment lane for
 under [API reference → Issues → Outcome](/api-reference/issues#outcome) for exactly what
 is and isn't wired.
 
+The practical consequence for authors: every `agent_run` prompt should end by
+asking for the line — for example *"End your reply with exactly one line:
+`outcome: SUCCEEDED` if you did the work, `outcome: NO_CHANGE` if there was
+nothing to do, `outcome: NEEDS_HUMAN` if you are blocked."* A routine written
+before this rule will show `FAILED` on every run until its prompt says so; the
+first scheduled dogfood run on dev1 did exactly that.
+
 ### The step's chat is a durable transcript
 
 Every `agent_run` step gets its own chat (titled `Pipeline <id> · step <id>`, one per attempt), and that chat keeps **both** halves of the turn: the rendered prompt the step sent, and the agent's answer with its reasoning and tool activity in the order they streamed. Read it with `crewship chat <chat-id>`, or open the chat in the dashboard — the transcript is the same one [`crewship chat stream`](/guides/watching-agent-runs) shows live, so a browser left open on a running step still has the text after a reload. A step that failed **after** the agent said something keeps what it said, which is usually the most useful thing on the screen.
