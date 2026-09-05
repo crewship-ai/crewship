@@ -106,6 +106,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// Waitpoints — StepWait approval persistence + UI inbox surface.
 	// Pending waitpoints flow into the same Inbox as Keeper approvals.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints", authed(wsCtx(http.HandlerFunc(pipes.ListPendingWaitpoints))))
+	// The 403 (agent or unidentified decider, B14 #2388) and 409 (already
+	// decided) are produced by replyWaitpointDecideError, outside the
+	// handler body, so they are declared here.
+	// openapi: responses 200,400,401,403,409,500,503
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve", roleCreate, pipes.ApproveWaitpoint)
 	// Pipeline schedules — cron triggers for saved pipelines (the
 	// Routines integration). CRUD-only; the scheduler runs in-process
@@ -211,6 +215,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// via callback URL with no workspace JWT (the high-entropy token is
 	// the auth, same model as webhook dispatch). Surfaced as callback_url
 	// on the pending-waitpoints list.
+	// openapi: responses 200,400,409,500,503
 	r.mux.HandleFunc("POST /api/v1/waitpoint-tokens/{token}", pipes.CompleteWaitpointToken)
 	// Internal /api/v1/internal/pipelines/save route is registered
 	// alongside the other /internal endpoints in router_internal.go.

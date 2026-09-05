@@ -45,6 +45,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `docs/guides/routines.mdx`'s Production notes.
 
 ### Security
+- **A peer agent's "GO" cannot satisfy a waitpoint (#2388, PRD §18 scenario 10).** The waitpoint resolve door now takes an explicit actor and refuses an agent — a crew-bound internal token, a sidecar tool, any agent-facing route — and an unidentified caller, before the row is touched. The waitpoint stays pending for a person, the authed approve route answers `403` with `reason: waitpoint_decider_not_allowed`, and the attempt lands in the audit log as `waitpoint.decision_refused` naming the actor and the run (`crewship audit --action waitpoint.decision_refused`). The public token callback is the external holder's door and unchanged; the inbox card now states `who_can_act: ["role:MANAGER"]`.
 
 - **A credential a human supplies to an agent is a grant, never a value the agent can read (#2376).**
   A `CREDENTIAL` escalation raised without a value stages a `REQUESTED`

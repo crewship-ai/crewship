@@ -57,6 +57,14 @@ func (s *stubApproverWaitpoints) CompleteApproval(_ context.Context, workspaceID
 	return s.completeReturnGenericErr
 }
 
+// Decide is the resolve door ApproveWaitpoint / CompleteWaitpointToken
+// go through (B14, #2388). The stub records the decider's id and
+// delegates to CompleteApproval; the actor-kind check itself lives in the
+// real store and is tested there and in pipeline_waitpoint_decider_test.go.
+func (s *stubApproverWaitpoints) Decide(ctx context.Context, workspaceID, token string, approved bool, decider pipeline.WaitpointDecider, payload string) error {
+	return s.CompleteApproval(ctx, workspaceID, token, approved, decider.ID, payload)
+}
+
 // stubBareWaitpoints satisfies only pipeline.WaitpointStore (no
 // CompleteApproval method). Used to exercise the 503 "does not support
 // completion" branch in ApproveWaitpoint.

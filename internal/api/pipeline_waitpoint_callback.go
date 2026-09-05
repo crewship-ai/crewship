@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // CompleteWaitpointToken is the PUBLIC waitpoint completion endpoint
@@ -61,10 +63,7 @@ func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.
 		payload = string(body.Payload)
 	}
 
-	type approver interface {
-		CompleteApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string) error
-	}
-	wp, ok := h.waitpoints.(approver)
+	wp, ok := h.waitpoints.(waitpointDecideDoor)
 	if !ok {
 		replyError(w, http.StatusServiceUnavailable, "waitpoint store does not support completion")
 		return
@@ -87,16 +86,17 @@ func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.
 			workspaceID = wsID
 		}
 	}
-	// deciderUserID = "external-callback": no human user, the token is the
+	// The decider is the EXTERNAL token holder, attributed to the
+	// "external-callback" sentinel: no human user, the token is the
 	// authority. Audit queries can distinguish callback completions from
-	// inbox approvals by this sentinel.
-	if err := wp.CompleteApproval(r.Context(), workspaceID, token, approved, "external-callback", payload); err != nil {
-		if err.Error() == "waitpoint: already decided or expired" {
-			replyError(w, http.StatusConflict, err.Error())
-			return
-		}
-		h.logger.Error("waitpoint callback complete", "error", err, "token", tokenFingerprint(token))
-		replyError(w, http.StatusInternalServerError, "Failed to complete waitpoint")
+	// inbox approvals by this sentinel. This is not an agent door (B14,
+	// #2388): an agent is never handed a waitpoint token — the token
+	// travels to the inbox, the pending-waitpoints listing and the CLI, all
+	// of them person-facing — so the only way one reaches this route is a
+	// person choosing to give it away.
+	if err := wp.Decide(r.Context(), workspaceID, token, approved,
+		pipeline.WaitpointDecider{Kind: pipeline.DeciderExternal, ID: "external-callback"}, payload); err != nil {
+		replyWaitpointDecideError(w, h.logger, "waitpoint callback complete", token, err)
 		return
 	}
 
