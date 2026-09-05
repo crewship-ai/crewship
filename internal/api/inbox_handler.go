@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -180,6 +181,16 @@ type inboxItemResponse struct {
 	// deciding needs beyond the model's argument for its own verdict. Detail view
 	// only; see inbox_evidence.go for why it is not on the list.
 	Evidence *inboxEvidence `json:"evidence,omitempty"`
+
+	// ThreadKey, AttentionClass and Actions are the §12 attention contract
+	// (PRD-ISSUES-AND-ROUTINES-2026, work package B10, #2364) — now real
+	// columns rather than payload-only fields, so the server can merge on
+	// them (internal/inbox.WriteThreaded) instead of the client
+	// (F28's inbox-v2-derive.ts). Empty/omitted for a row no producer has
+	// migrated onto the contract yet.
+	ThreadKey      string         `json:"thread_key,omitempty"`
+	AttentionClass string         `json:"attention_class,omitempty"`
+	Actions        []inbox.Action `json:"actions,omitempty"`
 }
 
 // inboxListResponse keeps the count + cursor metadata next to the
@@ -227,6 +238,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		title, COALESCE(body_md, ''),
 		COALESCE(sender_type, ''), COALESCE(sender_id, ''), COALESCE(sender_name, ''),
 		` + inboxEffectiveStateExpr + ` AS state, priority, blocking, payload_json,
+		COALESCE(thread_key, ''), COALESCE(attention_class, ''), actions_json,
 		COALESCE(inbox_items.read_at, ''), COALESCE(resolved_at, ''),
 		COALESCE(resolved_by_user_id, ''), COALESCE(resolved_action, ''),
 		created_at, updated_at
@@ -283,13 +295,14 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		scanned++
 		var item inboxItemResponse
 		var blocking int
-		var payloadJSON string
+		var payloadJSON, actionsJSON string
 		if err := rows.Scan(
 			&item.ID, &item.WorkspaceID, &item.Kind, &item.SourceID,
 			&item.TargetUserID, &item.TargetRole,
 			&item.Title, &item.BodyMD,
 			&item.SenderType, &item.SenderID, &item.SenderName,
 			&item.State, &item.Priority, &blocking, &payloadJSON,
+			&item.ThreadKey, &item.AttentionClass, &actionsJSON,
 			&item.ReadAt, &item.ResolvedAt,
 			&item.ResolvedByUserID, &item.ResolvedAction,
 			&item.CreatedAt, &item.UpdatedAt,
@@ -300,6 +313,9 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		item.Blocking = blocking != 0
 		if payloadJSON != "" {
 			_ = json.Unmarshal([]byte(payloadJSON), &item.Payload)
+		}
+		if actionsJSON != "" && actionsJSON != "[]" {
+			_ = json.Unmarshal([]byte(actionsJSON), &item.Actions)
 		}
 		out = append(out, item)
 	}
@@ -385,12 +401,13 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 	args := append([]interface{}{user.ID, id, workspaceID}, visArgs...)
 	var item inboxItemResponse
 	var blocking int
-	var payloadJSON string
+	var payloadJSON, actionsJSON string
 	err := h.db.QueryRowContext(r.Context(), `SELECT id, workspace_id, kind, source_id,
 		COALESCE(target_user_id, ''), COALESCE(target_role, ''),
 		title, COALESCE(body_md, ''),
 		COALESCE(sender_type, ''), COALESCE(sender_id, ''), COALESCE(sender_name, ''),
 		`+inboxEffectiveStateExpr+` AS state, priority, blocking, payload_json,
+		COALESCE(thread_key, ''), COALESCE(attention_class, ''), actions_json,
 		COALESCE(inbox_items.read_at, ''), COALESCE(resolved_at, ''),
 		COALESCE(resolved_by_user_id, ''), COALESCE(resolved_action, ''),
 		created_at, updated_at
@@ -401,6 +418,7 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&item.Title, &item.BodyMD,
 		&item.SenderType, &item.SenderID, &item.SenderName,
 		&item.State, &item.Priority, &blocking, &payloadJSON,
+		&item.ThreadKey, &item.AttentionClass, &actionsJSON,
 		&item.ReadAt, &item.ResolvedAt,
 		&item.ResolvedByUserID, &item.ResolvedAction,
 		&item.CreatedAt, &item.UpdatedAt,
@@ -417,6 +435,9 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 	item.Blocking = blocking != 0
 	if payloadJSON != "" {
 		_ = json.Unmarshal([]byte(payloadJSON), &item.Payload)
+	}
+	if actionsJSON != "" && actionsJSON != "[]" {
+		_ = json.Unmarshal([]byte(actionsJSON), &item.Actions)
 	}
 	batch := []inboxItemResponse{item}
 	h.enrichAgentAvatars(r.Context(), batch)
