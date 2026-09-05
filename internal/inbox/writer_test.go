@@ -590,34 +590,36 @@ func TestWriteThreaded_MergesAcrossProducers(t *testing.T) {
 	threadKey := "routine:ws1:daily-triage"
 
 	if err := WriteThreaded(ctx, db, quietLogger(), Item{
-		WorkspaceID:    "ws1",
-		Kind:           "escalation",
-		SourceID:       "routineprop:ws1:daily-triage",
-		TargetRole:     "MANAGER",
-		Title:          "Routine proposed for review: daily-triage",
-		BodyMD:         "A routine was authored that needs approval before it can run.",
-		Priority:       "high",
-		Blocking:       true,
-		ThreadKey:      threadKey,
-		AttentionClass: AttentionDecision,
-		Payload:        map[string]interface{}{"risk_reasons": []string{"http_egress"}},
-		Actions:        []Action{{ID: "approve_routine", Label: "Approve"}, {ID: "reject_routine", Label: "Reject"}},
+		WorkspaceID:       "ws1",
+		Kind:              "escalation",
+		SourceID:          "routineprop:ws1:daily-triage",
+		TargetRole:        "MANAGER",
+		Title:             "Routine proposed for review: daily-triage",
+		BodyMD:            "A routine was authored that needs approval before it can run.",
+		Priority:          "high",
+		Blocking:          true,
+		ThreadKey:         threadKey,
+		AccumulateOnMerge: true,
+		AttentionClass:    AttentionDecision,
+		Payload:           map[string]interface{}{"risk_reasons": []string{"http_egress"}},
+		Actions:           []Action{{ID: "approve_routine", Label: "Approve"}, {ID: "reject_routine", Label: "Reject"}},
 	}); err != nil {
 		t.Fatalf("write governance card: %v", err)
 	}
 	if err := WriteThreaded(ctx, db, quietLogger(), Item{
-		WorkspaceID:    "ws1",
-		Kind:           "escalation",
-		SourceID:       "routinetrigger:ws1:sched_1",
-		TargetRole:     "MANAGER",
-		Title:          "Routine trigger ready: daily-triage",
-		BodyMD:         "Routine daily-triage (version 3) is ready. Activate the trigger?",
-		Priority:       "high",
-		Blocking:       true,
-		ThreadKey:      threadKey,
-		AttentionClass: AttentionDecision,
-		Payload:        map[string]interface{}{"routine_version": 3, "schedule_id": "sched_1"},
-		Actions:        []Action{{ID: "activate_trigger", Label: "Activate"}, {ID: "dismiss_trigger", Label: "Dismiss"}},
+		WorkspaceID:       "ws1",
+		Kind:              "escalation",
+		SourceID:          "routinetrigger:ws1:sched_1",
+		TargetRole:        "MANAGER",
+		Title:             "Routine trigger ready: daily-triage",
+		BodyMD:            "Routine daily-triage (version 3) is ready. Activate the trigger?",
+		Priority:          "high",
+		Blocking:          true,
+		ThreadKey:         threadKey,
+		AccumulateOnMerge: true,
+		AttentionClass:    AttentionDecision,
+		Payload:           map[string]interface{}{"routine_version": 3, "schedule_id": "sched_1"},
+		Actions:           []Action{{ID: "activate_trigger", Label: "Activate"}, {ID: "dismiss_trigger", Label: "Dismiss"}},
 	}); err != nil {
 		t.Fatalf("write trigger-ready card: %v", err)
 	}
@@ -901,5 +903,53 @@ func TestRunDigestSweepOnce_OutsideWindowIsExcluded(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("a run 48h old with a 24h window should be excluded, got %d card(s)", n)
+	}
+}
+
+// TestWriteThreaded_DefaultMerge_LatestTitleAndBodyWin pins the fix for a
+// bug caught in review: the original merge always kept the FIRST title
+// forever and appended body_md without bound, which is right for two
+// DIFFERENT producers merging two different asks (AccumulateOnMerge=true,
+// see TestWriteThreaded_MergesAcrossProducers) but wrong for the far more
+// common case of ONE producer describing the SAME evolving condition (a
+// digest sweep, a schedule's growing missed-occurrence count) — the digest
+// card's own title/body would have frozen at the first sweep's numbers, or
+// grown a new paragraph every 3 hours forever. Default (AccumulateOnMerge
+// false) must show the LATEST call's title and body, not the first.
+func TestWriteThreaded_DefaultMerge_LatestTitleAndBodyWin(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+	threadKey := "schedule:sched1:missed"
+
+	calls := []struct{ title, body string }{
+		{"Schedule missed 1 occurrence(s): nightly-sync", "Missed occurrence, day 1."},
+		{"Schedule missed 5 occurrence(s): nightly-sync", "Missed occurrence, day 5."},
+	}
+	for _, c := range calls {
+		if err := WriteThreaded(ctx, db, quietLogger(), Item{
+			WorkspaceID: "ws1", Kind: "schedule_missed", SourceID: "sched1:" + c.title,
+			Title: c.title, BodyMD: c.body, ThreadKey: threadKey,
+		}); err != nil {
+			t.Fatalf("write %q: %v", c.title, err)
+		}
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = 'ws1'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want one card, got %d", n)
+	}
+	var title, body string
+	if err := db.QueryRow(`SELECT title, COALESCE(body_md,'') FROM inbox_items WHERE workspace_id = 'ws1'`).Scan(&title, &body); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if title != "Schedule missed 5 occurrence(s): nightly-sync" {
+		t.Errorf("title = %q, want the LATEST occurrence's title, not the first", title)
+	}
+	if body != "Missed occurrence, day 5." {
+		t.Errorf("body = %q, want ONLY the latest occurrence's body, not an ever-growing paragraph list", body)
 	}
 }

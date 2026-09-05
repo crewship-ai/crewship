@@ -220,6 +220,28 @@ type Item struct {
 	ThreadKey      string
 	AttentionClass string // "" | decision | input | review | repair (see the Attention* constants)
 	Actions        []Action
+
+	// AccumulateOnMerge changes how WriteThreaded's merge branch treats
+	// title/body_md when this write lands on an ALREADY-OPEN thread-mate
+	// (see WriteThreaded's doc comment for the two cases this
+	// distinguishes):
+	//
+	//   - false (default, "latest wins"): title and body_md are REPLACED
+	//     with this call's values. Correct for a producer describing the
+	//     SAME evolving condition over time — a digest sweep's counts, a
+	//     schedule's growing missed-occurrence tally, a routine's repeated
+	//     NEEDS_HUMAN. The visible card must show the CURRENT state, not
+	//     the first occurrence's now-stale numbers (caught in review: the
+	//     original always-append behavior left a digest card's title/body
+	//     frozen at its first sweep, or growing without bound).
+	//   - true: title is kept from whichever call raised the row FIRST,
+	//     and body_md is APPENDED as a new paragraph (deduped if already
+	//     present). Correct for two DIFFERENT producers merging two
+	//     DIFFERENT asks onto one thread — a routine's governance review
+	//     and its B8 trigger-activation review are two distinct questions
+	//     that must BOTH stay legible on the merged card, not have the
+	//     second overwrite the first.
+	AccumulateOnMerge bool
 }
 
 // Insert persists a new inbox row. INSERT OR IGNORE so the
@@ -339,74 +361,9 @@ func Upsert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if in.Priority == "" {
-		in.Priority = "medium"
-	}
-	payloadJSON := marshalPayload(in.Payload)
-	actionsJSON := marshalActions(in.Actions)
-	id := "ibx_" + in.Kind + "_" + in.SourceID
-	// Fixed-width sortable form — see Insert for why every inbox_items writer
-	// must share this format for the created_at index to order correctly.
-	now := tsformat.Format(time.Now())
-	blocking := 0
-	if in.Blocking {
-		blocking = 1
-	}
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO inbox_items (
-			id, workspace_id, kind, source_id,
-			target_user_id, target_role,
-			title, body_md,
-			sender_type, sender_id, sender_name,
-			state, priority, blocking, payload_json,
-			thread_key, attention_class, actions_json,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?,
-			NULLIF(?, ''), NULLIF(?, ''),
-			?, ?,
-			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
-			'unread', ?, ?, ?,
-			NULLIF(?, ''), NULLIF(?, ''), ?,
-			?, ?)
-		ON CONFLICT(kind, source_id) DO UPDATE SET
-			title = excluded.title,
-			body_md = excluded.body_md,
-			sender_type = excluded.sender_type,
-			sender_id = excluded.sender_id,
-			sender_name = excluded.sender_name,
-			priority = excluded.priority,
-			blocking = excluded.blocking,
-			payload_json = excluded.payload_json,
-			thread_key = excluded.thread_key,
-			attention_class = excluded.attention_class,
-			actions_json = excluded.actions_json,
-			state = 'unread',
-			read_at = NULL,
-			read_by_user_id = NULL,
-			resolved_at = NULL,
-			resolved_by_user_id = NULL,
-			resolved_action = NULL,
-			created_at = excluded.created_at,
-			updated_at = excluded.updated_at`,
-		id, in.WorkspaceID, in.Kind, in.SourceID,
-		in.TargetUserID, in.TargetRole,
-		in.Title, in.BodyMD,
-		in.SenderType, in.SenderID, in.SenderName,
-		in.Priority, blocking, string(payloadJSON),
-		in.ThreadKey, in.AttentionClass, string(actionsJSON),
-		now, now,
-	)
-	if err != nil {
+	if err := upsertRow(ctx, db, in); err != nil {
 		logger.Warn("inbox upsert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
 		return err
-	}
-	// Clear every per-user read marker (A7) alongside the shared columns
-	// the UPSERT above just reset. Best-effort: the row itself already
-	// resurrected correctly, so a failure here logs rather than fails the
-	// whole call — worst case a stale per-user marker survives one refresh
-	// cycle, not a lost notification.
-	if _, iirErr := db.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id = ?`, id); iirErr != nil {
-		logger.Warn("inbox upsert: clear per-user read markers", "error", iirErr, "kind", in.Kind, "source_id", in.SourceID)
 	}
 	// Unlike Insert, Upsert always fans out — by design, a repeated call
 	// here means a genuinely new event (another chat reply, another
@@ -429,7 +386,7 @@ func ResolveBySource(ctx context.Context, db *sql.DB, logger *slog.Logger, kind,
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if err := ResolveBySourceTx(ctx, db, kind, sourceID, action, userID); err != nil {
+	if _, err := ResolveBySourceTx(ctx, db, kind, sourceID, action, userID); err != nil {
 		logger.Warn("inbox resolve", "error", err, "kind", kind, "source_id", sourceID)
 	}
 }
@@ -448,15 +405,20 @@ type DBTX interface {
 // (ephemeral-hire decisions, issue #1247) use this so a failed inbox
 // write rolls the whole decision back rather than stranding an
 // unresolved blocking waitpoint against a terminal approval.
-func ResolveBySourceTx(ctx context.Context, tx DBTX, kind, sourceID, action, userID string) error {
+//
+// Also returns rows-affected — ResolveByThreadOrSource is built directly
+// on this (rather than a second copy of the same UPDATE, which is what
+// review caught here) and needs it to know whether its own (kind,
+// source_id) resolved anything before falling back to the thread.
+func ResolveBySourceTx(ctx context.Context, tx DBTX, kind, sourceID, action, userID string) (int64, error) {
 	if tx == nil || kind == "" || sourceID == "" {
-		return nil
+		return 0, nil
 	}
 	// Encoding must stay byte-identical to ResolveBySource below, which this
 	// function was extracted from — otherwise resolved_at carries two formats
 	// depending on which variant wrote the row.
 	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: matches the autocommit ResolveBySource this was extracted from; resolved_at is read back for display, never compared in SQL
-	_, err := tx.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		UPDATE inbox_items
 		SET state = 'resolved',
 		    resolved_at = COALESCE(resolved_at, ?),
@@ -465,7 +427,11 @@ func ResolveBySourceTx(ctx context.Context, tx DBTX, kind, sourceID, action, use
 		    updated_at = ?
 		WHERE kind = ? AND source_id = ? AND state != 'resolved'`,
 		now, userID, action, now, kind, sourceID)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 // ResolveByPipeline resolves every still-open inbox item tied to a routine
@@ -609,25 +575,24 @@ type threadedRow struct {
 // NEXT call to find.
 //
 // When an open item already shares in.ThreadKey, this UPDATES that row IN
-// PLACE instead of raising a sibling card — the fix for the exact duplicate
-// #2364's live check found (a `routine save --draft` raising both a
-// governance "proposed for review" card and a B8 "trigger ready" receipt for
-// the SAME routine, because the two producers shared no identity beyond
-// "the same routine"). The existing row's OWN (kind, source_id) is left
-// untouched — it is still what that row's own producer resolves via
-// ResolveBySource — and:
-//   - title stays the FIRST producer's (the earlier, usually broader,
-//     question — e.g. "may this routine run at all" before "may its
-//     trigger fire")
-//   - body_md gets the incoming producer's body appended as a new
-//     paragraph, unless it is already present (repeat calls, e.g. the
-//     same condition recurring across several days, must not keep growing
-//     the card)
+// PLACE instead of raising a sibling card. The existing row's OWN (kind,
+// source_id) is left untouched — it is still what that row's own producer
+// resolves via ResolveBySource — and:
+//   - title/body_md follow in.AccumulateOnMerge (see that field's doc
+//     comment): "latest wins" by default (a digest sweep's counts, a
+//     schedule's growing missed tally, a recurring NEEDS_HUMAN must show
+//     the CURRENT state, not freeze at or endlessly append the first
+//     occurrence — caught in review), or accumulated for the one case that
+//     needs it — #2364's live-observed duplicate, a routine's governance
+//     review ("may this routine run at all") and its B8 trigger-activation
+//     review ("may its trigger fire") merging their two DIFFERENT
+//     questions onto one card rather than one overwriting the other.
 //   - payload_json is merged key-by-key, incoming wins on collision
 //     (mergeJSONObjects) — this is how routine_version reaches the row
 //     regardless of which producer's call carried it
 //   - actions_json is merged by action id (mergeActionsJSON) — the merged
-//     card offers every action either producer contributed
+//     card offers every action either producer contributed, refreshing an
+//     existing id's label/effect in place on a repeat call
 //   - attention_class takes the incoming value when non-empty (a later,
 //     more specific class supersedes an earlier default), otherwise keeps
 //     the existing one
@@ -638,6 +603,17 @@ type threadedRow struct {
 // A caller resolving the thread later must use ResolveByThreadOrSource, not
 // ResolveBySource: the row's stored identity may belong to a DIFFERENT
 // producer than the one now trying to resolve it.
+//
+// Concurrency: the read-then-decide sequence below (look for an open
+// thread-mate, then insert or merge) is safe against two concurrent callers
+// racing the SAME (workspace_id, thread_key) ONLY because every production
+// *sql.DB in this codebase is opened via database.Open, whose DSN carries
+// `_txlock=immediate` (internal/database/database.go) — db.BeginTx below
+// therefore acquires SQLite's write lock at BEGIN, not at the first write,
+// so a second concurrent WriteThreaded call blocks for the whole
+// transaction rather than reading a stale "no thread yet" answer between
+// the first call's SELECT and its INSERT. Do not call this against a
+// *sql.DB opened any other way.
 func WriteThreaded(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error {
 	if db == nil || in.WorkspaceID == "" || in.Kind == "" || in.SourceID == "" {
 		return nil
@@ -675,7 +651,7 @@ func WriteThreaded(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if err := upsertRowTx(ctx, tx, in); err != nil {
+		if err := upsertRow(ctx, tx, in); err != nil {
 			logger.Warn("inbox write-threaded: insert", "error", err, "thread_key", in.ThreadKey)
 			return err
 		}
@@ -701,11 +677,13 @@ func WriteThreaded(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 	return nil
 }
 
-// upsertRowTx is Upsert's insert/on-conflict statement, extracted so
-// WriteThreaded's "no open thread-mate yet" branch shares it instead of
-// duplicating the column list a third time. Runs on the caller's
-// transaction.
-func upsertRowTx(ctx context.Context, tx *sql.Tx, in Item) error {
+// upsertRow is the single INSERT ... ON CONFLICT DO UPDATE statement behind
+// BOTH Upsert (on the pooled *sql.DB) and WriteThreaded's "no open
+// thread-mate yet" branch (on the caller's transaction) — DBTX is
+// satisfied by both, so there is exactly one copy of this column list, not
+// two (caught in review: they had drifted into two independent copies of
+// the same 20-column statement).
+func upsertRow(ctx context.Context, execer DBTX, in Item) error {
 	if in.Priority == "" {
 		in.Priority = "medium"
 	}
@@ -717,7 +695,7 @@ func upsertRowTx(ctx context.Context, tx *sql.Tx, in Item) error {
 	if in.Blocking {
 		blocking = 1
 	}
-	_, err := tx.ExecContext(ctx, `
+	_, err := execer.ExecContext(ctx, `
 		INSERT INTO inbox_items (
 			id, workspace_id, kind, source_id,
 			target_user_id, target_role,
@@ -764,7 +742,7 @@ func upsertRowTx(ctx context.Context, tx *sql.Tx, in Item) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id = ?`, id)
+	_, err = execer.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id = ?`, id)
 	return err
 }
 
@@ -778,16 +756,37 @@ func mergeThreadedRowTx(ctx context.Context, tx *sql.Tx, existing threadedRow, i
 	if in.Priority == "" {
 		in.Priority = "medium"
 	}
-	title := existing.title
-	if title == "" {
+	var title, body string
+	if in.AccumulateOnMerge {
+		// Two different producers, two different asks — keep the FIRST
+		// title (the earlier, usually broader question) and append this
+		// call's body as a new paragraph, deduped against repeats.
+		title = existing.title
+		if title == "" {
+			title = in.Title
+		}
+		body = existing.bodyMD.String
+		if in.BodyMD != "" && !strings.Contains(body, in.BodyMD) {
+			if body != "" {
+				body = body + "\n\n---\n\n" + in.BodyMD
+			} else {
+				body = in.BodyMD
+			}
+		}
+	} else {
+		// Latest wins: the same producer describing the SAME condition's
+		// current state (a digest's counts, a schedule's growing missed
+		// tally, a recurring NEEDS_HUMAN) — the card must show what is true
+		// NOW, not what was true on the first occurrence. Falling back to
+		// the existing value on an empty incoming field matches every other
+		// column's COALESCE(NULLIF(...)) behavior below.
 		title = in.Title
-	}
-	body := existing.bodyMD.String
-	if in.BodyMD != "" && !strings.Contains(body, in.BodyMD) {
-		if body != "" {
-			body = body + "\n\n---\n\n" + in.BodyMD
-		} else {
-			body = in.BodyMD
+		if title == "" {
+			title = existing.title
+		}
+		body = in.BodyMD
+		if body == "" {
+			body = existing.bodyMD.String
 		}
 	}
 	mergedPayload := mergeJSONObjects(existing.payloadJSON, string(marshalPayload(in.Payload)))
@@ -851,23 +850,23 @@ func ResolveByThreadOrSource(ctx context.Context, db *sql.DB, logger *slog.Logge
 	if logger == nil {
 		logger = slog.Default()
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: resolved_at is read back for display, never compared in SQL — matches ResolveBySource
-	res, err := db.ExecContext(ctx, `
-		UPDATE inbox_items
-		SET state = 'resolved',
-		    resolved_at = COALESCE(resolved_at, ?),
-		    resolved_by_user_id = COALESCE(resolved_by_user_id, NULLIF(?, '')),
-		    resolved_action = COALESCE(resolved_action, NULLIF(?, '')),
-		    updated_at = ?
-		WHERE kind = ? AND source_id = ? AND state != 'resolved'`,
-		now, userID, action, now, kind, sourceID)
+	// First: the caller's own (kind, source_id), exactly ResolveBySource —
+	// built ON ResolveBySourceTx rather than a second copy of its UPDATE
+	// (caught in review), so the two can never drift on what "resolved"
+	// means.
+	n, err := ResolveBySourceTx(ctx, db, kind, sourceID, action, userID)
 	if err != nil {
 		logger.Warn("inbox resolve by thread or source", "error", err, "kind", kind, "source_id", sourceID)
 		return
 	}
-	if n, _ := res.RowsAffected(); n > 0 || threadKey == "" || workspaceID == "" {
+	if n > 0 || threadKey == "" || workspaceID == "" {
 		return
 	}
+	// Fallback: the row this caller would have resolved belongs to a
+	// DIFFERENT producer's (kind, source_id) — WriteThreaded merged this
+	// caller's own write into that row earlier. Resolve by the thread
+	// instead.
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: resolved_at is read back for display, never compared in SQL — matches ResolveBySource
 	if _, err := db.ExecContext(ctx, `
 		UPDATE inbox_items
 		SET state = 'resolved',

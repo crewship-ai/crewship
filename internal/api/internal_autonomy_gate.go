@@ -498,7 +498,7 @@ func applyAutonomyGateDecisionTx(
 	if !approved {
 		action = "denied"
 	}
-	if err := inbox.ResolveBySourceTx(ctx, tx, inboxKind, targetID, action, decidedBy); err != nil {
+	if _, err := inbox.ResolveBySourceTx(ctx, tx, inboxKind, targetID, action, decidedBy); err != nil {
 		return fmt.Errorf("autonomy gate: resolve inbox waitpoint for %s: %w", targetID, err)
 	}
 	return nil
