@@ -40,7 +40,9 @@ routine — grounded in what this crew actually has, tested before it ships.
 
 1. **Clarify only the genuinely ambiguous essentials.** Ask at most 2–3 questions,
    then default the rest. The three that usually matter:
-   - **Trigger cadence** — manual, on a schedule (when?), webhook, or event.
+   - **Trigger cadence** — manual, or on a schedule (when, and in what timezone?).
+     A routine you save with NO trigger and no explicit "manual" reads as an
+     oversight, not a decision — see step 5.
    - **Where the output goes** — a Slack channel, an issue, a file, a return value.
    - **What to do on failure** — retry, alert someone, or just stop.
    Do not interrogate. If the goal is clear, proceed with sensible defaults
@@ -109,21 +111,60 @@ routine — grounded in what this crew actually has, tested before it ships.
    }
    ```
 
-5. **Save and test.** Call the **`save_routine`** tool with
-   `{ name, description, definition, sample_inputs }` — do NOT curl the save
-   endpoint. The tool validates (a fast dry-run) before saving. **If it returns
-   an error, READ it**, fix the DSL (bad template path, missing input, wrong
-   step shape), and retry — do not hand the user a routine that never passed
-   validation. Use `list_routines` to check existing routines before authoring
-   a duplicate.
+5. **Save with a trigger — always, in the same call.** Call the **`save_routine`**
+   tool with `{ name, description, definition, sample_inputs, trigger, activation }`
+   — do NOT curl the save endpoint, and do NOT save the routine first and
+   attach a trigger afterward; the trigger is created in the SAME transaction
+   as the routine, or not at all. `trigger` is REQUIRED — either a real one:
 
-6. **Tell the user the real outcome.** A routine is **risky** and lands as
-   `proposed` (a MANAGER must approve it before it can run) when it contains an
-   `http` step, a `code` step, declares `egress_targets` or `credentials_required`,
-   or names an integration the crew hasn't connected. A routine built from only
-   `agent_run` / `transform` / `wait` / `call_pipeline` with all integrations
-   already connected goes **live** immediately. Say which one happened — never
-   claim a proposed routine is live.
+   ```json
+   "trigger": {"kind": "schedule", "cron": "0 9 * * 1-5", "timezone": "Europe/Prague",
+               "catchup_policy": "once", "max_consecutive_failures": 5}
+   ```
+
+   or, when the goal genuinely has no cadence (a one-off / on-demand routine),
+   the explicit no-op:
+
+   ```json
+   "trigger": {"kind": "manual"}
+   ```
+
+   Never just omit `trigger` — that reads as an oversight, not a decision, and
+   the routine page shows it as a warning. Add `"activation": "draft"` at the
+   top level (a sibling of `trigger`, not inside it) whenever the routine acts
+   autonomously in a way a human should sign off on before it ever fires
+   unattended — this creates the trigger disabled and raises exactly one
+   approval item in the workspace's inbox instead of letting it fire.
+
+   The tool validates (a fast dry-run) before saving. **If it returns an
+   error, READ it**, fix the DSL or trigger (bad cron, unknown timezone,
+   missing input, wrong step shape), and retry — do not hand the user a
+   routine that never passed validation. Use `list_routines` to check
+   existing routines before authoring a duplicate.
+
+6. **Tell the user the real outcome — routine AND trigger.** A routine is
+   **risky** and lands as `proposed` (a MANAGER must approve it before it can
+   run at all) when it contains an `http` step, a `code` step, declares
+   `egress_targets` or `credentials_required`, or names an integration the
+   crew hasn't connected. A routine built from only `agent_run` / `transform`
+   / `wait` / `call_pipeline` with all integrations already connected goes
+   **live** immediately. Say which one happened — never claim a proposed
+   routine is live.
+
+   Separately, report the trigger from the save response's `trigger` field:
+   - `trigger.kind == "manual"` — say the routine has no automatic trigger and
+     runs only when invoked.
+   - `trigger.kind == "schedule"` and `trigger.approval_required` is false —
+     state `trigger.first_fire_at` as the plain-language first run time
+     ("next Monday at 9:00 AM Europe/Prague").
+   - `trigger.approval_required` is true (activation was "draft") — say the
+     trigger is disabled pending approval, that ONE item is now in the
+     workspace's inbox, and what the first run WOULD be
+     (`trigger.first_fire_at`) once a MANAGER activates it.
+
+   Your final message must always include this: what was created, when it
+   first runs (or that it's manual, or awaiting approval), and whether the
+   routine itself is active or awaiting review.
 
 7. **Present a short readable summary.** Describe the trigger and each step in
    plain language ("On a manual run: 1) Alex summarizes the repo's commits,

@@ -40,6 +40,26 @@ type pipelinesSaveRequest struct {
 	// so forwarding it verbatim cannot widen anything. author_crew_id below
 	// still carries the unforgeable caller identity from IPC.
 	Crew string `json:"crew"`
+	// Trigger + Activation are B8's atomic routine authoring (#2359): when
+	// Trigger is set, the routine, its version and this trigger commit in
+	// ONE transaction on the main API — never here, since the sidecar has
+	// no DB access. Forwarded verbatim to /internal/pipelines/save.
+	Trigger    *pipelinesTriggerInput `json:"trigger,omitempty"`
+	Activation string                 `json:"activation,omitempty"`
+}
+
+// pipelinesTriggerInput mirrors internal/api's triggerRequestBody field for
+// field — the sidecar cannot import internal/api (it would cycle back
+// through the router), so this is a deliberate, small duplicate of the wire
+// shape rather than a shared type. Kept in sync by the acceptance test that
+// drives both the CLI and the sidecar's MCP tool against the same server.
+type pipelinesTriggerInput struct {
+	Kind                   string         `json:"kind"`
+	CronExpr               string         `json:"cron"`
+	Timezone               string         `json:"timezone"`
+	CatchupPolicy          string         `json:"catchup_policy,omitempty"`
+	MaxConsecutiveFailures int            `json:"max_consecutive_failures,omitempty"`
+	Inputs                 map[string]any `json:"inputs,omitempty"`
 }
 
 // pipelinesRunRequest is the agent-facing body for /pipelines/{slug}/run.
@@ -186,6 +206,11 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 		"author_chat_id":   s.ipc.ChatID,
 		"save_token":       testRunResult.SaveToken,
 		"target_crew_slug": body.Crew,
+		// B8 (#2359): forwarded verbatim. The main API's InternalSave does
+		// the validation and the atomic routine+version+trigger transaction
+		// — the sidecar only relays what the agent asked for.
+		"trigger":    body.Trigger,
+		"activation": body.Activation,
 	})
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal save body"})
