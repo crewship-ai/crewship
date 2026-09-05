@@ -21,6 +21,247 @@ tag: Experimental
   user-visible pull request is required to add to it.
 </Note>
 
+<Update label="September 5, 2026" tags={["features", "updates", "fixes", "security"]}>
+
+## The answer to a credential ask is a grant, not a value
+
+An agent that needs a credential it does not have raises an ask — a name, a
+type, a tier and a purpose, never a value. That ask now stages a
+**handle-only** credential in the vault, and the person who answers it supplies
+the value through the inbox card or `crewship escalation supply <id>`, which
+reads from stdin and has no flag for it. The agent is told the credential's
+name and that its use is `keeper_execute`; the value never enters its stdout,
+its transcript or its model context, and a handle-only credential is never
+delivered as an environment variable or a file, Keeper on or off. Before this,
+the typed secret was encrypted into the escalation row and handed back to the
+agent in plaintext. The Keeper now also judges the ask itself before a human
+sees it — an off-task or prompt-injected agent can no longer spam credential
+requests at the operator — and a credential supplied on a running server is
+usable at once, not after the next restart. See
+[Asking a human for a credential](/guides/credentials#asking-a-human-for-a-credential),
+[Handle-only credentials](/guides/credentials#handle-only-credentials) and
+[Keeper](/guides/keeper).
+
+<Warning>
+  **A `CREDENTIAL` escalation takes no resolution text.** `/resolve` answers
+  **400** to any `resolution` on one, approve or reject, and `crewship
+  escalation resolve --resolution` is refused for it; a script that used to
+  answer an ask by typing the secret into the resolution must call
+  `crewship escalation supply <id>` instead. An agent whose prompt still expects
+  the value in the wait response receives the name and the use instead — the
+  shipped agent prompt is updated, a custom one needs the same edit. Historical
+  answered asks now read `[credential submitted]` everywhere; the ciphertext is
+  gone from the database.
+
+  With Keeper on, an ask the judge denies is never staged and never reaches a
+  person — the agent gets the reason and the journal records it. With Keeper
+  off, every ask reaches a human as before.
+</Warning>
+
+## Issues and routines: the reliability track landed
+
+Every issue now has one event log and a durable session per (issue, agent):
+a mention on a busy agent is acknowledged before any model call, queued behind
+the live run instead of racing a second one, and folded into the next turn;
+ten concurrent deliveries of the same event produce exactly one run. A run
+holds a lease its owner renews, so a killed process's runs recover in seconds
+rather than at the next restart, and never steal a live replica's run. An agent
+that wakes on an issue gets a bounded context pack and can read the comment
+thread it was woken for. Stop now actually stops — the next step, a run still
+queued, a run a mention started on an issue that was never started — and
+`crewship issue stop --hard` ends the run's own process inside the shared
+container without touching a sibling agent's. An issue's owner and its delegate
+are two columns, so delegating to an agent no longer erases the person.
+
+On the routine side, a routine, its version and its trigger commit in one
+transaction — a bad cron expression rolls the whole save back — and a save can
+create the trigger as a **draft** that one MANAGER+ approval turns on. The new
+reliability editor exposes every schedule field the backend already carried
+(catch-up policy, wake gate, breaker threshold, version pin) with a DST-safe
+preview of the next five fire times, and a webhook can be edited in place
+without rotating its URL. The inbox learned the attention contract: producers
+describing the same condition merge into one card, receipts name the version
+they decided on, a quiet-runs digest replaces the silence, and a
+`run_needs_human` card offers **Answer**, **Take over** and **Dismiss** on the
+web and as `crewship inbox act` — answering resumes the run from its checkpoint.
+The issues board moves without a refresh, a parent waits for its children, and
+the service levels the PRD promised — delivery latency, continuation,
+duplication, comprehension, fire punctuality — are real percentile series on
+`/metrics`. See [Issue detail](/guides/issue-detail),
+[Routines](/guides/routines), [Inbox](/guides/inbox) and
+[Prometheus metrics](/observability/metrics).
+
+<Warning>
+  **`DONE` is the only word for finished on an issue; `COMPLETED` is retired.**
+  A migration rewrites every `COMPLETED` mission row to `DONE`, and the PATCH
+  endpoint writes `DONE` for both mission types. A legacy
+  `{"status":"COMPLETED"}` request is still accepted and normalised. Anything
+  that filters missions on `COMPLETED` — a saved view, a script, a report — now
+  finds nothing. `assignments.status` and `pipeline_runs.status` are untouched.
+</Warning>
+
+<Warning>
+  **Three doors now refuse what they used to accept.** `crewship issue start`
+  answers **400** on an issue with no delegate, or whose delegate is not a live
+  agent. Moving a parent to `DONE` or `REVIEW` while a sub-issue is live answers
+  **409** unless you pass `--force` / `?force=true`, and the override is
+  recorded. And a **waitpoint can no longer be decided by an agent**: a peer's
+  "GO" — a crew token, a sidecar tool, any agent-facing route — answers **403**
+  with `waitpoint_decider_not_allowed`, the waitpoint stays pending for a
+  person, and the attempt lands in the audit log. An automation that had an
+  agent approve waitpoints stops working by design; the card says who can act.
+</Warning>
+
+## The web app reads as a product
+
+First-run setup is a wizard with real toolchain marks, a checklist, and a Guide
+that can see the workspace and give a crew a face. One model catalog
+(`config/models.json`) feeds the binary and every web picker — the Go side no
+longer offers models the web never did. The dashboard answers in order: what
+needs a human, then what is running, then the fleet. The inbox reads as
+decisions and is never blank; chat says who you are talking to; the crews
+screen reports the real fleet size and opens each crew with a "Needs you"
+strip whose rows carry the one action that resolves them. Issues, routines,
+activity and the journal keep their selection in the URL, so a drill-down can
+be linked and Back does what it says; `/journal` gets saved views and a real
+query contract. Settings gained a screen for the lifecycle-hook registry, and
+the New agent dialog can create a workspace-wide agent — only a Lead still
+needs a crew. Every list endpoint describes its window (`X-Total-Count`,
+`X-Limit`, `X-Offset`, `?q=`) and every CLI list takes `--limit`/`--offset`
+and ends with what page it showed. See [Onboarding](/guides/onboarding) and
+[Crew journal](/guides/crew-journal#shareable-views).
+
+<Warning>
+  **`GET /agents` hides the setup crew's Guide unless `include_setup=1`**
+  (`crewship agent list --include-setup`). A script that counted agents, or
+  looked the Guide up by slug on that list, needs the flag. The agent role
+  retired in April is now refused everywhere it was still promised — the
+  create-agent dialog, `crewship agent create`, `crewship apply` and
+  `crew suggest` — rather than planned and then rejected by the server; an
+  agent is `AGENT` or `LEAD`.
+</Warning>
+
+## What the journal keeps, and who may read what
+
+The journal no longer stores the prompt text of a run or the body of a message
+you sent. `exec.command` carries the argv's shape with the prompt elements
+named and replaced, and `chat.user_message` records a length, not a preview —
+a token pasted at the start of a message used to sit inside the 240-character
+preview, in a hash-chained table that erasure requests skip. The same table
+now receives the agent's raw output only through the credential scrubber, and
+an escalation's text reaches it redacted and capped, as the inbox copy already
+was. The crew-scoped file download no longer serves the generated MCP
+credential files the agent door refuses; the MCP OAuth client binds its token
+to a resource and checks the issuer; the public mission-start route checks the
+autonomy gate the internal one always did, so a MANAGER can no longer start a
+gated mission by choosing the other URL. Erasing an operator model now reaches
+every crew it was ever written to. See [Crew journal](/guides/crew-journal),
+[Harbormaster](/guides/harbormaster) and
+[Autonomy and self-learning](/guides/autonomy-and-self-learning).
+
+<Warning>
+  **Rows the journal wrote before this release keep what they hold.** The
+  chain is append-only and cannot be rewritten, so the change stops the leak
+  going forward; it does not scrub history. If a secret was pasted into agent
+  chat before the upgrade, rotate it.
+
+  **Decided approval-queue rows now age out after 90 days.** `approvals_queue`
+  was kept forever, rode into every backup, and its read endpoints answered
+  any workspace member; it now follows `crewship workspace update
+  --approvals-retention-days` (`0` keeps forever), pending rows and autonomy
+  gates are never swept, GDPR erasure reaches it, and reads are role-gated.
+
+  **A crew's shared credential store now serves an agent only what that agent
+  was granted.** One sidecar serves a whole crew, and its store used to hand a
+  model call whichever credential a round-robin landed on — with an
+  OpenAI-compatible credential, that decided where the prompt went. An agent
+  that was silently borrowing a sibling's credential now gets "no credential";
+  grant it one.
+</Warning>
+
+## Updates
+
+- **`crewship seed` ships three real demo packs, and `seed verify` proves
+  them.** A nightly CI watch over this repository's scheduled workflows, a
+  docs-drift audit, and a site replica delegated across four agents — each a
+  crew with its own scripts, routines, page and issues. `seed verify` runs
+  every pack end to end and checks the agents against independent probes. See
+  [Demo packs](/guides/demo-packs).
+- **The rate card was refreshed against the providers' published prices.**
+  `gpt-5.5` bills at 10.00/45.00 per million (it was 4.00/24.00 — the
+  long-context tier, chosen so a long call is never under-billed),
+  `gpt-5.4-nano` and both Gemini 2.5 Flash rows moved up, and the Claude 5
+  rows are present. Ledger rows written before the refresh keep the rate they
+  were billed at; new rows use the corrected one, so a budget that sat under
+  its cap can now trip it. Hosted OpenAI auxiliary calls use
+  `max_completion_tokens`, which the current models require. See
+  [Paymaster](/guides/paymaster#pricing-—-current-rates).
+- **Backups verify completeness, not just integrity, and fork cleanly.**
+  `crewship backup verify` can now tell a short bundle from a whole one; a
+  forked restore (`--as-workspace` / `--as-crew`) re-signs the journal chain it
+  rewrote, regenerates the instance-unique columns that made a live mission
+  vanish silently, and migrates pre-1.0 issue counters instead of dropping
+  them. See [Backup](/guides/backup).
+- **Ten lifecycle-hook events that registered but never fired now fire**, and
+  `on_budget_exceeded` fires once per breach rather than once per LLM call
+  while over budget. `pre_tool_call` is retired for good — Crewship drives an
+  external CLI and sees a tool call after it ran. See [Hooks](/guides/hooks).
+- **An automation refuses an event type nothing emits**, and a webhook or
+  automation that fails to start a run raises an inbox card after three
+  consecutive failures, not just a log line. See
+  [Automations](/guides/automations).
+- **Inbox read state is per user.** The first manager to open a role-targeted
+  item no longer marks it read for every other manager. `resolved` stays
+  shared.
+- **The CLI covers more of the API.** `crewship auth pair` mints a device
+  code, `auth profile` edits your display name, `feature-flag create|update`,
+  `admin workspaces`, `admin memory-stats`, `routine runs-all`, `routine
+  changes <run_id>`, `routine schedules preview|activate`, `routine webhooks
+  update`, `agent status`, `agent load`, `system crewshipd`, `issue comment
+  --mention`, `issue update --force`, `issue sessions`, `inbox act` and
+  `escalation supply` are new. Routine runs finally reach `/api/v1/runs` and
+  the Runs view.
+- **The wake-time prompt shows the agent its own memory budget**, and a fresh
+  agent with no credential no longer looks identical to a healthy one.
+- **The security pages say what the code does.** The threat model, RBAC and
+  credentials guides, the README and `keeper.mdx` no longer claim more
+  containment than exists; the 1.0 known limits are written where a reader
+  meets them.
+
+## Fixes
+
+- **A second run for a busy agent no longer kills the first.** Two concurrent
+  runs for one agent reused the same tmux session, and the second's opening
+  `kill-session` ended the first. A dispatch that loses the lock is queued and
+  says why (`queued_reason`: `crew_budget` or `agent_busy`); a chat to a busy
+  agent bounces with `agent_busy` instead of colliding.
+- **Hard stop was signalling a host pid inside the container** and ended
+  nothing; it now ends the run's own tmux session.
+- **An invited member could not authenticate with the CLI at all** — a NULL
+  display name broke CLI-token auth.
+- **`crewship backup` defaults its bundle directory under
+  `$CREWSHIP_DATA_DIR/backups`** when that variable is set, falling back to
+  `~/.crewship/backups` only when it is not. Several instances run by one user
+  on one host shared a directory, and a restore could pick up another
+  instance's bundle by name. If you set the variable, bundles you took before
+  are still in the old directory — pass `--output` or move them.
+- **A routine's step chats no longer evict your conversations** from the chat
+  column; `GET /agents/{id}/chats` takes `?kind=`.
+- **`crewship routine save` no longer erases a description** when
+  `--description` is omitted; an explicit empty value still clears it.
+- **Agent avatars were never stored** (the backfill omitted the workspace),
+  `crewship crew suggest --goal` could never succeed, and the create-crew
+  wizard could offer a crew it was then unable to create.
+- **Reactions and feedback submitted right after a streamed reply** now use the
+  persisted message id and survive a reload; a suggestion chip clicked twice
+  no longer sends twice; clearing a crew's issue prefix actually clears it.
+- **The Docker image builds again** — the backend stage now copies every root
+  package the binaries import, and a test fails when one is missing.
+- **The issues board renders a fetch failure as an error** and says when it is
+  showing a partial page; a 403 is a named error rather than an empty board.
+
+</Update>
+
 <Update label="August 26, 2026" tags={["features", "updates", "fixes"]}>
 
 ## A provider is now a credential
