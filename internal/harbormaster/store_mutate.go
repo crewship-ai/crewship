@@ -54,8 +54,8 @@ func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (s
 
 	const insertSQL = `INSERT INTO approvals_queue
 		(id, workspace_id, crew_id, agent_id, mission_id, requested_by, kind, reason,
-		 payload, status, timeout_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		 payload, status, timeout_at, created_at, routine_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	_, err = db.ExecContext(ctx, insertSQL,
 		req.ID,
 		req.WorkspaceID,
@@ -69,6 +69,7 @@ func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (s
 		string(req.Status),
 		req.TimeoutAt.UTC().Format(timeFmt),
 		req.CreatedAt.UTC().Format(timeFmt),
+		nullableRoutineVersion(req.RoutineVersion),
 	)
 	if err != nil {
 		return "", fmt.Errorf("harbormaster: insert approval: %w", err)

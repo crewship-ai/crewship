@@ -1153,7 +1153,14 @@ func (s *PipelineScheduler) notifyMissedOccurrences(ctx context.Context, sched *
 	if policy == CatchupSkip {
 		verb = "skipped"
 	}
-	if err := inbox.Insert(ctx, s.store.db, s.logger, inbox.Item{
+	// WriteThreaded, not Insert: each due timestamp got its own SourceID, so
+	// a schedule missing its window on five different days used to raise
+	// five siblings instead of updating one card — exactly the "recurring
+	// condition" case §12 names. ThreadKey drops the per-occurrence suffix,
+	// so five days' worth of misses merge into the one card the accept line
+	// asks for; SourceID is kept as-is for the per-occurrence audit trail
+	// (still visible in the merged payload's history via mergeJSONObjects).
+	if err := inbox.WriteThreaded(ctx, s.store.db, s.logger, inbox.Item{
 		WorkspaceID: sched.WorkspaceID,
 		Kind:        inbox.KindScheduleMissed,
 		SourceID:    sched.ID + ":" + dueAt.UTC().Format(time.RFC3339),
@@ -1169,6 +1176,9 @@ func (s *PipelineScheduler) notifyMissedOccurrences(ctx context.Context, sched *
 			"missed_count":   missed,
 			"catchup_policy": policy,
 		},
+		ThreadKey:      "schedule:" + sched.ID + ":missed",
+		AttentionClass: inbox.AttentionRepair,
+		Actions:        []inbox.Action{{ID: "acknowledge", Label: "Acknowledge", Effect: "Marks the miss reviewed", Irreversible: false}},
 	}); err != nil {
 		s.logger.Warn("pipeline scheduler: inbox alert on missed occurrences", "error", err, "schedule", sched.ID)
 	}
@@ -1382,7 +1392,12 @@ func (s *PipelineScheduler) maybeTripCircuitBreaker(ctx context.Context, sched *
 			"max_consecutive_failures": maxFailures,
 		},
 	})
-	if err := inbox.Insert(ctx, s.store.db, s.logger, inbox.Item{
+	// WriteThreaded, not Insert: Insert's INSERT OR IGNORE meant a schedule
+	// re-enabled and then tripping the breaker AGAIN silently dropped the
+	// second alert (the (kind, source_id) row from the first trip already
+	// existed). WriteThreaded resurrects the same thread instead — the
+	// "one card across repeats of the same recurring condition" contract.
+	if err := inbox.WriteThreaded(ctx, s.store.db, s.logger, inbox.Item{
 		WorkspaceID: sched.WorkspaceID,
 		Kind:        inbox.KindScheduleCircuitBreakerTripped,
 		SourceID:    sched.ID,
@@ -1399,6 +1414,9 @@ func (s *PipelineScheduler) maybeTripCircuitBreaker(ctx context.Context, sched *
 			"schedule_id":          sched.ID,
 			"consecutive_failures": newCount,
 		},
+		ThreadKey:      "schedule:" + sched.ID + ":circuit_breaker",
+		AttentionClass: inbox.AttentionRepair,
+		Actions:        []inbox.Action{{ID: "acknowledge", Label: "Acknowledge", Effect: "Marks the outage reviewed", Irreversible: false}},
 	}); err != nil {
 		s.logger.Warn("pipeline scheduler: circuit breaker inbox alert", "error", err, "schedule", sched.ID)
 	}

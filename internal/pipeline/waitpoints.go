@@ -209,6 +209,11 @@ func (s *SQLWaitpointStore) CreateApproval(ctx context.Context, req WaitpointApp
 	}
 	token := generateWaitpointToken()
 	timeoutAt := time.Now().Add(time.Duration(timeoutSec) * time.Second).UTC().Format(time.RFC3339Nano) // tsformat:allow: timeout_at is string-compared by the sweep query in sweepOnce; the whole column is RFC3339Nano and tsformat would order differently against existing rows
+	// §9.8's decision-receipt addition (B10, #2364): the version that was
+	// ACTUALLY running when this waitpoint asked a human to decide.
+	// Resolved once, up front, so both the auto-approved and the normal
+	// pending insert below stamp the same value.
+	routineVersion := s.routineVersionForRun(ctx, req.PipelineRunID)
 
 	// Standing trust: an operator who has waved this exact gate through
 	// on this exact routine body can have said "stop asking me". Consult
@@ -231,11 +236,11 @@ func (s *SQLWaitpointStore) CreateApproval(ctx context.Context, req WaitpointApp
 		if _, err := s.db.ExecContext(ctx, `
 INSERT INTO pipeline_waitpoints (
     token, workspace_id, pipeline_run_id, step_id, kind, prompt,
-    invoking_crew_id, status, timeout_at, decided_at, decided_by_user_id, decision_payload
-) VALUES (?, ?, ?, ?, 'approval', ?, ?, 'approved', ?, ?, ?, ?)`,
+    invoking_crew_id, status, timeout_at, decided_at, decided_by_user_id, decision_payload, routine_version
+) VALUES (?, ?, ?, ?, 'approval', ?, ?, 'approved', ?, ?, ?, ?, ?)`,
 			token, req.WorkspaceID, req.PipelineRunID, req.StepID,
 			nullableStr(req.Prompt), nullableStr(req.InvokingCrewID), timeoutAt,
-			decidedAt, nullableStr(use.GrantedByUserID), string(payload),
+			decidedAt, nullableStr(use.GrantedByUserID), string(payload), nullableRoutineVersion(routineVersion),
 		); err != nil {
 			return "", fmt.Errorf("waitpoints: insert auto-approved: %w", err)
 		}
@@ -251,10 +256,10 @@ INSERT INTO pipeline_waitpoints (
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO pipeline_waitpoints (
     token, workspace_id, pipeline_run_id, step_id, kind, prompt,
-    invoking_crew_id, status, timeout_at
-) VALUES (?, ?, ?, ?, 'approval', ?, ?, 'pending', ?)`,
+    invoking_crew_id, status, timeout_at, routine_version
+) VALUES (?, ?, ?, ?, 'approval', ?, ?, 'pending', ?, ?)`,
 		token, req.WorkspaceID, req.PipelineRunID, req.StepID,
-		nullableStr(req.Prompt), nullableStr(req.InvokingCrewID), timeoutAt,
+		nullableStr(req.Prompt), nullableStr(req.InvokingCrewID), timeoutAt, nullableRoutineVersion(routineVersion),
 	)
 	if err != nil {
 		return "", fmt.Errorf("waitpoints: insert: %w", err)
@@ -893,4 +898,46 @@ func nullableStr(s string) any {
 		return sql.NullString{}
 	}
 	return s
+}
+
+// nullableRoutineVersion is harbormaster's nullableRoutineVersion,
+// duplicated locally for the same "no cross-package dependency for one
+// helper" reason as nullableStr: zero means "not resolved to a routine
+// version", persisted as SQL NULL rather than the number 0.
+func nullableRoutineVersion(v int) any {
+	if v <= 0 {
+		return nil
+	}
+	return v
+}
+
+// routineVersionForRun resolves §9.8's routine_version receipt (B10,
+// #2364) for a waitpoint: the pipeline version that was ACTUALLY running
+// when this run reached the wait step. Mirrors pipeline_version's own
+// documented meaning (migrate_consts_v83: NULL = HEAD, matching
+// pipelines.head_version) — a run pinned to an explicit version answers
+// with that; a HEAD-following run answers with the pipeline's current
+// head. Returns 0 (best-effort, matching every other lookup in this file)
+// when runID is empty or the run/pipeline cannot be resolved — a waitpoint
+// that cannot name its version is still raised.
+func (s *SQLWaitpointStore) routineVersionForRun(ctx context.Context, runID string) int {
+	if s.db == nil || runID == "" {
+		return 0
+	}
+	var pinned, head sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT r.pipeline_version, p.head_version
+		  FROM pipeline_runs r
+		  JOIN pipelines p ON p.id = r.pipeline_id
+		 WHERE r.id = ?`, runID).Scan(&pinned, &head)
+	if err != nil {
+		return 0
+	}
+	if pinned.Valid {
+		return int(pinned.Int64)
+	}
+	if head.Valid {
+		return int(head.Int64)
+	}
+	return 0
 }

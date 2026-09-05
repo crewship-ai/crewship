@@ -226,6 +226,9 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     priority            TEXT NOT NULL DEFAULT 'medium',
     blocking            INTEGER NOT NULL DEFAULT 1,
     payload_json        TEXT NOT NULL DEFAULT '{}',
+    thread_key          TEXT,
+    attention_class     TEXT,
+    actions_json        TEXT NOT NULL DEFAULT '[]',
     read_at             TEXT,
     read_by_user_id     TEXT,
     resolved_at         TEXT,
@@ -235,7 +238,13 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_items_kind_source
-    ON inbox_items (kind, source_id);`); err != nil {
+    ON inbox_items (kind, source_id);
+CREATE TABLE IF NOT EXISTS inbox_item_reads (
+    inbox_item_id TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    read_at       TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    PRIMARY KEY (inbox_item_id, user_id)
+);`); err != nil {
 		t.Fatalf("create inbox_items: %v", err)
 	}
 }

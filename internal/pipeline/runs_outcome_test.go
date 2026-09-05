@@ -160,10 +160,21 @@ CREATE TABLE inbox_items (
     priority            TEXT NOT NULL DEFAULT 'medium',
     blocking            INTEGER NOT NULL DEFAULT 1,
     payload_json        TEXT NOT NULL DEFAULT '{}',
+    thread_key          TEXT,
+    attention_class     TEXT,
+    actions_json        TEXT NOT NULL DEFAULT '[]',
     read_at TEXT, read_by_user_id TEXT, resolved_at TEXT, resolved_by_user_id TEXT, resolved_action TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS inbox_item_reads (
+    inbox_item_id TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    read_at       TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    PRIMARY KEY (inbox_item_id, user_id)
+);
+
 CREATE UNIQUE INDEX idx_inbox_items_kind_source ON inbox_items (kind, source_id);
 `); err != nil {
 		t.Fatalf("inbox schema: %v", err)
@@ -215,30 +226,38 @@ func TestMarkTerminal_NeedsHumanOutcome_CreatesExactlyOneInboxItemWithActionCont
 		t.Fatalf("inbox items = %d, want exactly 1", n)
 	}
 
-	var payloadRaw string
-	if err := db.QueryRow(`SELECT payload_json FROM inbox_items WHERE kind = ? AND source_id = 'run_ibx_needs_human'`, inbox.KindRunNeedsHuman).Scan(&payloadRaw); err != nil {
-		t.Fatalf("query payload: %v", err)
+	// attention_class/thread_key/actions are real columns now (B10, #2364)
+	// — payload only still carries who_can_act/context, which have no
+	// dedicated column.
+	var payloadRaw, attentionClass, threadKey, actionsRaw string
+	if err := db.QueryRow(
+		`SELECT payload_json, COALESCE(attention_class,''), COALESCE(thread_key,''), actions_json
+		   FROM inbox_items WHERE kind = ? AND source_id = 'run_ibx_needs_human'`,
+		inbox.KindRunNeedsHuman,
+	).Scan(&payloadRaw, &attentionClass, &threadKey, &actionsRaw); err != nil {
+		t.Fatalf("query row: %v", err)
 	}
 	var payload struct {
-		AttentionClass string           `json:"attention_class"`
-		ThreadKey      string           `json:"thread_key"`
-		WhoCanAct      []string         `json:"who_can_act"`
-		Actions        []map[string]any `json:"actions"`
-		Context        map[string]any   `json:"context"`
+		WhoCanAct []string       `json:"who_can_act"`
+		Context   map[string]any `json:"context"`
 	}
 	if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
-		t.Fatalf("unmarshal: %v; raw=%s", err, payloadRaw)
+		t.Fatalf("unmarshal payload: %v; raw=%s", err, payloadRaw)
 	}
-	if payload.AttentionClass != "input" {
-		t.Errorf("attention_class = %q, want input", payload.AttentionClass)
+	var actions []map[string]any
+	if err := json.Unmarshal([]byte(actionsRaw), &actions); err != nil {
+		t.Fatalf("unmarshal actions: %v; raw=%s", err, actionsRaw)
 	}
-	if payload.ThreadKey == "" {
+	if attentionClass != "input" {
+		t.Errorf("attention_class = %q, want input", attentionClass)
+	}
+	if threadKey == "" {
 		t.Error("thread_key is empty")
 	}
 	if len(payload.WhoCanAct) == 0 {
 		t.Error("who_can_act is empty")
 	}
-	if len(payload.Actions) == 0 {
+	if len(actions) == 0 {
 		t.Fatal("actions is empty")
 	}
 	if payload.Context["issue"] != "ENG-42" {
@@ -295,5 +314,42 @@ func TestMarkTerminal_SecondCallOnTerminalRow_DoesNotOverwriteOutcome(t *testing
 	}
 	if got.Outcome != orchestrator.OutcomeNeedsHuman {
 		t.Errorf("outcome after second call = %q, want it unchanged at NEEDS_HUMAN — a later call must not overwrite an already-terminal row", got.Outcome)
+	}
+}
+
+// TestMarkTerminal_NeedsHumanOutcome_MergesAcrossRunsOfSameRoutine is the
+// code-review-caught gap: this file's producer (the pipeline_runs twin of
+// internal/api/issue_outcome_inbox.go) used to key its thread_key on the
+// RUN id alone, so a routine needing a human on run 1 and again on run 3
+// raised two siblings instead of the one merged card §12's "recurring
+// condition" contract asks for. Two DIFFERENT runs of the SAME routine
+// (same pipeline_id), both landing NEEDS_HUMAN while the first is still
+// open, must produce exactly one card.
+func TestMarkTerminal_NeedsHumanOutcome_MergesAcrossRunsOfSameRoutine(t *testing.T) {
+	store, db := openRunsTestDBWithInbox(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	for _, runID := range []string{"run_merge_1", "run_merge_2"} {
+		if err := store.Insert(ctx, &RunRecord{
+			ID: runID, WorkspaceID: "ws_runs", PipelineID: "pln_shared", PipelineSlug: "nightly-sync",
+		}); err != nil {
+			t.Fatalf("insert %s: %v", runID, err)
+		}
+	}
+	output := "---CHECKPOINT---\ndone: nothing\nblockers: waiting on a credential\nnext_step: ask an operator\nconfidence: low\noutcome: NEEDS_HUMAN\n---END CHECKPOINT---\n"
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{RunID: "run_merge_1", Status: RunStatusCompleted, Output: output}); err != nil {
+		t.Fatalf("MarkTerminal run_merge_1: %v", err)
+	}
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{RunID: "run_merge_2", Status: RunStatusCompleted, Output: output}); err != nil {
+		t.Fatalf("MarkTerminal run_merge_2: %v", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE kind = ? AND workspace_id = 'ws_runs'`, inbox.KindRunNeedsHuman).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("two runs of the same routine, both NEEDS_HUMAN while the first is unresolved, should merge to ONE card, got %d", n)
 	}
 }

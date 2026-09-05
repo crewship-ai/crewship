@@ -58,3 +58,37 @@ func TestRoutineUpdateSubkindMatchesProducer(t *testing.T) {
 			SubkindRoutineUpdate)
 	}
 }
+
+// TestDigestSubkindMatchesProducer is SubkindDigest's half of the same drift
+// guard: internal/inbox/digest.go's DigestSubkind constant is the producer,
+// duplicated here as a literal for the leaf-package reason both doc comments
+// give.
+func TestDigestSubkindMatchesProducer(t *testing.T) {
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	root := dir
+	for i := 0; i < 8; i++ {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			break
+		}
+		root = filepath.Dir(root)
+	}
+	src, err := os.ReadFile(filepath.Join(root, "internal/inbox/digest.go"))
+	if err != nil {
+		t.Fatalf("read producer: %v", err)
+	}
+	if !strings.Contains(string(src), `DigestSubkind = "`+SubkindDigest+`"`) {
+		t.Fatalf("internal/inbox/digest.go's DigestSubkind no longer matches %q — the category mapping keys off it", SubkindDigest)
+	}
+}
+
+// TestCategoryForItem_RoutesDigestToRoutinesCompleted pins the digest's
+// category mapping directly (as opposed to the drift-only test above).
+func TestCategoryForItem_RoutesDigestToRoutinesCompleted(t *testing.T) {
+	digest := map[string]interface{}{"subkind": SubkindDigest, "succeeded": 3}
+	if got := CategoryForItem("message", digest); got != CategoryRoutinesCompleted {
+		t.Errorf("digest → %q, want %q", got, CategoryRoutinesCompleted)
+	}
+}

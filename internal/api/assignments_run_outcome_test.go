@@ -242,13 +242,16 @@ func TestFinishAssignment_NeedsHumanOutcome_CreatesExactlyOneInboxItemWithAction
 		t.Fatalf("inbox items = %d, want exactly 1", n)
 	}
 
-	// The item carries a valid §12 action contract.
-	var payloadRaw, targetUserID, targetRole, blocking, bodyMD string
+	// The item carries a valid §12 action contract. attention_class/
+	// thread_key/actions are real columns now (B10, #2364) — payload only
+	// still carries who_can_act/context, which have no dedicated column.
+	var payloadRaw, targetUserID, targetRole, blocking, bodyMD, attentionClass, threadKey, actionsRaw string
 	if err := f.db.QueryRow(
-		`SELECT payload_json, COALESCE(target_user_id,''), COALESCE(target_role,''), blocking, COALESCE(body_md,'')
+		`SELECT payload_json, COALESCE(target_user_id,''), COALESCE(target_role,''), blocking, COALESCE(body_md,''),
+		        COALESCE(attention_class,''), COALESCE(thread_key,''), actions_json
 		   FROM inbox_items WHERE kind = ? AND source_id = ?`,
 		inbox.KindRunNeedsHuman, assignmentID,
-	).Scan(&payloadRaw, &targetUserID, &targetRole, &blocking, &bodyMD); err != nil {
+	).Scan(&payloadRaw, &targetUserID, &targetRole, &blocking, &bodyMD, &attentionClass, &threadKey, &actionsRaw); err != nil {
 		t.Fatalf("query inbox row: %v", err)
 	}
 	// The card's body must come from the run's own checkpoint (its
@@ -267,28 +270,29 @@ func TestFinishAssignment_NeedsHumanOutcome_CreatesExactlyOneInboxItemWithAction
 	}
 
 	var payload struct {
-		AttentionClass string           `json:"attention_class"`
-		ThreadKey      string           `json:"thread_key"`
-		WhoCanAct      []string         `json:"who_can_act"`
-		Actions        []map[string]any `json:"actions"`
-		Context        map[string]any   `json:"context"`
+		WhoCanAct []string       `json:"who_can_act"`
+		Context   map[string]any `json:"context"`
 	}
 	if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v; raw=%s", err, payloadRaw)
 	}
-	if payload.AttentionClass != "input" {
-		t.Errorf("attention_class = %q, want %q", payload.AttentionClass, "input")
+	var actions []map[string]any
+	if err := json.Unmarshal([]byte(actionsRaw), &actions); err != nil {
+		t.Fatalf("unmarshal actions: %v; raw=%s", err, actionsRaw)
 	}
-	if payload.ThreadKey == "" {
+	if attentionClass != "input" {
+		t.Errorf("attention_class = %q, want %q", attentionClass, "input")
+	}
+	if threadKey == "" {
 		t.Error("thread_key is empty, want a server-side thread key")
 	}
 	if len(payload.WhoCanAct) == 0 {
 		t.Error("who_can_act is empty, want at least one entry")
 	}
-	if len(payload.Actions) == 0 {
+	if len(actions) == 0 {
 		t.Fatal("actions is empty, want at least one actionable action")
 	}
-	for _, a := range payload.Actions {
+	for _, a := range actions {
 		if a["id"] == "" || a["id"] == nil {
 			t.Errorf("action missing id: %+v", a)
 		}

@@ -260,7 +260,7 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	if decision == string(keeper.DecisionDeny) {
 		action = "denied"
 	}
-	if err := inbox.ResolveBySourceTx(r.Context(), tx,
+	if _, err := inbox.ResolveBySourceTx(r.Context(), tx,
 		string(inbox.KindEscalation), reqID, action, actorID); err != nil {
 		replyInternalError(w, h.logger, "keeper resolve: resolve inbox item", err)
 		return

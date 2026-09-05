@@ -28,6 +28,33 @@ Items get written through to `inbox_items` the moment their source signal fires.
 | `message` | The orchestrator broadcasts a notification — e.g. "ENG-12 ready for review" — addressed at a user or role. Also carries **"your agent replied"** chat notifications: when an assistant reply lands in a session you aren't currently viewing, one per-user item appears with a scrubbed preview (repeated replies refresh it in place instead of stacking). See [Chat & Sessions](/guides/chat-sessions#your-agent-replied-notifications). | One-click jump to the linked issue or the **Open chat** deep link, or Dismiss. Opening the chat (or `crewship chat read`) clears it automatically. |
 | `run_needs_human` | A run's [outcome](/api-reference/issues#outcome) (work package B6, #2349) resolved to `NEEDS_HUMAN` — an issue-session assignment or a routine run reported it is blocked on a decision, missing input, or a credential. Exactly one item per run, carrying a §12 action contract (`attention_class`, `thread_key`, `actions`, `who_can_act`, `context`) in `payload_json`. Addressed at the issue's owner when it has one, `MANAGER` otherwise. | **Take over** (issue runs) / **Review run** (routine runs) — opens the source; there is no separate resolve endpoint, so Archive clears the card once you've acted. |
 
+## The attention contract
+
+Every row carries — or can carry — three server-computed fields (PRD-ISSUES-AND-ROUTINES-2026 §12, work package B10):
+
+- **`thread_key`** — the identity of the *recurring condition* the row is about, stable across every occurrence. Two producers describing the same underlying subject (a routine's governance review and its trigger-activation review, both raised from one `routine save --draft`) share a `thread_key` and collapse onto **one card** instead of two, and the same condition recurring on a later sweep (a schedule still missing its window, a webhook still failing) refreshes that one card in place rather than piling up a new row. This is the server-side merge that replaces the old client-side one (`internal/api/pipeline_governance.go`, `internal/api/pipeline_trigger.go`, `internal/pipeline/schedules.go`, `internal/api/pipeline_webhooks.go`, `internal/automation/registry.go`).
+- **`attention_class`** — one of `decision` \| `input` \| `review` \| `repair`, naming *what kind of ask* this is, independent of `kind` (which names the producer).
+- **`actions[]`** — the permitted, named things a recipient can do about this row: `{"id", "label", "effect", "irreversible"}`. A merged card's `actions[]` is the union of every producer's own actions, so a routine that is both risky and carries a draft trigger offers `approve_routine` / `reject_routine` *and* `activate_trigger` / `dismiss_trigger` on the same card.
+
+The write-through helper every attention-contract producer shares is `internal/inbox.WriteThreaded` — it looks for an open (non-resolved) row under the same `(workspace_id, thread_key)` before deciding whether to raise a new card or refresh the existing one. A decision route resolving a possibly-merged card uses `inbox.ResolveByThreadOrSource`, which falls back from its own `(kind, source_id)` to the shared thread when the row's stored identity belongs to a *different* producer than the one resolving it.
+
+<Note>
+Not every kind has adopted the contract yet — `thread_key`/`attention_class`/`actions` are additive columns, empty for a row no producer has migrated onto them. `GET /api/v1/inbox` and `GET /api/v1/inbox/{id}` return whatever is set; an empty `actions[]` means "read the kind-specific action row" (the table above), same as before B10.
+</Note>
+
+### Receipts that name the version
+
+A decision about a *routine's authored definition* — not just its inbox card — writes `routine_version` alongside the existing decision-record columns (`decided_by`/`decided_at`/`payload` on `approvals_queue`; `decided_by_user_id`/`decided_at`/`decision_payload` on `pipeline_waitpoints`), so "was it the same version that then ran?" is answerable without a separate receipts table (§9.8). Stamped by:
+
+- `internal/api/internal_routines.go` — an autonomy-held, agent-created schedule, at the pipeline's pinned or head version at hold time.
+- `internal/pipeline/waitpoints.go` — a `wait: approval` step, at the run's actually-executing pipeline version.
+
+Both columns are nullable: most approvals and waitpoints (a credential use, an ordinary production-change gate) have nothing to do with a routine's definition and stay `NULL`.
+
+### Digest
+
+`user_notification_prefs.state` has allowed `'digest'` since the notification-preferences schema shipped, but nothing ever wrote it (F30) — `SUCCEEDED` and `NO_CHANGE` outcomes create no inbox item on their own (the two hard rules of §12), so they were only ever visible in the Journal. `internal/inbox.StartDigestScheduler` closes that: every few hours it summarizes each workspace's quiet runs from the last rolling day into one refreshed `message`-kind card (`payload.subkind = "digest"`), skipping any workspace with nothing to report. This is about **what's in the product inbox**, not the separate (and still-unwritten) question of batching *external* channel delivery for users who set a category's preference to `digest` — the same setting name, a different, larger piece of work.
+
 Chat-reply items get priority placement: under Smart grouping they form their own **Agent replies** group directly beneath *Decisions needed* (never buried in FYI), and each row shows an **Open chat** quick action on hover that deep-links straight into the session — continue the conversation in one click; opening it clears the item.
 
 Items are **written by source-of-truth handlers**, not synthesised by the inbox. So:

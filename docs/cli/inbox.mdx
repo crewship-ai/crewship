@@ -107,6 +107,8 @@ crewship inbox archive inbox_abc123       # resolve with action=archived, no dec
 
 `inbox get <id>` (backed by `GET /api/v1/inbox/{id}`) is the detail counterpart of `list` — it returns the markdown body and the structured `payload` that the list view omits. `inbox archive <id>` maps to a `resolved` PATCH with `resolved_action=archived`; only non-decision kinds (messages, failed-run notices, advisories) archive — the server `409`s an archive on a source-managed waitpoint/escalation.
 
+`--format json` on either `list` or `get` also carries the §12 attention contract where a producer has adopted it (work package B10): `thread_key` (the server-side merge key — two producers describing the same recurring condition collapse onto one row instead of the client stitching them together), `attention_class` (`decision` \| `input` \| `review` \| `repair`), and `actions` (`[{"id", "label", "effect", "irreversible"}, ...]`, unioned across every producer that merged into the row). All three are omitted for a kind that has not adopted the contract yet — script against `payload` for those, same as before.
+
 On a `CREDENTIAL` escalation, `inbox get` also prints whether resolving it needs a **second approver**, and which of the two controls demands it:
 
 ```text

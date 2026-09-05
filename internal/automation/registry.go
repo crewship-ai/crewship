@@ -74,7 +74,7 @@ func NewDBInboxAlerter(db *sql.DB, logger *slog.Logger) InboxAlerter {
 }
 
 func (a dbInboxAlerter) Insert(ctx context.Context, item inbox.Item) error {
-	return inbox.Upsert(ctx, a.db, a.logger, item)
+	return inbox.WriteThreaded(ctx, a.db, a.logger, item)
 }
 
 // Options tunes a Registry. Zero values pick the documented defaults.
@@ -408,6 +408,9 @@ func (r *Registry) emitEnqueueFailed(ctx context.Context, it *intent, cause erro
 			"routine_slug":         it.pipelineSlug,
 			"consecutive_failures": streak,
 		},
+		ThreadKey:      "automation:" + it.automationID + ":enqueue_failed",
+		AttentionClass: inbox.AttentionRepair,
+		Actions:        []inbox.Action{{ID: "acknowledge", Label: "Acknowledge", Effect: "Marks the automation reviewed", Irreversible: false}},
 	}); err != nil {
 		r.logger.Error("automation: enqueue-failure inbox alert failed", "err", err, "automation_id", it.automationID)
 	}

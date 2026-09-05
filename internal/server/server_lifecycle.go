@@ -29,6 +29,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/ephemeral"
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/presence"
@@ -256,6 +257,14 @@ func (s *Server) Start(ctx context.Context) error {
 		// approvals to 'timeout' status so blocked agents unstick
 		// deterministically even if the UI is down.
 		go harbormaster.StartTimeoutSweeper(ctx, s.db, s.journalWriter, 30*time.Second)
+
+		// B10 digest scheduler (PRD-ISSUES-AND-ROUTINES-2026 §12/F30,
+		// #2364): every few hours, summarize each workspace's SUCCEEDED/
+		// NO_CHANGE runs into one refreshed inbox card, since neither
+		// outcome ever raises a card of its own (§9.6 — "history only").
+		// Without this the digest setting has been dead since it shipped:
+		// nothing ever wrote it.
+		inbox.StartDigestScheduler(ctx, s.db, s.logger, inbox.DefaultDigestSweepInterval)
 
 		// PR-D F5 ephemeral-agent expiry sweeper: every 5 min, flip
 		// expired_at on rows whose TTL has elapsed so they enter

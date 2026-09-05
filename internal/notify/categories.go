@@ -249,6 +249,12 @@ var categoryByKind = map[string]string{
 // the two spellings honest.
 const SubkindRoutineUpdate = "routine_update"
 
+// SubkindDigest is B10's digest-scheduler discriminator (PRD-ISSUES-AND-
+// ROUTINES-2026 §12/F30, #2364) — inbox.DigestSubkind, duplicated as a
+// literal for the same "inbox is a leaf package" reason SubkindRoutineUpdate
+// is; TestDigestSubkindMatchesProducer keeps the two spellings honest.
+const SubkindDigest = "digest"
+
 // CategoryForItem resolves an inbox row to its notification category.
 //
 // Kind alone is not always enough. A chat reply and a routine's progress notice
@@ -262,7 +268,14 @@ const SubkindRoutineUpdate = "routine_update"
 // owns it rather than pushing a default back into the producer.
 func CategoryForItem(kind string, payload map[string]interface{}) string {
 	if kind == "message" {
-		if sub, _ := payload["subkind"].(string); sub == SubkindRoutineUpdate {
+		switch sub, _ := payload["subkind"].(string); sub {
+		case SubkindRoutineUpdate:
+			return CategoryRoutinesCompleted
+		case SubkindDigest:
+			// The digest summarizes exactly the SUCCEEDED/NO_CHANGE runs
+			// routines.completed already covers — one preference/channel
+			// setting for both, rather than a digest-specific category
+			// nobody has tuned yet.
 			return CategoryRoutinesCompleted
 		}
 	}

@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // --- helpers --------------------------------------------------------------
@@ -395,5 +397,96 @@ func TestGovernance_Disable_BlocksRun_Enable_Restores(t *testing.T) {
 	h.Run(runRR2, covPE2Req(t, "POST", "/x", `{"inputs":{}}`, userID, wsID, "de-r"))
 	if runRR2.Code != http.StatusOK {
 		t.Fatalf("run after enable status=%d want 200; body=%s", runRR2.Code, runRR2.Body.String())
+	}
+}
+
+// internalSaveBodyWithTrigger is internalSaveBody plus a `trigger` +
+// `activation` block, so a save can be both risky (governance review) AND
+// carry a draft trigger (B8's own review) in one request — the exact shape
+// #2364's live check on dev1 found producing two cards.
+func internalSaveBodyWithTrigger(t *testing.T, wsID, slug, crewID, def, trigger, activation string) string {
+	t.Helper()
+	token := signInternalSaveTokenForTest([]byte(testSaveTokenSecret1371), wsID, crewID, def)
+	return `{"workspace_id":"` + wsID + `","slug":"` + slug + `","name":"` + slug + `","author_crew_id":"` + crewID + `",` +
+		`"save_token":"` + token + `","definition":` + def + `,"trigger":` + trigger + `,"activation":"` + activation + `"}`
+}
+
+// TestGovernance_RiskySaveWithDraftTrigger_RaisesOneMergedCard is B10's
+// (#2364) regression test for the live-observed duplicate: a routine save
+// that is BOTH risky (needs a governance decision on the definition) AND
+// carries a draft trigger (needs a decision to activate it) must raise
+// exactly ONE inbox card, not the governance "proposed for review" card
+// plus a separate B8 "trigger ready" card. The merged card carries both
+// asks: the risk reasons AND the routine_version B8 stamps.
+func TestGovernance_RiskySaveWithDraftTrigger_RaisesOneMergedCard(t *testing.T) {
+	h, _, wsID := newPipelineHandlerForCRUDTest(t)
+	h.SetScheduleStore(pipeline.NewScheduleStore(h.db))
+	crewID := seedCrewRow(t, h.db, "crew_merge", wsID, "Eng", "eng")
+	_ = seedAgentRow(t, h.db, "ag_merge", wsID, crewID, "Eva", "eva", "LEAD")
+
+	slug := "merge-routine"
+	trigger := `{"kind":"schedule","cron":"0 9 * * 1-5","timezone":"UTC"}`
+	body := internalSaveBodyWithTrigger(t, wsID, slug, crewID, httpRoutineDef(), trigger, "draft")
+
+	rr := doInternalSave(t, h, body)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status=%d want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := routineStatus(t, h, wsID, slug); got != "proposed" {
+		t.Fatalf("routine status=%q want proposed (risky)", got)
+	}
+
+	var n int
+	if err := h.db.QueryRow(
+		`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ? AND state != 'resolved'`, wsID,
+	).Scan(&n); err != nil {
+		t.Fatalf("count inbox rows: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want exactly ONE open inbox card for a risky save with a draft trigger, got %d", n)
+	}
+
+	var kind, sourceID, payloadJSON, actionsJSON, threadKey string
+	if err := h.db.QueryRow(
+		`SELECT kind, source_id, payload_json, actions_json, COALESCE(thread_key, '') FROM inbox_items WHERE workspace_id = ?`, wsID,
+	).Scan(&kind, &sourceID, &payloadJSON, &actionsJSON, &threadKey); err != nil {
+		t.Fatalf("read the merged row: %v", err)
+	}
+	if threadKey != routineThreadKey(wsID, slug) {
+		t.Errorf("thread_key = %q, want %q", threadKey, routineThreadKey(wsID, slug))
+	}
+	// Identity is the governance card's own — it was raised first in the
+	// save handler (pipelines_crud.go), so it is what Approve/Reject on the
+	// routine definition itself resolves.
+	if kind != "escalation" || sourceID != routineProposalInboxSource(wsID, slug) {
+		t.Errorf("merged row identity changed: kind=%q source_id=%q", kind, sourceID)
+	}
+	if !strings.Contains(payloadJSON, "risk_reasons") {
+		t.Errorf("merged payload lost the governance risk reasons: %s", payloadJSON)
+	}
+	if !strings.Contains(payloadJSON, `"routine_version"`) {
+		t.Errorf("merged payload lost B8's routine_version: %s", payloadJSON)
+	}
+	if !strings.Contains(actionsJSON, "approve_routine") || !strings.Contains(actionsJSON, "activate_trigger") {
+		t.Errorf("merged actions should union both producers, got %s", actionsJSON)
+	}
+
+	// Approving the governance half must resolve the ONE merged card —
+	// there is no second card left dangling for the trigger review.
+	approveReq := withWorkspaceUser(httptest.NewRequest("POST", "/x", nil), "u-merge", wsID, "OWNER")
+	approveReq.SetPathValue("slug", slug)
+	approveRR := httptest.NewRecorder()
+	h.Approve(approveRR, approveReq)
+	if approveRR.Code != http.StatusOK {
+		t.Fatalf("approve status=%d body=%s", approveRR.Code, approveRR.Body.String())
+	}
+	var resolvedCount int
+	if err := h.db.QueryRow(
+		`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ? AND state = 'resolved'`, wsID,
+	).Scan(&resolvedCount); err != nil {
+		t.Fatalf("count resolved: %v", err)
+	}
+	if resolvedCount != 1 {
+		t.Errorf("approving should resolve the one merged card, got %d resolved rows", resolvedCount)
 	}
 }

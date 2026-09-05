@@ -5682,6 +5682,33 @@
       },
       "FinalInboxItem": {
         "properties": {
+          "actions": {
+            "items": {
+              "properties": {
+                "effect": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "irreversible": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "attention_class": {
+            "type": "string"
+          },
           "avatar_seed": {
             "type": "string"
           },
@@ -5765,6 +5792,9 @@
           "target_user_id": {
             "type": "string"
           },
+          "thread_key": {
+            "type": "string"
+          },
           "title": {
             "type": "string"
           },
@@ -5800,6 +5830,33 @@
           "rows": {
             "items": {
               "properties": {
+                "actions": {
+                  "items": {
+                    "properties": {
+                      "effect": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "irreversible": {
+                        "type": "boolean"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "attention_class": {
+                  "type": "string"
+                },
                 "avatar_seed": {
                   "type": "string"
                 },
@@ -5881,6 +5938,9 @@
                   "type": "string"
                 },
                 "target_user_id": {
+                  "type": "string"
+                },
+                "thread_key": {
                   "type": "string"
                 },
                 "title": {

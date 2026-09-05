@@ -161,12 +161,25 @@ CREATE TABLE inbox_items (
     source_id            TEXT NOT NULL,
     state                TEXT NOT NULL DEFAULT 'unread',
     payload_json         TEXT NOT NULL DEFAULT '{}',
+    thread_key           TEXT,
+    attention_class      TEXT,
+    actions_json         TEXT NOT NULL DEFAULT '[]',
+    read_at              TEXT,
+    read_by_user_id      TEXT,
     resolved_at          TEXT,
     resolved_by_user_id  TEXT,
     resolved_action      TEXT,
     created_at           TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at           TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
+
+CREATE TABLE IF NOT EXISTS inbox_item_reads (
+    inbox_item_id TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    read_at       TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    PRIMARY KEY (inbox_item_id, user_id)
+);
+
 `
 
 func openSmokeDB(t *testing.T) *sql.DB {

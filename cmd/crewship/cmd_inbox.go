@@ -114,6 +114,17 @@ var inboxListCmd = &cobra.Command{
 				TargetRole string `json:"target_role,omitempty" yaml:"target_role,omitempty"`
 				ResolvedBy string `json:"resolved_by_user_id,omitempty" yaml:"resolved_by_user_id,omitempty"`
 				ResolvedAt string `json:"resolved_at,omitempty" yaml:"resolved_at,omitempty"`
+				// §12 attention contract (work package B10, #2364) — see
+				// internal/inbox.WriteThreaded. Omitted for a kind that
+				// has not adopted the contract yet.
+				ThreadKey      string `json:"thread_key,omitempty" yaml:"thread_key,omitempty"`
+				AttentionClass string `json:"attention_class,omitempty" yaml:"attention_class,omitempty"`
+				Actions        []struct {
+					ID           string `json:"id" yaml:"id"`
+					Label        string `json:"label" yaml:"label"`
+					Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
+					Irreversible bool   `json:"irreversible,omitempty" yaml:"irreversible,omitempty"`
+				} `json:"actions,omitempty" yaml:"actions,omitempty"`
 			} `json:"rows" yaml:"rows"`
 			Count       int  `json:"count" yaml:"count"`
 			UnreadCount int  `json:"unread_count" yaml:"unread_count"`
@@ -340,6 +351,17 @@ Examples:
 			TargetRole string `json:"target_role,omitempty" yaml:"target_role,omitempty"`
 			ResolvedBy string `json:"resolved_by_user_id,omitempty" yaml:"resolved_by_user_id,omitempty"`
 			ResolvedAt string `json:"resolved_at,omitempty" yaml:"resolved_at,omitempty"`
+			// §12 attention contract (work package B10, #2364) — see
+			// internal/inbox.WriteThreaded. Omitted for a kind that has not
+			// adopted the contract yet.
+			ThreadKey      string `json:"thread_key,omitempty" yaml:"thread_key,omitempty"`
+			AttentionClass string `json:"attention_class,omitempty" yaml:"attention_class,omitempty"`
+			Actions        []struct {
+				ID           string `json:"id" yaml:"id"`
+				Label        string `json:"label" yaml:"label"`
+				Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
+				Irreversible bool   `json:"irreversible,omitempty" yaml:"irreversible,omitempty"`
+			} `json:"actions,omitempty" yaml:"actions,omitempty"`
 			// Four-eyes on a credential escalation (#1574), as the server
 			// computes it at read time. The CLI is the third surface offering a
 			// resolve on this row, and it was the third one saying nothing about

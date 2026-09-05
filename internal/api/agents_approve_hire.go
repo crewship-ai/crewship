@@ -309,7 +309,7 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 	// This is part of the decision now: a failed projection rolls the
 	// whole approval back rather than leaving a blocking waitpoint
 	// nobody can clear.
-	if err := inbox.ResolveBySourceTx(r.Context(), tx, "waitpoint", agentID, "approved", userID); err != nil {
+	if _, err := inbox.ResolveBySourceTx(r.Context(), tx, "waitpoint", agentID, "approved", userID); err != nil {
 		logger.Error("approve-hire: resolve inbox waitpoint", "agent_id", agentID, "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -510,7 +510,7 @@ func applyEphemeralHireDecisionTx(ctx context.Context, tx harbormaster.DBTX, wor
 		return nil, errHireNotDecidable
 	}
 
-	if err := inbox.ResolveBySourceTx(ctx, tx, "waitpoint", agentID, action, decidedBy); err != nil {
+	if _, err := inbox.ResolveBySourceTx(ctx, tx, "waitpoint", agentID, action, decidedBy); err != nil {
 		return nil, err
 	}
 

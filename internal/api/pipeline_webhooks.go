@@ -514,7 +514,7 @@ func (h *PipelineHandler) alertWebhookFireFailure(ctx context.Context, wh *pipel
 	if streak != webhookFireFailureAlertThreshold {
 		return
 	}
-	if err := inbox.Upsert(ctx, h.db, h.logger, inbox.Item{
+	if err := inbox.WriteThreaded(ctx, h.db, h.logger, inbox.Item{
 		WorkspaceID: wh.WorkspaceID,
 		Kind:        inbox.KindWebhookFireFailed,
 		SourceID:    wh.ID,
@@ -532,6 +532,9 @@ func (h *PipelineHandler) alertWebhookFireFailure(ctx context.Context, wh *pipel
 			"pipeline_id":          wh.TargetPipelineID,
 			"consecutive_failures": streak,
 		},
+		ThreadKey:      "webhook:" + wh.ID + ":fire_failed",
+		AttentionClass: inbox.AttentionRepair,
+		Actions:        []inbox.Action{{ID: "acknowledge", Label: "Acknowledge", Effect: "Marks the failing webhook reviewed", Irreversible: false}},
 	}); err != nil {
 		h.logger.Warn("webhook fire: inbox alert", "error", err, "webhook_id", wh.ID)
 	}

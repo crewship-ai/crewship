@@ -163,6 +163,36 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   a pointer to the routine's own Editor tab rather than adding a control
   that would silently change every trigger of that routine at once.
 
+- **The attention contract — server-side thread merge, versioned receipts, and a digest (#2378).**
+  `inbox_items` gains real `thread_key` / `attention_class` / `actions_json`
+  columns (PRD-ISSUES-AND-ROUTINES-2026 §12, work package B10) instead of
+  the payload-only fields B6 introduced; `internal/inbox.WriteThreaded` is
+  the one write path every attention-contract producer (the a4
+  trigger-failure kinds, B6's `run_needs_human`, B8's routine receipts, and
+  the autonomy-gate/webhook/schedule/automation escalations) shares — a
+  second write under the same `(workspace_id, thread_key)` merges into the
+  open card instead of raising a sibling, and `internal/inbox.
+  ResolveByThreadOrSource` resolves a merged card via the thread when the
+  caller's own `(kind, source_id)` isn't the row's stored identity. This
+  fixes the exact duplicate the B8 live check found on dev1: one `routine
+  save --draft` on a risky routine used to raise BOTH the governance
+  "proposed for review" card and the B8 "trigger ready" receipt — they now
+  share one thread and collapse to one card carrying both asks and the
+  version. `routine_version` (nullable) lands on `approvals_queue` and
+  `pipeline_waitpoints` (§9.8) so a decision about a routine's authored
+  definition names the version it decided on, stamped by the autonomy-held
+  agent-schedule path and by every `wait: approval` step. `internal/inbox.
+  StartDigestScheduler` closes F30 — `user_notification_prefs`' `'digest'`
+  state has been schema-legal and unimplemented since it shipped; every few
+  hours it now refreshes one per-workspace card summarizing the quiet
+  `SUCCEEDED`/`NO_CHANGE` runs from the last rolling day, skipping workspaces
+  with nothing to report. `GET /api/v1/inbox` and `GET /api/v1/inbox/{id}`
+  (and their CLI counterparts) now return the three new fields. `/inbox-v2`
+  drops one of its two `GET /api/v1/inbox` calls (`active` + `resolved` used
+  to each round-trip separately; both now come from one `state=all` fetch) —
+  the approvals poll and the missions walk F28 also named are unchanged and
+  stated as follow-up.
+
 - **Atomic routine authoring — routine, version and trigger commit together (#2367).**
   `save_routine` (and the user/CLI/internal save endpoints) now accept an
   optional `trigger` block; `pipeline.Store.SaveWithTrigger` creates the

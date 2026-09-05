@@ -44,15 +44,16 @@ var outcomeInboxScrubber = scrubber.New()
 func (s *RunStore) createOutcomeInboxItem(ctx context.Context, runID, output string) {
 	var (
 		workspaceID   string
+		pipelineID    string
 		pipelineSlug  string
 		triggeredVia  string
 		triggeredByID sql.NullString
 		invokingAgent sql.NullString
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT workspace_id, pipeline_slug, triggered_via, triggered_by_id, invoking_agent_id
+		SELECT workspace_id, pipeline_id, pipeline_slug, triggered_via, triggered_by_id, invoking_agent_id
 		  FROM pipeline_runs WHERE id = ?`, runID,
-	).Scan(&workspaceID, &pipelineSlug, &triggeredVia, &triggeredByID, &invokingAgent)
+	).Scan(&workspaceID, &pipelineID, &pipelineSlug, &triggeredVia, &triggeredByID, &invokingAgent)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			slog.Default().Warn("create outcome inbox item: load run", "error", err, "run_id", runID)
@@ -93,29 +94,48 @@ func (s *RunStore) createOutcomeInboxItem(ctx context.Context, runID, output str
 		contractContext["issue"] = triggeredByID.String
 	}
 
+	// B10 (#2364): keyed per ROUTINE, not per run — the same "cross-run
+	// deduping by subject" fix issue_outcome_inbox.go's assignments twin
+	// got. A routine that needs a human on run 1, gets a decision, then
+	// needs one again on run 3 is the same recurring condition ("this
+	// routine keeps needing a human"); WriteThreaded only merges into a
+	// still-OPEN row, so a resolved earlier card does not swallow a later,
+	// genuinely new occurrence. Falls back to the pipeline_slug when
+	// pipeline_id is somehow empty (should not happen — pipeline_runs.
+	// pipeline_id is NOT NULL — but a thread_key is still better than none).
+	routineKey := pipelineID
+	if routineKey == "" {
+		routineKey = pipelineSlug
+	}
+	threadKey := "routine:" + workspaceID + ":" + routineKey
+
+	// attention_class/thread_key/actions stay off payload now that they are
+	// real columns (B10, #2364, caught in review — see the matching note in
+	// internal/api/issue_outcome_inbox.go). Only who_can_act and context
+	// have no dedicated column.
 	payload := map[string]any{
-		"attention_class": "input",
-		"thread_key":      "run:" + runID,
-		"who_can_act":     []string{"role:MANAGER"},
-		"actions": []map[string]any{
-			{"id": "review_run", "label": "Review run", "effect": "Opens the run detail", "irreversible": false},
-		},
-		"context": contractContext,
+		"who_can_act": []string{"role:MANAGER"},
+		"context":     contractContext,
 	}
 
-	if err := inbox.Insert(ctx, s.db, nil, inbox.Item{
-		WorkspaceID: workspaceID,
-		Kind:        inbox.KindRunNeedsHuman,
-		SourceID:    runID,
-		TargetRole:  "MANAGER",
-		Title:       fmt.Sprintf("Routine %s needs your input", pipelineSlug),
-		BodyMD:      reason,
-		SenderType:  "pipeline",
-		SenderID:    invokingAgent.String,
-		SenderName:  pipelineSlug,
-		Priority:    "high",
-		Blocking:    true,
-		Payload:     payload,
+	if err := inbox.WriteThreaded(ctx, s.db, nil, inbox.Item{
+		WorkspaceID:    workspaceID,
+		Kind:           inbox.KindRunNeedsHuman,
+		SourceID:       runID,
+		TargetRole:     "MANAGER",
+		Title:          fmt.Sprintf("Routine %s needs your input", pipelineSlug),
+		BodyMD:         reason,
+		SenderType:     "pipeline",
+		SenderID:       invokingAgent.String,
+		SenderName:     pipelineSlug,
+		Priority:       "high",
+		Blocking:       true,
+		Payload:        payload,
+		ThreadKey:      threadKey,
+		AttentionClass: inbox.AttentionInput,
+		Actions: []inbox.Action{
+			{ID: "review_run", Label: "Review run", Effect: "Opens the run detail", Irreversible: false},
+		},
 	}); err != nil {
 		slog.Default().Warn("create outcome inbox item", "error", err, "run_id", runID)
 	}
