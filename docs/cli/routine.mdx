@@ -628,8 +628,10 @@ crun_2d40…        completed  FAILED     live  manual      —                 
 
 `OUTCOME` is the §9.6 routing decision (work package B6, #2349) — `-` when the run
 predates the `outcome` column. It is not the same question `STATUS` answers: a run whose
-process completed cleanly but never reported a recognised outcome shows `FAILED` here
-(`error_message` names it `"no outcome reported"`), and `NEEDS_HUMAN` is the one value
+process completed cleanly but never reported a recognised outcome — while holding an
+`agent_run` step that could have — shows `FAILED` here (`error_message` names it
+`"no outcome reported"`); an agentless routine, which has nobody to report one, shows
+`SUCCEEDED` with no error. `NEEDS_HUMAN` is the one value
 that raises an inbox item (`crewship inbox list --kind run_needs_human`). Full vocabulary:
 [API reference → Issues → Outcome](/api-reference/issues#outcome).
 
